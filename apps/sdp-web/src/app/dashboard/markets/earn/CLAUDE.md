@@ -228,6 +228,14 @@ nothing else; the program create still sends the body `requestId` form.
   and throws if pagination ends early, and `fetchEarnVaultPositions` follows the
   opaque keyset cursor, throwing if the cursor repeats or does not advance. A
   silently short page is hidden MONEY.
+- `earn-outcome-trackers.tsx`: the tiny always-loaded polling mounts for
+  custodial withdrawals and vault deposits/withdrawals. Treasury imports these
+  directly and dynamically loads the three large transaction modals only when
+  an action opens, so moving a tracker back into a modal would pull that modal's
+  client graph into the initial portfolio route. The modal files re-export the
+  trackers only for compatibility; new callers import this module. Every
+  deferred surface uses the shared `EarnTransactionModalLoading` fallback so
+  the first click opens an accessible loading modal while its chunk arrives.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin, amount,
   Solana destination; preview → confirm → submitted. Every figure it quotes
   comes from the PROVIDER, never a local estimate (PRO-1675) — see
@@ -248,8 +256,9 @@ nothing else; the program create still sends the body `requestId` form.
   value-moving request. `walletBalanceForMint` distinguishes an absent or
   malformed RPC observation (`undefined`) from a successful observation with no
   row for the mint (a real zero) — only the latter may read as "no funds".
-  It also exports `EarnVaultDepositOutcomeTracker`, the null-rendering watcher
-  Treasury mounts per in-flight deposit — the modal's success screen is a
+  It re-exports `EarnVaultDepositOutcomeTracker` for compatibility; the
+  null-rendering watcher lives in `earn-outcome-trackers.tsx` so Treasury can
+  poll without eagerly loading this modal. The modal's success screen is a
   receipt for a SIGNATURE, and the customer closes it long before the chain has
   decided.
 - `earn-vault-deposit-tracking.ts` — the per-tab `sessionStorage` holding the
@@ -360,7 +369,8 @@ nothing else; the program create still sends the body `requestId` form.
   the deposit modal's key lifecycle exactly, including the held-key pre-flight
   (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
   outcome. The result screen links the withdrawal transaction in Explorer.
-  Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
+  It re-exports `EarnVaultWithdrawalOutcomeTracker` from the lightweight
+  tracker module, mounted once per withdrawal.
   Its five-second detail poll reports the terminal movement back to Treasury;
   Treasury keeps the latest state in the Active positions status column rather
   than announcing a long-running chain result with a toast.

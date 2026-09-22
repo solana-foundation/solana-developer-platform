@@ -400,15 +400,29 @@ interface CatalogueLane {
   allowEmptyKeepSet?: true;
 }
 
+function dedupeCatalogueLane(lane: CatalogueLane): CatalogueLane {
+  const snapshotsByProviderReference = new Map<string, ProviderStrategySnapshot>();
+  for (const snapshot of lane.snapshots) {
+    // A provider reference is unique inside one provider/environment lane.
+    // Keep the last accepted snapshot so overlapping provider pages cannot
+    // make one ON CONFLICT statement target the same row twice.
+    snapshotsByProviderReference.set(snapshot.providerReference, snapshot);
+  }
+  return snapshotsByProviderReference.size === lane.snapshots.length
+    ? lane
+    : { ...lane, snapshots: [...snapshotsByProviderReference.values()] };
+}
+
 async function writeCatalogueLane(
   repo: EarnRepository,
   client: EarnVaultProvider,
   lane: CatalogueLane
 ): Promise<void> {
+  const dedupedLane = dedupeCatalogueLane(lane);
   const logContext = {
     provider: client.provider,
-    environment: lane.environment,
-    delist_scope: lane.delistScope ?? "environment",
+    environment: dedupedLane.environment,
+    delist_scope: dedupedLane.delistScope ?? "environment",
   };
 
   // The keep set for the delist pass below: references this lane accepts as
@@ -417,61 +431,73 @@ async function writeCatalogueLane(
   // write failure never reads as a delisting — but any upsert failure still
   // skips the pass entirely (`upsertFailed`), because a half-applied catalogue
   // cannot say what the provider no longer lists.
-  const listedProviderReferences: string[] = [...(lane.keepWithoutUpsert ?? [])];
+  const listedProviderReferences: string[] = [...new Set(dedupedLane.keepWithoutUpsert ?? [])];
   let upsertFailed = false;
 
   // Figure anomaly check (PRO-1867) BEFORE the writes: the stored rows are the
   // "before". Scoped to the lane's sub-shelf, since that is the set this
   // lane's snapshots are the truth for. Read-only and never fatal: a failed
   // read costs this pass its diff, not its write.
-  await reportLaneAnomalies(repo, client, lane, listedProviderReferences.length, logContext);
+  await reportLaneAnomalies(repo, client, dedupedLane, listedProviderReferences.length, logContext);
 
-  for (const snapshot of lane.snapshots) {
+  const upserts = dedupedLane.snapshots.map((snapshot) => {
     listedProviderReferences.push(snapshot.providerReference);
+    return {
+      provider: client.provider,
+      providerReference: snapshot.providerReference,
+      name: snapshot.name,
+      sourceKind: snapshot.sourceKind,
+      underlyingSource: snapshot.underlyingSource ?? null,
+      depositMints: snapshot.depositMints,
+      shareMint: snapshot.shareMint ?? null,
+      apyType: snapshot.apyType,
+      currentApy: snapshot.currentApy ?? null,
+      liquidityTerm: snapshot.liquidityTerm,
+      redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
+      riskMetadata: snapshot.riskMetadata ?? {},
+      // Taken from the PROVIDER (production's accepted snapshot, on the
+      // mirror lane), never derived from the target environment.
+      hostCluster: snapshot.hostCluster,
+      // The repository keeps operator pauses/deprecations sticky.
+      status: "active" as const,
+      environment: dedupedLane.environment,
+    };
+  });
 
-    try {
-      await repo.upsertStrategy({
-        provider: client.provider,
-        providerReference: snapshot.providerReference,
-        name: snapshot.name,
-        sourceKind: snapshot.sourceKind,
-        underlyingSource: snapshot.underlyingSource ?? null,
-        depositMints: snapshot.depositMints,
-        shareMint: snapshot.shareMint ?? null,
-        apyType: snapshot.apyType,
-        currentApy: snapshot.currentApy ?? null,
-        liquidityTerm: snapshot.liquidityTerm,
-        redemptionDelayDays: snapshot.redemptionDelayDays ?? null,
-        riskMetadata: snapshot.riskMetadata ?? {},
-        // Taken from the PROVIDER (production's accepted snapshot, on the
-        // mirror lane), never derived from the target environment — assuming
-        // the environment's cluster here is the silent lie this column exists
-        // to prevent (migration 0057), and the mirror lane exists precisely
-        // because the two differ.
-        hostCluster: snapshot.hostCluster,
-        // Providers report no status; being listed is what makes a strategy
-        // depositable, so the sync submits `active` for anything a provider
-        // still lists. The repository upsert refuses to overwrite an operator
-        // `paused`/`deprecated` status (earn.repository.postgres.ts) — an
-        // operator stop outranks the sync; only an explicit status write
-        // reopens the row.
-        status: "active",
-        environment: lane.environment,
-      });
-    } catch (err) {
-      upsertFailed = true;
-      getLogger().error(
-        {
-          ...logContext,
-          provider_reference: snapshot.providerReference,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "syncEarnCatalogue: failed to upsert strategy"
-      );
+  try {
+    await repo.upsertStrategies(upserts);
+  } catch (batchError) {
+    // One bad provider row must not prevent valid rows from refreshing. The
+    // batch statement is atomic, so isolated retries are safe and identify the
+    // offending reference. A failed isolated retry still suppresses this
+    // lane's delist.
+    getLogger().warn(
+      {
+        ...logContext,
+        strategies: upserts.length,
+        error: batchError instanceof Error ? batchError.message : String(batchError),
+      },
+      "syncEarnCatalogue: batch upsert failed, retrying strategies separately"
+    );
+    for (const upsert of upserts) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- fallback isolates the provider row that broke the atomic batch.
+        await repo.upsertStrategy(upsert);
+      } catch (err) {
+        upsertFailed = true;
+        getLogger().error(
+          {
+            ...logContext,
+            provider_reference: upsert.providerReference,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "syncEarnCatalogue: failed to upsert strategy"
+        );
+      }
     }
   }
 
-  await deprecateUnlistedFromCatalogue(repo, client, lane, {
+  await deprecateUnlistedFromCatalogue(repo, client, dedupedLane, {
     listedProviderReferences,
     upsertFailed,
     logContext,

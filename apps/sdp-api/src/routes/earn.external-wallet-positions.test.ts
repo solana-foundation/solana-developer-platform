@@ -349,7 +349,9 @@ describe("external-wallet position reads", () => {
       ],
     });
     expect(resolveVaultDirectClient).toHaveBeenCalledTimes(2);
-    expect(resolveVaultDirectClient.mock.calls[0]?.[2]).not.toBe(
+    // Every owner shares one route-wide provider budget. Portfolio size may
+    // increase work, but it cannot multiply the request's latency ceiling.
+    expect(resolveVaultDirectClient.mock.calls[0]?.[2]).toBe(
       resolveVaultDirectClient.mock.calls[1]?.[2]
     );
     const strategies = body.data.summary.totalsByStrategy;
@@ -369,6 +371,43 @@ describe("external-wallet position reads", () => {
         }),
       ])
     );
+  });
+
+  it("coalesces concurrent project-wide live portfolio reads", async () => {
+    await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-coalesced",
+      tokenMint: USDC,
+      label: "Coalesced vault",
+    });
+    let release: ((value: unknown[]) => void) | undefined;
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        new Promise((resolve) => {
+          release = resolve;
+          expect(input.owner).toBe(OWNER_A);
+        })
+    );
+
+    const first = get("/v1/earn/external-wallet/positions/summary");
+    const second = get("/v1/earn/external-wallet/positions/summary");
+    await vi.waitFor(() => expect(readVaultPositions).toHaveBeenCalledTimes(1));
+    release?.([
+      {
+        providerReference: "vault-coalesced",
+        owner: OWNER_A,
+        cluster: "devnet",
+        shares: "1",
+        withdrawableShares: "1",
+        tokenValue: "1",
+        tokenMint: USDC,
+        shareMint: SHARE,
+      },
+    ]);
+
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(readVaultPositions).toHaveBeenCalledTimes(1);
   });
 
   it("default summary carries no owner address and no position details (EARN-028, PRO-1908)", async () => {

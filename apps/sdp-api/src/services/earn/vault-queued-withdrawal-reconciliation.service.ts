@@ -25,8 +25,11 @@ import type { Env } from "@/types/env";
 
 const ACTION_BATCH_SIZE = 128;
 const REQUEST_BATCH_SIZE = 128;
+const OPEN_REQUEST_POLL_MS = 60_000;
+const PENDING_REQUEST_MAX_POLL_MS = 15 * 60_000;
 const CLOSING_HISTORY_PAGE_SIZE = 1_000;
 const CLOSING_HISTORY_MAX_PAGES = 10;
+const CLOSING_HISTORY_LOOKUP_CONCURRENCY = 8;
 
 type QueueLedger = EarnVaultWithdrawalRequestsRepository;
 type RequestedLifecycleEvent = Extract<
@@ -115,7 +118,6 @@ function emptyStats(actions: number, requests: number): QueueReconciliationStats
  * fulfilled or cancelled; otherwise the durable state remains
  * `closed_or_unknown` and is retried on the next sweep.
  */
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the bounded sweep keeps per-environment RPC failure isolation and batch draining explicit.
 export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<void> {
   const ledger = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   await ledger.cleanupExpiredReservations();
@@ -139,8 +141,7 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
     }
   }
   const actions = await ledger.claimUnsettledActions(ACTION_BATCH_SIZE);
-  const requests = await ledger.claimOpenRequests(REQUEST_BATCH_SIZE);
-  const stats = emptyStats(actions.length, requests.length);
+  const stats = emptyStats(actions.length, 0);
 
   for (const [environment, rows] of groupBy(actions, (row) => row.environment)) {
     const cluster = earnClusterFor(environment);
@@ -201,24 +202,28 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
     }
   }
 
-  for (const request of requests) {
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- bounded reconciliation pacing protects provider RPC.
-      const outcome = await reconcileRequest(env, ledger, request);
-      if (outcome === "advanced") stats.requestsAdvanced += 1;
-      else if (outcome === "closedUnknown") stats.requestsClosedUnknown += 1;
-    } catch (error) {
-      stats.errors += 1;
-      await ledger.recordIndexError({
-        withdrawalRequestId: request.id,
-        error: describeError(error),
-      });
-      getLogger().error(
-        { requestId: request.id, requestAddress: request.request_address, error },
-        "earn queued withdrawal reconciliation: request remains unresolved"
-      );
+  stats.requestsClaimed = await visitOpenRequestsJustInTime(
+    ledger,
+    REQUEST_BATCH_SIZE,
+    async (request) => {
+      try {
+        const outcome = await reconcileRequest(env, ledger, request);
+        if (outcome === "advanced") stats.requestsAdvanced += 1;
+        else if (outcome === "closedUnknown") stats.requestsClosedUnknown += 1;
+      } catch (error) {
+        stats.errors += 1;
+        await ledger.recordIndexError({
+          withdrawalRequestId: request.id,
+          error: describeError(error),
+          retryAt: new Date(Date.now() + OPEN_REQUEST_POLL_MS).toISOString(),
+        });
+        getLogger().error(
+          { requestId: request.id, requestAddress: request.request_address, error },
+          "earn queued withdrawal reconciliation: request remains unresolved"
+        );
+      }
     }
-  }
+  );
 
   logEvent(stats.errors > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_queued_withdrawal_reconciliation_tick",
@@ -234,6 +239,30 @@ export async function reconcileEarnVaultQueuedWithdrawals(env: Env): Promise<voi
   if (stats.errors > 0) {
     throw new Error(`Earn queued withdrawal reconciliation had ${stats.errors} errors`);
   }
+}
+
+/**
+ * Claim each due request only when the worker is ready to reconcile it.
+ *
+ * Pre-claiming the whole tick lets a fixed lease expire while later rows wait
+ * in memory behind action and provider work. One-at-a-time claims keep the
+ * lease attached to active work while the max count still bounds each tick.
+ */
+export async function visitOpenRequestsJustInTime(
+  ledger: Pick<QueueLedger, "claimOpenRequests">,
+  maxRequests: number,
+  visit: (request: EarnVaultWithdrawalRequestRow) => Promise<void>
+): Promise<number> {
+  let claimed = 0;
+  while (claimed < maxRequests) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- claiming immediately before serial provider work keeps the durable lease fresh.
+    const [request] = await ledger.claimOpenRequests(1);
+    if (!request) break;
+    claimed += 1;
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- serial pacing protects provider and RPC capacity.
+    await visit(request);
+  }
+  return claimed;
 }
 
 function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
@@ -649,7 +678,38 @@ async function projectLiveRequest(
     maturityTimestamp: lookup.request.maturityTimestamp,
     deadlineTimestamp: lookup.request.deadlineTimestamp,
     lastIndexError: null,
+    nextCheckAt: nextQueuedWithdrawalCheckAt(
+      toStatus,
+      lookup.request.maturityTimestamp,
+      Date.now()
+    ),
   });
+}
+
+/**
+ * Schedule the next provider read without delaying a meaningful transition.
+ *
+ * Pending queue requests cannot be fulfilled or cancelled before their
+ * provider-authenticated maturity, so they may back off for up to 15 minutes.
+ * The schedule never adds delay beyond maturity or the normal one-minute
+ * cadence. Every other open state remains on that one-minute cadence.
+ */
+export function nextQueuedWithdrawalCheckAt(
+  status: EarnVaultWithdrawalRequestRow["status"],
+  maturityTimestamp: string,
+  nowMs = Date.now()
+): string | null {
+  if (status === "fulfilled" || status === "cancelled" || status === "failed") return null;
+  const minimumNextMs = nowMs + OPEN_REQUEST_POLL_MS;
+  if (status !== "pending") return new Date(minimumNextMs).toISOString();
+
+  const nowSeconds = BigInt(Math.floor(nowMs / 1_000));
+  const maturitySeconds = BigInt(maturityTimestamp);
+  const maximumNextSeconds = nowSeconds + BigInt(PENDING_REQUEST_MAX_POLL_MS / 1_000);
+  const usefulNextSeconds =
+    maturitySeconds < maximumNextSeconds ? maturitySeconds : maximumNextSeconds;
+  const usefulNextMs = Number(usefulNextSeconds) * 1_000;
+  return new Date(Math.max(minimumNextMs, usefulNextMs)).toISOString();
 }
 
 async function reconcileRequest(
@@ -684,6 +744,11 @@ async function reconcileRequest(
       organizationId: request.organization_id,
       toStatus: "closed_or_unknown",
       lastIndexError: "Queue PDA closed without a matching finalized lifecycle event yet",
+      nextCheckAt: nextQueuedWithdrawalCheckAt(
+        "closed_or_unknown",
+        request.maturity_timestamp,
+        Date.now()
+      ),
     });
     return "closedUnknown";
   }
@@ -744,21 +809,8 @@ async function findClosingEvent(
         ...(request.creation_signature ? { until: request.creation_signature as Signature } : {}),
       })
       .send();
-    for (const entry of history) {
-      if (entry.err !== null) continue;
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- history is newest-first and stops at the first authoritative close event.
-      const logs = await transactionLogs(rpc, entry.signature);
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- provider decoding may resolve provider-owned lifecycle configuration per finalized transaction.
-      const events = await lifecycleEvents(env, client, request, logs);
-      const event = events.find(
-        (candidate) =>
-          (candidate.kind === "withdrawalCancelled" || candidate.kind === "withdrawalFulfilled") &&
-          String(candidate.requestAddress) === request.request_address
-      );
-      if (event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled") {
-        return { signature: entry.signature, event };
-      }
-    }
+    const closing = await findClosingEventInHistoryPage(env, rpc, request, client, history);
+    if (closing) return closing;
     if (history.length < CLOSING_HISTORY_PAGE_SIZE) return null;
     const oldest = history.at(-1)?.signature;
     if (!oldest) return null;
@@ -767,4 +819,45 @@ async function findClosingEvent(
   throw new Error(
     `Queued withdrawal ${request.id} closing history exceeded ${CLOSING_HISTORY_MAX_PAGES} pages`
   );
+}
+
+/**
+ * Decode finalized history in small parallel windows while preserving its
+ * newest-first decision order. A window avoids a serial getTransaction
+ * waterfall, but bounded concurrency protects the RPC and provider decoder.
+ */
+export async function findClosingEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultQueuedWithdrawProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingEventObservation | null> {
+  const candidates = history.filter((entry) => entry.err === null);
+  for (let offset = 0; offset < candidates.length; offset += CLOSING_HISTORY_LOOKUP_CONCURRENCY) {
+    const batch = candidates.slice(offset, offset + CLOSING_HISTORY_LOOKUP_CONCURRENCY);
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each bounded window must finish before the next reaches the RPC.
+    const observations = await Promise.allSettled(
+      batch.map(async (entry): Promise<ClosingEventObservation | null> => {
+        const logs = await transactionLogs(rpc, entry.signature);
+        const events = await lifecycleEvents(env, client, request, logs);
+        const event = events.find(
+          (candidate) =>
+            (candidate.kind === "withdrawalCancelled" ||
+              candidate.kind === "withdrawalFulfilled") &&
+            String(candidate.requestAddress) === request.request_address
+        );
+        return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
+          ? { signature: entry.signature, event }
+          : null;
+      })
+    );
+    // Promise results retain input order. Throwing a failure encountered before
+    // a match and ignoring one after it preserves the former serial semantics.
+    for (const observation of observations) {
+      if (observation.status === "rejected") throw observation.reason;
+      if (observation.value) return observation.value;
+    }
+  }
+  return null;
 }

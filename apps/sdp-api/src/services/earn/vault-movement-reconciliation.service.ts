@@ -222,6 +222,7 @@ export async function reconcileEarnVaultMovementBatch(
     stats.settled += outcome.settled;
     stats.failed += outcome.failed;
     stats.confirmed += outcome.confirmed;
+    stats.finalized += outcome.finalized;
     stats.resubmitted += outcome.resubmitted;
     stats.unchanged += outcome.unchanged;
     stats.movementErrors += outcome.movementErrors;

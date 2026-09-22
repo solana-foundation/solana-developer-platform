@@ -4,7 +4,10 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EnglishTestI18n } from "../test-i18n";
-import { TreasurySolutionsWorkspace } from "./treasury-solutions-workspace";
+import {
+  EarnTransactionModalLoading,
+  TreasurySolutionsWorkspace,
+} from "./treasury-solutions-workspace";
 
 // jsdom implements no matchMedia, while the workspace's motion components read
 // it through useReducedMotion.
@@ -582,6 +585,9 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
     mocks.vaultWithdrawalModal = props;
     return <div role="dialog">Withdraw from {props.position.label}</div>;
   },
+}));
+
+vi.mock("../earn/earn-outcome-trackers", () => ({
   EarnVaultWithdrawalOutcomeTracker: (props: {
     movementId: string;
     onSettled?: (withdrawal: {
@@ -602,6 +608,33 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
     mocks.vaultWithdrawalTrackers[props.movementId] = props;
     return <output data-testid="vault-withdrawal-outcome-tracker">{props.movementId}</output>;
   },
+  EarnVaultDepositOutcomeTracker: (props: {
+    movementId: string;
+    onSettled?: (deposit: {
+      createdAt?: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+    onUpdated?: (deposit: {
+      createdAt?: string;
+      failureReason: string | null;
+      movementId: string;
+      positionId: string;
+      status: string;
+    }) => void;
+  }) => {
+    mocks.vaultDepositTrackers[props.movementId] = props;
+    return <output data-testid="vault-deposit-outcome-tracker">{props.movementId}</output>;
+  },
+  EarnWithdrawalOutcomeTracker: ({
+    programId,
+    withdrawalRef,
+  }: {
+    programId: string;
+    withdrawalRef: string;
+  }) => <output data-testid="withdrawal-outcome-tracker">{`${programId}:${withdrawalRef}`}</output>,
 }));
 
 vi.mock("../earn/earn-vault-exit-modal", () => ({
@@ -661,36 +694,9 @@ vi.mock("../earn/earn-vault-deposit-modal", () => ({
     mocks.vaultDepositModal = props;
     return <div role="dialog">Deposit into {props.strategy.name}</div>;
   },
-  EarnVaultDepositOutcomeTracker: (props: {
-    movementId: string;
-    onSettled?: (deposit: {
-      createdAt?: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-    onUpdated?: (deposit: {
-      createdAt?: string;
-      failureReason: string | null;
-      movementId: string;
-      positionId: string;
-      status: string;
-    }) => void;
-  }) => {
-    mocks.vaultDepositTrackers[props.movementId] = props;
-    return <output data-testid="vault-deposit-outcome-tracker">{props.movementId}</output>;
-  },
 }));
 
 vi.mock("../earn/earn-withdraw-modal", () => ({
-  EarnWithdrawalOutcomeTracker: ({
-    programId,
-    withdrawalRef,
-  }: {
-    programId: string;
-    withdrawalRef: string;
-  }) => <output data-testid="withdrawal-outcome-tracker">{`${programId}:${withdrawalRef}`}</output>,
   EarnWithdrawModal: ({ programId }: { programId: string }) => (
     <div role="dialog">Withdraw from {programId}</div>
   ),
@@ -757,6 +763,17 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("TreasurySolutionsWorkspace", () => {
+  it("shows immediate feedback while a deferred transaction modal loads", () => {
+    render(
+      <EnglishTestI18n>
+        <EarnTransactionModalLoading />
+      </EnglishTestI18n>
+    );
+
+    expect(screen.getByRole("dialog", { name: "Loading…" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("Loading…");
+  });
+
   it("guides a treasury with no wallet straight into wallet setup", () => {
     mocks.walletsEmpty = true;
     mocks.positionsEmpty = true;

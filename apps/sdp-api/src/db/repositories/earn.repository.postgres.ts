@@ -131,6 +131,65 @@ async function selectPage<Row>(
   };
 }
 
+const STRATEGY_UPSERT_CONFLICT_SQL = `ON CONFLICT (provider, provider_reference, environment)
+  DO UPDATE SET
+    name = EXCLUDED.name,
+    source_kind = EXCLUDED.source_kind,
+    underlying_source = EXCLUDED.underlying_source,
+    deposit_mints = EXCLUDED.deposit_mints,
+    share_mint = EXCLUDED.share_mint,
+    apy_type = EXCLUDED.apy_type,
+    current_apy = EXCLUDED.current_apy,
+    liquidity_term = EXCLUDED.liquidity_term,
+    redemption_delay_days = EXCLUDED.redemption_delay_days,
+    risk_metadata = EXCLUDED.risk_metadata,
+    host_cluster = EXCLUDED.host_cluster,
+    -- Migration 0099 clears the tombstone marker when an operator updates
+    -- status. A sync-owned delisting may be reactivated when the provider
+    -- relists it; operator pauses/deprecations stay sticky.
+    status = CASE
+      WHEN earn_strategies.status = 'paused'
+        OR (
+          earn_strategies.status = 'deprecated'
+          AND earn_strategies.catalogue_delisted_at IS NULL
+        )
+        THEN earn_strategies.status
+      ELSE EXCLUDED.status
+    END,
+    catalogue_delisted_at = NULL,
+    updated_at = sdp_iso_now()`;
+
+function strategyBatchRecord(input: UpsertEarnStrategyInput) {
+  return {
+    id: generateEarnStrategyId(),
+    provider: input.provider,
+    provider_reference: input.providerReference,
+    name: input.name,
+    source_kind: input.sourceKind,
+    underlying_source: input.underlyingSource,
+    deposit_mints: input.depositMints,
+    share_mint: input.shareMint,
+    apy_type: input.apyType,
+    current_apy: input.currentApy,
+    liquidity_term: input.liquidityTerm,
+    redemption_delay_days: input.redemptionDelayDays,
+    risk_metadata: input.riskMetadata ?? {},
+    status: input.status,
+    host_cluster: input.hostCluster,
+    environment: input.environment,
+  };
+}
+
+function metricsBatchRecord(input: UpdateEarnStrategyMetricsInput) {
+  return {
+    provider: input.provider,
+    provider_reference: input.providerReference,
+    environment: input.environment,
+    current_apy: input.currentApy,
+    risk_metadata: input.riskMetadata ?? {},
+  };
+}
+
 export function createPostgresEarnRepository(db: AppDb): EarnRepository {
   return {
     async upsertStrategy(input: UpsertEarnStrategyInput) {
@@ -144,32 +203,7 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
              apy_type, current_apy, liquidity_term, redemption_delay_days,
              risk_metadata, status, host_cluster, environment
            ) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
-           ON CONFLICT (provider, provider_reference, environment) DO UPDATE SET
-             name = EXCLUDED.name,
-             source_kind = EXCLUDED.source_kind,
-             underlying_source = EXCLUDED.underlying_source,
-             deposit_mints = EXCLUDED.deposit_mints,
-             share_mint = EXCLUDED.share_mint,
-             apy_type = EXCLUDED.apy_type,
-             current_apy = EXCLUDED.current_apy,
-             liquidity_term = EXCLUDED.liquidity_term,
-             redemption_delay_days = EXCLUDED.redemption_delay_days,
-             risk_metadata = EXCLUDED.risk_metadata,
-             host_cluster = EXCLUDED.host_cluster,
-             -- Migration 0099 clears the tombstone marker when an operator
-             -- updates status. A sync-owned delisting may be reactivated when
-             -- the provider relists it; operator pauses/deprecations stay sticky.
-             status = CASE
-               WHEN earn_strategies.status = 'paused'
-                 OR (
-                   earn_strategies.status = 'deprecated'
-                   AND earn_strategies.catalogue_delisted_at IS NULL
-                 )
-                 THEN earn_strategies.status
-               ELSE EXCLUDED.status
-             END,
-             catalogue_delisted_at = NULL,
-             updated_at = sdp_iso_now()
+           ${STRATEGY_UPSERT_CONFLICT_SQL}
            RETURNING *`
         )
         .bind(
@@ -193,6 +227,53 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         .first<Record<string, unknown>>();
 
       return row ? mapStrategyRow(row) : null;
+    },
+
+    async upsertStrategies(inputs) {
+      if (inputs.length === 0) return 0;
+      const result = await db
+        .prepare(
+          `WITH incoming AS MATERIALIZED (
+             SELECT *
+               FROM jsonb_to_recordset(?::jsonb) AS row(
+                 id TEXT,
+                 provider TEXT,
+                 provider_reference TEXT,
+                 name TEXT,
+                 source_kind TEXT,
+                 underlying_source TEXT,
+                 deposit_mints JSONB,
+                 share_mint TEXT,
+                 apy_type TEXT,
+                 current_apy TEXT,
+                 liquidity_term TEXT,
+                 redemption_delay_days INTEGER,
+                 risk_metadata JSONB,
+                 status TEXT,
+                 host_cluster TEXT,
+                 environment TEXT
+               )
+           ), upserted AS (
+             INSERT INTO earn_strategies (
+               id, provider, provider_reference, name,
+               source_kind, underlying_source, deposit_mints, share_mint,
+               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               risk_metadata, status, host_cluster, environment
+             )
+             SELECT
+               id, provider, provider_reference, name,
+               source_kind, underlying_source, deposit_mints, share_mint,
+               apy_type, current_apy, liquidity_term, redemption_delay_days,
+               risk_metadata, status, host_cluster, environment
+             FROM incoming
+             ${STRATEGY_UPSERT_CONFLICT_SQL}
+             RETURNING id
+           )
+           SELECT COUNT(*)::int AS count FROM upserted`
+        )
+        .bind(JSON.stringify(inputs.map(strategyBatchRecord)))
+        .first<{ count: number }>();
+      return Number(result?.count ?? 0);
     },
 
     async updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput) {
@@ -223,6 +304,37 @@ export function createPostgresEarnRepository(db: AppDb): EarnRepository {
         )
         .first<Record<string, unknown>>();
       return row !== null && row !== undefined;
+    },
+
+    async updateStrategyMetricsBatch(inputs) {
+      if (inputs.length === 0) return 0;
+      const result = await db
+        .prepare(
+          `WITH incoming AS MATERIALIZED (
+             SELECT *
+               FROM jsonb_to_recordset(?::jsonb) AS row(
+                 provider TEXT,
+                 provider_reference TEXT,
+                 environment TEXT,
+                 current_apy TEXT,
+                 risk_metadata JSONB
+               )
+           ), updated AS (
+             UPDATE earn_strategies strategy
+                SET current_apy = incoming.current_apy,
+                    risk_metadata = strategy.risk_metadata || incoming.risk_metadata,
+                    updated_at = sdp_iso_now()
+               FROM incoming
+              WHERE strategy.provider = incoming.provider
+                AND strategy.provider_reference = incoming.provider_reference
+                AND strategy.environment = incoming.environment
+             RETURNING strategy.id
+           )
+           SELECT COUNT(*)::int AS count FROM updated`
+        )
+        .bind(JSON.stringify(inputs.map(metricsBatchRecord)))
+        .first<{ count: number }>();
+      return Number(result?.count ?? 0);
     },
 
     async getStrategyById(strategyId: string) {
