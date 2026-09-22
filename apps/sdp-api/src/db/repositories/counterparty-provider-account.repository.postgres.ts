@@ -626,7 +626,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         "organization_id = ?",
         "project_id = ?",
         "counterparty_id = ?",
-        "kind IN ('payout_account', 'customer_link')",
+        "kind IN ('payout_account', 'customer_link', 'funding_wallet')",
       ];
       const bindings: string[] = [input.organizationId, input.projectId, input.counterpartyId];
 

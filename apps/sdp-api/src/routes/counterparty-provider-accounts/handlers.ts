@@ -4,6 +4,7 @@ import {
   type BvnkCounterpartyProviderCustomerLink,
   type CounterpartyProviderAccount,
   type ListCounterpartyProviderAccountsResponse,
+  type ProviderWalletBalance,
 } from "@sdp/types";
 import { z } from "zod";
 import type {
@@ -18,6 +19,7 @@ import { rampRuntime } from "@/routes/payments/context";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import type { AppContext } from "../counterparties/context";
 import { getCounterpartiesRepository } from "../counterparties/context";
+import { readBvnkFundingWalletBalances } from "./bvnk-funding-wallet-balances";
 import { getCounterpartyProviderAccountsRepository } from "./context";
 import {
   counterpartyProviderAccountParamsSchema,
@@ -58,9 +60,14 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
     counterpartyId: counterparty.id,
     ...query.data,
   });
+  const runtime = rampRuntime(c);
   const enriched = await enrichCounterpartyProviderAccounts(
-    rampRuntime(c),
+    runtime,
     rows.filter((row) => row.kind === "payout_account")
+  );
+  const walletBalances = await readBvnkFundingWalletBalances(
+    runtime,
+    rows.filter((row) => row.kind === "funding_wallet")
   );
 
   const rowsByProvider = new Map<
@@ -80,11 +87,15 @@ export const listCounterpartyProviderAccounts = async (c: AppContext) => {
   for (const providerRows of rowsByProvider.values()) {
     const customerLink = providerRows.find((row) => row.kind === "customer_link");
     const payoutRows = providerRows.filter((row) => row.kind === "payout_account");
-    if (payoutRows.length === 0 && customerLink !== undefined) {
+    const fundingWalletRows = providerRows.filter((row) => row.kind === "funding_wallet");
+    if (payoutRows.length === 0 && fundingWalletRows.length === 0 && customerLink !== undefined) {
       accounts.push(mapCustomerLinkAccount(customerLink));
     }
     for (const row of payoutRows) {
       accounts.push(mapProviderAccount(row, enriched, customerLink));
+    }
+    for (const row of fundingWalletRows) {
+      accounts.push(mapFundingWalletAccount(row, walletBalances, customerLink));
     }
   }
 
@@ -156,6 +167,51 @@ function mapProviderAccount(
       result.accountNumberLast4 = detail.accountNumberLast4;
     }
     result.paymentRails = detail.paymentRails;
+  }
+
+  if (customerLink !== undefined) {
+    result.customerLink = mapCustomerLink(customerLink);
+  }
+
+  return result;
+}
+
+/**
+ * Maps a funding-wallet row into the public provider-account shape with its
+ * just-in-time balance. Funding wallets carry no corridor, so the destination
+ * country and payment rail stay null; the provider status is the wallet
+ * lifecycle value. The reference and balance appear only once the provider
+ * assigned a wallet to the row.
+ *
+ * @param row - Parent-scoped funding-wallet row.
+ * @param balances - Live BVNK balances keyed by row id for referenced rows.
+ * @param customerLink - The provider's customer-link row for the counterparty, when one exists.
+ * @returns Public provider-account response row for the wallet.
+ */
+function mapFundingWalletAccount(
+  row: CounterpartyProviderAccountRow,
+  balances: ReadonlyMap<string, ProviderWalletBalance>,
+  customerLink: CounterpartyProviderAccountRow | undefined
+): CounterpartyProviderAccount {
+  const result: CounterpartyProviderAccount = {
+    id: row.id,
+    provider: row.provider,
+    kind: row.kind,
+    fiatCurrency: row.fiat_currency,
+    destinationCountry: null,
+    paymentRail: null,
+    status: row.status,
+    providerStatus: row.provider_status,
+    createdAt: row.created_at,
+  };
+
+  if (row.external_account_reference !== null) {
+    result.providerAccountReference = row.external_account_reference;
+    const balance = balances.get(row.id);
+    if (balance === undefined) {
+      throw internalError("Funding-wallet balance is missing for a referenced row.");
+    }
+    result.balance = balance;
   }
 
   if (customerLink !== undefined) {
