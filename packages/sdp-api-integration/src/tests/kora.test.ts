@@ -12,7 +12,7 @@
  */
 
 import { apiTestSupport } from "@sdp/api/test-support";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { env, KORA_CONFIGURED, RUN_INTEGRATION_TESTS } from "../helpers/integration";
 
 const { KoraAdapter, KoraClient } = apiTestSupport;
@@ -34,10 +34,6 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
       rpcUrl: koraUrl,
       apiKey: env.KORA_API_KEY,
     });
-  });
-
-  afterAll(() => {
-    // Cleanup if needed
   });
 
   describe("Kora Client", () => {
@@ -114,30 +110,20 @@ describe.skipIf(!KORA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Kora Fee Payment", 
 
   describe("Kora Adapter (FeePaymentPort)", () => {
     it("gets fee payer address via adapter", async () => {
-      // Note: This test may fail if Kora API format changed
-      // The adapter expects 'payerSigner' but newer Kora returns 'signer_address'
-      try {
-        const feePayer = await adapter.getFeePayer();
-        expect(feePayer).toBeDefined();
-        expect(feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
-      } catch {
-        // If adapter fails due to API format mismatch, verify via client directly
-        const response = await client.getPayerSigner();
-        const signerAddress = (response as { signer_address?: string }).signer_address;
-        expect(signerAddress).toBeDefined();
-        console.log("Note: Adapter needs update to match Kora API format");
-      }
+      // The adapter normalizes every known Kora response shape (signer_address,
+      // payment_address, payerSigner), so a format change is a test failure,
+      // not something to work around.
+      const feePayer = await adapter.getFeePayer();
+
+      expect(feePayer).toBeDefined();
+      expect(feePayer).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
     });
 
-    it("caches fee payer address", async () => {
-      try {
-        const feePayer1 = await adapter.getFeePayer();
-        const feePayer2 = await adapter.getFeePayer();
-        expect(feePayer1).toBe(feePayer2);
-      } catch {
-        // Skip caching test if adapter format mismatch
-        console.log("Note: Skipping cache test - adapter needs API format update");
-      }
+    it("returns the same fee payer address on repeated calls", async () => {
+      const feePayer1 = await adapter.getFeePayer();
+      const feePayer2 = await adapter.getFeePayer();
+
+      expect(feePayer2).toBe(feePayer1);
     });
 
     it("has correct provider ID", () => {

@@ -119,6 +119,36 @@ describe("KoraAdapter transient-failure handling", () => {
   });
 });
 
+describe("KoraAdapter.getFeePayer caching", () => {
+  it("caches the first fee payer instead of re-reading the transport", async () => {
+    let calls = 0;
+    const transport = {
+      // A distinct address per call: a non-caching adapter would surface the
+      // second address, so identical results prove the cache, not the API.
+      getPayerSigner: async () => {
+        calls += 1;
+        return { signer_address: `Signer${calls}` };
+      },
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => ({ signed_transaction: "" }),
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
+    const first = await adapter.getFeePayer();
+    const second = await adapter.getFeePayer();
+
+    assert.equal(second, first);
+    assert.equal(calls, 1);
+  });
+});
+
 describe("KoraAdapter error classification", () => {
   it("treats a Kora internal server error as ambiguous, not a deterministic rejection", async () => {
     const adapter = makeAdapterRejectingSend("RPC Error -32090: server exploded");
