@@ -732,7 +732,10 @@
       "status": "Status",
       "payinId": "Pay-in ID",
       "fiatSent": "Amount converted",
-      "cryptoToReceive": "Crypto to receive"
+      "cryptoToReceive": "Crypto to receive",
+      "received": "Received",
+      "credited": "Credited",
+      "depositTx": "Deposit tx"
     },
     "requestFailed": "Request failed.",
     "submitting": "Submitting...",

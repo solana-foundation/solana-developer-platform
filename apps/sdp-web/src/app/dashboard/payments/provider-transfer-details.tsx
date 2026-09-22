@@ -1,4 +1,5 @@
 import type {
+  BvnkOfframpChannelSettlement,
   BvnkRampSettlement,
   CoinbaseRampSettlement,
   LightsparkRampSettlement,
@@ -188,6 +189,46 @@ const BVNK_FIELDS: readonly TransferDetailFieldSpec<BvnkRampSettlement>[] = [
   },
 ];
 
+const BVNK_OFFRAMP_FIELDS: readonly TransferDetailFieldSpec<BvnkOfframpChannelSettlement>[] = [
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.received",
+    text: (settlement) => formatDisplayAmount(settlement.cryptoAmount, settlement.cryptoCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.credited",
+    text: (settlement) => formatDisplayAmount(settlement.fiatAmount, settlement.fiatCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.providerFee",
+    text: (settlement) => formatDisplayAmount(settlement.feeAmount, settlement.feeCurrency),
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.networkFee",
+    text: (settlement) =>
+      Number(settlement.networkFeeAmount) > 0
+        ? formatDisplayAmount(settlement.networkFeeAmount, settlement.networkFeeCurrency)
+        : null,
+  },
+  {
+    kind: "text",
+    labelKey: "DashboardPayments.transferDetails.exchangeRate",
+    text: (settlement) =>
+      `1 ${settlement.cryptoCurrency} = ${formatDisplayAmount(
+        settlement.exchangeRate,
+        settlement.fiatCurrency
+      )}`,
+  },
+  {
+    kind: "explorerTx",
+    labelKey: "DashboardPayments.transferDetails.depositTx",
+    signature: (settlement) => settlement.txHash,
+  },
+];
+
 const LIGHTSPARK_FIELDS: readonly TransferDetailFieldSpec<LightsparkRampSettlement>[] = [
   {
     kind: "text",
@@ -330,6 +371,9 @@ function bvnkBuilder(
   if (settlement === undefined || settlement.provider !== "bvnk") {
     return [];
   }
+  if ("kind" in settlement) {
+    return [];
+  }
   const statusRow: ProviderTransferDetailRow = {
     key: "DashboardPayments.transferDetails.status",
     label: t("DashboardPayments.transferDetails.status"),
@@ -378,6 +422,21 @@ function bvnkBuilder(
   ];
 }
 
+function bvnkOfframpBuilder(
+  transfer: PaymentTransferSummary,
+  context: TransferDetailFieldContext,
+  t: Translate
+): ProviderTransferDetailRow[] {
+  const settlement = transfer.settlement;
+  if (settlement === undefined || settlement.provider !== "bvnk") {
+    return [];
+  }
+  if (!("kind" in settlement) || settlement.kind !== "offramp_channel") {
+    return [];
+  }
+  return rowsFromSpecs(BVNK_OFFRAMP_FIELDS, settlement, context, t);
+}
+
 /**
  * Detail rows each provider contributes to the transfer modal, keyed by
  * provider and ramp direction. Providers absent here (or directions a
@@ -389,7 +448,7 @@ const PROVIDER_TRANSFER_DETAIL_FIELDS: Partial<
   moonpay: { onramp: moonpayBuilder, offramp: moonpayBuilder },
   coinbase: { onramp: coinbaseBuilder },
   lightspark: { onramp: lightsparkBuilder, offramp: lightsparkBuilder },
-  bvnk: { onramp: bvnkBuilder },
+  bvnk: { onramp: bvnkBuilder, offramp: bvnkOfframpBuilder },
 };
 
 /**
