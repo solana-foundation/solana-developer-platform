@@ -4,9 +4,8 @@ import type { EarnVaultPosition, EarnVaultWithdrawal } from "@sdp/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { EnglishTestI18n } from "../test-i18n";
 import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
@@ -65,7 +64,7 @@ function renderModal(
   return {
     onWithdrawn,
     ...render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <EarnVaultWithdrawModal
           environment="sandbox"
           onClose={vi.fn()}
@@ -74,7 +73,7 @@ function renderModal(
           projectId="prj_1"
           settlement={settlement}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     ),
   };
 }
@@ -220,7 +219,7 @@ describe("EarnVaultWithdrawModal", () => {
 
   it("disables Max when the withdrawable balance is unavailable", () => {
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <EarnVaultWithdrawModal
           environment="sandbox"
           onClose={vi.fn()}
@@ -228,7 +227,7 @@ describe("EarnVaultWithdrawModal", () => {
           position={{ ...position, withdrawableShares: undefined }}
           projectId="prj_1"
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     expect((screen.getByRole("button", { name: "Max" }) as HTMLButtonElement).disabled).toBe(true);

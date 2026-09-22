@@ -15,7 +15,7 @@ import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { dvpToastAction } from "../dvp-action-toast";
+import { DVP_TOAST_POSITION, dvpToastAction } from "../dvp-action-toast";
 import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "../dvp-trade";
 import { TOKEN_2022_PROGRAM } from "./dvp-create.data";
@@ -145,7 +145,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       // addresses and costs rent; arriving on a new page with no acknowledgement
       // leaves somebody guessing whether they just did that twice.
       toast.success(t("DashboardMarkets.dvp.toastCreated"), {
-        position: "bottom-right",
+        ...DVP_TOAST_POSITION,
         action: dvpToastAction(t, createSignature, cluster),
       });
       router.push(`${DASHBOARD_MARKETS_SUBNAV_HREFS.dvp}/${createdId}`);

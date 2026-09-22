@@ -5,16 +5,15 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { DvpStatusBadge } from "./dvp-status";
 import type { DvpSettlementAvailability, DvpTradeStatus } from "./dvp-trade";
 
 function badge(status: DvpTradeStatus, availability: DvpSettlementAvailability | null): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpStatusBadge settlementAvailability={availability} status={status} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 

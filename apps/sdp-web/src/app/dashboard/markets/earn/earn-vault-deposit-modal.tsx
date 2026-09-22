@@ -82,7 +82,7 @@ import {
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
   earnVaultDepositUiState,
-  earnVaultPositionStatusDisplay,
+  earnVaultPositionStatusLabels,
   vaultOutcomeTone,
 } from "./earn-vault-ui-state";
 
@@ -642,11 +642,7 @@ function DepositMovementResult({
     ? null
     : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
       ? null
-      : earnVaultPositionStatusDisplay(
-          earnVaultDepositUiState(deposit.status).positionStatus,
-          t("DashboardMarkets.treasury.positionStatusPending"),
-          t("DashboardMarkets.treasury.positionStatusActive")
-        );
+      : earnVaultPositionStatusLabels(earnVaultDepositUiState(deposit.status).positionStatus, t);
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =

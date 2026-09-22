@@ -11,18 +11,13 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
 // The hook confirms each outcome in words, so it needs the catalog those words
 // come from — the same provider the surfaces rendering it already sit inside.
 function withI18n({ children }: { children: ReactNode }) {
-  return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {children}
-    </I18nProvider>
-  );
+  return <EnglishTestI18n>{children}</EnglishTestI18n>;
 }
 
 const refresh = vi.hoisted(() => vi.fn());

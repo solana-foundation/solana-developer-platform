@@ -92,7 +92,7 @@ import {
 import { EarnVaultExitModal } from "../earn/earn-vault-exit-modal";
 import {
   earnVaultDepositUiState,
-  earnVaultPositionStatusDisplay,
+  earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "../earn/earn-vault-ui-state";
 import { EarnVaultWithdrawalOutcomeTracker } from "../earn/earn-vault-withdraw-modal";
@@ -489,11 +489,7 @@ function TreasuryPositionStatusBadge({ activity }: { activity?: TrackedVaultActi
         : earnVaultWithdrawalUiState(activity.movement.status)
       ).positionStatus
     : "active";
-  const display = earnVaultPositionStatusDisplay(
-    positionStatus,
-    t("DashboardMarkets.treasury.positionStatusPending"),
-    t("DashboardMarkets.treasury.positionStatusActive")
-  );
+  const display = earnVaultPositionStatusLabels(positionStatus, t);
   const description =
     positionStatus === "pending"
       ? t("DashboardMarkets.treasury.positionStatusPendingDescription")

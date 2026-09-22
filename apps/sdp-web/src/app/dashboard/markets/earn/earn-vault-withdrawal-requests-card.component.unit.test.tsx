@@ -3,8 +3,7 @@
 import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -57,9 +56,9 @@ function request(
 
 function renderCard(onChanged = vi.fn()) {
   const renderUi = () => (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <EarnVaultWithdrawalRequestsCard onChanged={onChanged} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
   return {
     ...render(renderUi()),

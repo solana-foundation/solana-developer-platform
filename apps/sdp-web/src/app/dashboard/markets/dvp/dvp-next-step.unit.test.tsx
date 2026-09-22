@@ -13,8 +13,7 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { OTHER_ADDRESS, ownParty, testLeg, testTrade } from "./dvp.fixtures";
 import { DvpNextStep } from "./dvp-next-step";
 import type { DvpTradeStatus } from "./dvp-trade";
@@ -66,9 +65,9 @@ function trade({
 
 function renderStep(value: ReturnType<typeof testTrade>): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpNextStep trade={value} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 

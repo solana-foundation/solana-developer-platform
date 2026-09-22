@@ -52,7 +52,7 @@ import {
 } from "./earn-vault-slippage";
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
-  earnVaultPositionStatusDisplay,
+  earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
   vaultOutcomeTone,
 } from "./earn-vault-ui-state";
@@ -393,10 +393,9 @@ function WithdrawalMovementResult({
   const sharedStatus =
     outcome.absorbedByApproval || settlement === "provider_order"
       ? null
-      : earnVaultPositionStatusDisplay(
+      : earnVaultPositionStatusLabels(
           earnVaultWithdrawalUiState(withdrawal.status).positionStatus,
-          t("DashboardMarkets.treasury.positionStatusPending"),
-          t("DashboardMarkets.treasury.positionStatusActive")
+          t
         );
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
