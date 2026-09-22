@@ -195,8 +195,50 @@ test("merge deploys promote signed per-merge images and never migrate", () => {
   assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
   assert.match(
     workflow,
-    /git diff --quiet "\$\{last_release\}"\.\.HEAD -- apps\/sdp-api\/src\/db\/migrations/
+    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
   );
+
+  // A held merge must cost seconds and leave nothing behind: the gate runs
+  // before GCP auth and before any image is promoted into prod Artifact Registry.
+  const gate = workflow.indexOf("- name: Gate merge deploys on pending migrations");
+  const gcpAuth = workflow.indexOf("- name: Authenticate to GCP");
+  const mergePromotion = workflow.indexOf("- name: Verify and promote merge image");
+  assert.ok(gate !== -1 && gate < gcpAuth, "gate must run before GCP auth");
+  assert.ok(gate < mergePromotion, "gate must run before the merge image is promoted");
+});
+
+test("the orchestrator holds merge deploys on pending migrations instead of failing them", () => {
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
+  );
+  const changes = orchestrator.slice(
+    orchestrator.indexOf("  changes:"),
+    orchestrator.indexOf("  notify-start:")
+  );
+  assert.match(changes, /prod: \$\{\{ steps\.detect\.outputs\.prod \}\}/);
+  assert.match(changes, /prod_hold: \$\{\{ steps\.detect\.outputs\.prod_hold \}\}/);
+  assert.match(changes, /CONTINUOUS_PROD_DEPLOY: \$\{\{ vars\.CONTINUOUS_PROD_DEPLOY \}\}/);
+  assert.match(
+    changes,
+    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
+  );
+  // A gate that cannot run must fail the job, never masquerade as a hold.
+  assert.match(
+    changes,
+    /\*\)\n\s+echo "::error::Prod merge gate could not be evaluated \(exit \$\{gate_status\}\)\."\n\s+exit 1/
+  );
+
+  const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
+  assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);
+  assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
+
+  // Both Slack posts name the hold; neither promises "stage → prod" for a
+  // merge that was never going to prod.
+  const heldTargets = orchestrator.match(
+    /format\('stage \(prod held: \{0\}\)', needs\.changes\.outputs\.prod_hold\)/g
+  );
+  assert.equal(heldTargets?.length, 2, "notify-start and notify-end must both report a hold");
 });
 
 test("merge mode skips the internal smoke gate but requires the caller's", () => {
