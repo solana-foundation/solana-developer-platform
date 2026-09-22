@@ -809,6 +809,7 @@ async function loadBvnkOfframpChannelFacts(
          AND pt.type = 'offramp'
          AND prj.environment = ?`
     )
+    .bind(transferId, environment)
     .first<{
       provider_reference: string | null;
       counterparty_id: string | null;
