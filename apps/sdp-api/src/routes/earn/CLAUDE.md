@@ -152,6 +152,18 @@ matching finalized close event stays `closed_or_unknown`; missing signature
 history never proves that a live escrow failed. See ADR 0003 for the full state
 machine and recovery rationale.
 
+Open requests are a durable due queue, not a full-table poll.
+`next_check_at` is both the next useful provider read and a two-minute claim
+lease. `claimOpenRequests` takes only due rows with `FOR UPDATE SKIP LOCKED`;
+pending requests wait until maturity or at most 15 minutes, subject to the
+normal one-minute minimum, while every other open state stays on the one-minute
+cadence. Terminal transitions clear the schedule. A crashed worker becomes
+retryable when its lease expires, so do not replace this with an in-memory timer
+or scan every open request on every tick. Closed-PDA history reads fetch
+transactions in ordered windows of eight, then inspect results newest first;
+the bound protects RPC capacity and the ordered inspection preserves the former
+serial decision and error semantics.
+
 These runtime routes are intentionally absent from public OpenAPI. Promotion is
 an EARN-027 security-scope change and requires named security sign-off plus the
 pinned public-operation update; do not add generated docs or OpenAPI paths as a
@@ -870,6 +882,10 @@ organization's own custody wallets.
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
+  Every owner/provider job shares one request-wide `VaultDeadline` and runs in
+  bounded waves of eight. Giving each queued owner a new deadline makes the
+  route's latency ceiling grow with portfolio size. Empty-position close-out
+  writes use the same concurrency bound and remain fail-soft.
 
 - `GET /vault-share-reconciliation` — chain-versus-ledger REPORT for the custody
   claims above (PRO-1741). The positions read can only serve what SDP recorded,
@@ -1265,6 +1281,13 @@ their owners) and replaces the dashboard's old N-per-owner read fanout. The
 dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
 that opts in, pinned by its unit test. Partner docs steer analytics keys to the
 default shape and detailed surfaces to the explicit opt-in.
+
+Simultaneous summary calls for the same organization, project and environment
+share only their in-flight DB scan and live hydration. This is not a cache: the
+entry is removed on settlement, and each caller applies its own detail/owner
+flags after the shared observation. Migration 0117's partial project/created
+index serves the project-wide keyset scan; keep the older owner-first index for
+the per-owner reads.
 
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
