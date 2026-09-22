@@ -38,7 +38,7 @@ const paymentsWalletSchema = z
     { message: "Wallet must have exactly one custody owner" }
   );
 
-const paymentsWalletsResponseSchema = z.object({
+export const paymentsWalletsResponseSchema = z.object({
   data: z.object({ wallets: z.array(paymentsWalletSchema) }),
 });
 
