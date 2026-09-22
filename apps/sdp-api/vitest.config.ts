@@ -5,7 +5,6 @@ import { TEST_WORKER_COUNT } from "./src/test/worker-count";
 // Matches parseTestShard in scripts/run-workspace-tests.mjs: an unset or
 // blank TEST_SHARD means an unsharded run, which must keep thresholds.
 const isShardedRun = process.env.TEST_SHARD !== undefined && process.env.TEST_SHARD.trim() !== "";
-const isCiRun = process.env.CI !== undefined;
 
 export default defineConfig({
   resolve: {
@@ -48,15 +47,19 @@ export default defineConfig({
       // the suite, so threshold enforcement happens once in the CI merge job
       // over the blob-merged coverage of all shards. The merge run leaves
       // TEST_SHARD unset, so it enforces the thresholds defined here.
+      //
+      // The floors are coarse round-downs of current coverage so ordinary
+      // drift does not trip them; move them deliberately, never automatically
+      // (no autoUpdate — its write-back dirtied the config after every local
+      // run and could not round-trip this file's spread at all).
       ...(isShardedRun
         ? {}
         : {
             thresholds: {
-              statements: 78.1,
-              branches: 68.7,
-              functions: 84.3,
-              lines: 78.5,
-              autoUpdate: !isCiRun,
+              statements: 77,
+              branches: 67,
+              functions: 83,
+              lines: 77,
             },
           }),
     },
