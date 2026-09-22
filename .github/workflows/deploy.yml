@@ -103,7 +103,7 @@ jobs:
             '{
               text: ("*" + $marker + "* — services: `" + $services + "` · targets: `" + $targets + "`"),
               attachments: [{
-                color: "#dbab09",
+                color: "#36a64f",
                 blocks: [
                   {type:"section", text:{type:"mrkdwn", text:("*" + $marker + "*")}},
                   {type:"section", fields:[
