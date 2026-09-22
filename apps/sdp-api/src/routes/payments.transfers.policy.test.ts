@@ -1,5 +1,6 @@
 import { SOL_MINT } from "@sdp/types";
 import { address, createNoopSigner } from "@solana/kit";
+import { Hono } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -45,16 +46,7 @@ import {
   seedWalletControlProfile,
 } from "@/test/helpers/payments-transfers";
 
-const { verifyClerkJwtForRequest } = vi.hoisted(() => ({
-  verifyClerkJwtForRequest: vi.fn(),
-}));
-
-// Only the external JWT verification is stubbed; identity mapping and
-// authorization run through the normal Clerk middleware and database.
-vi.mock("@/lib/clerk-token", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/clerk-token")>()),
-  verifyClerkJwtForRequest,
-}));
+import type { Env } from "@/types/env";
 
 const TEST_DUPLICATE_CUSTODY_WALLET_ID = "cwlt_payments_duplicate_test";
 
@@ -579,6 +571,7 @@ describe("Payments routes — transfer policy", () => {
 
   describe("approved dashboard transfers", () => {
     const requesterSessionId = "ses_approval_requester";
+    const requesterClerkToken = "clerk.approval.signature";
     const approverUserId = "usr_approval_replay_approver";
     const approverHeaders = {
       Cookie: "sdp_session=ses_approval_replay_approver",
@@ -586,13 +579,6 @@ describe("Payments routes — transfer policy", () => {
     };
 
     beforeEach(async () => {
-      verifyClerkJwtForRequest.mockReset();
-      verifyClerkJwtForRequest.mockResolvedValue({
-        sub: "clerk_approval_requester",
-        org_id: "clerk_approval_org",
-        org_role: "org:admin",
-        email: TEST_USER.email,
-      });
       const db = getDb(env);
       await db.batch([
         db
@@ -664,9 +650,28 @@ describe("Payments routes — transfer policy", () => {
         // Client hints cannot supply the trusted replay author type.
         "x-sdp-approved-wallet-operation-actor-type": "clerk",
       };
-      if (authType === "clerk") headers.Authorization = "Bearer clerk.approval.signature";
-      else headers.Cookie = `sdp_session=${requesterSessionId}`;
-      const response = await app.request(
+      const requesterApp = new Hono<{ Bindings: Env }>();
+      if (authType === "clerk") {
+        headers.Authorization = `Bearer ${requesterClerkToken}`;
+        // Only this initial request receives the verified external credential;
+        // identity mapping and authorization still use the real middleware.
+        requesterApp.use("*", async (c, next) => {
+          c.set("verifiedClerkJwt", {
+            token: requesterClerkToken,
+            payload: {
+              sub: "clerk_approval_requester",
+              org_id: "clerk_approval_org",
+              org_role: "org:admin",
+              email: TEST_USER.email,
+            },
+          });
+          await next();
+        });
+      } else {
+        headers.Cookie = `sdp_session=${requesterSessionId}`;
+      }
+      requesterApp.route("/", app);
+      const response = await requesterApp.request(
         "/v1/payments/transfers",
         {
           method: "POST",
@@ -706,8 +711,21 @@ describe("Payments routes — transfer policy", () => {
           userId: TEST_USER.id,
         });
 
-        // Approval must not depend on retaining the original Clerk credential.
-        verifyClerkJwtForRequest.mockRejectedValue(new Error("Original token expired"));
+        // The original credential cannot authenticate outside the initial request.
+        // Approval and internal replay must work without that request's JWT context.
+        if (authType === "clerk") {
+          const unauthenticated = await app.request(
+            "/v1/payments/transfers",
+            {
+              headers: {
+                Authorization: `Bearer ${requesterClerkToken}`,
+                "x-project-id": TEST_PROJECT.id,
+              },
+            },
+            env
+          );
+          expect(unauthenticated.status).toBe(401);
+        }
         const approved = await approve(approvalRequestId);
         expect(approved.status).toBe(200);
         expect(
@@ -785,10 +803,12 @@ describe("Payments routes — transfer policy", () => {
     );
 
     it.each([
+      ["null actor", null],
       ["unsupported type", { type: "unknown", id: TEST_USER.id, userId: TEST_USER.id }],
       ["conflicting identities", { type: "clerk", id: approverUserId, userId: TEST_USER.id }],
       ["missing userId", { type: "clerk", id: TEST_USER.id }],
       ["blank identity", { type: "clerk", id: "", userId: "" }],
+      ["whitespace identity", { type: "clerk", id: "   ", userId: "   " }],
     ])("refuses a saved actor with %s", async (_label, actor) => {
       const { approvalRequestId, walletOperationId } = await requestTransfer("clerk");
       await getDb(env)

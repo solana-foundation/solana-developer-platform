@@ -32,6 +32,14 @@ const walletOperationExecutionRequestSchema = z.object({
 
 const legacyPaymentExecutionBodySchema = z.object({ source: z.string() }).catchall(z.unknown());
 
+const humanWalletOperationActorSchema = z
+  .object({
+    type: z.enum(["clerk", "session"]),
+    id: z.string(),
+    userId: z.string().refine((userId) => userId.trim().length > 0),
+  })
+  .refine((actor) => actor.id === actor.userId);
+
 export type WalletOperationExecutionRequest = z.infer<typeof walletOperationExecutionRequestSchema>;
 
 export function walletOperationExecutionRequest(
@@ -202,22 +210,16 @@ export async function tryApprovedOperationReplayAuth(
   const projectId = (operation.project_id as string | null | undefined) ?? null;
   const apiKeyId = (operation.api_key_id as string | null | undefined) ?? null;
   const rawPayload = parsePostgresJsonOr<Record<string, unknown>>(operation.raw_payload, {});
-  const actor = isObject(rawPayload.actor) ? rawPayload.actor : null;
 
   if (apiKeyId) {
     const apiKey = await loadActiveApiKey(db, apiKeyId, organizationId, projectId);
     c.set("apiKey", apiKey);
   } else {
-    if (
-      !actor ||
-      (actor.type !== "clerk" && actor.type !== "session") ||
-      typeof actor.userId !== "string" ||
-      !actor.userId.trim() ||
-      actor.id !== actor.userId
-    ) {
+    const parsedActor = humanWalletOperationActorSchema.safeParse(rawPayload.actor);
+    if (!parsedActor.success) {
       throw new AppError("FORBIDDEN", "Original wallet-operation actor is unavailable");
     }
-    const userId = actor.userId;
+    const { userId, type: actorType } = parsedActor.data;
     const membership = await db
       .prepare(
         `SELECT om.role
@@ -242,7 +244,7 @@ export async function tryApprovedOperationReplayAuth(
     });
     // The internal Session authenticates execution; it must not replace
     // the original author's authentication type in the approved operation.
-    c.set("approvedWalletOperationActorType", actor.type);
+    c.set("approvedWalletOperationActorType", actorType);
   }
 
   c.set("approvedWalletOperationId", capability.operationId);
