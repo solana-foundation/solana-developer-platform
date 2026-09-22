@@ -99,6 +99,10 @@ function createSdpApiRequest(
     }
     const startedAt = performance.now();
     const method = options.method ?? "GET";
+    // The query string is caller-supplied and may carry a pasted credential
+    // (e.g. a playground request); the log keeps the route only while the
+    // upstream request still receives the full path.
+    const loggedPath = path.split("?", 1)[0];
 
     const response = await fetch(url, {
       ...options,
@@ -114,7 +118,7 @@ function createSdpApiRequest(
         source,
         requestId,
         method,
-        path,
+        path: loggedPath,
         status: response.status,
         durationMs: roundDuration(performance.now() - startedAt),
         upstreamRequestId: response.headers.get("X-Request-ID"),

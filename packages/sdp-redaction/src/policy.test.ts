@@ -35,6 +35,16 @@ describe("isCredentialKey", () => {
       "setCookie",
       "credentials",
       "secretPayload",
+      // Key-material spellings no suffix rule catches: `secretKey` is the
+      // literal field a Solana keypair JSON file uses for the 64-byte secret,
+      // and `mnemonic`/`seedPhrase` are the standard recovery-secret names.
+      "secretKey",
+      "payerSecretKey",
+      "mnemonic",
+      "seedMnemonic",
+      "seedPhrase",
+      "seed_phrase",
+      "signingKey",
       // Normalization strips the separators, so an exact `apikey` rule would
       // miss the header form. This is the shape that reaches Sentry as
       // `request.headers`.
@@ -46,7 +56,10 @@ describe("isCredentialKey", () => {
   });
 
   it("leaves public ids alone", () => {
-    for (const key of ["tokenId", "walletId", "apiKeyId", "credentialId"]) {
+    // `signingKeyId` is a persisted resource id on the DFNS provider config,
+    // the join key for signing-path debugging — only the bare `signingKey`
+    // key-material name is a credential.
+    for (const key of ["tokenId", "walletId", "apiKeyId", "credentialId", "signingKeyId"]) {
       assert.equal(isCredentialKey(key), false, key);
     }
   });
