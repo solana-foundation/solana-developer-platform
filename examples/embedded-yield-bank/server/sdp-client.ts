@@ -96,7 +96,8 @@ export class EmbeddedYieldClient {
     const strategies: YieldStrategy[] = [];
     const seenStrategyIds = new Set<string>();
     const pageSize = 100;
-    for (let page = 1; ; page += 1) {
+    const maximumPages = 100;
+    for (let page = 1; page <= maximumPages; page += 1) {
       const query = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
@@ -119,6 +120,9 @@ export class EmbeddedYieldClient {
         );
       }
     }
+    throw new Error(
+      `SDP strategy pagination exceeded ${maximumPages} pages before the reported total`
+    );
   }
 
   async previewDeposit(strategyId: string, amount: string) {

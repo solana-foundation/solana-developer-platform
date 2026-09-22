@@ -142,7 +142,8 @@ export async function listEarnStrategies() {
   const strategies = [];
   const seenStrategyIds = new Set();
   const pageSize = 100;
-  for (let page = 1; ; page += 1) {
+  const maximumPages = 100;
+  for (let page = 1; page <= maximumPages; page += 1) {
     const data = await sdpFetch(
       \`/v1/earn/strategies?\${new URLSearchParams({ page: String(page), pageSize: String(pageSize) })}\`,
       { headers: sdpHeaders() }
@@ -159,6 +160,11 @@ export async function listEarnStrategies() {
       throw new Error("SDP strategy pagination made no progress before the reported total");
     }
   }
+  throw new Error(
+    "SDP strategy pagination exceeded " +
+      maximumPages +
+      " pages before the reported total"
+  );
 }
 
 /** What a deposit would mint right now. Read-only; nothing is built. */

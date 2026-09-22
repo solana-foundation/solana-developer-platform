@@ -107,6 +107,27 @@ describe("EmbeddedYieldClient", () => {
     ).rejects.toThrow("pagination made no progress");
   });
 
+  it("bounds a changing catalogue even while every page makes progress", async () => {
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      page += 1;
+      return Response.json({
+        data: {
+          strategies: Array.from({ length: 100 }, (_, index) => ({
+            id: `strategy-${page}-${index}`,
+          })),
+          total: 10_001,
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new EmbeddedYieldClient(config).listStrategies()
+    ).rejects.toThrow("pagination exceeded 100 pages");
+    expect(fetchMock).toHaveBeenCalledTimes(100);
+  });
+
   it("builds and submits keyed queued-withdrawal actions", async () => {
     const fetchMock = vi
       .fn()

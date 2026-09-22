@@ -329,6 +329,27 @@ describe("generated Embedded Yield integration", () => {
     await expect(repeated.listEarnStrategies()).rejects.toThrow("pagination made no progress");
   });
 
+  it("bounds a changing catalogue even while every page makes progress", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    let page = 0;
+    const fetchMock = vi.fn(async () => {
+      page += 1;
+      return Response.json({
+        data: {
+          strategies: Array.from({ length: 100 }, (_, index) => ({
+            id: `strategy_${page}_${index}`,
+          })),
+          total: 10_001,
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const generated = await loadGeneratedIntegration(strategy);
+
+    await expect(generated.listEarnStrategies()).rejects.toThrow("pagination exceeded 100 pages");
+    expect(fetchMock).toHaveBeenCalledTimes(100);
+  });
+
   it("generates explicit queued request and post-deadline recovery calls", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];

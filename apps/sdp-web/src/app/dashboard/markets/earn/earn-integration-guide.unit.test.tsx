@@ -188,6 +188,8 @@ describe("EarnIntegrationGuide", () => {
       "new URLSearchParams({ page: String(page), pageSize: String(pageSize) })"
     );
     expect(code).toContain("strategy pagination made no progress before the reported total");
+    expect(code).toContain("const maximumPages = 100");
+    expect(code).toContain("strategy pagination exceeded");
     expect(code).toContain("ownerAddress");
     // The preview helpers ship for every strategy, but a strategy with no
     // slippage contract must not compute or send a floor from one.
