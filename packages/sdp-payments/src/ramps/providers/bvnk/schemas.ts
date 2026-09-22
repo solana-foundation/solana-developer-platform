@@ -20,8 +20,11 @@ export const bvnkEstimateFeeCurrencySchema = z
   .toUpperCase()
   .pipe(z.union([bvnkEstimateFiatCurrencySchema, z.enum(Object.values(CRYPTO_RAIL_ASSET_LABELS))]));
 
+export const BVNK_PARTY_DETAILS_TYPES = ["BENEFICIARY", "ORIGINATOR"] as const;
+export type BvnkPartyDetailsType = (typeof BVNK_PARTY_DETAILS_TYPES)[number];
+
 export const bvnkPartyDetailsSchema = z.object({
-  type: z.literal("BENEFICIARY"),
+  type: z.enum(BVNK_PARTY_DETAILS_TYPES),
   entityType: z.literal("INDIVIDUAL"),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
@@ -43,7 +46,7 @@ export type BvnkSandboxPayinCurrency = z.infer<typeof bvnkSandboxPayinCurrencySc
 export const bvnkOfframpQuoteInputSchema = z.object({
   fiatCurrency: bvnkEstimateFiatCurrencySchema,
   paymentTransferId: z.string().min(1),
-  bvnkOfframpWalletId: z.string().min(1),
+  bvnkFundingWalletId: z.string().min(1),
   externalCustomerId: z.string().min(1),
   bvnkCompliance: bvnkComplianceDetailsSchema,
 });
