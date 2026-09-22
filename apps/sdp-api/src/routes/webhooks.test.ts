@@ -22,7 +22,6 @@ import type { BvnkCustomerProviderAccountMetadata } from "@/db/repositories/coun
 import app from "@/index";
 import { bvnkCustomerLinkProviderStatus } from "@/routes/counterparty-provider-accounts/handlers";
 import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
-import { rootLogger } from "@/runtime/logger";
 import { RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS } from "@/services/jobs/replay-ramp-webhook-events";
 import { SessionService } from "@/services/session.service";
 import {
@@ -2329,52 +2328,8 @@ describe("BVNK ramp webhook", () => {
       }>();
     expect(transfer?.status).toBe("completed");
     expect(transfer?.fiat_amount).toBe("4.95");
-    expect(transfer?.signature).toBe(OFFRAMP_CHANNEL_BASE.hash);
     expect(transfer?.provider_data.settlement).toEqual(
       bvnkOfframpChannelSettlementFromEvent(parsedConfirmedEventData(event.data))
-    );
-  });
-
-  it("keeps a stored SDP signature over a diverging confirmed event hash and still settles", async () => {
-    const transferId = "xfr_d7a72b93-cd7e-405b-96b5-73ca368a7c07";
-    const channelId = OFFRAMP_CHANNEL_BASE.channelId;
-    const storedSignature =
-      "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
-    await seedBvnkOfframpTransfer(transferId, {
-      projectId: PROJECT_ID,
-      counterpartyId: COUNTERPARTY_ID,
-      providerReference: channelId,
-      channelWalletId: FUNDING_WALLET_ID,
-      channelCustomerReference: CUSTOMER_REFERENCE,
-      signature: storedSignature,
-    });
-    vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getChannelV2").mockResolvedValue(
-      matchingOfframpChannel(transferId, channelId)
-    );
-    const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
-
-    await sendBvnkWebhook(
-      bvnkChannelTransactionEvent("transaction-confirmed", {
-        ...OFFRAMP_CHANNEL_BASE,
-        eventId: "019f0ce5-28a6-7000-8000-000000000003",
-        reference: buildBvnkOfframpReference(transferId),
-        walletAmount: 4.95,
-      })
-    );
-
-    const transfer = await getDb(env)
-      .prepare("SELECT status, signature FROM payment_transfers WHERE id = ?")
-      .bind(transferId)
-      .first<{ status: string; signature: string | null }>();
-    expect(transfer).toEqual({ status: "completed", signature: storedSignature });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      {
-        transfer_id: transferId,
-        stored_signature: storedSignature,
-        event_hash: OFFRAMP_CHANNEL_BASE.hash,
-      },
-      "[bvnk webhook] off-ramp confirmation event hash differs from the stored signature"
     );
   });
 

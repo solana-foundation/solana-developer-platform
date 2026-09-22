@@ -766,7 +766,7 @@ const bvnkOfframpChannelSettlementSchema = z
     }),
     sources: z
       .array(z.string())
-      .openapi({ description: "Source signatures that paid the channel." }),
+      .openapi({ description: "Source wallet addresses that paid the channel." }),
   })
   .openapi({ description: "BVNK off-ramp channel settlement economics." });
 

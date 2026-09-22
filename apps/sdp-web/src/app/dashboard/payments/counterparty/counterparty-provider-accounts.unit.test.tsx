@@ -52,7 +52,7 @@ describe("groupProviderAccounts", () => {
           id: "cpa_link",
           providerCustomerReference: "cust-1",
           status: "active",
-          providerStatus: "ACTIVE",
+          providerStatus: "VERIFIED",
           createdAt: "2026-01-01T00:00:00.000Z",
           residenceCountryCode: "US",
           agreements: [],
@@ -61,7 +61,7 @@ describe("groupProviderAccounts", () => {
       providerAccount({
         id: "cpa_payout",
         provider: "lightspark",
-        providerStatus: "ACTIVE",
+        providerStatus: "VERIFIED",
       }),
     ]);
 

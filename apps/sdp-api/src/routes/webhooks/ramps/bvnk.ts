@@ -695,9 +695,10 @@ async function applyBvnkWalletEvent(
  * Applies an off-ramp channel settlement transition scoped to the webhook's
  * project environment; a sandbox-signed event naming a production off-ramp
  * transfer is terminal. The completed path records the settlement economics
- * and the deposit transaction hash in the SAME single CAS update: the jsonb
- * merge is first-write-wins at the settlement key and the signature
- * COALESCE keeps any stored SDP signature. The settling path writes neither.
+ * (deposit hash included as `txHash`) in the SAME single CAS update; the
+ * `signature` column stays owned by the SDP send that funded the deposit,
+ * because a deposit funded by an external send is a separate transfer row and
+ * the column is globally unique. The settling path writes no settlement.
  * @param env - Process environment used for database access.
  * @param environment - The project environment the event was delivered for.
  * @param transferId - SDP off-ramp transfer identifier.
@@ -715,7 +716,7 @@ async function settleBvnkOfframpChannel(
 ): Promise<void> {
   const existing = await getDb(env)
     .prepare(
-      `SELECT pt.id, pt.signature
+      `SELECT pt.id
        FROM payment_transfers pt
        JOIN projects prj ON prj.id = pt.project_id
        WHERE pt.id = ?
@@ -724,25 +725,10 @@ async function settleBvnkOfframpChannel(
          AND prj.environment = ?`
     )
     .bind(transferId, environment)
-    .first<{ id: string; signature: string | null }>();
+    .first<{ id: string }>();
   if (existing === null) {
     throw new TerminalRampWebhookError(
       "stray off-ramp channel event: unknown transfer or environment mismatch"
-    );
-  }
-  const eventHash = settlement === null ? null : settlement.txHash;
-  if (
-    settlement !== null &&
-    existing.signature !== null &&
-    existing.signature !== settlement.txHash
-  ) {
-    getLogger().warn(
-      {
-        transfer_id: transferId,
-        stored_signature: existing.signature,
-        event_hash: settlement.txHash,
-      },
-      "[bvnk webhook] off-ramp confirmation event hash differs from the stored signature"
     );
   }
   const placeholders = buildInClause(NON_TERMINAL_RAMP_TRANSFER_STATUSES.length);
@@ -752,7 +738,6 @@ async function settleBvnkOfframpChannel(
        SET status = ?,
            fiat_amount = CASE WHEN ?::boolean THEN ? ELSE fiat_amount END,
            provider_data = provider_data || ?::jsonb,
-           signature = COALESCE(signature, ?),
            updated_at = ?
        WHERE pt.id = ?
          AND pt.provider = 'bvnk'
@@ -767,7 +752,6 @@ async function settleBvnkOfframpChannel(
       walletAmount !== null,
       walletAmount,
       settlement === null ? {} : { settlement },
-      eventHash,
       new Date().toISOString(),
       transferId,
       ...NON_TERMINAL_RAMP_TRANSFER_STATUSES,

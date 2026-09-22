@@ -427,7 +427,7 @@ export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
  * confirmed channel-transaction webhook settles the transfer: the crypto
  * received (`paidAmount`), the fiat credited to the funding wallet
  * (`walletAmount`), the fee and network-fee legs, the exchange rate, the
- * deposit transaction hash, and the source signatures that paid the channel.
+ * deposit transaction hash, and the source wallet addresses that paid the channel.
  * Amounts are decimal strings.
  */
 export const bvnkOfframpChannelSettlementSchema = z.object({
