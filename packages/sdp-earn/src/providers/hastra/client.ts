@@ -6,10 +6,13 @@ import {
 import { providerNotConfigured } from "../../errors";
 import type {
   EarnDeclaredStrategySupport,
+  EarnLiveMetricsProvider,
   EarnRuntimeContext,
+  ProviderStrategyMetrics,
   ProviderStrategySnapshot,
 } from "../../types";
 import { StubEarnClient } from "../stub";
+import { readHastraPrimeMetrics } from "./prime-metrics";
 
 /**
  * Catalogue half of Hastra PRIME.
@@ -25,12 +28,12 @@ import { StubEarnClient } from "../stub";
  * and mint addresses come from the verified v0.0.6 registry in
  * `@sdp/types/hastra-programs`.
  *
- * No `currentApy` is published. PRIME's price feed establishes a conversion
- * rate, not an annualized return, and SDP has no measured issuer rate endpoint
- * to refresh. The catalogue therefore renders “—” instead of deriving a
- * transient APY from share-price samples.
+ * Hastra's public proof-of-reserves feed supplies PRIME's effective APY and its
+ * Solana vault balance. Both the hourly catalogue pass and five-minute metrics
+ * pass read that feed: the former cannot erase figures written by the latter.
+ * The APY is issuer-published, never derived from share-price samples.
  */
-export class HastraEarnClient extends StubEarnClient {
+export class HastraEarnClient extends StubEarnClient implements EarnLiveMetricsProvider {
   readonly provider = "hastra" as const;
   readonly declaredSupport: EarnDeclaredStrategySupport = {
     sourceKinds: ["rwa"],
@@ -52,6 +55,7 @@ export class HastraEarnClient extends StubEarnClient {
     if (depositMints.length === 0) {
       throw providerNotConfigured("Hastra PRIME has no admitted USDC mint on mainnet-beta");
     }
+    const metrics = await readHastraPrimeMetrics(deployment.primeMint);
 
     return [
       {
@@ -64,6 +68,7 @@ export class HastraEarnClient extends StubEarnClient {
         shareMint: deployment.primeMint,
         hostCluster: "mainnet-beta",
         apyType: "variable",
+        currentApy: metrics.currentApy,
         // The conservative catalogue posture follows the default at-par route,
         // which is operator-mediated and carries no on-chain completion SLA.
         // Deployments may separately opt into the atomic Jupiter market exit.
@@ -75,10 +80,28 @@ export class HastraEarnClient extends StubEarnClient {
           wrapperAsset: "wYLDS",
           priceOracle: "Chainlink Data Streams",
           programRelease: deployment.release,
+          tvlUsd: metrics.solanaTvlUsd,
           parExit: "PRIME to wYLDS atomically, then Hastra operator-mediated redemption",
           optionalDexExit:
             "PRIME to wYLDS to USDC through Jupiter when enabled by the integrating deployment",
         },
+      },
+    ];
+  }
+
+  async listStrategyMetrics(ctx: EarnRuntimeContext): Promise<ProviderStrategyMetrics[]> {
+    if (ctx.environment !== "production") return [];
+
+    const deployment = hastraDeployment("mainnet-beta");
+    if (!deployment) {
+      throw providerNotConfigured("Hastra PRIME has no verified mainnet-beta deployment");
+    }
+    const metrics = await readHastraPrimeMetrics(deployment.primeMint);
+    return [
+      {
+        providerReference: metrics.providerReference,
+        currentApy: metrics.currentApy,
+        riskMetadata: { tvlUsd: metrics.solanaTvlUsd },
       },
     ];
   }
