@@ -612,6 +612,8 @@
       "providerAccountWalletProvisioning": "Provisioning",
       "copyCustomerId": "Copy customer ID",
       "customerIdCopied": "Customer ID copied",
+      "copyWalletId": "Copy wallet ID",
+      "walletIdCopied": "Wallet ID copied",
       "taxResidence": "Tax residence",
       "noPayoutAccounts": "No payout accounts yet.",
       "addExternalAccountTitle": "Add Crypto Address",

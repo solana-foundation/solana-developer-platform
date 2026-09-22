@@ -38,6 +38,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
+import { CopyIdButton } from "@/components/copy-id-button";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -278,29 +279,15 @@ function ProviderCustomerHeader({
 /** Provider customer reference with copy button (once the customer exists) and the link's age. */
 function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProviderCustomerLink }) {
   const t = useTranslations();
-  const { copied, copy } = useCopy();
   const customerReference = customerLink.providerCustomerReference;
   return (
     <div className="flex min-w-0 items-center gap-1">
       {customerReference !== null ? (
-        <>
-          <span className="max-w-40 truncate text-xs text-tertiary">{customerReference}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="size-5"
-            aria-label={t("DashboardPayments.counterparty.copyCustomerId")}
-            onClick={() => {
-              void copy(customerReference);
-              toast.success(t("DashboardPayments.counterparty.customerIdCopied"), {
-                position: "bottom-right",
-              });
-            }}
-          >
-            {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-          </Button>
-        </>
+        <CopyIdButton
+          value={customerReference}
+          label={t("DashboardPayments.counterparty.copyCustomerId")}
+          copiedMessage={t("DashboardPayments.counterparty.customerIdCopied")}
+        />
       ) : null}
       <span
         className="whitespace-nowrap text-xs text-tertiary"
@@ -401,12 +388,11 @@ function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
                       })}
                     </span>
                     {account.providerAccountReference !== undefined ? (
-                      <span
-                        className="max-w-40 truncate font-mono text-xs text-secondary"
-                        title={account.providerAccountReference}
-                      >
-                        {account.providerAccountReference}
-                      </span>
+                      <CopyIdButton
+                        value={account.providerAccountReference}
+                        label={t("DashboardPayments.counterparty.copyWalletId")}
+                        copiedMessage={t("DashboardPayments.counterparty.walletIdCopied")}
+                      />
                     ) : null}
                     <span className="ml-auto">
                       <ProviderWalletBalanceCell balance={account.balance} />
