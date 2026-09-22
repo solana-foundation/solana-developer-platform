@@ -5,7 +5,13 @@ import { createKeyPairSignerFromBytes, type KeyPairSigner } from "@solana/kit";
 import { z } from "zod";
 
 const configSchema = z.object({
-  SDP_API_BASE_URL: z.url().default("http://127.0.0.1:8787"),
+  SDP_API_BASE_URL: z
+    .url()
+    .default("http://127.0.0.1:8787")
+    .refine(
+      allowsCleartext,
+      "must use https unless it points at localhost; the API key and every built transaction cross this connection"
+    ),
   SDP_API_KEY: z.string().min(1, "SDP_API_KEY is required"),
   DEMO_WALLET_PRIVATE_KEY: z
     .string()
@@ -16,7 +22,24 @@ const configSchema = z.object({
   SOLANA_RPC_URL: z.url().default("https://api.devnet.solana.com"),
 });
 
+/**
+ * Loopback connections may stay cleartext for local development. Anything
+ * else carries the SDP API key and the unsigned transactions the demo signs
+ * with real keys, so it must be https — a MITM on this URL is a signing
+ * oracle for both demo wallets.
+ */
+function allowsCleartext(value: string): boolean {
+  const url = new URL(value);
+  return (
+    url.protocol === "https:" ||
+    ["localhost", "127.0.0.1"].includes(url.hostname)
+  );
+}
+
 export type DemoConfig = z.infer<typeof configSchema>;
+
+/** Exposed for tests; `getConfig` is the runtime entry point. */
+export const demoConfigSchema = configSchema;
 
 let cachedConfig: DemoConfig | undefined;
 let cachedSigner: KeyPairSigner | undefined;

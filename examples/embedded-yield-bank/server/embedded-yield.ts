@@ -1,7 +1,11 @@
 import "server-only";
 
 import type { KeyPairSigner } from "@solana/kit";
-import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
+import {
+  floorForTolerance,
+  isPositiveDecimal,
+  toAtoms,
+} from "../src/lib/decimal";
 import type { DashboardData, YieldMovement, YieldStrategy } from "../src/types";
 import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
 import {
@@ -10,11 +14,17 @@ import {
   isOpenPosition,
   pickSavingsStrategy,
   requireDepositMint,
+  SAVINGS_AMOUNT_DECIMALS,
   sharesForAmount,
   summarizeSavings,
 } from "./savings";
 import { EmbeddedYieldClient, SdpApiError } from "./sdp-client";
-import { assertRpcCluster, readTokenBalance, signTransaction } from "./solana";
+import {
+  assertRpcCluster,
+  assertSimulatedOwnerTokenDelta,
+  readTokenBalance,
+  signTransaction,
+} from "./solana";
 
 const DEFAULT_WITHDRAWAL_TOLERANCE_BPS = 10;
 const STRATEGY_CACHE_MS = 5 * 60_000;
@@ -190,9 +200,25 @@ export async function deposit(amount: string): Promise<YieldMovement> {
 
   // 3. The owner signs on the server, joined by Northstar when it pays fees.
   // Private keys never reach the browser.
-  const signedTransaction = await signTransaction(built.transaction, all);
+  const signedTransaction = await signTransaction(built.transaction, all, {
+    feePayerAddress: feePayer?.address,
+  });
+  // 4. The simulation is the intent check the other guards cannot make: the
+  // owner's savings token must drop by exactly what was asked, whatever
+  // instructions the build carried. A simulation failure refuses the submit.
+  await assertSimulatedOwnerTokenDelta(
+    config.SOLANA_RPC_URL,
+    signedTransaction,
+    {
+      ownerAddress: owner.address,
+      mint: sourceTokenMint,
+      atoms: -toAtoms(amount, SAVINGS_AMOUNT_DECIMALS),
+      tolerance: "exact",
+      feePayerAddress: feePayer?.address,
+    }
+  );
 
-  // 4. Submit with a unique key. An uncertain retry must reuse this exact key.
+  // 5. Submit with a unique key. An uncertain retry must reuse this exact key.
   const idempotencyKey = `northstar-deposit-${crypto.randomUUID()}`;
   return retryUncertainSubmit(() =>
     client.submitDeposit(built.transactionId, signedTransaction, idempotencyKey)
@@ -238,7 +264,23 @@ export async function withdraw(amount: string): Promise<YieldMovement> {
     ...(feePayer ? { feePayer: feePayer.address } : {}),
   });
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
-  const signedTransaction = await signTransaction(built.transaction, all);
+  const signedTransaction = await signTransaction(built.transaction, all, {
+    feePayerAddress: feePayer?.address,
+  });
+  // The payout must clear the same floor the build encoded. Where no floor is
+  // quotable (withdrawalSlippage is null) the check still refuses a payout of
+  // zero: one atom is the smallest thing that can clear.
+  await assertSimulatedOwnerTokenDelta(
+    config.SOLANA_RPC_URL,
+    signedTransaction,
+    {
+      ownerAddress: owner.address,
+      mint: requireDepositMint(strategy),
+      atoms: minAmountOut ? toAtoms(minAmountOut, SAVINGS_AMOUNT_DECIMALS) : 1n,
+      tolerance: "atLeast",
+      feePayerAddress: feePayer?.address,
+    }
+  );
   const idempotencyKey = `northstar-withdrawal-${crypto.randomUUID()}`;
   return retryUncertainSubmit(() =>
     client.submitWithdrawal(
