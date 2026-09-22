@@ -307,23 +307,8 @@ optionalAuthEarn.post(
   validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
   createEarnExternalWalletQueuedWithdrawalPreview
 );
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-request-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requirePermissionsWhenAuthenticated("earn:write"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestTransaction
-);
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-request-cancel-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requirePermissionsWhenAuthenticated("earn:write"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestCancelTransaction
-);
-
+// Queue action builds live on the keyed router below. Unlike an instant exit,
+// their durable request id and recovery lifecycle are part of the contract.
 // Keyed routes retain dashboard auth, project membership checks, and their
 // existing permission matrix. Give anonymous callers the API-facing contract
 // before projectContextMiddleware can turn a missing project into a 400.
@@ -398,6 +383,18 @@ earn.get(
   requirePermissions("earn:read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletEarnings
+);
+earn.post(
+  "/external-wallet/withdrawal-request-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestTransaction
+);
+earn.post(
+  "/external-wallet/withdrawal-request-cancel-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestCancelTransaction
 );
 earn.get(
   "/external-wallet/withdrawal-requests",
@@ -567,8 +564,9 @@ earn.get(
   getEarnVaultShareReconciliation
 );
 
-// External-wallet SUBMIT routes remain keyed. Their BUILD and preview partners
-// live on the optional-auth router above, each declared exactly once.
+// External-wallet SUBMIT routes remain keyed. Instant deposit/withdrawal builds
+// and all previews live on the optional-auth router above. Queued request and
+// cancellation builds stay keyed with the durable lifecycle they create.
 //
 // Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
 // deposit route's cautionary tale repeating: wallet policy governs the org's

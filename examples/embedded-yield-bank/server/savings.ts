@@ -12,6 +12,8 @@ import type {
   YieldMovement,
   YieldPosition,
   YieldStrategy,
+  YieldWithdrawalOptions,
+  YieldWithdrawalRequest,
 } from "../src/types";
 import { ApiRequestError } from "./http";
 import { type SolanaCluster, USDC_MINTS } from "./solana";
@@ -23,10 +25,11 @@ const MAX_SHARE_DECIMALS = 9;
 /**
  * Northstar offers one savings product, backed by one Embedded Yield strategy.
  * `DEMO_STRATEGY_ID` pins it; otherwise the first active, fundable strategy on
- * the configured cluster that is DeFi, instant-liquidity, and USDC, in
- * catalogue order. Nothing else qualifies: an RWA strategy, delayed exit,
- * another token, or another cluster would silently change the
- * checking-and-savings model.
+ * the configured cluster that is DeFi and uses USDC as its direct deposit mint,
+ * in catalogue order. Withdrawal routes are discovered from live provider
+ * state when the customer exits; `liquidityTerm` is not a route selector.
+ * Nothing else qualifies: an RWA strategy, another token, or another cluster
+ * would silently change the checking-and-savings model.
  */
 export function pickSavingsStrategy(
   strategies: readonly YieldStrategy[],
@@ -54,12 +57,11 @@ export function pickSavingsStrategy(
       item.status === "active" &&
       item.hostCluster === cluster &&
       item.sourceKind === "defi" &&
-      item.liquidityTerm === "instant" &&
       item.depositMints[0] === USDC_MINTS[cluster]
   );
   if (!strategy) {
     throw new Error(
-      `The SDP catalogue has no fundable ${cluster} DeFi strategy with instant liquidity and a USDC deposit mint. Set DEMO_STRATEGY_ID to choose one explicitly.`
+      `The SDP catalogue has no fundable ${cluster} DeFi strategy with a USDC deposit mint. Set DEMO_STRATEGY_ID to choose one explicitly.`
     );
   }
   return strategy;
@@ -109,9 +111,15 @@ export interface SavingsSummary {
 export function summarizeSavings(
   checking: Pick<TokenBalance, "amount">,
   position: YieldPosition | null,
-  movements: readonly YieldMovement[]
+  movements: readonly YieldMovement[],
+  withdrawalRequests: readonly YieldWithdrawalRequest[] = []
 ): SavingsSummary {
-  const balance = position ? position.tokenValue : "0";
+  const positionBalance = position ? position.tokenValue : "0";
+  const queuedBalance = queuedWithdrawalValue(withdrawalRequests);
+  const balance =
+    positionBalance === undefined || queuedBalance === undefined
+      ? undefined
+      : addDecimals([positionBalance, queuedBalance]);
   return {
     balance,
     withdrawable: position ? withdrawableAmount(position) : "0",
@@ -121,6 +129,79 @@ export function summarizeSavings(
         ? undefined
         : addDecimals([checking.amount, balance]),
   };
+}
+
+/**
+ * Expected value still owned by the customer while shares sit in queue
+ * escrow. Creating and closed-or-unknown requests stay unvalued because adding
+ * either would guess whether the wallet shares or asset payout already count.
+ */
+export function queuedWithdrawalValue(
+  requests: readonly YieldWithdrawalRequest[]
+): string | undefined {
+  if (
+    requests.some(
+      (request) =>
+        request.status === "creating" || request.status === "closedOrUnknown"
+    )
+  ) {
+    return undefined;
+  }
+  return addDecimals(
+    requests
+      .filter((request) =>
+        ["pending", "fulfillable", "expiredCancelable", "cancelling"].includes(
+          request.status
+        )
+      )
+      .map((request) => request.quotedAssets)
+  );
+}
+
+/** Refuse stale or out-of-range queue choices before asking SDP to build. */
+export function assertQueuedWithdrawalTerms(
+  options: YieldWithdrawalOptions,
+  shares: string,
+  discountBps: number,
+  deadlineSeconds: number
+): void {
+  const terms = options.queueAsset;
+  if (!options.queued || !terms?.allowWithdrawals) {
+    throw new ApiRequestError(
+      400,
+      "WITHDRAWAL_ROUTE_UNAVAILABLE",
+      "Queued withdrawals are not currently available"
+    );
+  }
+  if (compareDecimals(shares, terms.minimumShares) === -1) {
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
+      `Queued withdrawals require at least ${terms.minimumShares} shares`
+    );
+  }
+  if (
+    !Number.isInteger(discountBps) ||
+    discountBps < terms.minimumDiscountBps ||
+    discountBps > terms.maximumDiscountBps
+  ) {
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
+      `Choose a discount from ${terms.minimumDiscountBps} to ${terms.maximumDiscountBps} basis points`
+    );
+  }
+  if (
+    !Number.isInteger(deadlineSeconds) ||
+    deadlineSeconds < terms.minimumSecondsToDeadline ||
+    deadlineSeconds > terms.maximumSecondsToDeadline
+  ) {
+    throw new ApiRequestError(
+      400,
+      "INVALID_REQUEST",
+      `Choose a solver window from ${terms.minimumSecondsToDeadline} to ${terms.maximumSecondsToDeadline} seconds`
+    );
+  }
 }
 
 export function earnedFromLedger(

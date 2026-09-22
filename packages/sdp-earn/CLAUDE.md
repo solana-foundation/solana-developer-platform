@@ -12,11 +12,12 @@ This package defines provider capabilities; the API router defines caller
 authentication. Do not confuse a provider's own upstream credential with an
 integrator's SDP API key.
 
-- Strategy catalogue reads, deposit and withdrawal previews, and unsigned
-  external-wallet transaction builds accept either a valid SDP credential or
-  no credential. The anonymous form has no organization or project context,
-  picks its own shelf (`?environment=` on the list, the named strategy's
-  environment on quotes and builds), and persists nothing.
+- Strategy catalogue reads, deposit and withdrawal previews, withdrawal-route
+  discovery, and unsigned instant deposit/direct-withdrawal builds accept either
+  a valid SDP credential or no credential. The anonymous form has no organization
+  or project context, picks its own shelf (`?environment=` on the list, the named
+  strategy's environment on quotes and builds), and persists nothing. Queued
+  request/cancellation builds are control-plane actions and always require a key.
 - Submits, programs, custody vault operations, movements, positions, earnings,
   and aggregate reads require an authenticated tenant and their existing Earn
   permissions.

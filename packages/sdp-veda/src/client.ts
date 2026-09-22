@@ -465,6 +465,7 @@ export class VedaVaultDirectClient
               allowWithdrawals: options.queueAsset.allowWithdrawals,
               secondsToMaturity: options.queueAsset.secondsToMaturity,
               minimumSecondsToDeadline: options.queueAsset.minimumSecondsToDeadline,
+              maximumSecondsToDeadline: options.queueAsset.maximumSecondsToDeadline,
               minimumDiscountBps: options.queueAsset.minimumDiscountBps,
               maximumDiscountBps: options.queueAsset.maximumDiscountBps,
               minimumShares: options.queueAsset.minimumShares,

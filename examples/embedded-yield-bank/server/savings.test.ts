@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { YieldMovement, YieldPosition, YieldStrategy } from "../src/types";
+import type {
+  YieldMovement,
+  YieldPosition,
+  YieldStrategy,
+  YieldWithdrawalOptions,
+  YieldWithdrawalRequest,
+} from "../src/types";
 import { ApiRequestError } from "./http";
 import {
+  assertQueuedWithdrawalTerms,
   earnedFromLedger,
   pickSavingsStrategy,
   sharesForAmount,
@@ -11,7 +18,7 @@ import {
 import { USDC_MINTS } from "./solana";
 
 describe("savings strategy", () => {
-  it("picks the first DeFi, instant-liquidity USDC strategy on devnet, in catalogue order", () => {
+  it("picks the first fundable DeFi USDC strategy without inferring its exit route", () => {
     const strategies = [
       strategy({ id: "rwa-usdc", sourceKind: "rwa" }),
       strategy({ id: "veda-delayed", liquidityTerm: "delayed" }),
@@ -22,7 +29,7 @@ describe("savings strategy", () => {
       strategy({ id: "steakhouse-usdc" }),
     ];
 
-    expect(pickSavingsStrategy(strategies, "devnet").id).toBe("kamino-usdc");
+    expect(pickSavingsStrategy(strategies, "devnet").id).toBe("veda-delayed");
   });
 
   it("picks a mainnet USDC strategy when mainnet is configured", () => {
@@ -44,14 +51,14 @@ describe("savings strategy", () => {
     expect(pickSavingsStrategy(strategies, "mainnet-beta").id).toBe("mainnet");
   });
 
-  it("refuses to fall back to a delayed or non-USDC strategy", () => {
+  it("refuses to fall back to an RWA or non-USDC strategy", () => {
     const strategies = [
-      strategy({ id: "veda-delayed", liquidityTerm: "delayed" }),
+      strategy({ id: "rwa-usdc", sourceKind: "rwa" }),
       strategy({ id: "eurc-instant", depositMints: ["eurc"] }),
     ];
 
     expect(() => pickSavingsStrategy(strategies, "devnet")).toThrow(
-      "instant liquidity and a USDC deposit mint"
+      "with a USDC deposit mint"
     );
   });
 
@@ -122,6 +129,78 @@ describe("savings summary", () => {
       earned: undefined,
       total: undefined,
     });
+  });
+
+  it("keeps queued escrow in savings value without calling it withdrawable", () => {
+    expect(
+      summarizeSavings(
+        { amount: "10" },
+        position({ shares: "5", withdrawableShares: "5", tokenValue: "5" }),
+        [movement("deposit", "finalized", "9.95")],
+        [withdrawalRequest("pending", "4.95")]
+      )
+    ).toEqual({
+      balance: "9.95",
+      withdrawable: "5",
+      earned: "0",
+      total: "19.95",
+    });
+  });
+
+  it("does not guess a balance while a queue close is unclassified", () => {
+    expect(
+      summarizeSavings(
+        { amount: "10" },
+        position({ shares: "5", withdrawableShares: "5", tokenValue: "5" }),
+        [],
+        [withdrawalRequest("closedOrUnknown", "4.95")]
+      )
+    ).toEqual({
+      balance: undefined,
+      withdrawable: "5",
+      earned: undefined,
+      total: undefined,
+    });
+  });
+});
+
+describe("queued withdrawal terms", () => {
+  const options: YieldWithdrawalOptions = {
+    positionId: "position",
+    instant: true,
+    providerOrder: false,
+    queued: true,
+    withdrawAuthority: "authority",
+    queueState: "queue",
+    queueAsset: {
+      assetMint: USDC_MINTS.devnet,
+      allowWithdrawals: true,
+      secondsToMaturity: 60,
+      minimumSecondsToDeadline: 300,
+      maximumSecondsToDeadline: 7_776_000,
+      minimumDiscountBps: 25,
+      maximumDiscountBps: 75,
+      minimumShares: "1.5",
+      shareDecimals: 6,
+    },
+  };
+
+  it("accepts exact live boundaries", () => {
+    expect(() =>
+      assertQueuedWithdrawalTerms(options, "1.5", 25, 300)
+    ).not.toThrow();
+    expect(() =>
+      assertQueuedWithdrawalTerms(options, "1.500000", 75, 7_776_000)
+    ).not.toThrow();
+  });
+
+  it("rejects below-minimum shares and above-maximum deadlines", () => {
+    expect(() =>
+      assertQueuedWithdrawalTerms(options, "1.499999", 25, 300)
+    ).toThrow("at least 1.5 shares");
+    expect(() =>
+      assertQueuedWithdrawalTerms(options, "1.5", 25, 7_776_001)
+    ).toThrow("from 300 to 7776000 seconds");
   });
 });
 
@@ -264,5 +343,40 @@ function movement(
     failureReason: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     settledAt: status === "finalized" ? "2026-01-01T00:00:01.000Z" : null,
+  };
+}
+
+function withdrawalRequest(
+  status: YieldWithdrawalRequest["status"],
+  quotedAssets: string
+): YieldWithdrawalRequest {
+  return {
+    withdrawalRequestId: `request-${status}`,
+    positionId: "position",
+    provider: "provider",
+    providerReference: "vault",
+    ownerAddress: "owner",
+    requestAddress: "request-address",
+    status,
+    assetMint: USDC_MINTS.devnet,
+    shareMint: "shares",
+    shares: "5",
+    quotedAssets,
+    shareDecimals: 6,
+    assetDecimals: 6,
+    discountBps: 50,
+    nonce: "1",
+    creationTimestamp: "1",
+    maturityTimestamp: "2",
+    deadlineTimestamp: "3",
+    creationSignature: "signature",
+    cancelSignature: null,
+    closingSignature: null,
+    assetsPaid: null,
+    failureReason: null,
+    fulfilledAt: null,
+    cancelledAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
   };
 }

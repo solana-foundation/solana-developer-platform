@@ -22,7 +22,12 @@ import {
   isSettledMovement,
 } from "@/lib/movements";
 import { cn } from "@/lib/utils";
-import type { DashboardData, YieldMovement } from "@/types";
+import type {
+  DashboardData,
+  WithdrawalIntent,
+  YieldMovement,
+  YieldWithdrawalRequest,
+} from "@/types";
 import { arrivalCopy, TransferDialog } from "./transfer-dialog";
 
 interface OverviewDashboardProps {
@@ -31,7 +36,8 @@ interface OverviewDashboardProps {
   busy: boolean;
   onRefresh: () => void;
   onDeposit: (amount: string) => Promise<void>;
-  onWithdraw: (amount: string) => Promise<void>;
+  onWithdraw: (input: WithdrawalIntent) => Promise<void>;
+  onCancelQueuedWithdrawal: (withdrawalRequestId: string) => Promise<void>;
 }
 
 export function OverviewDashboard({
@@ -41,6 +47,7 @@ export function OverviewDashboard({
   onRefresh,
   onDeposit,
   onWithdraw,
+  onCancelQueuedWithdrawal,
 }: OverviewDashboardProps) {
   const { token, checking, savings, wallet, connection } = data;
   const { strategy } = savings;
@@ -117,7 +124,7 @@ export function OverviewDashboard({
               strategy.fundable && strategy.status === "active",
               checking.balance
             )}
-            onSubmit={onDeposit}
+            onSubmit={(input) => onDeposit(input.amount)}
           />
           <TransferDialog
             direction="to-checking"
@@ -125,10 +132,15 @@ export function OverviewDashboard({
             symbol={token.symbol}
             available={savings.withdrawable}
             strategy={strategy}
+            withdrawalOptions={savings.withdrawalOptions}
             feesPaidBy={wallet.feesPaidBy}
             busy={busy}
             disabledReason={withdrawalDisabledReason(savings)}
-            onSubmit={onWithdraw}
+            onSubmit={(input) =>
+              input.route === "deposit"
+                ? Promise.reject(new Error("Invalid withdrawal route"))
+                : onWithdraw(input)
+            }
           />
         </div>
       </section>
@@ -147,9 +159,16 @@ export function OverviewDashboard({
           badge={formatApy(strategy.currentApy)}
           amount={savingsBalance(savings.balance, token.symbol)}
           {...savingsDetail(savings, token.symbol, earningsUpdating)}
-          footer={savingsFooter(strategy)}
+          footer={savingsFooter(savings)}
         />
       </section>
+
+      <QueuedWithdrawals
+        requests={data.withdrawalRequests}
+        symbol={token.symbol}
+        busy={busy}
+        onCancel={onCancelQueuedWithdrawal}
+      />
 
       <RecentActivity
         movements={data.movements}
@@ -210,10 +229,22 @@ function withdrawalDisabledReason(
   savings: DashboardData["savings"]
 ): string | undefined {
   if (savings.position === null) return "Nothing in savings yet";
-  if (savings.withdrawable === undefined)
+  if (savings.balance === undefined || savings.withdrawable === undefined)
     return "Savings balance is still updating";
   if (savings.withdrawable === "0")
     return "Nothing available to move right now";
+  if (!savings.withdrawalOptions)
+    return "Withdrawal routes are temporarily unavailable";
+  if (
+    !savings.withdrawalOptions.instant &&
+    !savings.withdrawalOptions.providerOrder &&
+    !(
+      savings.withdrawalOptions.queued &&
+      savings.withdrawalOptions.queueAsset?.allowWithdrawals
+    )
+  ) {
+    return "No supported withdrawal route is available right now";
+  }
   return undefined;
 }
 
@@ -221,12 +252,154 @@ function savingsBalance(balance: string | undefined, symbol: string): string {
   return balance === undefined ? "—" : formatAmount(balance, symbol);
 }
 
-function savingsFooter(strategy: DashboardData["savings"]["strategy"]): string {
-  const availability =
-    strategy.liquidityTerm === "instant"
-      ? "Withdraw anytime"
-      : `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`;
+function savingsFooter(savings: DashboardData["savings"]): string {
+  const { strategy, withdrawalOptions } = savings;
+  let availability = "Withdrawal routes updating";
+  if (withdrawalOptions?.instant) availability = "Withdraw anytime";
+  else if (withdrawalOptions?.providerOrder) {
+    availability = `Withdrawals arrive ${arrivalCopy(strategy).toLowerCase()}`;
+  } else if (withdrawalOptions?.queued) availability = "Queued withdrawals";
   return `${strategy.name} · ${availability}`;
+}
+
+function QueuedWithdrawals({
+  requests,
+  symbol,
+  busy,
+  onCancel,
+}: {
+  requests: YieldWithdrawalRequest[];
+  symbol: string;
+  busy: boolean;
+  onCancel: (withdrawalRequestId: string) => Promise<void>;
+}) {
+  if (!requests.length) return null;
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold tracking-[-0.01em]">
+          Queued withdrawals
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          These shares are escrowed. A request is complete only after payment or
+          share recovery.
+        </p>
+      </div>
+      <ul className="divide-y rounded-2xl border">
+        {requests.map((request) => (
+          <li
+            key={request.withdrawalRequestId}
+            className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center"
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="text-sm font-medium">
+                {formatAmount(request.quotedAssets, symbol)} expected
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {queuedWithdrawalStatusCopy(request)}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Requested {formatDate(request.createdAt)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge
+                variant="outline"
+                className={queuedWithdrawalStatusClass(request.status)}
+              >
+                <span
+                  className={cn(
+                    "status-dot",
+                    queuedWithdrawalStatusIsLive(request.status) &&
+                      "status-dot-live"
+                  )}
+                />
+                {queuedWithdrawalStatusLabel(request.status)}
+              </Badge>
+              {request.status === "expiredCancelable" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void onCancel(request.withdrawalRequestId)}
+                >
+                  Get shares back
+                </Button>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function queuedWithdrawalStatusLabel(
+  status: YieldWithdrawalRequest["status"]
+): string {
+  const labels: Record<YieldWithdrawalRequest["status"], string> = {
+    creating: "Confirming",
+    pending: "Queued",
+    fulfillable: "Payment window",
+    expiredCancelable: "Recovery available",
+    cancelling: "Returning shares",
+    fulfilled: "Paid",
+    cancelled: "Recovered",
+    closedOrUnknown: "Checking outcome",
+    failed: "Failed",
+  };
+  return labels[status];
+}
+
+function queuedWithdrawalStatusClass(
+  status: YieldWithdrawalRequest["status"]
+): string {
+  if (status === "fulfilled" || status === "cancelled") return "status-success";
+  if (status === "failed")
+    return "border-destructive/40 bg-destructive/5 text-destructive";
+  return "status-warning";
+}
+
+function queuedWithdrawalStatusIsLive(
+  status: YieldWithdrawalRequest["status"]
+): boolean {
+  return [
+    "creating",
+    "pending",
+    "fulfillable",
+    "cancelling",
+    "closedOrUnknown",
+  ].includes(status);
+}
+
+function queuedWithdrawalStatusCopy(request: YieldWithdrawalRequest): string {
+  switch (request.status) {
+    case "creating":
+      return "Confirming the owner-signed request. No payout is credited yet.";
+    case "pending":
+      return `Solver payments can begin ${formatEpochSeconds(request.maturityTimestamp)}.`;
+    case "fulfillable":
+      return `Waiting for payment through ${formatEpochSeconds(request.deadlineTimestamp)}.`;
+    case "expiredCancelable":
+      return "The payment deadline passed. You can recover the escrowed shares.";
+    case "cancelling":
+      return "Share recovery was submitted. Payment can still win the race.";
+    case "closedOrUnknown":
+      return "SDP is verifying whether assets were paid or shares were returned.";
+    case "fulfilled":
+      return "The provider payout was finalized.";
+    case "cancelled":
+      return "The escrowed shares were returned.";
+    case "failed":
+      return request.failureReason ?? "The queued withdrawal failed.";
+  }
+}
+
+function formatEpochSeconds(value: string): string {
+  const milliseconds = Number(BigInt(value) * 1_000n);
+  if (!Number.isSafeInteger(milliseconds)) return "at the provider time";
+  return formatDate(new Date(milliseconds).toISOString());
 }
 
 function RecentActivity({

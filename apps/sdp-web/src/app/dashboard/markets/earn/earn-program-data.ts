@@ -1297,6 +1297,7 @@ const queuedWithdrawalTermsSchema = z.object({
   allowWithdrawals: z.boolean(),
   secondsToMaturity: z.number().int().nonnegative(),
   minimumSecondsToDeadline: z.number().int().nonnegative(),
+  maximumSecondsToDeadline: z.number().int().positive(),
   minimumDiscountBps: z.number().int().nonnegative(),
   maximumDiscountBps: z.number().int().nonnegative(),
   minimumShares: z.string(),

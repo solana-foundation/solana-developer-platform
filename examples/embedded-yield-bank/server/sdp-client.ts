@@ -1,6 +1,12 @@
 import "server-only";
 
-import type { YieldMovement, YieldPosition, YieldStrategy } from "../src/types";
+import type {
+  YieldMovement,
+  YieldPosition,
+  YieldStrategy,
+  YieldWithdrawalOptions,
+  YieldWithdrawalRequest,
+} from "../src/types";
 import type { DemoConfig } from "./env";
 
 interface SdpErrorEnvelope {
@@ -44,6 +50,15 @@ interface WithdrawalBuildResult {
   };
 }
 
+interface QueuedWithdrawalBuildResult {
+  transaction: BuiltTransaction & {
+    positionId: string;
+    action: "request" | "cancel";
+    requestAddress: string;
+    withdrawalRequestId?: string;
+  };
+}
+
 export class SdpApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
@@ -78,10 +93,36 @@ export class EmbeddedYieldClient {
   }
 
   async listStrategies(): Promise<YieldStrategy[]> {
-    const data = await this.request<{ strategies: YieldStrategy[] }>(
-      "/v1/earn/strategies"
+    const strategies: YieldStrategy[] = [];
+    const seenStrategyIds = new Set<string>();
+    const pageSize = 100;
+    const maximumPages = 100;
+    for (let page = 1; page <= maximumPages; page += 1) {
+      const query = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const data = await this.request<{
+        strategies: YieldStrategy[];
+        total: number;
+      }>(`/v1/earn/strategies?${query}`);
+      let added = 0;
+      for (const strategy of data.strategies) {
+        if (seenStrategyIds.has(strategy.id)) continue;
+        seenStrategyIds.add(strategy.id);
+        strategies.push(strategy);
+        added += 1;
+      }
+      if (strategies.length >= data.total) return strategies;
+      if (added === 0) {
+        throw new Error(
+          "SDP strategy pagination made no progress before the reported total"
+        );
+      }
+    }
+    throw new Error(
+      `SDP strategy pagination exceeded ${maximumPages} pages before the reported total`
     );
-    return data.strategies;
   }
 
   async previewDeposit(strategyId: string, amount: string) {
@@ -144,6 +185,38 @@ export class EmbeddedYieldClient {
     });
   }
 
+  async getWithdrawalOptions(
+    positionId: string
+  ): Promise<YieldWithdrawalOptions> {
+    return this.request<YieldWithdrawalOptions>(
+      "/v1/earn/external-wallet/withdrawal-options",
+      { method: "POST", body: { positionId } }
+    );
+  }
+
+  async previewQueuedWithdrawal(input: {
+    positionId: string;
+    shares: string;
+    discountBps: number;
+    deadlineSeconds: number;
+  }) {
+    return this.request<{
+      positionId: string;
+      assetMint: string;
+      shares: string;
+      shareDecimals: number;
+      assets: string;
+      assetDecimals: number;
+      discountBps: number;
+      maturityTimestamp: string;
+      deadlineTimestamp: string;
+      blockingIssues: Array<{ code: string; message: string }>;
+    }>("/v1/earn/external-wallet/queued-withdrawal-previews", {
+      method: "POST",
+      body: input,
+    });
+  }
+
   async buildWithdrawal(input: {
     positionId: string;
     shares: string;
@@ -171,6 +244,76 @@ export class EmbeddedYieldClient {
       }
     );
     return data.withdrawal;
+  }
+
+  async buildQueuedWithdrawalRequest(input: {
+    positionId: string;
+    shares: string;
+    discountBps: number;
+    deadlineSeconds: number;
+    feePayer?: string;
+  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
+    const data = await this.request<QueuedWithdrawalBuildResult>(
+      "/v1/earn/external-wallet/withdrawal-request-transactions",
+      { method: "POST", body: input }
+    );
+    return data.transaction;
+  }
+
+  async submitQueuedWithdrawalRequest(
+    transactionId: string,
+    signedTransaction: string,
+    idempotencyKey: string
+  ): Promise<YieldWithdrawalRequest> {
+    const data = await this.request<{
+      withdrawalRequest: YieldWithdrawalRequest;
+    }>("/v1/earn/external-wallet/withdrawal-requests", {
+      method: "POST",
+      body: { transactionId, signedTransaction },
+      idempotencyKey,
+    });
+    return data.withdrawalRequest;
+  }
+
+  async listPendingWithdrawalRequests(
+    ownerAddress: string
+  ): Promise<YieldWithdrawalRequest[]> {
+    return this.allowUnknownOwner(
+      () =>
+        this.collectPages<YieldWithdrawalRequest>(
+          "/v1/earn/external-wallet/withdrawal-requests",
+          "withdrawalRequests",
+          ownerAddress,
+          { settled: "false" }
+        ),
+      []
+    );
+  }
+
+  async buildQueuedWithdrawalCancellation(input: {
+    withdrawalRequestId: string;
+    feePayer?: string;
+  }): Promise<QueuedWithdrawalBuildResult["transaction"]> {
+    const data = await this.request<QueuedWithdrawalBuildResult>(
+      "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      { method: "POST", body: input }
+    );
+    return data.transaction;
+  }
+
+  async submitQueuedWithdrawalCancellation(
+    transactionId: string,
+    signedTransaction: string,
+    idempotencyKey: string
+  ): Promise<YieldWithdrawalRequest> {
+    const data = await this.request<{
+      withdrawalRequest: YieldWithdrawalRequest;
+    }>("/v1/earn/external-wallet/withdrawal-request-cancellations", {
+      method: "POST",
+      body: { transactionId, signedTransaction },
+      idempotencyKey,
+    });
+    return data.withdrawalRequest;
   }
 
   /** Every recorded movement for the wallet, newest first, across all pages. */
@@ -209,23 +352,30 @@ export class EmbeddedYieldClient {
 
   private async collectPages<T>(
     path: string,
-    key: "movements" | "positions",
-    ownerAddress: string
+    key: "movements" | "positions" | "withdrawalRequests",
+    ownerAddress: string,
+    filters: Record<string, string> = {}
   ): Promise<T[]> {
     const items: T[] = [];
+    const seenCursors = new Set<string>();
     let cursor: string | undefined;
 
     while (true) {
-      const query = new URLSearchParams({ ownerAddress, limit: "100" });
+      const query = new URLSearchParams({
+        ownerAddress,
+        limit: "100",
+        ...filters,
+      });
       if (cursor) query.set("before", cursor);
       const data = await this.request<Page & Record<typeof key, T[]>>(
         `${path}?${query}`
       );
       items.push(...data[key]);
       if (!data.hasMore) return items;
-      if (!data.nextCursor || data.nextCursor === cursor) {
+      if (!data.nextCursor || seenCursors.has(data.nextCursor)) {
         throw new Error(`SDP ${key} cursor did not advance`);
       }
+      seenCursors.add(data.nextCursor);
       cursor = data.nextCursor;
     }
   }

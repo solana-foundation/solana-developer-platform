@@ -133,8 +133,10 @@ nothing else; the program create still sends the body `requestId` form.
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
   render a dash, never $0), list `GET …/movements?ownerAddress=` and
   `GET …/positions?ownerAddress=` (the owner rides the query on every
-  per-owner read), and exit via
-  `…/withdrawal-transactions` + `…/withdrawals`. The treasury
+  per-owner read), and exit directly via
+  `…/withdrawal-transactions` + `…/withdrawals` or through the queued lifecycle:
+  options, queued preview, request build/submit, request list/detail, and
+  post-deadline cancellation build/submit. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
@@ -188,8 +190,9 @@ nothing else; the program create still sends the body `requestId` form.
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
   and availability sit in one plain line under the dropdown ("Kamino · Instant
   liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
-  copyable code block. A short intro paragraph explains the loop, then four
-  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  copyable code block. A short intro paragraph explains the loop, then five
+  freely navigable reference tabs (client setup, deposits, reads, direct
+  withdraw, queued withdraw).
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
   an info callout that links to the API keys page (a Developer key includes

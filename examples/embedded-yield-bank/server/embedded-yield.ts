@@ -2,9 +2,17 @@ import "server-only";
 
 import type { KeyPairSigner } from "@solana/kit";
 import { floorForTolerance, isPositiveDecimal } from "../src/lib/decimal";
-import type { DashboardData, YieldMovement, YieldStrategy } from "../src/types";
+import type {
+  DashboardData,
+  WithdrawalIntent,
+  WithdrawalResult,
+  YieldMovement,
+  YieldStrategy,
+  YieldWithdrawalRequest,
+} from "../src/types";
 import { getConfig, getDemoSigner, getFeePayerSigner } from "./env";
 import {
+  assertQueuedWithdrawalTerms,
   belongsToStrategy,
   canDeposit,
   isOpenPosition,
@@ -25,10 +33,10 @@ let strategyCache:
 
 /**
  * The catalogue changes rarely and the dashboard polls often. Reading it once
- * every few minutes keeps the steady-state refresh to two SDP calls and one
- * RPC read. An actively watched movement adds one short-lived chain-aware
- * detail read so confirmation reaches the UI without waiting for the
- * background sweep.
+ * every few minutes keeps it out of the steady-state refresh. The live refresh
+ * reads positions, movements, queued requests, withdrawal routes, and the
+ * token balance. An actively watched movement adds one short-lived chain-aware
+ * detail read so confirmation reaches the UI without waiting for the sweep.
  */
 async function listStrategies(
   client: EmbeddedYieldClient
@@ -55,11 +63,13 @@ export async function loadDashboard(
   );
   const tokenMint = requireDepositMint(strategy);
 
-  let [positions, allMovements, checking] = await Promise.all([
-    client.listPositions(owner.address),
-    client.listMovements(owner.address),
-    readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
-  ]);
+  let [positions, allMovements, allWithdrawalRequests, checking] =
+    await Promise.all([
+      client.listPositions(owner.address),
+      client.listMovements(owner.address),
+      client.listPendingWithdrawalRequests(owner.address),
+      readTokenBalance(config.SOLANA_RPC_URL, owner.address, tokenMint),
+    ]);
 
   // Scope by strategy, never by open-position ids: SDP drops a position from
   // the list once it closes, but its movements (and their payouts) remain.
@@ -84,7 +94,18 @@ export async function loadDashboard(
     positions
       .filter((candidate) => belongsToStrategy(candidate, strategy))
       .find(isOpenPosition) ?? null;
-  const { total, ...savings } = summarizeSavings(checking, position, movements);
+  const withdrawalRequests = allWithdrawalRequests.filter((request) =>
+    belongsToStrategy(request, strategy)
+  );
+  const withdrawalOptions = position
+    ? await client.getWithdrawalOptions(position.id).catch(() => null)
+    : null;
+  const { total, ...savings } = summarizeSavings(
+    checking,
+    position,
+    movements,
+    withdrawalRequests
+  );
 
   return {
     wallet: {
@@ -94,9 +115,10 @@ export async function loadDashboard(
     },
     token: { mint: tokenMint, symbol: checking.symbol },
     checking: { balance: checking.amount },
-    savings: { strategy, position, ...savings },
+    savings: { strategy, position, withdrawalOptions, ...savings },
     total,
     movements,
+    withdrawalRequests,
     connection: {
       apiLabel: localApiLabel(config.SDP_API_BASE_URL),
       checkedAt: new Date().toISOString(),
@@ -190,7 +212,11 @@ export async function deposit(amount: string): Promise<YieldMovement> {
 
   // 3. The owner signs on the server, joined by Northstar when it pays fees.
   // Private keys never reach the browser.
-  const signedTransaction = await signTransaction(built.transaction, all);
+  const signedTransaction = await signTransaction(
+    built.transaction,
+    all,
+    feePayer?.address ?? owner.address
+  );
 
   // 4. Submit with a unique key. An uncertain retry must reuse this exact key.
   const idempotencyKey = `northstar-deposit-${crypto.randomUUID()}`;
@@ -202,8 +228,10 @@ export async function deposit(amount: string): Promise<YieldMovement> {
 }
 
 /** Move money from savings back into checking. */
-export async function withdraw(amount: string): Promise<YieldMovement> {
-  assertAmount(amount);
+export async function withdraw(
+  input: WithdrawalIntent
+): Promise<WithdrawalResult> {
+  assertAmount(input.amount);
   const config = getConfig();
   const { owner, feePayer, all } = await getTransactionSigners();
   const client = new EmbeddedYieldClient(config);
@@ -223,14 +251,56 @@ export async function withdraw(amount: string): Promise<YieldMovement> {
   if (!position) throw new Error("Savings is empty");
 
   // The customer thinks in tokens; the vault redeems shares.
-  const shares = sharesForAmount(amount, position);
+  const shares = sharesForAmount(input.amount, position);
+  const options = await client.getWithdrawalOptions(position.id);
+
+  if (input.route === "queued") {
+    assertQueuedWithdrawalTerms(
+      options,
+      shares,
+      input.discountBps,
+      input.deadlineSeconds
+    );
+    const preview = await client.previewQueuedWithdrawal({
+      positionId: position.id,
+      shares,
+      discountBps: input.discountBps,
+      deadlineSeconds: input.deadlineSeconds,
+    });
+    assertNoBlockingIssues(preview.blockingIssues);
+    const built = await client.buildQueuedWithdrawalRequest({
+      positionId: position.id,
+      shares,
+      discountBps: input.discountBps,
+      deadlineSeconds: input.deadlineSeconds,
+      ...(feePayer ? { feePayer: feePayer.address } : {}),
+    });
+    assertBuiltFeePayer(built.feePayer, feePayer?.address);
+    const signedTransaction = await signTransaction(
+      built.transaction,
+      all,
+      feePayer?.address ?? owner.address
+    );
+    const idempotencyKey = `northstar-queued-withdrawal-${crypto.randomUUID()}`;
+    const withdrawalRequest = await retryUncertainSubmit(() =>
+      client.submitQueuedWithdrawalRequest(
+        built.transactionId,
+        signedTransaction,
+        idempotencyKey
+      )
+    );
+    return { kind: "queued", withdrawalRequest };
+  }
+
+  if (!options.instant && !options.providerOrder) {
+    throw new Error("A direct withdrawal is not currently available");
+  }
   const minAmountOut = await deriveWithdrawalFloor(
     client,
     position,
     shares,
     strategy
   );
-
   const built = await client.buildWithdrawal({
     positionId: position.id,
     shares,
@@ -238,10 +308,43 @@ export async function withdraw(amount: string): Promise<YieldMovement> {
     ...(feePayer ? { feePayer: feePayer.address } : {}),
   });
   assertBuiltFeePayer(built.feePayer, feePayer?.address);
-  const signedTransaction = await signTransaction(built.transaction, all);
+  const signedTransaction = await signTransaction(
+    built.transaction,
+    all,
+    feePayer?.address ?? owner.address
+  );
   const idempotencyKey = `northstar-withdrawal-${crypto.randomUUID()}`;
-  return retryUncertainSubmit(() =>
+  const movement = await retryUncertainSubmit(() =>
     client.submitWithdrawal(
+      built.transactionId,
+      signedTransaction,
+      idempotencyKey
+    )
+  );
+  return { kind: "movement", movement };
+}
+
+/** Recover escrowed shares after SDP reports that the queue deadline passed. */
+export async function cancelQueuedWithdrawal(
+  withdrawalRequestId: string
+): Promise<YieldWithdrawalRequest> {
+  const config = getConfig();
+  const { owner, feePayer, all } = await getTransactionSigners();
+  const client = new EmbeddedYieldClient(config);
+  await assertRpcCluster(config.SOLANA_RPC_URL, config.SOLANA_CLUSTER);
+  const built = await client.buildQueuedWithdrawalCancellation({
+    withdrawalRequestId,
+    ...(feePayer ? { feePayer: feePayer.address } : {}),
+  });
+  assertBuiltFeePayer(built.feePayer, feePayer?.address);
+  const signedTransaction = await signTransaction(
+    built.transaction,
+    all,
+    feePayer?.address ?? owner.address
+  );
+  const idempotencyKey = `northstar-withdrawal-cancel-${crypto.randomUUID()}`;
+  return retryUncertainSubmit(() =>
+    client.submitQueuedWithdrawalCancellation(
       built.transactionId,
       signedTransaction,
       idempotencyKey
@@ -303,9 +406,7 @@ async function getTransactionSigners(): Promise<{
   };
 }
 
-async function retryUncertainSubmit(
-  submit: () => Promise<YieldMovement>
-): Promise<YieldMovement> {
+async function retryUncertainSubmit<T>(submit: () => Promise<T>): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {

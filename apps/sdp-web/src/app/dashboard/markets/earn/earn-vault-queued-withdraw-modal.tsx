@@ -123,7 +123,8 @@ function isQueueTermsValid(
     discountBps >= terms.minimumDiscountBps &&
     discountBps <= terms.maximumDiscountBps &&
     Number.isInteger(deadlineSeconds) &&
-    deadlineSeconds >= terms.minimumSecondsToDeadline
+    deadlineSeconds >= terms.minimumSecondsToDeadline &&
+    deadlineSeconds <= terms.maximumSecondsToDeadline
   );
 }
 
@@ -720,8 +721,11 @@ function QueueDetails({
               />
               <p className="text-xs text-tertiary">
                 {t("DashboardEarn.queuedWithdraw.deadlineMinimum", {
-                  duration:
+                  minimum:
                     formatDurationSeconds(terms.minimumSecondsToDeadline, locale) ??
+                    t("DashboardEarn.unavailable"),
+                  maximum:
+                    formatDurationSeconds(terms.maximumSecondsToDeadline, locale) ??
                     t("DashboardEarn.unavailable"),
                 })}
               </p>
