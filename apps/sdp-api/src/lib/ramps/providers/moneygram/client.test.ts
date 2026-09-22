@@ -11,6 +11,7 @@ const MONEYGRAM_CONTEXT: RampRuntimeContext = {
 };
 
 const ONRAMP_INPUT: RampOnrampQuoteInput = {
+  paymentTransferId: "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
   assetRail: "usdc.solana",
   fiatCurrency: "USD",
   fiatAmount: "25",
@@ -31,6 +32,7 @@ function sessionResponse(
       sessionToken: sessionJwt(1789000000),
       sessionId: "moneygram_session_123",
       widgetUrl: "https://playground.xramps.moneygram.com/widget?mode=off-ramp",
+      walletType: "custodial",
       ...overrides,
     }),
     { status: 200, headers: { "Content-Type": "application/json" } }
@@ -40,6 +42,26 @@ function sessionResponse(
 describe("MoneygramRampClient", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("posts the customer, destination wallet, and payment transfer UUID to create a session", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(sessionResponse({}));
+
+    await new MoneygramRampClient().createOnrampQuote(MONEYGRAM_CONTEXT, ONRAMP_INPUT);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const request = fetchSpy.mock.calls[0];
+    if (!request || typeof request[1]?.body !== "string") {
+      throw new Error("Expected a session request with a JSON body");
+    }
+    expect(request[0]).toBe("https://playground.xramps.moneygram.com/api/v1/sessions");
+    expect(request[1].method).toBe("POST");
+    expect(JSON.parse(request[1].body)).toEqual({
+      customerIdentifier: ONRAMP_INPUT.externalCustomerId,
+      chain: "solana",
+      walletAddress: ONRAMP_INPUT.destinationWalletAddress,
+      walletTransactionId: "0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
+    });
   });
 
   it("creates a session quote bound to the session JWT expiry", async () => {
