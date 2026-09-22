@@ -4,9 +4,9 @@ import { postMoneygramRampEvent, type Translate } from "../../payments-workspace
 import { sendTransferUnderKey } from "../../transfer-idempotency";
 import { fundMoneygramDeposit, type MoneygramFundingContext } from "./moneygram-sign-transaction";
 
-const SOURCE_WALLET = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
-const DEPOSIT_WALLET = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
-const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOURCE_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+const DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+const USDC_MINT = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
 
 vi.mock("../../payments-workspace.data", () => ({ postMoneygramRampEvent: vi.fn() }));
 vi.mock("../../transfer-idempotency", () => ({ sendTransferUnderKey: vi.fn() }));

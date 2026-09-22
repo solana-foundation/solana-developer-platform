@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import type { RampOfframpQuoteInput, RampOnrampQuoteInput } from "../../types";
+import type { RampOfframpQuoteInput, RampOnrampQuoteInput, RampRuntimeContext } from "../../types";
 import { MoneygramRampClient } from "./client";
 
-const SOURCE_WALLET = "MgSourceWallet11111111111111111111111111111";
-const DEPOSIT_WALLET = "MgDepositWallet1111111111111111111111111111";
+const SOURCE_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+const DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
 
 const runtimeContext = {
   env: { MONEYGRAM_SANDBOX_SECRET_KEY: "mg_sk_test" },
   mode: "sandbox",
-} as const;
+} satisfies RampRuntimeContext;
 
 const offrampInput: RampOfframpQuoteInput = {
+  paymentTransferId: "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
   externalCustomerId: "cpty_mg_offramp_1",
   sourceWalletAddress: SOURCE_WALLET,
   assetRail: "usdc.solana",
@@ -20,6 +21,7 @@ const offrampInput: RampOfframpQuoteInput = {
 };
 
 const onrampInput: RampOnrampQuoteInput = {
+  paymentTransferId: "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
   externalCustomerId: "cpty_mg_onramp_1",
   destinationWalletAddress: DEPOSIT_WALLET,
   assetRail: "usdc.solana",
@@ -66,6 +68,7 @@ describe("MoneygramRampClient custodial sessions", () => {
       customerIdentifier: offrampInput.externalCustomerId,
       walletAddress: offrampInput.sourceWalletAddress,
       chain: "solana",
+      walletTransactionId: "0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
     });
     assert.ok(quote.provider === "moneygram");
     assert.ok(quote.widgetUrl);
@@ -88,10 +91,31 @@ describe("MoneygramRampClient custodial sessions", () => {
       customerIdentifier: onrampInput.externalCustomerId,
       walletAddress: onrampInput.destinationWalletAddress,
       chain: "solana",
+      walletTransactionId: "0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f",
     });
     assert.ok(quote.provider === "moneygram");
     assert.ok(quote.widgetUrl);
     assert.equal(new URL(quote.widgetUrl).searchParams.get("mode"), "on-ramp");
+  });
+
+  it("throws when paymentTransferId is missing", async () => {
+    const { paymentTransferId: offTransferId, ...offrampWithoutTransfer } = offrampInput;
+    const { paymentTransferId: onTransferId, ...onrampWithoutTransfer } = onrampInput;
+    assert.ok(offTransferId);
+    assert.ok(onTransferId);
+    globalThis.fetch = async () => {
+      assert.fail("A session must not be requested without a payment transfer id");
+    };
+
+    const client = new MoneygramRampClient();
+    await assert.rejects(
+      client.createOfframpQuote(runtimeContext, offrampWithoutTransfer),
+      /require the SDP payment transfer id/
+    );
+    await assert.rejects(
+      client.createOnrampQuote(runtimeContext, onrampWithoutTransfer),
+      /require the SDP payment transfer id/
+    );
   });
 
   it("rejects a session without walletType", async () => {
@@ -105,93 +129,136 @@ describe("MoneygramRampClient custodial sessions", () => {
   });
 });
 
-describe("MoneygramRampClient.getCustomerProfileId", () => {
-  it("mints a customer session and returns only the profile id from the authenticated profile lookup", async () => {
-    const session = sessionFixture();
-    const responses = [
-      Response.json(session),
-      Response.json({ profileId: "mg_profile_1", firstName: "Test", extraField: "test_value" }),
-    ];
+describe("MoneygramRampClient.findOwnedTransaction", () => {
+  const ownership = {
+    transactionId: "mg_tx_owned_1",
+    customerIdentifier: "cpty_mg_1",
+  };
+  const ownedTransaction = {
+    transactionId: ownership.transactionId,
+    customerIdentifier: ownership.customerIdentifier,
+    partnerTransactionId: "mg_partner_transaction_1",
+    mgiProfileId: "mg_profile_1",
+    transactionType: "cash-in",
+    sendAsset: "USDC",
+    sendChain: "solana",
+    settlementAccount: DEPOSIT_WALLET,
+    kycData: { firstName: "Test" },
+  };
+  const transactions = [
+    {
+      ...ownedTransaction,
+      transactionId: "mg_tx_other_customer_1",
+      customerIdentifier: "cpty_mg_other_1",
+    },
+    {
+      ...ownedTransaction,
+      transactionId: "mg_tx_uncommitted_1",
+      mgiProfileId: null,
+      settlementAccount: null,
+      transactionType: "cash-out",
+    },
+    ownedTransaction,
+  ];
+
+  it("returns only the owned transaction profile and direction", async () => {
     const requests: { url: string; init: RequestInit }[] = [];
     globalThis.fetch = async (input, init) => {
       assert.ok(init);
       requests.push({ url: String(input), init });
-      const response = responses.shift();
-      assert.ok(response);
-      return response;
+      return Response.json({ transactions });
     };
 
-    const profileId = await new MoneygramRampClient().getCustomerProfileId(
-      runtimeContext,
-      "cpty_mg_profile_1"
+    assert.deepEqual(
+      await new MoneygramRampClient().findOwnedTransaction(runtimeContext, ownership),
+      { profileId: "mg_profile_1", transactionType: "cash-in" }
     );
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://playground.xramps.moneygram.com/api/v1/transactions");
+    assert.ok(requests[0].init.signal instanceof AbortSignal);
+    assert.equal(requests[0].init.signal.aborted, false);
+    assert.equal(requests[0].init.method, "GET");
+    assert.equal(new Headers(requests[0].init.headers).get("x-api-key"), "mg_sk_test");
+  });
 
-    assert.equal(profileId, "mg_profile_1");
-    assert.equal(requests.length, 2);
-    assert.equal(responses.length, 0);
-    const [sessionRequest, profileRequest] = requests;
-    assert.equal(sessionRequest.url, "https://playground.xramps.moneygram.com/api/v1/sessions");
-    assert.equal(sessionRequest.init.method, "POST");
-    assert.equal(new Headers(sessionRequest.init.headers).get("x-api-key"), "mg_sk_test");
-    assert.equal(typeof sessionRequest.init.body, "string");
-    assert.deepEqual(JSON.parse(String(sessionRequest.init.body)), {
-      customerIdentifier: "cpty_mg_profile_1",
-      chain: "solana",
+  for (const [name, input] of [
+    [
+      "the same id belongs to another customer",
+      { ...ownership, customerIdentifier: "cpty_mg_other_1" },
+    ],
+    ["the transaction id is unknown", { ...ownership, transactionId: "mg_tx_unknown_1" }],
+  ] satisfies [string, typeof ownership][]) {
+    it(`returns null when ${name}`, async () => {
+      globalThis.fetch = async () => Response.json({ transactions });
+
+      assert.equal(
+        await new MoneygramRampClient().findOwnedTransaction(runtimeContext, input),
+        null
+      );
     });
-    assert.equal(profileRequest.url, "https://playground.xramps.moneygram.com/api/v1/profiles/me");
-    assert.equal(profileRequest.init.method, "GET");
-    assert.equal(
-      new Headers(profileRequest.init.headers).get("Authorization"),
-      `Bearer ${session.sessionToken}`
+  }
+
+  it("parses an owned item without settlementAccount or partnerTransactionId", async () => {
+    const {
+      transactionId,
+      customerIdentifier,
+      mgiProfileId,
+      transactionType,
+      sendAsset,
+      sendChain,
+    } = ownedTransaction;
+    globalThis.fetch = async () =>
+      Response.json({
+        transactions: [
+          {
+            transactionId,
+            customerIdentifier,
+            mgiProfileId,
+            transactionType,
+            sendAsset,
+            sendChain,
+          },
+        ],
+      });
+
+    assert.deepEqual(
+      await new MoneygramRampClient().findOwnedTransaction(runtimeContext, ownership),
+      { profileId: "mg_profile_1", transactionType: "cash-in" }
     );
   });
 
-  it("rejects a 204 response when the customer has no profile yet", async () => {
-    const responses = [Response.json(sessionFixture()), new Response(null, { status: 204 })];
-    globalThis.fetch = async () => {
-      const response = responses.shift();
-      assert.ok(response);
-      return response;
-    };
+  it("rejects an owned transaction on Stellar", async () => {
+    globalThis.fetch = async () =>
+      Response.json({
+        transactions: [{ ...ownedTransaction, sendChain: "stellar" }],
+      });
 
     await assert.rejects(
-      new MoneygramRampClient().getCustomerProfileId(runtimeContext, "cpty_mg_profile_1"),
-      /no profile for this customer yet/
+      new MoneygramRampClient().findOwnedTransaction(runtimeContext, ownership),
+      /not USDC on Solana/
     );
-    assert.equal(responses.length, 0);
   });
 
-  it("rejects a 500 profile response", async () => {
-    const responses = [
-      Response.json(sessionFixture()),
-      Response.json({ message: "Profile lookup failed" }, { status: 500 }),
-    ];
-    globalThis.fetch = async () => {
-      const response = responses.shift();
-      assert.ok(response);
-      return response;
-    };
+  it("rejects an owned transaction with no customer profile", async () => {
+    globalThis.fetch = async () =>
+      Response.json({
+        transactions: [{ ...ownedTransaction, mgiProfileId: null }],
+      });
 
     await assert.rejects(
-      new MoneygramRampClient().getCustomerProfileId(runtimeContext, "cpty_mg_profile_1"),
-      /profile lookup failed with status 500/
+      new MoneygramRampClient().findOwnedTransaction(runtimeContext, ownership),
+      /no customer profile/
     );
-    assert.equal(responses.length, 0);
   });
 
-  it("rejects a malformed profile response without profileId", async () => {
-    const responses = [Response.json(sessionFixture()), Response.json({ firstName: "Test" })];
-    globalThis.fetch = async () => {
-      const response = responses.shift();
-      assert.ok(response);
-      return response;
-    };
+  it("rejects a malformed transaction list", async () => {
+    globalThis.fetch = async () =>
+      Response.json({ transactions: [{ transactionId: "mg_tx_owned_1" }] });
 
     await assert.rejects(
-      new MoneygramRampClient().getCustomerProfileId(runtimeContext, "cpty_mg_profile_1"),
+      new MoneygramRampClient().findOwnedTransaction(runtimeContext, ownership),
       /malformed/
     );
-    assert.equal(responses.length, 0);
   });
 });
 

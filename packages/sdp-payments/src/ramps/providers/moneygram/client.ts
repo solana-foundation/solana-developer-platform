@@ -12,11 +12,17 @@ import {
 } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { estimateNotAvailable, providerNotConfigured, providerUnavailable } from "../../../errors";
-import { providerFetch, providerFetchJson } from "../../fetch";
+import {
+  estimateNotAvailable,
+  internalError,
+  providerNotConfigured,
+  providerUnavailable,
+} from "../../../errors";
+import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
 import {
   isActiveIso4217CurrencyCode,
+  paymentTransferUuid,
   RAMP_RAIL_DUMPS,
   requireEnv,
   UNREPORTED_COUNTRY_SUPPORT,
@@ -36,6 +42,8 @@ import type {
 } from "../../types";
 
 const MONEYGRAM_SANDBOX_BASE_URL = "https://playground.xramps.moneygram.com";
+
+const MONEYGRAM_REQUEST_TIMEOUT_MS = 30_000;
 
 export const MONEYGRAM_DECLARED_RAIL_SUPPORT = {
   onramp: {
@@ -108,8 +116,17 @@ const sessionSchema = z.object({
 
 const MONEYGRAM_AWAITING_FUNDS_STATUS = "awaiting_funds";
 
-const profileSchema = z.object({
-  profileId: z.string().trim().min(1),
+const listedTransactionSchema = z.object({
+  transactionId: z.string().trim().min(1),
+  customerIdentifier: z.string().trim().min(1),
+  mgiProfileId: z.string().trim().min(1).nullable(),
+  transactionType: z.enum(["cash-in", "cash-out"]),
+  sendAsset: z.string().trim().min(1),
+  sendChain: z.string().trim().min(1),
+});
+
+const transactionListSchema = z.object({
+  transactions: z.array(listedTransactionSchema),
 });
 
 const transactionStatusSchema = z.object({
@@ -132,10 +149,27 @@ export interface MoneygramAwaitingDeposit {
 
 interface MoneygramSessionInput {
   customerIdentifier: string;
-  walletAddress?: string;
+  walletAddress: string;
+  walletTransactionId: string;
+}
+
+/**
+ * A MoneyGram transaction proven to belong to the counterparty: it carries the
+ * customerIdentifier SDP sent when the counterparty's sessions were minted.
+ */
+export interface MoneygramOwnedTransaction {
+  profileId: string;
+  transactionType: "cash-in" | "cash-out";
 }
 
 type MoneygramSession = z.infer<typeof sessionSchema>;
+
+function requireWalletTransactionId(paymentTransferId: string | undefined): string {
+  if (paymentTransferId === undefined) {
+    throw internalError("MoneyGram sessions require the SDP payment transfer id.");
+  }
+  return paymentTransferUuid(paymentTransferId);
+}
 
 function requireMoneygramSecretKey(
   env: Record<string, string | undefined>,
@@ -295,6 +329,7 @@ export class MoneygramRampClient implements RampProvider {
     return this.createSessionQuote(ctx, "on-ramp", {
       customerIdentifier: input.externalCustomerId,
       walletAddress: input.destinationWalletAddress,
+      walletTransactionId: requireWalletTransactionId(input.paymentTransferId),
     });
   }
 
@@ -361,6 +396,7 @@ export class MoneygramRampClient implements RampProvider {
     return this.createSessionQuote(ctx, "off-ramp", {
       customerIdentifier: input.externalCustomerId,
       walletAddress: input.sourceWalletAddress,
+      walletTransactionId: requireWalletTransactionId(input.paymentTransferId),
     });
   }
 
@@ -385,6 +421,7 @@ export class MoneygramRampClient implements RampProvider {
       {
         method: "GET",
         headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
       }
     );
     const parsed = transactionStatusSchema.safeParse(response);
@@ -417,49 +454,66 @@ export class MoneygramRampClient implements RampProvider {
   }
 
   /**
-   * Reads the id of the MoneyGram profile keyed to a customerIdentifier. The
-   * profile endpoint is session-authenticated, so a session is minted for the
-   * identifier first. The response is the customer's full KYC record; only the
-   * profile id leaves this function, nothing else is retained or logged.
+   * Finds the MoneyGram transaction the widget reported and proves it belongs to
+   * the counterparty: it must carry the customerIdentifier SDP sent and be USDC on
+   * Solana. The browser supplies the transaction id, so nothing about it is
+   * trusted until MoneyGram confirms these under the secret key.
+   *
+   * MoneyGram's transaction list is partner-wide and, as of the Sep 2026 sandbox,
+   * ignores every filter and pagination parameter; the status endpoint carries no
+   * customer reference, and the session's `walletTransactionId` is not echoed as
+   * the transaction's `partnerTransactionId`, so there is no per-transfer bind
+   * available. The list is scanned client-side and only the fields above are
+   * parsed, never the per-transaction KYC data.
    *
    * @param ctx - Provider env and environment mode.
-   * @param customerIdentifier - The identifier SDP sent when the customer's sessions were created.
-   * @returns MoneyGram's profile id for that customer.
-   * @throws When MoneyGram holds no profile for the identifier yet, or the lookup fails.
+   * @param input.transactionId - The Ramps transaction id the widget surfaced.
+   * @param input.customerIdentifier - The identifier SDP sent for the counterparty.
+   * @returns The owned transaction, or null when no transaction with that id belongs to this customer.
+   * @throws When the transaction is owned but is not USDC on Solana, or has no MoneyGram profile.
    */
-  async getCustomerProfileId(
+  async findOwnedTransaction(
     { env, mode }: RampRuntimeContext,
-    customerIdentifier: string
-  ): Promise<string> {
+    input: { transactionId: string; customerIdentifier: string }
+  ): Promise<MoneygramOwnedTransaction | null> {
     const secretKey = requireMoneygramSecretKey(env, mode);
-    const session = await this.mintSession(secretKey, { customerIdentifier });
-    const { response, parsed } = await providerFetch(
+    const response = await providerFetchJson<unknown>(
       this.id,
-      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/profiles/me`,
+      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/transactions`,
       {
         method: "GET",
-        headers: { Authorization: `Bearer ${session.sessionToken}`, "User-Agent": "sdp-api/ramps" },
+        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
       }
     );
-    if (response.status === 204) {
-      throw providerUnavailable("MoneyGram has no profile for this customer yet.", {
+    const parsed = transactionListSchema.safeParse(response);
+    if (!parsed.success) {
+      throw providerUnavailable("MoneyGram transaction list response is malformed.", {
         provider: this.id,
+        issues: z.flattenError(parsed.error).fieldErrors,
       });
     }
-    if (!response.ok) {
-      throw providerUnavailable(`MoneyGram profile lookup failed with status ${response.status}.`, {
+    const owned = parsed.data.transactions.find(
+      (transaction) =>
+        transaction.transactionId === input.transactionId &&
+        transaction.customerIdentifier === input.customerIdentifier
+    );
+    if (!owned) {
+      return null;
+    }
+    if (owned.sendAsset !== "USDC" || owned.sendChain !== "solana") {
+      throw providerUnavailable(
+        `MoneyGram transaction is ${owned.sendAsset} on ${owned.sendChain}, not USDC on Solana.`,
+        { provider: this.id, transactionId: input.transactionId }
+      );
+    }
+    if (owned.mgiProfileId === null) {
+      throw providerUnavailable("MoneyGram transaction has no customer profile yet.", {
         provider: this.id,
-        providerStatus: response.status,
+        transactionId: input.transactionId,
       });
     }
-    const profile = profileSchema.safeParse(parsed);
-    if (!profile.success) {
-      throw providerUnavailable("MoneyGram profile response is malformed.", {
-        provider: this.id,
-        issues: z.flattenError(profile.error).fieldErrors,
-      });
-    }
-    return profile.data.profileId;
+    return { profileId: owned.mgiProfileId, transactionType: owned.transactionType };
   }
 
   /**
@@ -480,6 +534,7 @@ export class MoneygramRampClient implements RampProvider {
         method: "POST",
         headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
         body: { ...input, chain: "solana" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
       }
     );
     const parsed = sessionSchema.safeParse(session);
@@ -499,7 +554,7 @@ export class MoneygramRampClient implements RampProvider {
   private async createSessionQuote(
     { env, mode }: RampRuntimeContext,
     widgetMode: "on-ramp" | "off-ramp",
-    input: Required<MoneygramSessionInput>
+    input: MoneygramSessionInput
   ): Promise<PaymentRampQuote> {
     const secretKey = requireMoneygramSecretKey(env, mode);
     const session = await this.mintSession(secretKey, input);

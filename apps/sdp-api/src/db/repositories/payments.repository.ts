@@ -1,3 +1,4 @@
+import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
 import {
   isRampTransferType,
   type PaymentTransactionKind,
@@ -59,7 +60,7 @@ export interface PaymentTransferRow {
 }
 
 export function generatePaymentTransferId(): string {
-  return `xfr_${crypto.randomUUID()}`;
+  return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
 export type ConfirmedTransferPollVerdict = {

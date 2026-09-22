@@ -1,6 +1,11 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { isTerminalRampTransferStatus, type MoneygramRampEvent } from "@sdp/types";
+import {
+  isRampTransferType,
+  isTerminalRampTransferStatus,
+  type MoneygramRampEvent,
+  type RampTransferType,
+} from "@sdp/types";
 import { getDb } from "@/db";
 import { asTransactionalClient } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories";
@@ -274,11 +279,11 @@ function requireMoneygramDepositAddress(moneygramData: Record<string, unknown>):
  * key for every later status read, so it is first-write-wins: a replay with the
  * same id is a no-op and a different id for the same session is a conflict.
  *
- * Validate only succeeds once MoneyGram holds a KYC profile for the session's
- * customerIdentifier, so the same transaction also links the counterparty to
- * that MoneyGram customer: the profile id is read from MoneyGram (once per
- * counterparty; an existing link is reused) and stored both as the
- * `customer_link` provider account reference and on the transfer.
+ * The browser names the transaction, so before anything is pinned MoneyGram must
+ * confirm under the secret key that the transaction carries this counterparty's
+ * customerIdentifier and the direction of this transfer. The same read yields MoneyGram's profile id, which
+ * becomes the counterparty's `customer_link` reference and is mirrored on the
+ * transfer.
  */
 async function pinMoneygramTransaction(
   c: AppContext,
@@ -293,6 +298,9 @@ async function pinMoneygramTransaction(
   const projectId = transfer.project_id;
   if (projectId === null) {
     throw internalError("Ramp transfer is missing its project.");
+  }
+  if (!isRampTransferType(transfer.type)) {
+    throw badRequest("MoneyGram events only apply to ramp transfers.");
   }
   const linkScope = {
     organizationId: transfer.organization_id,
@@ -314,12 +322,20 @@ async function pinMoneygramTransaction(
   if (transfer.status !== "pending") {
     throw conflict(`Cannot bind a MoneyGram transaction while the transfer is ${transfer.status}.`);
   }
-  const customerId = existingLink
-    ? existingLink.provider_customer_reference
-    : await RAMP_PROVIDER_CLIENTS.moneygram.getCustomerProfileId(
-        rampRuntime(c),
-        customerIdentifier
-      );
+  if (isRampQuoteBindingExpired(transfer)) {
+    throw conflict("MoneyGram session has expired; create a new quote before continuing.");
+  }
+  const owned = await RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction(rampRuntime(c), {
+    transactionId: event.transactionId,
+    customerIdentifier,
+  });
+  if (!owned) {
+    throw conflict("MoneyGram transaction does not belong to this session.");
+  }
+  if (owned.transactionType !== MONEYGRAM_TRANSACTION_TYPE[transfer.type]) {
+    throw conflict("MoneyGram transaction direction does not match this transfer.");
+  }
+  const customerId = owned.profileId;
   const claimed = await getDb(c.env).transaction(async (tx) => {
     const txClient = asTransactionalClient(tx);
     const row = await createPostgresPaymentsRepository(
@@ -363,6 +379,11 @@ async function pinMoneygramTransaction(
   }
   throw conflict("Off-ramp transfer changed while the MoneyGram transaction was bound.");
 }
+
+const MONEYGRAM_TRANSACTION_TYPE = {
+  onramp: "cash-in",
+  offramp: "cash-out",
+} as const satisfies Record<RampTransferType, "cash-in" | "cash-out">;
 
 function customerLinkedTransferResponse(
   c: AppContext,
