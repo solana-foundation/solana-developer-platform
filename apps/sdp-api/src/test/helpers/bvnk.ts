@@ -281,30 +281,97 @@ export function bvnkCryptoPayoutStatusChangeEvent(
 }
 
 /**
- * BVNK channel transaction payloads carry far more fields than the webhook
- * schema models (it reads only `reference`/`walletAmount`), so this shape
- * stays local to the fixture module.
+ * BVNK channel transaction payloads, shaped by the observed
+ * `channel-transaction-confirmed` payload in the repo devlog. The confirmed
+ * event requires the full data shape, so the fixture carries complete
+ * defaults for it; the detected event's parser reads only `reference`, and
+ * the extras are dropped.
  */
-interface BvnkChannelTransactionData {
+export interface BvnkChannelTransactionData {
   reference: string;
   channelId: string;
   status: string;
-  merchantDisplayName?: string;
-  dateCreated?: number;
-  lastUpdated?: number;
-  uuid?: string;
-  hash?: string;
-  address?: string;
-  paidCurrency?: string;
-  displayCurrency?: string;
-  walletCurrency?: string;
-  feeCurrency?: string;
-  paidAmount?: number;
-  displayAmount?: number;
-  walletAmount?: number;
-  feeAmount?: number;
-  sources?: string[] | null;
+  merchantId: string;
+  merchantDisplayName: string;
+  dateCreated: number;
+  lastUpdated: number;
+  uuid: string;
+  hash: string;
+  address: string;
+  tag: string | null;
+  paidCurrency: string;
+  displayCurrency: string;
+  walletCurrency: string;
+  feeCurrency: string;
+  paidAmount: number;
+  displayAmount: number;
+  walletAmount: number;
+  feeAmount: number;
+  exchangeRate: {
+    base: string;
+    counter: string;
+    rate: number;
+    baseAmount: number;
+    counterAmount: number;
+  };
+  displayRate: {
+    base: string;
+    counter: string;
+    rate: number;
+    baseAmount: number;
+    counterAmount: number;
+  };
+  risk: { level: string; resourceName: string; resourceCategory: string; alerts: string[] };
+  sources: string[];
+  networkFee: {
+    paidCurrency: string;
+    paidAmount: number;
+    displayCurrency: string;
+    displayAmount: number;
+  };
+  pegged: boolean;
+  walletId: string;
+  metaData: unknown | null;
+  originator: unknown | null;
+  embeddedCustomerDetails: { reference: string };
 }
+
+const BVNK_CHANNEL_CONFIRMED_DEFAULTS: BvnkChannelTransactionData = {
+  reference: "bvnk-sandbox-test-payment",
+  channelId: "channel_1",
+  status: "COMPLETE",
+  merchantId: "merchant_1",
+  merchantDisplayName: "sdp:onramp:counterparty_provider_account_1",
+  dateCreated: 1782627748000,
+  lastUpdated: 1782627771174,
+  uuid: "tx_1",
+  hash: "hash_1",
+  address: "address_1",
+  tag: null,
+  paidCurrency: "USDC",
+  displayCurrency: "USD",
+  walletCurrency: "USD",
+  feeCurrency: "USD",
+  paidAmount: 5,
+  displayAmount: 4.95,
+  walletAmount: 4.95,
+  feeAmount: 0.04,
+  exchangeRate: { base: "USDC", counter: "USD", rate: 0.99, baseAmount: 5, counterAmount: 4.95 },
+  displayRate: { base: "USDC", counter: "USD", rate: 0.99, baseAmount: 5, counterAmount: 4.95 },
+  risk: { level: "UNKNOWN", resourceName: "UNKNOWN", resourceCategory: "UNKNOWN", alerts: [] },
+  sources: ["src_1", "src_2"],
+  networkFee: {
+    paidCurrency: "SOL",
+    paidAmount: 0.00001,
+    displayCurrency: "USD",
+    displayAmount: 0,
+  },
+  pegged: false,
+  walletId: "a:1:wallet:1",
+  metaData: null,
+  originator: null,
+  embeddedCustomerDetails: { reference: "customer_1" },
+};
 
 const BVNK_CHANNEL_EVENTS = {
   "transaction-detected": "bvnk:payment:channel:transaction-detected",
@@ -326,9 +393,10 @@ export function bvnkChannelTransactionEvent(
     event: BVNK_CHANNEL_EVENTS[kind],
     ...(eventId === undefined ? {} : { eventId }),
     data: {
+      ...BVNK_CHANNEL_CONFIRMED_DEFAULTS,
       reference: "bvnk-sandbox-test-payment",
       channelId: "channel_1",
-      status: kind === "transaction-detected" ? "DETECTED" : "completed",
+      status: kind === "transaction-detected" ? "DETECTED" : "COMPLETE",
       ...dataOverrides,
     },
   };

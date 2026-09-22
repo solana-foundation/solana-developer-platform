@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BVNK_WEBHOOK_TIMESTAMP,
@@ -7,6 +9,56 @@ import {
   bvnkV1PayinEvent,
 } from "@/test/helpers/bvnk";
 import { BvnkWebhookProcessor } from "./bvnk";
+
+/** The parsed shape of the fixture's confirmed defaults: every money field as a decimal string. */
+const CONFIRMED_FIXTURE_PARSED = {
+  channelId: "channel_1",
+  merchantId: "merchant_1",
+  walletId: "a:1:wallet:1",
+  merchantDisplayName: "sdp:onramp:counterparty_provider_account_1",
+  reference: "bvnk-sandbox-test-payment",
+  dateCreated: 1782627748000,
+  lastUpdated: 1782627771174,
+  status: "COMPLETE",
+  uuid: "tx_1",
+  hash: "hash_1",
+  address: "address_1",
+  tag: null,
+  paidCurrency: "USDC",
+  displayCurrency: "USD",
+  walletCurrency: "USD",
+  feeCurrency: "USD",
+  paidAmount: "5",
+  displayAmount: "4.95",
+  walletAmount: "4.95",
+  feeAmount: "0.04",
+  exchangeRate: {
+    base: "USDC",
+    counter: "USD",
+    rate: "0.99",
+    baseAmount: "5",
+    counterAmount: "4.95",
+  },
+  displayRate: {
+    base: "USDC",
+    counter: "USD",
+    rate: "0.99",
+    baseAmount: "5",
+    counterAmount: "4.95",
+  },
+  risk: { level: "UNKNOWN", resourceName: "UNKNOWN", resourceCategory: "UNKNOWN", alerts: [] },
+  sources: ["src_1", "src_2"],
+  networkFee: {
+    paidCurrency: "SOL",
+    paidAmount: "0.00001",
+    displayCurrency: "USD",
+    displayAmount: "0",
+  },
+  pegged: false,
+  metaData: null,
+  originator: null,
+  embeddedCustomerDetails: { reference: "customer_1" },
+} as const;
 
 describe("BvnkWebhookProcessor.parse", () => {
   it("parses a platform customer update webhook", () => {
@@ -147,28 +199,92 @@ describe("BvnkWebhookProcessor.parse", () => {
       )
     ).toEqual({
       event: "bvnk:payment:channel:transaction-confirmed",
-      data: {
-        reference: "bvnk-sandbox-test-payment",
-        walletAmount: "4.95",
-      },
+      data: CONFIRMED_FIXTURE_PARSED,
     });
   });
 
   it("accepts an sdp_offramp reference and stringifies its walletAmount", () => {
     const processor = new BvnkWebhookProcessor();
+    const reference = "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000";
 
     expect(
-      processor.parse(
-        bvnkChannelTransactionEvent("transaction-confirmed", {
-          reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
-          walletAmount: 100,
-        })
-      )
+      processor.parse(bvnkChannelTransactionEvent("transaction-confirmed", { reference }))
     ).toEqual({
       event: "bvnk:payment:channel:transaction-confirmed",
       data: {
-        reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
+        ...CONFIRMED_FIXTURE_PARSED,
+        reference,
         walletAmount: "100",
+      },
+    });
+  });
+
+  it("parses the observed confirmed channel-transaction payload in full", () => {
+    const payloadUrl = new URL(
+      "../../../../../../docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json",
+      import.meta.url
+    );
+    const payload = JSON.parse(readFileSync(fileURLToPath(payloadUrl), "utf8")) as unknown;
+    const processor = new BvnkWebhookProcessor();
+
+    expect(processor.parse(payload)).toEqual({
+      event: "bvnk:payment:channel:transaction-confirmed",
+      data: {
+        channelId: "01a0c769-44c1-7064-bea7-522a4c5def00",
+        merchantId: "f40021ec-a48f-4186-b9c5-1abc71f4f4a8",
+        walletId: "a:26091854404227:N4fqg2A:1",
+        merchantDisplayName:
+          "sdp:onramp:counterparty_provider_account_2bd4aeca-01d6-4dbb-8471-ff312c6ecd30",
+        reference: "sdp_offramp_xfr_6a78d488-5c32-490d-b620-a70d7784c544",
+        dateCreated: 1790051985000,
+        lastUpdated: 1790052118171,
+        status: "COMPLETE",
+        uuid: "01a0c769-a709-7520-803d-675b49a739f5",
+        hash: "4ep657PdRL8MFuoSrMwSXXqHYycnacQc1JMYSxz9Lan6Yuep7VSLsfB2zfGZcDpAoxNV2Si3u7i3nuScjAUrfDn6",
+        address: "A8sPnzHUS9hEMkKt8Dia3Sy3t95xFMPving6XCFdf5AM",
+        tag: null,
+        paidCurrency: "USDC",
+        displayCurrency: "USD",
+        walletCurrency: "USD",
+        feeCurrency: "USD",
+        paidAmount: "10",
+        displayAmount: "9.9",
+        walletAmount: "9.9",
+        feeAmount: "0.09",
+        exchangeRate: {
+          base: "USDC",
+          counter: "USD",
+          rate: "0.99",
+          baseAmount: "10",
+          counterAmount: "9.9",
+        },
+        displayRate: {
+          base: "USDC",
+          counter: "USD",
+          rate: "0.99",
+          baseAmount: "10",
+          counterAmount: "9.9",
+        },
+        risk: {
+          level: "UNKNOWN",
+          resourceName: "UNKNOWN",
+          resourceCategory: "UNKNOWN",
+          alerts: [],
+        },
+        sources: [
+          "ETdP97bEd8k2pQbtLLZTSwg1XbZqwFVHd17aBDMyziVw",
+          "6Lwr3tNtTxGfViCqVSzeZpS2ZJxaY9WnUGQDgnDW3Lvs",
+        ],
+        networkFee: {
+          paidCurrency: "SOL",
+          paidAmount: "0.00001",
+          displayCurrency: "USD",
+          displayAmount: "0",
+        },
+        pegged: false,
+        metaData: null,
+        originator: null,
+        embeddedCustomerDetails: { reference: "b84c506f-3172-4a0a-adad-c399619090d0" },
       },
     });
   });

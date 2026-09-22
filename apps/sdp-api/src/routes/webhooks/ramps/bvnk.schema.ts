@@ -185,6 +185,70 @@ const bvnkLedgersSchema = z
     };
   });
 
+/**
+ * Confirmed channel-transaction data, shaped exactly by the observed payload
+ * in `docs/_devlog/HOO-1710/payloads/channel-transaction-confirmed.json`:
+ * 10 USDC paid in, 9.9 USD credited to the funding wallet, 0.09 USD fee,
+ * 0.99 exchange rate, 0.00001 SOL network fee. Every money field is a
+ * decimal string on the parsed event; unknown keys are allowed and dropped,
+ * matching the crypto payout schema convention.
+ */
+const bvnkChannelTransactionConfirmedDataSchema = z.object({
+  channelId: z.string().min(1),
+  merchantId: z.string().min(1),
+  walletId: z.string().min(1),
+  merchantDisplayName: z.string().min(1),
+  reference: z.string().min(1),
+  dateCreated: z.number(),
+  lastUpdated: z.number(),
+  status: z.string().min(1),
+  uuid: z.string().min(1),
+  hash: z.string().min(1),
+  address: z.string().min(1),
+  tag: z.string().nullable(),
+  paidCurrency: z.string().min(1),
+  displayCurrency: z.string().min(1),
+  walletCurrency: z.string().min(1),
+  feeCurrency: z.string().min(1),
+  paidAmount: bvnkAmountSchema,
+  displayAmount: bvnkAmountSchema,
+  walletAmount: bvnkAmountSchema,
+  feeAmount: bvnkAmountSchema,
+  exchangeRate: z.object({
+    base: z.string().min(1),
+    counter: z.string().min(1),
+    rate: bvnkAmountSchema,
+    baseAmount: bvnkAmountSchema,
+    counterAmount: bvnkAmountSchema,
+  }),
+  displayRate: z.object({
+    base: z.string().min(1),
+    counter: z.string().min(1),
+    rate: bvnkAmountSchema,
+    baseAmount: bvnkAmountSchema,
+    counterAmount: bvnkAmountSchema,
+  }),
+  risk: z.object({
+    level: z.string().min(1),
+    resourceName: z.string().min(1),
+    resourceCategory: z.string().min(1),
+    alerts: z.array(z.string().min(1)),
+  }),
+  sources: z.array(z.string().min(1)),
+  networkFee: z.object({
+    paidCurrency: z.string().min(1),
+    paidAmount: bvnkAmountSchema,
+    displayCurrency: z.string().min(1),
+    displayAmount: bvnkAmountSchema,
+  }),
+  pegged: z.boolean(),
+  metaData: z.unknown().nullable(),
+  originator: z.unknown().nullable(),
+  embeddedCustomerDetails: z.object({
+    reference: z.string().min(1),
+  }),
+});
+
 export const bvnkWebhookSchema = z.discriminatedUnion("event", [
   z.object({
     event: z.literal("bvnk:platform:customer:update"),
@@ -251,7 +315,7 @@ export const bvnkWebhookSchema = z.discriminatedUnion("event", [
   }),
   z.object({
     event: z.literal("bvnk:payment:channel:transaction-confirmed"),
-    data: z.object({ reference: z.string().optional(), walletAmount: bvnkAmountSchema }),
+    data: bvnkChannelTransactionConfirmedDataSchema,
   }),
 ]);
 
