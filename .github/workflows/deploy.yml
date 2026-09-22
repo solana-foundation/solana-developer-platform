@@ -83,7 +83,7 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ (github.event_name == 'push' && vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
+            ${{ (github.event_name == 'push' &&
                 !startsWith(github.event.head_commit.message, 'chore(main): release')) && 'stage → prod' || 'stage' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -193,7 +193,6 @@ jobs:
     if: >-
       needs.changes.outputs.api == 'true' &&
       github.event_name == 'push' &&
-      vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
       !startsWith(github.event.head_commit.message, 'chore(main): release')
     permissions:
       contents: read
