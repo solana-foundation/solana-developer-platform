@@ -144,6 +144,28 @@ jobs:
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: .github/scripts/verify-release-identity.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
 
+      # deploy.yml evaluates this same gate before calling the prod job and
+      # skips the job when held; this is the fail-closed backstop for any other
+      # caller. It runs before GCP auth and image promotion so a held merge
+      # costs seconds and leaves nothing behind in prod Artifact Registry.
+      - name: Gate merge deploys on pending migrations
+        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          gate_status=0
+          verdict="$(.github/scripts/prod-merge-gate.sh)" || gate_status=$?
+          case "${gate_status}" in
+            0) echo "${verdict}" ;;
+            2)
+              echo "::error::Prod merge deploy held: ${verdict}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
+              exit 1
+              ;;
+            *)
+              echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
+              exit 1
+              ;;
+          esac
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -285,16 +307,6 @@ jobs:
           fi
           echo "IMAGE=${resolved_image}" >> "${GITHUB_ENV}"
           echo "Deploying ${tagged_image} as ${resolved_image}" >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Gate merge deploys on pending migrations
-        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
-        run: |
-          set -euo pipefail
-          last_release="$(git describe --tags --abbrev=0 --match 'v*')"
-          if ! git diff --quiet "${last_release}"..HEAD -- apps/sdp-api/src/db/migrations; then
-            echo "::error::Migrations changed since ${last_release}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
-            exit 1
-          fi
 
       # Rollback path (workflow_dispatch by git sha): the AR image must carry
       # the signature copied at its original promotion — release-tag or

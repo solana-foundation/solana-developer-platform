@@ -6,7 +6,8 @@
 
 | Event | Target | Result |
 | --- | --- | --- |
-| Relevant push to `main` | Dev | Builds a SHA-tagged image, runs migrations, updates the dev service, and updates the dev cron job |
+| Relevant push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service, worker, and cron job, then runs the stage smoke |
+| Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, promotes the signed per-merge image without running migrations. Held (prod job skipped, Slack reports `prod held`) while `apps/sdp-api/src/db/migrations` differs from the last `v*` tag; cutting the release resumes merge deploys |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
 | Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
 | Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
