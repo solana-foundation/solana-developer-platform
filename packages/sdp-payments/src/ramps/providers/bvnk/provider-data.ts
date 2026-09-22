@@ -196,6 +196,50 @@ export function readBvnkOnrampTransferData(
   return parsed.data;
 }
 
+/**
+ * Typed `provider_data.bvnk` payload for BVNK off-ramp transfers. The `bvnk`
+ * object starts `{}` at prebook; the quote completion writes `channel` exactly
+ * once. `channel` is the ONLY source the webhooks prove the channel against —
+ * a later change to the counterparty's funding-wallet or customer-link rows
+ * can never re-attribute or block settlement of this transfer.
+ */
+export const bvnkOfframpTransferDataSchema = z
+  .object({
+    channel: z
+      .object({
+        id: z.string().min(1),
+        walletId: z.string().min(1),
+        customerReference: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type BvnkOfframpTransferData = z.infer<typeof bvnkOfframpTransferDataSchema>;
+
+/**
+ * Reads a BVNK off-ramp transfer's `provider_data.bvnk` payload strictly.
+ *
+ * @param providerData - The transfer row's `provider_data` column; the `bvnk`
+ *   object must be present (the prebook initializes it to `{}`).
+ * @returns The parsed off-ramp transfer data.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the `bvnk` key is missing
+ * or the payload does not match {@link bvnkOfframpTransferDataSchema}.
+ */
+export function readBvnkOfframpTransferData(
+  providerData: CounterpartyRow["provider_data"]
+): BvnkOfframpTransferData {
+  const bvnk = providerData.bvnk;
+  if (bvnk === undefined) {
+    throw internalError("BVNK off-ramp transfer provider_data has no bvnk object");
+  }
+  const parsed = bvnkOfframpTransferDataSchema.safeParse(bvnk);
+  if (!parsed.success) {
+    throw internalError("BVNK off-ramp transfer provider_data.bvnk is malformed");
+  }
+  return parsed.data;
+}
+
 export const BVNK_NETWORKS = ["SOLANA"] as const;
 
 export type BvnkNetwork = (typeof BVNK_NETWORKS)[number];

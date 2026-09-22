@@ -126,7 +126,7 @@ export async function createPendingBvnkOfframpTransfer(
     fiatCurrency: input.fiatCurrency,
     fiatAmount: null,
     rampsMemo: input.rampsMemo,
-    providerData: {},
+    providerData: { bvnk: {} },
     serializedTx: null,
     signature: null,
     slot: null,
@@ -138,7 +138,13 @@ export async function createPendingBvnkOfframpTransfer(
   return created;
 }
 
-/** Stamps the pending BVNK off-ramp transfer with the quote's reference, delivery mode, crypto deposit, and status. */
+/**
+ * Stamps the pending BVNK off-ramp transfer with the quote's reference,
+ * delivery mode, crypto deposit, and the channel facts recorded at quote time.
+ * The `provider_data` jsonb `||` merge is shallow, which is fine because the
+ * prebook initializes `bvnk` to `{}`: the merged value replaces it wholesale
+ * with the single `bvnk.channel` block written here, once.
+ */
 export async function completePendingBvnkOfframpTransfer(
   c: AppContext,
   input: {
@@ -148,6 +154,7 @@ export async function completePendingBvnkOfframpTransfer(
     quote: PaymentRampQuote;
     cryptoAmount: string;
     status: PaymentTransferStatus;
+    channel: { walletId: string; customerReference: string };
   }
 ): Promise<void> {
   const updated = await getPaymentsRepository(c).updateTransfer({
@@ -158,7 +165,16 @@ export async function completePendingBvnkOfframpTransfer(
     status: input.status,
     providerReference: input.quote.id,
     deliveryMode: input.quote.deliveryMode,
-    providerData: rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
+    providerData: {
+      ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
+      bvnk: {
+        channel: {
+          id: input.quote.id,
+          walletId: input.channel.walletId,
+          customerReference: input.channel.customerReference,
+        },
+      },
+    },
     updatedAt: new Date().toISOString(),
   });
   if (!updated) {
