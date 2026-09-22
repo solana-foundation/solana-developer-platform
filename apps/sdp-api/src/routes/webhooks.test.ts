@@ -1293,8 +1293,6 @@ describe("BVNK ramp webhook", () => {
         "manual_instructions",
         "USD",
         null,
-        // Recorded by the quote completion once, on this transfer — the
-        // webhook proves the channel against exactly these facts.
         {
           bvnk: {
             channel: {

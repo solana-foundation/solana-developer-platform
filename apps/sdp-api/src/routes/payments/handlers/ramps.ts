@@ -1154,9 +1154,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   const reservedTransferId = generatePaymentTransferId();
   let quote: PaymentRampQuote;
   let precreatedTransferId: string | undefined;
-  let pendingTransfer: PaymentTransferRow | undefined;
   let transferProviderData: Record<string, unknown> | undefined;
-  let bvnkOfframpChannel: { walletId: string; customerReference: string } | undefined;
   switch (input.provider) {
     case "moonpay": {
       const apiKey = c.get("apiKey");
@@ -1315,11 +1313,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       const bvnkCustomer = await RAMP_PROVIDER_CLIENTS.bvnk.getCustomer(rampRuntime(c), {
         reference: customerResolution.customerReference,
       });
-      bvnkOfframpChannel = {
-        walletId: fundingRow.external_account_reference,
-        customerReference: customerResolution.customerReference,
-      };
-      pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
+      const pendingTransfer = await createPendingBvnkOfframpTransfer(c, {
         transferId: reservedTransferId,
         organizationId: scope.auth.organizationId,
         projectId,
@@ -1332,8 +1326,9 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         fiatCurrency: input.fiatCurrency,
         rampsMemo: input.rampsMemo,
       });
+      let bvnkQuote: PaymentRampQuote;
       try {
-        quote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
+        bvnkQuote = await RAMP_PROVIDER_CLIENTS.bvnk.createOfframpQuote(rampRuntime(c), {
           assetRail: input.assetRail,
           fiatCurrency: input.fiatCurrency,
           cryptoAmount: input.cryptoAmount,
@@ -1357,6 +1352,20 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         });
         throw error;
       }
+      await completePendingBvnkOfframpTransfer(c, {
+        organizationId: scope.auth.organizationId,
+        projectId,
+        transferId: pendingTransfer.id,
+        quote: bvnkQuote,
+        cryptoAmount: input.cryptoAmount,
+        status: rampQuoteTransferStatus(bvnkQuote),
+        channel: {
+          walletId: fundingRow.external_account_reference,
+          customerReference: customerResolution.customerReference,
+        },
+      });
+      quote = bvnkQuote;
+      precreatedTransferId = pendingTransfer.id;
       break;
     }
     case "moneygram": {
@@ -1384,21 +1393,7 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   }
 
   let transferId: string;
-  if (pendingTransfer) {
-    if (bvnkOfframpChannel === undefined) {
-      throw internalError("BVNK off-ramp quote prebook lost its channel facts.");
-    }
-    await completePendingBvnkOfframpTransfer(c, {
-      organizationId: scope.auth.organizationId,
-      projectId,
-      transferId: pendingTransfer.id,
-      quote,
-      cryptoAmount: input.cryptoAmount,
-      status: rampQuoteTransferStatus(quote),
-      channel: bvnkOfframpChannel,
-    });
-    transferId = pendingTransfer.id;
-  } else if (precreatedTransferId) {
+  if (precreatedTransferId) {
     transferId = precreatedTransferId;
   } else {
     transferId = await persistRampQuoteTransfer(c, {
