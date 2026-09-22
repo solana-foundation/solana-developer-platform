@@ -1,15 +1,18 @@
 import type { SdpEnvironment } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
-import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
 import type { CryptoAssetSymbol } from "@sdp/types/payment-rails";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { type CounterpartyRow, SDP_COUNTERPARTY_ID_PATTERN } from "../../../counterparty";
 import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
-import { readRecord } from "../../../json";
 import { readyCounterparty } from "../../requirements";
-import type { BvnkCustomer, BvnkCustomerStatus, BvnkPartyDetails } from "./schemas";
+import type {
+  BvnkCustomer,
+  BvnkCustomerStatus,
+  BvnkPartyDetails,
+  BvnkPartyDetailsType,
+} from "./schemas";
 
 /** The ONE place BVNK payout network codes are encoded: create/list/read use the network code, dry-run uses the protocol code (probe: "SOLANA" vs "SOL"). */
 export const BVNK_PAYOUT_NETWORK = {
@@ -80,27 +83,32 @@ export function parseBvnkTransferIdFromRemittance(
 }
 
 /**
- * Maps the v1 customer GET onto the payout `partyDetails` element BVNK accepts.
- *
- * The mapping is built JIT from the BVNK customer read and is never stored:
- * SDP persists no PII on the transfer row.
+ * Maps the v1 customer GET onto the `partyDetails` element BVNK accepts for
+ * payouts and channels. The mapping is built JIT from the BVNK customer read
+ * and is never stored: SDP persists no PII on the transfer row.
  *
  * @param customer - Typed v1 customer response from the v1 customer GET; the
  *   `individual.person` block's `firstName`, `lastName`, `dateOfBirth`, and
  *   `address.countryCode` become the party details.
- * @returns The party details element accepted by `POST /api/v1/pay/summary`.
+ * @param type - Party role on the instrument: `BENEFICIARY` for an on-ramp
+ *   payout, `ORIGINATOR` for an off-ramp channel.
+ * @returns The party details element accepted by `POST /api/v1/pay/summary`
+ * and `POST /api/v2/channel`.
  * @throws SdpPaymentsError with `INTERNAL_ERROR` when the customer has no
  * individual details to build the party details from.
  */
-export function bvnkPayoutPartyDetailsFromCustomer(customer: BvnkCustomer): BvnkPartyDetails {
+export function bvnkPayoutPartyDetailsFromCustomer(
+  customer: BvnkCustomer,
+  type: BvnkPartyDetailsType
+): BvnkPartyDetails {
   const person = customer.individual?.person;
   if (person === undefined) {
     throw internalError(
-      `BVNK customer ${customer.reference} has no individual details for the payout party details`
+      `BVNK customer ${customer.reference} has no individual details for the party details`
     );
   }
   return {
-    type: "BENEFICIARY",
+    type,
     entityType: "INDIVIDUAL",
     firstName: person.firstName,
     lastName: person.lastName,
@@ -184,6 +192,50 @@ export function readBvnkOnrampTransferData(
   const parsed = bvnkOnrampTransferDataSchema.safeParse(bvnk);
   if (!parsed.success) {
     throw internalError("BVNK on-ramp transfer provider_data.bvnk is malformed");
+  }
+  return parsed.data;
+}
+
+/**
+ * Typed `provider_data.bvnk` payload for BVNK off-ramp transfers. The `bvnk`
+ * object starts `{}` at prebook; the quote completion writes `channel` exactly
+ * once. `channel` is the ONLY source the webhooks prove the channel against —
+ * a later change to the counterparty's funding-wallet or customer-link rows
+ * can never re-attribute or block settlement of this transfer.
+ */
+export const bvnkOfframpTransferDataSchema = z
+  .object({
+    channel: z
+      .object({
+        id: z.string().min(1),
+        walletId: z.string().min(1),
+        customerReference: z.string().min(1),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type BvnkOfframpTransferData = z.infer<typeof bvnkOfframpTransferDataSchema>;
+
+/**
+ * Reads a BVNK off-ramp transfer's `provider_data.bvnk` payload strictly.
+ *
+ * @param providerData - The transfer row's `provider_data` column; the `bvnk`
+ *   object must be present (the prebook initializes it to `{}`).
+ * @returns The parsed off-ramp transfer data.
+ * @throws SdpPaymentsError with `INTERNAL_ERROR` when the `bvnk` key is missing
+ * or the payload does not match {@link bvnkOfframpTransferDataSchema}.
+ */
+export function readBvnkOfframpTransferData(
+  providerData: CounterpartyRow["provider_data"]
+): BvnkOfframpTransferData {
+  const bvnk = providerData.bvnk;
+  if (bvnk === undefined) {
+    throw internalError("BVNK off-ramp transfer provider_data has no bvnk object");
+  }
+  const parsed = bvnkOfframpTransferDataSchema.safeParse(bvnk);
+  if (!parsed.success) {
+    throw internalError("BVNK off-ramp transfer provider_data.bvnk is malformed");
   }
   return parsed.data;
 }
@@ -458,26 +510,6 @@ export function isBvnkWalletActive(status: string | undefined): boolean {
   return status !== undefined && BVNK_WALLET_ACTIVE_STATUSES.has(status.toUpperCase());
 }
 
-export function readBvnkData(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const bvnk = providerData.bvnk;
-  return bvnk && typeof bvnk === "object" ? (bvnk as Record<string, unknown>) : {};
-}
-
-/** Merchant-owned BVNK off-ramp wallet, one per fiat currency. */
-export interface BvnkOfframpWallet {
-  id: string;
-  status?: string;
-}
-
-export function buildBvnkOfframpWalletName(
-  fiatCurrency: RampFiatCurrency,
-  counterpartyId: string
-): string {
-  return `sdp:offramp:${fiatCurrency}:${counterpartyId}`;
-}
-
 /** Fiat currency SDP provisions BVNK customer funding wallets for (the US-only residence list this slice). */
 export const BVNK_FUNDING_WALLET_FIAT = "USD" as const satisfies RampFiatCurrency;
 
@@ -495,48 +527,15 @@ export function buildBvnkFundingWalletName(providerAccountId: string): string {
   return `sdp:onramp:${providerAccountId}`;
 }
 
-const BVNKMerchantOfframpWalletName = z.object({
-  namespace: z.literal("sdp"),
-  kind: z.literal("merchant_offramp"),
-  fiatCurrency: z.enum(RAMP_FIAT_CURRENCIES),
-  counterpartyId: z.string().min(1),
-});
-
 const BVNKFundingWalletName = z.object({
   namespace: z.literal("sdp"),
   kind: z.literal("funding_wallet"),
   providerAccountId: z.string().min(1),
 });
 
-export const BVNKWallet = z.discriminatedUnion("kind", [
-  BVNKMerchantOfframpWalletName,
-  BVNKFundingWalletName,
-]);
+export const BVNKWallet = z.discriminatedUnion("kind", [BVNKFundingWalletName]);
 
 export type BVNKWallet = z.infer<typeof BVNKWallet>;
-
-export function parseBvnkOfframpWalletName(
-  walletName: string
-): Extract<BVNKWallet, { kind: "merchant_offramp" }> {
-  const parts = walletName.split(":");
-  if (parts.length !== 4) {
-    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
-  }
-  const [namespace, direction, fiatCurrency, counterpartyId] = parts;
-  if (direction !== "offramp") {
-    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
-  }
-  const parsed = BVNKMerchantOfframpWalletName.safeParse({
-    namespace,
-    kind: "merchant_offramp",
-    fiatCurrency,
-    counterpartyId,
-  });
-  if (!parsed.success) {
-    throw internalError(`Malformed BVNK off-ramp wallet name: ${walletName}`);
-  }
-  return parsed.data;
-}
 
 /**
  * Parses a customer funding wallet name back into its SDP provider-account id.
@@ -577,14 +576,11 @@ export function parseBvnkFundingWalletName(
  * retry them.
  *
  * @param walletName BVNK wallet `name` value.
- * @returns The parsed funding or merchant off-ramp wallet reference, or the
- * unrecognised name when it does not match either SDP naming contract.
+ * @returns The parsed funding wallet reference, or the unrecognised name when
+ * it does not match the SDP funding wallet naming contract.
  */
 export function parseBvnkWalletName(walletName: string): BVNKWallet | BvnkUnrecognisedWalletName {
   const parts = walletName.split(":");
-  if (parts[1] === "offramp" && parts.length === 4) {
-    return parseBvnkOfframpWalletName(walletName);
-  }
   if (parts[1] === "onramp" && parts.length === 3) {
     return parseBvnkFundingWalletName(walletName);
   }
@@ -595,105 +591,4 @@ export function parseBvnkWalletName(walletName: string): BVNKWallet | BvnkUnreco
 export interface BvnkUnrecognisedWalletName {
   kind: "unrecognised";
   name: string;
-}
-
-export function readBvnkOfframpWallets(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, BvnkOfframpWallet> {
-  const offramp = readRecord(readBvnkData(providerData).offramp)?.wallets;
-  return offramp && typeof offramp === "object"
-    ? (offramp as Record<string, BvnkOfframpWallet>)
-    : {};
-}
-
-export function withBvnkOfframpWalletStatus(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: RampFiatCurrency,
-  status: string
-): CounterpartyRow["provider_data"] {
-  const bvnk = readBvnkData(providerData);
-  const offramp =
-    bvnk.offramp && typeof bvnk.offramp === "object"
-      ? (bvnk.offramp as Record<string, unknown>)
-      : {};
-  const wallets = readBvnkOfframpWallets(providerData);
-  return {
-    ...providerData,
-    bvnk: {
-      ...bvnk,
-      offramp: {
-        ...offramp,
-        wallets: {
-          ...wallets,
-          [fiatCurrency]: { ...wallets[fiatCurrency], status },
-        },
-      },
-    },
-  };
-}
-
-export function readBvnkOfframpWallet(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: string
-): BvnkOfframpWallet | undefined {
-  return readBvnkOfframpWallets(providerData)[fiatCurrency];
-}
-
-/** A registered off-ramp payout beneficiary. PII-light: raw account details are not stored. */
-export interface BvnkOfframpBeneficiary {
-  /** `${fiatCurrency}:${hash(collectedData)}` — content-addressed so distinct bank details never collide. */
-  key: string;
-  fiatCurrency: string;
-  accountType: string;
-  createdAt: string;
-}
-
-export function readBvnkOfframpBeneficiaries(
-  providerData: CounterpartyRow["provider_data"]
-): Record<string, unknown> {
-  const beneficiaries = readRecord(readBvnkData(providerData).offramp)?.beneficiaries;
-  return beneficiaries && typeof beneficiaries === "object"
-    ? (beneficiaries as Record<string, unknown>)
-    : {};
-}
-
-function parseBvnkOfframpBeneficiary(key: string, value: unknown): BvnkOfframpBeneficiary {
-  const { fiatCurrency, accountType, createdAt } = value as {
-    fiatCurrency?: unknown;
-    accountType?: unknown;
-    createdAt?: unknown;
-  };
-  if (
-    typeof fiatCurrency !== "string" ||
-    typeof accountType !== "string" ||
-    typeof createdAt !== "string"
-  ) {
-    throw internalError(`Malformed BVNK off-ramp beneficiary "${key}" in provider_data`);
-  }
-  return { key, fiatCurrency, accountType, createdAt };
-}
-
-export function readBvnkOfframpBeneficiaryByKey(
-  providerData: CounterpartyRow["provider_data"],
-  key: string
-): BvnkOfframpBeneficiary | null {
-  const value = readBvnkOfframpBeneficiaries(providerData)[key];
-  return value === undefined ? null : parseBvnkOfframpBeneficiary(key, value);
-}
-
-export function latestBvnkOfframpBeneficiary(
-  providerData: CounterpartyRow["provider_data"],
-  fiatCurrency: string
-): BvnkOfframpBeneficiary | null {
-  const entries = Object.entries(readBvnkOfframpBeneficiaries(providerData))
-    .filter(([key]) => key.startsWith(`${fiatCurrency}:`))
-    .map(([key, value]) => parseBvnkOfframpBeneficiary(key, value))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return entries[0] ?? null;
-}
-
-export function buildBvnkPartyDetails(counterparty: CounterpartyRow): never {
-  throw badRequest(
-    `BVNK offramp requires identity fields for counterparty ${counterparty.id} that are no longer stored; JIT collection is not wired yet`
-  );
 }

@@ -20,8 +20,11 @@ export const bvnkEstimateFeeCurrencySchema = z
   .toUpperCase()
   .pipe(z.union([bvnkEstimateFiatCurrencySchema, z.enum(Object.values(CRYPTO_RAIL_ASSET_LABELS))]));
 
+export const BVNK_PARTY_DETAILS_TYPES = ["BENEFICIARY", "ORIGINATOR"] as const;
+export type BvnkPartyDetailsType = (typeof BVNK_PARTY_DETAILS_TYPES)[number];
+
 export const bvnkPartyDetailsSchema = z.object({
-  type: z.literal("BENEFICIARY"),
+  type: z.enum(BVNK_PARTY_DETAILS_TYPES),
   entityType: z.literal("INDIVIDUAL"),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
@@ -43,7 +46,7 @@ export type BvnkSandboxPayinCurrency = z.infer<typeof bvnkSandboxPayinCurrencySc
 export const bvnkOfframpQuoteInputSchema = z.object({
   fiatCurrency: bvnkEstimateFiatCurrencySchema,
   paymentTransferId: z.string().min(1),
-  bvnkOfframpWalletId: z.string().min(1),
+  bvnkFundingWalletId: z.string().min(1),
   externalCustomerId: z.string().min(1),
   bvnkCompliance: bvnkComplianceDetailsSchema,
 });
@@ -59,11 +62,23 @@ const bvnkChannelAddressSchema = z.object({
   network: z.string().trim().toUpperCase(),
   address: z.string().min(1),
 });
+
+/**
+ * A BVNK v2 payment channel as returned by `POST /api/v2/channel` and the
+ * `GET /api/v2/channel/{uuid}` read-back. Shape source of truth:
+ * `BVNK_CHANNEL_CREATED_WEBHOOK` in `./test-fixtures` (`data` object). The
+ * confirmed-channel webhook handler asserts `reference`, `walletId`, and
+ * `embeddedCustomerDetails.reference` against SDP-persisted facts before
+ * settling an off-ramp transfer.
+ */
 export const bvnkChannelResponseSchema = z.object({
   uuid: z.string().min(1),
+  walletId: z.string().min(1),
+  reference: z.string().min(1),
   address: z.string().min(1),
   network: z.string().trim().toUpperCase(),
   alternatives: z.array(bvnkChannelAddressSchema).optional(),
+  embeddedCustomerDetails: z.object({ reference: z.string().min(1) }).optional(),
 });
 export type BvnkChannelAddress = z.infer<typeof bvnkChannelAddressSchema>;
 export type BvnkChannelResponse = z.infer<typeof bvnkChannelResponseSchema>;

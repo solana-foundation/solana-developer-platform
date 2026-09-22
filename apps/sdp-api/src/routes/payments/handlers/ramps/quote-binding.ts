@@ -1,5 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
-import type { PaymentRampQuote } from "@sdp/types";
+import type { PaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { conflict } from "@/lib/errors";
 
@@ -93,4 +93,38 @@ export function isRampQuoteBindingExpired(
   }
   const expiryMs = Date.parse(expiresAt);
   return Number.isFinite(expiryMs) && expiryMs <= now;
+}
+
+function isCryptoDepositInstruction(
+  instruction: PaymentRampInstruction
+): instruction is Extract<PaymentRampInstruction, { kind: "crypto_deposit" }> {
+  return "kind" in instruction && instruction.kind === "crypto_deposit";
+}
+
+/**
+ * Provider-data payload carrying the quote's crypto deposit instruction, so the
+ * in-app send validates its destination and amount against what the provider
+ * asked for. Quotes without a manual crypto deposit contribute nothing.
+ *
+ * @param quote - The off-ramp quote whose instructions may name a crypto deposit.
+ * @param cryptoAmount - The crypto amount the transfer was quoted for, or null when the quote carried none.
+ * @returns The `cryptoDeposit` fragment, or an empty object.
+ */
+export function rampQuoteCryptoDepositProviderData(
+  quote: PaymentRampQuote,
+  cryptoAmount: string | null
+): Record<string, unknown> {
+  if (quote.deliveryMode !== "manual_instructions" || cryptoAmount === null) {
+    return {};
+  }
+  const instruction = quote.paymentInstructions?.find(isCryptoDepositInstruction);
+  if (instruction === undefined) {
+    return {};
+  }
+  return {
+    cryptoDeposit: {
+      destinationAddress: instruction.destinationAddress,
+      amount: cryptoAmount,
+    },
+  };
 }

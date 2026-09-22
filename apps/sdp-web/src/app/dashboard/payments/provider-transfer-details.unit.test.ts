@@ -15,7 +15,6 @@ function transferFixture(overrides: Partial<PaymentTransferSummary>): PaymentTra
     ...overrides,
   };
 }
-
 describe("providerTransferDetailRows", () => {
   it("builds a MoonPay sell receipt from the bound provider transaction id", () => {
     const rows = providerTransferDetailRows(
@@ -34,10 +33,9 @@ describe("providerTransferDetailRows", () => {
       href: "https://buy.moonpay.com/v2/transaction-tracker?transactionId=772f7a7f-142e-43cf-824f-8d861aefe8bd",
     });
   });
-
   it("builds MoonPay settlement economics and an explorer link", () => {
     const signature =
-      "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
+      "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
     const rows = providerTransferDetailRows(
       transferFixture({
         id: "xfr_settled",
@@ -62,7 +60,6 @@ describe("providerTransferDetailRows", () => {
       { cluster: "devnet" },
       (key) => key
     );
-
     expect(rows.map(({ key, value }) => [key, value])).toEqual([
       [
         "DashboardPayments.transferDetails.receipt",
@@ -71,7 +68,7 @@ describe("providerTransferDetailRows", () => {
       ["DashboardPayments.transferDetails.providerFee", "2.00 SOL"],
       ["DashboardPayments.transferDetails.networkFee", "0.27 SOL"],
       ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 125 SOL"],
-      ["DashboardPayments.transferDetails.solanaSignature", "5XGAib…iwcM"],
+      ["DashboardPayments.transferDetails.solanaSignature", "TestDe…1111"],
     ]);
     expect(rows[0]).toMatchObject({
       href: "https://buy.moonpay.com/v2/transaction-tracker?transactionId=moonpay_transaction",
@@ -136,19 +133,16 @@ describe("providerTransferDetailRows", () => {
       )
     ).toEqual([]);
   });
-
   it("builds BVNK on-ramp COMPLETE economics, the stored receipt, and the explorer link", () => {
     const hash =
-      "5XGAib9T1PRDQ3sNVofzfP94VUMUh2qqd9BKLBVBQs4Kpnj4JfjaqvAr3Pbx6k8MXA65b6654ooy2TaptkB9iwcM";
-    const payinId = "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9";
-    const payoutId = "01a0ab3c-4388-7e84-a501-3b02668d715b";
+      "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
+    const payinId = "00000000-0000-4000-8000-00000000b001";
+    const payoutId = "00000000-0000-4000-8000-00000000b002";
     const rows = providerTransferDetailRows(
       transferFixture({
         id: "xfr_bvnk_settled",
         type: "onramp",
         provider: "bvnk",
-        // The payout reference names the same payout the stored receipt is
-        // scoped to, so the receipt and the transfer facts agree.
         providerReference: payoutId,
         signature: hash,
         settlement: {
@@ -179,7 +173,6 @@ describe("providerTransferDetailRows", () => {
       { cluster: "devnet" },
       (key) => key
     );
-
     expect(rows.map(({ key, value }) => [key, value])).toEqual([
       ["DashboardPayments.transferDetails.status", "DashboardPayments.bvnk.settlementCompleted"],
       [
@@ -191,7 +184,7 @@ describe("providerTransferDetailRows", () => {
       ["DashboardPayments.transferDetails.providerFee", "0.10 USD"],
       ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 0.998 USDC"],
       ["DashboardPayments.transferDetails.payinId", payinId],
-      ["DashboardPayments.transferDetails.solanaSignature", "5XGAib…iwcM"],
+      ["DashboardPayments.transferDetails.solanaSignature", "TestDe…1111"],
     ]);
     expect(
       rows.find((row) => row.key === "DashboardPayments.transferDetails.receipt")
@@ -214,7 +207,93 @@ describe("providerTransferDetailRows", () => {
       rows.find((row) => row.key === "DashboardPayments.transferDetails.solanaSignature")
     ).not.toHaveProperty("mono");
   });
+  it.each([
+    {
+      networkFeeAmount: "0.00001",
+      networkFeeRows: [["DashboardPayments.transferDetails.networkFee", "0.00001 SOL"]],
+    },
+    { networkFeeAmount: "0", networkFeeRows: [] },
+  ])(
+    "builds BVNK off-ramp rows with network fee $networkFeeAmount",
+    ({ networkFeeAmount, networkFeeRows }) => {
+      const hash =
+        "TestDepos1tS1gnature11111111111111111111111111111111111111111111111111111111111111111111";
+      const rows = providerTransferDetailRows(
+        transferFixture({
+          id: "xfr_bvnk_offramp_settled",
+          type: "offramp",
+          provider: "bvnk",
+          settlement: {
+            provider: "bvnk",
+            kind: "offramp_channel",
+            status: "COMPLETE",
+            channelId: "01000000-0000-7000-8000-00000000c002",
+            transactionId: "01000000-0000-7000-8000-00000000c7a1",
+            txHash: hash,
+            depositAddress: "TestChanne1Depos1tAddress111111111111111111",
+            cryptoCurrency: "USDC",
+            cryptoAmount: "10",
+            fiatCurrency: "USD",
+            fiatAmount: "9.9",
+            displayCurrency: "USD",
+            displayAmount: "9.9",
+            feeCurrency: "USD",
+            feeAmount: "0.09",
+            networkFeeCurrency: "SOL",
+            networkFeeAmount,
+            exchangeRate: "0.99",
+            sources: ["src_a", "src_b"],
+          },
+        }),
+        { cluster: "devnet" },
+        (key) => key
+      );
+      expect(rows.map(({ key, value }) => [key, value])).toEqual([
+        ["DashboardPayments.transferDetails.received", "10.00 USDC"],
+        ["DashboardPayments.transferDetails.credited", "9.90 USD"],
+        ["DashboardPayments.transferDetails.providerFee", "0.09 USD"],
+        ...networkFeeRows,
+        ["DashboardPayments.transferDetails.exchangeRate", "1 USDC = 0.99 USD"],
+        ["DashboardPayments.transferDetails.depositTx", "TestDe…1111"],
+      ]);
+      expect(
+        rows.find((row) => row.key === "DashboardPayments.transferDetails.depositTx")
+      ).toMatchObject({
+        href: `https://explorer.solana.com/tx/${hash}?cluster=devnet`,
+        copyValue: hash,
+      });
+    }
+  );
 
+  it("omits BVNK off-ramp rows for a settlement of another kind", () => {
+    const rows = providerTransferDetailRows(
+      transferFixture({
+        id: "xfr_bvnk_onramp_on_offramp_type",
+        type: "offramp",
+        provider: "bvnk",
+        settlement: {
+          provider: "bvnk",
+          status: "PROCESSING",
+          payinId: "payin_1",
+          payoutId: "payout_1",
+          receiptUrl: "https://pay.sandbox.bvnk.com/payout/payout_1",
+          fiatCurrency: "USD",
+          fiatAmount: "9.9",
+          cryptoCurrency: "USDC",
+          cryptoAmount: "9.8802",
+          feeCurrency: "USD",
+          feeAmount: "0.1",
+          networkFeeCurrency: "USD",
+          networkFeeAmount: "0",
+          exchangeRate: "0.998",
+        },
+      }),
+      { cluster: "devnet" },
+      (key) => key
+    );
+
+    expect(rows).toEqual([]);
+  });
   it("builds BVNK PROCESSING rows without a tx hash and with the sandbox receipt url", () => {
     const rows = providerTransferDetailRows(
       transferFixture({
@@ -222,13 +301,13 @@ describe("providerTransferDetailRows", () => {
         status: "settling",
         type: "onramp",
         provider: "bvnk",
-        providerReference: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+        providerReference: "00000000-0000-4000-8000-00000000b002",
         settlement: {
           provider: "bvnk",
           status: "PROCESSING",
-          payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
-          payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
-          receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+          payinId: "00000000-0000-4000-8000-00000000b001",
+          payoutId: "00000000-0000-4000-8000-00000000b002",
+          receiptUrl: "https://pay.sandbox.bvnk.com/payout/00000000-0000-4000-8000-00000000b002",
           fiatCurrency: "USD",
           fiatAmount: "9.9",
           cryptoCurrency: "USDC",
@@ -243,7 +322,6 @@ describe("providerTransferDetailRows", () => {
       { cluster: "mainnet-beta" },
       (key) => key
     );
-
     expect(rows.map(({ key, value }) => [key, value])).toEqual([
       ["DashboardPayments.transferDetails.status", "DashboardPayments.bvnk.settlementProcessing"],
       [
@@ -255,33 +333,29 @@ describe("providerTransferDetailRows", () => {
       ["DashboardPayments.transferDetails.providerFee", "0.10 USD"],
       ["DashboardPayments.transferDetails.networkFee", "0.12 USD"],
       ["DashboardPayments.transferDetails.exchangeRate", "1 USD = 0.998 USDC"],
-      ["DashboardPayments.transferDetails.payinId", "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9"],
+      ["DashboardPayments.transferDetails.payinId", "00000000-0000-4000-8000-00000000b001"],
     ]);
     expect(rows[1]).toMatchObject({
-      href: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+      href: "https://pay.sandbox.bvnk.com/payout/00000000-0000-4000-8000-00000000b002",
     });
     expect(rows.map(({ key }) => key)).not.toContain(
       "DashboardPayments.transferDetails.solanaSignature"
     );
   });
-
   it("renders no BVNK settlement rows for a failed-after-issued transfer", () => {
-    // The payout was issued (the PROCESSING settlement blob was recorded at
-    // issue) and then failed at the provider: the terminal status hides the
-    // issued-payout economics, so the complete expected row set is empty.
     const rows = providerTransferDetailRows(
       transferFixture({
         id: "xfr_bvnk_failed_after_issued",
         status: "failed",
         type: "onramp",
         provider: "bvnk",
-        providerReference: "01a0ab3c-4388-7e84-a501-3b02668d715b",
+        providerReference: "00000000-0000-4000-8000-00000000b002",
         settlement: {
           provider: "bvnk",
           status: "PROCESSING",
-          payinId: "01a0ab3c-2c02-7788-ab94-d5ce3bbb5db9",
-          payoutId: "01a0ab3c-4388-7e84-a501-3b02668d715b",
-          receiptUrl: "https://pay.sandbox.bvnk.com/payout/01a0ab3c-4388-7e84-a501-3b02668d715b",
+          payinId: "00000000-0000-4000-8000-00000000b001",
+          payoutId: "00000000-0000-4000-8000-00000000b002",
+          receiptUrl: "https://pay.sandbox.bvnk.com/payout/00000000-0000-4000-8000-00000000b002",
           fiatCurrency: "USD",
           fiatAmount: "9.9",
           cryptoCurrency: "USDC",
@@ -301,8 +375,6 @@ describe("providerTransferDetailRows", () => {
   });
 
   it("renders no BVNK settlement rows for a canceled-before-payin transfer", () => {
-    // Canceled while awaiting funding: no payout was ever issued, so no
-    // settlement blob exists to render.
     const rows = providerTransferDetailRows(
       transferFixture({
         id: "xfr_bvnk_canceled_before_payin",
@@ -316,9 +388,8 @@ describe("providerTransferDetailRows", () => {
 
     expect(rows).toEqual([]);
   });
-
   describe("isValidBvnkReceiptUrl", () => {
-    const payoutId = "01a0ab3c-4388-7e84-a501-3b02668d715b";
+    const payoutId = "00000000-0000-4000-8000-00000000b002";
 
     it("accepts an https payout url on either BVNK host", () => {
       expect(isValidBvnkReceiptUrl(`https://pay.bvnk.com/payout/${payoutId}`, payoutId)).toBe(true);
@@ -326,9 +397,6 @@ describe("providerTransferDetailRows", () => {
         isValidBvnkReceiptUrl(`https://pay.sandbox.bvnk.com/payout/${payoutId}`, payoutId)
       ).toBe(true);
 
-      // The rejection matrix: wrong scheme, lookalike host, foreign host,
-      // embedded credentials, non-default port, mismatched payout id,
-      // extra path segments, and non-URLs are all refused.
       const rejects = [
         `http://pay.bvnk.com/payout/${payoutId}`,
         `https://pay.bvnk.com.evil.example/payout/${payoutId}`,

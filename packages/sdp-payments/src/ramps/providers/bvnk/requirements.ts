@@ -127,10 +127,6 @@ const BVNK_TAX_ID_FORMATS: Partial<
     placeholder: "12 345 678 901",
   },
 };
-const BVNK_ACH_ACCOUNT_NUMBER_PATTERN = "^[0-9]{4,17}$";
-const BVNK_ACH_ROUTING_NUMBER_PATTERN = "^[0-9]{9}$";
-const BVNK_IBAN_PATTERN = "^[A-Z]{2}[0-9A-Z]{13,32}$";
-
 /**
  * Jurisdictions covered by BVNK's US money transmitter licences (System Pay
  * Services (US), Inc., NMLS ID 2531294). The US address state select may only
@@ -395,57 +391,4 @@ export function bvnkOnrampFields(countryCode: CountryCode): RequirementField[] {
     bvnkTaxIdField(countryCode),
     ...(countryCode === "US" ? BVNK_ONRAMP_US_FIELDS : []),
   ];
-}
-
-interface BvnkOfframpSpec {
-  accountType: string;
-  fields: readonly RequirementField[];
-}
-
-/** Verified BVNK payout corridors: each fiat maps to its bank-detail field set. */
-const BVNK_OFFRAMP_SPECS = {
-  USD: {
-    accountType: "ACH",
-    fields: [
-      textField({
-        key: "accountNumber",
-        label: "Account number",
-        required: true,
-        pattern: BVNK_ACH_ACCOUNT_NUMBER_PATTERN,
-      }),
-      textField({
-        key: "routingNumber",
-        label: "Routing number",
-        required: true,
-        pattern: BVNK_ACH_ROUTING_NUMBER_PATTERN,
-        placeholder: "021000021",
-      }),
-    ],
-  },
-  EUR: {
-    accountType: "SEPA_CT",
-    fields: [
-      textField({
-        key: "iban",
-        label: "IBAN",
-        required: true,
-        pattern: BVNK_IBAN_PATTERN,
-        placeholder: "DE89370400440532013000",
-      }),
-    ],
-  },
-} as const satisfies Record<string, BvnkOfframpSpec>;
-
-type BvnkOfframpCurrency = keyof typeof BVNK_OFFRAMP_SPECS;
-
-export function isBvnkOfframpCurrency(value: string): value is BvnkOfframpCurrency {
-  return Object.hasOwn(BVNK_OFFRAMP_SPECS, value);
-}
-
-export function bvnkOfframpAccountType(fiatCurrency: BvnkOfframpCurrency): string {
-  return BVNK_OFFRAMP_SPECS[fiatCurrency].accountType;
-}
-
-export function bvnkOfframpFields(fiatCurrency: BvnkOfframpCurrency): RequirementField[] {
-  return [...BVNK_OFFRAMP_SPECS[fiatCurrency].fields];
 }

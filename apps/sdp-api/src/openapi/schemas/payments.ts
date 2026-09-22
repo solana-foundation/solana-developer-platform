@@ -599,8 +599,11 @@ export const moneygramTransferDetailsSchema = z
 /**
  * Provider-reported ramp settlement economics, mirroring the
  * `RampTransferSettlement` union in `@sdp/types`. BVNK on-ramp transfers
- * carry the PROCESSING variant once the payout is created and the COMPLETE
- * variant once the crypto payout settles.
+ * carry the PROCESSING variant once the payout is created, the COMPLETE
+ * variant once the crypto payout settles, and BVNK off-ramp transfers the
+ * offramp_channel variant once the confirmed channel transaction settles
+ * them. The BVNK members share the provider discriminator, so the outer
+ * union is a plain union, not a discriminated one.
  */
 const moonpayRampSettlementSchema = z
   .object({
@@ -729,11 +732,54 @@ const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
   bvnkRampCompleteSettlementSchema,
 ]);
 
-const rampTransferSettlementSchema = z.discriminatedUnion("provider", [
+const bvnkOfframpChannelSettlementSchema = z
+  .object({
+    provider: z.literal("bvnk"),
+    kind: z.literal("offramp_channel"),
+    status: z.literal("COMPLETE"),
+    channelId: z.string().openapi({ description: "BVNK channel uuid the crypto was paid into." }),
+    transactionId: z
+      .string()
+      .openapi({ description: "BVNK channel transaction uuid (event `uuid`)." }),
+    txHash: z.string().openapi({ description: "Deposit transaction hash (event `hash`)." }),
+    depositAddress: z.string().openapi({ description: "Channel deposit address the crypto paid." }),
+    cryptoCurrency: z.string().openapi({ description: "Crypto paid in (event `paidCurrency`)." }),
+    cryptoAmount: z.string().openapi({ description: "Crypto paid in, as a decimal string." }),
+    fiatCurrency: z
+      .string()
+      .openapi({ description: "Fiat credited to the funding wallet (event `walletCurrency`)." }),
+    fiatAmount: z.string().openapi({ description: "Fiat credited, as a decimal string." }),
+    displayCurrency: z
+      .string()
+      .openapi({ description: "Display currency (event `displayCurrency`)." }),
+    displayAmount: z.string().openapi({ description: "Display amount, as a decimal string." }),
+    feeCurrency: z.string().openapi({ description: "Fee currency." }),
+    feeAmount: z.string().openapi({ description: "Fee amount, as a decimal string." }),
+    networkFeeCurrency: z
+      .string()
+      .openapi({ description: "Network fee currency (event `networkFee.paidCurrency`)." }),
+    networkFeeAmount: z
+      .string()
+      .openapi({ description: "Network fee amount, as a decimal string." }),
+    exchangeRate: z.string().openapi({
+      description: "Exchange rate (event `exchangeRate.rate`), as a decimal string.",
+    }),
+    sources: z
+      .array(z.string())
+      .openapi({ description: "Source wallet addresses that paid the channel." }),
+  })
+  .openapi({ description: "BVNK off-ramp channel settlement economics." });
+
+const bvnkSettlementSchema = z.union([
+  bvnkRampSettlementSchema,
+  bvnkOfframpChannelSettlementSchema,
+]);
+
+const rampTransferSettlementSchema = z.union([
   moonpayRampSettlementSchema,
   lightsparkRampSettlementSchema,
   coinbaseRampSettlementSchema,
-  bvnkRampSettlementSchema,
+  bvnkSettlementSchema,
 ]);
 
 export const transferSchema = z

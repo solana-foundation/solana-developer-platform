@@ -10,29 +10,9 @@ import {
   validateBvnkCounterparty,
 } from "./counterparty";
 import { BVNK_RESIDENCE_FIELDS, BVNK_US_MTL_STATES, bvnkOnrampFields } from "./requirements";
+import { bvnkCollectedIndividual } from "./test-fixtures";
 
-const usCollectedData = {
-  firstName: "Ada",
-  lastName: "Lovelace",
-  dateOfBirth: "1815-12-10",
-  email: "ada@example.com",
-  "address.addressLine1": "1 Main Street",
-  "address.city": "Austin",
-  "address.postalCode": "78701",
-  "address.countryCode": "US",
-  "address.stateCode": "MO",
-  "taxIdentification.number": "123-45-6789",
-  birthCountryCode: "GB",
-  nationality: "GB",
-  "cdd.employmentStatus": "SELF_EMPLOYED",
-  "cdd.sourceOfFunds": "SALARY",
-  "cdd.pepStatus": "NOT_PEP",
-  "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
-  "cdd.expectedMonthlyVolume.amount": "1000.50",
-  "cdd.expectedMonthlyVolume.currency": "USD",
-  "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-  "cdd.employmentIndustrySector": "INFORMATION",
-};
+const usCollectedData = bvnkCollectedIndividual({});
 
 function counterparty(): Counterparty {
   return {
@@ -222,6 +202,54 @@ describe("validateBvnkCounterparty", () => {
       status: "collect_counterparty_residence",
       fields: BVNK_RESIDENCE_FIELDS,
     });
+  });
+
+  it("runs the same residence gate for the off-ramp direction", () => {
+    const requirements = validateBvnkCounterparty(counterparty(), {
+      direction: "offramp",
+      providerData: {},
+      fiatCurrency: "USD",
+    });
+
+    assert.deepEqual(requirements, {
+      provider: "bvnk",
+      direction: "offramp",
+      status: "collect_counterparty_residence",
+      fields: BVNK_RESIDENCE_FIELDS,
+    });
+  });
+
+  it("rejects any non-USD fiat before the residence gate, both directions", () => {
+    for (const direction of ["onramp", "offramp"] as const) {
+      assert.deepEqual(
+        validateBvnkCounterparty(counterparty(), {
+          direction,
+          providerData: {},
+          fiatCurrency: "EUR",
+        }),
+        {
+          provider: "bvnk",
+          direction,
+          status: "unsupported",
+          reason: "BVNK supports USD only.",
+        }
+      );
+    }
+  });
+
+  it("rejects non-individual counterparties in both directions", () => {
+    const business: Counterparty = { ...counterparty(), entityType: "business" };
+    for (const direction of ["onramp", "offramp"] as const) {
+      assert.deepEqual(
+        validateBvnkCounterparty(business, { direction, providerData: {}, fiatCurrency: "USD" }),
+        {
+          provider: "bvnk",
+          direction,
+          status: "unsupported",
+          reason: "BVNK supports individual counterparties only.",
+        }
+      );
+    }
   });
 });
 

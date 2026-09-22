@@ -7776,6 +7776,12 @@
                       "signedAt": "2025-01-01T00:00:00.000Z"
                     }
                   ]
+                },
+                "providerAccountReference": "a:26091815750755:c1aVEgc:1",
+                "balance": {
+                  "state": "available",
+                  "amount": "9.90",
+                  "currency": "USD"
                 }
               }
             ]

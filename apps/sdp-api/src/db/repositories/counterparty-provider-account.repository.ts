@@ -448,9 +448,10 @@ export interface CounterpartyProviderAccountsRepository {
   listExternalAccounts(input: ListExternalAccountsInput): Promise<CounterpartyProviderAccountRow[]>;
 
   /**
-   * Lists all payout-account and customer-link rows for one counterparty.
-   * Corridor filters apply to payout accounts only; customer links carry no
-   * corridor and are always included for the matching providers.
+   * Lists all payout-account, customer-link, and funding-wallet rows for one
+   * counterparty. Corridor filters apply to payout accounts and funding
+   * wallets (which carry a fiat currency); customer links carry no corridor
+   * and are always included for the matching providers.
    *
    * @param input - Tenant, project, counterparty, and optional corridor filters.
    * @returns Active and archived rows in creation order.

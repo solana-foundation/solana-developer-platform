@@ -2,19 +2,24 @@ import { createHmac } from "node:crypto";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOnrampRemittance } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { BVNK_FUNDING_WALLET_STATUS, type PaymentTransferStatus } from "@sdp/types";
+import { bvnkVerifiedIndividualCustomer } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
+import {
+  BVNK_FUNDING_WALLET_STATUS,
+  type PaymentRampQuote,
+  type PaymentTransferStatus,
+} from "@sdp/types";
+import type { Address } from "@solana/addresses";
 import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import app from "@/index";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   bvnkSeedCustomerReference,
+  seedBvnkCustomerLink,
   seedBvnkFundingWallet,
   seedBvnkOnrampPayoutIssued,
   seedBvnkOnrampTransfer,
-  TEST_BVNK_OFFRAMP_WALLET_ID,
   TEST_BVNK_WALLET_ID,
 } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
@@ -160,7 +165,6 @@ async function seedRampEventTransfer(params: {
     )
     .run();
 }
-
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
 
@@ -291,7 +295,6 @@ describe("Payments routes — ramps", () => {
     const body = (await response.json()) as { error: { message: string } };
     expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
   });
-
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "provider_walletid_as_custody_id",
@@ -320,12 +323,11 @@ describe("Payments routes — ramps", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(
-      await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>()
+      await getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>()
     ).toEqual({ count: 0 });
   });
-
   it("creates a hosted quote for an exact Connection wallet row", async () => {
     await seedActiveConnectionWallet();
     const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
@@ -352,9 +354,9 @@ describe("Payments routes — ramps", () => {
 
     expect(response.status).toBe(200);
     expect(
-      await getDb(env)
-        .prepare("SELECT custody_wallet_id FROM payment_transfers")
-        .first<{ custody_wallet_id: string | null }>()
+      await getDb(env).prepare("SELECT custody_wallet_id FROM payment_transfers").first<{
+        custody_wallet_id: string | null;
+      }>()
     ).toEqual({ custody_wallet_id: TEST_CONNECTION_CUSTODY_WALLET_ID });
   });
 
@@ -759,7 +761,6 @@ describe("Payments routes — ramps", () => {
       provider_reference: null,
     });
   });
-
   it("dry-runs an on-ramp quote with zero writes", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_onramp_dry_run" });
 
@@ -788,19 +789,17 @@ describe("Payments routes — ramps", () => {
     expect(await response.json()).toMatchObject({
       data: { decision: "allow", criteria: [] },
     });
-
     const [transferCount, operationCount] = await Promise.all([
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>(),
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-        .first<{ count: number }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
+        count: number;
+      }>(),
     ]);
     expect(transferCount).toEqual({ count: 0 });
     expect(operationCount).toEqual({ count: 0 });
   });
-
   it("dry-runs an off-ramp quote with zero writes", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_dry_run" });
 
@@ -829,14 +828,13 @@ describe("Payments routes — ramps", () => {
     expect(await response.json()).toMatchObject({
       data: { decision: "allow", criteria: [] },
     });
-
     const [transferCount, operationCount] = await Promise.all([
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>(),
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-        .first<{ count: number }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
+        count: number;
+      }>(),
     ]);
     expect(transferCount).toEqual({ count: 0 });
     expect(operationCount).toEqual({ count: 0 });
@@ -975,106 +973,280 @@ describe("Payments routes — ramps", () => {
     const offrampBody = (await offrampRes.json()) as { error: { code: string } };
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
-
-  it("fails loudly when a BVNK off-ramp quote has no customer-link row", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "customer_456",
-      providerData: {
-        bvnk: {
-          offramp: {
-            wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
-            beneficiaries: {
-              "USD:abc123": {
-                key: "USD:abc123",
-                fiatCurrency: "USD",
-                accountType: "ACH",
-                createdAt: "2026-06-01T00:00:00.000Z",
-              },
-            },
-          },
-        },
-      },
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    const res = await app.request(
-      "/v1/payments/ramps/offramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "bvnk",
-          counterpartyId,
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
-          fiatCurrency: "USD",
-          cryptoAmount: "75.25",
-          rampsMemo: { invoice: "INV-123", po: "PO-9" },
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("CONFLICT");
-    expect(body.error.message).toContain("not provisioned for bvnk offramp");
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "customer_456",
-      providerData: {
-        bvnk: {
-          offramp: {
-            wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
-          },
-        },
-      },
-    });
-
-    const res = await app.request(
-      "/v1/payments/ramps/offramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "bvnk",
-          counterpartyId,
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
-          fiatCurrency: "USD",
-          cryptoAmount: "75.25",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CONFLICT");
-  });
-
-  describe("BVNK on-ramp quote (rules-free prebook)", () => {
-    const BVNK_QUOTE_CUSTOMER = "bvnk_quote_customer_1";
-
-    async function seedVerifiedCounterparty(externalId: string): Promise<string> {
+  describe("BVNK off-ramp quote (funding-wallet channel)", () => {
+    const BVNK_OFFRAMP_CUSTOMER = "bvnk_offramp_test_customer";
+    async function seedProvisionedOfframpCounterparty(externalId: string): Promise<string> {
       const counterpartyId = await seedCounterparty({ externalId });
-      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+      await seedBvnkCustomerLink(getDb(env), {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         counterpartyId,
+        customerReference: BVNK_OFFRAMP_CUSTOMER,
+        status: "VERIFIED",
+      });
+      return counterpartyId;
+    }
+
+    function bvnkOfframpQuoteRequest(counterpartyId: string, overrides?: Record<string, unknown>) {
+      return app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "bvnk",
+            counterpartyId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "75.25",
+            ...overrides,
+          }),
+        },
+        env
+      );
+    }
+
+    function mockBvnkChannelQuote() {
+      return {
         provider: "bvnk",
-        providerCustomerReference: BVNK_QUOTE_CUSTOMER,
-        metadata: { status: "VERIFIED" },
+        id: "channel_offramp_test_1",
+        status: "pending",
+        deliveryMode: "manual_instructions",
+        paymentInstructions: [
+          {
+            provider: "bvnk",
+            kind: "crypto_deposit",
+            fiatCurrency: "USD",
+            cryptoCurrency: "USDC",
+            destinationAddress: TEST_SOLANA_ADDRESSES.wallet2 as Address,
+            network: "SOLANA",
+            reference: "sdp_offramp_xfr_1",
+            instructionsNotes:
+              "Send USDC on SOLANA to the deposit address. BVNK converts it to USD and credits the counterparty's BVNK USD wallet.",
+          },
+        ],
+      } satisfies PaymentRampQuote;
+    }
+
+    it("fails before prebooking when the funding wallet is not provisioned, and writes no transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_no_funding_wallet"
+      );
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.message).toContain("not provisioned for bvnk offramp");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+
+      const transfer = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ count: number }>();
+      expect(transfer?.count).toBe(0);
+    });
+    it("opens the off-ramp channel on the funding wallet with an ORIGINATOR party and prebooks the transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_provisioned"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }));
+      const channelSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+        .mockResolvedValue(mockBvnkChannelQuote());
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transferId: string; quote: { id: string; deliveryMode: string } };
+      };
+      expect(body.data.transferId.startsWith("xfr_")).toBe(true);
+      expect(body.data.quote.id).toBe("channel_offramp_test_1");
+      expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+
+      const input = channelSpy.mock.calls[0]?.[1];
+      expect(input?.paymentTransferId).toBe(body.data.transferId);
+      expect(input?.bvnkFundingWalletId).toBe(TEST_BVNK_WALLET_ID);
+      expect(input?.externalCustomerId).toBe(BVNK_OFFRAMP_CUSTOMER);
+      expect(input?.bvnkCompliance?.partyDetails[0]?.type).toBe("ORIGINATOR");
+      expect(input?.bvnkCompliance?.partyDetails[0]?.firstName).toBe("Ada");
+
+      const transfer = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE counterparty_id = ?"
+        )
+        .bind(counterpartyId)
+        .first<{
+          status: string;
+          provider_reference: string | null;
+          provider_data: Record<string, unknown>;
+        }>();
+      expect(transfer?.status).toBe("awaiting_payment");
+      expect(transfer?.provider_reference).toBe("channel_offramp_test_1");
+      expect(transfer?.provider_data).toEqual({
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "75.25" },
+        bvnk: {
+          channel: {
+            id: "channel_offramp_test_1",
+            walletId: TEST_BVNK_WALLET_ID,
+            customerReference: BVNK_OFFRAMP_CUSTOMER,
+          },
+        },
+      });
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+    it("rejects the off-ramp quote when the fresh BVNK customer status is no longer verified, patches the link, and writes no transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_fresh_rejected"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer").mockResolvedValue({
+        ...bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }),
+        status: "REJECTED",
+      });
+      const channelSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote");
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { code: string; details: { customerStatus: string } };
+      };
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.details.customerStatus).toBe("REJECTED");
+      expect(channelSpy).not.toHaveBeenCalled();
+      const transfers = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ count: number }>();
+      expect(transfers?.count).toBe(0);
+      const link = await getDb(env)
+        .prepare(
+          "SELECT metadata->>'status' AS status FROM counterparty_provider_accounts WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'"
+        )
+        .bind(counterpartyId)
+        .first<{ status: string }>();
+      expect(link?.status).toBe("REJECTED");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+    it("keeps the prebooked transfer pending when the quote has no crypto deposit instruction", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_missing_instruction"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer").mockResolvedValue(
+        bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER })
+      );
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote").mockResolvedValue({
+        ...mockBvnkChannelQuote(),
+        paymentInstructions: [],
+      });
+      const response = await bvnkOfframpQuoteRequest(counterpartyId);
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as {
+        error: {
+          code: string;
+          message: string;
+        };
+      };
+      expect(body.error.code).toBe("INTERNAL_ERROR");
+      const transfer = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE counterparty_id = ?"
+        )
+        .bind(counterpartyId)
+        .first<{
+          status: PaymentTransferStatus;
+          provider_reference: string | null;
+          provider_data: Record<string, unknown>;
+        }>();
+      expect(transfer).toMatchObject({ status: "pending", provider_reference: null });
+      expect(transfer?.provider_data).not.toHaveProperty("cryptoDeposit");
+      expect(transfer?.provider_data).not.toHaveProperty("bvnk.channel");
+    });
+    it("marks the prebooked transfer failed when the channel call errors", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_channel_error"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }));
+      const channelSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+        .mockRejectedValue(new Error("channel exploded"));
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(500);
+
+      const transfer = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ status: string }>();
+      expect(transfer?.status).toBe("failed");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+  });
+  describe("BVNK on-ramp quote (rules-free prebook)", () => {
+    const BVNK_QUOTE_CUSTOMER = "bvnk_quote_customer_1";
+    async function seedVerifiedCounterparty(externalId: string): Promise<string> {
+      const counterpartyId = await seedCounterparty({ externalId });
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        customerReference: BVNK_QUOTE_CUSTOMER,
+        status: "VERIFIED",
       });
       return counterpartyId;
     }
@@ -1122,7 +1294,6 @@ describe("Payments routes — ramps", () => {
         ],
       };
     }
-
     it("prebooks the transfer, gets the ledger wallet, and answers instructions carrying the SDP-ONRAMP reference without touching rules or the funding wallet", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_provisioned");
       const fundingRow = await seedBvnkFundingWallet(getDb(env), {
@@ -1131,7 +1302,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       const walletSpy = vi
@@ -1203,9 +1374,9 @@ describe("Payments routes — ramps", () => {
       });
 
       walletSpy.mockRestore();
+
       payoutSpy.mockRestore();
     });
-
     it("fails the prebooked transfer when the ledger wallet read rejects", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_wallet_fail");
       await seedBvnkFundingWallet(getDb(env), {
@@ -1214,7 +1385,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       const walletSpy = vi
@@ -1245,7 +1416,6 @@ describe("Payments routes — ramps", () => {
 
       walletSpy.mockRestore();
     });
-
     it("answers counterpartyNotProvisioned while the funding wallet is provisioning", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_provisioning");
       await seedBvnkFundingWallet(getDb(env), {
@@ -1254,7 +1424,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        stage: "claimed",
         metadata: {},
       });
       const walletSpy = vi
@@ -1358,9 +1528,6 @@ describe("Payments routes — ramps", () => {
       };
       expect((await fetchTransfer(A3_TRANSFER_ID)).data.transfer).toEqual(expectedBefore);
 
-      // The "after payout" row is built through the REAL transitions
-      // (seedBvnkOnrampPayinApplied → seedBvnkOnrampPayoutIssued), never by
-      // attaching a settlement to an awaiting_payment row.
       const issued = await seedBvnkOnrampPayoutIssued(getDb(env), {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -1529,7 +1696,6 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("settling");
   });
-
   it("cancels an awaiting BVNK on-ramp transfer after the custody-wallet authz without touching BVNK", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_onramp" });
     await seedBvnkOnrampTransfer(getDb(env), {
@@ -1548,7 +1714,7 @@ describe("Payments routes — ramps", () => {
       counterpartyId,
       providerCustomerReference: "bvnk_cancel_onramp",
       walletId: TEST_BVNK_WALLET_ID,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      stage: "provisioned",
       metadata: {},
     });
     const payoutSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampPayout");
@@ -1586,8 +1752,6 @@ describe("Payments routes — ramps", () => {
 
   it("denies canceling a BVNK on-ramp transfer outside the custody-wallet authz", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_authz" });
-    // The transfer points at a real custody wallet that the API key does not
-    // hold, so the FK holds and the exact-access authz denies the cancel.
     await getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -1635,10 +1799,8 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("awaiting_payment");
   });
-
   describe("BVNK sandbox pay-in simulation", () => {
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
-
     async function seedBvnkSimulatableTransfer(overrides?: {
       status?: PaymentTransferStatus;
       custodyWalletId?: string;
@@ -1651,7 +1813,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: "bvnk_simulate_1",
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       await seedBvnkOnrampTransfer(getDb(env), {
@@ -1934,11 +2096,6 @@ describe("Payments routes — ramps", () => {
     const SESSION_ID = "ses_ramps_environment";
     const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
-    /**
-     * Dashboard (session) callers resolve their environment from the
-     * membership-verified x-project-id project; this seeds the org member, a
-     * production sibling of the hooks' sandbox project, and a session.
-     */
     async function seedSessionAuth(): Promise<void> {
       await getDb(env).batch([
         getDb(env)
@@ -1972,11 +2129,6 @@ describe("Payments routes — ramps", () => {
       );
     }
 
-    // A schema-valid, nonexistent-counterparty mural payload: the mural branch
-    // resolves the counterparty from the DB before ever making a provider
-    // call, so it distinguishes "blocked by the environment guard" (403,
-    // before the payload is inspected) from "past the guard" (404, from the
-    // in-process DB lookup) without a network mock.
     const NONEXISTENT_MURAL_SIMULATE_BODY = {
       provider: "mural",
       payload: { counterpartyId: "cpty_does_not_exist", amount: 100, fiatCurrency: "USD" },
@@ -1985,9 +2137,6 @@ describe("Payments routes — ramps", () => {
     it("refuses the sandbox simulator from a production-project session", async () => {
       await seedSessionAuth();
 
-      // Session callers used to hardcode to sandbox, so a production-project
-      // session could run sandbox simulations inside production tenant scope.
-      // The guard now sees the real project environment.
       const res = await simulateAsSession(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
@@ -1998,9 +2147,6 @@ describe("Payments routes — ramps", () => {
     it("still lets sandbox-project sessions past the environment guard", async () => {
       await seedSessionAuth();
 
-      // A nonexistent counterparty is rejected downstream of the guard, so a
-      // 404 (rather than 403) proves the request got PAST the environment
-      // guard — sandbox sessions are unchanged.
       const res = await simulateAsSession(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
@@ -2210,12 +2356,6 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("lightspark offramp quote account selection", () => {
-    /**
-     * Inserts one counterparty provider-account row with explicit values.
-     *
-     * @param input - Row values for the fixture.
-     * @returns The inserted row id.
-     */
     async function seedLightsparkProviderAccount(input: {
       id: string;
       counterpartyId: string;
@@ -2251,12 +2391,6 @@ describe("Payments routes — ramps", () => {
       return input.id;
     }
 
-    /**
-     * Seeds a lightspark counterparty with a Grid customer link and payout accounts.
-     *
-     * @param accounts - Corridor account fixtures to insert for the counterparty.
-     * @returns The counterparty id.
-     */
     async function seedLightsparkCounterparty(
       accounts: readonly {
         id: string;
@@ -2292,11 +2426,6 @@ describe("Payments routes — ramps", () => {
       return counterpartyId;
     }
 
-    /**
-     * Mocks the Grid quote endpoint with a valid locked-sending quote.
-     *
-     * @returns The installed fetch spy.
-     */
     function mockGridQuote() {
       const quotePage = JSON.stringify({
         id: "Quote:qt_selection_test",

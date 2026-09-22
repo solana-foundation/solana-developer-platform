@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BvnkCompletedPayoutObservation, BvnkFailedPayoutObservation } from "./settlement";
-import { bvnkPayoutObservationMismatches, bvnkTerminalObservationsEqual } from "./settlement";
+import type {
+  BvnkChannelTransactionConfirmedData,
+  BvnkCompletedPayoutObservation,
+  BvnkFailedPayoutObservation,
+} from "./settlement";
+import {
+  bvnkOfframpChannelSettlementFromEvent,
+  bvnkPayoutObservationMismatches,
+  bvnkTerminalObservationsEqual,
+} from "./settlement";
+import {
+  BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK,
+  BVNK_OFFRAMP_CHANNEL_SETTLEMENT_EXPECTED,
+} from "./test-fixtures";
 
-/** One canonical completed observation; every field is caller-written. */
 function completedObservation(
-  overrides: Partial<BvnkCompletedPayoutObservation> = {}
+  overrides: Partial<BvnkCompletedPayoutObservation>
 ): BvnkCompletedPayoutObservation {
   return {
     outcome: "completed",
@@ -28,10 +39,8 @@ function completedObservation(
     ...overrides,
   };
 }
-
-/** One canonical failed observation; failed replays compare on identity alone. */
 function failedObservation(
-  overrides: Partial<BvnkFailedPayoutObservation> = {}
+  overrides: Partial<BvnkFailedPayoutObservation>
 ): BvnkFailedPayoutObservation {
   return {
     outcome: "failed",
@@ -47,23 +56,17 @@ function failedObservation(
     ...overrides,
   };
 }
-
 describe("bvnkTerminalObservationsEqual", () => {
   it("terminal_conflict_is_retained_when_a_competitor_wins", () => {
-    // A competing terminal write with DIVERGED delivery facts is a conflict,
-    // never an identical replay: same identity, different observed fee.
-    const ours = completedObservation();
+    const ours = completedObservation({});
     const competitors = completedObservation({ fee: "9.9" });
     assert.equal(bvnkTerminalObservationsEqual(ours, competitors), false);
     assert.equal(bvnkTerminalObservationsEqual(competitors, ours), false);
   });
-
   it("identical_terminal_replays_are_acknowledged", () => {
-    const completed = completedObservation();
+    const completed = completedObservation({});
     assert.equal(bvnkTerminalObservationsEqual(completed, { ...completed }), true);
-    // Failed observations replay on identity alone: no money moved, so the
-    // requested economics never conflict.
-    const failed = failedObservation();
+    const failed = failedObservation({});
     assert.equal(
       bvnkTerminalObservationsEqual(failed, {
         ...failed,
@@ -73,9 +76,8 @@ describe("bvnkTerminalObservationsEqual", () => {
       true
     );
   });
-
   it("varies_every_completed_delivery_fact_independently", () => {
-    const base = completedObservation();
+    const base = completedObservation({});
     const variants: Partial<BvnkCompletedPayoutObservation>[] = [
       { hash: "tx_other" },
       { destination: "AddrOther" },
@@ -98,9 +100,8 @@ describe("bvnkTerminalObservationsEqual", () => {
       assert.equal(bvnkTerminalObservationsEqual(base, { ...base, ...variant }), false);
     }
   });
-
   it("accepts_numerically_equal_decimal_strings_as_identical", () => {
-    const base = completedObservation();
+    const base = completedObservation({});
     assert.equal(
       bvnkTerminalObservationsEqual(base, {
         ...base,
@@ -113,11 +114,10 @@ describe("bvnkTerminalObservationsEqual", () => {
       true
     );
   });
-
   it("never_confuses_completed_with_failed_observations", () => {
     assert.equal(
       bvnkTerminalObservationsEqual(
-        completedObservation(),
+        completedObservation({}),
         failedObservation({
           uuid: "payout_1",
           reference: "xfr_1",
@@ -126,6 +126,40 @@ describe("bvnkTerminalObservationsEqual", () => {
         })
       ),
       false
+    );
+  });
+});
+describe("bvnkOfframpChannelSettlementFromEvent", () => {
+  function parsedConfirmedPayload(): BvnkChannelTransactionConfirmedData {
+    const data = BVNK_CHANNEL_TRANSACTION_CONFIRMED_WEBHOOK.data;
+    const exchangeRate = data.exchangeRate as { rate: number };
+    const networkFee = data.networkFee as { paidCurrency: string; paidAmount: number };
+    return {
+      channelId: data.channelId,
+      uuid: data.uuid,
+      hash: data.hash,
+      address: data.address,
+      paidCurrency: data.paidCurrency,
+      paidAmount: String(data.paidAmount),
+      displayCurrency: data.displayCurrency,
+      displayAmount: String(data.displayAmount),
+      walletCurrency: data.walletCurrency,
+      walletAmount: String(data.walletAmount),
+      feeCurrency: data.feeCurrency,
+      feeAmount: String(data.feeAmount),
+      exchangeRate: { rate: String(exchangeRate.rate) },
+      networkFee: {
+        paidCurrency: networkFee.paidCurrency,
+        paidAmount: String(networkFee.paidAmount),
+      },
+      sources: [...data.sources],
+    };
+  }
+  it("maps_the_observed_confirmed_payload_to_the_settlement_object_exactly", () => {
+    const parsed = parsedConfirmedPayload();
+    assert.deepEqual(
+      bvnkOfframpChannelSettlementFromEvent(parsed),
+      BVNK_OFFRAMP_CHANNEL_SETTLEMENT_EXPECTED
     );
   });
 });
