@@ -161,6 +161,21 @@ describe("EarnRepository (postgres)", () => {
       expect(row?.risk_metadata).toEqual({ curator: "gauntlet", tvlUsd: 4_200_000 });
     });
 
+    it("updates a provider shelf in one batch and counts only catalogued rows", async () => {
+      const first = await seedStrategy();
+      const second = await seedStrategy({ providerReference: "vault-usdt-prime" });
+
+      const updated = await repo.updateStrategyMetricsBatch([
+        metricsInput(),
+        metricsInput({ providerReference: "vault-usdt-prime", currentApy: "0.081" }),
+        metricsInput({ providerReference: "not-catalogued" }),
+      ]);
+
+      expect(updated).toBe(2);
+      expect((await repo.getStrategyById(first.id))?.current_apy).toBe("0.0731");
+      expect((await repo.getStrategyById(second.id))?.current_apy).toBe("0.081");
+    });
+
     it("never inserts — an unknown reference is a silent no-op", async () => {
       // This is what lets the refresh hand over a provider's whole shelf
       // without first working out which of it we catalogue. If it could
@@ -309,6 +324,25 @@ describe("EarnRepository (postgres)", () => {
       expect(row.risk_metadata).toEqual({ curator: "gauntlet" });
       expect(row.status).toBe("active");
       expect(row.environment).toBe("sandbox");
+    });
+
+    it("upserts a catalogue lane in one batch", async () => {
+      const written = await repo.upsertStrategies([
+        strategyInput({ providerReference: "vault-a" }),
+        strategyInput({ providerReference: "vault-b", name: "Vault B" }),
+      ]);
+
+      expect(written).toBe(2);
+      const listed = await repo.listStrategies({
+        environment: "sandbox",
+        includeInactive: true,
+        limit: 10,
+        offset: 0,
+      });
+      expect(listed.total).toBe(2);
+      expect(new Set(listed.rows.map((row) => row.provider_reference))).toEqual(
+        new Set(["vault-a", "vault-b"])
+      );
     });
 
     it("keeps an operator pause when the sync re-upserts the source as active", async () => {

@@ -441,11 +441,14 @@ wrongly. So the volatile figures have a second pass —
 
 Two properties keep it from fighting the sync, and both are load-bearing:
 
-- **It can only UPDATE.** `updateStrategyMetrics` matches on (provider,
-  reference, environment) and no-ops otherwise, so a provider reporting figures
-  for a vault the catalogue refused cannot admit it. Every admission gate stays
+- **It can only UPDATE.** The normal path sends one atomic
+  `updateStrategyMetricsBatch` per provider/environment; it matches on
+  (provider, reference, environment) and no-ops otherwise, so a provider
+  reporting figures for a vault the catalogue refused cannot admit it. A failed
+  batch falls back to `updateStrategyMetrics` per row to isolate malformed data
+  without costing the rest of the shelf its refresh. Every admission gate stays
   in the hourly sync. Kamino deliberately reports its whole shelf (173 rows) and
-  21 land.
+  only catalogued rows land.
 - **It cannot change what a strategy IS.** `UpdateEarnStrategyMetricsInput`
   carries the rate and volatile risk metadata only, and the metadata is MERGED
   so `curator` (which the sync derives) survives.

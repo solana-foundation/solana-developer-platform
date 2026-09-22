@@ -193,11 +193,10 @@ async function refreshProviderMetrics(
       new Error(`provider metrics exceeded the ${EARN_PROVIDER_METRICS_DEADLINE_MS}ms deadline`),
       startedAt
     );
-    // Logged at error, not warn: the whole point of this pass is that a rate is
-    // stays bounded by the frequent refresh cadence, and a provider that
-    // cannot answer
-    // inside the deadline is not meeting that — even though the rows keep their
-    // last-known figures and every other provider still refreshes.
+    // Logged at error, not warn: the whole point of this pass is to bound rate
+    // freshness with a frequent cadence. A provider that cannot answer inside
+    // the deadline is not meeting that contract, even though its rows keep
+    // their last-known figures and every other provider still refreshes.
     getLogger().error(
       { ...logContext, deadlineMs: EARN_PROVIDER_METRICS_DEADLINE_MS },
       "refreshEarnStrategyMetrics: provider metrics exceeded the deadline"
@@ -239,31 +238,42 @@ async function refreshProviderMetrics(
 
   let updated = 0;
   let failed = 0;
-  for (const entry of metrics) {
-    try {
-      const applied = await repo.updateStrategyMetrics({
-        provider: client.provider,
-        providerReference: entry.providerReference,
-        environment: ctx.environment,
-        // Explicit null, not undefined: a provider that stops reporting a rate
-        // must clear the stored one rather than leave a figure that no longer
-        // has a source behind it.
-        currentApy: entry.currentApy ?? null,
-        riskMetadata: entry.riskMetadata ?? {},
-      });
-      if (applied) {
-        updated += 1;
+  const updates = metrics.map((entry) => ({
+    provider: client.provider,
+    providerReference: entry.providerReference,
+    environment: ctx.environment,
+    // Explicit null, not undefined: a provider that stops reporting a rate
+    // must clear the stored one rather than leave a figure with no source.
+    currentApy: entry.currentApy ?? null,
+    riskMetadata: entry.riskMetadata ?? {},
+  }));
+  try {
+    updated = await repo.updateStrategyMetricsBatch(updates);
+  } catch (batchError) {
+    getLogger().warn(
+      {
+        ...logContext,
+        strategies: updates.length,
+        error: batchError instanceof Error ? batchError.message : String(batchError),
+      },
+      "refreshEarnStrategyMetrics: batch update failed, retrying strategies separately"
+    );
+    for (const update of updates) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- fallback isolates the provider row that broke the atomic batch.
+        const applied = await repo.updateStrategyMetrics(update);
+        if (applied) updated += 1;
+      } catch (err) {
+        failed += 1;
+        getLogger().error(
+          {
+            ...logContext,
+            provider_reference: update.providerReference,
+            error: err instanceof Error ? err.message : String(err),
+          },
+          "refreshEarnStrategyMetrics: failed to update strategy metrics"
+        );
       }
-    } catch (err) {
-      failed += 1;
-      getLogger().error(
-        {
-          ...logContext,
-          provider_reference: entry.providerReference,
-          error: err instanceof Error ? err.message : String(err),
-        },
-        "refreshEarnStrategyMetrics: failed to update strategy metrics"
-      );
     }
   }
 

@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -514,11 +514,15 @@ function PortfolioByStrategy({
   const t = useTranslations();
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
-  const strategiesByReference = new Map(
-    (strategies ?? []).map((strategy) => [
-      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
-      strategy,
-    ])
+  const strategiesByReference = useMemo(
+    () =>
+      new Map(
+        (strategies ?? []).map((strategy) => [
+          earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
+          strategy,
+        ])
+      ),
+    [strategies]
   );
 
   return (
@@ -681,9 +685,9 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
     detailsVisible: selectedStrategyId !== null,
   });
-  const positions = summary ? portfolioPositions(summary) : [];
-  const walletAges = buildAgeDistribution(positions, "wallets");
-  const positionAges = buildAgeDistribution(positions, "positions");
+  const positions = useMemo(() => (summary ? portfolioPositions(summary) : []), [summary]);
+  const walletAges = useMemo(() => buildAgeDistribution(positions, "wallets"), [positions]);
+  const positionAges = useMemo(() => buildAgeDistribution(positions, "positions"), [positions]);
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 

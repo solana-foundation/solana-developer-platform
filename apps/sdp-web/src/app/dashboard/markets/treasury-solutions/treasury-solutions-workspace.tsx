@@ -19,9 +19,11 @@ import {
   ArrowUpIcon,
   ArrowUpRightIcon,
   InfoIcon,
+  Loader2Icon,
   RefreshCwIcon,
   WalletCardsIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -30,6 +32,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { Modal } from "@/components/ui/modal";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -68,6 +71,11 @@ import {
   sumDecimalStrings,
 } from "../earn/earn-market-presentation";
 import {
+  EarnVaultDepositOutcomeTracker,
+  EarnVaultWithdrawalOutcomeTracker,
+  EarnWithdrawalOutcomeTracker,
+} from "../earn/earn-outcome-trackers";
+import {
   type EarnProgram,
   type EarnVaultDepositRecord,
   isEarnVaultDepositInFlight,
@@ -86,18 +94,11 @@ import {
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
 import {
-  EarnVaultDepositModal,
-  EarnVaultDepositOutcomeTracker,
-} from "../earn/earn-vault-deposit-modal";
-import { EarnVaultExitModal } from "../earn/earn-vault-exit-modal";
-import {
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "../earn/earn-vault-ui-state";
-import { EarnVaultWithdrawalOutcomeTracker } from "../earn/earn-vault-withdraw-modal";
 import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
-import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 import {
@@ -117,6 +118,40 @@ import {
   type TreasuryAllocation,
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
+
+// The three transaction surfaces account for most of this route's client
+// module graph. They are not needed to inspect a portfolio, so load each only
+// after the corresponding action opens it. Outcome polling stays in the small
+// tracker module above and remains immediate after a reload.
+export function EarnTransactionModalLoading() {
+  const t = useTranslations();
+  const label = t("Shared.SharedComponents.loading");
+  return (
+    <Modal isOpen ariaLabel={label} showCloseButton={false} size="sm">
+      <div
+        aria-live="polite"
+        className="flex min-h-28 items-center justify-center gap-2 p-6 text-sm text-secondary"
+        role="status"
+      >
+        <Loader2Icon aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+        {label}
+      </div>
+    </Modal>
+  );
+}
+
+const EarnVaultDepositModal = dynamic(
+  () => import("../earn/earn-vault-deposit-modal").then((module) => module.EarnVaultDepositModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
+const EarnVaultExitModal = dynamic(
+  () => import("../earn/earn-vault-exit-modal").then((module) => module.EarnVaultExitModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
+const EarnWithdrawModal = dynamic(
+  () => import("../earn/earn-withdraw-modal").then((module) => module.EarnWithdrawModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
 
 interface VaultBalanceProjection {
   amount: string;
@@ -1150,7 +1185,10 @@ function ActiveVaultPositionsCard({
       ),
     [balanceSortDirection, deposits, positionsWithProvisionalDeposits, withdrawals]
   );
-  const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
+  const walletById = useMemo(
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet] as const)),
+    [wallets]
+  );
 
   return (
     <section>
@@ -2063,10 +2101,11 @@ export function TreasurySolutionsWorkspace({
   // Provider hydration only clears those presentation hints once it can replace
   // them, so the modal and table never race separate client-side state stores.
   useEffect(() => {
+    const positionById = new Map(positions?.map((position) => [position.id, position] as const));
     setVaultDepositWatches((current) => {
       let changed = false;
       const next = current.map((deposit) => {
-        const position = positions?.find((candidate) => candidate.id === deposit.positionId);
+        const position = positionById.get(deposit.positionId);
         const clearProvisional =
           deposit.provisionalPosition !== undefined && position !== undefined;
         const clearProjection =
@@ -2092,7 +2131,7 @@ export function TreasurySolutionsWorkspace({
           !balanceProjectionReachedProvider(
             projection,
             "withdrawal",
-            positions?.find((candidate) => candidate.id === withdrawal.positionId)
+            positionById.get(withdrawal.positionId)
           )
         ) {
           return withdrawal;
@@ -2137,7 +2176,7 @@ export function TreasurySolutionsWorkspace({
     return () => window.clearTimeout(timeout);
   }, [vaultDepositWatches, vaultWithdrawalWatches]);
 
-  const activeWallets = wallets ?? [];
+  const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
   // a wallet can hold receipt tokens for a strategy it has no recorded
   // position in (deposited outside SDP), and those tiles are still not cash.
@@ -2154,15 +2193,25 @@ export function TreasurySolutionsWorkspace({
   //     its error state over stale rows, so this matches that posture), and
   //   - every row actually NAMED its share mint, since a row without one
   //     contributes nothing and leaves a real vault unnameable.
-  const shareMints = treasuryShareMints(positions, strategies, strategiesError);
+  const shareMints = useMemo(
+    () => treasuryShareMints(positions, strategies, strategiesError),
+    [positions, strategies, strategiesError]
+  );
   // Every figure on this page comes from here, so no two surfaces can compute
   // the same thing differently.
-  const allocation = summarizeTreasuryAllocation({
-    positions: availableValue(positionsError, positions),
-    shareMints,
-    wallets: availableValue(walletsError, wallets),
-  });
-  const programs = programsState?.kind === "ready" ? programsState.programs : [];
+  const allocation = useMemo(
+    () =>
+      summarizeTreasuryAllocation({
+        positions: availableValue(positionsError, positions),
+        shareMints,
+        wallets: availableValue(walletsError, wallets),
+      }),
+    [positions, positionsError, shareMints, wallets, walletsError]
+  );
+  const programs = useMemo(
+    () => (programsState?.kind === "ready" ? programsState.programs : []),
+    [programsState]
+  );
   // Recovery seeds durable component state. Do not derive tracker mounts
   // directly from the live list: the list can stop returning a movement just
   // before its detail poll observes terminal state, which would unmount the
@@ -2176,18 +2225,20 @@ export function TreasurySolutionsWorkspace({
     );
   }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
 
-  const activeVaultDepositWatches = vaultDepositWatches.filter(
-    (deposit) => !settledVaultDepositIds.has(deposit.movementId)
+  const activeVaultDepositWatches = useMemo(
+    () => vaultDepositWatches.filter((deposit) => !settledVaultDepositIds.has(deposit.movementId)),
+    [settledVaultDepositIds, vaultDepositWatches]
   );
-  const activeVaultWithdrawalWatches = vaultWithdrawalWatches.filter(
-    (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
+  const activeVaultWithdrawalWatches = useMemo(
+    () =>
+      vaultWithdrawalWatches.filter(
+        (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
+      ),
+    [settledVaultWithdrawalIds, vaultWithdrawalWatches]
   );
-  const portfolioApy = treasuryPortfolioApy(
-    allocation,
-    positions,
-    positionsError,
-    strategies,
-    strategiesError
+  const portfolioApy = useMemo(
+    () => treasuryPortfolioApy(allocation, positions, positionsError, strategies, strategiesError),
+    [allocation, positions, positionsError, strategies, strategiesError]
   );
   const summaryLoading = treasurySummaryLoading({
     positionsError,

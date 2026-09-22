@@ -539,7 +539,16 @@ describe("provider-order settlement boundary", () => {
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
+    logEvent.mockClear();
     await reconcileEarnVaultMovements(env);
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_tick",
+        finalized: 1,
+      })
+    );
 
     // The payment leg is irreversible, but WisdomTree has not delivered shares.
     // Keep that narrower chain fact separate from the economic lifecycle.

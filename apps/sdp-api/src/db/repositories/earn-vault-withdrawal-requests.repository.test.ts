@@ -976,5 +976,58 @@ describe("Earn queued withdrawal repository", () => {
     });
     const claimed = await repository.claimOpenRequests(16);
     expect(claimed.map(({ id }) => id)).toContain(created.request.id);
+
+    // The claim itself is a lease. A second worker cannot pick up the same
+    // provider read until either the worker schedules it or the lease expires.
+    const overlapping = await repository.claimOpenRequests(16);
+    expect(overlapping.map(({ id }) => id)).not.toContain(created.request.id);
+
+    await getDb(env)
+      .prepare("UPDATE earn_vault_withdrawal_requests SET next_check_at = ? WHERE id = ?")
+      .bind("2020-01-01T00:00:00.000Z", created.request.id)
+      .run();
+    const retried = await repository.claimOpenRequests(16);
+    expect(retried.map(({ id }) => id)).toContain(created.request.id);
+  });
+
+  it("defers a failed request before claiming later due work", async () => {
+    const first = await createRequest();
+    const second = await createRequest();
+    for (const created of [first, second]) {
+      await repository.advanceAction({
+        actionId: created.action.id,
+        organizationId: ORG,
+        toStatus: "submitted",
+      });
+      await repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "pending",
+        nonce: "9",
+        creationTimestamp: "1700000000",
+      });
+    }
+
+    const [failed] = await repository.claimOpenRequests(1);
+    if (!failed) throw new Error("Expected one due queued withdrawal");
+    await repository.recordIndexError({
+      withdrawalRequestId: failed.id,
+      error: "provider timed out",
+      retryAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    const [next] = await repository.claimOpenRequests(1);
+    const expectedNext = [first.request.id, second.request.id].find((id) => id !== failed.id);
+    expect(next?.id).toBe(expectedNext);
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: failed.id,
+      })
+    ).resolves.toMatchObject({
+      last_index_error: "provider timed out",
+      next_check_at: "2099-01-01T00:00:00.000Z",
+    });
   });
 });

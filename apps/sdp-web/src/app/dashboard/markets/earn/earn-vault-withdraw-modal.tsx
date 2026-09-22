@@ -30,6 +30,9 @@ import {
   fetchEarnVaultWithdrawalsByRequestId,
   useEarnVaultWithdrawalOutcome,
 } from "./earn-program-data";
+
+export { EarnVaultWithdrawalOutcomeTracker } from "./earn-outcome-trackers";
+
 import { EarnVaultApprovalResult } from "./earn-vault-approval-result";
 import {
   mergeObservedVaultMovement,
@@ -489,28 +492,6 @@ function WithdrawalResult({
       settlement={settlement}
     />
   );
-}
-
-interface EarnVaultWithdrawalOutcomeTrackerProps {
-  movementId: string;
-  /** Keep the table's status badge current while the movement advances. */
-  onUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
-  /** Refresh the balances the exit changed, then retire the tracker. */
-  onSettled?: (withdrawal: EarnVaultWithdrawal) => void;
-}
-
-/**
- * Keeps one logical withdrawal under observation independently of the
- * dismissible modal. The canonical hook polls the movement until the
- * internal transaction reaches a terminal result.
- */
-export function EarnVaultWithdrawalOutcomeTracker({
-  movementId,
-  onSettled,
-  onUpdated,
-}: EarnVaultWithdrawalOutcomeTrackerProps) {
-  useEarnVaultWithdrawalOutcome(movementId, onSettled, onUpdated);
-  return null;
 }
 
 export interface EarnVaultWithdrawModalProps {

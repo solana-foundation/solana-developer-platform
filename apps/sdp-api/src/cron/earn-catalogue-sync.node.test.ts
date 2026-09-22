@@ -24,6 +24,7 @@ const MONITOR_SLOT_KEY = "cron:earn-catalogue-sync:disabled-monitor-slot";
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   upsertStrategy: vi.fn(),
+  upsertStrategies: vi.fn(),
   deprecateUnlistedStrategies: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
@@ -48,6 +49,7 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     upsertStrategy: mocks.upsertStrategy,
+    upsertStrategies: mocks.upsertStrategies,
     deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
     listStrategyFigures: mocks.listStrategyFigures,
   })),
@@ -116,6 +118,10 @@ function installProviders(providers: Record<string, EarnVaultProvider>): void {
 describe("runEarnCatalogueSyncIfDue", () => {
   beforeEach(() => {
     mocks.upsertStrategy.mockReset().mockResolvedValue(undefined);
+    mocks.upsertStrategies.mockReset().mockImplementation(async (inputs: unknown[]) => {
+      for (const input of inputs) await mocks.upsertStrategy(input);
+      return inputs.length;
+    });
     mocks.deprecateUnlistedStrategies.mockReset().mockResolvedValue([]);
     mocks.listStrategyFigures.mockReset().mockResolvedValue([]);
     mocks.logEvent.mockReset();
@@ -129,6 +135,7 @@ describe("runEarnCatalogueSyncIfDue", () => {
         () =>
           ({
             upsertStrategy: mocks.upsertStrategy,
+            upsertStrategies: mocks.upsertStrategies,
             deprecateUnlistedStrategies: mocks.deprecateUnlistedStrategies,
             listStrategyFigures: mocks.listStrategyFigures,
           }) as never
@@ -361,6 +368,56 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.upsertStrategy).toHaveBeenCalledTimes(2);
     expect(mocks.upsertStrategy.mock.calls.every(([row]) => row.provider === "upshift")).toBe(true);
     expect(mocks.compareAndDelete).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates provider references before each lane's batch upsert", async () => {
+    mocks.upsertStrategies.mockImplementation(
+      async (inputs: Array<{ providerReference: string }>) => {
+        const references = inputs.map(({ providerReference }) => providerReference);
+        if (new Set(references).size !== references.length) {
+          throw new Error("batch contains duplicate provider references");
+        }
+        return inputs.length;
+      }
+    );
+    const listStrategies = vi.fn(async (ctx: EarnRuntimeContext) =>
+      ctx.environment === "production"
+        ? [
+            { ...makeSnapshot("mainnet-vault", "mainnet-beta"), name: "Stale mainnet name" },
+            { ...makeSnapshot("mainnet-vault", "mainnet-beta"), name: "Current mainnet name" },
+          ]
+        : [
+            { ...makeSnapshot("devnet-vault"), name: "Stale devnet name" },
+            { ...makeSnapshot("devnet-vault"), name: "Current devnet name" },
+          ]
+    );
+    installProviders({ upshift: makeProvider("upshift", listStrategies) });
+
+    await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("synced");
+
+    expect(mocks.upsertStrategies).toHaveBeenCalledTimes(3);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(1, [
+      expect.objectContaining({
+        providerReference: "mainnet-vault",
+        environment: "production",
+        name: "Current mainnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(2, [
+      expect.objectContaining({
+        providerReference: "devnet-vault",
+        environment: "sandbox",
+        name: "Current devnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategies).toHaveBeenNthCalledWith(3, [
+      expect.objectContaining({
+        providerReference: "mainnet-vault",
+        environment: "sandbox",
+        name: "Current mainnet name",
+      }),
+    ]);
+    expect(mocks.upsertStrategy).not.toHaveBeenCalled();
   });
 
   it("treats stub and un-credentialed providers as steady states, not failures", async () => {
