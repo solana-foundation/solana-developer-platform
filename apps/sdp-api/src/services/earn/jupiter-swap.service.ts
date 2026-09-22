@@ -7,6 +7,7 @@ import type { EarnVaultInstruction, EarnVaultTransactionPlan } from "@sdp/earn/t
 import { isAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
@@ -15,7 +16,7 @@ import type { Env } from "@/types/env";
 import type { VaultDeadline } from "./vault-deadline";
 
 /**
- * Jupiter-routed swap legs for swap-funded Earn deposits.
+ * Jupiter-routed swap legs for swap-funded deposits and provider DEX exits.
  *
  * A customer may fund a vault deposit in a stablecoin the vault does not take
  * (pay USDC into a PYUSD-denominated strategy). The gap is closed by a spot
@@ -110,6 +111,16 @@ const SHARED_ACCOUNTS_ROUTE_V2_DISCRIMINATOR = "d19853937cfed8e9";
 const ROUTE_V2_FIXED_BYTES = 8 + 8 + 8 + 2 + 2 + 2;
 const SHARED_ACCOUNTS_ROUTE_V2_FIXED_BYTES = 8 + 1 + 8 + 8 + 2 + 2 + 2;
 const ROUTE_PLAN_LENGTH_BYTES = 4;
+const SLIPPAGE_BPS_DENOMINATOR = 10_000n;
+
+/** Jupiter's ExactIn V2 program rounds the post-slippage floor up. */
+function exactInMinimumOutAtoms(quotedOutAtoms: bigint, slippageBps: number): bigint {
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps > 10_000) {
+    throw providerUnavailable("Jupiter returned an invalid ExactIn slippage tolerance");
+  }
+  const numerator = quotedOutAtoms * BigInt(10_000 - slippageBps);
+  return (numerator + SLIPPAGE_BPS_DENOMINATOR - 1n) / SLIPPAGE_BPS_DENOMINATOR;
+}
 
 /**
  * ── Compute-unit sizing for the composed transaction ────────────────────────
@@ -242,7 +253,7 @@ function resolveJupiterSwapConfig(env: Env): { url: string; apiKey: string } {
   const apiKey = env.JUPITER_SWAP_API_KEY?.trim();
   if (!apiKey) {
     throw providerNotConfigured(
-      "Swap-funded deposits are not configured: JUPITER_SWAP_API_KEY is not set for this deployment"
+      "Earn swaps are not configured: JUPITER_SWAP_API_KEY is not set for this deployment"
     );
   }
   return {
@@ -251,19 +262,52 @@ function resolveJupiterSwapConfig(env: Env): { url: string; apiKey: string } {
   };
 }
 
+export interface EarnSwapMintMetadata {
+  decimals: number;
+  tokenProgram: keyof typeof SPL_TOKEN_PROGRAMS;
+}
+
 /**
- * Decimals for a mint this service is allowed to reason about. Swap legs move
- * only well-known, deliberately pinned stablecoin mints (both the funding side
- * and every catalogued vault deposit token), so an unknown mint is a refusal —
- * scaling an amount with guessed decimals is exactly how a 6-vs-9 mixup moves
- * a thousandfold the intended value.
+ * Mints the Earn-owned Jupiter boundary may admit.
+ *
+ * Most are the globally well-known token catalogue. Provider-intermediate
+ * assets stay local to this boundary so adding one cannot accidentally expose
+ * it in payment/token pickers: Hastra's wYLDS is spendable only as the exact
+ * output of PRIME's native redeem leg and the input to its USDC exit. Its mint,
+ * scale and classic-token owner come from the same pinned deployment registry
+ * as the Hastra catalogue and execution package.
  */
-export function requireWellKnownMintDecimals(mint: string, role: string): number {
-  const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+const HASTRA_MAINNET_DEPLOYMENT = HASTRA_DEPLOYMENTS["mainnet-beta"];
+
+const EARN_SWAP_MINT_METADATA_BY_MINT: ReadonlyMap<string, EarnSwapMintMetadata> = new Map([
+  ...[...WELL_KNOWN_TOKEN_BY_MINT].map(
+    ([mint, token]) =>
+      [mint, { decimals: token.decimals, tokenProgram: token.tokenProgram }] as const
+  ),
+  ...(HASTRA_MAINNET_DEPLOYMENT
+    ? [
+        [
+          HASTRA_MAINNET_DEPLOYMENT.wYldsMint,
+          {
+            decimals: HASTRA_MAINNET_DEPLOYMENT.decimals,
+            tokenProgram: "spl-token" as const,
+          },
+        ] as const,
+      ]
+    : []),
+]);
+
+/**
+ * Exact token metadata for a mint this service is allowed to reason about.
+ * An unknown mint is a refusal: scaling with guessed decimals or deriving its
+ * ATA through a guessed token program can move the wrong amount or account.
+ */
+export function requireEarnSwapMintMetadata(mint: string, role: string): EarnSwapMintMetadata {
+  const token = EARN_SWAP_MINT_METADATA_BY_MINT.get(mint);
   if (!token) {
-    throw badRequest(`Swap-funded deposits do not support this ${role}: unrecognized mint ${mint}`);
+    throw badRequest(`Earn swaps do not support this ${role}: unrecognized mint ${mint}`);
   }
-  return token.decimals;
+  return token;
 }
 
 /**
@@ -376,7 +420,8 @@ function validateSwapInstruction(
   request: JupiterSwapRequest,
   expected: ExpectedSwapAccounts,
   inputAtoms: bigint,
-  quotedOutAtoms: bigint
+  quotedOutAtoms: bigint,
+  reportedMinOutAtoms: bigint
 ): void {
   if (instruction.programId !== JUPITER_AGGREGATOR_PROGRAM_ID) {
     throw providerUnavailable(
@@ -406,15 +451,23 @@ function validateSwapInstruction(
   // shared route adds one byte of router-account identity after the Anchor
   // discriminator; the remaining fields use the same widths.
   const amountOffset = sharedAccounts ? 9 : 8;
+  const encodedInputAtoms = data.readBigUInt64LE(amountOffset);
+  const encodedQuotedOutAtoms = data.readBigUInt64LE(amountOffset + 8);
+  const encodedSlippageBps = data.readUInt16LE(amountOffset + 16);
   if (
-    data.readBigUInt64LE(amountOffset) !== inputAtoms ||
-    data.readBigUInt64LE(amountOffset + 8) !== quotedOutAtoms ||
-    data.readUInt16LE(amountOffset + 16) !== request.slippageBps ||
+    encodedInputAtoms !== inputAtoms ||
+    encodedQuotedOutAtoms !== quotedOutAtoms ||
+    encodedSlippageBps !== request.slippageBps ||
     data.readUInt16LE(amountOffset + 18) !== 0 ||
     data.readUInt16LE(amountOffset + 20) !== 0
   ) {
     throw providerUnavailable(
       "Jupiter returned a swap instruction that does not match the requested amount, slippage, or zero-fee contract"
+    );
+  }
+  if (reportedMinOutAtoms !== exactInMinimumOutAtoms(encodedQuotedOutAtoms, encodedSlippageBps)) {
+    throw providerUnavailable(
+      "Jupiter returned a swap output floor that does not match its encoded ExactIn contract"
     );
   }
 
@@ -578,7 +631,8 @@ function swapLegInstructions(
   request: JupiterSwapRequest,
   expected: ExpectedSwapAccounts,
   inputAtoms: bigint,
-  quotedOutAtoms: bigint
+  quotedOutAtoms: bigint,
+  minOutAtoms: bigint
 ): EarnVaultInstruction[] {
   if (!body.swapInstruction) {
     throw providerUnavailable("Jupiter answered without a swap instruction");
@@ -620,7 +674,14 @@ function swapLegInstructions(
       "Jupiter returned auxiliary instructions that this stablecoin swap did not request"
     );
   }
-  validateSwapInstruction(body.swapInstruction, request, expected, inputAtoms, quotedOutAtoms);
+  validateSwapInstruction(
+    body.swapInstruction,
+    request,
+    expected,
+    inputAtoms,
+    quotedOutAtoms,
+    minOutAtoms
+  );
   const setupSigners = new Set([request.owner, payer]);
   const ownerOnly = new Set([request.owner]);
   return [
@@ -651,13 +712,10 @@ export async function fetchJupiterSwapLeg(
   request: JupiterSwapRequest
 ): Promise<JupiterSwapLeg> {
   const { url, apiKey } = resolveJupiterSwapConfig(env);
-  const sourceDecimals = requireWellKnownMintDecimals(request.inputMint, "funding token");
-  const depositDecimals = requireWellKnownMintDecimals(request.outputMint, "deposit token");
-  const sourceToken = WELL_KNOWN_TOKEN_BY_MINT.get(request.inputMint);
-  const destinationToken = WELL_KNOWN_TOKEN_BY_MINT.get(request.outputMint);
-  if (!sourceToken || !destinationToken) {
-    throw badRequest("Swap-funded deposits require recognized funding and deposit mints");
-  }
+  const sourceToken = requireEarnSwapMintMetadata(request.inputMint, "funding token");
+  const destinationToken = requireEarnSwapMintMetadata(request.outputMint, "deposit token");
+  const sourceDecimals = sourceToken.decimals;
+  const depositDecimals = destinationToken.decimals;
 
   const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
   if (amountAtoms <= 0n) {
@@ -748,7 +806,14 @@ export async function fetchJupiterSwapLeg(
   }
 
   return {
-    instructions: swapLegInstructions(body, request, expectedAccounts, amountAtoms, quotedOutAtoms),
+    instructions: swapLegInstructions(
+      body,
+      request,
+      expectedAccounts,
+      amountAtoms,
+      quotedOutAtoms,
+      minOutAtoms
+    ),
     lookupTableAddresses: Object.keys(body.addressesByLookupTableAddress ?? {}),
     sourceAmount: request.sourceAmount,
     quotedAmount: formatDecimalAmount(BigInt(body.outAmount), depositDecimals),
@@ -783,10 +848,10 @@ export interface JupiterSwapQuoteResult {
  *
  * `GET {base}/order` with `taker` omitted is the v2 quote surface (the old
  * standalone `/quote` is deprecated): the response carries the routed
- * `outAmount` and no transaction. Used by the Ondo provider's quote
+ * `outAmount` and no transaction. Used by the Ondo and Hastra provider quote
  * capabilities, where a slippage floor is later derived from this figure; it
- * shares the credential, the well-known-mint decimals rule and the error
- * taxonomy with the build above so the two surfaces cannot drift.
+ * shares the credential, approved-mint metadata and error taxonomy with the
+ * build above so the two surfaces cannot drift.
  */
 export async function fetchJupiterSwapQuote(
   env: Env,
@@ -794,8 +859,8 @@ export async function fetchJupiterSwapQuote(
   request: JupiterSwapQuoteRequest
 ): Promise<JupiterSwapQuoteResult> {
   const { url, apiKey } = resolveJupiterSwapConfig(env);
-  const sourceDecimals = requireWellKnownMintDecimals(request.inputMint, "funding token");
-  const outputDecimals = requireWellKnownMintDecimals(request.outputMint, "deposit token");
+  const sourceDecimals = requireEarnSwapMintMetadata(request.inputMint, "funding token").decimals;
+  const outputDecimals = requireEarnSwapMintMetadata(request.outputMint, "deposit token").decimals;
 
   const amountAtoms = parseDecimalAmount(request.sourceAmount, sourceDecimals);
   if (amountAtoms <= 0n) {

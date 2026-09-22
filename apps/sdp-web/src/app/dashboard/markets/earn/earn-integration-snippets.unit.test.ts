@@ -40,6 +40,10 @@ type GeneratedIntegration = {
     discountBps: number;
     deadlineSeconds: number;
   }): Promise<Record<string, unknown>>;
+  previewEarnParRedemption(input: {
+    positionId: string;
+    shares: string;
+  }): Promise<Record<string, unknown>>;
   buildEarnQueuedWithdrawalRequest(input: {
     positionId: string;
     shares: string;
@@ -47,7 +51,17 @@ type GeneratedIntegration = {
     deadlineSeconds: number;
     feePayer?: string;
   }): Promise<Record<string, unknown>>;
-  buildEarnQueuedWithdrawalCancellation(input: {
+  buildEarnParRedemptionRequest(input: {
+    positionId: string;
+    shares: string;
+    feePayer?: string;
+  }): Promise<Record<string, unknown>>;
+  submitEarnWithdrawalRequest(input: {
+    transactionId: string;
+    signedTransaction: string;
+    idempotencyKey: string;
+  }): Promise<Record<string, unknown>>;
+  buildEarnWithdrawalRequestCancellation(input: {
     withdrawalRequestId: string;
     feePayer?: string;
   }): Promise<Record<string, unknown>>;
@@ -404,7 +418,7 @@ describe("generated Embedded Yield integration", () => {
     });
   });
 
-  it("generates explicit queued request and post-deadline recovery calls", async () => {
+  it("generates solver-queue and operator-redemption request flows with cancellation", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal(
@@ -436,6 +450,13 @@ describe("generated Embedded Yield integration", () => {
     );
     const generated = await loadGeneratedIntegration(strategy);
 
+    await generated.previewEarnQueuedWithdrawal({
+      positionId: "position",
+      shares: "2",
+      discountBps: 25,
+      deadlineSeconds: 600,
+    });
+    await generated.previewEarnParRedemption({ positionId: "position", shares: "3" });
     await generated.buildEarnQueuedWithdrawalRequest({
       positionId: "position",
       shares: "2",
@@ -443,7 +464,17 @@ describe("generated Embedded Yield integration", () => {
       deadlineSeconds: 600,
       feePayer: "sponsor",
     });
-    await generated.buildEarnQueuedWithdrawalCancellation({
+    await generated.buildEarnParRedemptionRequest({
+      positionId: "position",
+      shares: "3",
+      feePayer: "sponsor",
+    });
+    await generated.submitEarnWithdrawalRequest({
+      transactionId: "par-build",
+      signedTransaction: "signed-par-request",
+      idempotencyKey: "par-request-1",
+    });
+    await generated.buildEarnWithdrawalRequestCancellation({
       withdrawalRequestId: "request_1",
       feePayer: "sponsor",
     });
@@ -463,6 +494,14 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
+        path: "/v1/earn/external-wallet/queued-withdrawal-previews",
+        body: {
+          positionId: "position",
+          shares: "3",
+          mechanism: "operatorRedemption",
+        },
+      },
+      {
         path: "/v1/earn/external-wallet/withdrawal-request-transactions",
         body: {
           positionId: "position",
@@ -473,10 +512,30 @@ describe("generated Embedded Yield integration", () => {
         },
       },
       {
+        path: "/v1/earn/external-wallet/withdrawal-request-transactions",
+        body: {
+          positionId: "position",
+          shares: "3",
+          mechanism: "operatorRedemption",
+          feePayer: "sponsor",
+        },
+      },
+      {
+        path: "/v1/earn/external-wallet/withdrawal-requests",
+        body: {
+          transactionId: "par-build",
+          signedTransaction: "signed-par-request",
+        },
+      },
+      {
         path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
         body: { withdrawalRequestId: "request_1", feePayer: "sponsor" },
       },
     ]);
+
+    const source = buildEarnServerIntegration(strategy, "https://api.test");
+    expect(source).toContain("operatorRedemption request is cancellable while pending");
+    expect(source).toContain("solverQueue request must first");
   });
 
   it("refuses queue terms outside the live provider bounds before building", async () => {

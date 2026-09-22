@@ -200,6 +200,43 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     ).toBeTruthy();
   });
 
+  it("shows pending operator redemption without solver dates and permits cancellation", async () => {
+    const refresh = vi.fn();
+    const par = {
+      ...request("par_request", "pending"),
+      provider: "hastra",
+      mechanism: "operatorRedemption" as const,
+      intermediateMint: "wylds",
+      intermediateAmount: "2500",
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    };
+    mocks.useRequests.mockReturnValue({
+      withdrawalRequests: [par],
+      error: undefined,
+      isLoading: false,
+      refresh,
+    });
+    mocks.cancelRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ...par, status: "cancelling" },
+    });
+
+    renderCard();
+
+    expect(screen.getByText("Awaiting operator")).toBeTruthy();
+    expect(screen.getByText(/expected at par · awaiting operator settlement/)).toBeTruthy();
+    expect(screen.queryByText(/payment can start after/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel and keep wYLDS" }));
+    await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Cancelling")).toBeTruthy();
+    expect(screen.getByText(/cancelling the operator request/)).toBeTruthy();
+    expect(screen.queryByText(/awaiting operator settlement/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel and keep wYLDS" })).toBeNull();
+  });
+
   it("renders nothing once the server-side open feed is empty", () => {
     mocks.useRequests.mockReturnValue({
       withdrawalRequests: [],

@@ -204,7 +204,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("strategyId: STRATEGY_ID");
     expect(code).not.toContain("sourceTokenMint");
     expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
-    expect(code.match(/return data\.transaction;/g)).toHaveLength(4);
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(5);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
@@ -223,6 +223,10 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
+    expect(code).toContain("previewEarnParRedemption");
+    expect(code).toContain("buildEarnParRedemptionRequest");
+    expect(code).toContain('mechanism: "operatorRedemption"');
+    expect(code).toContain("operatorRedemption request is cancellable while pending");
     expect(code).toContain("waitForEarnMovement");
     expect(code).toContain("intervalMs = 1_000");
     expect(code).not.toContain('movement.status === "confirmed"');

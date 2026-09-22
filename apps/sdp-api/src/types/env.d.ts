@@ -112,7 +112,7 @@ export interface Env {
   JUPITER_PRICE_API_URL?: string;
   JUPITER_PRICE_API_KEY?: string;
   /**
-   * Jupiter Swap API (swap-funded Earn deposits). Fail-closed: with no key
+   * Jupiter Swap API (swap-funded Earn deposits and provider DEX exits). Fail-closed: with no key
    * present, a deposit that names a `sourceTokenMint` is refused before any
    * network request — the same posture as an absent provider credential.
    * The URL defaults to the keyed production base; override it only to pin a
@@ -316,6 +316,9 @@ export interface Env {
   // Markets module gate. Clearing it dark-launches every Markets API surface.
   MARKETS_ENABLED?: string;
   EARN_ENABLED?: string;
+  // Optional Hastra PRIME -> wYLDS -> Jupiter -> USDC exit. Off by default;
+  // Hastra's operator-settled par redemption remains available independently.
+  EARN_HASTRA_DEX_EXIT_ENABLED?: string;
   // Settlement authority for DvP trades. Only this key can Settle or Cancel;
   // the parties can only unwind. It cannot be either party or an executable
   // account. Where it ultimately lives is still an open decision (PRO-1796).

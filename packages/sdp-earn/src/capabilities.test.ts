@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   supportsPortfolioWallets,
+  supportsVaultParRedemption,
   supportsVaultProviderOrderWithdraw,
   supportsVaultQueuedWithdraw,
   supportsWithdrawalApprovals,
@@ -80,6 +81,30 @@ describe("supportsVaultQueuedWithdraw", () => {
       decodeQueuedWithdrawalLifecycleEvents: async () => [],
     });
     assert.equal(supportsVaultQueuedWithdraw(complete), true);
+  });
+});
+
+describe("supportsVaultParRedemption", () => {
+  const directMethods = {
+    buildVaultDeposit: async () => ({}),
+    readVaultPositions: async () => [],
+    sponsoredPrograms: () => [],
+  };
+
+  it("requires the complete request, cancel, read, and lifecycle contract", () => {
+    const partial = Object.assign(Object.create(EARN_PROVIDER_CLIENTS.veda), directMethods, {
+      getParRedemptionOptions: async () => ({}),
+      quoteParRedemption: async () => ({}),
+      buildParRedemptionRequest: async () => ({}),
+      buildParRedemptionCancel: async () => ({}),
+      readParRedemptionRequest: async () => ({}),
+    });
+    assert.equal(supportsVaultParRedemption(partial), false);
+
+    const complete = Object.assign(partial, {
+      decodeParRedemptionLifecycleEvents: async () => [],
+    });
+    assert.equal(supportsVaultParRedemption(complete), true);
   });
 });
 
