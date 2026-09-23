@@ -8,14 +8,17 @@ import { env } from "@/test/helpers/env";
 import {
   assertClosingIdentity,
   findClosingEventInHistoryPage,
+  findClosingParEventInHistoryPage,
   nextQueuedWithdrawalCheckAt,
   projectClosingEvent,
   reconcileAction,
+  reconcileParRequest,
   visitOpenRequestsJustInTime,
 } from "./vault-queued-withdrawal-reconciliation.service";
 
 const provider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
 const parProvider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
+const sweepRpc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 
 vi.mock("@/services/earn/execution-registry", () => ({
   earnClusterFor: () => "devnet",
@@ -23,6 +26,11 @@ vi.mock("@/services/earn/execution-registry", () => ({
   resolveVaultQueuedWithdrawClient: () => provider.client,
   resolveVaultParRedemptionClient: () => parProvider.client,
 }));
+
+vi.mock("@sdp/rpc/solana", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, createRpc: () => sweepRpc.current };
+});
 
 const OWNER = "7YfVedaQueueOwner111111111111111111111111111";
 const VAULT = "8VfVedaQueueVault111111111111111111111111111";
@@ -147,6 +155,7 @@ describe("queued withdrawal reconciliation", () => {
     vi.clearAllMocks();
     provider.client = null;
     parProvider.client = null;
+    sweepRpc.current = null;
   });
 
   it("backs pending provider reads off without adding delay past maturity", () => {
@@ -586,6 +595,109 @@ describe("queued withdrawal reconciliation", () => {
         closingSignature: "operator-fulfillment",
         assetsPaid: "10.25",
         fulfilledAt: "2027-01-15T08:03:20.000Z",
+      })
+    );
+  });
+
+  it("decodes par closing history with bounded parallel transaction reads", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const rpc = {
+      getTransaction: vi.fn((signature: string) => ({
+        send: async () => {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          active -= 1;
+          return { blockTime: 1_800_000_200, meta: { err: null, logMessages: [signature] } };
+        },
+      })),
+      getSignaturesForAddress: vi.fn(),
+    };
+    const client = {
+      decodeParRedemptionLifecycleEvents: vi.fn(
+        async (_ctx: unknown, input: { logs: readonly string[] }) =>
+          input.logs[0] === "history-9"
+            ? [
+                {
+                  kind: "redemptionFulfilled",
+                  requestAddress: PAR_REQUEST_ADDRESS,
+                  owner: OWNER,
+                  intermediateMint: INTERMEDIATE_MINT,
+                  intermediateAmount: "10.25",
+                  assetsPaid: "10.25",
+                  occurredAt: "1800000200",
+                },
+              ]
+            : []
+      ),
+    };
+    const history = Array.from({ length: 12 }, (_, index) => ({
+      signature: `history-${index}`,
+      err: null,
+    }));
+
+    await expect(
+      findClosingParEventInHistoryPage(env, rpc as never, parRequest(), client as never, history)
+    ).resolves.toMatchObject({ signature: "history-9" });
+    expect(maxActive).toBe(8);
+    expect(rpc.getTransaction).toHaveBeenCalledTimes(12);
+  });
+
+  it("schedules the next provider read for a live par request instead of recycling the claim", async () => {
+    const ledger = fakeLedger(parRequest({ status: "pending" }));
+    parProvider.client = {
+      readParRedemptionRequest: vi.fn().mockResolvedValue({
+        requestAddress: PAR_REQUEST_ADDRESS,
+        status: "pending",
+        request: {
+          requestAddress: PAR_REQUEST_ADDRESS,
+          providerReference: VAULT,
+          owner: OWNER,
+          intermediateMint: INTERMEDIATE_MINT,
+          intermediateAmount: "10.25",
+        },
+      }),
+    };
+
+    const before = Date.now();
+    await expect(reconcileParRequest(env, ledger, parRequest({ status: "pending" }))).resolves.toBe(
+      "unchanged"
+    );
+    expect(ledger.advanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ toStatus: "pending", lastIndexError: null })
+    );
+    const nextCheckAt = vi.mocked(ledger.advanceRequest).mock.calls[0]?.[0]?.nextCheckAt;
+    expect(typeof nextCheckAt).toBe("string");
+    // A live operator request must keep a retry schedule: without one the
+    // claim lease is dropped and the same request is re-claimed immediately.
+    expect(Date.parse(nextCheckAt as string)).toBeGreaterThanOrEqual(before + 59_000);
+    expect(Date.parse(nextCheckAt as string)).toBeLessThanOrEqual(Date.now() + 61_000);
+  });
+
+  it("backs off a closed par request whose history has no closing event yet", async () => {
+    const ledger = fakeLedger(parRequest({ status: "closed_or_unknown" }));
+    parProvider.client = {
+      readParRedemptionRequest: vi.fn().mockResolvedValue({
+        requestAddress: PAR_REQUEST_ADDRESS,
+        status: "closedOrUnknown",
+        request: null,
+      }),
+    };
+    sweepRpc.current = {
+      getSignaturesForAddress: vi.fn().mockReturnValue({
+        send: vi.fn().mockResolvedValue([]),
+      }),
+    };
+
+    await expect(
+      reconcileParRequest(env, ledger, parRequest({ status: "closed_or_unknown" }))
+    ).resolves.toBe("closedUnknown");
+    expect(ledger.advanceRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toStatus: "closed_or_unknown",
+        lastIndexError: "Par-redemption PDA closed without a matching finalized event yet",
+        nextCheckAt: expect.any(String),
       })
     );
   });
