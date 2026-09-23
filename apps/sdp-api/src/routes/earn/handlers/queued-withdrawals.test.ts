@@ -59,12 +59,19 @@ describe("queued withdrawal handler contracts", () => {
     ).toBe(true);
     expect(
       earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+        positionId: position.id,
+        shares: "10",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(true);
+    expect(
+      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
         strategyId: "hastra-prime",
         ownerAddress: "11111111111111111111111111111111",
         shares: "10",
         mechanism: "operatorRedemption",
       }).success
-    ).toBe(true);
+    ).toBe(false);
     expect(
       earnVaultWithdrawalRequestSchema.safeParse({
         positionId: position.id,

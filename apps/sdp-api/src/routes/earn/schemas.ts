@@ -630,7 +630,7 @@ export const earnExternalWalletWithdrawalPreviewSchema = z.union([
   }),
 ]);
 
-/** Optional-auth locator shared by queued exit options, previews and builds. */
+/** Optional-auth locator shared by queued exit options and previews. */
 export const earnExternalWalletWithdrawalOptionsSchema = z.union([
   z.object({ positionId: earnWithdrawalPositionIdSchema }).strict(),
   z
@@ -680,23 +680,7 @@ export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
     .strict(),
   z
     .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      ...earnExternalWalletFeePayerShape,
-      ...earnVaultQueuedWithdrawalTermsShape,
-    })
-    .strict(),
-  z
-    .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletFeePayerShape,
-      ...earnVaultParRedemptionTermsShape,
-    })
-    .strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
       ...earnExternalWalletFeePayerShape,
       ...earnVaultParRedemptionTermsShape,
     })

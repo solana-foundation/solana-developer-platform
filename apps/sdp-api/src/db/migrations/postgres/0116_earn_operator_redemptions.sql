@@ -26,9 +26,12 @@ ALTER TABLE earn_vault_withdrawal_requests
     CHECK (
       (
         mechanism = 'solver_queue'
+        AND discount_bps IS NOT NULL
         AND discount_bps BETWEEN 0 AND 10000
         AND intermediate_mint IS NULL
         AND intermediate_amount IS NULL
+        AND maturity_timestamp IS NOT NULL
+        AND deadline_timestamp IS NOT NULL
         AND maturity_timestamp = TRUNC(maturity_timestamp)
         AND deadline_timestamp = TRUNC(deadline_timestamp)
         AND maturity_timestamp >= 0
@@ -40,6 +43,8 @@ ALTER TABLE earn_vault_withdrawal_requests
         AND discount_bps IS NULL
         AND maturity_timestamp IS NULL
         AND deadline_timestamp IS NULL
+        AND intermediate_mint IS NOT NULL
+        AND intermediate_amount IS NOT NULL
         AND LENGTH(intermediate_mint) BETWEEN 32 AND 44
         AND LENGTH(intermediate_amount) BETWEEN 1 AND 128
         AND intermediate_amount ~ '^\d+(\.\d+)?$'

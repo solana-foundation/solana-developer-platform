@@ -30,6 +30,7 @@ const MAINNET_PRIME_MINT = MAINNET.primeMint;
 function stubMetricsFeed() {
   return mock.method(globalThis, "fetch", async () =>
     Response.json({
+      wylds_card: { wylds_ratio: "1.0050906525492219" },
       prime_card: {
         mint_address_by_chain: { solana: MAINNET_PRIME_MINT },
         vault_balance_by_chain: { solana: "130615211.729093" },
@@ -121,7 +122,7 @@ describe("HastraEarnClient", () => {
       wrapperAsset: "wYLDS",
       priceOracle: "Chainlink Data Streams",
       programRelease: "v0.0.6",
-      tvlUsd: 130_615_211.729093,
+      tvlUsd: 131_280_128.38964885,
       parExit: "PRIME to wYLDS atomically, then Hastra operator-mediated redemption",
       optionalDexExit:
         "PRIME to wYLDS to USDC through Jupiter when enabled by the integrating deployment",
@@ -135,7 +136,7 @@ describe("HastraEarnClient", () => {
       {
         providerReference: MAINNET.primeMint,
         currentApy: "0.061336",
-        riskMetadata: { tvlUsd: 130_615_211.729093 },
+        riskMetadata: { tvlUsd: 131_280_128.38964885 },
       },
     ]);
   });
