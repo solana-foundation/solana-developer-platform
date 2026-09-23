@@ -270,7 +270,7 @@ describe("trackPendingTransfers", () => {
           slot: 22222n,
           confirmations: 0n,
           confirmationStatus: "confirmed",
-          err: { InstructionError: [0, "Custom"] },
+          err: { InstructionError: [0, { Custom: 1 }] },
         },
       ]);
 
@@ -310,23 +310,40 @@ describe("trackPendingTransfers", () => {
       expect(errored?.slot).toBe(22222);
     });
 
-    it("keeps an old processing transfer when the transaction-history lookup is unavailable", async () => {
+    it("keeps and rotates an old processing transfer when the transaction-history lookup is unavailable", async () => {
       getSignatureStatusesMock
         .mockResolvedValueOnce([null])
         .mockRejectedValueOnce(new Error("history node down"));
+      const staleAt = minutesAgo(10);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
 
-      await insertTransfer({
-        id: "xfr_legacy_history_down",
-        status: "processing",
-        signature: String(TEST_SIG_1),
-        createdAt: minutesAgo(10),
-        updatedAt: minutesAgo(10),
-      });
+      try {
+        await insertTransfer({
+          id: "xfr_legacy_history_down",
+          status: "processing",
+          signature: String(TEST_SIG_1),
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        });
 
-      await trackPendingTransfers(env);
+        await trackPendingTransfers(env);
 
-      const kept = await getTransfer("xfr_legacy_history_down");
-      expect(kept?.status).toBe("processing");
+        const kept = await getTransfer("xfr_legacy_history_down");
+        expect(kept?.status).toBe("processing");
+        expect(kept?.error).toBeNull();
+        expect(kept?.updated_at).not.toBe(staleAt);
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "sdp_api_payment_submission_unresolved",
+            flow: "reconciler",
+            reason: "history_unavailable",
+            transfer_id: "xfr_legacy_history_down",
+          }),
+          expect.any(String)
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("retries a transient getBlockHeight failure instead of rotating the row", async () => {
