@@ -8,6 +8,7 @@ import { createPostgresPolicyRepository } from "@/db/repositories";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import app from "@/index";
+import type { HumanAuthType } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import {
@@ -642,13 +643,11 @@ describe("Payments routes — transfer policy", () => {
       });
     });
 
-    async function requestTransfer(authType: "clerk" | "session") {
+    async function requestTransfer(authType: HumanAuthType) {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         "x-project-id": TEST_PROJECT.id,
         "Idempotency-Key": "approved-dashboard-transfer",
-        // Client hints cannot supply the trusted replay author type.
-        "x-sdp-approved-wallet-operation-actor-type": "clerk",
       };
       const requesterApp = new Hono<{ Bindings: Env }>();
       if (authType === "clerk") {

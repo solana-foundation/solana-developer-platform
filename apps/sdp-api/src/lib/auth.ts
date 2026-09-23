@@ -10,7 +10,9 @@ import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
-export type AuthType = "api_key" | "clerk" | "session";
+export const HUMAN_AUTH_TYPES = ["clerk", "session"] as const;
+export type HumanAuthType = (typeof HUMAN_AUTH_TYPES)[number];
+export type AuthType = "api_key" | HumanAuthType;
 
 interface AuthContextBase {
   id: string;
@@ -34,11 +36,11 @@ export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
     | {
-        authType: "clerk" | "session";
+        authType: HumanAuthType;
         apiKeyId: null;
         userId: string;
         /** Original author type, set only by authenticated approved-operation replay. */
-        approvedWalletOperationActorType?: "clerk" | "session";
+        approvedWalletOperationActorType?: HumanAuthType;
       }
   );
 

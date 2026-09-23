@@ -9,6 +9,7 @@ import {
   type PolicyRepository,
   type WalletOperationRow,
 } from "@/db/repositories";
+import { HUMAN_AUTH_TYPES } from "@/lib/auth";
 import { AppError } from "@/lib/errors";
 import { createTenantScope, getRequestTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
@@ -34,7 +35,7 @@ const legacyPaymentExecutionBodySchema = z.object({ source: z.string() }).catcha
 
 const humanWalletOperationActorSchema = z
   .object({
-    type: z.enum(["clerk", "session"]),
+    type: z.enum(HUMAN_AUTH_TYPES),
     id: z.string(),
     userId: z.string().refine((userId) => userId.trim().length > 0),
   })
