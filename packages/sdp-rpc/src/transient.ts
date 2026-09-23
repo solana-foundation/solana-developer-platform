@@ -7,10 +7,12 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
+import { RpcHttpStatusError } from "./errors";
 
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
-const TRANSIENT_HTTP_STATUS = /\b(408|429|500|502|503|504)\b/;
+const TRANSIENT_HTTP_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
 
 // Transport-level failures thrown by `fetch` or the underlying socket. The `i`
 // flag makes matching case-insensitive, so callers don't need to lowercase the
@@ -38,7 +40,9 @@ const TRANSIENT_SOLANA_RPC_CODES = [
 export function isTransientRpcError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return (
-    TRANSIENT_HTTP_STATUS.test(message) ||
+    (isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      TRANSIENT_HTTP_STATUS_CODES.has(error.context.statusCode)) ||
+    (error instanceof RpcHttpStatusError && TRANSIENT_HTTP_STATUS_CODES.has(error.httpStatus)) ||
     TRANSIENT_ERROR_TEXT.test(message) ||
     TRANSIENT_SOLANA_RPC_CODES.some((code) => isSolanaError(error, code))
   );
