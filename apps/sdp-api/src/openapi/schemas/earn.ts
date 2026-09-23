@@ -482,10 +482,16 @@ export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema
   ])
 );
 
+const earnAsyncWithdrawalSharesSchema = earnDecimalAmountSchema.openapi({
+  description: "Shares to place into the selected asynchronous exit, in share units.",
+  example: "10",
+});
+
 const earnQueuedWithdrawalTermsFields = {
-  shares: earnDecimalAmountSchema.openapi({
-    description: "Shares to escrow in the queue, decimal string in share units.",
-    example: "10",
+  shares: earnAsyncWithdrawalSharesSchema,
+  mechanism: z.literal("solverQueue").optional().openapi({
+    description:
+      "Selects the solver queue. May be omitted for backwards compatibility; operator redemptions must be explicit.",
   }),
   discountBps: z.number().int().min(0).max(10_000).openapi({
     description:
@@ -535,6 +541,28 @@ const earnQueuedWithdrawalAssetSchema = z.object({
   shareDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
 });
 
+const earnParRedemptionOptionsSchema = z.object({
+  intermediateMint: earnSolanaMintSchema.openapi({
+    description:
+      "Token created or delegated by the request transaction and later burned by the operator.",
+  }),
+  assetMint: earnSolanaMintSchema.openapi({
+    description: "Token the operator pays when the redemption completes.",
+  }),
+  minimumShares: earnDecimalAmountSchema.openapi({
+    description: "Smallest operator-redemption request, in position-share units.",
+    example: "1",
+  }),
+  shareDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
+  assetDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
+  cancelable: z.boolean().openapi({
+    description: "Whether the owner may revoke an open request before the operator completes it.",
+  }),
+  operatorSettled: z.literal(true).openapi({
+    description: "Always true: a provider operator must complete the eventual asset payout.",
+  }),
+});
+
 const earnQueuedWithdrawalOptionsFields = {
   instant: z.boolean().openapi({
     description: "Whether an atomic withdrawal is independently available.",
@@ -555,6 +583,18 @@ const earnQueuedWithdrawalOptionsFields = {
   queueAsset: earnQueuedWithdrawalAssetSchema.nullable().openapi({
     description:
       "Live asset-specific queue limits. Null when this asset has no queue configuration.",
+  }),
+  parRedemption: earnParRedemptionOptionsSchema.nullable().openapi({
+    description:
+      "Live issuer/operator redemption terms. Null when this strategy has no operator-completed par route.",
+  }),
+} as const;
+
+const earnParRedemptionTermsFields = {
+  shares: earnAsyncWithdrawalSharesSchema,
+  mechanism: z.literal("operatorRedemption").openapi({
+    description:
+      "Selects an issuer/operator-completed par redemption with no solver discount or deadline.",
   }),
 } as const;
 
@@ -578,10 +618,12 @@ export const earnExternalWalletQueuedWithdrawalPreviewRequest = z
   .union([
     earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
     earnExternalWalletStrategyLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
+    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionTermsFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnParRedemptionTermsFields),
   ])
   .openapi({
     description:
-      "Preview a queued request against live queue limits. Read-only: nothing is built or persisted.",
+      "Preview a solver-queue or operator-redemption request against live provider limits. Read-only: nothing is built or persisted.",
   });
 
 const earnQueuedWithdrawalPreviewFields = {
@@ -606,25 +648,53 @@ const earnQueuedWithdrawalPreviewFields = {
   blockingIssues: z.array(earnVaultQuoteIssueSchema),
 } as const;
 
+const earnParRedemptionPreviewFields = {
+  mechanism: z.literal("operatorRedemption"),
+  shares: earnDecimalAmountSchema,
+  shareDecimals: z.number().int().min(0).max(38),
+  intermediateMint: earnSolanaMintSchema.openapi({
+    description: "Token the request creates or delegates for later operator settlement.",
+  }),
+  intermediateAmount: earnDecimalAmountSchema.openapi({
+    description: "Expected intermediate-token amount, in that token's units.",
+  }),
+  assetMint: earnSolanaMintSchema,
+  assets: earnDecimalAmountSchema.openapi({
+    description: "Expected par payout when the operator completes the redemption.",
+    example: "10",
+  }),
+  assetDecimals: z.number().int().min(0).max(38),
+  blockingIssues: z.array(earnVaultQuoteIssueSchema),
+} as const;
+
 export const earnExternalWalletQueuedWithdrawalPreviewResponse = successResponseSchema(
   z.union([
     earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalPreviewFields),
     z
       .object({ strategyId: z.string().openapi({ example: "earn_strategy_example" }) })
       .extend(earnQueuedWithdrawalPreviewFields),
+    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionPreviewFields),
+    z
+      .object({ strategyId: z.string().openapi({ example: "earn_strategy_example" }) })
+      .extend(earnParRedemptionPreviewFields),
   ])
 );
 
-export const earnExternalWalletWithdrawalRequestTransactionRequest =
-  earnExternalWalletPositionLocatorSchema
-    .extend({
+export const earnExternalWalletWithdrawalRequestTransactionRequest = z
+  .union([
+    earnExternalWalletPositionLocatorSchema.extend({
       ...earnQueuedWithdrawalTermsFields,
       feePayer: earnFeePayerRequestSchema.optional(),
-    })
-    .openapi({
-      description:
-        "Build a keyed queued-withdrawal request. Landing it escrows shares; it does not pay assets.",
-    });
+    }),
+    earnExternalWalletPositionLocatorSchema.extend({
+      ...earnParRedemptionTermsFields,
+      feePayer: earnFeePayerRequestSchema.optional(),
+    }),
+  ])
+  .openapi({
+    description:
+      "Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token. Neither action pays assets.",
+  });
 
 export const earnExternalWalletWithdrawalRequestCancelTransactionRequest = z
   .object({
@@ -635,7 +705,7 @@ export const earnExternalWalletWithdrawalRequestCancelTransactionRequest = z
   })
   .openapi({
     description:
-      "Build the owner-signed recovery transaction for a request whose status is expiredCancelable.",
+      "Build the owner-signed recovery transaction. Solver requests become cancellable at expiredCancelable; a cancelable operator redemption may be revoked while pending.",
   });
 
 const earnQueuedWithdrawalStatusSchema = z
@@ -655,7 +725,7 @@ const earnQueuedWithdrawalStatusSchema = z
       "Durable request status. Only fulfilled, cancelled and failed are terminal. closedOrUnknown remains retryable until a finalized close event proves payout or recovery.",
   });
 
-const earnQueuedWithdrawalRequestSchema = z.object({
+const earnAsyncWithdrawalRequestCommonFields = {
   withdrawalRequestId: z.string().openapi({ example: "earn_vault_withdrawal_request_example" }),
   positionId: z.string().openapi({ example: "earn_position_example" }),
   provider: z.string().openapi({ example: "veda" }),
@@ -669,11 +739,8 @@ const earnQueuedWithdrawalRequestSchema = z.object({
   quotedAssets: earnDecimalAmountSchema,
   shareDecimals: z.number().int().min(0).max(38),
   assetDecimals: z.number().int().min(0).max(38),
-  discountBps: z.number().int().min(0).max(10_000),
   nonce: z.string().nullable(),
   creationTimestamp: z.string().regex(/^\d+$/).nullable(),
-  maturityTimestamp: z.string().regex(/^\d+$/),
-  deadlineTimestamp: z.string().regex(/^\d+$/),
   creationSignature: z.string().nullable(),
   cancelSignature: z.string().nullable(),
   closingSignature: z.string().nullable(),
@@ -684,15 +751,40 @@ const earnQueuedWithdrawalRequestSchema = z.object({
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
   replayed: z.boolean().optional(),
+} as const;
+
+const earnSolverWithdrawalRequestSchema = z.object({
+  ...earnAsyncWithdrawalRequestCommonFields,
+  mechanism: z.literal("solverQueue"),
+  intermediateMint: z.null(),
+  intermediateAmount: z.null(),
+  discountBps: z.number().int().min(0).max(10_000),
+  maturityTimestamp: z.string().regex(/^\d+$/),
+  deadlineTimestamp: z.string().regex(/^\d+$/),
 });
 
+const earnOperatorRedemptionRequestSchema = z.object({
+  ...earnAsyncWithdrawalRequestCommonFields,
+  mechanism: z.literal("operatorRedemption"),
+  intermediateMint: earnSolanaMintSchema,
+  intermediateAmount: earnDecimalAmountSchema,
+  discountBps: z.null(),
+  maturityTimestamp: z.null(),
+  deadlineTimestamp: z.null(),
+});
+
+const earnAsyncWithdrawalRequestSchema = z.union([
+  earnSolverWithdrawalRequestSchema,
+  earnOperatorRedemptionRequestSchema,
+]);
+
 export const earnExternalWalletWithdrawalRequestResponse = successResponseSchema(
-  z.object({ withdrawalRequest: earnQueuedWithdrawalRequestSchema })
+  z.object({ withdrawalRequest: earnAsyncWithdrawalRequestSchema })
 );
 
 export const earnExternalWalletWithdrawalRequestsResponse = successResponseSchema(
   z.object({
-    withdrawalRequests: z.array(earnQueuedWithdrawalRequestSchema),
+    withdrawalRequests: z.array(earnAsyncWithdrawalRequestSchema),
     hasMore: z.boolean(),
     nextCursor: z.string().nullable(),
   })
@@ -767,6 +859,7 @@ const earnExternalWalletTransactionSchema = z
 const earnQueuedWithdrawalRequestBuildSchema = earnExternalWalletTransactionSchema.extend({
   positionId: z.string().openapi({ example: "earn_position_example" }),
   action: z.literal("request"),
+  mechanism: z.literal("solverQueue"),
   requestAddress: z.string().openapi({ description: "Provider request account address." }),
   shares: earnDecimalAmountSchema,
   assets: earnDecimalAmountSchema,
@@ -775,12 +868,24 @@ const earnQueuedWithdrawalRequestBuildSchema = earnExternalWalletTransactionSche
   deadlineTimestamp: z.string().regex(/^\d+$/),
 });
 
+const earnOperatorRedemptionRequestBuildSchema = earnExternalWalletTransactionSchema.extend({
+  positionId: z.string().openapi({ example: "earn_position_example" }),
+  action: z.literal("request"),
+  mechanism: z.literal("operatorRedemption"),
+  requestAddress: z.string().openapi({ description: "Provider request account address." }),
+  shares: earnDecimalAmountSchema,
+  assets: earnDecimalAmountSchema,
+  intermediateMint: earnSolanaMintSchema,
+  intermediateAmount: earnDecimalAmountSchema,
+});
+
 const earnQueuedWithdrawalCancelBuildSchema = earnExternalWalletTransactionSchema.extend({
   positionId: z.string().openapi({ example: "earn_position_example" }),
   withdrawalRequestId: z.string().openapi({
     example: "earn_vault_withdrawal_request_example",
   }),
   action: z.literal("cancel"),
+  mechanism: z.enum(["solverQueue", "operatorRedemption"]),
   requestAddress: z.string().openapi({ description: "Provider request account address." }),
 });
 
@@ -788,6 +893,7 @@ export const earnExternalWalletWithdrawalRequestTransactionResponse = successRes
   z.object({
     transaction: z.union([
       earnQueuedWithdrawalRequestBuildSchema,
+      earnOperatorRedemptionRequestBuildSchema,
       earnQueuedWithdrawalCancelBuildSchema,
     ]),
   })

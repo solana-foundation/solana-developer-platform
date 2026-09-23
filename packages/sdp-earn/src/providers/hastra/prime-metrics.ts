@@ -11,6 +11,9 @@ interface HastraPorTokenMetrics {
 }
 
 interface HastraPorResponse {
+  wylds_card?: {
+    wylds_ratio?: string;
+  };
   prime_card?: {
     mint_address_by_chain?: {
       solana?: string;
@@ -29,7 +32,7 @@ export interface HastraPrimeMetrics {
   providerReference: string;
   /** Effective PRIME APY as a decimal fraction, e.g. `"0.061336"`. */
   currentApy: string;
-  /** PRIME's Solana vault balance in USD, not the cross-chain total. */
+  /** PRIME's Solana vault balance converted from wYLDS to USD, not the cross-chain total. */
   solanaTvlUsd: number;
 }
 
@@ -71,12 +74,35 @@ function nonNegativeDecimalNumber(value: unknown, field: string): number {
   return parsed;
 }
 
+function positiveDecimalNumber(value: unknown, field: string): number {
+  const parsed = nonNegativeDecimalNumber(value, field);
+  if (parsed === 0) {
+    throw providerUnavailable(`Hastra ${field} must be greater than zero`);
+  }
+  return parsed;
+}
+
+function multiplyNonNegativeDecimals(
+  left: unknown,
+  leftField: string,
+  right: unknown,
+  rightField: string
+): number {
+  const product =
+    nonNegativeDecimalNumber(left, leftField) * positiveDecimalNumber(right, rightField);
+  if (!Number.isFinite(product)) {
+    throw providerUnavailable("Hastra PRIME Solana TVL is outside the supported numeric range");
+  }
+  return product;
+}
+
 /**
  * Read the two PRIME figures SDP publishes from Hastra's public feed.
  *
  * The feed is cross-chain. Identity is therefore checked against the pinned
- * Solana PRIME mint before any figure is accepted, and TVL is the Solana vault
- * balance rather than `prime_card.vaulted_wylds` (the cross-chain total).
+ * Solana PRIME mint before any figure is accepted. TVL converts the Solana-only
+ * wYLDS vault balance to USD using Hastra's wYLDS ratio rather than publishing
+ * token units or using `prime_card.vaulted_wylds` (the cross-chain total).
  */
 export async function readHastraPrimeMetrics(
   expectedPrimeMint: string,
@@ -109,9 +135,11 @@ export async function readHastraPrimeMetrics(
   return {
     providerReference,
     currentApy: hastraPercentToDecimalString(primeEntries[0]?.effective_rate),
-    solanaTvlUsd: nonNegativeDecimalNumber(
+    solanaTvlUsd: multiplyNonNegativeDecimals(
       body.prime_card?.vault_balance_by_chain?.solana,
-      "PRIME Solana vault balance"
+      "PRIME Solana vault balance",
+      body.wylds_card?.wylds_ratio,
+      "wYLDS USD ratio"
     ),
   };
 }

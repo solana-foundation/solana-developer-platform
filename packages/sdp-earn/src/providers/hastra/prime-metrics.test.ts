@@ -11,6 +11,9 @@ const PRIME_MINT = "3b8X44fLF9ooXaUm3hhSgjpmVs6rZZ3pPoGnGahc3Uu7";
 
 const LIVE_BODY = {
   timestamp: "2026-09-22T21:44:02.027138016Z",
+  wylds_card: {
+    wylds_ratio: "1.0050906525492219",
+  },
   prime_card: {
     mint_address_by_chain: {
       ethereum: "0x19ebb35279A16207Ec4ba82799CC64715065F7F6",
@@ -63,13 +66,13 @@ describe("hastraPercentToDecimalString", () => {
 });
 
 describe("readHastraPrimeMetrics", () => {
-  it("reads PRIME APY and Solana-only TVL with one keyless GET", async () => {
+  it("reads PRIME APY and converts the Solana-only wYLDS balance to USD", async () => {
     const seen = stubFeed(LIVE_BODY);
 
     assert.deepEqual(await readHastraPrimeMetrics(PRIME_MINT), {
       providerReference: PRIME_MINT,
       currentApy: "0.061336",
-      solanaTvlUsd: 130_615_211.729093,
+      solanaTvlUsd: 131_280_128.38964885,
     });
     assert.deepEqual(seen, [{ url: HASTRA_POR_API_URL, method: "GET" }]);
   });
@@ -114,6 +117,17 @@ describe("readHastraPrimeMetrics", () => {
     });
 
     await assert.rejects(readHastraPrimeMetrics(PRIME_MINT), SdpEarnError);
+  });
+
+  it("refuses a missing or malformed wYLDS USD ratio instead of publishing token units", async () => {
+    for (const wyldsRatio of [undefined, -1, "0", "not-a-decimal"]) {
+      stubFeed({
+        ...LIVE_BODY,
+        wylds_card: { wylds_ratio: wyldsRatio },
+      });
+      await assert.rejects(readHastraPrimeMetrics(PRIME_MINT), SdpEarnError);
+      mock.restoreAll();
+    }
   });
 
   it("surfaces upstream HTTP failures through the provider error taxonomy", async () => {
