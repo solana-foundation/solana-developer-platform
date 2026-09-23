@@ -271,7 +271,12 @@
       "addressAutocompleteFailed": "No pudimos buscar direcciones. Inténtalo de nuevo.",
       "addressDetailsFailed": "No pudimos cargar esa dirección. Prueba con otra búsqueda.",
       "payoutAccountsTitle": "Cuentas de pago saliente guardadas",
-      "payoutAccountsDescription": "Elige dónde llega este pago saliente, o completa los datos de abajo para pagar a una cuenta nueva."
+      "payoutAccountsDescription": "Elige dónde llega este pago saliente, o completa los datos de abajo para pagar a una cuenta nueva.",
+      "transferHeldForApproval": "La política de esta Wallet exige aprobar esta transferencia antes de que se envíe, por lo que MoneyGram no puede continuar. Todavía no se ha movido nada. Si más adelante no debería salir, cancela la solicitud en Approvals.",
+      "transferApprovalPending": "Esperando aprobación",
+      "offrampHeldDescription": "Todavía no se ha movido nada. Una vez aprobada, se enviará {amount} {token} a la dirección de depósito que aparece abajo. Si la cotización vence primero, el envío no se realizará y necesitarás una nueva cotización.",
+      "moneygramDepositUnconfirmed": "No se pudo confirmar la dirección de depósito de MoneyGram, por lo que no se envió nada.",
+      "moneygramTransactionUnreported": "MoneyGram solicitó un depósito antes de reportar la transacción, por lo que no se envió nada."
     },
     "onchainSend": {
       "noAssets": "Esta Wallet no tiene activos disponibles para enviar.",
@@ -303,7 +308,10 @@
       "transferFailed": "La transferencia falló.",
       "transferSuccess": "Tu transferencia se envió correctamente.",
       "transferStatus": "Estado: {status}",
-      "viewOnExplorer": "Ver en el explorador"
+      "viewOnExplorer": "Ver en el explorador",
+      "approvalPendingTitle": "Esperando aprobación",
+      "approvalPendingDescription": "La política de esta Wallet requiere que alguien apruebe la transferencia antes de que se envíe. Todavía no se ha movido nada.",
+      "viewApprovalRequest": "Ver solicitud de aprobación"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -338,7 +346,9 @@
       "agreementSigningTitle": "Confirmando acuerdo",
       "agreementSigningDescription": "Esperando a que el proveedor confirme el acuerdo firmado. Esto suele tardar unos segundos.",
       "agreementConsentPrefix": "He leído y acepto la",
-      "privacyPolicy": "política de privacidad"
+      "privacyPolicy": "política de privacidad",
+      "settlementProcessing": "Procesando en BVNK",
+      "settlementCompleted": "Completado"
     },
     "lightspark": {
       "verificationRequiredTitle": "Verifica tu identidad",
@@ -490,7 +500,9 @@
       "quotedAmount": "el monto cotizado",
       "cryptoDeposit": "Depósito de {currency}",
       "virtualAccount": "Cuenta virtual de {currency}",
-      "payin": "Ingreso de {currency}"
+      "payin": "Ingreso de {currency}",
+      "paymentReferenceRequired": "Referencia de pago (obligatoria)",
+      "remittancePrefix": "Prefijo de remesa"
     },
     "providerRisk": {
       "close": "Cerrar {title}",
@@ -676,7 +688,13 @@
       "agreementSigned": "Firmado",
       "agreementAwaitingSignature": "Pendiente de firma",
       "viewAgreement": "Acuerdo",
-      "viewPrivacyPolicy": "Política de privacidad"
+      "viewPrivacyPolicy": "Política de privacidad",
+      "providerAccountBalanceUnavailable": "Saldo no disponible",
+      "providerAccountFundingWallet": "Wallet de {currency}",
+      "providerAccountWalletActive": "Activa",
+      "providerAccountWalletProvisioning": "En aprovisionamiento",
+      "customerIdLabel": "ID del cliente",
+      "walletIdLabel": "ID de la Wallet"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -784,7 +802,14 @@
       "copy": "Copiar {label}",
       "viewReceipt": "Ver recibo",
       "receipt": "Recibo",
-      "failureReason": "Motivo del error"
+      "failureReason": "Motivo del error",
+      "status": "Estado",
+      "payinId": "ID de pago entrante",
+      "fiatSent": "Monto convertido",
+      "cryptoToReceive": "Cripto por recibir",
+      "received": "Recibido",
+      "credited": "Acreditado",
+      "depositTx": "Tx de depósito"
     },
     "requestFailed": "La solicitud falló.",
     "submitting": "Enviando...",
