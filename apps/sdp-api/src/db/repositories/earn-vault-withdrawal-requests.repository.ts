@@ -337,7 +337,11 @@ export interface EarnVaultWithdrawalRequestsRepository {
     lastIndexError?: string | null;
     fulfilledAt?: string | null;
     cancelledAt?: string | null;
-    /** Next useful provider read. Terminal transitions always clear it. */
+    /**
+     * Next useful provider read. Terminal transitions always clear it; a
+     * nonterminal transition without one preserves the outstanding claim
+     * lease instead of recycling the request into an immediate re-claim.
+     */
     nextCheckAt?: string | null;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
   recordIndexError(input: {
@@ -1308,6 +1312,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     async advanceRequest(input) {
       const sources = REQUEST_SOURCES[input.toStatus];
       if (sources.length === 0) return null;
+      const nextCheckAt = input.nextCheckAt ?? null;
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const row = await tx
@@ -1329,6 +1334,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     THEN COALESCE(?, cancelled_at, sdp_iso_now()) ELSE NULL END,
                   next_check_at = CASE
                     WHEN ? IN ('fulfilled', 'cancelled', 'failed') THEN NULL
+                    WHEN ?::text IS NULL THEN next_check_at
                     ELSE ?
                   END,
                   updated_at = sdp_iso_now()
@@ -1353,7 +1359,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.toStatus,
             input.cancelledAt ?? null,
             input.toStatus,
-            input.nextCheckAt ?? null,
+            nextCheckAt,
+            nextCheckAt,
             input.withdrawalRequestId,
             input.organizationId,
             [...sources]

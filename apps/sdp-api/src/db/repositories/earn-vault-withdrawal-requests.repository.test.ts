@@ -1135,6 +1135,70 @@ describe("Earn queued withdrawal repository", () => {
     expect(retried.map(({ id }) => id)).toContain(created.request.id);
   });
 
+  it("preserves the claim lease when a nonterminal advance omits the next check", async () => {
+    const created = await createRequest();
+    await repository.advanceAction({
+      actionId: created.action.id,
+      organizationId: ORG,
+      toStatus: "submitted",
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      nonce: "9",
+      creationTimestamp: "1700000000",
+    });
+    const [claimed] = await repository.claimOpenRequests(1);
+    if (!claimed) throw new Error("Expected one due queued withdrawal");
+    expect(claimed.next_check_at).not.toBeNull();
+
+    // A nonterminal advance without a replacement schedule must keep the
+    // lease claimOpenRequests wrote, or the same request becomes due again
+    // inside the same worker tick and hogs the whole claim budget.
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      lastIndexError: null,
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).resolves.toMatchObject({ next_check_at: claimed.next_check_at });
+
+    // A supplied schedule still wins, and terminal transitions clear it.
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      nextCheckAt: "2030-01-01T00:00:00.000Z",
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).resolves.toMatchObject({ next_check_at: "2030-01-01T00:00:00.000Z" });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "cancelled",
+      closingSignature: "queued-cancel-signature",
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).resolves.toMatchObject({ next_check_at: null });
+  });
+
   it("defers a failed request before claiming later due work", async () => {
     const first = await createRequest();
     const second = await createRequest();

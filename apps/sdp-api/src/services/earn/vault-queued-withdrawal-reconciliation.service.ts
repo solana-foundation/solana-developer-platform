@@ -987,7 +987,7 @@ function assertLiveParRequest(
   }
 }
 
-async function reconcileParRequest(
+export async function reconcileParRequest(
   env: Env,
   ledger: QueueLedger,
   request: EarnVaultWithdrawalRequestRow
@@ -1006,6 +1006,7 @@ async function reconcileParRequest(
       organizationId: request.organization_id,
       toStatus,
       lastIndexError: null,
+      nextCheckAt: nextQueuedWithdrawalCheckAt(toStatus, request.maturity_timestamp, Date.now()),
     });
     return request.status === toStatus ? "unchanged" : "advanced";
   }
@@ -1020,6 +1021,11 @@ async function reconcileParRequest(
       organizationId: request.organization_id,
       toStatus: "closed_or_unknown",
       lastIndexError: "Par-redemption PDA closed without a matching finalized event yet",
+      nextCheckAt: nextQueuedWithdrawalCheckAt(
+        "closed_or_unknown",
+        request.maturity_timestamp,
+        Date.now()
+      ),
     });
     return "closedUnknown";
   }
@@ -1124,32 +1130,15 @@ async function findClosingEvent(
  * newest-first decision order. A window avoids a serial getTransaction
  * waterfall, but bounded concurrency protects the RPC and provider decoder.
  */
-export async function findClosingEventInHistoryPage(
-  env: Env,
-  rpc: RawHistoryRpc,
-  request: EarnVaultWithdrawalRequestRow,
-  client: EarnVaultQueuedWithdrawProvider,
-  history: readonly RawSignatureInfo[]
-): Promise<ClosingEventObservation | null> {
+async function observeHistoryNewestFirst<T>(
+  history: readonly RawSignatureInfo[],
+  observe: (signature: string) => Promise<T | null>
+): Promise<T | null> {
   const candidates = history.filter((entry) => entry.err === null);
   for (let offset = 0; offset < candidates.length; offset += CLOSING_HISTORY_LOOKUP_CONCURRENCY) {
     const batch = candidates.slice(offset, offset + CLOSING_HISTORY_LOOKUP_CONCURRENCY);
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each bounded window must finish before the next reaches the RPC.
-    const observations = await Promise.allSettled(
-      batch.map(async (entry): Promise<ClosingEventObservation | null> => {
-        const logs = await transactionLogs(rpc, entry.signature);
-        const events = await lifecycleEvents(env, client, request, logs);
-        const event = events.find(
-          (candidate) =>
-            (candidate.kind === "withdrawalCancelled" ||
-              candidate.kind === "withdrawalFulfilled") &&
-            String(candidate.requestAddress) === request.request_address
-        );
-        return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
-          ? { signature: entry.signature, event }
-          : null;
-      })
-    );
+    const observations = await Promise.allSettled(batch.map((entry) => observe(entry.signature)));
     // Promise results retain input order. Throwing a failure encountered before
     // a match and ignoring one after it preserves the former serial semantics.
     for (const observation of observations) {
@@ -1160,6 +1149,48 @@ export async function findClosingEventInHistoryPage(
   return null;
 }
 
+export async function findClosingEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultQueuedWithdrawProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingEventObservation | null> {
+  return observeHistoryNewestFirst(history, async (signature) => {
+    const logs = await transactionLogs(rpc, signature);
+    const events = await lifecycleEvents(env, client, request, logs);
+    const event = events.find(
+      (candidate) =>
+        (candidate.kind === "withdrawalCancelled" || candidate.kind === "withdrawalFulfilled") &&
+        String(candidate.requestAddress) === request.request_address
+    );
+    return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
+      ? { signature, event }
+      : null;
+  });
+}
+
+export async function findClosingParEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultParRedemptionProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingParEventObservation | null> {
+  return observeHistoryNewestFirst(history, async (signature) => {
+    const observation = await transactionObservation(rpc, signature);
+    const events = await parLifecycleEvents(env, client, request, observation);
+    const event = events.find(
+      (candidate) =>
+        (candidate.kind === "redemptionCancelled" || candidate.kind === "redemptionFulfilled") &&
+        String(candidate.requestAddress) === request.request_address
+    );
+    return event?.kind === "redemptionCancelled" || event?.kind === "redemptionFulfilled"
+      ? { signature, event }
+      : null;
+  });
+}
+
 async function findClosingParEvent(
   env: Env,
   rpc: RawHistoryRpc,
@@ -1168,6 +1199,7 @@ async function findClosingParEvent(
 ): Promise<ClosingParEventObservation | null> {
   let before: Signature | undefined;
   for (let page = 0; page < CLOSING_HISTORY_MAX_PAGES; page += 1) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pagination follows newest-first history to the known request-creation boundary.
     const history = await rpc
       .getSignaturesForAddress(address(request.request_address), {
         commitment: "finalized",
@@ -1176,19 +1208,8 @@ async function findClosingParEvent(
         ...(request.creation_signature ? { until: request.creation_signature as Signature } : {}),
       })
       .send();
-    for (const entry of history) {
-      if (entry.err !== null) continue;
-      const observation = await transactionObservation(rpc, entry.signature);
-      const events = await parLifecycleEvents(env, client, request, observation);
-      const event = events.find(
-        (candidate) =>
-          (candidate.kind === "redemptionCancelled" || candidate.kind === "redemptionFulfilled") &&
-          String(candidate.requestAddress) === request.request_address
-      );
-      if (event?.kind === "redemptionCancelled" || event?.kind === "redemptionFulfilled") {
-        return { signature: entry.signature, event };
-      }
-    }
+    const closing = await findClosingParEventInHistoryPage(env, rpc, request, client, history);
+    if (closing) return closing;
     if (history.length < CLOSING_HISTORY_PAGE_SIZE) return null;
     const oldest = history.at(-1)?.signature;
     if (!oldest) return null;
