@@ -193,9 +193,11 @@ packages/sdp-earn/src/
                                    Live catalogue implementations. WisdomTree is
                                    registered but not surfaced; Upshift/Perena
                                    below remain scaffolds.
+  providers/hastra/                One pinned mainnet PRIME catalogue row;
+                                   execution lives in @sdp/hastra.
   providers/{upshift,perena}/      Registered scaffolds awaiting integrations.
 
-packages/sdp-{kamino,veda,jupiter-lend,ondo,wisdomtree}/
+packages/sdp-{kamino,veda,jupiter-lend,ondo,hastra,wisdomtree}/
                                    Provider execution adapters implementing
                                    vault-direct plans and their supported quote,
                                    withdrawal, and sponsorship capabilities.

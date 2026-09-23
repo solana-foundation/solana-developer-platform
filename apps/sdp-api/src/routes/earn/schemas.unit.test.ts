@@ -39,6 +39,21 @@ describe("external-wallet queued withdrawal schemas", () => {
         deadlineSeconds: 300,
       }).success
     ).toBe(false);
+    expect(
+      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+        positionId: "earn_position_example",
+        shares: "1",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(true);
+    expect(
+      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+        strategyId: "earn_strategy_example",
+        ownerAddress: "7YfVedaQueueOwner111111111111111111111111111",
+        shares: "1",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(false);
   });
 
   it("requires the durable request id for cancellation builds", () => {

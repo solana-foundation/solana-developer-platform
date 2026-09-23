@@ -6,11 +6,15 @@ export type EarnVaultAsyncWithdrawalIntent = {
   projectId: string | null;
   positionId: string;
   shares: string;
-  route: {
-    kind: "queue";
-    discountBps: number;
-    deadlineSeconds: number;
-  };
+  route:
+    | {
+        kind: "queue";
+        discountBps: number;
+        deadlineSeconds: number;
+      }
+    | {
+        kind: "operator_redemption";
+      };
 };
 
 /**
@@ -25,12 +29,10 @@ export const vaultAsyncWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore
 export function vaultAsyncWithdrawalRequestFingerprint(
   input: EarnVaultAsyncWithdrawalIntent
 ): string {
-  return JSON.stringify([
-    input.projectId,
-    input.positionId,
-    input.shares,
-    input.route.kind,
-    input.route.discountBps,
-    input.route.deadlineSeconds,
-  ]);
+  const common = [input.projectId, input.positionId, input.shares, input.route.kind];
+  return JSON.stringify(
+    input.route.kind === "queue"
+      ? [...common, input.route.discountBps, input.route.deadlineSeconds]
+      : common
+  );
 }

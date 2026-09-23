@@ -5,6 +5,7 @@ import type {
   EarnVaultAsyncWithdrawalEvent,
   EarnVaultAsyncWithdrawalRoute,
 } from "./earn-vault-async-withdrawal";
+import { EarnVaultParRedemptionModal } from "./earn-vault-par-redemption-modal";
 import { EarnVaultQueuedWithdrawModal } from "./earn-vault-queued-withdraw-modal";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
@@ -52,6 +53,15 @@ export function EarnVaultAsyncWithdrawModal({
           onMovementUpdated={onMovementUpdated}
           onWithdrawn={onWithdrawn}
           settlement="provider_order"
+        />
+      );
+    case "operator_redemption":
+      return (
+        <EarnVaultParRedemptionModal
+          {...props}
+          onRequested={(request) => onRequested?.({ kind: "operator_redemption", request })}
+          onSettled={(request) => onSettled?.({ kind: "operator_redemption", request })}
+          terms={route.terms}
         />
       );
   }

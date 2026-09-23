@@ -32,7 +32,7 @@ export interface EarnIntegrationSections {
   portfolio: string;
   /** Money out: preview, build the exit, customer signs, submit. */
   withdraw: string;
-  /** Queued money out: request, observe solver outcome, or recover shares. */
+  /** Asynchronous money out: request solver or operator settlement, then observe or cancel. */
   asyncWithdraw: string;
 }
 
@@ -41,6 +41,22 @@ export type EarnIntegrationStrategy = Pick<
   "id" | "depositSlippage" | "withdrawalSlippage"
 >;
 
+/**
+ * The catalogue's suggested tolerance is interpolated into code a partner
+ * copies onto their server and runs with SDP_API_KEY in scope, so the emitted
+ * text must be nothing but an integer literal. The strategies read does not
+ * re-validate the row at runtime (the `number` here is a compile-time claim),
+ * so this is the enforcement point: a finite integer inside the 1–1000 bps
+ * range `floorForTolerance` itself accepts passes through, and any other
+ * value — a string, an object, a payload smuggling statements — falls back to
+ * the documented default instead of being spelled into the module.
+ */
+function snippetToleranceBps(value: number | undefined): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000
+    ? value
+    : 10;
+}
+
 export function buildEarnIntegrationSections(
   strategy: EarnIntegrationStrategy,
   apiBaseUrl?: string
@@ -48,10 +64,10 @@ export function buildEarnIntegrationSections(
   const requiresDepositFloor = strategy.depositSlippage?.quoteRequired === true;
   const requiresWithdrawalFloor = strategy.withdrawalSlippage?.quoteRequired === true;
   const depositSlippageInput = requiresDepositFloor
-    ? `  slippageBps = ${strategy.depositSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.depositSlippage?.defaultToleranceBps)},\n`
     : "";
   const withdrawalSlippageInput = requiresWithdrawalFloor
-    ? `  slippageBps = ${strategy.withdrawalSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.withdrawalSlippage?.defaultToleranceBps)},\n`
     : "";
   const depositSlippageType = requiresDepositFloor
     ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
@@ -460,9 +476,10 @@ export async function submitEarnWithdrawal({
 }`;
 
   const asyncWithdraw = `/**
- * Read atomic, provider-order, and queued routes independently. Atomic exits
- * pay in one transaction; provider orders settle later; queued requests escrow
- * shares under the provider's on-chain queue terms.
+ * Read atomic, provider-order, solver-queue, and operator-redemption routes
+ * independently. Atomic exits pay in one transaction; the other routes settle
+ * later. Check parRedemption separately from queued: a provider may expose one,
+ * both, or neither.
  */
 export async function getEarnWithdrawalOptions(positionId: string) {
   return sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
@@ -540,6 +557,21 @@ export async function previewEarnQueuedWithdrawal({
   });
 }
 
+/** Preview the operator-completed redemption at par before building. */
+export async function previewEarnParRedemption({
+  positionId,
+  shares,
+}: {
+  positionId: string;
+  shares: string;
+}) {
+  return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares, mechanism: "operatorRedemption" }),
+  });
+}
+
 /**
  * Build an unsigned queue request. Landing this transaction escrows shares; it
  * does NOT pay assets. The provider's solve authority may fulfil after maturity.
@@ -583,7 +615,36 @@ export async function buildEarnQueuedWithdrawalRequest({
   return data.transaction;
 }
 
-export async function submitEarnQueuedWithdrawalRequest(input: {
+/**
+ * Build an unsigned par-redemption request. Landing it converts the position's
+ * shares into the provider's intermediate asset and delegates later settlement
+ * at par to the operator; it does NOT pay the deposit asset immediately.
+ */
+export async function buildEarnParRedemptionRequest({
+  positionId,
+  shares,
+  feePayer,
+}: {
+  positionId: string;
+  shares: string;
+  feePayer?: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({
+      positionId,
+      shares,
+      mechanism: "operatorRedemption",
+      ...(feePayer ? { feePayer } : {}),
+    }),
+  });
+  // Includes requestAddress, intermediateMint, intermediateAmount, and expected assets.
+  return data.transaction;
+}
+
+/** Submit either signed solver-queue or operator-redemption request build. */
+export async function submitEarnWithdrawalRequest(input: {
   transactionId: string;
   signedTransaction: string;
   idempotencyKey: string;
@@ -604,7 +665,7 @@ export async function submitEarnQueuedWithdrawalRequest(input: {
  * states are fulfilled, cancelled, and failed. closedOrUnknown is retryable:
  * SDP is still indexing the close event to distinguish payout from recovery.
  */
-export async function getEarnQueuedWithdrawalRequest(withdrawalRequestId: string) {
+export async function getEarnWithdrawalRequest(withdrawalRequestId: string) {
   const data = await sdpFetch(
     \`/v1/earn/external-wallet/withdrawal-requests/\${encodeURIComponent(withdrawalRequestId)}\`,
     { headers: sdpHeaders() }
@@ -659,10 +720,12 @@ export async function waitForEarnQueuedWithdrawal(
 }
 
 /**
- * Once status is expiredCancelable, build the holder's recovery transaction.
- * Cancelling before the deadline is rejected by the provider's queue program.
+ * Build the holder's cancellation transaction. A solverQueue request must first
+ * reach expiredCancelable; cancelling it before its deadline is rejected. An
+ * operatorRedemption request is cancellable while pending, until the operator
+ * completes and closes it. Refresh the request immediately before building.
  */
-export async function buildEarnQueuedWithdrawalCancellation({
+export async function buildEarnWithdrawalRequestCancellation({
   withdrawalRequestId,
   feePayer,
 }: {
@@ -683,7 +746,8 @@ export async function buildEarnQueuedWithdrawalCancellation({
   return data.transaction;
 }
 
-export async function submitEarnQueuedWithdrawalCancellation(input: {
+/** Submit a signed cancellation build for either asynchronous mechanism. */
+export async function submitEarnWithdrawalRequestCancellation(input: {
   transactionId: string;
   signedTransaction: string;
   idempotencyKey: string;

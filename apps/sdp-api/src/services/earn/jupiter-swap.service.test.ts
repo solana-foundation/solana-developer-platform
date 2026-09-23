@@ -1,5 +1,6 @@
 import { SdpEarnError } from "@sdp/earn/errors";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
+import { HASTRA_DEPLOYMENTS } from "@sdp/types/hastra-programs";
 import { address } from "@solana/kit";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +12,7 @@ import {
   fetchJupiterSwapQuote,
   type JupiterSwapRequest,
   prependSwapLegToVaultPlan,
+  requireEarnSwapMintMetadata,
 } from "./jupiter-swap.service";
 import { createVaultDeadline } from "./vault-deadline";
 
@@ -23,6 +25,7 @@ import { createVaultDeadline } from "./vault-deadline";
 
 const USDC = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const PYUSD = WELL_KNOWN_TOKENS.PYUSD.mints["mainnet-beta"].address;
+const WYLDS = HASTRA_DEPLOYMENTS["mainnet-beta"]?.wYldsMint;
 const OWNER = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
 const PAYER = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const JUPITER_PROGRAM = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
@@ -229,6 +232,15 @@ afterEach(() => {
 });
 
 describe("fetchJupiterSwapLeg", () => {
+  it("admits Hastra's pinned wYLDS intermediate without adding it to global token surfaces", () => {
+    expect(WYLDS).toBeDefined();
+    expect(requireEarnSwapMintMetadata(WYLDS ?? "", "funding token")).toEqual({
+      decimals: 6,
+      tokenProgram: "spl-token",
+    });
+    expect(WELL_KNOWN_TOKENS).not.toHaveProperty("WYLDS");
+  });
+
   it("fails closed with PROVIDER_NOT_CONFIGURED when no API key is deployed", async () => {
     await expect(
       fetchJupiterSwapLeg(
@@ -480,6 +492,26 @@ describe("fetchJupiterSwapLeg", () => {
   ] as const)("refuses a swap instruction with mismatched %s semantics", async (_field, data) => {
     fetchMock.mockResolvedValue(
       okResponse(buildResponse({ swapInstruction: swapInstruction({ data }) }))
+    );
+
+    await expect(
+      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
+    ).rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
+  });
+
+  it("refuses a reported floor above the exact ceil-rounded floor encoded on chain", async () => {
+    fetchMock.mockResolvedValue(
+      okResponse(
+        buildResponse({
+          outAmount: "24990001",
+          // Jupiter derives ceil(24_990_001 * 9_950 / 10_000) = 24_865_051.
+          // Claiming one atom more must not satisfy a caller's minimum-output intent.
+          otherAmountThreshold: "24865052",
+          swapInstruction: swapInstruction({
+            data: routeData({ quotedOutAmount: 24_990_001n }),
+          }),
+        })
+      )
     );
 
     await expect(

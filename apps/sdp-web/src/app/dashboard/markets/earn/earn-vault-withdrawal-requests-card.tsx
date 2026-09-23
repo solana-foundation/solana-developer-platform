@@ -6,6 +6,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatEpochSecondsOr, formatProviderAmount, shortenMarketAddress } from "./earn-format";
 import { earnMintAsset } from "./earn-market-presentation";
@@ -13,18 +14,136 @@ import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
 } from "./earn-program-data";
+import {
+  earnVaultParRedemptionStatusPresentation,
+  isEarnVaultParRedemptionCancelable,
+} from "./earn-vault-par-redemption-presentation";
 import { earnVaultQueuedWithdrawalStatusPresentation } from "./earn-vault-queued-withdrawal-presentation";
+
+function freshestRequest(
+  server: EarnVaultWithdrawalRequestRecord,
+  local: EarnVaultWithdrawalRequestRecord | undefined
+): EarnVaultWithdrawalRequestRecord {
+  if (!local) return server;
+  if (["fulfilled", "cancelled", "failed"].includes(server.status)) return server;
+  return Date.parse(local.updatedAt) >= Date.parse(server.updatedAt) ? local : server;
+}
+
+function parRedemptionSummaryKey(status: EarnVaultWithdrawalRequestRecord["status"]): MessageKey {
+  if (status === "creating") return "DashboardEarn.parRedemption.activeSummaryCreating";
+  if (status === "cancelling") return "DashboardEarn.parRedemption.activeSummaryCancelling";
+  if (status === "closedOrUnknown") return "DashboardEarn.parRedemption.activeSummaryChecking";
+  return "DashboardEarn.parRedemption.activeSummary";
+}
+
+function WithdrawalRequestSummary({
+  parRedemption,
+  request,
+}: {
+  parRedemption: boolean;
+  request: EarnVaultWithdrawalRequestRecord;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const amount = formatProviderAmount(
+    request.quotedAssets,
+    locale,
+    earnMintAsset(request.assetMint).symbol
+  );
+  if (parRedemption) {
+    return <>{t(parRedemptionSummaryKey(request.status), { amount })}</>;
+  }
+  return (
+    <>
+      {t("DashboardEarn.queuedWithdraw.activeSummary", {
+        amount,
+        maturity: formatEpochSecondsOr(
+          request.maturityTimestamp,
+          locale,
+          t("DashboardEarn.unavailable")
+        ),
+        deadline: formatEpochSecondsOr(
+          request.deadlineTimestamp,
+          locale,
+          t("DashboardEarn.unavailable")
+        ),
+      })}
+    </>
+  );
+}
+
+function WithdrawalRequestItem({
+  busy,
+  cancelError,
+  onCancel,
+  request,
+}: {
+  busy: boolean;
+  cancelError: string | undefined;
+  onCancel: () => void;
+  request: EarnVaultWithdrawalRequestRecord;
+}) {
+  const t = useTranslations();
+  const parRedemption = request.mechanism === "operatorRedemption";
+  const status = parRedemption
+    ? earnVaultParRedemptionStatusPresentation(request.status)
+    : earnVaultQueuedWithdrawalStatusPresentation(request.status);
+  const cancelable = parRedemption
+    ? isEarnVaultParRedemptionCancelable(request)
+    : request.status === "expiredCancelable";
+  const cancellingKey = parRedemption
+    ? "DashboardEarn.parRedemption.cancelling"
+    : "DashboardEarn.queuedWithdraw.cancelling";
+  const cancelKey = parRedemption
+    ? "DashboardEarn.parRedemption.cancelAction"
+    : "DashboardEarn.queuedWithdraw.cancelAction";
+
+  return (
+    <li className="grid gap-4 px-6 py-4 md:grid-cols-[1fr_auto] md:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <Clock3Icon aria-hidden="true" className="size-4 text-tertiary" />
+          <span className="truncate text-sm font-medium text-primary">
+            {shortenMarketAddress(request.providerReference)}
+          </span>
+          <Badge variant={status.variant}>{t(status.labelKey)}</Badge>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-secondary">
+          <WithdrawalRequestSummary parRedemption={parRedemption} request={request} />
+        </p>
+        {cancelError ? (
+          <p className="mt-2 text-xs text-error" role="alert">
+            {cancelError}
+          </p>
+        ) : null}
+      </div>
+      {cancelable ? (
+        <Button
+          disabled={busy}
+          iconLeft={busy ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null}
+          onClick={onCancel}
+          size="sm"
+          variant="outline"
+        >
+          {t(busy ? cancellingKey : cancelKey)}
+        </Button>
+      ) : null}
+    </li>
+  );
+}
 
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations();
-  const locale = useLocale();
   const { withdrawalRequests, error, isLoading, refresh } = useEarnVaultWithdrawalRequests();
   const cancelKeys = useRef(new Map<string, string>());
   const observedOpenRequestIds = useRef<ReadonlySet<string> | null>(null);
   const reportedDisappearances = useRef(new Set<string>());
   const [cancelling, setCancelling] = useState<ReadonlySet<string>>(() => new Set());
   const [cancelError, setCancelError] = useState<Record<string, string>>({});
+  const [cancelResults, setCancelResults] = useState<
+    Record<string, EarnVaultWithdrawalRequestRecord>
+  >({});
   const reportServerSettlement = useEffectEvent(() => onChanged?.());
 
   useEffect(() => {
@@ -75,6 +194,7 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
       return;
     }
     cancelKeys.current.delete(id);
+    setCancelResults((current) => ({ ...current, [id]: result.data }));
     refresh();
   }
 
@@ -95,63 +215,19 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
           </div>
         ) : (
           <ul className="divide-y divide-border-subtle">
-            {(withdrawalRequests ?? []).map((request) => {
-              const status = earnVaultQueuedWithdrawalStatusPresentation(request.status);
-              const busy = cancelling.has(request.withdrawalRequestId);
+            {(withdrawalRequests ?? []).map((serverRequest) => {
+              const request = freshestRequest(
+                serverRequest,
+                cancelResults[serverRequest.withdrawalRequestId]
+              );
               return (
-                <li
-                  className="grid gap-4 px-6 py-4 md:grid-cols-[1fr_auto] md:items-center"
+                <WithdrawalRequestItem
+                  busy={cancelling.has(request.withdrawalRequestId)}
+                  cancelError={cancelError[request.withdrawalRequestId]}
                   key={request.withdrawalRequestId}
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Clock3Icon aria-hidden="true" className="size-4 text-tertiary" />
-                      <span className="truncate text-sm font-medium text-primary">
-                        {shortenMarketAddress(request.providerReference)}
-                      </span>
-                      <Badge variant={status.variant}>{t(status.labelKey)}</Badge>
-                    </div>
-                    <p className="mt-1 text-xs leading-5 text-secondary">
-                      {t("DashboardEarn.queuedWithdraw.activeSummary", {
-                        amount: formatProviderAmount(
-                          request.quotedAssets,
-                          locale,
-                          earnMintAsset(request.assetMint).symbol
-                        ),
-                        maturity: formatEpochSecondsOr(
-                          request.maturityTimestamp,
-                          locale,
-                          t("DashboardEarn.unavailable")
-                        ),
-                        deadline: formatEpochSecondsOr(
-                          request.deadlineTimestamp,
-                          locale,
-                          t("DashboardEarn.unavailable")
-                        ),
-                      })}
-                    </p>
-                    {cancelError[request.withdrawalRequestId] ? (
-                      <p className="mt-2 text-xs text-error" role="alert">
-                        {cancelError[request.withdrawalRequestId]}
-                      </p>
-                    ) : null}
-                  </div>
-                  {request.status === "expiredCancelable" ? (
-                    <Button
-                      disabled={busy}
-                      iconLeft={
-                        busy ? <Loader2Icon aria-hidden="true" className="animate-spin" /> : null
-                      }
-                      onClick={() => void cancel(request)}
-                      size="sm"
-                      variant="outline"
-                    >
-                      {busy
-                        ? t("DashboardEarn.queuedWithdraw.cancelling")
-                        : t("DashboardEarn.queuedWithdraw.cancelAction")}
-                    </Button>
-                  ) : null}
-                </li>
+                  onCancel={() => void cancel(request)}
+                  request={request}
+                />
               );
             })}
           </ul>

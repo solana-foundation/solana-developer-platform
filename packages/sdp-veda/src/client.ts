@@ -457,6 +457,7 @@ export class VedaVaultDirectClient
       queued: options.queued,
       withdrawAuthority: String(options.withdrawAuthority),
       queueState: options.queueState === null ? null : String(options.queueState),
+      parRedemption: null,
       queueAsset:
         options.queueAsset === null
           ? null

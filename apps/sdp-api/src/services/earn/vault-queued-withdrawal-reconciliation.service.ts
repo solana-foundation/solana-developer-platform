@@ -1,4 +1,7 @@
 import type {
+  EarnVaultParRedemptionLifecycleEvent,
+  EarnVaultParRedemptionProvider,
+  EarnVaultParRedemptionRequestLookup,
   EarnVaultQueuedWithdrawalLifecycleEvent,
   EarnVaultQueuedWithdrawalRequestLookup,
   EarnVaultQueuedWithdrawProvider,
@@ -17,6 +20,7 @@ import { logEvent } from "@/runtime/money-path-events";
 import {
   earnClusterFor,
   resolveClusterRpcUrl,
+  resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "@/services/earn/execution-registry";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
@@ -40,10 +44,19 @@ type ClosingLifecycleEvent = Extract<
   EarnVaultQueuedWithdrawalLifecycleEvent,
   { kind: "withdrawalCancelled" | "withdrawalFulfilled" }
 >;
+type ClosingParLifecycleEvent = Extract<
+  EarnVaultParRedemptionLifecycleEvent,
+  { kind: "redemptionCancelled" | "redemptionFulfilled" }
+>;
 
 interface ClosingEventObservation {
   signature: string;
   event: ClosingLifecycleEvent;
+}
+
+interface ClosingParEventObservation {
+  signature: string;
+  event: ClosingParLifecycleEvent;
 }
 
 interface QueueReconciliationStats {
@@ -58,6 +71,7 @@ interface QueueReconciliationStats {
 }
 
 interface RawTransactionResponse {
+  blockTime?: bigint | number | null;
   meta: { err: unknown | null; logMessages?: readonly string[] | null } | null;
 }
 
@@ -376,6 +390,10 @@ async function recoverExpiredUnknownAction(
   });
   if (!request) throw new Error(`Missing queued withdrawal ${actionRow.withdrawal_request_id}`);
 
+  if (request.mechanism === "operator_redemption") {
+    return recoverExpiredUnknownParAction(env, ledger, actionRow, request, rpc);
+  }
+
   const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Queued withdrawal provider ${request.provider} is unavailable`);
   const lookup = await client.readQueuedWithdrawalRequest(
@@ -476,6 +494,93 @@ async function recoverExpiredUnknownAction(
   return "unchanged";
 }
 
+async function recoverExpiredUnknownParAction(
+  env: Env,
+  ledger: QueueLedger,
+  actionRow: EarnVaultWithdrawalRequestActionRow,
+  request: EarnVaultWithdrawalRequestRow,
+  rpc: RawHistoryRpc
+): Promise<"advanced" | "failed" | "unchanged"> {
+  const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
+  if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
+  const lookup = await client.readParRedemptionRequest(
+    { env, environment: request.environment },
+    { providerReference: request.vault_address, requestAddress: request.request_address }
+  );
+  if (lookup.status !== "closedOrUnknown") {
+    assertLiveParRequest(request, lookup);
+    if (actionRow.action === "cancel") {
+      await ledger.failActionAndRecoverRequest({
+        actionId: actionRow.id,
+        organizationId: actionRow.organization_id,
+        failureReason: "Cancellation blockhash expired while the par redemption remained open",
+        lastIndexError: null,
+      });
+      return "failed";
+    }
+    await ledger.advanceAction({
+      actionId: actionRow.id,
+      organizationId: actionRow.organization_id,
+      toStatus: "submitted",
+    });
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "pending",
+      lastIndexError: null,
+    });
+    return "advanced";
+  }
+
+  const closing = await findClosingParEvent(env, rpc, request, client);
+  if (closing !== null) {
+    assertParEventIdentity(request, closing.event);
+    await projectClosingParEvent(ledger, request, closing);
+    if (actionRow.action === "cancel") {
+      if (closing.event.kind === "redemptionFulfilled") {
+        await ledger.advanceAction({
+          actionId: actionRow.id,
+          organizationId: actionRow.organization_id,
+          toStatus: "failed",
+          failureReason: "Par redemption completed before cancellation finalized",
+        });
+        return "failed";
+      }
+      await ledger.advanceAction({
+        actionId: actionRow.id,
+        organizationId: actionRow.organization_id,
+        toStatus: closing.signature === actionRow.signature ? "finalized" : "failed",
+        ...(closing.signature === actionRow.signature
+          ? {}
+          : { failureReason: "Par redemption was cancelled by a different transaction" }),
+      });
+      return closing.signature === actionRow.signature ? "advanced" : "failed";
+    }
+    await ledger.advanceAction({
+      actionId: actionRow.id,
+      organizationId: actionRow.organization_id,
+      toStatus: "submitted",
+    });
+    return "advanced";
+  }
+
+  if (actionRow.action === "cancel") {
+    await ledger.advanceAction({
+      actionId: actionRow.id,
+      organizationId: actionRow.organization_id,
+      toStatus: "submitted",
+    });
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "closed_or_unknown",
+      lastIndexError: "Par-redemption PDA closed while transaction history was unavailable",
+    });
+    return "advanced";
+  }
+  return "unchanged";
+}
+
 async function failAction(
   ledger: QueueLedger,
   actionRow: EarnVaultWithdrawalRequestActionRow,
@@ -488,10 +593,10 @@ async function failAction(
   });
 }
 
-async function transactionLogs(
+async function transactionObservation(
   rpc: RawHistoryRpc,
   signature: string
-): Promise<readonly string[] | null> {
+): Promise<{ logs: readonly string[] | null; blockTime: string | null } | null> {
   const transaction = await rpc
     .getTransaction(signature as Signature, {
       commitment: "finalized",
@@ -500,7 +605,20 @@ async function transactionLogs(
     })
     .send();
   if (!transaction || transaction.meta?.err) return null;
-  return transaction.meta?.logMessages ?? null;
+  return {
+    logs: transaction.meta?.logMessages ?? null,
+    blockTime:
+      transaction.blockTime === null || transaction.blockTime === undefined
+        ? null
+        : String(transaction.blockTime),
+  };
+}
+
+async function transactionLogs(
+  rpc: RawHistoryRpc,
+  signature: string
+): Promise<readonly string[] | null> {
+  return (await transactionObservation(rpc, signature))?.logs ?? null;
 }
 
 async function lifecycleEvents(
@@ -521,6 +639,25 @@ async function lifecycleEvents(
   );
 }
 
+async function parLifecycleEvents(
+  env: Env,
+  client: EarnVaultParRedemptionProvider,
+  request: EarnVaultWithdrawalRequestRow,
+  observation: { logs: readonly string[] | null; blockTime: string | null } | null
+): Promise<readonly EarnVaultParRedemptionLifecycleEvent[]> {
+  return client.decodeParRedemptionLifecycleEvents(
+    { env, environment: request.environment },
+    {
+      providerReference: request.vault_address,
+      requestAddress: request.request_address,
+      logs: observation?.logs ?? null,
+      blockTime: observation?.blockTime ?? null,
+      shareDecimals: request.share_decimals,
+      assetDecimals: request.asset_decimals,
+    }
+  );
+}
+
 async function projectFinalizedAction(
   env: Env,
   ledger: QueueLedger,
@@ -533,6 +670,10 @@ async function projectFinalizedAction(
     withdrawalRequestId: actionRow.withdrawal_request_id,
   });
   if (!request) throw new Error(`Missing queued withdrawal ${actionRow.withdrawal_request_id}`);
+  if (request.mechanism === "operator_redemption") {
+    await projectFinalizedParAction(env, ledger, actionRow, request, rpc);
+    return;
+  }
   const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Queued withdrawal provider ${request.provider} is unavailable`);
   const logs = await transactionLogs(rpc, actionRow.signature);
@@ -579,6 +720,74 @@ async function projectFinalizedAction(
     nonce: event.nonce,
     cancelledAt: epochSecondsIso(event.cancelledAt),
   });
+}
+
+async function projectFinalizedParAction(
+  env: Env,
+  ledger: QueueLedger,
+  actionRow: EarnVaultWithdrawalRequestActionRow,
+  request: EarnVaultWithdrawalRequestRow,
+  rpc: RawHistoryRpc
+): Promise<void> {
+  const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
+  if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
+  const observation = await transactionObservation(rpc, actionRow.signature);
+  const events = await parLifecycleEvents(env, client, request, observation);
+  if (actionRow.action === "request") {
+    const event = events.find(
+      (candidate) =>
+        candidate.kind === "redemptionRequested" &&
+        String(candidate.requestAddress) === request.request_address
+    );
+    if (event?.kind !== "redemptionRequested") {
+      throw new Error(
+        `Finalized par request ${actionRow.signature} had no matching lifecycle event`
+      );
+    }
+    assertParEventIdentity(request, event);
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "pending",
+      creationTimestamp: event.occurredAt,
+      lastIndexError: null,
+    });
+    return;
+  }
+
+  const event = events.find(
+    (candidate) =>
+      candidate.kind === "redemptionCancelled" &&
+      String(candidate.requestAddress) === request.request_address
+  );
+  if (event?.kind !== "redemptionCancelled") {
+    throw new Error(
+      `Finalized par cancellation ${actionRow.signature} had no matching lifecycle event`
+    );
+  }
+  assertParEventIdentity(request, event);
+  await ledger.advanceRequest({
+    withdrawalRequestId: request.id,
+    organizationId: request.organization_id,
+    toStatus: "cancelled",
+    closingSignature: actionRow.signature,
+    cancelledAt: epochSecondsIso(event.occurredAt),
+    lastIndexError: null,
+  });
+}
+
+function assertParEventIdentity(
+  request: EarnVaultWithdrawalRequestRow,
+  event: EarnVaultParRedemptionLifecycleEvent
+): void {
+  if (
+    String(event.requestAddress) !== request.request_address ||
+    String(event.owner) !== request.owner_address ||
+    String(event.intermediateMint) !== request.intermediate_mint ||
+    event.intermediateAmount !== request.intermediate_amount
+  ) {
+    throw new Error(`Par redemption ${request.id} lifecycle event has a foreign identity`);
+  }
 }
 
 function statusAt(
@@ -696,12 +905,14 @@ async function projectLiveRequest(
  */
 export function nextQueuedWithdrawalCheckAt(
   status: EarnVaultWithdrawalRequestRow["status"],
-  maturityTimestamp: string,
+  maturityTimestamp: string | null,
   nowMs = Date.now()
 ): string | null {
   if (status === "fulfilled" || status === "cancelled" || status === "failed") return null;
   const minimumNextMs = nowMs + OPEN_REQUEST_POLL_MS;
-  if (status !== "pending") return new Date(minimumNextMs).toISOString();
+  if (status !== "pending" || maturityTimestamp === null) {
+    return new Date(minimumNextMs).toISOString();
+  }
 
   const nowSeconds = BigInt(Math.floor(nowMs / 1_000));
   const maturitySeconds = BigInt(maturityTimestamp);
@@ -717,6 +928,9 @@ async function reconcileRequest(
   ledger: QueueLedger,
   request: EarnVaultWithdrawalRequestRow
 ): Promise<"advanced" | "closedUnknown" | "unchanged"> {
+  if (request.mechanism === "operator_redemption") {
+    return reconcileParRequest(env, ledger, request);
+  }
   const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
   if (!client) throw new Error(`Queued withdrawal provider ${request.provider} is unavailable`);
   const lookup = await client.readQueuedWithdrawalRequest(
@@ -755,6 +969,96 @@ async function reconcileRequest(
   assertClosingIdentity(request, closing.event);
   await projectClosingEvent(ledger, request, closing);
   return "advanced";
+}
+
+function assertLiveParRequest(
+  request: EarnVaultWithdrawalRequestRow,
+  lookup: Exclude<EarnVaultParRedemptionRequestLookup, { status: "closedOrUnknown" }>
+): void {
+  if (
+    lookup.requestAddress !== request.request_address ||
+    lookup.request.requestAddress !== request.request_address ||
+    lookup.request.providerReference !== request.vault_address ||
+    lookup.request.owner !== request.owner_address ||
+    lookup.request.intermediateMint !== request.intermediate_mint ||
+    lookup.request.intermediateAmount !== request.intermediate_amount
+  ) {
+    throw new Error(`Par redemption ${request.id} account disagrees with durable intent`);
+  }
+}
+
+export async function reconcileParRequest(
+  env: Env,
+  ledger: QueueLedger,
+  request: EarnVaultWithdrawalRequestRow
+): Promise<"advanced" | "closedUnknown" | "unchanged"> {
+  const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
+  if (!client) throw new Error(`Par-redemption provider ${request.provider} is unavailable`);
+  const lookup = await client.readParRedemptionRequest(
+    { env, environment: request.environment },
+    { providerReference: request.vault_address, requestAddress: request.request_address }
+  );
+  if (lookup.status !== "closedOrUnknown") {
+    assertLiveParRequest(request, lookup);
+    const toStatus = request.status === "cancelling" ? "cancelling" : "pending";
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus,
+      lastIndexError: null,
+      nextCheckAt: nextQueuedWithdrawalCheckAt(toStatus, request.maturity_timestamp, Date.now()),
+    });
+    return request.status === toStatus ? "unchanged" : "advanced";
+  }
+
+  const rpc = createRpc(env, {
+    rpcUrl: resolveClusterRpcUrl(env, earnClusterFor(request.environment)),
+  }) as unknown as RawHistoryRpc;
+  const closing = await findClosingParEvent(env, rpc, request, client);
+  if (closing === null) {
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "closed_or_unknown",
+      lastIndexError: "Par-redemption PDA closed without a matching finalized event yet",
+      nextCheckAt: nextQueuedWithdrawalCheckAt(
+        "closed_or_unknown",
+        request.maturity_timestamp,
+        Date.now()
+      ),
+    });
+    return "closedUnknown";
+  }
+  assertParEventIdentity(request, closing.event);
+  await projectClosingParEvent(ledger, request, closing);
+  return "advanced";
+}
+
+async function projectClosingParEvent(
+  ledger: QueueLedger,
+  request: EarnVaultWithdrawalRequestRow,
+  closing: ClosingParEventObservation
+): Promise<void> {
+  if (closing.event.kind === "redemptionCancelled") {
+    await ledger.advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "cancelled",
+      closingSignature: closing.signature,
+      cancelledAt: epochSecondsIso(closing.event.occurredAt),
+      lastIndexError: null,
+    });
+    return;
+  }
+  await ledger.advanceRequest({
+    withdrawalRequestId: request.id,
+    organizationId: request.organization_id,
+    toStatus: "fulfilled",
+    closingSignature: closing.signature,
+    assetsPaid: closing.event.assetsPaid,
+    fulfilledAt: epochSecondsIso(closing.event.occurredAt),
+    lastIndexError: null,
+  });
 }
 
 export async function projectClosingEvent(
@@ -826,32 +1130,15 @@ async function findClosingEvent(
  * newest-first decision order. A window avoids a serial getTransaction
  * waterfall, but bounded concurrency protects the RPC and provider decoder.
  */
-export async function findClosingEventInHistoryPage(
-  env: Env,
-  rpc: RawHistoryRpc,
-  request: EarnVaultWithdrawalRequestRow,
-  client: EarnVaultQueuedWithdrawProvider,
-  history: readonly RawSignatureInfo[]
-): Promise<ClosingEventObservation | null> {
+async function observeHistoryNewestFirst<T>(
+  history: readonly RawSignatureInfo[],
+  observe: (signature: string) => Promise<T | null>
+): Promise<T | null> {
   const candidates = history.filter((entry) => entry.err === null);
   for (let offset = 0; offset < candidates.length; offset += CLOSING_HISTORY_LOOKUP_CONCURRENCY) {
     const batch = candidates.slice(offset, offset + CLOSING_HISTORY_LOOKUP_CONCURRENCY);
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each bounded window must finish before the next reaches the RPC.
-    const observations = await Promise.allSettled(
-      batch.map(async (entry): Promise<ClosingEventObservation | null> => {
-        const logs = await transactionLogs(rpc, entry.signature);
-        const events = await lifecycleEvents(env, client, request, logs);
-        const event = events.find(
-          (candidate) =>
-            (candidate.kind === "withdrawalCancelled" ||
-              candidate.kind === "withdrawalFulfilled") &&
-            String(candidate.requestAddress) === request.request_address
-        );
-        return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
-          ? { signature: entry.signature, event }
-          : null;
-      })
-    );
+    const observations = await Promise.allSettled(batch.map((entry) => observe(entry.signature)));
     // Promise results retain input order. Throwing a failure encountered before
     // a match and ignoring one after it preserves the former serial semantics.
     for (const observation of observations) {
@@ -860,4 +1147,75 @@ export async function findClosingEventInHistoryPage(
     }
   }
   return null;
+}
+
+export async function findClosingEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultQueuedWithdrawProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingEventObservation | null> {
+  return observeHistoryNewestFirst(history, async (signature) => {
+    const logs = await transactionLogs(rpc, signature);
+    const events = await lifecycleEvents(env, client, request, logs);
+    const event = events.find(
+      (candidate) =>
+        (candidate.kind === "withdrawalCancelled" || candidate.kind === "withdrawalFulfilled") &&
+        String(candidate.requestAddress) === request.request_address
+    );
+    return event?.kind === "withdrawalCancelled" || event?.kind === "withdrawalFulfilled"
+      ? { signature, event }
+      : null;
+  });
+}
+
+export async function findClosingParEventInHistoryPage(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultParRedemptionProvider,
+  history: readonly RawSignatureInfo[]
+): Promise<ClosingParEventObservation | null> {
+  return observeHistoryNewestFirst(history, async (signature) => {
+    const observation = await transactionObservation(rpc, signature);
+    const events = await parLifecycleEvents(env, client, request, observation);
+    const event = events.find(
+      (candidate) =>
+        (candidate.kind === "redemptionCancelled" || candidate.kind === "redemptionFulfilled") &&
+        String(candidate.requestAddress) === request.request_address
+    );
+    return event?.kind === "redemptionCancelled" || event?.kind === "redemptionFulfilled"
+      ? { signature, event }
+      : null;
+  });
+}
+
+async function findClosingParEvent(
+  env: Env,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow,
+  client: EarnVaultParRedemptionProvider
+): Promise<ClosingParEventObservation | null> {
+  let before: Signature | undefined;
+  for (let page = 0; page < CLOSING_HISTORY_MAX_PAGES; page += 1) {
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- pagination follows newest-first history to the known request-creation boundary.
+    const history = await rpc
+      .getSignaturesForAddress(address(request.request_address), {
+        commitment: "finalized",
+        limit: CLOSING_HISTORY_PAGE_SIZE,
+        ...(before ? { before } : {}),
+        ...(request.creation_signature ? { until: request.creation_signature as Signature } : {}),
+      })
+      .send();
+    const closing = await findClosingParEventInHistoryPage(env, rpc, request, client, history);
+    if (closing) return closing;
+    if (history.length < CLOSING_HISTORY_PAGE_SIZE) return null;
+    const oldest = history.at(-1)?.signature;
+    if (!oldest) return null;
+    before = oldest as Signature;
+  }
+  throw new Error(
+    `Par redemption ${request.id} closing history exceeded ${CLOSING_HISTORY_MAX_PAGES} pages`
+  );
 }

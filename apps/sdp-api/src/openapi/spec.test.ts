@@ -4,12 +4,15 @@ import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
   anyOf?: TestJsonSchema[];
+  enum?: unknown[];
   example?: unknown;
   items?: TestJsonSchema;
   not?: TestJsonSchema;
+  nullable?: boolean;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
+  type?: string;
 }
 
 function getJsonSchema(value: unknown): TestJsonSchema {
@@ -364,6 +367,80 @@ describe("OpenAPI spec", () => {
     for (const path of referencedPaths) {
       expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
     }
+  });
+
+  it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
+    const doc = createPublicOpenApiDocument({ publishEarn: true });
+    const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
+
+    const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
+    expect(buildRequest.anyOf).toHaveLength(2);
+    const operatorRequest = buildRequest.anyOf?.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorRequest?.required).toEqual(
+      expect.arrayContaining(["positionId", "shares", "mechanism"])
+    );
+    expect(operatorRequest?.properties).not.toHaveProperty("strategyId");
+    expect(operatorRequest?.properties).not.toHaveProperty("discountBps");
+    expect(operatorRequest?.properties).not.toHaveProperty("deadlineSeconds");
+
+    const options = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
+    );
+    const optionsVariants = options.properties?.data?.anyOf ?? [];
+    expect(optionsVariants).toHaveLength(2);
+    for (const variant of optionsVariants) {
+      expect(variant.properties?.parRedemption).toMatchObject({
+        nullable: true,
+        required: expect.arrayContaining([
+          "intermediateMint",
+          "assetMint",
+          "minimumShares",
+          "cancelable",
+          "operatorSettled",
+        ]),
+      });
+    }
+
+    const preview = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
+    );
+    const operatorPreview = preview.properties?.data?.anyOf?.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorPreview?.required).toEqual(
+      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount", "assets"])
+    );
+
+    const record = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}"]?.get
+        ?.responses?.["200"]
+    );
+    const recordVariants = record.properties?.data?.properties?.withdrawalRequest?.anyOf ?? [];
+    expect(recordVariants).toHaveLength(2);
+    const operatorRecord = recordVariants.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorRecord?.properties?.intermediateMint?.type).toBe("string");
+    expect(operatorRecord?.properties?.intermediateAmount?.type).toBe("string");
+    expect(operatorRecord?.properties?.discountBps?.nullable).toBe(true);
+    expect(operatorRecord?.properties?.maturityTimestamp?.nullable).toBe(true);
+    expect(operatorRecord?.properties?.deadlineTimestamp?.nullable).toBe(true);
+
+    const buildResponse = getJsonSchema(requestPath?.post?.responses?.["200"]);
+    const buildVariants = buildResponse.properties?.data?.properties?.transaction?.anyOf ?? [];
+    const operatorBuild = buildVariants.find(
+      (variant) =>
+        variant.properties?.action?.enum?.includes("request") &&
+        variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorBuild?.required).toEqual(
+      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount"])
+    );
+    expect(operatorBuild?.properties).not.toHaveProperty("discountBps");
+    expect(operatorBuild?.properties).not.toHaveProperty("maturityTimestamp");
+    expect(operatorBuild?.properties).not.toHaveProperty("deadlineTimestamp");
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {

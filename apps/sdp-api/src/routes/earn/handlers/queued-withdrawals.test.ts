@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  earnExternalWalletWithdrawalRequestTransactionSchema,
+  earnVaultWithdrawalRequestSchema,
+} from "@/routes/earn/schemas";
 import { AuditService } from "@/services/audit.service";
 import { env } from "@/test/helpers/env";
 import {
@@ -10,11 +14,13 @@ import {
 const capabilities = vi.hoisted(() => ({
   instant: null as Record<string, unknown> | null,
   queued: null as Record<string, unknown> | null,
+  par: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/services/earn/execution-registry", () => ({
   resolveVaultWithdrawClient: () => capabilities.instant,
   resolveVaultQueuedWithdrawClient: () => capabilities.queued,
+  resolveVaultParRedemptionClient: () => capabilities.par,
 }));
 
 const position = {
@@ -40,6 +46,41 @@ describe("queued withdrawal handler contracts", () => {
   beforeEach(() => {
     capabilities.instant = null;
     capabilities.queued = null;
+    capabilities.par = null;
+  });
+
+  it("accepts explicit operator-redemption bodies without solver-only terms", () => {
+    expect(
+      earnVaultWithdrawalRequestSchema.safeParse({
+        positionId: position.id,
+        shares: "10",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(true);
+    expect(
+      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+        positionId: position.id,
+        shares: "10",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(true);
+    expect(
+      earnExternalWalletWithdrawalRequestTransactionSchema.safeParse({
+        strategyId: "hastra-prime",
+        ownerAddress: "11111111111111111111111111111111",
+        shares: "10",
+        mechanism: "operatorRedemption",
+      }).success
+    ).toBe(false);
+    expect(
+      earnVaultWithdrawalRequestSchema.safeParse({
+        positionId: position.id,
+        shares: "10",
+        mechanism: "operatorRedemption",
+        discountBps: 25,
+        deadlineSeconds: 60,
+      }).success
+    ).toBe(false);
   });
 
   it("keeps instant-only providers available and leaves queue-only fields null", async () => {
@@ -51,6 +92,7 @@ describe("queued withdrawal handler contracts", () => {
       withdrawAuthority: null,
       queueState: null,
       queueAsset: null,
+      parRedemption: null,
     });
   });
 
@@ -63,6 +105,31 @@ describe("queued withdrawal handler contracts", () => {
       withdrawAuthority: null,
       queueState: null,
       queueAsset: null,
+      parRedemption: null,
+    });
+  });
+
+  it("advertises par redemption as the only route when the DEX exit is disabled", async () => {
+    capabilities.par = {
+      getParRedemptionOptions: vi.fn().mockResolvedValue({
+        intermediateMint: "wYldsMint111111111111111111111111111111111",
+        assetMint: position.tokenMint,
+        minimumShares: "0.000001",
+        shareDecimals: 6,
+        assetDecimals: 6,
+        cancelable: true,
+        operatorSettled: true,
+      }),
+    };
+
+    await expect(readOptions({ env } as never, "production", position)).resolves.toMatchObject({
+      instant: false,
+      providerOrder: false,
+      queued: false,
+      parRedemption: {
+        intermediateMint: "wYldsMint111111111111111111111111111111111",
+        operatorSettled: true,
+      },
     });
   });
 
@@ -93,6 +160,7 @@ describe("queued withdrawal handler contracts", () => {
       position_id: position.id,
       withdrawal_request_id: null,
       action: "request",
+      mechanism: "solver_queue",
       owner_address: position.ownerAddress,
       vault_address: position.vaultAddress,
       token_mint: position.tokenMint,
@@ -102,6 +170,8 @@ describe("queued withdrawal handler contracts", () => {
       quoted_assets: "9.8",
       share_decimals: 6,
       asset_decimals: 6,
+      intermediate_mint: null,
+      intermediate_amount: null,
       discount_bps: 25,
       maturity_timestamp: "1700000060",
       deadline_timestamp: "1700000120",
@@ -119,6 +189,45 @@ describe("queued withdrawal handler contracts", () => {
     });
     expect(wire).not.toHaveProperty("unsignedTransaction");
     expect(wire).not.toHaveProperty("feePayer");
+  });
+
+  it("emits only par-redemption terms for an operator request build", () => {
+    const wire = builtTransactionWire({
+      id: "earn_external_wallet_withdrawal_request_transaction_par",
+      environment: "production",
+      provider: "hastra",
+      position_id: position.id,
+      withdrawal_request_id: null,
+      action: "request",
+      mechanism: "operator_redemption",
+      owner_address: position.ownerAddress,
+      vault_address: position.vaultAddress,
+      token_mint: position.tokenMint,
+      share_mint: position.shareMint,
+      request_address: "ParRequestAddress11111111111111111111111",
+      shares: "10",
+      quoted_assets: "10.25",
+      share_decimals: 6,
+      asset_decimals: 6,
+      intermediate_mint: "wYldsMint111111111111111111111111111111111",
+      intermediate_amount: "10.25",
+      discount_bps: null,
+      maturity_timestamp: null,
+      deadline_timestamp: null,
+      fee_payer: null,
+      unsigned_transaction: "AQ==",
+      last_valid_block_height: "12345",
+    });
+
+    expect(wire).toMatchObject({
+      mechanism: "operatorRedemption",
+      assets: "10.25",
+      intermediateMint: "wYldsMint111111111111111111111111111111111",
+      intermediateAmount: "10.25",
+    });
+    expect(wire).not.toHaveProperty("discountBps");
+    expect(wire).not.toHaveProperty("maturityTimestamp");
+    expect(wire).not.toHaveProperty("deadlineTimestamp");
   });
 
   it("records queued share escrow as a distinct audit action, not a completed payout", async () => {

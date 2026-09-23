@@ -1,6 +1,8 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type {
   EarnRuntimeContext,
+  EarnVaultParRedemptionQuote,
+  EarnVaultParRedemptionRequestPlan,
   EarnVaultQueuedWithdrawalQuote,
   EarnVaultQueuedWithdrawalRequestPlan,
   EarnVaultTransactionPlan,
@@ -12,6 +14,7 @@ import { type AppDb, getDb } from "@/db";
 import {
   createPostgresEarnVaultWithdrawalRequestsRepository,
   type EarnExternalWalletWithdrawalRequestTransactionRow,
+  type EarnVaultWithdrawalMechanism,
   type EarnVaultWithdrawalRequestActionRow,
   type EarnVaultWithdrawalRequestRow,
   generateEarnExternalWalletWithdrawalRequestTransactionId,
@@ -28,6 +31,7 @@ import {
   transactionExpired,
 } from "@/lib/errors";
 import {
+  buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalCancelFingerprint,
   buildEarnVaultQueuedWithdrawalFingerprint,
 } from "@/lib/idempotency";
@@ -37,6 +41,7 @@ import type { Env } from "@/types/env";
 import {
   earnClusterFor,
   resolveClusterRpcUrl,
+  resolveVaultParRedemptionClient,
   resolveVaultQueuedWithdrawClient,
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
@@ -81,7 +86,15 @@ export interface QueuedWithdrawalTermsInput {
   shares: string;
   discountBps: number;
   deadlineSeconds: number;
+  mechanism?: "solver_queue";
 }
+
+export interface ParRedemptionTermsInput {
+  shares: string;
+  mechanism: "operator_redemption";
+}
+
+export type AsyncWithdrawalTermsInput = QueuedWithdrawalTermsInput | ParRedemptionTermsInput;
 
 export interface QueuedWithdrawalMutationResult {
   request: EarnVaultWithdrawalRequestRow;
@@ -101,6 +114,7 @@ export interface ExternalQueuedWithdrawalBuiltTransaction {
   position_id: string | null;
   withdrawal_request_id: string | null;
   action: "request" | "cancel";
+  mechanism: EarnVaultWithdrawalMechanism;
   owner_address: string;
   vault_address: string;
   token_mint: string;
@@ -110,6 +124,8 @@ export interface ExternalQueuedWithdrawalBuiltTransaction {
   quoted_assets: string | null;
   share_decimals: number | null;
   asset_decimals: number | null;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
   discount_bps: number | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
@@ -148,9 +164,66 @@ export function assertQueuePlan(
   }
 }
 
-function throwBlockingQuote(quote: EarnVaultQueuedWithdrawalQuote): void {
+interface NormalizedAsyncWithdrawalQuote {
+  shares: string;
+  shareDecimals: number;
+  assets: string;
+  assetDecimals: number;
+  blockingIssues: EarnVaultQueuedWithdrawalQuote["blockingIssues"];
+  intermediateMint: string | null;
+  intermediateAmount: string | null;
+}
+
+interface NormalizedAsyncWithdrawalPlan extends EarnVaultTransactionPlan {
+  requestAddress: string;
+  expectedRequest: {
+    shares: string;
+    assets: string;
+    intermediateMint: string | null;
+    intermediateAmount: string | null;
+    discountBps: number | null;
+    maturityTimestamp: string | null;
+    deadlineTimestamp: string | null;
+  };
+}
+
+function asyncMechanism(terms: AsyncWithdrawalTermsInput): EarnVaultWithdrawalMechanism {
+  return terms.mechanism === "operator_redemption" ? "operator_redemption" : "solver_queue";
+}
+
+function requestFingerprint(input: {
+  environment: SdpEnvironment;
+  provider: string;
+  positionId: string;
+  terms: AsyncWithdrawalTermsInput;
+  transactionId?: string;
+}): string {
+  if (input.terms.mechanism === "operator_redemption") {
+    return buildEarnVaultParRedemptionFingerprint({
+      environment: input.environment,
+      provider: input.provider,
+      positionId: input.positionId,
+      shares: input.terms.shares,
+      ...(input.transactionId ? { transactionId: input.transactionId } : {}),
+    });
+  }
+  return buildEarnVaultQueuedWithdrawalFingerprint({
+    environment: input.environment,
+    provider: input.provider,
+    positionId: input.positionId,
+    shares: input.terms.shares,
+    discountBps: input.terms.discountBps,
+    deadlineSeconds: input.terms.deadlineSeconds,
+    ...(input.transactionId ? { transactionId: input.transactionId } : {}),
+  });
+}
+
+function throwBlockingQuote(quote: {
+  blockingIssues: readonly { code: string; message: string }[];
+}): void {
   const issue = quote.blockingIssues[0];
-  if (issue) throw badRequest(`Queued withdrawal is not currently available: ${issue.message}`);
+  if (issue)
+    throw badRequest(`Asynchronous withdrawal is not currently available: ${issue.message}`);
 }
 
 async function quoteAndBuildRequest(
@@ -158,39 +231,120 @@ async function quoteAndBuildRequest(
   input: {
     actor: Pick<QueuedWithdrawalActor, "environment">;
     position: QueuedWithdrawalPosition;
-    terms: QueuedWithdrawalTermsInput;
+    terms: AsyncWithdrawalTermsInput;
     memoId: string;
     rentPayer?: string;
     memoKind: "vault-withdrawal-request" | "external-withdrawal-request";
   }
-): Promise<{ quote: EarnVaultQueuedWithdrawalQuote; plan: EarnVaultQueuedWithdrawalRequestPlan }> {
+): Promise<{
+  quote: NormalizedAsyncWithdrawalQuote;
+  plan: NormalizedAsyncWithdrawalPlan;
+  mechanism: EarnVaultWithdrawalMechanism;
+}> {
   const deadline = createVaultDeadline();
-  const client = resolveVaultQueuedWithdrawClient(env, input.position.provider, deadline);
-  if (!client) throw notImplemented(input.position.provider, "queued vault withdrawals");
   const runtime: EarnRuntimeContext = { env, environment: input.actor.environment };
-  let quote: EarnVaultQueuedWithdrawalQuote;
-  let built: EarnVaultQueuedWithdrawalRequestPlan;
+  let quote: NormalizedAsyncWithdrawalQuote;
+  let built: NormalizedAsyncWithdrawalPlan;
+  const mechanism = asyncMechanism(input.terms);
   try {
-    quote = await client.quoteQueuedWithdrawal(runtime, {
-      providerReference: input.position.vaultAddress,
-      ...input.terms,
-    });
-    throwBlockingQuote(quote);
-    built = await client.buildQueuedWithdrawalRequest(runtime, {
-      providerReference: input.position.vaultAddress,
-      owner: input.position.ownerAddress,
-      ...input.terms,
-      ...(input.rentPayer === undefined ? {} : { rentPayer: input.rentPayer }),
-    });
+    if (input.terms.mechanism === "operator_redemption") {
+      const client = resolveVaultParRedemptionClient(env, input.position.provider, deadline);
+      if (!client) throw notImplemented(input.position.provider, "par redemptions");
+      const parQuote: EarnVaultParRedemptionQuote = await client.quoteParRedemption(runtime, {
+        providerReference: input.position.vaultAddress,
+        shares: input.terms.shares,
+      });
+      throwBlockingQuote(parQuote);
+      const parPlan: EarnVaultParRedemptionRequestPlan = await client.buildParRedemptionRequest(
+        runtime,
+        {
+          providerReference: input.position.vaultAddress,
+          owner: input.position.ownerAddress,
+          shares: input.terms.shares,
+          // Same sponsorship hand-off as the queued-withdrawal branch below:
+          // the provider charges what it can to the sponsor and pre-funds the
+          // owner for the rents its program hardcodes.
+          ...(input.rentPayer === undefined ? {} : { rentPayer: input.rentPayer }),
+        }
+      );
+      if (
+        parPlan.assetIdentity.depositTokenMint !== input.position.tokenMint ||
+        parPlan.assetIdentity.shareMint !== input.position.shareMint ||
+        parPlan.expectedRequest.assetMint !== input.position.tokenMint ||
+        compareDecimalAmounts(parPlan.expectedRequest.shares, input.terms.shares) !== 0
+      ) {
+        throw internalError("Par-redemption builder changed the position asset identity or shares");
+      }
+      quote = {
+        shares: parQuote.shares,
+        shareDecimals: parQuote.shareDecimals,
+        assets: parQuote.assets,
+        assetDecimals: parQuote.assetDecimals,
+        blockingIssues: parQuote.blockingIssues,
+        intermediateMint: parQuote.intermediateMint,
+        intermediateAmount: parQuote.intermediateAmount,
+      };
+      built = {
+        ...parPlan,
+        expectedRequest: {
+          shares: parPlan.expectedRequest.shares,
+          assets: parPlan.expectedRequest.assets,
+          intermediateMint: parPlan.expectedRequest.intermediateMint,
+          intermediateAmount: parPlan.expectedRequest.intermediateAmount,
+          discountBps: null,
+          maturityTimestamp: null,
+          deadlineTimestamp: null,
+        },
+      };
+    } else {
+      const client = resolveVaultQueuedWithdrawClient(env, input.position.provider, deadline);
+      if (!client) throw notImplemented(input.position.provider, "queued vault withdrawals");
+      const queueQuote = await client.quoteQueuedWithdrawal(runtime, {
+        providerReference: input.position.vaultAddress,
+        shares: input.terms.shares,
+        discountBps: input.terms.discountBps,
+        deadlineSeconds: input.terms.deadlineSeconds,
+      });
+      throwBlockingQuote(queueQuote);
+      const queuePlan = await client.buildQueuedWithdrawalRequest(runtime, {
+        providerReference: input.position.vaultAddress,
+        owner: input.position.ownerAddress,
+        shares: input.terms.shares,
+        discountBps: input.terms.discountBps,
+        deadlineSeconds: input.terms.deadlineSeconds,
+        ...(input.rentPayer === undefined ? {} : { rentPayer: input.rentPayer }),
+      });
+      assertQueuePlan(queuePlan, input.position, input.terms);
+      quote = {
+        shares: queueQuote.shares,
+        shareDecimals: queueQuote.shareDecimals,
+        assets: queueQuote.assets,
+        assetDecimals: queueQuote.assetDecimals,
+        blockingIssues: queueQuote.blockingIssues,
+        intermediateMint: null,
+        intermediateAmount: null,
+      };
+      built = {
+        ...queuePlan,
+        expectedRequest: {
+          shares: queuePlan.expectedRequest.shares,
+          assets: queuePlan.expectedRequest.assets,
+          intermediateMint: null,
+          intermediateAmount: null,
+          discountBps: queuePlan.expectedRequest.discountBps,
+          maturityTimestamp: queuePlan.expectedRequest.maturityTimestamp,
+          deadlineTimestamp: queuePlan.expectedRequest.deadlineTimestamp,
+        },
+      };
+    }
   } catch (error) {
     rethrowVaultProviderFailure(error);
   }
   if (built.cluster !== earnClusterFor(input.actor.environment)) {
     throw internalError(
-      `Queued withdrawal builder returned a ${built.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
+      `Asynchronous withdrawal builder returned a ${built.cluster} plan for the configured ${earnClusterFor(input.actor.environment)} cluster`
     );
   }
-  assertQueuePlan(built, input.position, input.terms);
   return {
     quote,
     plan: {
@@ -199,6 +353,7 @@ async function quoteAndBuildRequest(
       requestAddress: built.requestAddress,
       expectedRequest: built.expectedRequest,
     },
+    mechanism,
   };
 }
 
@@ -235,7 +390,7 @@ async function prepareCustodyTransaction(
   });
   if (!simulation.ok) {
     throw badRequest(
-      `Queued withdrawal simulation failed: ${simulation.error}`,
+      `Asynchronous withdrawal simulation failed: ${simulation.error}`,
       rawSimulationDetails(simulation.raw)
     );
   }
@@ -299,17 +454,17 @@ export async function createCustodyQueuedWithdrawal(
   input: {
     actor: CustodyQueuedWithdrawalActor;
     position: QueuedWithdrawalPosition;
-    terms: QueuedWithdrawalTermsInput;
+    terms: AsyncWithdrawalTermsInput;
     clientRequestId: string;
   },
   options: QueuedWithdrawalExecutionOptions = {}
 ): Promise<QueuedWithdrawalMutationResult> {
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
-  const fingerprint = buildEarnVaultQueuedWithdrawalFingerprint({
+  const fingerprint = requestFingerprint({
     environment: input.actor.environment,
     provider: input.position.provider,
     positionId: input.position.id,
-    ...input.terms,
+    terms: input.terms,
   });
   const prior = await repository.findByClientRequestId({
     organizationId: input.actor.organizationId,
@@ -326,7 +481,7 @@ export async function createCustodyQueuedWithdrawal(
       withdrawalRequestId: prior.id,
       action: "request",
     });
-    if (!action) throw internalError(`Queued withdrawal ${prior.id} has no request action`);
+    if (!action) throw internalError(`Asynchronous withdrawal ${prior.id} has no request action`);
     return { request: prior, action, replayed: true };
   }
 
@@ -340,7 +495,7 @@ export async function createCustodyQueuedWithdrawal(
     cluster: earnClusterFor(input.actor.environment),
     deadline,
   });
-  const { quote, plan } = await quoteAndBuildRequest(env, {
+  const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
     actor: input.actor,
     position: input.position,
     terms: input.terms,
@@ -361,6 +516,7 @@ export async function createCustodyQueuedWithdrawal(
     clientRequestId: input.clientRequestId,
     idempotencyFingerprint: fingerprint,
     expiresAt: new Date(Date.now() + QUEUED_REQUEST_RESERVATION_MS).toISOString(),
+    mechanism,
   });
   try {
     // Reuse the already resolved sponsorship identity in signing. Resolving it
@@ -383,7 +539,7 @@ export async function createCustodyQueuedWithdrawal(
     });
     if (!simulation.ok) {
       throw badRequest(
-        `Queued withdrawal simulation failed: ${simulation.error}`,
+        `Asynchronous withdrawal simulation failed: ${simulation.error}`,
         rawSimulationDetails(simulation.raw)
       );
     }
@@ -423,10 +579,13 @@ export async function createCustodyQueuedWithdrawal(
         tokenMint: input.position.tokenMint,
         shareMint: input.position.shareMint,
         requestAddress: plan.requestAddress,
+        mechanism,
         shares: plan.expectedRequest.shares,
         quotedAssets: plan.expectedRequest.assets,
         shareDecimals: quote.shareDecimals,
         assetDecimals: quote.assetDecimals,
+        intermediateMint: plan.expectedRequest.intermediateMint,
+        intermediateAmount: plan.expectedRequest.intermediateAmount,
         discountBps: plan.expectedRequest.discountBps,
         maturityTimestamp: plan.expectedRequest.maturityTimestamp,
         deadlineTimestamp: plan.expectedRequest.deadlineTimestamp,
@@ -463,6 +622,38 @@ async function requireCancelableProviderRequest(
   request: EarnVaultWithdrawalRequestRow,
   expectedOwner: string
 ): Promise<void> {
+  if (request.mechanism === "operator_redemption") {
+    const client = resolveVaultParRedemptionClient(env, request.provider, createVaultDeadline());
+    if (!client) throw notImplemented(request.provider, "par redemptions");
+    let lookup: Awaited<ReturnType<typeof client.readParRedemptionRequest>>;
+    try {
+      lookup = await client.readParRedemptionRequest(
+        { env, environment: request.environment },
+        { providerReference: request.vault_address, requestAddress: request.request_address }
+      );
+    } catch (error) {
+      rethrowVaultProviderFailure(error);
+    }
+    if (lookup.status === "closedOrUnknown") {
+      throw conflict("Par redemption is already closed; refresh its status before cancelling");
+    }
+    if (
+      lookup.requestAddress !== request.request_address ||
+      lookup.request.requestAddress !== request.request_address ||
+      lookup.request.owner !== expectedOwner ||
+      lookup.request.providerReference !== request.vault_address ||
+      lookup.request.intermediateMint !== request.intermediate_mint ||
+      lookup.request.intermediateAmount !== request.intermediate_amount
+    ) {
+      throw internalError("Par-redemption owner or intermediate amount no longer matches");
+    }
+    await createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env)).advanceRequest({
+      withdrawalRequestId: request.id,
+      organizationId: request.organization_id,
+      toStatus: "pending",
+    });
+    return;
+  }
   const client = resolveVaultQueuedWithdrawClient(env, request.provider, createVaultDeadline());
   if (!client) throw notImplemented(request.provider, "queued vault withdrawals");
   let lookup: Awaited<ReturnType<typeof client.readQueuedWithdrawalRequest>>;
@@ -478,6 +669,8 @@ async function requireCancelableProviderRequest(
     throw conflict("Queued withdrawal is already closed; refresh its status before cancelling");
   }
   if (
+    lookup.requestAddress !== request.request_address ||
+    lookup.request.requestAddress !== request.request_address ||
     lookup.request.owner !== expectedOwner ||
     lookup.request.providerReference !== request.vault_address ||
     lookup.request.assetMint !== request.token_mint
@@ -525,22 +718,36 @@ export async function cancelCustodyQueuedWithdrawal(
     return { request: input.request, action: prior, replayed: true };
   }
   await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
-  const client = resolveVaultQueuedWithdrawClient(
-    env,
-    input.request.provider,
-    createVaultDeadline()
-  );
-  if (!client) throw notImplemented(input.request.provider, "queued vault withdrawals");
   let plan: EarnVaultTransactionPlan;
   try {
-    const built = await client.buildQueuedWithdrawalCancel(
-      { env, environment: input.actor.environment },
-      {
-        providerReference: input.request.vault_address,
-        owner: input.position.ownerAddress,
-        requestAddress: input.request.request_address,
-      }
-    );
+    const runtime = { env, environment: input.actor.environment };
+    const cancelInput = {
+      providerReference: input.request.vault_address,
+      owner: input.position.ownerAddress,
+      requestAddress: input.request.request_address,
+    };
+    const built =
+      input.request.mechanism === "operator_redemption"
+        ? await (() => {
+            const parClient = resolveVaultParRedemptionClient(
+              env,
+              input.request.provider,
+              createVaultDeadline()
+            );
+            if (!parClient) throw notImplemented(input.request.provider, "par redemptions");
+            return parClient.buildParRedemptionCancel(runtime, cancelInput);
+          })()
+        : await (() => {
+            const queueClient = resolveVaultQueuedWithdrawClient(
+              env,
+              input.request.provider,
+              createVaultDeadline()
+            );
+            if (!queueClient) {
+              throw notImplemented(input.request.provider, "queued vault withdrawals");
+            }
+            return queueClient.buildQueuedWithdrawalCancel(runtime, cancelInput);
+          })();
     plan = appendVaultRequestMemo(built, "vault-withdrawal-cancel", input.clientRequestId);
   } catch (error) {
     rethrowVaultProviderFailure(error);
@@ -606,7 +813,7 @@ async function compileExternalPlan(
   });
   if (!simulation.ok)
     throw badRequest(
-      `Queued withdrawal simulation failed: ${simulation.error}`,
+      `Asynchronous withdrawal simulation failed: ${simulation.error}`,
       rawSimulationDetails(simulation.raw)
     );
   return compileUnsignedVaultTransaction({
@@ -625,13 +832,13 @@ export async function buildExternalQueuedWithdrawalRequest(
   input: {
     actor: ExternalBuildActor;
     position: QueuedWithdrawalPosition;
-    terms: QueuedWithdrawalTermsInput;
+    terms: AsyncWithdrawalTermsInput;
     feePayer?: string;
   }
 ): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
   const feePayer = input.feePayer === input.position.ownerAddress ? undefined : input.feePayer;
-  const { quote, plan } = await quoteAndBuildRequest(env, {
+  const { quote, plan, mechanism } = await quoteAndBuildRequest(env, {
     actor: input.actor,
     position: input.position,
     terms: input.terms,
@@ -652,6 +859,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     position_id: input.position.id || null,
     withdrawal_request_id: null,
     action: "request",
+    mechanism,
     owner_address: input.position.ownerAddress,
     vault_address: input.position.vaultAddress,
     token_mint: input.position.tokenMint,
@@ -661,6 +869,8 @@ export async function buildExternalQueuedWithdrawalRequest(
     quoted_assets: plan.expectedRequest.assets,
     share_decimals: quote.shareDecimals,
     asset_decimals: quote.assetDecimals,
+    intermediate_mint: plan.expectedRequest.intermediateMint,
+    intermediate_amount: plan.expectedRequest.intermediateAmount,
     discount_bps: plan.expectedRequest.discountBps,
     maturity_timestamp: plan.expectedRequest.maturityTimestamp,
     deadline_timestamp: plan.expectedRequest.deadlineTimestamp,
@@ -683,6 +893,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     provider: built.provider,
     positionId: built.position_id,
     action: "request",
+    mechanism: built.mechanism,
     ownerAddress: built.owner_address,
     vaultAddress: built.vault_address,
     tokenMint: built.token_mint,
@@ -692,6 +903,8 @@ export async function buildExternalQueuedWithdrawalRequest(
     quotedAssets: built.quoted_assets,
     shareDecimals: built.share_decimals,
     assetDecimals: built.asset_decimals,
+    intermediateMint: built.intermediate_mint,
+    intermediateAmount: built.intermediate_amount,
     discountBps: built.discount_bps,
     maturityTimestamp: built.maturity_timestamp,
     deadlineTimestamp: built.deadline_timestamp,
@@ -705,6 +918,7 @@ export async function buildExternalQueuedWithdrawalRequest(
   });
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: authenticated and anonymous cancellation both validate provider truth before sharing one build/persist path.
 export async function buildExternalQueuedWithdrawalCancel(
   env: Env,
   input: {
@@ -715,8 +929,40 @@ export async function buildExternalQueuedWithdrawalCancel(
     feePayer?: string;
   }
 ): Promise<ExternalQueuedWithdrawalBuiltTransaction> {
+  const parClient = resolveVaultParRedemptionClient(
+    env,
+    input.position.provider,
+    createVaultDeadline()
+  );
+  const mechanism: EarnVaultWithdrawalMechanism =
+    input.request?.mechanism === "operator_redemption" || (!input.request && parClient)
+      ? "operator_redemption"
+      : "solver_queue";
   if (input.request) {
     await requireCancelableProviderRequest(env, input.request, input.position.ownerAddress);
+  } else if (mechanism === "operator_redemption") {
+    if (!parClient) throw notImplemented(input.position.provider, "par redemptions");
+    let lookup: Awaited<ReturnType<typeof parClient.readParRedemptionRequest>>;
+    try {
+      lookup = await parClient.readParRedemptionRequest(
+        { env, environment: input.actor.environment },
+        {
+          providerReference: input.position.vaultAddress,
+          requestAddress: input.requestAddress,
+        }
+      );
+    } catch (error) {
+      rethrowVaultProviderFailure(error);
+    }
+    if (lookup.status === "closedOrUnknown") throw conflict("Par redemption is already closed");
+    if (
+      lookup.requestAddress !== input.requestAddress ||
+      lookup.request.requestAddress !== input.requestAddress ||
+      lookup.request.owner !== input.position.ownerAddress ||
+      lookup.request.providerReference !== input.position.vaultAddress
+    ) {
+      throw badRequest("Par-redemption request does not match the supplied owner and strategy");
+    }
   } else {
     const readClient = resolveVaultQueuedWithdrawClient(
       env,
@@ -740,6 +986,8 @@ export async function buildExternalQueuedWithdrawalCancel(
       throw conflict("Queued withdrawal is already closed");
     }
     if (
+      lookup.requestAddress !== input.requestAddress ||
+      lookup.request.requestAddress !== input.requestAddress ||
       lookup.request.owner !== input.position.ownerAddress ||
       lookup.request.providerReference !== input.position.vaultAddress ||
       lookup.request.assetMint !== input.position.tokenMint
@@ -750,23 +998,32 @@ export async function buildExternalQueuedWithdrawalCancel(
       throw conflict(`Queued withdrawal cannot be cancelled while status is ${lookup.status}`);
     }
   }
-  const client = resolveVaultQueuedWithdrawClient(
-    env,
-    input.position.provider,
-    createVaultDeadline()
-  );
-  if (!client) throw notImplemented(input.position.provider, "queued vault withdrawals");
   const transactionId = generateEarnExternalWalletWithdrawalRequestTransactionId();
   let plan: EarnVaultTransactionPlan;
   try {
-    const built = await client.buildQueuedWithdrawalCancel(
-      { env, environment: input.actor.environment },
-      {
-        providerReference: input.position.vaultAddress,
-        owner: input.position.ownerAddress,
-        requestAddress: input.requestAddress,
-      }
-    );
+    const runtime = { env, environment: input.actor.environment };
+    const cancelInput = {
+      providerReference: input.position.vaultAddress,
+      owner: input.position.ownerAddress,
+      requestAddress: input.requestAddress,
+    };
+    const built =
+      mechanism === "operator_redemption"
+        ? await (() => {
+            if (!parClient) throw notImplemented(input.position.provider, "par redemptions");
+            return parClient.buildParRedemptionCancel(runtime, cancelInput);
+          })()
+        : await (() => {
+            const queueClient = resolveVaultQueuedWithdrawClient(
+              env,
+              input.position.provider,
+              createVaultDeadline()
+            );
+            if (!queueClient) {
+              throw notImplemented(input.position.provider, "queued vault withdrawals");
+            }
+            return queueClient.buildQueuedWithdrawalCancel(runtime, cancelInput);
+          })();
     plan = appendVaultRequestMemo(built, "external-withdrawal-cancel", transactionId);
   } catch (error) {
     rethrowVaultProviderFailure(error);
@@ -790,6 +1047,7 @@ export async function buildExternalQueuedWithdrawalCancel(
     position_id: input.position.id || null,
     withdrawal_request_id: input.request?.id ?? null,
     action: "cancel",
+    mechanism,
     owner_address: input.position.ownerAddress,
     vault_address: input.position.vaultAddress,
     token_mint: input.position.tokenMint,
@@ -799,6 +1057,8 @@ export async function buildExternalQueuedWithdrawalCancel(
     quoted_assets: null,
     share_decimals: null,
     asset_decimals: null,
+    intermediate_mint: null,
+    intermediate_amount: null,
     discount_bps: null,
     maturity_timestamp: null,
     deadline_timestamp: null,
@@ -821,6 +1081,7 @@ export async function buildExternalQueuedWithdrawalCancel(
     positionId: built.position_id,
     withdrawalRequestId: input.request.id,
     action: "cancel",
+    mechanism: built.mechanism,
     ownerAddress: built.owner_address,
     vaultAddress: built.vault_address,
     tokenMint: built.token_mint,
@@ -904,19 +1165,32 @@ export async function submitExternalQueuedWithdrawalAction(
       build.quoted_assets === null ||
       build.share_decimals === null ||
       build.asset_decimals === null ||
-      build.discount_bps === null ||
-      build.maturity_timestamp === null ||
-      build.deadline_timestamp === null
+      (build.mechanism === "solver_queue" &&
+        (build.discount_bps === null ||
+          build.maturity_timestamp === null ||
+          build.deadline_timestamp === null)) ||
+      (build.mechanism === "operator_redemption" &&
+        (build.intermediate_mint === null || build.intermediate_amount === null))
     ) {
-      throw internalError(`Queued withdrawal build ${build.id} is missing request terms`);
+      throw internalError(`Asynchronous withdrawal build ${build.id} is missing request terms`);
     }
-    const fingerprint = buildEarnVaultQueuedWithdrawalFingerprint({
+    const terms: AsyncWithdrawalTermsInput =
+      build.mechanism === "operator_redemption"
+        ? { mechanism: "operator_redemption", shares: build.shares }
+        : {
+            mechanism: "solver_queue",
+            shares: build.shares,
+            discountBps: build.discount_bps as number,
+            deadlineSeconds: Number(
+              BigInt(build.deadline_timestamp as string) -
+                BigInt(build.maturity_timestamp as string)
+            ),
+          };
+    const fingerprint = requestFingerprint({
       environment: build.environment,
       provider: build.provider,
       positionId: build.position_id,
-      shares: build.shares,
-      discountBps: build.discount_bps,
-      deadlineSeconds: Number(BigInt(build.deadline_timestamp) - BigInt(build.maturity_timestamp)),
+      terms,
       transactionId: build.id,
     });
     result = await repository.createSignedRequest({
@@ -932,10 +1206,13 @@ export async function submitExternalQueuedWithdrawalAction(
       tokenMint: build.token_mint,
       shareMint: build.share_mint,
       requestAddress: build.request_address,
+      mechanism: build.mechanism,
       shares: build.shares,
       quotedAssets: build.quoted_assets,
       shareDecimals: build.share_decimals,
       assetDecimals: build.asset_decimals,
+      intermediateMint: build.intermediate_mint,
+      intermediateAmount: build.intermediate_amount,
       discountBps: build.discount_bps,
       maturityTimestamp: build.maturity_timestamp,
       deadlineTimestamp: build.deadline_timestamp,
