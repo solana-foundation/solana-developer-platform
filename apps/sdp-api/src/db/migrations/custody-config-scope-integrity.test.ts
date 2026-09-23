@@ -97,7 +97,9 @@ describe("custody Config scope integrity constraints", () => {
     // actually persist with the scopes this test names, or the allows-side of
     // the constraint is never really exercised.
     const rows = await getDb(env)
-      .prepare("SELECT id, project_id, provider FROM custody_configs WHERE id IN (?, ?, ?) ORDER BY id")
+      .prepare(
+        "SELECT id, project_id, provider FROM custody_configs WHERE id IN (?, ?, ?) ORDER BY id"
+      )
       .bind("cust_scope_mix_org", "cust_scope_mix_para", "cust_scope_mix_prj")
       .all<{ id: string; project_id: string | null; provider: string }>();
     expect(rows.results).toEqual([
