@@ -470,7 +470,11 @@ export interface RampCryptoDeposit {
 }
 
 export interface MoneygramTransferDetails {
+  /** MoneyGram's profile id for the counterparty, the same reference stored on its `customer_link` provider account. */
+  customerId?: string;
   transactionId?: string;
+  /** MoneyGram-side transaction id; the correlation key for MoneyGram status webhooks. */
+  mgiTransactionId?: string;
   referenceNumber?: string;
   payoutAmount?: number;
   payoutStatus?: string;
@@ -1510,6 +1514,13 @@ export type CoinbaseRampEvent =
   | { kind: "errored"; orderId: string; reason: string };
 
 export type MoneygramRampEvent =
+  | {
+      kind: "transaction_created";
+      sessionId: string;
+      transactionId: string;
+      mgiTransactionId?: string;
+    }
+  | { kind: "deposit_address"; sessionId: string }
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
   | {
       kind: "onramp_completed";

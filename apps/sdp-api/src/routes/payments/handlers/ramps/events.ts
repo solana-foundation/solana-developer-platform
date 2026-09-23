@@ -1,12 +1,22 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
-import { isTerminalRampTransferStatus, type MoneygramRampEvent } from "@sdp/types";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import {
+  isRampTransferType,
+  isTerminalRampTransferStatus,
+  type MoneygramRampEvent,
+  type RampTransferType,
+} from "@sdp/types";
+import { getDb } from "@/db";
+import { asTransactionalClient } from "@/db/client";
 import type { PaymentTransferRow } from "@/db/repositories";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { noContent } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { type AppContext, getPaymentsRepository } from "../../context";
-import { mapTransferRow } from "../../mappers";
+import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
 import { isRampQuoteBindingExpired } from "./quote-binding";
 
@@ -27,6 +37,9 @@ async function requireVerifiedCryptoLeg(
   cryptoTransferId: string,
   options: { requireConfirmed: boolean }
 ): Promise<PaymentTransferRow> {
+  if (ramp.destination_address === null) {
+    throw conflict("MoneyGram deposit address has not been recorded for this session.");
+  }
   const leg = await getPaymentsRepository(c).getTransferById({
     transferId: cryptoTransferId,
     organizationId: ramp.organization_id,
@@ -50,6 +63,9 @@ async function requireVerifiedCryptoLeg(
   if (leg.direction !== "outbound") {
     throw badRequest("Crypto transfer must be outbound.");
   }
+  if (leg.destination_address !== ramp.destination_address) {
+    throw badRequest("Crypto transfer was not sent to the MoneyGram deposit address.");
+  }
   if (leg.token !== ramp.token) {
     throw badRequest("Crypto transfer asset does not match the off-ramp asset.");
   }
@@ -65,13 +81,6 @@ async function requireVerifiedCryptoLeg(
   return leg;
 }
 
-function transferResponse(c: AppContext, row: PaymentTransferRow | null) {
-  if (!row) {
-    throw internalError("Failed to update the ramp transfer.");
-  }
-  return success(c, { transfer: mapTransferRow(row) });
-}
-
 /**
  * Browser/widget callbacks are useful telemetry, but they are not provider-authenticated
  * settlement evidence. Keep them in an explicitly advisory namespace and never derive a
@@ -82,23 +91,14 @@ async function recordAdvisoryClientEvent(
   transfer: PaymentTransferRow,
   event: Record<string, unknown>
 ) {
-  const repo = getPaymentsRepository(c);
   const receivedAt = new Date().toISOString();
-  const updated = await repo.updateTransfer({
+  await getPaymentsRepository(c).updateTransfer({
     transferId: transfer.id,
     expectedStatus: transfer.status,
     providerData: { clientEvent: { ...event, advisory: true, receivedAt } },
     updatedAt: receivedAt,
   });
-  if (updated) {
-    return transferResponse(c, updated);
-  }
-  const current = await repo.getTransferById({
-    transferId: transfer.id,
-    organizationId: transfer.organization_id,
-    projectId: transfer.project_id,
-  });
-  return transferResponse(c, current);
+  return noContent(c);
 }
 
 export async function recordCoinbaseRampEvent(
@@ -123,7 +123,7 @@ export async function recordCoinbaseRampEvent(
     throw badRequest("Coinbase events only apply to on-ramp transfers.");
   }
   if (isTerminalRampTransferStatus(transfer.status)) {
-    return success(c, { transfer: mapTransferRow(transfer) });
+    return noContent(c);
   }
 
   switch (event.kind) {
@@ -142,6 +142,8 @@ export async function recordCoinbaseRampEvent(
 }
 
 const MONEYGRAM_EVENT_DIRECTION = {
+  transaction_created: null,
+  deposit_address: "offramp",
   onramp_completed: "onramp",
   signed: "offramp",
   completed: "offramp",
@@ -168,7 +170,7 @@ export async function recordMoneygramRampEvent(
     throw notFound("Ramp transfer");
   }
   if (isTerminalRampTransferStatus(transfer.status)) {
-    return success(c, { transfer: mapTransferRow(transfer) });
+    return noContent(c);
   }
 
   const expectedDirection = MONEYGRAM_EVENT_DIRECTION[event.kind];
@@ -179,12 +181,19 @@ export async function recordMoneygramRampEvent(
   }
 
   const moneygramData = readMoneygramData(transfer);
-  if (event.kind !== "signed") {
-    return recordMoneygramAdvisoryEvent(c, transfer, moneygramData, event);
+  switch (event.kind) {
+    case "transaction_created":
+      return pinMoneygramTransaction(c, transfer, moneygramData, event);
+    case "deposit_address":
+      return pinMoneygramDeposit(c, transfer, moneygramData);
+    case "signed":
+      break;
+    default:
+      return recordMoneygramAdvisoryEvent(c, transfer, moneygramData, event);
   }
   if (transfer.status === "settling") {
     if (moneygramData.cryptoTransferId === event.cryptoTransferId) {
-      return success(c, { transfer: mapTransferRow(transfer) });
+      return noContent(c);
     }
     throw conflict("Off-ramp transfer is already settling a different crypto transfer.");
   }
@@ -222,18 +231,188 @@ export async function recordMoneygramRampEvent(
       projectId: transfer.project_id,
     });
     if (current?.status === "settling" && readMoneygramData(current).cryptoTransferId === leg.id) {
-      return transferResponse(c, current);
+      return noContent(c);
     }
     throw conflict("Off-ramp transfer changed while the signed event was recorded.");
   }
-  return transferResponse(c, updated);
+  return noContent(c);
+}
+
+/**
+ * Pins the Ramps transaction id the widget surfaced after validate. The id is the
+ * key for every later status read, so it is first-write-wins: a replay with the
+ * same id is a no-op and a different id for the same session is a conflict.
+ *
+ * The browser names the transaction, so before anything is pinned MoneyGram must
+ * confirm under the secret key that the transaction carries this counterparty's
+ * customerIdentifier and the direction of this transfer. The same read yields
+ * MoneyGram's profile id, which becomes the counterparty's `customer_link`
+ * reference (read back through the provider-accounts list) and is mirrored on
+ * the transfer as `moneygram.customerId`.
+ */
+async function pinMoneygramTransaction(
+  c: AppContext,
+  transfer: PaymentTransferRow,
+  moneygramData: Record<string, unknown>,
+  event: Extract<MoneygramRampEvent, { kind: "transaction_created" }>
+) {
+  const customerIdentifier = transfer.counterparty_id;
+  if (customerIdentifier === null) {
+    throw internalError("Ramp transfer is missing its counterparty.");
+  }
+  const projectId = transfer.project_id;
+  if (projectId === null) {
+    throw internalError("Ramp transfer is missing its project.");
+  }
+  if (!isRampTransferType(transfer.type)) {
+    throw badRequest("MoneyGram events only apply to ramp transfers.");
+  }
+  const linkScope = {
+    organizationId: transfer.organization_id,
+    projectId,
+    counterpartyId: customerIdentifier,
+    provider: "moneygram",
+  } as const;
+  if (moneygramData.transactionId !== undefined) {
+    if (moneygramData.transactionId !== event.transactionId) {
+      throw conflict("MoneyGram session is already bound to a different transaction.");
+    }
+    return noContent(c);
+  }
+  if (transfer.status !== "pending") {
+    throw conflict(`Cannot bind a MoneyGram transaction while the transfer is ${transfer.status}.`);
+  }
+  if (isRampQuoteBindingExpired(transfer)) {
+    throw conflict("MoneyGram session has expired; create a new quote before continuing.");
+  }
+  const owned = await RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction(rampRuntime(c), {
+    transactionId: event.transactionId,
+    customerIdentifier,
+  });
+  if (!owned) {
+    throw conflict("MoneyGram transaction does not belong to this session.");
+  }
+  if (owned.transactionType !== MONEYGRAM_TRANSACTION_TYPE[transfer.type]) {
+    throw conflict("MoneyGram transaction direction does not match this transfer.");
+  }
+  const customerId = owned.profileId;
+  const claimed = await getDb(c.env).transaction(async (tx) => {
+    const txClient = asTransactionalClient(tx);
+    const row = await createPostgresPaymentsRepository(
+      txClient,
+      getRequestTenantScope(c)
+    ).claimTransferProviderData({
+      transferId: transfer.id,
+      organizationId: transfer.organization_id,
+      projectId: transfer.project_id,
+      expectedStatus: "pending",
+      claimPath: ["moneygram", "transactionId"],
+      providerData: {
+        moneygram: {
+          ...moneygramData,
+          customerId,
+          transactionId: event.transactionId,
+          ...(event.mgiTransactionId ? { mgiTransactionId: event.mgiTransactionId } : {}),
+        },
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    if (!row) {
+      return null;
+    }
+    await createPostgresCounterpartyProviderAccountsRepository(txClient).upsertProviderAccount({
+      ...linkScope,
+      providerCustomerReference: customerId,
+    });
+    return row;
+  });
+  if (claimed) {
+    return noContent(c);
+  }
+  const current = await getPaymentsRepository(c).getTransferById({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+  });
+  if (current && readMoneygramData(current).transactionId === event.transactionId) {
+    return noContent(c);
+  }
+  throw conflict("Off-ramp transfer changed while the MoneyGram transaction was bound.");
+}
+
+const MONEYGRAM_TRANSACTION_TYPE = {
+  onramp: "cash-in",
+  offramp: "cash-out",
+} as const satisfies Record<RampTransferType, "cash-in" | "cash-out">;
+
+/**
+ * Reads the deposit instruction for a committed custodial off-ramp from the Ramps
+ * status API and writes it onto the transfer row itself: MoneyGram's deposit
+ * address becomes the row's destination and its memo the row's memo, so the
+ * browser funds whatever the transfer says rather than anything the widget sent.
+ * The amount MoneyGram expects must equal the quoted row amount. The read is
+ * side-effect free on MoneyGram's side; the spend happens later under the
+ * session idempotency key when the crypto leg is sent.
+ */
+async function pinMoneygramDeposit(
+  c: AppContext,
+  transfer: PaymentTransferRow,
+  moneygramData: Record<string, unknown>
+) {
+  if (transfer.destination_address !== null) {
+    return noContent(c);
+  }
+  if (transfer.status !== "pending") {
+    throw conflict(`Cannot read a deposit address while the transfer is ${transfer.status}.`);
+  }
+  if (isRampQuoteBindingExpired(transfer)) {
+    throw conflict("MoneyGram session has expired; create a new quote before funding.");
+  }
+  const transactionId = moneygramData.transactionId;
+  if (typeof transactionId !== "string") {
+    throw conflict("MoneyGram transaction has not been recorded for this session.");
+  }
+  if (transfer.amount === null) {
+    throw internalError("Off-ramp transfer is missing its crypto amount.");
+  }
+  const deposit = await RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit(
+    rampRuntime(c),
+    transactionId
+  );
+  if (compareDecimalAmounts(deposit.sendAmount, transfer.amount) !== 0) {
+    throw conflict(
+      "MoneyGram expects a different amount than this off-ramp was quoted for; create a new quote."
+    );
+  }
+  const repo = getPaymentsRepository(c);
+  const updated = await repo.claimTransferDestination({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+    expectedStatus: "pending",
+    destinationAddress: deposit.depositAddress,
+    memo: deposit.depositMemo === undefined ? null : deposit.depositMemo,
+    updatedAt: new Date().toISOString(),
+  });
+  if (updated) {
+    return noContent(c);
+  }
+  const current = await repo.getTransferById({
+    transferId: transfer.id,
+    organizationId: transfer.organization_id,
+    projectId: transfer.project_id,
+  });
+  if (current && current.destination_address === deposit.depositAddress) {
+    return noContent(c);
+  }
+  throw conflict("Off-ramp transfer changed while the deposit address was recorded.");
 }
 
 async function recordMoneygramAdvisoryEvent(
   c: AppContext,
   transfer: PaymentTransferRow,
   moneygramData: Record<string, unknown>,
-  event: Exclude<MoneygramRampEvent, { kind: "signed" }>
+  event: Exclude<MoneygramRampEvent, { kind: "signed" | "transaction_created" | "deposit_address" }>
 ) {
   switch (event.kind) {
     case "onramp_completed":

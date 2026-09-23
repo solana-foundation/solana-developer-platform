@@ -7,6 +7,7 @@ import { type CounterpartyRow, SDP_COUNTERPARTY_ID_PATTERN } from "../../../coun
 import { badRequest, internalError } from "../../../errors";
 import { hashString } from "../../../hash";
 import { readyCounterparty } from "../../requirements";
+import { isPaymentTransferId } from "../../shared";
 import type {
   BvnkCustomer,
   BvnkCustomerStatus,
@@ -445,7 +446,7 @@ export function readBvnkOfframpReference(reference: string): string | undefined 
     return undefined;
   }
   const transferId = reference.slice(prefix.length);
-  if (!/^xfr_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transferId)) {
+  if (!isPaymentTransferId(transferId)) {
     return undefined;
   }
   return transferId;

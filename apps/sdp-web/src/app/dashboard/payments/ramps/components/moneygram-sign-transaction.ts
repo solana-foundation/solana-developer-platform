@@ -1,25 +1,25 @@
 "use client";
 
 /**
- * Signing the transfer MoneyGram asks for, mid-session.
+ * Funding the deposit MoneyGram asks for, mid-session.
  *
- * The widget hands over a transaction to sign and waits for a signature. Every
- * refusal here has to be a refusal MoneyGram can show, because the person is
- * sitting in the provider's flow: a transaction for another chain or asset, a
- * wallet holding none of the token, a payment a wallet policy parked, and a
- * recorded transfer with no signature are each said plainly rather than left
- * to a generic failure.
+ * The custodial widget reports that MoneyGram allocated a deposit address and
+ * waits for the signature of the transfer that funds it. Every refusal here has
+ * to be a refusal MoneyGram can show, because the person is sitting in the
+ * provider's flow: a deposit for another chain or asset, a wallet holding none
+ * of the token, a payment a wallet policy parked, and a recorded transfer with
+ * no signature are each said plainly rather than left to a generic failure.
  */
 
 import { address } from "@solana/kit";
 import {
+  fetchTransferById,
   postMoneygramRampEvent,
   type Translate,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { sendTransferUnderKey } from "@/app/dashboard/payments/transfer-idempotency";
 
-/** The transaction the widget asks to have signed. */
-export interface MoneygramSignRequest {
+interface MoneygramTransferRequest {
   chain: string;
   asset: string;
   to: string;
@@ -27,9 +27,20 @@ export interface MoneygramSignRequest {
   memo?: string;
 }
 
-export interface MoneygramSignContext {
+/** The deposit instruction the widget hands over once MoneyGram allocates an address. */
+export interface MoneygramDepositAddress {
+  address: string;
+  memo?: string;
+  chain: string;
+  asset: string;
+  amount?: string;
+}
+
+export interface MoneygramFundingContext {
   cryptoAsset: string;
   sessionId: string;
+  /** The off-ramp transfer row; its destination and memo are MoneyGram's deposit instruction once pinned. */
+  transferId: string;
   sourceWalletId: string;
   /** The wallet's mint for the asset, or null when it holds none of it. */
   sourceTokenMint: string | null;
@@ -38,17 +49,9 @@ export interface MoneygramSignContext {
   t: Translate;
 }
 
-/**
- * Sends the transfer MoneyGram asked for and answers with its signature.
- *
- * @param request - What the widget asked to sign.
- * @param context - The session's wallet, asset and translator.
- * @returns The signature the widget waits on.
- * @throws When nothing was sent, with a reason the widget can show.
- */
-export async function signMoneygramTransfer(
-  request: MoneygramSignRequest,
-  context: MoneygramSignContext
+async function sendMoneygramTransfer(
+  request: MoneygramTransferRequest,
+  context: MoneygramFundingContext
 ): Promise<string> {
   const { cryptoAsset, sessionId, sourceWalletId, sourceTokenMint, onSigned, t } = context;
   if (request.chain !== "solana" || request.asset !== cryptoAsset) {
@@ -91,4 +94,37 @@ export async function signMoneygramTransfer(
   onSigned(transfer.id);
   await postMoneygramRampEvent({ kind: "signed", sessionId, cryptoTransferId: transfer.id }, t);
   return transfer.signature;
+}
+
+/**
+ * Funds a custodial off-ramp. The widget payload only says a deposit address exists;
+ * the API reads the real instruction from MoneyGram under the secret key and writes
+ * it onto the off-ramp transfer row, so what gets sent is the row's destination,
+ * amount and memo, never anything the widget supplied.
+ *
+ * @param deposit - What the widget reported; only its chain and asset are used.
+ * @param context - The session's transfer, wallet, asset and translator.
+ * @returns The signature the widget waits on.
+ * @throws When the transfer row carries no deposit instruction, or nothing was sent.
+ */
+export async function fundMoneygramDeposit(
+  deposit: MoneygramDepositAddress,
+  context: MoneygramFundingContext
+): Promise<string> {
+  const { sessionId, transferId, t } = context;
+  await postMoneygramRampEvent({ kind: "deposit_address", sessionId }, t);
+  const transfer = await fetchTransferById({ transferId }, t);
+  if (transfer.destination === undefined || transfer.amount === undefined) {
+    throw new Error(t("DashboardPayments.ramps.moneygramDepositUnconfirmed"));
+  }
+  return sendMoneygramTransfer(
+    {
+      chain: deposit.chain,
+      asset: deposit.asset,
+      to: transfer.destination,
+      amount: transfer.amount,
+      memo: transfer.memo,
+    },
+    context
+  );
 }

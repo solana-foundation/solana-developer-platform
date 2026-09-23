@@ -5,6 +5,7 @@ import {
   type RampCountrySupport,
   type RampCurrencyLimit,
 } from "@sdp/types/payment-rails";
+import { internalError } from "../errors";
 
 let icuModernCurrencies: Set<string> | undefined;
 let countryDisplayNames: Intl.DisplayNames | undefined;
@@ -93,6 +94,32 @@ export function requireEnv(env: Record<string, string | undefined>, key: string)
 
 export function basicAuthHeader(username: string, password: string): string {
   return `Basic ${globalThis.btoa(`${username}:${password}`)}`;
+}
+
+export const PAYMENT_TRANSFER_ID_PREFIX = "xfr_";
+
+const PAYMENT_TRANSFER_ID_PATTERN =
+  /^xfr_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Whether a string is an SDP payment transfer id (`xfr_<uuid>`). */
+export function isPaymentTransferId(value: string): boolean {
+  return PAYMENT_TRANSFER_ID_PATTERN.test(value);
+}
+
+/**
+ * The UUID inside an SDP payment transfer id, for providers whose partner
+ * reference field only accepts a bare UUID.
+ *
+ * @param transferId - An SDP payment transfer id (`xfr_<uuid>`).
+ * @returns The UUID without the `xfr_` prefix.
+ * @throws When the id is not an SDP payment transfer id.
+ */
+export function paymentTransferUuid(transferId: string): string {
+  const match = PAYMENT_TRANSFER_ID_PATTERN.exec(transferId);
+  if (!match) {
+    throw internalError(`Not an SDP payment transfer id: ${transferId}`);
+  }
+  return match[1];
 }
 
 export function rampId(prefix: string): string {
