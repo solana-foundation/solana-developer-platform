@@ -8,7 +8,7 @@ export const PUBLIC_TAG_SLUGS = new Set([
   "policies",
   "compliance",
   "asset-profiles",
-  "earn",
+  // "earn" returns with EARN_PUBLIC_SURFACE_PUBLISHED (apps/sdp-api/src/openapi/spec.ts), PRO-2038.
 ]);
 
 export const POSTMAN_COLLECTION_ROUTE = "/docs/postman/collection.json";

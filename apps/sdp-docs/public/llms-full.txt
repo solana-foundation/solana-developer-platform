@@ -14,16 +14,15 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
+> One API for tokenization, custody, payments, and compliance on Solana.
 
-SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds for self-custodial integrations.
+SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
-| **Embedded Yield** | Discover curated strategies and build self-custodial instant deposits or direct withdrawals [with or without an API key](/docs/reference/api/earn); use an API key for submission, tracking, and queued actions |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -249,13 +248,13 @@ Source: https://platform.solana.com/docs/developing-with-sdp
 SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API:** programmatic access for backend integrations. Most routes authenticate with an API key in the `Authorization` header. Embedded Yield also has a [keyless catalogue and unsigned-build tier](/docs/reference/api/earn).
+- **REST API:** programmatic access for backend integrations. Routes authenticate with an API key in the `Authorization` header.
 
 Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. A keyless Earn strategy list instead chooses its shelf with `?environment=sandbox|production` (production by default); a preview or instant build follows the environment of the strategy it names.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
@@ -287,7 +286,7 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes custody operations by building, signing, and submitting with the configured custody wallet. For Embedded Yield, the customer's external wallet signs. A keyless integration broadcasts and tracks that signed transaction itself; an authenticated integration may submit it back to SDP for durable tracking.
+SDP executes custody operations by building, signing, and submitting with the configured custody wallet.
 
 ---
 
@@ -352,8 +351,6 @@ curl https://api.solana.com/v1/wallets \
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
-
-Embedded Yield strategy reads, deposit and withdrawal previews, withdrawal-route discovery, and instant deposit or direct-withdrawal builders also support [keyless access](/docs/reference/api/earn). Those requests have no organization or project identity and cannot submit transactions, build queued request or cancellation actions, or read tenant state.
 
 ## Key scope
 
@@ -2139,7 +2136,7 @@ Source: https://platform.solana.com/docs/wallet-operations
 
 > Configure custody-wallet controls, operation permissions, and balances.
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity such as Earn vault deposits, whichever product flow initiates the request.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
 
 ## What's in this section
 
@@ -2289,13 +2286,13 @@ A `velocity` rule caps volume over a rolling window instead of per operation:
 
 ```json title="velocity-rule.json"
 {
-  "id": "daily-usdc-deposits",
+  "id": "daily-usdc-transfers",
   "kind": "velocity",
   "scope": "organization",
   "window": "P1D",
   "max": "100000",
   "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  "operationTypes": ["earn_vault_deposit"],
+  "operationTypes": ["payment_transfer_execute"],
   "action": "approval_required"
 }
 ```
@@ -2323,7 +2320,7 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
 | `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
-| `program` | On-chain program interactions signed by the wallet. | Earn vault deposits |
+| `program` | On-chain program interactions signed by the wallet. | No current public operation type |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
@@ -2346,7 +2343,6 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
 | `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
 | `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
-| `earn_vault_deposit` | `program` | Deposits custody-wallet assets into a supported non-custodial Earn vault. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
@@ -5069,8 +5065,6 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
-| `EARN_ANONYMOUS_RPC_MAX_REQUESTS` | `20` | Paid-upstream calls allowed per anonymous client IP in one Earn RPC quota window. |
-| `EARN_ANONYMOUS_RPC_WINDOW_SECONDS` | `60` | Anonymous Earn RPC quota window in seconds. |
 | `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
@@ -5514,7 +5508,6 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
 - Compliance screening
-- Embedded Yield strategy discovery, caller-signed transactions, and queued withdrawals
 
 ---
 
@@ -5540,13 +5533,6 @@ When you import the collection into Postman, set:
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
 
-The eight optional-auth Earn requests import with **No Auth**: strategy list and
-detail, deposit preview and build, direct-withdrawal preview and build,
-withdrawal-route discovery, and queued-withdrawal preview. To exercise their
-authenticated behavior, switch the individual request to **Inherit auth from
-parent**. Queued request or cancellation builds, tenant reads, and transaction
-submissions always inherit the collection API key.
-
 ---
 
 ## API
@@ -5571,7 +5557,6 @@ Source: https://platform.solana.com/docs/reference/api
 - [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
-- [Earn](/docs/reference/api/earn)
 
 ---
 
@@ -5787,37 +5772,6 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
 | `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
-
----
-
-### Earn
-Source: https://platform.solana.com/docs/reference/api/earn
-
-> Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-| `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
-| `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
-| `GET` | `/v1/earn/external-wallet/earnings` | Get one external wallet's balance and earnings |
-| `GET` | `/v1/earn/external-wallet/movements` | List one external wallet's activity |
-| `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
-| `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
-| `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
-| `POST` | `/v1/earn/external-wallet/queued-withdrawal-previews` | Preview a queued external-wallet withdrawal |
-| `POST` | `/v1/earn/external-wallet/withdrawal-options` | Discover external-wallet withdrawal routes |
-| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancel-transactions` | Build an unsigned queued-withdrawal cancellation |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancellations` | Submit a signed queued-withdrawal cancellation |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-transactions` | Build an unsigned queued-withdrawal request |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests` | List an external wallet's queued withdrawals |
-| `POST` | `/v1/earn/external-wallet/withdrawal-requests` | Submit a signed queued-withdrawal request |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Get one queued-withdrawal request |
-| `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
-| `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
-| `GET` | `/v1/earn/strategies` | List yield strategies |
-| `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
-| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

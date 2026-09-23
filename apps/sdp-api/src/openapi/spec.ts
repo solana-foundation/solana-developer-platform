@@ -82,6 +82,23 @@ const OPENAPI_TAG = {
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
 
+/**
+ * Whether the public OpenAPI document carries the Earn family. Everything
+ * partner-facing derives from that document: api.solana.com/openapi.json and
+ * Swagger UI, the generated API reference, the Postman collection, the
+ * playground catalog and the AI discovery files. Held false until launch
+ * (PRO-2038): Earn is feature-complete but not announced, so partners must not
+ * discover it yet. The internal document and the runtime are unaffected.
+ * Flipping this back is a PRO-1872 security sign-off PR (routes/earn/CLAUDE.md,
+ * "Public OpenAPI promotion"); spec.test.ts pins both states.
+ */
+export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
+
+export type PublicOpenApiDocumentOptions = {
+  /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
+  publishEarn?: boolean;
+};
+
 const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
   OPENAPI_TAG.API_KEYS,
@@ -93,8 +110,11 @@ const PUBLIC_OPENAPI_TAGS = [
   OPENAPI_TAG.COMPLIANCE,
   OPENAPI_TAG.COUNTERPARTIES,
   OPENAPI_TAG.ASSET_PROFILES,
-  OPENAPI_TAG.PUBLIC_EARN,
 ];
+
+function publicOpenApiTags(publishEarn: boolean) {
+  return publishEarn ? [...PUBLIC_OPENAPI_TAGS, OPENAPI_TAG.PUBLIC_EARN] : PUBLIC_OPENAPI_TAGS;
+}
 
 const OPENAPI_TAGS = [
   OPENAPI_TAG.HEALTH,
@@ -151,11 +171,13 @@ function registerInternalSecuritySchemes(registry: OpenAPIRegistry) {
   });
 }
 
-function registerPublicPaths(registry: OpenAPIRegistry) {
+function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerHealthPaths(registry);
   registerApiKeyPaths(registry);
   registerCustodyPaths(registry);
-  registerPublicEarnPaths(registry);
+  if (publishEarn) {
+    registerPublicEarnPaths(registry);
+  }
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
@@ -189,13 +211,19 @@ function registerAllPaths(registry: OpenAPIRegistry) {
   registerOnboardingPaths(registry);
 }
 
-function createDocument({ publicOnly }: { publicOnly: boolean }): OpenAPIObject {
+function createDocument({
+  publicOnly,
+  publishEarn,
+}: {
+  publicOnly: boolean;
+  publishEarn: boolean;
+}): OpenAPIObject {
   const registry = new OpenAPIRegistry();
 
   registerApiKeyAuth(registry);
 
   if (publicOnly) {
-    registerPublicPaths(registry);
+    registerPublicPaths(registry, publishEarn);
   } else {
     registerInternalSecuritySchemes(registry);
     registerAllPaths(registry);
@@ -212,7 +240,7 @@ function createDocument({ publicOnly }: { publicOnly: boolean }): OpenAPIObject 
         ? "Public OpenAPI spec generated from supported API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract."
         : "Production-only OpenAPI spec generated from API schemas and routes. API versioning is path-based: /v1 is the current contract, and breaking changes are introduced under a new path major (for example /v2). The OpenAPI info.version tracks spec/document revision for the current path contract.",
     },
-    tags: publicOnly ? PUBLIC_OPENAPI_TAGS : OPENAPI_TAGS,
+    tags: publicOnly ? publicOpenApiTags(publishEarn) : OPENAPI_TAGS,
     servers: [
       {
         url: "http://localhost:8787",
@@ -227,9 +255,14 @@ function createDocument({ publicOnly }: { publicOnly: boolean }): OpenAPIObject 
 }
 
 export function createOpenApiDocument(): OpenAPIObject {
-  return createDocument({ publicOnly: false });
+  return createDocument({ publicOnly: false, publishEarn: true });
 }
 
-export function createPublicOpenApiDocument(): OpenAPIObject {
-  return createDocument({ publicOnly: true });
+export function createPublicOpenApiDocument(
+  options: PublicOpenApiDocumentOptions = {}
+): OpenAPIObject {
+  return createDocument({
+    publicOnly: true,
+    publishEarn: options.publishEarn ?? EARN_PUBLIC_SURFACE_PUBLISHED,
+  });
 }

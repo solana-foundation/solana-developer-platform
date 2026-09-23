@@ -14,8 +14,6 @@ curl https://api.solana.com/v1/wallets \
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
 
-Embedded Yield strategy reads, deposit and withdrawal previews, withdrawal-route discovery, and instant deposit or direct-withdrawal builders also support [keyless access](/docs/reference/api/earn). Those requests have no organization or project identity and cannot submit transactions, build queued request or cancellation actions, or read tenant state.
-
 ## Key scope
 
 Keys are issued per **project** and inherit that project's environment: `sk_test_` keys belong to sandbox projects (devnet), `sk_live_` keys to production projects (mainnet-beta). A key can only reach the wallets, tokens, and payments of the project it was issued for; there is no cross-project or organization-wide key.

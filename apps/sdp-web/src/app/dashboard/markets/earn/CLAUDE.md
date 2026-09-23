@@ -142,7 +142,7 @@ nothing else; the program create still sends the body `requestId` form.
   partner `feePayer` (the implementor sponsoring its customers' fees) is
   documented in the docs guide
   (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, unpublished
-  until PRO-1802). That guide
+  until PRO-2038). That guide
   also owns the keyless quickstart; these dashboard snippets intentionally stay
   keyed because they include submit and tenant read routes. Keep the shared
   authenticated flow aligned across both. The guide is

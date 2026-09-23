@@ -19,7 +19,7 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
  * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
- * unpublished until PRO-1802)
+ * unpublished until PRO-2038)
  * documents this same authenticated flow plus the keyless catalogue and
  * unsigned-build tier. Keep the shared contract aligned in both.
  */

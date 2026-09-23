@@ -138,7 +138,7 @@ and cancellation actions before broadcast, reconciles provider state and lifecyc
 events, and projects a withdrawal movement only after verified fulfilment.
 
 The Embedded Yield guide (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`,
-unpublished until PRO-1802) documents both access tiers. The dashboard's
+unpublished until PRO-2038) documents both access tiers. The dashboard's
 configuration snippets intentionally emit the authenticated end-to-end flow
 because they include submit and tenant read routes. The treasury dashboard
 flows use the SDP-signed routes.
