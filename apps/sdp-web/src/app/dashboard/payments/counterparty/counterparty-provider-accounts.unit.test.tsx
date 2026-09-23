@@ -3,10 +3,8 @@ import { act } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
-import {
-  CounterpartyDetailWorkspace,
-  groupProviderAccounts,
-} from "./counterparty-detail-workspace";
+import { CounterpartyDetailWorkspace } from "./counterparty-detail-workspace";
+import { groupProviderAccounts } from "./counterparty-provider-accounts.utils";
 
 vi.mock("@/i18n/provider", () => ({
   useTranslations:
