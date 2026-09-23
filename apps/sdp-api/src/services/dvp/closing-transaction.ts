@@ -7,15 +7,24 @@ import {
   getSignaturesForAddress,
   getTransaction,
   type ParsedInstruction,
+  type SignatureInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { type Address, getBase58Encoder, type Signature } from "@solana/kit";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 
 /** Position of `swap_dvp` in every SettleDvp, CancelDvp and RejectDvp account list. */
 const SWAP_DVP_ACCOUNT_INDEX = 1;
 const HISTORY_PAGE_LIMIT = 100;
 const HISTORY_PAGE_CAP = 10;
+/**
+ * Page fetches of close transactions fan out with this bound, matching the
+ * billed-RPC concurrency the observed-transfers read uses: a full page is up
+ * to 100 round trips, and resolving them serially puts that cost between a
+ * party and the answer to "what happened to my trade".
+ */
+export const TRANSACTION_LOOKUP_CONCURRENCY = 5;
 /** Maximum tolerated difference between SDP and validator clocks around create. */
 export const CREATE_TIME_SKEW_SECONDS = 300;
 
@@ -66,6 +75,73 @@ function readCloseStatus(
 }
 
 /**
+ * Collects one history page's fetch candidates in history order, stopping at
+ * the first bound — the create signature or an entry older than the created-at
+ * floor — since nothing at or past a bound can concern this trade, so those
+ * signatures are never fetched at all. The bound is reported rather than
+ * thrown away: an earlier entry in the page may still carry the close, and it
+ * wins over the bound.
+ */
+function collectCloseCandidates(
+  history: SignatureInfo[],
+  createSignature: Signature | null,
+  createdAtFloor: number
+): { candidates: SignatureInfo[]; boundHit: boolean } {
+  const candidates: SignatureInfo[] = [];
+  for (const entry of history) {
+    if (
+      entry.signature === createSignature ||
+      (entry.blockTime !== null && Number(entry.blockTime) < createdAtFloor)
+    ) {
+      return { candidates, boundHit: true };
+    }
+    if (entry.err === null) {
+      candidates.push(entry);
+    }
+  }
+  return { candidates, boundHit: false };
+}
+
+/**
+ * Fetches the candidates' transactions concurrently — bounded, because a page
+ * holds up to 100 signatures against the billed RPC — and decodes the first
+ * close in history order. Results stay aligned to that order, so this resolves
+ * exactly the entry a serial walk would have reached first, and a rejected
+ * fetch still throws unless an earlier entry already resolved the close.
+ */
+async function firstCloseOnPage(
+  rpc: SolanaRpc,
+  swapDvp: Address,
+  candidates: SignatureInfo[]
+): Promise<DvpCloseLookup | null> {
+  const settled = await mapSettledWithConcurrency(
+    candidates,
+    TRANSACTION_LOOKUP_CONCURRENCY,
+    (entry) => getTransaction(rpc, entry.signature)
+  );
+  for (const [index, entry] of candidates.entries()) {
+    const lookup = settled[index];
+    if (lookup === undefined) {
+      continue;
+    }
+    if (lookup.status === "rejected") {
+      throw lookup.reason;
+    }
+    const transaction = lookup.value;
+    if (transaction === null || transaction.err !== null) {
+      continue;
+    }
+    for (const instruction of transaction.instructions) {
+      const status = readCloseStatus(instruction, swapDvp);
+      if (status !== null) {
+        return { kind: "resolved", status, signature: entry.signature };
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Finds and decodes the transaction that closed a vanished DvP account.
  *
  * `createSignature` bounds the history walk: SDP inserts the row before broadcasting create, and the PDA is only derivable
@@ -86,28 +162,16 @@ export async function resolveDvpClose(
       ...(before === undefined ? {} : { before }),
       ...(createSignature === null ? {} : { until: createSignature }),
     });
-    for (const entry of history) {
-      if (entry.signature === createSignature) {
-        return { kind: "absent" };
-      }
-      if (entry.blockTime !== null && Number(entry.blockTime) < createdAtFloor) {
-        return { kind: "absent" };
-      }
-      if (entry.err !== null) {
-        continue;
-      }
-      const transaction = await getTransaction(rpc, entry.signature);
-      if (transaction === null || transaction.err !== null) {
-        continue;
-      }
-      for (const instruction of transaction.instructions) {
-        const status = readCloseStatus(instruction, swapDvp);
-        if (status !== null) {
-          return { kind: "resolved", status, signature: entry.signature };
-        }
-      }
+    const { candidates, boundHit } = collectCloseCandidates(
+      history,
+      createSignature,
+      createdAtFloor
+    );
+    const close = await firstCloseOnPage(rpc, swapDvp, candidates);
+    if (close !== null) {
+      return close;
     }
-    if (history.length < HISTORY_PAGE_LIMIT) {
+    if (boundHit || history.length < HISTORY_PAGE_LIMIT) {
       return { kind: "absent" };
     }
     before = history[history.length - 1].signature;

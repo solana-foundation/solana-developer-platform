@@ -7,12 +7,15 @@ const getTransaction = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({ getSignaturesForAddress, getTransaction }));
 
-const { CREATE_TIME_SKEW_SECONDS, resolveDvpClose } = await import("./closing-transaction");
+const { CREATE_TIME_SKEW_SECONDS, resolveDvpClose, TRANSACTION_LOOKUP_CONCURRENCY } = await import(
+  "./closing-transaction"
+);
 const SWAP = address("11111111111111111111111111111111");
 const RPC = createSolanaRpc("http://localhost");
 const SIGNATURE = signature(
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
 );
+const CREATE_SIGNATURE = signature(getBase58Decoder().decode(new Uint8Array(64).fill(1)));
 
 const OTHER_SWAP = address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 const CREATED_AT = "2026-09-11T00:00:00.000Z";
@@ -165,5 +168,91 @@ describe("resolveDvpClose", () => {
       kind: "absent",
     });
     expect(getTransaction).not.toHaveBeenCalled();
+  });
+
+  it("overlaps a page's transaction fetches without exceeding the concurrency bound", async () => {
+    getSignaturesForAddress.mockResolvedValue(
+      Array.from({ length: 20 }, () => ({
+        signature: SIGNATURE,
+        slot: 1n,
+        blockTime: null,
+        err: null,
+      }))
+    );
+    let inFlight = 0;
+    let maxInFlight = 0;
+    getTransaction.mockImplementation(
+      () =>
+        new Promise((resolveGate) => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          queueMicrotask(() => {
+            inFlight -= 1;
+            resolveGate(null);
+          });
+        })
+    );
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).resolves.toEqual({
+      kind: "absent",
+    });
+    expect(getTransaction).toHaveBeenCalledTimes(20);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(TRANSACTION_LOOKUP_CONCURRENCY);
+  });
+
+  it("resolves the first close in history order when several candidates close", async () => {
+    getSignaturesForAddress.mockResolvedValue([
+      { signature: SIGNATURE, slot: 3n, blockTime: null, err: null },
+      { signature: SIGNATURE, slot: 2n, blockTime: null, err: null },
+    ]);
+    getTransaction.mockResolvedValueOnce(transaction(2)).mockResolvedValueOnce(transaction(3));
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).resolves.toEqual({
+      kind: "resolved",
+      status: "settled",
+      signature: SIGNATURE,
+    });
+  });
+
+  it("resolves a close that precedes a create-signature bound in the same page", async () => {
+    getSignaturesForAddress.mockResolvedValue([
+      { signature: SIGNATURE, slot: 2n, blockTime: null, err: null },
+      { signature: CREATE_SIGNATURE, slot: 1n, blockTime: null, err: null },
+    ]);
+    getTransaction.mockResolvedValue(transaction(2));
+
+    await expect(resolveDvpClose(RPC, SWAP, CREATE_SIGNATURE, CREATED_AT)).resolves.toEqual({
+      kind: "resolved",
+      status: "settled",
+      signature: SIGNATURE,
+    });
+    expect(getTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a failed transaction fetch when no earlier entry resolved", async () => {
+    getSignaturesForAddress.mockResolvedValue([
+      { signature: SIGNATURE, slot: 2n, blockTime: null, err: null },
+      { signature: SIGNATURE, slot: 1n, blockTime: null, err: null },
+    ]);
+    getTransaction.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).rejects.toThrow("rpc unavailable");
+  });
+
+  it("resolves a close found before a failed fetch in the same page", async () => {
+    getSignaturesForAddress.mockResolvedValue([
+      { signature: SIGNATURE, slot: 2n, blockTime: null, err: null },
+      { signature: SIGNATURE, slot: 1n, blockTime: null, err: null },
+    ]);
+    getTransaction
+      .mockResolvedValueOnce(transaction(2))
+      .mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).resolves.toEqual({
+      kind: "resolved",
+      status: "settled",
+      signature: SIGNATURE,
+    });
   });
 });
