@@ -12,6 +12,7 @@
  * Platform targets keep the ordinary fetch: they come from deployment config
  * and are legitimately private in local development and in the Surfpool suites.
  */
+import { RpcHttpStatusError } from "@sdp/rpc/errors";
 import type { RpcTransport } from "@solana/kit";
 import { type GuardedFetchInit, guardedFetch } from "@/services/guarded-egress";
 
@@ -121,7 +122,10 @@ export function createRpcTransportForTarget(
     });
 
     if (!upstream.ok) {
-      throw new Error(`RPC request failed with HTTP ${upstream.status}`);
+      throw new RpcHttpStatusError(
+        upstream.status,
+        `RPC request failed with HTTP ${upstream.status}`
+      );
     }
 
     return (await upstream.json()) as TResponse;

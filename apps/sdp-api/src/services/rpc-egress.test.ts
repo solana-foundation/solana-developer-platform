@@ -1,5 +1,8 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { isTransientRpcError } from "@sdp/rpc";
+import { confirmTransaction, createRpcFromTransport } from "@sdp/rpc/solana";
+import type { Signature } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EgressBlockedError } from "@/services/guarded-egress";
 import { checkResolvedRpcTargetConnection } from "@/services/provider-setup-registry";
@@ -18,9 +21,36 @@ import {
  */
 let server: Server;
 let origin: string;
+const scriptedStatuses: number[] = [];
 
 beforeAll(async () => {
-  server = createServer((_req, res) => {
+  server = createServer((req, res) => {
+    const status = req.url?.match(/^\/status\/(\d{3})$/);
+    if (status) {
+      res.writeHead(Number(status[1]));
+      res.end();
+      return;
+    }
+    if (req.url === "/scripted") {
+      const next = scriptedStatuses.shift();
+      if (next !== undefined) {
+        res.writeHead(next);
+        res.end();
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "0",
+          result: {
+            context: { slot: 7 },
+            value: [{ slot: 7, confirmations: null, err: null, confirmationStatus: "confirmed" }],
+          },
+        })
+      );
+      return;
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: "probe", result: { "solana-core": "0.0.0" } }));
   });
@@ -92,6 +122,47 @@ describe("createRpcTransportForTarget", () => {
     });
 
     await expect(transport({ payload })).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it.each([408, 429, 500, 502, 503, 504])(
+    "classifies an upstream HTTP %i as transient",
+    async (status) => {
+      const transport = createRpcTransportForTarget({ endpoint: `${origin}/status/${status}` });
+
+      const error = await transport({ payload }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(`RPC request failed with HTTP ${status}`);
+      expect(isTransientRpcError(error)).toBe(true);
+    }
+  );
+
+  it.each([400, 401, 403, 404])(
+    "does not classify an upstream HTTP %i as transient",
+    async (status) => {
+      const transport = createRpcTransportForTarget({ endpoint: `${origin}/status/${status}` });
+
+      const error = await transport({ payload }).catch((caught: unknown) => caught);
+
+      expect((error as Error).message).toBe(`RPC request failed with HTTP ${status}`);
+      expect(isTransientRpcError(error)).toBe(false);
+    }
+  );
+
+  it("keeps polling a confirmation through upstream 429 and 503 answers", async () => {
+    scriptedStatuses.push(429, 503);
+    const rpc = createRpcFromTransport(
+      createRpcTransportForTarget({ endpoint: `${origin}/scripted` })
+    );
+
+    const confirmation = await confirmTransaction(
+      rpc,
+      "5VERv8NMvzbJMEkV8xnrLkEaWRtSz9CosKDYjCJjBRnbJLgp8uirBgmQpjKhoR4tjF3ZpRzrFmBV6UjKdiSZkQUW" as Signature,
+      { timeoutMs: 5_000, pollIntervalMs: 1 }
+    );
+
+    expect(confirmation.confirmationStatus).toBe("confirmed");
+    expect(scriptedStatuses).toEqual([]);
   });
 });
 

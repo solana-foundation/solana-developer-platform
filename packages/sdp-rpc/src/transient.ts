@@ -9,6 +9,7 @@ import {
   SOLANA_ERROR__JSON_RPC__SERVER_ERROR_NODE_UNHEALTHY,
   SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
 } from "@solana/kit";
+import { RpcHttpStatusError } from "./errors";
 
 // Overloaded-gateway / timeout HTTP statuses worth retrying.
 const TRANSIENT_HTTP_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
@@ -41,6 +42,7 @@ export function isTransientRpcError(error: unknown): boolean {
   return (
     (isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
       TRANSIENT_HTTP_STATUS_CODES.has(error.context.statusCode)) ||
+    (error instanceof RpcHttpStatusError && TRANSIENT_HTTP_STATUS_CODES.has(error.httpStatus)) ||
     TRANSIENT_ERROR_TEXT.test(message) ||
     TRANSIENT_SOLANA_RPC_CODES.some((code) => isSolanaError(error, code))
   );
