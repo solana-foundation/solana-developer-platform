@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { getLogger } from "@/runtime/logger";
 import { createProviderWallet } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -454,6 +455,33 @@ describe("default wallet audit admission", () => {
       },
     });
   });
+
+  it.each([
+    ["organization", "org_other_scope", project],
+    ["project", org, "prj_other_scope"],
+  ] as const)(
+    "does not lock or promote a Config from another %s",
+    async (_scope, orgId, projectId) => {
+      const created = await new CustodyConfigStore(getDb(env), env).createDefaultWallet(
+        config,
+        orgId,
+        projectId,
+        {
+          id: "cwlt_config_foreign",
+          walletId: "privy_config_foreign",
+          publicKey: "SysvarRent111111111111111111111111111111111",
+        }
+      );
+
+      expect(created).toBeNull();
+      expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+      expect(
+        await getDb(env).queryMany("SELECT id FROM custody_wallets WHERE id = ?", [
+          "cwlt_config_foreign",
+        ])
+      ).toEqual([]);
+    }
+  );
 
   it("keeps Config selection available while BYOK is disabled", async () => {
     env.PRIVY_BYOK_ENABLED = "false";

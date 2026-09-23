@@ -1371,7 +1371,7 @@ export class SigningService {
 
     let created: Awaited<ReturnType<CustodyConfigStore["createDefaultWallet"]>>;
     try {
-      created = await this.configStore.createDefaultWallet(config.id, {
+      created = await this.configStore.createDefaultWallet(config.id, orgId, projectId, {
         id: custodyWalletId,
         walletId: provisioned.walletId,
         publicKey: provisioned.publicKey,

@@ -463,6 +463,8 @@ export class CustodyConfigStore implements SigningConfigStore {
    */
   async createDefaultWallet(
     configId: string,
+    orgId: string,
+    projectId: string | undefined,
     params: CreateWalletParams & { id: string }
   ): Promise<{ wallet: CustodyConfigWallet; previous: PreviousDefaultWallet } | null> {
     const previous = await this.db.transaction(async (tx) => {
@@ -471,9 +473,9 @@ export class CustodyConfigStore implements SigningConfigStore {
          FROM custody_configs c
          LEFT JOIN custody_wallets w
            ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-         WHERE c.id = ?
+         WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
          FOR UPDATE OF c`,
-        [configId]
+        [configId, orgId, projectId ?? null]
       );
       if (!current) return null;
 
