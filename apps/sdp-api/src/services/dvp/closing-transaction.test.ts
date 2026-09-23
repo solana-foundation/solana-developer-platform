@@ -201,6 +201,70 @@ describe("resolveDvpClose", () => {
     expect(maxInFlight).toBeLessThanOrEqual(TRANSACTION_LOOKUP_CONCURRENCY);
   });
 
+  it("returns the moment the earliest close settles instead of waiting for later lookups", async () => {
+    getSignaturesForAddress.mockResolvedValue(
+      Array.from({ length: 20 }, () => ({
+        signature: SIGNATURE,
+        slot: 1n,
+        blockTime: null,
+        err: null,
+      }))
+    );
+    getTransaction
+      .mockResolvedValueOnce(transaction(2))
+      .mockImplementation(() => new Promise(() => {}));
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).resolves.toEqual({
+      kind: "resolved",
+      status: "settled",
+      signature: SIGNATURE,
+    });
+    expect(getTransaction).toHaveBeenCalledTimes(TRANSACTION_LOOKUP_CONCURRENCY);
+  });
+
+  it("stops issuing page lookups once the earliest rejection surfaces", async () => {
+    getSignaturesForAddress.mockResolvedValue(
+      Array.from({ length: 20 }, () => ({
+        signature: SIGNATURE,
+        slot: 1n,
+        blockTime: null,
+        err: null,
+      }))
+    );
+    getTransaction
+      .mockRejectedValueOnce(new Error("rpc unavailable"))
+      .mockImplementation(() => new Promise(() => {}));
+
+    await expect(resolveDvpClose(RPC, SWAP, null, CREATED_AT)).rejects.toThrow("rpc unavailable");
+    expect(getTransaction).toHaveBeenCalledTimes(TRANSACTION_LOOKUP_CONCURRENCY);
+  });
+
+  it("keeps waiting for the head of history even when a later lookup settles first", async () => {
+    getSignaturesForAddress.mockResolvedValue([
+      { signature: SIGNATURE, slot: 2n, blockTime: null, err: null },
+      { signature: SIGNATURE, slot: 1n, blockTime: null, err: null },
+    ]);
+    let resolveHead: (value: unknown) => void = () => {};
+    getTransaction
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolveGate) => {
+            resolveHead = resolveGate;
+          })
+      )
+      .mockResolvedValueOnce(transaction(2));
+
+    const pending = resolveDvpClose(RPC, SWAP, null, CREATED_AT);
+    await vi.waitFor(() => expect(getTransaction).toHaveBeenCalledTimes(2));
+    resolveHead(transaction(3));
+
+    await expect(pending).resolves.toEqual({
+      kind: "resolved",
+      status: "cancelled",
+      signature: SIGNATURE,
+    });
+  });
+
   it("resolves the first close in history order when several candidates close", async () => {
     getSignaturesForAddress.mockResolvedValue([
       { signature: SIGNATURE, slot: 3n, blockTime: null, err: null },

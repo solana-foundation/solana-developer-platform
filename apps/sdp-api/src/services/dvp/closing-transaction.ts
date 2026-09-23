@@ -7,11 +7,11 @@ import {
   getSignaturesForAddress,
   getTransaction,
   type ParsedInstruction,
+  type ParsedTransaction,
   type SignatureInfo,
   type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { type Address, getBase58Encoder, type Signature } from "@solana/kit";
-import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import { internalError } from "@/lib/errors";
 
 /** Position of `swap_dvp` in every SettleDvp, CancelDvp and RejectDvp account list. */
@@ -102,41 +102,55 @@ function collectCloseCandidates(
   return { candidates, boundHit: false };
 }
 
+/** One page lookup's settled outcome: the transaction, or its fetch failure. */
+type TransactionLookup = PromiseSettledResult<ParsedTransaction | null>;
+
 /**
- * Fetches the candidates' transactions concurrently — bounded, because a page
- * holds up to 100 signatures against the billed RPC — and decodes the first
- * close in history order. Results stay aligned to that order, so this resolves
- * exactly the entry a serial walk would have reached first, and a rejected
- * fetch still throws unless an earlier entry already resolved the close.
+ * Fetches the candidates' transactions through a bounded sliding window — a
+ * page holds up to 100 signatures against the billed RPC — and decodes the
+ * first close in history order. The window only looks ahead while the head of
+ * history is still unresolved, so an early close or rejection returns the
+ * moment its own fetch settles instead of waiting for later lookups, and
+ * nothing past the window is issued once the outcome is known. Abandoned
+ * in-flight fetches stay harmless because every lookup resolves to a settled
+ * result rather than rejecting.
  */
 async function firstCloseOnPage(
   rpc: SolanaRpc,
   swapDvp: Address,
   candidates: SignatureInfo[]
 ): Promise<DvpCloseLookup | null> {
-  const settled = await mapSettledWithConcurrency(
-    candidates,
-    TRANSACTION_LOOKUP_CONCURRENCY,
-    (entry) => getTransaction(rpc, entry.signature)
-  );
-  for (const [index, entry] of candidates.entries()) {
-    const lookup = settled[index];
-    if (lookup === undefined) {
-      continue;
+  const lookups: Promise<TransactionLookup>[] = [];
+  let cursor = 0;
+  const fillWindow = () => {
+    while (lookups.length < TRANSACTION_LOOKUP_CONCURRENCY && cursor < candidates.length) {
+      const entry = candidates[cursor];
+      cursor += 1;
+      lookups.push(
+        getTransaction(rpc, entry.signature).then(
+          (value): TransactionLookup => ({ status: "fulfilled", value }),
+          (reason): TransactionLookup => ({ status: "rejected", reason })
+        )
+      );
     }
+  };
+  fillWindow();
+  for (const entry of candidates) {
+    const lookup = await lookups[0];
+    lookups.shift();
     if (lookup.status === "rejected") {
       throw lookup.reason;
     }
     const transaction = lookup.value;
-    if (transaction === null || transaction.err !== null) {
-      continue;
-    }
-    for (const instruction of transaction.instructions) {
-      const status = readCloseStatus(instruction, swapDvp);
-      if (status !== null) {
-        return { kind: "resolved", status, signature: entry.signature };
+    if (transaction !== null && transaction.err === null) {
+      for (const instruction of transaction.instructions) {
+        const status = readCloseStatus(instruction, swapDvp);
+        if (status !== null) {
+          return { kind: "resolved", status, signature: entry.signature };
+        }
       }
     }
+    fillWindow();
   }
   return null;
 }
