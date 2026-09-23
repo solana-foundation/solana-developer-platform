@@ -49,7 +49,13 @@ export class KeychainParaAdapter extends BaseKeychainAdapter {
       apiBaseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
       walletId: denormalizeParaWalletId(normalizedWalletId),
+    }).catch((error: unknown) => {
+      if (this.signerByWalletId.get(cacheKey) === created) {
+        this.signerByWalletId.delete(cacheKey);
+      }
+      throw error;
     });
+
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }
