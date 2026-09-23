@@ -42,24 +42,24 @@ const contracts: ValueMovingContract[] = [
   {
     family: "batch",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/payments/handlers/transfer-batches/create.ts",
+      file: "apps/sdp-api/src/routes/payments/transfer-batches/create.ts",
       evidence: "resolved.scope.auth.organizationId",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/index.ts",
-      section: '"/transfer-batches",',
+      file: "apps/sdp-api/src/routes/payments/transfer-batches/index.ts",
+      section: 'transferBatches.post(\n  "/",',
       before: "extract: extractTransferBatchPolicyCandidate",
       after: "\n  createTransferBatch\n",
     },
     replay: [
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments/transfer-batches.test.ts",
+        file: "apps/sdp-api/src/routes/payments/transfer-batches/handlers.test.ts",
         evidence: "replays the original transfer batch for the same idempotency key and payload",
       },
       {
         mode: "idempotency_fingerprint",
-        file: "apps/sdp-api/src/routes/payments/transfer-batches.test.ts",
+        file: "apps/sdp-api/src/routes/payments/transfer-batches/handlers.test.ts",
         evidence: "returns the original batch when a concurrent insert loses the idempotency race",
       },
     ],

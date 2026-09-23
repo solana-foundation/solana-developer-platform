@@ -7,9 +7,9 @@ import { estimateNotAvailable } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertFreshApiKeyCustodyWalletAccess } from "@/services/api-key-scope.service";
-import { getFeePayment } from "../../context";
-import type { estimateTransferBatchSchema } from "../../schemas";
+import { getFeePayment } from "../context";
 import { resolveBatchRequest } from "./resolve";
+import type { estimateTransferBatchSchema } from "./schemas";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,

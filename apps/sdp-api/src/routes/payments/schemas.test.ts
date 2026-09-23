@@ -4,13 +4,15 @@ import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
   createSubscriptionSchema,
-  createTransferBatchSchema,
-  listTransferBatchesQuerySchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
   walletPolicyRuleSchema,
 } from "./schemas";
+import {
+  createTransferBatchSchema,
+  listTransferBatchesQuerySchema,
+} from "./transfer-batches/schemas";
 import { createTransferSchema, listTransfersQuerySchema } from "./transfers/schemas";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;

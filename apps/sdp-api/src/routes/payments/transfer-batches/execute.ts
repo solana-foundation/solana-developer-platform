@@ -19,7 +19,7 @@ import {
   isDefiniteSubmissionError,
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
-import { type AppContext, type getFeePayment, getPaymentsRepository } from "../../context";
+import { type AppContext, type getFeePayment, getPaymentsRepository } from "../context";
 import type { TransactionChunk } from "./transaction";
 import type { ResolvedBatchRequest } from "./types";
 

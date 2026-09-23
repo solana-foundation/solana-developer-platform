@@ -14,9 +14,9 @@ import {
   isNativePaymentToken,
   normalizePaymentToken,
 } from "@/services/payment-operation.service";
-import { type AppContext, getCounterpartyAccountsRepository } from "../../context";
-import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../../token-accounts";
-import { resolveScope, resolveWalletByCustodyWalletId } from "../../wallets";
+import { type AppContext, getCounterpartyAccountsRepository } from "../context";
+import { resolveMintTokenProgram, resolveSourceTokenAccount } from "../token-accounts";
+import { resolveScope, resolveWalletByCustodyWalletId } from "../wallets";
 import type {
   CreateTransferBatchInput,
   ResolvedBatchRequest,
