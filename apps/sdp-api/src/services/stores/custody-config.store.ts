@@ -467,7 +467,7 @@ export class CustodyConfigStore implements SigningConfigStore {
     projectId: string | undefined,
     params: CreateWalletParams & { id: string }
   ): Promise<{ wallet: CustodyConfigWallet; previous: PreviousDefaultWallet } | null> {
-    const previous = await this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const current = await tx.queryOne<PreviousDefaultWallet>(
         `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
          FROM custody_configs c
@@ -479,7 +479,7 @@ export class CustodyConfigStore implements SigningConfigStore {
       );
       if (!current) return null;
 
-      await tx.execute(
+      const row = await tx.queryOne<CustodyWalletRow>(
         `INSERT INTO custody_wallets (
            id,
            custody_config_id,
@@ -490,7 +490,8 @@ export class CustodyConfigStore implements SigningConfigStore {
            status,
            updated_at
          )
-         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`,
+         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))
+         RETURNING *`,
         [
           params.id,
           configId,
@@ -500,26 +501,20 @@ export class CustodyConfigStore implements SigningConfigStore {
           params.purpose ?? null,
         ]
       );
+      if (!row) {
+        throw new Error("Failed to create wallet");
+      }
       await tx.execute(
         `UPDATE custody_configs
          SET default_wallet_id = ?, updated_at = datetime('now')
          WHERE id = ?`,
         [params.walletId, configId]
       );
-      return current;
+      return { row, previous: current };
     });
-    if (!previous) return null;
+    if (!result) return null;
 
-    const row = await this.db
-      .prepare("SELECT * FROM custody_wallets WHERE id = ?")
-      .bind(params.id)
-      .first<CustodyWalletRow>();
-
-    if (!row) {
-      throw new Error("Failed to create wallet");
-    }
-
-    return { wallet: this.mapWalletRow(row), previous };
+    return { wallet: this.mapWalletRow(result.row), previous: result.previous };
   }
 
   /**
