@@ -4,7 +4,6 @@ import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
   isSuccessfulPaymentTransferStatus,
-  type Permission,
   type PolicyCandidate,
   TRANSFER_CHAIN_VERDICT_STATUSES,
 } from "@sdp/types";
@@ -62,10 +61,7 @@ import type { ValidatedBodyContext } from "@/middleware/validate";
 import { isRampQuoteBindingExpired } from "@/routes/payments/handlers/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
-import {
-  assertApiKeyWalletAccess,
-  getAllowedApiKeyWalletAuthorizationForPermissions,
-} from "@/services/api-key-scope.service";
+import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { AuditService } from "@/services/audit.service";
 import {
   assertPaymentProjectScope,
@@ -91,12 +87,7 @@ import {
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import { type AppContext, getFeePayment, getPaymentsRepository } from "../context";
 import { mapTransferRow } from "../mappers";
-import {
-  type createTransferSchema,
-  listTransfersQuerySchema,
-  transferIdParamsSchema,
-  walletIdParamsSchema,
-} from "../schemas";
+import { transferIdParamsSchema } from "../schemas";
 import * as tokenAccounts from "../token-accounts";
 import {
   admitExactPaymentWallet,
@@ -104,7 +95,6 @@ import {
   assertPaymentWalletReadAccess,
   type ResolvedScope,
   resolveScope,
-  resolveWallet,
   resolveWalletByCustodyWalletId,
 } from "../wallets";
 import {
@@ -115,25 +105,7 @@ import {
   resolveWalletTokenAccountAddresses,
   SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
 } from "./observed-transfers";
-
-export async function resolveWalletFromParams(
-  c: AppContext,
-  requiredWalletPermissions: Permission[] = []
-) {
-  const params = walletIdParamsSchema.safeParse(c.req.param());
-  if (!params.success) {
-    throw badRequest("Invalid wallet ID");
-  }
-
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, params.data.walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, requiredWalletPermissions);
-
-  return {
-    ...scope,
-    wallet,
-  };
-}
+import { type createTransferSchema, listTransfersQuerySchema } from "./schemas";
 
 async function resolveTransferIdempotencyReplay(
   repository: PaymentsRepository,

@@ -10,12 +10,18 @@ import {
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
+  createTransferSchema as createTransferSchemaBase,
+  listTransfersQuerySchema as listTransfersQuerySchemaBase,
+  transferDirectionSchema as transferDirectionSchemaBase,
+  transferStatusSchema as transferStatusSchemaBase,
+  transferTypeSchema as transferTypeSchemaBase,
+} from "@/routes/payments/transfers/schemas";
+import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   createSubscriptionSchema as createSubscriptionSchemaBase,
   createTransferBatchSchema as createTransferBatchSchemaBase,
-  createTransferSchema as createTransferSchemaBase,
   estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
@@ -24,7 +30,6 @@ import {
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
   listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
   listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
-  listTransfersQuerySchema as listTransfersQuerySchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
   paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
@@ -41,10 +46,7 @@ import {
   transferBatchIdParamsSchema as transferBatchIdParamsSchemaBase,
   transferBatchRecipientStatusSchema as transferBatchRecipientStatusSchemaBase,
   transferBatchStatusSchema as transferBatchStatusSchemaBase,
-  transferDirectionSchema as transferDirectionSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
-  transferStatusSchema as transferStatusSchemaBase,
-  transferTypeSchema as transferTypeSchemaBase,
   updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,

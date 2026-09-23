@@ -12,7 +12,6 @@ import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
   admitTransferBatchRuntimeExecution,
-  admitTransferRuntimeExecution,
   cancelRampTransfer,
   cancelRecurringPayment,
   collectRecurringPayment,
@@ -22,7 +21,6 @@ import {
   createRecurringPayment,
   createSubscription,
   createSubscriptionPlan,
-  createTransfer,
   createTransferBatch,
   estimateOfframp,
   estimateOnramp,
@@ -30,13 +28,10 @@ import {
   extractOfframpQuotePolicyCandidate,
   extractOnrampQuotePolicyCandidate,
   extractTransferBatchPolicyCandidate,
-  extractTransferPolicyCandidate,
   findTransferBatchIdempotentKeyReplay,
-  findTransferIdempotentKeyReplay,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
-  getTransfer,
   getTransferBatch,
   getWalletBalances,
   getWalletPolicy,
@@ -49,7 +44,6 @@ import {
   listSubscriptionPlans,
   listSubscriptions,
   listTransferBatches,
-  listTransfers,
   listWalletControlProfileRevisions,
   listWalletPolicyEvaluations,
   prepareCancelSubscription,
@@ -78,7 +72,6 @@ import {
   createSubscriptionPlanSchema,
   createSubscriptionSchema,
   createTransferBatchSchema,
-  createTransferSchema,
   estimateOfframpSchema,
   estimateOnrampSchema,
   estimateTransferBatchSchema,
@@ -93,6 +86,7 @@ import {
   updateSubscriptionPlanSchema,
   updateWalletPolicySchema,
 } from "./schemas";
+import transfers from "./transfers";
 
 const payments = new Hono<{ Bindings: Env }>();
 
@@ -234,18 +228,7 @@ payments.get(
   requirePermissions("payments:read"),
   listSubscriptionCollectionAttempts
 );
-payments.post(
-  "/transfers",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(createTransferSchema),
-  policyGate({
-    extract: extractTransferPolicyCandidate,
-    findIdempotentKeyReplay: findTransferIdempotentKeyReplay,
-    beforeEnforce: admitTransferRuntimeExecution,
-  }),
-  createTransfer
-);
-payments.get("/transfers", requirePermissions("payments:read"), listTransfers);
+payments.route("/transfers", transfers);
 payments.post(
   "/transfer-batches/estimate",
   requirePermissions("payments:read", "wallets:read", "counterparties:read"),
@@ -272,7 +255,6 @@ payments.post(
   validateBody(createPaymentRequestSchema),
   createPaymentRequest
 );
-payments.get("/transfers/:transferId", requirePermissions("payments:read"), getTransfer);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 // Estimates fan out one live call per provider on the corridor and quotes
