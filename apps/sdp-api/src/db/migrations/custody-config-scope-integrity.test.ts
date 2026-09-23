@@ -92,6 +92,21 @@ describe("custody Config scope integrity constraints", () => {
     await insertConfig("cust_scope_mix_org", null);
     await insertConfig("cust_scope_mix_prj", PROJECT_ID);
     await insertConfig("cust_scope_mix_para", null, "para");
+
+    // The positive control for the two "enforces" tests above: the rows must
+    // actually persist with the scopes this test names, or the allows-side of
+    // the constraint is never really exercised.
+    const rows = await getDb(env)
+      .prepare(
+        "SELECT id, project_id, provider FROM custody_configs WHERE id IN (?, ?, ?) ORDER BY id"
+      )
+      .bind("cust_scope_mix_org", "cust_scope_mix_para", "cust_scope_mix_prj")
+      .all<{ id: string; project_id: string | null; provider: string }>();
+    expect(rows.results).toEqual([
+      { id: "cust_scope_mix_org", project_id: null, provider: "privy" },
+      { id: "cust_scope_mix_para", project_id: null, provider: "para" },
+      { id: "cust_scope_mix_prj", project_id: PROJECT_ID, provider: "privy" },
+    ]);
   });
 
   it("requires the default wallet to belong to the same config", async () => {
