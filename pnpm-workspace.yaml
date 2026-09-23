@@ -6,7 +6,7 @@ catalog:
   # Kit 7: what kora, subscriptions, surfpool and the @solana-program clients already peer; @solana/pay is the holdout, covered by peerDependencyRules.
   '@solana-program/system': 0.14.1
   '@solana-program/token': 0.16.1
-  '@solana-program/token-2022': 0.16.1
+  '@solana-program/token-2022': 0.17.0
   '@solana/addresses': 7.1.1
   '@solana/codecs': 7.1.1
   '@solana/instructions': 7.1.1
