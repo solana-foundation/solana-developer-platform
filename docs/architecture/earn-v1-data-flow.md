@@ -1,11 +1,11 @@
 # Earn V1 — data flow & SDP reuse map
 
 Companion to [ADR 0002](../decisions/0002-earn-provider-pluggability.md). The
-scaffold on `earn-initial` shows the *shape*; this doc shows where every piece
-of data comes from **in the real build**, and which existing SDP components
-Earn rides on instead of rebuilding. Rule of thumb: **Earn adds a domain, not
-a platform** — auth, tenancy, custody, signing, fees, RPC, webhooks, cron,
-compliance, policies, and audit all already exist and are reused. For the
+current implementation is the contract; this doc maps where every piece of data
+comes from and which existing SDP components Earn rides on instead of
+rebuilding. Rule of thumb: **Earn adds a domain, not a platform**: auth,
+tenancy, custody, signing, fees, RPC, webhooks, cron, compliance, policies, and
+audit all already exist and are reused. For the
 step-by-step of changing what Earn offers (provider / vault / category /
 custodian), see the
 [Earn pluggability playbook](../contributing/earn-pluggability-playbook.md).
@@ -20,15 +20,15 @@ flowchart LR
     end
 
     subgraph SDP["sdp-api  /v1/earn"]
-        ROUTES["earn routes<br/>optional auth for catalogue/builds<br/>required auth for tenant control plane"]
-        SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo vault-direct; Upshift/Perena stubs)"]
-        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions")]
-        CRON["cron: catalogue sync (hourly) · metrics refresh (5 min)"]
+        ROUTES["earn routes<br/>optional auth for catalogue/previews/instant builds<br/>required auth for queued actions and tenant control plane"]
+        SVC["@sdp/earn provider clients<br/>(Kamino/Veda/Jupiter Lend/Ondo; WisdomTree pre-launch; Upshift/Perena stubs)"]
+        DB[("Postgres<br/>earn_strategies · earn_provider_wallets<br/>earn_movements · earn_positions<br/>earn_vault_withdrawal_requests + actions")]
+        CRON["cron: catalogue sync · metrics refresh<br/>movement + queued-withdrawal reconciliation"]
     end
 
     subgraph External
-        VAULT["Vault-infra APIs<br/>Kamino · Jupiter Lend · Jupiter swap (Ondo)<br/>+ on-chain reads (Veda, Ondo)"]
-        CHAIN["Solana<br/>(provider-managed wallet or direct vault transaction)"]
+        VAULT["Provider APIs and chain state<br/>Kamino · Jupiter Lend · Jupiter swap (Ondo)<br/>Veda · WisdomTree Connect/Token-2022"]
+        CHAIN["Solana<br/>(provider-managed wallet or owner-signed transaction)"]
         CURATOR["Curator risk frameworks<br/>Gauntlet · Steakhouse · Sentora<br/>(via vault-infra metadata)"]
     end
 
@@ -48,8 +48,11 @@ Vault-direct execution has two signer surfaces over one provider runtime. The
 treasury flow signs with an organization custody wallet. Embedded Yield returns
 an unsigned transaction for an end-user wallet and, on keyed builds, an
 optional partner fee payer to co-sign. Authenticated submits are recorded before
-SDP broadcasts and converge through the vault-movement reconciler. Anonymous
-builds are never persisted; the caller broadcasts and tracks them.
+SDP broadcasts and converge through the vault-movement reconciler. Queued exits
+use a separate durable request/action lifecycle and reconciler because the
+request transaction only escrows shares; only a verified solver fulfilment
+becomes a payout movement. Anonymous instant builds are never persisted; the
+caller broadcasts and tracks them.
 
 ## Where each surface gets its data (source of truth)
 
@@ -58,7 +61,7 @@ builds are never persisted; the caller broadcasts and tracks them.
 | Strategy catalogue | `earn_strategies` (DB) | Cron sync ← provider `listStrategies` (curator/risk metadata rides along as `risk_metadata`); snapshots outside the client's `declaredSupport` are skipped fail-closed (`isStrategyWithinDeclaredSupport`, `@sdp/earn/support`) | Hourly (`cron/earn-catalogue-sync.ts`) — identity, mints, liquidity terms and **admission** only |
 | APY + vault TVL/holders | `earn_strategies.current_apy` / `risk_metadata` (DB) + live `getPortfolioYield` for the program-level rate | Metrics refresh ← provider `listStrategyMetrics` (`supportsLiveMetrics`); live provider read | **Every 5 min** (`cron/earn-metrics-refresh.ts`) / real-time |
 | Whether a strategy is fundable *here* | Derived per request from `earn_strategies.host_cluster` vs the caller's environment — the `fundable` field on `GET /strategies` | `isClusterFundableInEnvironment` (`@sdp/earn`) | Real-time (never stored) |
-| Keyless catalogue and unsigned builds | `GET /strategies`, `GET /strategies/:id`, deposit and withdrawal previews, and external-wallet transaction builders | Deployment `SDP_ENVIRONMENT`; no organization, project, entitlement, or persisted build context | Per request; catalogue responses may be publicly cached |
+| Keyless catalogue, previews, and instant builds | `GET /strategies`, `GET /strategies/:id`, deposit/direct-withdrawal previews and builds, withdrawal-route discovery, and queued-withdrawal preview | Caller-selected strategy shelf; no organization, project, entitlement, or persisted build context. Queued request/cancellation builds remain keyed. | Per request; catalogue responses may be publicly cached |
 | Program list | `earn_provider_wallets` (**DB**, oldest first) joined per row with a **live provider snapshot** — `GET /v1/earn/programs` | Rows written by create; snapshots fetched in parallel per listed program | Real-time |
 | Positions & balances | **Live provider snapshot** (`GET /v1/earn/programs/:programId` ← `getPortfolioWallet`) — never persisted | Provider | Real-time |
 | Deposits | **Live provider** (`GET /programs/:programId/deposits` ← provider-observed on-chain deposits) — customer-initiated, so SDP has no intent moment to ledger | Provider | Real-time |
@@ -68,14 +71,17 @@ builds are never persisted; the caller broadcasts and tracks them.
 | Vault holdings | `earn_positions` (**DB claim index**, never a balance) **hydrated live from chain** — `GET /vault-positions` | Claim written with the first durable signed intent; shares and value read live per request | Claim = immediate; value = real-time |
 | Embedded Yield holdings + earnings | `earn_positions` scoped by org, project, environment, and owner, then hydrated live from chain; `GET /external-wallet/positions`, `/positions/summary`, `/earnings` | Claim written on the first submitted caller-signed movement; balances read from the owner's real on-chain shares | Claim = immediate; value = real-time |
 | Embedded Yield activity | `earn_movements`; `GET /external-wallet/movements` + `/:movementId` | Caller-signed deposit and withdrawal submits, recorded before SDP broadcasts | Intent = immediate; detail polls chain finality and the background sweep recovers unattended rows |
+| Queued withdrawal lifecycle | `earn_vault_withdrawal_requests` plus signed action/build rows; external-wallet list/detail and custody request routes | Owner-signed request/cancellation actions, persisted before broadcast; provider PDA/event reads prove maturity, fulfilment, or returned shares | Durable immediately; due-queue reconciliation continues until terminal |
 | Movement history, ALL providers | `earn_movements` (**DB ledger** — `GET /v1/earn/movements`) | Every movement above, one chronological feed across both execution models; no provider gate (ADR 0002 exit safety) | Same as the rows it serves |
 | Wallet balances (funding) | Existing wallet/custody surfaces | Existing RPC relay + token account reads — nothing Earn-specific | Existing behavior |
 | Provider on/off state | `getProviderAvailability` (existing service, `earn` family already wired) | Org entitlements + env credentials | Real-time |
 
 > **Ledger vs live.** SDP ledgers every movement it signs or accepts through a
 > keyed external-wallet submit, while balances remain live provider or
-> on-chain reads. Anonymous builds are not SDP movements and create no ledger
-> row. A ledger row proves SDP's movement lifecycle, never the current balance.
+> on-chain reads. A queued request or cancellation is an action, not a payout;
+> only a verified fulfilment projects one withdrawal movement. Anonymous builds
+> are not SDP movements and create no ledger row. A ledger row proves SDP's
+> movement lifecycle, never the current balance.
 
 > **Catalogue vs figures — split by how fast the thing moves (2026-08-13).**
 > The catalogue row and the numbers on it now have different cadences and
@@ -134,13 +140,12 @@ recording is otherwise unrecoverable. `earn_positions` records only WHICH
 ledger-vs-live rule above is unchanged.
 
 That ledger started as `earn_vault_movements` (migration 0059, *not* 0058 as this
-document previously said) beside the custodial `earn_program_withdrawals` — two
+document previously said) beside the custodial `earn_program_withdrawals`, two
 authoritative tables split by execution mechanism. PRO-1705 merged them into one
 `earn_movements` root and one `earn_positions` holdings table (migrations
-0062-0065; ADR 0002 addendum 2026-08-19). The legacy tables still take the writes
-and are mirrored into the unified shape in the same transaction until a later
-release retires them, so the sources of truth in the table above are the unified
-ones for every READ.
+0062-0065; ADR 0002 addendum 2026-08-19). Migration 0068 verified the projection,
+dropped the mechanism-split tables, and ended dual writes. The unified tables are
+now the only movement and holdings sources.
 
 The withdraw counterpart landed with PRO-1702: `POST /v1/earn/vault-withdrawals`
 records one share-mint-denominated signed movement before broadcasting it, and
@@ -149,9 +154,10 @@ sweep finishes an ambiguous or interrupted submission. Vault deposits open
 where the provider is DEPLOYED (`EARN_PROVIDER_DEPLOYED_CLUSTERS` in
 `@sdp/types`, derived from each provider's program table and mapped through
 `CLUSTER_BY_SDP_ENVIRONMENT`): Kamino from sandbox and production, Jupiter Lend
-and Ondo from production only, Veda from sandbox until PRO-1777 fills its
-mainnet deployment; the exit route itself takes no environment gate —
-money out beats money off.
+and Ondo from production only, and Veda from sandbox until PRO-1777 fills its
+mainnet deployment. WisdomTree is registered but deposit-disabled until its
+launch gates pass. The exit route itself takes no environment gate because money
+out beats money off.
 
 The removed pre-PRO-1634 execution sketch is not a contract. New providers must
 implement today's `EarnVaultDirectProvider` plan and quote capabilities, then
@@ -170,29 +176,28 @@ per-provider movement endpoints or status polling types from git history.
 | Solana RPC | `@sdp/rpc`, `services/earn/execution-registry.ts` | Cluster-proved provider build, simulation, broadcast, and live vault-position hydration | ✅ vault-direct paths |
 | Helius DAS | `services/helius-das.service.ts` | No V1 consumer; vault positions use direct RPC reads | ⏸ none in V1 |
 | Webhook dispatch + signature verify | `routes/webhooks/handlers.ts`, `lib/webhook-signature.ts` | Provider settlement events land on the withdrawal ledger via the same applier the poll path uses (`earn-withdrawal-ledger.service.ts`) | ⏸ PRO-1631 (polling works today; the neutral event contract returns with it) |
-| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts scheduled`, `job.ts` | Catalogue sync, metrics refresh, withdrawal-ledger polling, and vault-movement reconciliation | ✅ wired and gated by the owning jobs |
-| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_program_withdrawals` (wallet, request_id) unique + `earn_provider_wallets` (provider, provider_wallet_ref) unique | Two-layer withdrawal retry safety: SDP intent row first, provider request-id dedupe as the crash-window backstop. Program **creation** is key-required too (PRO-1670) and derives against (org, environment, provider); the provider replays a retried create with the original wallet ref, so the global wallet-ref unique is what catches it — a violation there means "already created", answered 200, never 409 | ✅ wired (PRO-1628, PRO-1670) |
-| Compliance providers | `services/compliance/`, compliance family | RWA strategy KYC / depositor checks (open decision) | ⏸ decision pending |
+| Cron infra (3 entrypoints) | `cron/runner.ts`, `index.ts` scheduled handler, `job.ts` | Catalogue sync, metrics refresh, movement reconciliation, queued-withdrawal reconciliation, and orphaned split-swap detection | ✅ wired and gated by the owning jobs |
+| Idempotency | `middleware/idempotency-key.ts` + `lib/idempotency.ts` (derived request id, fingerprint replay) + `earn_movements` request uniques + queued request/action client-request uniques + `earn_provider_wallets` provider-wallet unique | Movement and queued-action retries return the recorded intent instead of moving shares or assets twice. Program creation remains key-required and the provider-wallet unique is its replay anchor. External-wallet build rows are consumable once. | ✅ wired |
+| Compliance providers | `services/compliance/`, compliance family; provider-native eligibility capability | WisdomTree uses its Connect wallet/product checks before money-in. A generic SDP compliance-provider hook for other RWA strategies remains an open decision. | ✅ WisdomTree · ⏸ generic hook |
 | Policies + approvals | policy/approval domains (`policy.repository`, approvals UI) | Treasury vault deposits and withdrawals emit `program` / `earn_vault_deposit` or `earn_vault_withdrawal`, enforce before custody, and fence approved retries against the signed intent; external-wallet authorization is the owner's signature | ✅ treasury vault writes |
-| Audit log | `services/audit.service.ts` | Deposit/withdraw/config audit events | 🔨 execution phase |
+| Audit log | `services/audit.service.ts`, `routes/earn/handlers/movement-audit.ts` | Program configuration, movement, queued request, and cancellation audit events | ✅ wired |
 | Secrets/env plumbing | Doppler → `secret-keys.mjs` → workers | Provider API keys (already registered) | ✅ wired |
-| OpenAPI → docs pipeline | `openapi/spec.ts` → sdp-docs | Public Earn route inventory and the optional-auth contract for the six keyless operations | ✅ source and generated artifacts aligned |
+| OpenAPI to docs pipeline | `openapi/spec.ts` to sdp-docs | 21 public Earn operations with exactly eight optional-auth operations; queued action builds, submits, and tenant reads stay keyed | ✅ source and generated artifacts aligned |
 
 **Net-new (Earn-only) components:** the provider clients in `@sdp/earn`
-(Kamino, Veda, Jupiter Lend and Ondo carry real catalogue reads;
-Upshift/Perena remain `StubEarnClient` subclasses
-carrying `provider` + `declaredSupport`, filled in method-by-method), the
-vault-direct execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`
-and `@sdp/ondo`, the
+(Kamino, Veda, Jupiter Lend, Ondo, and pre-launch WisdomTree carry real catalogue
+implementations; Upshift/Perena remain `StubEarnClient` subclasses carrying
+`provider` + `declaredSupport`, filled in method-by-method), the vault-direct
+execution packages `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`, `@sdp/ondo`,
+and `@sdp/wisdomtree`, the
 portfolio-wallet capability (`EarnPortfolioWalletProvider` +
 `supportsPortfolioWallets` in `@sdp/earn/capabilities`), the
 `earn_provider_wallets` table (migration `0049`; migration `0056` lifted its
 one-per-org cap so an org may hold N programs per environment+provider, and
-moved uniqueness onto the provider wallet itself — one link row per
-`(provider, provider_wallet_ref)` platform-wide), the withdrawal ledger
-(`earn_program_withdrawals`, migration `0055`) with its status machine in
-`services/earn-withdrawal-ledger.service.ts`, and the catalogue-sync cron
-(`cron/earn-catalogue-sync.ts`).
+moved uniqueness onto the provider wallet itself), the unified movement ledger
+(`earn_movements`) and holdings table (`earn_positions`), the separate queued
+withdrawal request/action/build tables introduced by migration 0113, and the
+catalogue and reconciliation jobs.
 
 ## The custodial portfolio-wallet flow (retired)
 

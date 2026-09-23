@@ -1,7 +1,8 @@
 # 0003. Veda vault withdrawals — the exit path for `vault_direct`
 
 Date: 2026-08-19
-Status: Implemented for the configured devnet deployment (2026-09-18).
+Status: Implemented for the configured devnet deployment (2026-09-18) and
+published for external-wallet Embedded Yield integrations (2026-09-22).
 
 The context below is retained as the decision record. The implementation now
 includes the separate queued-withdraw capability, live options and previews,
@@ -9,6 +10,12 @@ custody and external-wallet request/cancel flows, durable request/action/build
 tables, and a closing-event reconciler that distinguishes fulfillment from
 cancellation and records the provider-paid asset amount. Treasury and Embedded
 Yield expose both exit routes without choosing between them.
+
+Sections from **Context** through **Open questions** preserve the facts and
+sequencing as they stood on 2026-08-19. Present-tense statements there about
+missing routes, empty deployments, global environment gates, or unimplemented
+Kamino exits are historical and are superseded by this status block and the
+current route/package documentation.
 
 The real-program Surfpool scenario in
 `packages/sdp-veda/src/sdk.surfpool.test.ts` proves deposit → share lock → queue
@@ -20,10 +27,13 @@ This supersedes any inference that the older external audit completed a cancel:
 `docs/earn/veda-svm-audit/SUMMARY.md` records that all of its cancel attempts
 failed and its shares remained escrowed.
 
-Two release gates remain outside this implementation: the new runtime routes
-must not enter the public OpenAPI document without a named EARN-027 security
-sign-off, and production remains fail-closed until Veda names approved mainnet
-vaults for SDP rather than the shared Test Vault.
+The EARN-027 publication gate completed in
+[PR #1987](https://github.com/solana-foundation/solana-developer-platform/pull/1987):
+`cutbow7` approved exact head `b2d313803` before merge. External-wallet route
+discovery and queued previews are optional-auth; request/cancellation builds,
+submits, and history require an API key. Custody queue routes remain internal.
+Production remains fail-closed until Veda names approved mainnet vaults for SDP
+rather than the shared Test Vault.
 
 ## Context
 

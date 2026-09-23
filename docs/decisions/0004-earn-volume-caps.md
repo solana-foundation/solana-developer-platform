@@ -1,7 +1,18 @@
 # 0004. Earn volume caps
 
 Date: 2026-09-11
-Status: Proposed (PRO-1870; threat model P4.2 / P4.6 / E4.2, §9 item 4)
+Status: Accepted. The platform-wide vault exposure cap (layer 1, PRO-1934) and
+the reusable policy velocity rule (layer 2, PRO-1933) are implemented. Tier
+defaults, per-org override workflow, and the partner-key tripwire remain
+follow-up work pending measured thresholds (PRO-1870; threat model P4.2 / P4.6
+/ E4.2, §9 item 4).
+
+The context and decision sections below preserve the pre-implementation
+problem statement. Current code evaluates the layer-1 cap on every deposit
+admission and rechecks durable writes under a per-vault lock; the
+`EARN_VOLUME_CAPS_ENFORCED` flag controls refusal versus shadow-only telemetry.
+The velocity rule is available to explicit policies, but the platform tier
+defaults described below are not yet synthesized.
 
 ## Context
 

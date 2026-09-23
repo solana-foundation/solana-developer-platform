@@ -4,14 +4,14 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
  *
- * Earn is a stablecoin deposit facility: organizations browse a catalogue of
- * yield strategies (DeFi protocols or tokenized RWAs, fronted by vault-infra
- * providers), fund a shared portfolio wallet, and withdraw to addresses they
- * control. Custodial portfolio balances are read live from the provider, while
- * non-custodial vault ownership and movement records are durable and their
- * balances are hydrated live. SDP-initiated portfolio withdrawals are recorded
- * in a ledger — "Record"-suffixed types are ledger rows, `EarnPortfolio*`
- * types are live provider reads (PRO-1628 / ADR 0002 addendum).
+ * Earn is a stablecoin deposit facility: organizations and external-wallet
+ * integrators browse a catalogue of DeFi vaults and tokenized RWAs, then use
+ * provider-built transactions to enter or exit a strategy. Current providers
+ * are non-custodial; the retained portfolio-wallet contracts support a future
+ * custodial provider. Durable movements and position claims live in SDP's
+ * unified ledger while balances are hydrated live. "Record"-suffixed types are
+ * ledger rows; `EarnPortfolio*` types are live provider reads (PRO-1628 / ADR
+ * 0002 addendum).
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a

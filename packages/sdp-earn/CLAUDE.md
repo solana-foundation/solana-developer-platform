@@ -23,8 +23,9 @@ integrator's SDP API key.
   permissions.
 - A credentialed call to an optional-auth route preserves the existing tenant
   environment, entitlement, custom fee-payer, persistence, and submit flow.
-- A missing `GROUND_*_API_KEY` is a provider configuration failure. It says
-  nothing about whether an integrator supplied an SDP API key.
+- Missing credentials for a provider that requires them are a provider
+  configuration failure. They say nothing about whether an integrator supplied
+  an SDP API key.
 
 ## Local development — the whole Earn stack
 
@@ -73,9 +74,10 @@ DATABASE_URL=postgresql://sdp:sdp@127.0.0.1:5433/sdp pnpm db:seed:local
   no dev-only default-on: `MARKETS_ENABLED=true` and `EARN_ENABLED=true`, needed
   by **both** apps (same unprefixed names). Under the Doppler wrapper, plain
   shell exports are ignored unless named in `DOPPLER_PRESERVE_ENV`.
-- **Keyless environment** maps `ENVIRONMENT=development` to sandbox and
-  `ENVIRONMENT=production` to production. Authenticated calls continue to
-  derive environment from the selected project.
+- **Keyless environment** is caller-selected on strategy lists with
+  `?environment=sandbox|production` and defaults to production. Quotes and
+  builds inherit the named strategy's environment. Authenticated calls continue
+  to derive environment from the selected project.
 - **Sponsored vault movements** (`EARN_VAULT_FEE_SPONSORSHIP_ENABLED=true`, API
   only) additionally need a Kora to sign against: `pnpm kora:up`, then point
   `KORA_RPC_URL` at it. `infra/kora/kora.toml` already carries the Kamino program
@@ -159,14 +161,14 @@ that is correct, not a bug. Grant the override in the **local** DB to proceed.
 
 ### 5b. The gate BEFORE that one: is the provider even offered?
 
-**Kamino and Veda are the offered providers. Locally the sandbox catalogue
-shows Kamino's devnet shelf plus Veda's devnet Test Vault, and there is no way
-to create a program — that is the shipped state, not a broken setup**
-(production has no Veda rows: `VEDA_DEPLOYMENTS` is devnet-only until Veda
-names a production vault). The Ground integration that previously served the
-custodial program flow was REMOVED (client, credentials, catalogue rows), so no
-registered provider is portfolio-capable today; the program routes stay and
-answer 503 for any id that does not resolve.
+**Kamino, Veda, Jupiter Lend, and Ondo are offered. WisdomTree is registered
+pre-launch; Upshift and Perena remain stubs.** The sandbox catalogue's own lane
+shows Kamino's devnet shelf plus Veda's devnet Test Vault. Its explicit mainnet
+mirror can also show browse-only Jupiter Lend and Ondo rows. Production has no
+Veda row because `VEDA_DEPLOYMENTS` is devnet-only until Veda names a production
+vault. The Ground integration that previously served the custodial program flow
+was removed, so no registered provider is portfolio-capable today; the program
+routes stay and answer 501 for providers without that capability.
 `EARN_PROVIDER_SURFACING`
 (`packages/sdp-types/src/provider-access.ts`) declares which registered
 providers SDP OFFERS; it is a code constant, so there is no env var or DB row to
@@ -239,21 +241,20 @@ yield sources. Programs, withdrawals and the deposit wizard all assume that
 shape. No shipped provider uses it today, but the routes, ledger and
 `EarnPortfolioWalletProvider` capability stay — they are provider-neutral.
 
-Kamino and Veda are **non-custodial**: the vault is an on-chain account the
-customer's own wallet deposits into, so there is no wallet for SDP to provision
-or pay out from, and no address to hand out — the vault's account is a PROGRAM
-account and stablecoins sent to it are destroyed.
-
-Both implement the base `EarnVaultProvider` contract plus the **vault-direct**
-capability (`EarnVaultDirectProvider`, `supportsVaultDirect`), which is
-DEPOSIT + READ only. Kamino additionally implements live metrics; Veda does
-not, and that is deliberate — one reading of a Veda exchange rate is not a rate
-of return, so it reports no APY at all rather than a fabricated one.
+Every current executing provider is **non-custodial** and implements the base
+`EarnVaultProvider` contract plus the **vault-direct** capability
+(`EarnVaultDirectProvider`, `supportsVaultDirect`). Kamino and Veda target
+on-chain vault programs. Jupiter Lend targets its pinned market. Ondo swaps into
+the yield-bearing USDY token. Pre-launch WisdomTree sends an eligibility-checked
+primary-market order leg. None exposes a generic deposit address as a safe
+substitute for the provider-built transaction. Kamino additionally implements
+live metrics; Veda does not, because one exchange-rate reading is not a rate of
+return.
 
 Money OUT is a separate capability, `EarnVaultWithdrawProvider` /
-`supportsVaultWithdraw`, which BOTH implement now — Kamino since PRO-1702 and
-Veda's instant redemption since ADR 0003's "instant lands first" step, both
-through `POST /v1/earn/vault-withdrawals`. Veda's QUEUED exit
+`supportsVaultWithdraw`. Every surfaced executing provider implements a direct
+exit; WisdomTree's pre-launch client implements its provider-order redemption.
+Veda's QUEUED exit
 (`boring_onchain_queue`) is a separate `EarnVaultQueuedWithdrawProvider`
 capability because landing its holder-signed request only escrows shares. Its
 request, optional solver fulfillment, and post-deadline cancellation live in a
@@ -270,15 +271,16 @@ never a permission gate, since ADR 0002 forbids money-out inheriting a
 money-in gate, and it traps nothing — the shares sit in the organization's own
 custody wallet and each provider's own surfaces can redeem them.
 
-Neither implements ANY of the portfolio-wallet capability, so every portfolio
-route answers 501 for them through `supportsPortfolioWallets`, never a
+No current provider implements the portfolio-wallet capability, so every
+portfolio route answers 501 through `supportsPortfolioWallets`, never a
 provider-id check. The two capabilities are asserted MUTUALLY EXCLUSIVE: a
 client claiming both would let a portfolio route render the vault account as a
 fundable address.
 
-Money moves for both by SDP BUILDING an instruction, signing it with one of the
-organization's own custody wallets and submitting it — `@sdp/kamino` and
-`@sdp/veda` build the plan, the API signs and submits
+Money moves through provider-specific execution packages. SDP builds the plan,
+signs it with one of the organization's own custody wallets, and submits it.
+The current packages are `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
+`@sdp/ondo`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
 (`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
 the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
 `owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
@@ -349,7 +351,7 @@ page it links is fetchable as raw markdown):
   authority/address data or an audited vault-address allowlist — free-text
   vault names must never feed a curator or source-kind classification.
 
-## Veda — an ALLOWLIST shelf, and currently an empty one
+## Veda: an allowlisted devnet shelf
 
 Veda's catalogue read is the mirror image of Kamino's. Kamino's registry is
 permissionless, so its problem is filtering a census down; Veda deploys a vault
@@ -359,14 +361,12 @@ explicit allowlist — `VEDA_DEPLOYMENTS` in `@sdp/types/veda-programs` — and 
 is also what makes Veda's `sourceKind` defensible: every row traces to an
 address Veda named rather than to anything a stranger could create.
 
-**SDP DOES NOT YET KNOW THOSE ADDRESSES.** `VEDA_DEPLOYMENTS` is `null` for
-both clusters, so `listStrategies` throws `PROVIDER_NOT_CONFIGURED` and Veda
-contributes no rows anywhere. Two candidate address sets exist and disagree: the
-`declare_id!` defaults baked into each Anchor IDL inside `@vedatech/svm-sdk`,
-and three different addresses in Veda's integration document. Measured
-2026-08-19 against both public RPCs — none of the IDL addresses exists on either
-cluster. Filling the table in is a pure data change once Veda confirms; see
-`packages/sdp-veda/CLAUDE.md`.
+`VEDA_DEPLOYMENTS.devnet` pins Veda's confirmed Test Vault programs and vault
+state, measured on chain. `VEDA_DEPLOYMENTS["mainnet-beta"]` remains `null`:
+the published mainnet addresses point at Veda's shared Test Vault, not a
+production offering SDP may expose. Sandbox therefore carries one fundable
+Veda row; production contributes none until Veda names an approved vault. See
+`packages/sdp-veda/CLAUDE.md` for the measured addresses and execution notes.
 
 Four things about the read itself:
 
@@ -473,10 +473,10 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
 
 ## Contracts
 
-- `EarnVaultProvider` (src/types.ts) is the base contract — slimmed by
-  PRO-1628 to `provider` + `declaredSupport` + `listStrategies`, every member
-  real and called (the per-strategy quote/execution seams live in git history
-  until PRO-1634 gives them a consumer); the portfolio-wallet
+- `EarnVaultProvider` (src/types.ts) is the base catalogue contract:
+  `provider` + `declaredSupport` + `listStrategies`. Quote, execution,
+  eligibility, metrics, and portfolio-wallet behavior live in optional
+  capabilities; the portfolio-wallet
   surface (`EarnPortfolioWalletProvider`) is an **optional capability** detected
   via `supportsPortfolioWallets()` (src/capabilities.ts, all-or-nothing method
   presence). New optional surfaces follow the same pattern: interface extension
@@ -520,7 +520,8 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   safety gates. The Earn strategy API separately hides Aave- and Morpho-related
   rows from list and detail reads; do not move that product policy into a
   provider client.
-- Missing API key ⇒ throw `PROVIDER_NOT_CONFIGURED` **before** any network call.
+- Missing required provider configuration ⇒ throw `PROVIDER_NOT_CONFIGURED`
+  **before** any network call.
 
 ## Conventions
 

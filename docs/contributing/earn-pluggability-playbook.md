@@ -202,14 +202,14 @@ even that. Both halves are covered by route tests
 row: catalogue history must survive wind-down, and program allocations
 reference strategies by provider reference.
 
-## 4. Add a vault-infra provider — add the id, follow the compiler
+## 4. Add an Earn provider: add the id, follow the compiler
 
 `EarnProviderId` is a closed union, so adding the id breaks the build until
 every registration point is filled — the type errors are the checklist, and
 the tests listed at the end of this section guard the registration points the
 compiler can't see.
 
-**Three worked examples**, and which one you copy depends on how the provider
+**Six worked patterns**, and which one you copy depends on how the provider
 holds the money and who signs:
 
 - **Custodial portfolio** (no live example — the Ground integration was
@@ -232,6 +232,11 @@ holds the money and who signs:
   Vault and a deliberately null mainnet entry. Both builders require explicit
   quote-derived floors, declared through the deposit and withdrawal slippage
   maps. Copy this when a provider's SDK refuses implicit slippage.
+- **Jupiter Lend: one public mainnet market.** The catalogue pins the canonical
+  USDT/jlUSDT market and the execution package uses the official SDK. There is no
+  provider credential and no devnet deployment, so sandbox sees only the mirrored
+  browse-only row. Copy this for a tightly pinned public market rather than a
+  provider-wide shelf.
 - **Ondo: no vault program — the instrument IS the position.** `ondo` id, no
   Ondo credential, executing like Veda, registered dormant (PRO-1803) and
   surfaced on 2026-09-14 (PRO-1832). The strategy is holding USDY: deposits
@@ -246,6 +251,13 @@ holds the money and who signs:
   its mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox
   shelf to the PRO-1742 mirror, which in a devnet deployment only fills when
   the catalogue can reach mainnet (`SOLANA_MAINNET_RPC_URL`, below).
+- **WisdomTree: credentialed provider-order execution, registered but not
+  offered.** Catalogue and eligibility checks use environment-specific Connect
+  credentials; the chain adapter transfers USDC or Token-2022 fund shares, while
+  economic settlement happens later through the transfer agent. Surfacing and
+  deposits remain off until real credentials, wallet eligibility, and provider
+  settlement reconciliation pass the launch gates. Copy this for a primary-market
+  product where chain finality is not economic settlement.
 
 Steps 5–8 below are the **upstream-credentialed** path; a provider on a public
 API skips most of them (see the credential-free upstream variant under the
@@ -270,7 +282,7 @@ key to the hosted `/v1/earn` routes.
 | 10. Execution wiring (executing providers only) | `packages/sdp-<id>` + `apps/sdp-api/src/services/earn-provider-registry.ts` + `apps/sdp-api/src/services/earn/execution-registry.ts` | The executing client lives in its own workspace package and registers TWICE in the API: the composition-root overlay in `earn-provider-registry.ts` (capability resolution for routes) and a branch in `resolveEarnExecutionClient` (the one place a provider id maps to an executing client; everything downstream narrows by capability, so no route edits). Plus workspace plumbing: `apps/sdp-api/package.json` and the Dockerfile's explicit package COPY list. Full walk in §4d. |
 | 11. Error contract (executing providers only) | Provider package error type + `apps/sdp-api/src/services/earn/vault-refusals.ts` | Emit the shared provider-neutral codes. Use `INVALID_AMOUNT`, `DEPOSIT_REFUSED`, `WITHDRAW_REFUSED`, or `COMPLIANCE_APPROVAL_REQUIRED` only for caller-actionable failures. Use `VAULT_UNREADABLE` for RPC outages, rate limits, missing live state, and other retryable read failures. The API maps those families to 400 and sanitized 503 responses respectively; unknown codes stay 500s. Never put RPC URLs, credentials, or raw transport messages in the public response. |
 
-### The credential-free upstream variant (public API or on-chain state: Kamino and Veda)
+### The credential-free upstream variant (Kamino, Veda, and Jupiter Lend)
 
 A provider whose data API takes no credential does steps 1–4 unchanged, then:
 
@@ -293,9 +305,11 @@ A provider whose data API takes no credential does steps 1–4 unchanged, then:
 
 Provider configuration and caller entitlement are separate gates. An
 authenticated request retains the organization's provider entitlement. The
-PRO-1943 anonymous catalogue, preview, and unsigned-build subset has no
-organization whose entitlement can be evaluated, so it relies on global
-provider surfacing, environment capability, and strategy admission instead.
+optional-auth catalogue, preview, withdrawal-route discovery, and instant-build
+subset has no organization whose entitlement can be evaluated, so it relies on
+global provider surfacing, environment capability, and strategy admission
+instead. Queued request and cancellation builds stay authenticated because the
+durable lifecycle is part of their recovery contract.
 
 ### If the provider is not deployed on every cluster
 
@@ -514,10 +528,12 @@ Three things to understand before opting in:
   two requests. A provider whose rates arrive on the same paged endpoint its
   catalogue uses should NOT implement it: the five-minute pass would re-pay
   the whole catalogue cost for the rate alone.
-- **Return your whole shelf, unfiltered.** The refresh is UPDATE-only —
-  `updateStrategyMetrics` no-ops on any reference the catalogue does not hold —
-  so reporting vaults that distillation refused costs one no-op per row and
-  saves you re-running the admission gates. Kamino reports 173 and 21 land.
+- **Return your whole shelf, unfiltered.** The refresh is UPDATE-only. Its
+  normal path calls `updateStrategyMetricsBatch` once per provider/environment,
+  then falls back to `updateStrategyMetrics` per row only to isolate malformed
+  data. Both no-op on references the catalogue does not hold, so reporting
+  vaults that distillation refused cannot admit them. A provider may report
+  its entire shelf while only already-catalogued rows land.
 - **Figures only.** `ProviderStrategyMetrics` carries the rate and volatile risk
   metadata (TVL, holders) and nothing that could change what a strategy *is*.
   The metadata is merged over what is stored, so `curator` — which the hourly
@@ -530,8 +546,9 @@ Why this writes to the DB rather than reading live at request time:
 
 ## 4d. Implementing vault-direct execution: one runtime, two signer surfaces
 
-A `vault_direct` provider's instruments are non-custodial on-chain programs.
-The provider builds the same neutral plans for two API surfaces. Treasury uses
+A `vault_direct` provider's instruments are non-custodial vaults, markets, or
+yield-bearing tokens reached through an on-chain transaction. The provider
+builds the same neutral plans for two API surfaces. Treasury uses
 the organization's custody signer. Embedded Yield returns an unsigned
 transaction for the end user's wallet and an optional partner `feePayer` to
 co-sign, then SDP verifies, records, and broadcasts the submitted bytes. Both
@@ -541,14 +558,17 @@ provider adds:
 1. **A second client, in its own package.** The catalogue client from step 2
    stays in `@sdp/earn` and SDK-free, because the catalogue cron must keep its
    small dependency surface. The executing client wraps the chain SDK in its
-   own workspace package (`packages/sdp-kamino`, `packages/sdp-veda`) and
+   own workspace package (`packages/sdp-<id>`; current examples include Kamino,
+   Veda, Jupiter Lend, Ondo, and WisdomTree) and
    implements `EarnVaultDirectProvider` (`packages/sdp-earn/src/types.ts`):
    the build/quote members plus `sponsoredPrograms(cluster)`, which is
    REQUIRED (PRO-1736). A client that cannot name its programs answers false
    to `supportsVaultDirect`, and its routes 501.
-2. **A per-cluster deployment registry in `@sdp/types`.** The verified address
-   table (`kamino-programs.ts`, `veda-programs.ts`) declares the provider's
-   program ids per cluster. Both the client's plan-target guard and
+2. **A per-cluster deployment registry in `@sdp/types`.** A provider with
+   vault programs declares its verified program ids per cluster in a
+   provider-specific `*-programs.ts` table. A token-based integration instead
+   pins the mint and executable program identities it actually targets. Both
+   the client's plan-target guard and
    `sponsoredPrograms` derive from it, so what is declared to the paymaster
    cannot drift from what the builder emits. An all-null registry is the
    shipping-dormant state: the client resolves, catalogues nothing, sponsors
@@ -600,11 +620,12 @@ in order:
   `providerOverrides.earn.<id>` (step 1's note).
 - **Surfacing**: `EARN_PROVIDER_SURFACING` must say `true` (step 1b, and §6
   to reverse it).
-- **Environment**: `vault_direct` deposits open per environment via
-  `VAULT_DIRECT_DEPOSIT_ENVIRONMENTS` (`@sdp/types/provider-access`),
-  sandbox-only until PRO-1703 lands and PRO-1635's launch checklist adds
-  `"production"`. Exits never consult it: a withdrawal works in every
-  environment a position exists in (ADR 0002's exit-safety rule).
+- **Environment**: `isVaultDirectDepositEnabled(environment, provider)` derives
+  depositability from `EARN_PROVIDER_DEPLOYED_CLUSTERS`, which in turn derives
+  from each provider's verified per-cluster deployment table. There is no global
+  sandbox-only switch. A provider with no deployment in the project's cluster is
+  browse-only there. Exits never consult this money-in gate: a withdrawal works
+  in every environment where a position exists (ADR 0002's exit-safety rule).
 
 ## 5. Custodian seam — "add Anchorage/Fireblocks to Earn"
 

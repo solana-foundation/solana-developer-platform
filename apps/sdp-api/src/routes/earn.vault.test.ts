@@ -6,8 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 /**
- * Surfacing is real by default here — Kamino AND Veda are offered, so both
- * providers' happy paths run against the shipped map with no help.
+ * Surfacing is real by default here. These cases exercise Kamino and Veda, so
+ * both providers' happy paths run against the shipped map with no help.
  *
  * `forceOn` opens the two OFFERING gates (deployed-cluster environment
  * capability and surfacing) for the few cases that must get PAST them to

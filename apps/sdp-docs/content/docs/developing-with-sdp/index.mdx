@@ -12,14 +12,14 @@ Everything the dashboard does is available through the API. Build against the AP
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. Keyless Earn requests instead use the API deployment's operator-configured environment.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. A keyless Earn strategy list instead chooses its shelf with `?environment=sandbox|production` (production by default); a preview or instant build follows the environment of the strategy it names.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose identical APIs. Develop and test against a sandbox project, then switch authenticated integrations to production by swapping your API key. Keyless integrations switch only when the API operator changes the deployment environment.
+Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key. A keyless integration selects the sandbox shelf explicitly while testing and must treat a production build as a real-funds transaction.
 
 ## Response conventions
 

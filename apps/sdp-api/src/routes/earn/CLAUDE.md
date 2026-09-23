@@ -525,11 +525,11 @@ other's balance.
 
 ## Vault-direct routes (non-custodial positions)
 
-A second money model, added for Kamino. A `vault_direct` provider custodies
-nothing: there is no wallet to provision and no address to fund — the vault's
-account is a PROGRAM account and stablecoins sent to it are destroyed. Money
-moves only when SDP builds an instruction and signs it with one of the
-organization's own custody wallets.
+A second money model, first added for Kamino. A `vault_direct` provider
+custodies nothing: the position may be vault shares, a market receipt token, or
+a yield-bearing token, but there is no provider-managed wallet to provision or
+generic deposit address to fund. Money moves only through a provider-built
+transaction signed by the organization custody wallet or external owner.
 
 - `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
@@ -1580,8 +1580,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - Whole-stack local setup (ports, flags, provider credentials, entitlement,
   troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** No registered
-  provider is portfolio-capable today, so `POST /programs` 403s in the shipped
-  config — but idempotency, replay, gate order and environment isolation still
+  provider is portfolio-capable today, so `POST /programs` answers 501 in the
+  shipped config. Idempotency, replay, gate order and environment isolation still
   have to work for whichever provider is offered next. `earn-program.test.ts`
   therefore installs a portfolio-capable test double under a stub id and
   partial-mocks `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in
