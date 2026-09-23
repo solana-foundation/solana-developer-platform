@@ -20,12 +20,12 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
-import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../../context";
-import type { createTransferBatchSchema } from "../../schemas";
-import { admitExactPaymentWallet, assertPaymentWalletExactAccess } from "../../wallets";
+import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
+import { admitExactPaymentWallet, assertPaymentWalletExactAccess } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import { resolveBatchRequest } from "./resolve";
 import { buildTransferBatchResponse, resolveTransferBatchIdempotencyReplay } from "./respond";
+import type { createTransferBatchSchema } from "./schemas";
 import {
   buildInstructionGroups,
   chunkInstructionGroups,

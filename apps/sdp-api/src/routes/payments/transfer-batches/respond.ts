@@ -8,8 +8,8 @@ import {
   type AppContext,
   getPaymentsRepository,
   getPaymentTransferBatchesRepository,
-} from "../../context";
-import { mapTransferRow } from "../../mappers";
+} from "../context";
+import { mapTransferRow } from "../mappers";
 
 /**
  * Maps a batch row to its API response shape.

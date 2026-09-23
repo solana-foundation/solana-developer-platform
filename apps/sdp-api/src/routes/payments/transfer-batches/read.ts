@@ -4,10 +4,10 @@ import { AppError, badRequestParams, badRequestQuery, notFound } from "@/lib/err
 import { paginated, success } from "@/lib/response";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import { normalizePaymentToken } from "@/services/payment-operation.service";
-import { type AppContext, getPaymentTransferBatchesRepository } from "../../context";
-import { listTransferBatchesQuerySchema, transferBatchIdParamsSchema } from "../../schemas";
-import { assertPaymentWalletReadAccess } from "../../wallets";
+import { type AppContext, getPaymentTransferBatchesRepository } from "../context";
+import { assertPaymentWalletReadAccess } from "../wallets";
 import { buildTransferBatchResponse, mapBatchRow } from "./respond";
+import { listTransferBatchesQuerySchema, transferBatchIdParamsSchema } from "./schemas";
 
 /**
  * GET /transfer-batches — paginated batch listing scoped to the project and

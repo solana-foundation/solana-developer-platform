@@ -11,7 +11,6 @@ import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
   activateRecurringPayment,
-  admitTransferBatchRuntimeExecution,
   cancelRampTransfer,
   cancelRecurringPayment,
   collectRecurringPayment,
@@ -21,18 +20,13 @@ import {
   createRecurringPayment,
   createSubscription,
   createSubscriptionPlan,
-  createTransferBatch,
   estimateOfframp,
   estimateOnramp,
-  estimateTransferBatch,
   extractOfframpQuotePolicyCandidate,
   extractOnrampQuotePolicyCandidate,
-  extractTransferBatchPolicyCandidate,
-  findTransferBatchIdempotentKeyReplay,
   getRecurringPayment,
   getSubscription,
   getSubscriptionPlan,
-  getTransferBatch,
   getWalletBalances,
   getWalletPolicy,
   getWalletPolicyEvaluation,
@@ -43,7 +37,6 @@ import {
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
   listSubscriptions,
-  listTransferBatches,
   listWalletControlProfileRevisions,
   listWalletPolicyEvaluations,
   prepareCancelSubscription,
@@ -71,10 +64,8 @@ import {
   createRecurringPaymentSchema,
   createSubscriptionPlanSchema,
   createSubscriptionSchema,
-  createTransferBatchSchema,
   estimateOfframpSchema,
   estimateOnrampSchema,
-  estimateTransferBatchSchema,
   moneygramRampEventSchema,
   prepareSubscriptionAuthorizationSchema,
   prepareSubscriptionCollectionSchema,
@@ -86,6 +77,7 @@ import {
   updateSubscriptionPlanSchema,
   updateWalletPolicySchema,
 } from "./schemas";
+import transferBatches from "./transfer-batches";
 import transfers from "./transfers";
 
 const payments = new Hono<{ Bindings: Env }>();
@@ -229,25 +221,7 @@ payments.get(
   listSubscriptionCollectionAttempts
 );
 payments.route("/transfers", transfers);
-payments.post(
-  "/transfer-batches/estimate",
-  requirePermissions("payments:read", "wallets:read", "counterparties:read"),
-  validateBody(estimateTransferBatchSchema),
-  estimateTransferBatch
-);
-payments.post(
-  "/transfer-batches",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  validateBody(createTransferBatchSchema),
-  policyGate({
-    extract: extractTransferBatchPolicyCandidate,
-    findIdempotentKeyReplay: findTransferBatchIdempotentKeyReplay,
-    beforeEnforce: admitTransferBatchRuntimeExecution,
-  }),
-  createTransferBatch
-);
-payments.get("/transfer-batches", requirePermissions("payments:read"), listTransferBatches);
-payments.get("/transfer-batches/:batchId", requirePermissions("payments:read"), getTransferBatch);
+payments.route("/transfer-batches", transferBatches);
 payments.get("/requests", requirePermissions("payments:read"), listPaymentRequests);
 payments.post(
   "/requests",
