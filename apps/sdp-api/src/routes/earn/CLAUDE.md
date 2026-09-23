@@ -125,15 +125,20 @@ balance with a live one.
   read, queued request/cancellation build, and signed-transaction submit remains
   authenticated.
 
-### Queued vault withdrawals (Veda)
+### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
 
-Queued exits are a separate durable resource, not a slow `earn_movement`.
-The owner-signed request only escrows shares; a later solver transaction pays
-assets, and a post-deadline owner-signed cancellation returns shares. Persist
-the lifecycle in `earn_vault_withdrawal_requests` plus its signed action rows.
-Only a verified `withdrawalFulfilled` close is projected into movement/activity
-reads, using the solver transaction's closing signature and payout; request and
-cancel transactions remain request history and must never be labelled payouts.
+Asynchronous exits are a separate durable resource, not a slow
+`earn_movement`. The `mechanism` column keeps two different economic contracts
+explicit. Veda's solver queue escrows shares; a later solver transaction pays
+assets, and a post-deadline owner-signed cancellation returns shares. Hastra's
+par request instead redeems PRIME to wYLDS and delegates that wYLDS; a Hastra
+administrator later burns it and pays USDC, while an owner cancellation may
+happen at any time and leaves the owner holding wYLDS rather than recreating
+PRIME. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+signed action rows. Only a provider-authenticated terminal fulfillment is
+projected into movement/activity reads, using the closing transaction's
+signature and payout; request and cancel transactions remain request history
+and must never be labelled payouts.
 
 The custody options/preview/create/list/detail/cancel routes are keyed. External
 wallet options and previews use the optional-auth contract: anonymous calls are
@@ -147,12 +152,13 @@ request whose initiating project was deleted; list/detail history remains
 exact-project scoped.
 
 The scheduled reconciler independently advances both signed-action finality and
-provider PDA state. Landed request terms and terminal quantities come from Veda
-lifecycle events/PDA reads, and Veda log parsing accepts `Program data:` only
-inside the configured queue program's active log frame. A closed PDA without a
-matching finalized close event stays `closed_or_unknown`; missing signature
-history never proves that a live escrow failed. See ADR 0003 for the full state
-machine and recovery rationale.
+provider PDA state. Landed request terms and terminal quantities come from the
+selected provider capability's authenticated lifecycle events/PDA reads. Veda
+and Hastra log parsing each accept `Program data:` only inside their configured
+program's active log frame. A closed PDA without a matching finalized close
+event stays `closed_or_unknown`; missing signature history never proves that a
+live obligation failed. See ADR 0003 for the solver-queue state machine and
+`docs/earn/hastra-prime-inventory.md` for the operator-redemption differences.
 
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
@@ -948,6 +954,18 @@ Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolve
 through `services/earn/execution-registry.ts` — the one place a provider id maps
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
+
+Hastra is the exception where one executing client retains two exit builders
+but the API deliberately exposes only one by default. Its native operator par
+redemption remains available with no provider credential; the Jupiter
+wYLDS→USDC quote/build capability requires both the default-off
+`EARN_HASTRA_DEX_EXIT_ENABLED` flag and `JUPITER_SWAP_API_KEY`. Apply that gate
+only to discovery and new DEX quotes/builds. Deposits, position reads, par
+request/cancel/reconciliation, signed-build submission, and reconciliation of
+an already recorded atomic DEX movement must not inherit it. In particular,
+the movement reconciler must classify historical settlement through an ungated
+registered-client path (or equivalent durable contract), or switching the flag
+off would misclassify an atomic movement as a provider order.
 
 The every-minute vault reconciliation worker consumes
 `idx_earn_movements_unsettled` in bounded pages. Both the embedded cron and the

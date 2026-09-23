@@ -537,8 +537,10 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultWithdrawalRequest
 );
-// Recovery is intentionally not policy-gated: after the deadline this only
-// returns escrowed shares to the same owner wallet.
+// Recovery is intentionally not policy-gated: it only releases the caller's
+// provider request. Solver queues return escrowed shares after their deadline;
+// operator redemptions revoke the claim and leave the redeemed intermediate
+// asset in the same owner wallet.
 earn.post(
   "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
   requirePermissions("earn:write", "wallets:read"),

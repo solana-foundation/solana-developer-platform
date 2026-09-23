@@ -17,11 +17,14 @@ import {
   type EarnProgramWithdrawalRecord,
   type EarnProgramWithdrawalResponse,
   type EarnStrategy,
+  type EarnVaultAsyncWithdrawalTermsRequest,
   type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
   type EarnVaultDirectMovementStatus,
   type EarnVaultMovementStatus,
+  type EarnVaultParRedemptionPreview,
+  type EarnVaultParRedemptionTermsRequest,
   type EarnVaultPosition,
   type EarnVaultQueuedWithdrawalPreview,
   type EarnVaultQueuedWithdrawalTermsRequest,
@@ -52,6 +55,7 @@ export type {
   EarnProgram,
   EarnVaultDeposit,
   EarnVaultDepositRecord,
+  EarnVaultParRedemptionPreview,
   EarnVaultQueuedWithdrawalPreview,
   EarnVaultWithdrawal,
   EarnVaultWithdrawalOptions,
@@ -1304,6 +1308,16 @@ const queuedWithdrawalTermsSchema = z.object({
   shareDecimals: z.number().int().min(0).max(38),
 });
 
+const parRedemptionTermsSchema = z.object({
+  intermediateMint: z.string(),
+  assetMint: z.string(),
+  minimumShares: z.string(),
+  shareDecimals: z.number().int().min(0).max(38),
+  assetDecimals: z.number().int().min(0).max(38),
+  cancelable: z.boolean(),
+  operatorSettled: z.literal(true),
+});
+
 const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = z.object({
   positionId: z.string(),
   instant: z.boolean(),
@@ -1312,6 +1326,7 @@ const earnVaultWithdrawalOptionsSchema: z.ZodType<EarnVaultWithdrawalOptions> = 
   withdrawAuthority: z.string().nullable(),
   queueState: z.string().nullable(),
   queueAsset: queuedWithdrawalTermsSchema.nullable(),
+  parRedemption: parRedemptionTermsSchema.nullable().default(null),
 });
 
 const earnVaultQueuedWithdrawalPreviewSchema: z.ZodType<EarnVaultQueuedWithdrawalPreview> =
@@ -1327,6 +1342,19 @@ const earnVaultQueuedWithdrawalPreviewSchema: z.ZodType<EarnVaultQueuedWithdrawa
     deadlineTimestamp: z.string().regex(/^\d+$/),
     blockingIssues: z.array(queuedWithdrawalIssueSchema),
   });
+
+const earnVaultParRedemptionPreviewSchema: z.ZodType<EarnVaultParRedemptionPreview> = z.object({
+  positionId: z.string(),
+  mechanism: z.literal("operatorRedemption"),
+  shares: z.string(),
+  shareDecimals: z.number().int().min(0).max(38),
+  intermediateMint: z.string(),
+  intermediateAmount: z.string(),
+  assetMint: z.string(),
+  assets: z.string(),
+  assetDecimals: z.number().int().min(0).max(38),
+  blockingIssues: z.array(queuedWithdrawalIssueSchema),
+});
 
 const EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES = [
   "creating",
@@ -1349,17 +1377,20 @@ const earnVaultWithdrawalRequestRecordSchema: z.ZodType<EarnVaultWithdrawalReque
     ownerAddress: z.string(),
     requestAddress: z.string(),
     status: z.enum(EARN_VAULT_WITHDRAWAL_REQUEST_STATUSES),
+    mechanism: z.enum(["solverQueue", "operatorRedemption"]).default("solverQueue"),
     assetMint: z.string(),
     shareMint: z.string(),
+    intermediateMint: z.string().nullable().default(null),
+    intermediateAmount: z.string().nullable().default(null),
     shares: z.string(),
     quotedAssets: z.string(),
     shareDecimals: z.number().int().min(0).max(38),
     assetDecimals: z.number().int().min(0).max(38),
-    discountBps: z.number().int().nonnegative(),
+    discountBps: z.number().int().nonnegative().nullable(),
     nonce: z.string().regex(/^\d+$/).nullable(),
     creationTimestamp: z.string().regex(/^\d+$/).nullable(),
-    maturityTimestamp: z.string().regex(/^\d+$/),
-    deadlineTimestamp: z.string().regex(/^\d+$/),
+    maturityTimestamp: z.string().regex(/^\d+$/).nullable(),
+    deadlineTimestamp: z.string().regex(/^\d+$/).nullable(),
     creationSignature: z.string().nullable(),
     cancelSignature: z.string().nullable(),
     closingSignature: z.string().nullable(),
@@ -1401,6 +1432,19 @@ export async function fetchEarnVaultQueuedWithdrawalPreview(
   return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
 }
 
+export async function fetchEarnVaultParRedemptionPreview(
+  input: EarnVaultParRedemptionTermsRequest,
+  signal?: AbortSignal
+): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
+  const result = await dashboardFetch<unknown>(
+    "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
+    { method: "POST", body: input, signal }
+  );
+  if (!result.ok) return { kind: "unavailable" };
+  const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
+  return parsed.success ? { kind: "ready", value: parsed.data.data } : { kind: "unavailable" };
+}
+
 const queuedMutationEnvelopeSchema = z.object({
   data: z.object({ withdrawalRequest: earnVaultWithdrawalRequestRecordSchema }),
 });
@@ -1418,15 +1462,23 @@ export type EarnVaultQueuedWithdrawalOutcome = z.infer<
 >;
 
 export async function createEarnVaultWithdrawalRequest(
-  input: EarnVaultQueuedWithdrawalTermsRequest,
+  input: EarnVaultAsyncWithdrawalTermsRequest,
   idempotencyKey: string
 ): Promise<DashboardFetchResult<EarnVaultQueuedWithdrawalOutcome>> {
-  const body: EarnVaultQueuedWithdrawalTermsRequest = {
-    positionId: input.positionId,
-    shares: input.shares,
-    discountBps: input.discountBps,
-    deadlineSeconds: input.deadlineSeconds,
-  };
+  const body: EarnVaultAsyncWithdrawalTermsRequest =
+    input.mechanism === "operatorRedemption"
+      ? {
+          positionId: input.positionId,
+          shares: input.shares,
+          mechanism: "operatorRedemption",
+        }
+      : {
+          positionId: input.positionId,
+          shares: input.shares,
+          discountBps: input.discountBps,
+          deadlineSeconds: input.deadlineSeconds,
+          ...(input.mechanism ? { mechanism: input.mechanism } : {}),
+        };
   const result = await dashboardFetch<unknown>(
     "/api/dashboard/markets/earn/vault-withdrawal-requests",
     {
@@ -1438,6 +1490,20 @@ export async function createEarnVaultWithdrawalRequest(
   if (!result.ok) return result;
   const parsed = earnVaultQueuedWithdrawalOutcomeSchema.safeParse(result.data);
   if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Invalid queued withdrawal response",
+      status: result.status,
+      body: result.data,
+    };
+  }
+  if (
+    parsed.data.kind === "submitted" &&
+    ((input.mechanism === "operatorRedemption" &&
+      parsed.data.withdrawalRequest.mechanism !== "operatorRedemption") ||
+      (input.mechanism !== "operatorRedemption" &&
+        parsed.data.withdrawalRequest.mechanism === "operatorRedemption"))
+  ) {
     return {
       ok: false,
       error: "Invalid queued withdrawal response",

@@ -488,16 +488,22 @@ the five-minute pass would re-pay the whole catalogue cost for the rate alone.
   resolved through this, never direct-indexed.
 - Optional capabilities so far: portfolio wallets, withdrawal approvals, live
   metrics, vault-direct (deposit + read), vault-withdraw,
-  vault-queued-withdraw, deposit eligibility, and the two live quotes (deposit
-  and withdrawal previews). All are method-presence guards in capabilities.ts,
+  vault-queued-withdraw, provider-operated par redemption, deposit eligibility,
+  and the two live quotes (deposit and withdrawal previews). All are
+  method-presence guards in capabilities.ts,
   and a provider may implement any subset. `supportsDepositEligibility` is a
   provider-side KYC check MONEY-IN paths consult, never exits; WisdomTree
   implements it over its Connect wallet registry. Kamino has live metrics,
   vault-direct, vault-withdraw (PRO-1702), and both quotes (`@sdp/kamino`);
   Veda implements both instant and queued vault exits (see
-  `docs/decisions/0003-veda-vault-withdrawals.md`). A deposit-only provider's
-  exit route answers 501, which is a statement about SDP's plumbing rather
-  than about anyone's right to their money.
+  `docs/decisions/0003-veda-vault-withdrawals.md`). Hastra defaults to the
+  distinct operator-completed par-redemption capability; never model it as a
+  solver queue. Its instant Jupiter exit is optional behind the API's
+  default-off `EARN_HASTRA_DEX_EXIT_ENABLED` gate and still requires
+  `JUPITER_SWAP_API_KEY`. Disabling that lane must not change the atomic
+  settlement or recovery semantics of an already recorded DEX movement. A
+  deposit-only provider's exit route answers 501, which is a statement about
+  SDP's plumbing rather than about anyone's right to their money.
 - **`sponsoredPrograms(cluster)` is a REQUIRED member of
   `EarnVaultDirectProvider`, not an optional capability** (PRO-1736). It returns
   every program the client may emit an instruction for, as plain base58 strings,

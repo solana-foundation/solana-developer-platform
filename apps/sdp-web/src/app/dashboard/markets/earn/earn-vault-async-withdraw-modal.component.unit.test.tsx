@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  parProps: undefined as Record<string, unknown> | undefined,
   withdrawProps: undefined as Record<string, unknown> | undefined,
 }));
 
@@ -59,6 +60,12 @@ vi.mock("./earn-vault-withdraw-modal", () => ({
     return <div>provider order flow</div>;
   },
 }));
+vi.mock("./earn-vault-par-redemption-modal", () => ({
+  EarnVaultParRedemptionModal: (props: Record<string, unknown>) => {
+    mocks.parProps = props;
+    return <div>par redemption flow</div>;
+  },
+}));
 
 import { EarnVaultAsyncWithdrawModal } from "./earn-vault-async-withdraw-modal";
 
@@ -97,6 +104,7 @@ const route = {
 };
 
 afterEach(() => {
+  mocks.parProps = undefined;
   mocks.withdrawProps = undefined;
   cleanup();
 });
@@ -152,5 +160,47 @@ describe("EarnVaultAsyncWithdrawModal", () => {
       onMovementUpdated,
       onWithdrawn,
     });
+  });
+
+  it("renders operator redemption with its live par terms", () => {
+    const onRequested = vi.fn();
+    const onSettled = vi.fn();
+    const terms = {
+      intermediateMint: "wylds",
+      assetMint: "asset",
+      minimumShares: "2000",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      cancelable: true,
+      operatorSettled: true as const,
+    };
+    render(
+      <EarnVaultAsyncWithdrawModal
+        environment="production"
+        onClose={vi.fn()}
+        onRequested={onRequested}
+        onSettled={onSettled}
+        position={position}
+        projectId="project_1"
+        route={{
+          kind: "operator_redemption",
+          summary: {
+            titleKey: "DashboardEarn.exitRoute.parTitle",
+            messageKey: "DashboardEarn.exitRoute.parDescription",
+            values: {},
+          },
+          terms,
+        }}
+      />
+    );
+
+    expect(screen.getByText("par redemption flow")).toBeTruthy();
+    expect(mocks.parProps).toMatchObject({ terms });
+    if (!mocks.parProps) throw new Error("Expected par-redemption props");
+    const parRequest = { ...request, mechanism: "operatorRedemption" as const };
+    (mocks.parProps.onRequested as (value: EarnVaultWithdrawalRequestRecord) => void)(parRequest);
+    (mocks.parProps.onSettled as (value: EarnVaultWithdrawalRequestRecord) => void)(parRequest);
+    expect(onRequested).toHaveBeenCalledWith({ kind: "operator_redemption", request: parRequest });
+    expect(onSettled).toHaveBeenCalledWith({ kind: "operator_redemption", request: parRequest });
   });
 });

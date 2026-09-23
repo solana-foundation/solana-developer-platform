@@ -209,7 +209,7 @@ every registration point is filled — the type errors are the checklist, and
 the tests listed at the end of this section guard the registration points the
 compiler can't see.
 
-**Six worked patterns**, and which one you copy depends on how the provider
+**Seven worked patterns**, and which one you copy depends on how the provider
 holds the money and who signs:
 
 - **Custodial portfolio** (no live example — the Ground integration was
@@ -251,6 +251,18 @@ holds the money and who signs:
   its mainnet-only registry (`@sdp/types/ondo-programs`) leaves the sandbox
   shelf to the PRO-1742 mirror, which in a devnet deployment only fills when
   the catalogue can reach mainnet (`SOLANA_MAINNET_RPC_URL`, below).
+- **Hastra: two native programs plus two independent exit contracts.** `hastra`
+  fronts exactly one pinned PRIME strategy. Deposit composes USDC -> wYLDS ->
+  PRIME atomically. Its default exit is an operator-completed at-par redemption,
+  modeled by `EarnVaultParRedemptionProvider` rather than by the
+  Veda solver-queue capability because it has no solver, discount, maturity, or
+  deadline. An optional atomic PRIME -> wYLDS -> Jupiter -> USDC exit is retained
+  behind the default-off `EARN_HASTRA_DEX_EXIT_ENABLED` flag and additionally
+  requires the platform `JUPITER_SWAP_API_KEY`; neither prerequisite gates the
+  native deposit or par path. Copy this separation when a provider offers both a
+  materially different issuer redemption lifecycle and an opt-in liquid-market
+  exit. A rollout flag may refuse new quotes/builds, but durable DEX movements
+  admitted while it was on must continue through submission and reconciliation.
 - **WisdomTree: credentialed provider-order execution, registered but not
   offered.** Catalogue and eligibility checks use environment-specific Connect
   credentials; the chain adapter transfers USDC or Token-2022 fund shares, while

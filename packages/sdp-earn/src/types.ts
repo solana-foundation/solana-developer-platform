@@ -603,6 +603,8 @@ export interface EarnVaultWithdrawalOptions {
   queueState: string | null;
   /** Null when the SDP-facing asset has no queue configuration. */
   queueAsset: EarnVaultQueuedWithdrawalTerms | null;
+  /** Independent operator-completed par redemption, when available. */
+  parRedemption: EarnVaultParRedemptionOptions | null;
 }
 
 export interface EarnVaultQueuedWithdrawalQuoteInput {
@@ -716,6 +718,128 @@ export interface EarnVaultQueuedWithdrawalLifecycleInput {
   shareDecimals: number;
   assetDecimals: number;
 }
+
+/**
+ * Terms for an issuer/operator redemption that settles at par after the
+ * owner's request transaction lands. Unlike `EarnVaultQueuedWithdrawalTerms`,
+ * this route has no solver discount, maturity, or deadline: the provider
+ * records one open request and an operator later completes the payout.
+ */
+export interface EarnVaultParRedemptionOptions {
+  /** Token delegated/burned by the operator while completing the request. */
+  intermediateMint: string;
+  /** Token paid by the operator when the request completes. */
+  assetMint: string;
+  /** Minimum request size, denominated in the position share mint. */
+  minimumShares: string;
+  shareDecimals: number;
+  assetDecimals: number;
+  /** Whether the owner can revoke an open request before completion. */
+  cancelable: boolean;
+  /** True when completion requires a provider/operator transaction. */
+  operatorSettled: true;
+}
+
+export interface EarnVaultParRedemptionQuoteInput {
+  providerReference: string;
+  shares: string;
+}
+
+/** Informational preview for a par redemption request. */
+export interface EarnVaultParRedemptionQuote {
+  shares: string;
+  shareDecimals: number;
+  intermediateMint: string;
+  intermediateAmount: string;
+  assetMint: string;
+  assets: string;
+  assetDecimals: number;
+  blockingIssues: readonly EarnVaultDepositQuoteIssue[];
+}
+
+export interface EarnVaultParRedemptionRequestInput extends EarnVaultParRedemptionQuoteInput {
+  owner: string;
+  /** Same rent-payer contract as the other vault-direct builders. */
+  rentPayer?: string;
+}
+
+export interface EarnVaultParRedemptionExpectedRequest {
+  shares: string;
+  intermediateMint: string;
+  intermediateAmount: string;
+  assetMint: string;
+  assets: string;
+}
+
+export interface EarnVaultParRedemptionRequestPlan extends EarnVaultTransactionPlan {
+  requestAddress: string;
+  expectedRequest: EarnVaultParRedemptionExpectedRequest;
+}
+
+export interface EarnVaultParRedemptionCancelInput {
+  providerReference: string;
+  owner: string;
+  requestAddress: string;
+}
+
+export interface EarnVaultParRedemptionRequestReadInput {
+  providerReference: string;
+  requestAddress: string;
+}
+
+/** Provider truth for the one currently open operator-redemption request. */
+export interface EarnVaultParRedemptionRequest {
+  requestAddress: string;
+  providerReference: string;
+  owner: string;
+  intermediateMint: string;
+  intermediateAmount: string;
+}
+
+export type EarnVaultParRedemptionRequestLookup =
+  | { requestAddress: string; status: "closedOrUnknown"; request: null }
+  | { requestAddress: string; status: "pending"; request: EarnVaultParRedemptionRequest };
+
+/**
+ * Context for authenticating one finalized par-redemption transaction.
+ * `blockTime` comes from the finalized Solana transaction because Hastra's
+ * Anchor events do not carry timestamps.
+ */
+export interface EarnVaultParRedemptionLifecycleInput {
+  providerReference: string;
+  requestAddress: string;
+  logs: readonly string[] | null;
+  blockTime: string | null;
+  shareDecimals: number;
+  assetDecimals: number;
+}
+
+export type EarnVaultParRedemptionLifecycleEvent =
+  | {
+      kind: "redemptionRequested";
+      requestAddress: string;
+      owner: string;
+      intermediateMint: string;
+      intermediateAmount: string;
+      occurredAt: string;
+    }
+  | {
+      kind: "redemptionCancelled";
+      requestAddress: string;
+      owner: string;
+      intermediateMint: string;
+      intermediateAmount: string;
+      occurredAt: string;
+    }
+  | {
+      kind: "redemptionFulfilled";
+      requestAddress: string;
+      owner: string;
+      intermediateMint: string;
+      intermediateAmount: string;
+      assetsPaid: string;
+      occurredAt: string;
+    };
 
 /**
  * Canonical lifecycle facts emitted by any asynchronous vault-exit provider.
@@ -1013,6 +1137,40 @@ export interface EarnVaultQueuedWithdrawProvider extends EarnVaultDirectProvider
     ctx: EarnRuntimeContext,
     input: EarnVaultQueuedWithdrawalLifecycleInput
   ): Promise<readonly EarnVaultQueuedWithdrawalLifecycleEvent[]>;
+}
+
+/**
+ * Optional capability for a provider-operated par redemption. The request
+ * transaction may transform the position shares into a delegated intermediate
+ * asset, but it is not a payout; only an authenticated completion event is.
+ * Kept separate from the solver queue so neither route invents the other's
+ * discount, maturity, deadline, escrow, or cancellation semantics.
+ */
+export interface EarnVaultParRedemptionProvider extends EarnVaultDirectProvider {
+  getParRedemptionOptions(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultWithdrawalOptionsInput
+  ): Promise<EarnVaultParRedemptionOptions>;
+  quoteParRedemption(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultParRedemptionQuoteInput
+  ): Promise<EarnVaultParRedemptionQuote>;
+  buildParRedemptionRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultParRedemptionRequestInput
+  ): Promise<EarnVaultParRedemptionRequestPlan>;
+  buildParRedemptionCancel(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultParRedemptionCancelInput
+  ): Promise<EarnVaultTransactionPlan>;
+  readParRedemptionRequest(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultParRedemptionRequestReadInput
+  ): Promise<EarnVaultParRedemptionRequestLookup>;
+  decodeParRedemptionLifecycleEvents(
+    ctx: EarnRuntimeContext,
+    input: EarnVaultParRedemptionLifecycleInput
+  ): Promise<readonly EarnVaultParRedemptionLifecycleEvent[]>;
 }
 
 /**

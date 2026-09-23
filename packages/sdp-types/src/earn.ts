@@ -168,6 +168,8 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   jupiter: "Jupiter",
   // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
   ondo: "Ondo",
+  // Hastra operates the PRIME wrapper and vault programs over Figure's assets.
+  hastra: "Hastra",
   aave_v3: "Aave V3",
 };
 
@@ -578,6 +580,17 @@ export interface EarnVaultQueuedWithdrawalTerms {
   shareDecimals: number;
 }
 
+/** Live terms for an operator-completed par redemption. */
+export interface EarnVaultParRedemptionTerms {
+  intermediateMint: string;
+  assetMint: string;
+  minimumShares: string;
+  shareDecimals: number;
+  assetDecimals: number;
+  cancelable: boolean;
+  operatorSettled: true;
+}
+
 /** Independently available exit routes for one owned vault position. */
 export interface EarnVaultWithdrawalOptions {
   positionId: string;
@@ -594,6 +607,8 @@ export interface EarnVaultWithdrawalOptions {
   withdrawAuthority: string | null;
   queueState: string | null;
   queueAsset: EarnVaultQueuedWithdrawalTerms | null;
+  /** Independent par-redemption route; null when the provider has none. */
+  parRedemption?: EarnVaultParRedemptionTerms | null;
 }
 
 /** Queue quote inputs shared by preview and request creation. */
@@ -605,6 +620,19 @@ export interface EarnVaultQueuedWithdrawalTermsRequest {
   /** Solver window, in seconds after maturity. */
   deadlineSeconds: number;
 }
+
+/** Request inputs for an operator-completed par redemption. */
+export interface EarnVaultParRedemptionTermsRequest {
+  positionId: string;
+  /** Decimal string in vault-share units. */
+  shares: string;
+  mechanism: "operatorRedemption";
+}
+
+/** Backwards-compatible queue input or the explicit par-redemption variant. */
+export type EarnVaultAsyncWithdrawalTermsRequest =
+  | (EarnVaultQueuedWithdrawalTermsRequest & { mechanism?: "solverQueue" })
+  | EarnVaultParRedemptionTermsRequest;
 
 /** Pre-execution queue quote. Landed request state replaces these expected values. */
 export interface EarnVaultQueuedWithdrawalPreview {
@@ -619,6 +647,19 @@ export interface EarnVaultQueuedWithdrawalPreview {
   maturityTimestamp: string;
   /** Unix epoch seconds, kept as a decimal string for JSON safety. */
   deadlineTimestamp: string;
+  blockingIssues: Array<{ code: string; message: string }>;
+}
+
+export interface EarnVaultParRedemptionPreview {
+  positionId: string;
+  mechanism: "operatorRedemption";
+  shares: string;
+  shareDecimals: number;
+  intermediateMint: string;
+  intermediateAmount: string;
+  assetMint: string;
+  assets: string;
+  assetDecimals: number;
   blockingIssues: Array<{ code: string; message: string }>;
 }
 
@@ -642,19 +683,22 @@ export interface EarnVaultWithdrawalRequestRecord {
   ownerAddress: string;
   requestAddress: string;
   status: EarnVaultWithdrawalRequestStatus;
+  mechanism?: "solverQueue" | "operatorRedemption";
   assetMint: string;
   shareMint: string;
+  intermediateMint?: string | null;
+  intermediateAmount?: string | null;
   shares: string;
   quotedAssets: string;
   shareDecimals: number;
   assetDecimals: number;
-  discountBps: number;
+  discountBps: number | null;
   /** Provider request nonce, populated only after the request lands on chain. */
   nonce: string | null;
   /** Provider-recorded Unix creation time, populated from landed chain state. */
   creationTimestamp: string | null;
-  maturityTimestamp: string;
-  deadlineTimestamp: string;
+  maturityTimestamp: string | null;
+  deadlineTimestamp: string | null;
   creationSignature: string | null;
   cancelSignature: string | null;
   closingSignature: string | null;
@@ -827,17 +871,19 @@ export type EarnExternalWalletWithdrawalRequestAction = "request" | "cancel";
  * builds identify only the already-landed request.
  */
 export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
-  transaction: EarnExternalWalletTransaction & {
-    /** The durable tenant position being exited. Queue builds are keyed-only. */
-    positionId: string;
-    action: EarnExternalWalletWithdrawalRequestAction;
-    requestAddress: string;
-    shares?: string;
-    assets?: string;
-    discountBps?: number;
-    maturityTimestamp?: string;
-    deadlineTimestamp?: string;
-  };
+  transaction: EarnExternalWalletTransaction &
+    Partial<EarnExternalWalletExitReference> & {
+      action: EarnExternalWalletWithdrawalRequestAction;
+      requestAddress: string;
+      mechanism: "solverQueue" | "operatorRedemption";
+      shares?: string;
+      assets?: string;
+      intermediateMint?: string;
+      intermediateAmount?: string;
+      discountBps?: number;
+      maturityTimestamp?: string;
+      deadlineTimestamp?: string;
+    };
 }
 
 /** One recorded external-wallet vault movement, either direction. */

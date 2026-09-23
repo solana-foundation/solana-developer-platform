@@ -15,6 +15,7 @@ export type EarnVaultWithdrawalRequestStatus =
   | "failed";
 
 export type EarnVaultWithdrawalRequestActionKind = "request" | "cancel";
+export type EarnVaultWithdrawalMechanism = "solver_queue" | "operator_redemption";
 export type EarnVaultWithdrawalRequestActionStatus =
   | "requested"
   | "submitted"
@@ -36,15 +37,18 @@ export interface EarnVaultWithdrawalRequestRow {
   share_mint: string;
   request_address: string;
   status: EarnVaultWithdrawalRequestStatus;
+  mechanism: EarnVaultWithdrawalMechanism;
   shares: string;
   quoted_assets: string;
   share_decimals: number;
   asset_decimals: number;
-  discount_bps: number;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
+  discount_bps: number | null;
   nonce: string | null;
   creation_timestamp: string | null;
-  maturity_timestamp: string;
-  deadline_timestamp: string;
+  maturity_timestamp: string | null;
+  deadline_timestamp: string | null;
   client_request_id: string;
   idempotency_fingerprint: string;
   creation_signature: string | null;
@@ -97,6 +101,7 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   position_id: string | null;
   withdrawal_request_id: string | null;
   action: EarnVaultWithdrawalRequestActionKind;
+  mechanism: EarnVaultWithdrawalMechanism;
   owner_address: string;
   vault_address: string;
   token_mint: string;
@@ -106,6 +111,8 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   quoted_assets: string | null;
   share_decimals: number | null;
   asset_decimals: number | null;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
   discount_bps: number | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
@@ -156,13 +163,16 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   tokenMint: string;
   shareMint: string;
   requestAddress: string;
+  mechanism: EarnVaultWithdrawalMechanism;
   shares: string;
   quotedAssets: string;
   shareDecimals: number;
   assetDecimals: number;
-  discountBps: number;
-  maturityTimestamp: string;
-  deadlineTimestamp: string;
+  intermediateMint?: string | null;
+  intermediateAmount?: string | null;
+  discountBps?: number | null;
+  maturityTimestamp?: string | null;
+  deadlineTimestamp?: string | null;
   signature: string;
   signedTransaction: string;
   lastValidBlockHeight: string;
@@ -205,6 +215,7 @@ export interface CreateExternalWalletQueuedTransactionInput {
   tokenMint: string;
   shareMint: string;
   requestAddress: string;
+  mechanism?: EarnVaultWithdrawalMechanism;
   shares?: string | null;
   quotedAssets?: string | null;
   shareDecimals?: number | null;
@@ -212,6 +223,8 @@ export interface CreateExternalWalletQueuedTransactionInput {
   discountBps?: number | null;
   maturityTimestamp?: string | null;
   deadlineTimestamp?: string | null;
+  intermediateMint?: string | null;
+  intermediateAmount?: string | null;
   feePayer?: string | null;
   unsignedTransaction: string;
   lastValidBlockHeight: string;
@@ -248,6 +261,7 @@ export interface EarnVaultWithdrawalRequestsRepository {
     idempotencyFingerprint: string;
     expiresAt: string;
     lastValidBlockHeight?: string | null;
+    mechanism?: EarnVaultWithdrawalMechanism;
   }): Promise<void>;
   releaseRequestReservation(params: { id: string; organizationId: string }): Promise<void>;
   findByClientRequestId(params: {
@@ -323,7 +337,11 @@ export interface EarnVaultWithdrawalRequestsRepository {
     lastIndexError?: string | null;
     fulfilledAt?: string | null;
     cancelledAt?: string | null;
-    /** Next useful provider read. Terminal transitions always clear it. */
+    /**
+     * Next useful provider read. Terminal transitions always clear it; a
+     * nonterminal transition without one preserves the outstanding claim
+     * lease instead of recycling the request into an immediate re-claim.
+     */
     nextCheckAt?: string | null;
   }): Promise<EarnVaultWithdrawalRequestRow | null>;
   recordIndexError(input: {
@@ -353,14 +371,15 @@ function mapRequest(row: Record<string, unknown>): EarnVaultWithdrawalRequestRow
     ...(row as unknown as EarnVaultWithdrawalRequestRow),
     share_decimals: Number(row.share_decimals),
     asset_decimals: Number(row.asset_decimals),
-    discount_bps: Number(row.discount_bps),
+    mechanism: (row.mechanism ?? "solver_queue") as EarnVaultWithdrawalMechanism,
+    discount_bps: row.discount_bps == null ? null : Number(row.discount_bps),
     nonce: row.nonce === null || row.nonce === undefined ? null : String(row.nonce),
     creation_timestamp:
       row.creation_timestamp === null || row.creation_timestamp === undefined
         ? null
         : String(row.creation_timestamp),
-    maturity_timestamp: String(row.maturity_timestamp),
-    deadline_timestamp: String(row.deadline_timestamp),
+    maturity_timestamp: row.maturity_timestamp == null ? null : String(row.maturity_timestamp),
+    deadline_timestamp: row.deadline_timestamp == null ? null : String(row.deadline_timestamp),
   };
 }
 
@@ -376,6 +395,7 @@ function mapExternalBuild(
 ): EarnExternalWalletWithdrawalRequestTransactionRow {
   return {
     ...(row as unknown as EarnExternalWalletWithdrawalRequestTransactionRow),
+    mechanism: (row.mechanism ?? "solver_queue") as EarnVaultWithdrawalMechanism,
     share_decimals: row.share_decimals == null ? null : Number(row.share_decimals),
     asset_decimals: row.asset_decimals == null ? null : Number(row.asset_decimals),
     discount_bps: row.discount_bps == null ? null : Number(row.discount_bps),
@@ -401,7 +421,7 @@ const REQUEST_SOURCES: Record<
   readonly EarnVaultWithdrawalRequestStatus[]
 > = {
   creating: [],
-  pending: ["creating", "pending", "closed_or_unknown"],
+  pending: ["creating", "pending", "cancelling", "closed_or_unknown"],
   fulfillable: ["creating", "pending", "fulfillable", "closed_or_unknown"],
   // A synchronous cancel eligibility read may be the first observer after a
   // finalized request transaction. Permit it to close the short `creating`
@@ -646,7 +666,10 @@ async function recordFulfilledQueueMovement(
       request.client_request_id,
       request.idempotency_fingerprint,
       JSON.stringify({
-        observation: "provider_solver_fulfillment",
+        observation:
+          request.mechanism === "operator_redemption"
+            ? "provider_operator_redemption"
+            : "provider_solver_fulfillment",
         withdrawalRequestId: request.id,
         requestAddress: request.request_address,
         nonce: request.nonce,
@@ -666,6 +689,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     async acquireRequestReservation(input) {
       await db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
+        const mechanism = input.mechanism ?? "solver_queue";
         await tx
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_reservations
@@ -677,9 +701,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         const recorded = await tx
           .prepare(
             `SELECT id FROM earn_vault_withdrawal_requests
-              WHERE environment = ? AND request_address = ? AND status <> 'failed'`
+              WHERE environment = ? AND request_address = ?
+                AND status <> 'failed'
+                AND (
+                  ? = 'solver_queue'
+                  OR mechanism = 'solver_queue'
+                  OR status NOT IN ('fulfilled', 'cancelled')
+                )`
           )
-          .bind(input.environment, input.requestAddress)
+          .bind(input.environment, input.requestAddress, mechanism)
           .first<{ id: string }>();
         if (recorded) {
           throw conflict("A queued withdrawal already uses this provider request address");
@@ -695,6 +725,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                expires_at = EXCLUDED.expires_at,
                last_valid_block_height = EXCLUDED.last_valid_block_height
              WHERE NOT earn_vault_withdrawal_request_pda_leases.occupied
+               AND earn_vault_withdrawal_request_pda_leases.reuse_not_before <= sdp_iso_now()
                AND earn_vault_withdrawal_request_pda_leases.expires_at <= sdp_iso_now()
              RETURNING lease_token`
           )
@@ -779,7 +810,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         .prepare(
           `SELECT * FROM earn_vault_withdrawal_requests
             WHERE environment = ? AND provider = ? AND request_address = ?
-              AND status <> 'failed'`
+              AND status NOT IN ('failed', 'fulfilled', 'cancelled')
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1`
         )
         .bind(params.environment, params.provider, params.requestAddress)
         .first<Record<string, unknown>>();
@@ -838,6 +871,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async createSignedRequest(input) {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotency, PDA ownership, and request/action persistence must commit atomically.
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         await lockQueuedWithdrawalKey(
@@ -881,9 +915,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         const recordedAddress = await tx
           .prepare(
             `SELECT id FROM earn_vault_withdrawal_requests
-              WHERE environment = ? AND request_address = ? AND status <> 'failed'`
+              WHERE environment = ? AND request_address = ?
+                AND status <> 'failed'
+                AND (
+                  ? = 'solver_queue'
+                  OR mechanism = 'solver_queue'
+                  OR status NOT IN ('fulfilled', 'cancelled')
+                )`
           )
-          .bind(input.environment, input.requestAddress)
+          .bind(input.environment, input.requestAddress, input.mechanism)
           .first<{ id: string }>();
         if (recordedAddress) {
           throw conflict("A queued withdrawal already uses this provider request address");
@@ -894,11 +934,14 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             `INSERT INTO earn_vault_withdrawal_requests (
                id, organization_id, project_id, environment, provider, position_id,
                custody_wallet_id, owner_address, vault_address, token_mint, share_mint,
-               request_address, status, shares, quoted_assets, share_decimals, asset_decimals,
+               request_address, status, mechanism, shares, quoted_assets,
+               share_decimals, asset_decimals, intermediate_mint, intermediate_amount,
                discount_bps, maturity_timestamp, deadline_timestamp,
                client_request_id, idempotency_fingerprint, creation_signature,
                created_by, initiated_by_key_id
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ) VALUES (
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+             )
              RETURNING *`
           )
           .bind(
@@ -914,13 +957,16 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.tokenMint,
             input.shareMint,
             input.requestAddress,
+            input.mechanism,
             input.shares,
             input.quotedAssets,
             input.shareDecimals,
             input.assetDecimals,
-            input.discountBps,
-            input.maturityTimestamp,
-            input.deadlineTimestamp,
+            input.intermediateMint ?? null,
+            input.intermediateAmount ?? null,
+            input.discountBps ?? null,
+            input.maturityTimestamp ?? null,
+            input.deadlineTimestamp ?? null,
             input.clientRequestId,
             input.idempotencyFingerprint,
             input.signature,
@@ -1033,7 +1079,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .first<Record<string, unknown>>();
         if (!locked) throw new Error(`Missing queued withdrawal ${input.withdrawalRequestId}`);
         const request = mapRequest(locked);
-        if (request.status !== "expired_cancelable") {
+        const cancelFromStatus =
+          request.mechanism === "operator_redemption" ? "pending" : "expired_cancelable";
+        if (request.status !== cancelFromStatus) {
           throw conflict(`Queued withdrawal cannot be cancelled while status is ${request.status}`);
         }
 
@@ -1068,10 +1116,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                 SET status = 'cancelling', cancel_signature = ?,
                     failure_reason = NULL, next_check_at = NULL,
                     updated_at = sdp_iso_now()
-              WHERE id = ? AND organization_id = ? AND status = 'expired_cancelable'
+              WHERE id = ? AND organization_id = ? AND status = ?
               RETURNING *`
           )
-          .bind(input.signature, input.withdrawalRequestId, input.organizationId)
+          .bind(input.signature, input.withdrawalRequestId, input.organizationId, cancelFromStatus)
           .first<Record<string, unknown>>();
         if (!updated) throw conflict("Queued withdrawal status changed before cancellation");
         await consumeExternalBuild(
@@ -1131,6 +1179,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     },
 
     async failActionAndRecoverRequest(input) {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: action failure and mechanism-specific request recovery must commit atomically.
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const actionRow = await tx
@@ -1151,7 +1200,22 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .first<Record<string, unknown>>();
         if (!actionRow) return null;
         const action = mapAction(actionRow);
-        const requestStatus = action.action === "request" ? "failed" : "expired_cancelable";
+        const requestIdentity = await tx
+          .prepare(
+            `SELECT mechanism FROM earn_vault_withdrawal_requests
+              WHERE id = ? AND organization_id = ?`
+          )
+          .bind(action.withdrawal_request_id, input.organizationId)
+          .first<{ mechanism: EarnVaultWithdrawalMechanism }>();
+        if (!requestIdentity) {
+          throw new Error(`Missing queued withdrawal ${action.withdrawal_request_id}`);
+        }
+        const requestStatus =
+          action.action === "request"
+            ? "failed"
+            : requestIdentity.mechanism === "operator_redemption"
+              ? "pending"
+              : "expired_cancelable";
         const requestRow = await tx
           .prepare(
             `UPDATE earn_vault_withdrawal_requests
@@ -1248,6 +1312,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
     async advanceRequest(input) {
       const sources = REQUEST_SOURCES[input.toStatus];
       if (sources.length === 0) return null;
+      const nextCheckAt = input.nextCheckAt ?? null;
       return db.transaction(async (executor) => {
         const tx = asTransactionalClient(executor);
         const row = await tx
@@ -1269,6 +1334,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     THEN COALESCE(?, cancelled_at, sdp_iso_now()) ELSE NULL END,
                   next_check_at = CASE
                     WHEN ? IN ('fulfilled', 'cancelled', 'failed') THEN NULL
+                    WHEN ?::text IS NULL THEN next_check_at
                     ELSE ?
                   END,
                   updated_at = sdp_iso_now()
@@ -1293,7 +1359,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.toStatus,
             input.cancelledAt ?? null,
             input.toStatus,
-            input.nextCheckAt ?? null,
+            nextCheckAt,
+            nextCheckAt,
             input.withdrawalRequestId,
             input.organizationId,
             [...sources]
@@ -1310,7 +1377,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           // fulfillment via idx_earn_movements_signature.
           await recordFulfilledQueueMovement(tx, request);
         }
-        if (input.toStatus === "cancelled") {
+        if (input.toStatus === "cancelled" && request.mechanism === "solver_queue") {
           // A cancellation can restore a full wallet balance after hydration
           // observed zero escrowed shares. Reopening/bumping the position in
           // this transaction makes that stale close CAS fail.
@@ -1323,7 +1390,34 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             .bind(request.position_id, request.organization_id)
             .run();
         }
-        if (input.toStatus === "failed") {
+        if (
+          request.mechanism === "operator_redemption" &&
+          (input.toStatus === "fulfilled" || input.toStatus === "cancelled")
+        ) {
+          // Hastra reuses one owner-derived PDA with no cycle nonce. Keep a
+          // database-side embargo after terminal chain truth so another API
+          // path cannot reserve it immediately. The adapter independently
+          // proves >200 finalized block heights, which remains authoritative
+          // across a chain halt; this five-minute fence closes local races.
+          await tx
+            .prepare(
+              `UPDATE earn_vault_withdrawal_request_pda_leases
+                  SET occupied = FALSE,
+                      expires_at = to_char(
+                        timezone('UTC', now() + INTERVAL '5 minutes'),
+                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                      ),
+                      reuse_not_before = to_char(
+                        timezone('UTC', now() + INTERVAL '5 minutes'),
+                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                      ),
+                      last_valid_block_height = NULL
+                WHERE environment = ? AND request_address = ?
+                  AND lease_token = ? AND occupied`
+            )
+            .bind(request.environment, request.request_address, request.id)
+            .run();
+        } else if (input.toStatus === "failed") {
           await tx
             .prepare(
               `DELETE FROM earn_vault_withdrawal_request_pda_leases
@@ -1436,6 +1530,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .prepare(
             `DELETE FROM earn_vault_withdrawal_request_pda_leases
               WHERE NOT occupied
+                AND reuse_not_before <= sdp_iso_now()
                 AND last_valid_block_height IS NULL AND expires_at <= sdp_iso_now()`
           )
           .run();
@@ -1504,9 +1599,15 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           const recorded = await tx
             .prepare(
               `SELECT id FROM earn_vault_withdrawal_requests
-                WHERE environment = ? AND request_address = ? AND status <> 'failed'`
+                WHERE environment = ? AND request_address = ?
+                  AND status <> 'failed'
+                  AND (
+                    ? = 'solver_queue'
+                    OR mechanism = 'solver_queue'
+                    OR status NOT IN ('fulfilled', 'cancelled')
+                  )`
             )
-            .bind(input.environment, input.requestAddress)
+            .bind(input.environment, input.requestAddress, input.mechanism ?? "solver_queue")
             .first<{ id: string }>();
           if (recorded) {
             throw conflict("A queued withdrawal already uses this provider request address");
@@ -1524,6 +1625,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                  expires_at = EXCLUDED.expires_at,
                  last_valid_block_height = EXCLUDED.last_valid_block_height
                WHERE NOT earn_vault_withdrawal_request_pda_leases.occupied
+                 AND earn_vault_withdrawal_request_pda_leases.reuse_not_before <= sdp_iso_now()
                  AND (
                    earn_vault_withdrawal_request_pda_leases.expires_at <= sdp_iso_now()
                    OR earn_vault_withdrawal_request_pda_leases.last_valid_block_height < ?
@@ -1576,12 +1678,13 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           .prepare(
             `INSERT INTO earn_external_wallet_withdrawal_request_transactions (
              id, organization_id, project_id, environment, provider, position_id,
-             withdrawal_request_id, action, owner_address, vault_address, token_mint,
+             withdrawal_request_id, action, mechanism, owner_address, vault_address, token_mint,
              share_mint, request_address, shares, quoted_assets, share_decimals,
-             asset_decimals, discount_bps, maturity_timestamp, deadline_timestamp,
+             asset_decimals, intermediate_mint, intermediate_amount,
+             discount_bps, maturity_timestamp, deadline_timestamp,
              fee_payer, unsigned_transaction, last_valid_block_height,
              created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING *`
           )
@@ -1594,6 +1697,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.positionId ?? null,
             input.withdrawalRequestId ?? null,
             input.action,
+            input.mechanism ?? "solver_queue",
             input.ownerAddress,
             input.vaultAddress,
             input.tokenMint,
@@ -1603,6 +1707,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.quotedAssets ?? null,
             input.shareDecimals ?? null,
             input.assetDecimals ?? null,
+            input.intermediateMint ?? null,
+            input.intermediateAmount ?? null,
             input.discountBps ?? null,
             input.maturityTimestamp ?? null,
             input.deadlineTimestamp ?? null,

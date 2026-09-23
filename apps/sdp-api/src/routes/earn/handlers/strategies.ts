@@ -13,7 +13,7 @@ import {
 } from "@sdp/types";
 import type { EarnStrategyRow } from "@/db/repositories";
 import { notFound } from "@/lib/errors";
-import { isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
+import { isEarnHastraDexExitConfigured, isEarnVaultSponsorshipEnabled } from "@/lib/feature-flags";
 import { success } from "@/lib/response";
 import type { Env } from "@/types/env";
 import {
@@ -84,10 +84,16 @@ export function isHiddenStrategy(row: EarnStrategyRow): boolean {
 export function mapToEarnStrategy(
   row: EarnStrategyRow,
   environment: SdpEnvironment,
-  env: Pick<Env, "EARN_VAULT_FEE_SPONSORSHIP_ENABLED">
+  env: Pick<
+    Env,
+    "EARN_HASTRA_DEX_EXIT_ENABLED" | "EARN_VAULT_FEE_SPONSORSHIP_ENABLED" | "JUPITER_SWAP_API_KEY"
+  >
 ): EarnStrategy {
   const depositSlippage = earnDepositSlippagePolicy(row.provider, environment, row.host_cluster);
-  const withdrawalSlippage = earnWithdrawSlippageFloor(row.provider);
+  const withdrawalSlippage =
+    row.provider === "hastra" && !isEarnHastraDexExitConfigured(env)
+      ? null
+      : earnWithdrawSlippageFloor(row.provider);
   const fundable = isClusterFundableInEnvironment(row.host_cluster, environment);
   return {
     id: row.id,
