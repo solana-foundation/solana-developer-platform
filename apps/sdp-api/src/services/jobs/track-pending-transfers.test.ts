@@ -216,8 +216,8 @@ describe("trackPendingTransfers", () => {
       expect(updated?.error).toContain("InsufficientFunds");
     });
 
-    it("marks old processing transfer as failed when signature is not found on chain", async () => {
-      getSignatureStatusesMock.mockResolvedValueOnce([null]);
+    it("marks old processing transfer as failed when signature is absent from transaction history", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null]).mockResolvedValueOnce([null]);
 
       await insertTransfer({
         id: "xfr_processing_not_found",
@@ -232,7 +232,118 @@ describe("trackPendingTransfers", () => {
       const updated = await getTransfer("xfr_processing_not_found");
       expect(updated?.status).toBe("failed");
       expect(updated?.error).toBe("Transaction not found on chain");
-      expect(getSignatureStatusesMock).toHaveBeenCalledOnce();
+      expect(getSignatureStatusesMock).toHaveBeenCalledTimes(2);
+      expect(getSignatureStatusesMock).toHaveBeenLastCalledWith(
+        expect.anything(),
+        [String(TEST_SIG_1)],
+        { searchTransactionHistory: true }
+      );
+    });
+
+    it("finalizes an old processing transfer found in transaction history instead of failing it", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([null])
+        .mockResolvedValueOnce([
+          { slot: 77777n, confirmations: null, confirmationStatus: "finalized", err: null },
+        ]);
+
+      await insertTransfer({
+        id: "xfr_legacy_in_history",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const updated = await getTransfer("xfr_legacy_in_history");
+      expect(updated?.status).toBe("finalized");
+      expect(updated?.slot).toBe(77777);
+    });
+
+    it("applies archival verdicts to matching legacy transfers in one batch", async () => {
+      getSignatureStatusesMock.mockResolvedValueOnce([null, null, null]).mockResolvedValueOnce([
+        { slot: 11111n, confirmations: null, confirmationStatus: "finalized", err: null },
+        null,
+        {
+          slot: 22222n,
+          confirmations: 0n,
+          confirmationStatus: "confirmed",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+
+      await insertTransfer({
+        id: "xfr_legacy_batch_finalized",
+        status: "processing",
+        signature: String(TEST_SIG_1),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+      await insertTransfer({
+        id: "xfr_legacy_batch_absent",
+        status: "processing",
+        signature: String(TEST_SIG_2),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+      await insertTransfer({
+        id: "xfr_legacy_batch_errored",
+        status: "processing",
+        signature: String(TEST_SIG_3),
+        createdAt: minutesAgo(10),
+        updatedAt: minutesAgo(10),
+      });
+
+      await trackPendingTransfers(env);
+
+      const finalized = await getTransfer("xfr_legacy_batch_finalized");
+      expect(finalized?.status).toBe("finalized");
+      expect(finalized?.slot).toBe(11111);
+      const absent = await getTransfer("xfr_legacy_batch_absent");
+      expect(absent?.status).toBe("failed");
+      expect(absent?.error).toBe("Transaction not found on chain");
+      const errored = await getTransfer("xfr_legacy_batch_errored");
+      expect(errored?.status).toBe("failed");
+      expect(errored?.error).toContain("Custom");
+      expect(errored?.slot).toBe(22222);
+    });
+
+    it("keeps and rotates an old processing transfer when the transaction-history lookup is unavailable", async () => {
+      getSignatureStatusesMock
+        .mockResolvedValueOnce([null])
+        .mockRejectedValueOnce(new Error("history node down"));
+      const staleAt = minutesAgo(10);
+      const warn = vi.spyOn(rootLogger, "warn").mockImplementation(() => undefined);
+
+      try {
+        await insertTransfer({
+          id: "xfr_legacy_history_down",
+          status: "processing",
+          signature: String(TEST_SIG_1),
+          createdAt: staleAt,
+          updatedAt: staleAt,
+        });
+
+        await trackPendingTransfers(env);
+
+        const kept = await getTransfer("xfr_legacy_history_down");
+        expect(kept?.status).toBe("processing");
+        expect(kept?.error).toBeNull();
+        expect(kept?.updated_at).not.toBe(staleAt);
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: "sdp_api_payment_submission_unresolved",
+            flow: "reconciler",
+            reason: "history_unavailable",
+            transfer_id: "xfr_legacy_history_down",
+          }),
+          expect.any(String)
+        );
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("retries a transient getBlockHeight failure instead of rotating the row", async () => {
