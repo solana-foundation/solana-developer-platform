@@ -100,14 +100,15 @@ export class KeychainFireblocksAdapter extends BaseKeychainAdapter {
 
     signer.request = (async <T>(method: string, uri: string, body?: unknown): Promise<T> => {
       try {
-        console.info("sdp_fireblocks_api_request", scrubTelemetry({ method, uri, body }));
+        // Request and response bodies stay out of the logs: they carry vault,
+        // counterparty and transaction payloads whose disclosure outweighs the
+        // debug value. scrubTelemetry still guards the URI, whose query string
+        // can carry credential material.
+        console.info("sdp_fireblocks_api_request", scrubTelemetry({ method, uri }));
 
         const response = await originalRequest<T>(method, uri, body);
 
-        console.info(
-          "sdp_fireblocks_api_response",
-          scrubTelemetry({ method, uri, body, response })
-        );
+        console.info("sdp_fireblocks_api_response", scrubTelemetry({ method, uri }));
 
         return response;
       } catch (error) {

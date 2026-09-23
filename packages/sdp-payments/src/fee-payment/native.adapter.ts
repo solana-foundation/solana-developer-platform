@@ -4,6 +4,8 @@
  * First-class fee payment provider for self-hosted deployments that do not want
  * a third-party relayer. A locally-configured, funded keypair signs as the fee
  * payer and (for `signAndSend`) submits the transaction over direct RPC.
+ * Transactions whose fee payer is not this key are refused: the key only ever
+ * signs in the fee-payer slot, never as an additional authority.
  *
  * Use KoraAdapter instead when you want gasless/relayed execution.
  */
@@ -14,11 +16,13 @@ import { getBase58Codec } from "@solana/codecs";
 import {
   type Address,
   createKeyPairSignerFromBytes,
+  getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
   getTransactionEncoder,
   type KeyPairSigner,
   partiallySignTransaction,
   type Signature,
+  type Transaction,
 } from "@solana/kit";
 import type { FeePaymentEnv, FeePaymentErrorCode, FeePaymentPort } from "./port";
 import { FeePaymentError } from "./port";
@@ -84,8 +88,9 @@ export class NativeAdapter implements FeePaymentPort {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Decode the serialized transaction and add the fee payer signature in its
-   * correct slot. `partiallySignTransaction` matches the keypair's address to the
+   * Decode the serialized transaction, refuse anything this key must not
+   * sign, and add the fee payer signature in its correct slot.
+   * `partiallySignTransaction` matches the keypair's address to the
    * transaction's signer accounts, preserving any existing (source) signatures.
    */
   private async signTransactionAsFeePayer(transaction: Uint8Array) {
@@ -93,6 +98,7 @@ export class NativeAdapter implements FeePaymentPort {
 
     try {
       const decoded = getTransactionDecoder().decode(transaction);
+      assertSignsOnlyAsFeePayer(decoded, signer.address);
       return await partiallySignTransaction([signer.keyPair], decoded);
     } catch (error) {
       throw wrapError(error, "Failed to sign transaction as fee payer", "SIGNING_FAILED");
@@ -153,6 +159,26 @@ export class NativeAdapter implements FeePaymentPort {
 // ═══════════════════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Refuse any transaction that does not name the funded key as its fee payer.
+ *
+ * `partiallySignTransaction` signs whenever the key matches *any* required
+ * signer slot, so a message that merely lists the fee-payer key as an
+ * additional authority (e.g. the source of a SOL transfer) would otherwise
+ * mint a spending signature over arbitrary instructions. By consensus the fee
+ * payer is the first static account of the compiled message — address-lookup
+ * tables cannot move it, because it must be addressable without a lookup.
+ */
+function assertSignsOnlyAsFeePayer(decoded: Transaction, feePayer: Address): void {
+  const message = getCompiledTransactionMessageDecoder().decode(decoded.messageBytes);
+  if (message.staticAccounts[0] !== feePayer) {
+    throw new FeePaymentError(
+      "Refusing to sign: the transaction's fee payer is not the configured fee-payer key",
+      "PROVIDER_REJECTED"
+    );
+  }
+}
 
 function wrapError(error: unknown, message: string, code: FeePaymentErrorCode): FeePaymentError {
   // Preserve already-classified errors (e.g. PROVIDER_NOT_AVAILABLE from getSigner).

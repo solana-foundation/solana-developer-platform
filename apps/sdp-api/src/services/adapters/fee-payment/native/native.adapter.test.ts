@@ -12,6 +12,7 @@ import {
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
+  type KeyPairSigner,
   partiallySignTransactionMessageWithSigners,
   pipe,
   type Signature,
@@ -45,13 +46,17 @@ async function makeFeePayerSecret(seedByte: number): Promise<{ secret: string; a
 /**
  * Build a SOL transfer transaction that the source wallet has already signed but
  * whose fee payer slot is still empty — exactly what the transfer handlers hand to
- * the fee payment adapter via `signAndSend`.
+ * the fee payment adapter via `signAndSend`. Pass `sourceSigner` explicitly to
+ * stage abuse cases (e.g. the adapter's own key listed as the transfer source).
  */
-async function buildSourceSignedTransfer(feePayer: Address): Promise<{
+async function buildSourceSignedTransfer(
+  feePayer: Address,
+  givenSourceSigner?: KeyPairSigner
+): Promise<{
   txBytes: Uint8Array;
   source: Address;
 }> {
-  const sourceSigner = await generateKeyPairSigner();
+  const sourceSigner = givenSourceSigner ?? (await generateKeyPairSigner());
   const destination = (await generateKeyPairSigner()).address;
   const blockhash = base58.decode(new Uint8Array(32).fill(1)) as Blockhash;
 
@@ -133,6 +138,49 @@ describe("NativeAdapter", () => {
 
     const submitted = vi.mocked(solanaRpc.sendTransaction).mock.calls[0]?.[1] as Uint8Array;
     expect(decoder.decode(submitted).signatures[feePayer.address]).not.toBeNull();
+  });
+
+  it("refuses to sign when the fee payer is not the configured key", async () => {
+    const feePayer = await makeFeePayerSecret(7);
+    const configured = await makeFeePayerSecret(11);
+    const adapter = new NativeAdapter({
+      FEE_PAYER_PRIVATE_KEY: configured.secret,
+    } as unknown as Env);
+    const { txBytes } = await buildSourceSignedTransfer(feePayer.address);
+
+    await expect(adapter.signAsFeePayer(txBytes)).rejects.toMatchObject({
+      name: "FeePaymentError",
+      code: "PROVIDER_REJECTED",
+    });
+    await expect(adapter.signAndSend(txBytes)).rejects.toMatchObject({
+      name: "FeePaymentError",
+      code: "PROVIDER_REJECTED",
+    });
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses to sign when the configured key is only an additional required signer", async () => {
+    // The adapter's key is the transfer's source authority (a spending signer),
+    // while a different key pays the fee. Kit's partiallySignTransaction would
+    // happily mint the configured key's signature over the transfer; the
+    // adapter must refuse because its key is not the fee payer.
+    const feePayer = await makeFeePayerSecret(7);
+    const configured = await makeFeePayerSecret(11);
+    const sourceSigner = await createKeyPairSignerFromPrivateKeyBytes(
+      new Uint8Array(32).fill(11),
+      true
+    );
+    const adapter = new NativeAdapter({
+      FEE_PAYER_PRIVATE_KEY: configured.secret,
+    } as unknown as Env);
+    const { txBytes, source } = await buildSourceSignedTransfer(feePayer.address, sourceSigner);
+    expect(source).toBe(configured.address);
+
+    await expect(adapter.signAndSend(txBytes)).rejects.toMatchObject({
+      name: "FeePaymentError",
+      code: "PROVIDER_REJECTED",
+    });
+    expect(solanaRpc.sendTransaction).not.toHaveBeenCalled();
   });
 
   it("throws PROVIDER_NOT_AVAILABLE when no keypair is configured", async () => {
