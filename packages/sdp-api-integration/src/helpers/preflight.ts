@@ -297,7 +297,16 @@ async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): 
         fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body })
       );
 
-      const json = (await res.json()) as SolanaRpcResponse<T>;
+      const responseText = await res.text();
+      let json: SolanaRpcResponse<T>;
+      try {
+        json = JSON.parse(responseText) as SolanaRpcResponse<T>;
+      } catch (error) {
+        const parseMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Solana RPC returned ${res.status} with empty/invalid body calling ${method}: ${parseMessage}`
+        );
+      }
       if ("error" in json) {
         throw new Error(`Solana RPC error calling ${method}: ${json.error.message}`);
       }
@@ -319,6 +328,7 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    message.includes("empty/invalid body") ||
     message.includes("internal error") ||
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||

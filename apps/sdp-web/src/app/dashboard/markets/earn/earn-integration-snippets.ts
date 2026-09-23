@@ -40,6 +40,22 @@ export type EarnIntegrationStrategy = Pick<
   "id" | "depositSlippage" | "withdrawalSlippage"
 >;
 
+/**
+ * The catalogue's suggested tolerance is interpolated into code a partner
+ * copies onto their server and runs with SDP_API_KEY in scope, so the emitted
+ * text must be nothing but an integer literal. The strategies read does not
+ * re-validate the row at runtime (the `number` here is a compile-time claim),
+ * so this is the enforcement point: a finite integer inside the 1–1000 bps
+ * range `floorForTolerance` itself accepts passes through, and any other
+ * value — a string, an object, a payload smuggling statements — falls back to
+ * the documented default instead of being spelled into the module.
+ */
+function snippetToleranceBps(value: number | undefined): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000
+    ? value
+    : 10;
+}
+
 export function buildEarnIntegrationSections(
   strategy: EarnIntegrationStrategy,
   apiBaseUrl?: string
@@ -47,10 +63,10 @@ export function buildEarnIntegrationSections(
   const requiresDepositFloor = strategy.depositSlippage?.quoteRequired === true;
   const requiresWithdrawalFloor = strategy.withdrawalSlippage?.quoteRequired === true;
   const depositSlippageInput = requiresDepositFloor
-    ? `  slippageBps = ${strategy.depositSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.depositSlippage?.defaultToleranceBps)},\n`
     : "";
   const withdrawalSlippageInput = requiresWithdrawalFloor
-    ? `  slippageBps = ${strategy.withdrawalSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.withdrawalSlippage?.defaultToleranceBps)},\n`
     : "";
   const depositSlippageType = requiresDepositFloor
     ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
