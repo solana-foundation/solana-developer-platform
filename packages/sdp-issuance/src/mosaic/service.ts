@@ -576,7 +576,7 @@ export class MosaicService {
   ): Promise<MosaicTransactionResult> {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
-    const feePayer = await this.resolveFeePayer(fallbackFeePayer);
+    const feePayer = await this.resolveFeePayer(fallbackFeePayer, false);
 
     // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer)
     // Note: amount is decimal number, SDK converts using mint decimals
@@ -1268,7 +1268,7 @@ export class MosaicService {
 
   private async resolveFeePayer(
     fallback: Address | TransactionSigner,
-    forClientSigning = false
+    forClientSigning: boolean
   ): Promise<Address | TransactionSigner> {
     if (!this.feePayment || forClientSigning) {
       return fallback;
