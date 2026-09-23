@@ -1,34 +1,11 @@
 "use client";
 
+import type { Counterparty, CounterpartyAccount, PaymentTransferSummary } from "@sdp/types";
 import {
-  BVNK_FUNDING_WALLET_STATUSES,
-  type BvnkFundingWalletStatus,
-  type Counterparty,
-  type CounterpartyAccount,
-  type CounterpartyProviderAccount,
-  type CounterpartyProviderCustomerLink,
-  type CounterpartyProviderCustomerLinkAgreement,
-  PAYMENT_TRANSFER_STATUS_TONE,
-  type PaymentTransferStatus,
-  type PaymentTransferSummary,
-  type RampProviderId,
-} from "@sdp/types";
-import { regionFlagEmoji } from "@sdp/types/payment-rails";
-import {
-  ArrowRightIcon,
-  BanknoteArrowDownIcon,
-  BanknoteArrowUpIcon,
   CalendarIcon,
-  CheckCircle2Icon,
-  CheckIcon,
   ChevronDownIcon,
-  ClockIcon,
-  CopyIcon,
-  ExternalLinkIcon,
   HashIcon,
-  LoaderCircleIcon,
   PlusIcon,
-  ReceiptTextIcon,
   ShieldCheckIcon,
   Trash2Icon,
   UserIcon,
@@ -38,10 +15,10 @@ import {
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
-import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
+import { WalletAddressCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
+import { formatCreatedDate } from "@/app/dashboard/custody/wallet-format-utils";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,30 +27,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Modal } from "@/components/ui/modal";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { explorerTxUrl } from "@/lib/explorer";
-import {
-  getRampProviderLabel,
-  RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS,
-  RAMP_PROVIDER_LOGOS,
-} from "@/lib/ramps";
-import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
-import { useCopy } from "@/lib/use-copy";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
-import {
-  formatDisplayAmount,
-  formatPaymentTransferType,
-  formatTimestamp,
-  resolveTransferFlow,
-  shortenAddress,
-  statusMessageKey,
-} from "../payments-overview.utils";
-import { providerTransferDetailRows } from "../provider-transfer-details";
+import { toTitleCase } from "../../activity-format-utils";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
+import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts";
+import { CounterpartyTransactions } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
 
@@ -83,1062 +44,10 @@ interface CounterpartyDetailWorkspaceProps {
   initialTransfers: PaymentTransferSummary[];
 }
 
-function transferStatusClassName(status: PaymentTransferStatus): string {
-  const tone = PAYMENT_TRANSFER_STATUS_TONE[status];
-  switch (tone) {
-    case "success":
-      return "bg-success-bg text-success";
-    case "pending":
-      return "bg-fill-strong text-secondary";
-    case "danger":
-      return "bg-error-bg text-error";
-    case "neutral":
-      return "bg-fill-subtle text-tertiary";
-    default: {
-      const exhaustiveTone: never = tone;
-      return exhaustiveTone;
-    }
-  }
-}
+const DETAIL_TABS = ["details", "transactions"] as const;
+type DetailTab = (typeof DETAIL_TABS)[number];
 
-function TransferStatusBadge({ status }: { status: PaymentTransferStatus }) {
-  const t = useTranslations();
-  return (
-    <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        transferStatusClassName(status)
-      )}
-    >
-      {t(statusMessageKey(status))}
-    </span>
-  );
-}
-
-function TransferProviderCell({ provider }: { provider?: RampProviderId }) {
-  if (!provider) {
-    return <span className="text-sm text-tertiary">—</span>;
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
-      <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
-    </div>
-  );
-}
-
-const PROVIDER_ACCOUNT_STATUS_TONE = {
-  active: "success",
-  completed: "success",
-  ready: "success",
-  archived: "error",
-  failed: "error",
-  rejected: "error",
-  pending: "pending",
-  pending_agreement: "pending",
-  pending_details: "pending",
-  processing: "pending",
-  provisioning_funding_wallet: "pending",
-  provisioned_funding_wallet: "success",
-} as const;
-
-function ProviderAccountStatusBadge({ status, label }: { status: string; label?: string }) {
-  const tone =
-    PROVIDER_ACCOUNT_STATUS_TONE[status.toLowerCase() as keyof typeof PROVIDER_ACCOUNT_STATUS_TONE];
-  return (
-    <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        tone === "success" && "bg-success-bg text-success",
-        tone === "error" && "bg-error-bg text-error",
-        (tone === "pending" || tone === undefined) && "bg-fill-strong text-secondary"
-      )}
-    >
-      {label === undefined ? toTitleCase(status) : label}
-    </span>
-  );
-}
-
-const FUNDING_WALLET_STATUS_LABEL_KEY = {
-  provisioning_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletProvisioning",
-  provisioned_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletActive",
-} as const satisfies Record<BvnkFundingWalletStatus, string>;
-
-function isBvnkFundingWalletStatus(value: string): value is BvnkFundingWalletStatus {
-  return BVNK_FUNDING_WALLET_STATUSES.some((status) => status === value);
-}
-
-function providerAccountStatus(
-  account: Pick<
-    CounterpartyProviderAccount,
-    "status" | "providerStatus" | "bankName" | "accountNumberLast4" | "paymentRails"
-  >
-): string {
-  const hasEnrichment =
-    account.bankName !== undefined ||
-    account.accountNumberLast4 !== undefined ||
-    account.paymentRails !== undefined;
-  if (hasEnrichment || account.providerStatus === null) {
-    return account.status;
-  }
-  return account.providerStatus;
-}
-
-interface ProviderCustomerGroup {
-  provider: RampProviderId;
-  customerLink: CounterpartyProviderCustomerLink | undefined;
-  payoutAccounts: CounterpartyProviderAccount[];
-  fundingWallets: FundingWalletAccount[];
-}
-
-type FundingWalletAccount = CounterpartyProviderAccount & { fiatCurrency: string };
-
-function toFundingWalletAccount(account: CounterpartyProviderAccount): FundingWalletAccount {
-  if (account.fiatCurrency === null) {
-    throw new Error(`Funding wallet ${account.id} has no fiat currency`);
-  }
-  return { ...account, fiatCurrency: account.fiatCurrency };
-}
-
-/**
- * Groups provider-account rows by provider with the customer link lifted onto the group.
- *
- * @param accounts - Flat provider-account rows from the API.
- * @returns One group per provider in first-seen order.
- */
-export function groupProviderAccounts(
-  accounts: CounterpartyProviderAccount[]
-): ProviderCustomerGroup[] {
-  const groups = new Map<RampProviderId, ProviderCustomerGroup>();
-  for (const account of accounts) {
-    let group = groups.get(account.provider);
-    if (group === undefined) {
-      group = {
-        provider: account.provider,
-        customerLink: undefined,
-        payoutAccounts: [],
-        fundingWallets: [],
-      };
-      groups.set(account.provider, group);
-    }
-    if (account.kind === "payout_account") {
-      group.payoutAccounts.push(account);
-    }
-    if (account.kind === "funding_wallet") {
-      group.fundingWallets.push(toFundingWalletAccount(account));
-    }
-    if (account.customerLink !== undefined) {
-      group.customerLink = account.customerLink;
-    }
-  }
-  return [...groups.values()];
-}
-
-/**
- * Renders the agreement session rows for a BVNK customer link: one row per
- * agreement with its signing state on the left and the document links.
- *
- * @param agreements - Signed or pending agreements from the customer link.
- * @returns The agreement rows.
- */
-function CustomerLinkAgreements({
-  agreements,
-}: {
-  agreements: CounterpartyProviderCustomerLinkAgreement[];
-}) {
-  const t = useTranslations();
-  return (
-    <>
-      {agreements.map((agreement) => (
-        <div
-          key={agreement.name}
-          className="flex min-w-0 items-center gap-2 border-t border-border-default px-4 py-2 text-sm"
-        >
-          {agreement.signedAt !== null ? (
-            <span
-              className="flex shrink-0 items-center gap-1 text-success"
-              title={formatTimestamp(agreement.signedAt, t)}
-            >
-              <CheckCircle2Icon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementSigned")}
-            </span>
-          ) : (
-            <span className="flex shrink-0 items-center gap-1 text-tertiary">
-              <ClockIcon className="size-4" />
-              {t("DashboardPayments.counterparty.agreementAwaitingSignature")}
-            </span>
-          )}
-          <span className="truncate text-primary">{agreement.displayName}</span>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.url)}
-          >
-            {t("DashboardPayments.counterparty.viewAgreement")}
-          </button>
-          <button
-            type="button"
-            className="underline underline-offset-2 text-tertiary hover:text-primary"
-            onClick={() => openBvnkCustomerLink(agreement.privacyPolicyUrl)}
-          >
-            {t("DashboardPayments.counterparty.viewPrivacyPolicy")}
-          </button>
-        </div>
-      ))}
-    </>
-  );
-}
-
-/** Provider logo, label, "Customer" tag, status badge, and BVNK residence flag. */
-function ProviderCustomerHeader({
-  provider,
-  customerLink,
-}: {
-  provider: RampProviderId;
-  customerLink: CounterpartyProviderCustomerLink | undefined;
-}) {
-  const t = useTranslations();
-  return (
-    <>
-      <Image
-        src={RAMP_PROVIDER_LOGOS[provider]}
-        alt=""
-        width={20}
-        height={20}
-        className="size-5 rounded"
-      />
-      <span className="text-sm font-medium text-primary">{getRampProviderLabel(provider)}</span>
-      {customerLink !== undefined ? (
-        <>
-          <span className="text-xs uppercase tracking-wide text-tertiary">
-            {t("DashboardPayments.counterparty.providerAccountCustomer")}
-          </span>
-          <ProviderAccountStatusBadge status={providerAccountStatus(customerLink)} />
-          {customerLink.provider === "bvnk" ? (
-            <span
-              className="text-xs text-tertiary"
-              title={t("DashboardPayments.counterparty.taxResidence")}
-            >
-              <span aria-hidden="true">{regionFlagEmoji(customerLink.residenceCountryCode)}</span>{" "}
-              {customerLink.residenceCountryCode}
-            </span>
-          ) : null}
-        </>
-      ) : null}
-    </>
-  );
-}
-
-/** Provider customer reference with copy button (once the customer exists) and the link's age. */
-function CustomerLinkMeta({ customerLink }: { customerLink: CounterpartyProviderCustomerLink }) {
-  const t = useTranslations();
-  const customerReference = customerLink.providerCustomerReference;
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      {customerReference !== null ? (
-        <WalletMetadataCopyButton
-          value={customerReference}
-          label={t("DashboardPayments.counterparty.customerIdLabel")}
-          tooltip={customerReference}
-        />
-      ) : null}
-      <span
-        className="whitespace-nowrap text-xs text-tertiary"
-        title={formatTimestamp(customerLink.createdAt, t)}
-      >
-        {formatRelativeTime(customerLink.createdAt)}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Renders the live-balance cell of a funding-wallet row: the formatted amount
- * plus currency when available, a muted badge when the provider read failed,
- * and an em dash while no provider wallet exists yet.
- *
- * @param balance - The row's just-in-time balance, absent during provisioning.
- * @returns The balance cell content.
- */
-export function ProviderWalletBalanceCell({
-  balance,
-}: {
-  balance: CounterpartyProviderAccount["balance"];
-}) {
-  const t = useTranslations();
-  if (balance === undefined) {
-    return <span className="text-sm text-tertiary">—</span>;
-  }
-  if (balance.state === "unavailable") {
-    return (
-      <span className="rounded-full bg-fill-strong px-2 py-0.5 text-xs font-medium text-tertiary">
-        {t("DashboardPayments.counterparty.providerAccountBalanceUnavailable")}
-      </span>
-    );
-  }
-  return (
-    <span className="whitespace-nowrap text-sm tabular-nums text-primary">
-      {formatDisplayAmount(balance.amount, balance.currency)}
-    </span>
-  );
-}
-
-function ProviderCustomerCard({ group }: { group: ProviderCustomerGroup }) {
-  const t = useTranslations();
-  const [open, setOpen] = useState(false);
-  const { provider, customerLink, payoutAccounts, fundingWallets } = group;
-  const expandable =
-    payoutAccounts.length > 0 ||
-    fundingWallets.length > 0 ||
-    (customerLink !== undefined && customerLink.provider === "bvnk") ||
-    RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider];
-  const headers = [
-    t("DashboardPayments.counterparty.providerAccountCorridor"),
-    t("DashboardPayments.counterparty.providerAccountRail"),
-    t("DashboardPayments.counterparty.providerAccountBank"),
-    t("DashboardPayments.counterparty.providerAccountNumber"),
-    t("DashboardPayments.counterparty.providerAccountStatus"),
-  ];
-
-  return (
-    <div className="rounded-lg border border-border-default bg-surface-raised">
-      <div className="flex items-center gap-2 px-4 py-3">
-        {expandable ? (
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
-            className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          >
-            <ChevronDownIcon
-              className={cn(
-                "size-4 shrink-0 text-secondary transition-transform",
-                !open && "-rotate-90"
-              )}
-            />
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
-          </button>
-        ) : (
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <ProviderCustomerHeader provider={provider} customerLink={customerLink} />
-          </div>
-        )}
-        {customerLink !== undefined ? <CustomerLinkMeta customerLink={customerLink} /> : null}
-      </div>
-      {expandable && open ? (
-        <>
-          {fundingWallets.length > 0 ? (
-            <ul className="border-t border-border-default">
-              {fundingWallets.map((account) => {
-                const walletStatus = providerAccountStatus(account);
-                return (
-                  <li
-                    key={account.id}
-                    className="flex items-center gap-3 border-b border-border-default px-4 py-3 last:border-b-0"
-                  >
-                    <span className="text-sm text-primary">
-                      {t("DashboardPayments.counterparty.providerAccountFundingWallet", {
-                        currency: account.fiatCurrency,
-                      })}
-                    </span>
-                    {account.providerAccountReference !== undefined ? (
-                      <WalletMetadataCopyButton
-                        value={account.providerAccountReference}
-                        label={t("DashboardPayments.counterparty.walletIdLabel")}
-                        tooltip={account.providerAccountReference}
-                      />
-                    ) : null}
-                    <span className="ml-auto">
-                      <ProviderWalletBalanceCell balance={account.balance} />
-                    </span>
-                    <ProviderAccountStatusBadge
-                      status={walletStatus}
-                      label={
-                        isBvnkFundingWalletStatus(walletStatus)
-                          ? t(FUNDING_WALLET_STATUS_LABEL_KEY[walletStatus])
-                          : undefined
-                      }
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-          {payoutAccounts.length === 0 ? (
-            RAMP_PROVIDER_HAS_PAYOUT_ACCOUNTS[provider] ? (
-              <p className="border-t border-border-default px-4 py-3 text-sm text-tertiary">
-                {t("DashboardPayments.counterparty.noPayoutAccounts")}
-              </p>
-            ) : null
-          ) : (
-            <div className="overflow-x-auto border-t border-border-default">
-              <table className="w-full min-w-max border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-border-default">
-                    {headers.map((header) => (
-                      <th
-                        key={header}
-                        className="whitespace-nowrap px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary"
-                      >
-                        {header}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {payoutAccounts.map((account) => {
-                    const flag =
-                      account.destinationCountry === null
-                        ? null
-                        : regionFlagEmoji(account.destinationCountry);
-                    return (
-                      <tr
-                        key={account.id}
-                        className="border-b border-border-default last:border-b-0"
-                      >
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <div className="flex items-center gap-2 text-sm text-primary">
-                            <span>{account.fiatCurrency}</span>
-                            {flag !== null ? (
-                              <>
-                                <span aria-hidden="true">{flag}</span>
-                                <span className="sr-only">{account.destinationCountry}</span>
-                              </>
-                            ) : null}
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          {account.paymentRail !== null ? (
-                            <span className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs font-medium text-secondary">
-                              {account.paymentRail}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                          {account.bankName}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-sm text-primary">
-                          {account.accountNumberLast4 !== undefined
-                            ? `•••• ${account.accountNumberLast4}`
-                            : null}
-                        </td>
-                        <td className="whitespace-nowrap px-4 py-3">
-                          <ProviderAccountStatusBadge status={providerAccountStatus(account)} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {customerLink !== undefined && customerLink.provider === "bvnk" ? (
-            <CustomerLinkAgreements agreements={customerLink.agreements} />
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function TransferTableRow({
-  transfer,
-  onSelect,
-}: {
-  transfer: PaymentTransferSummary;
-  onSelect: (transfer: PaymentTransferSummary) => void;
-}) {
-  const t = useTranslations();
-  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
-  const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const flow = resolveTransferFlow(transfer);
-
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a table row can't be a <button>; role+key handler is the accessible compromise
-    <tr
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(transfer)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect(transfer);
-        }
-      }}
-      className="cursor-pointer border-b border-border-default transition-colors last:border-b-0 hover:bg-fill-subtle"
-    >
-      <td className="whitespace-nowrap px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-strong text-secondary [&_svg]:size-4">
-            {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
-          </span>
-          <span className="text-sm font-medium text-primary">
-            {formatPaymentTransferType(transfer.type, t)}
-          </span>
-        </div>
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        <TransferProviderCell provider={transfer.provider} />
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        {walletAddress ? (
-          <span className="font-mono text-xs text-secondary" title={walletAddress}>
-            {shortenAddress(walletAddress)}
-          </span>
-        ) : (
-          <span className="text-sm text-tertiary">—</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right">
-        {flow.send || flow.receive ? (
-          <span className="inline-flex items-center justify-end gap-1.5 text-sm">
-            {flow.send ? <span className="text-secondary">{flow.send}</span> : null}
-            {flow.send && flow.receive ? (
-              <ArrowRightIcon className="size-3.5 text-tertiary" />
-            ) : null}
-            {flow.receive ? <span className="font-medium text-primary">{flow.receive}</span> : null}
-          </span>
-        ) : (
-          <span className="text-sm text-tertiary">—</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        <TransferStatusBadge status={transfer.status} />
-      </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-tertiary">
-        {transfer.createdAt ? (
-          <span title={formatTimestamp(transfer.createdAt, t)}>
-            {formatRelativeTime(transfer.createdAt)}
-          </span>
-        ) : null}
-      </td>
-    </tr>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-on-primary"
-          : "border-border-default bg-surface-raised text-secondary hover:text-primary"
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function CounterpartyTransactions({
-  transfers,
-  counterpartyName,
-}: {
-  transfers: PaymentTransferSummary[];
-  counterpartyName: string;
-}) {
-  const t = useTranslations();
-  const transferTableHeaders = [
-    {
-      label: t("DashboardPayments.counterparty.transferType"),
-      align: "left" as const,
-      width: "12%",
-    },
-    {
-      label: t("DashboardPayments.counterparty.transferProvider"),
-      align: "left" as const,
-      width: "16%",
-    },
-    {
-      label: t("DashboardPayments.counterparty.transferWallet"),
-      align: "left" as const,
-      width: "15%",
-    },
-    {
-      label: t("DashboardPayments.counterparty.transferAmount"),
-      align: "right" as const,
-      width: "28%",
-    },
-    {
-      label: t("DashboardPayments.counterparty.transferStatus"),
-      align: "left" as const,
-      width: "13%",
-    },
-    {
-      label: t("DashboardPayments.counterparty.transferDate"),
-      align: "right" as const,
-      width: "16%",
-    },
-  ];
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
-  const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
-
-  const availableTypes = useMemo(() => {
-    const types = new Set<string>();
-    for (const transfer of transfers) {
-      if (transfer.type) {
-        types.add(transfer.type);
-      }
-    }
-    return [...types];
-  }, [transfers]);
-
-  const availableProviders = useMemo(() => {
-    const providers = new Set<RampProviderId>();
-    for (const transfer of transfers) {
-      if (transfer.provider) {
-        providers.add(transfer.provider);
-      }
-    }
-    return [...providers];
-  }, [transfers]);
-
-  const filteredTransfers = useMemo(
-    () =>
-      transfers.filter((transfer) => {
-        if (typeFilter && transfer.type !== typeFilter) {
-          return false;
-        }
-        if (providerFilter && transfer.provider !== providerFilter) {
-          return false;
-        }
-        return true;
-      }),
-    [transfers, typeFilter, providerFilter]
-  );
-
-  const showFilters = availableTypes.length > 1 || availableProviders.length > 1;
-  return (
-    <section className="space-y-3">
-      {transfers.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
-          <ReceiptTextIcon className="size-7 text-muted" />
-          <p className="text-sm text-tertiary">
-            {t("DashboardPayments.counterparty.noTransactions")}
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            {showFilters ? (
-              <div className="flex flex-wrap items-center gap-2">
-                {availableTypes.length > 1 ? (
-                  <>
-                    <FilterChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>
-                      {t("DashboardPayments.counterparty.allTypes")}
-                    </FilterChip>
-                    {availableTypes.map((type) => (
-                      <FilterChip
-                        key={type}
-                        active={typeFilter === type}
-                        onClick={() => setTypeFilter(type)}
-                      >
-                        {formatPaymentTransferType(type, t)}
-                      </FilterChip>
-                    ))}
-                  </>
-                ) : null}
-                {availableProviders.length > 1 ? (
-                  <>
-                    <span className="mx-1 h-4 w-px bg-fill-strong" />
-                    <FilterChip
-                      active={providerFilter === null}
-                      onClick={() => setProviderFilter(null)}
-                    >
-                      {t("DashboardPayments.counterparty.allProviders")}
-                    </FilterChip>
-                    {availableProviders.map((provider) => (
-                      <FilterChip
-                        key={provider}
-                        active={providerFilter === provider}
-                        onClick={() => setProviderFilter(provider)}
-                      >
-                        {getRampProviderLabel(provider)}
-                      </FilterChip>
-                    ))}
-                  </>
-                ) : null}
-              </div>
-            ) : (
-              <span />
-            )}
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border border-border-default bg-surface-raised">
-            <table className="w-full min-w-[760px] table-fixed border-collapse">
-              <thead>
-                <tr className="border-b border-border-default">
-                  {transferTableHeaders.map((header) => (
-                    <th
-                      key={header.label}
-                      style={{ width: header.width }}
-                      className={cn(
-                        "px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary",
-                        header.align === "right" ? "text-right" : "text-left"
-                      )}
-                    >
-                      {header.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredTransfers.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={transferTableHeaders.length}
-                      className="px-4 py-8 text-center text-sm text-tertiary"
-                    >
-                      {t("DashboardPayments.counterparty.noFilteredTransactions")}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTransfers.map((transfer) => (
-                    <TransferTableRow
-                      key={transfer.id}
-                      transfer={transfer}
-                      onSelect={setSelectedTransfer}
-                    />
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      <TransferDetailModal
-        transfer={selectedTransfer}
-        counterpartyName={counterpartyName}
-        onClose={() => setSelectedTransfer(null)}
-      />
-    </section>
-  );
-}
-
-function CopyButton({ value, label }: { value: string; label: string }) {
-  const t = useTranslations();
-  const { copy, copied } = useCopy(1200);
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-xs"
-      aria-label={label}
-      onClick={() => {
-        void copy(value);
-        toast.success(t("Shared.SharedComponents.copied"), { position: "bottom-right" });
-      }}
-    >
-      {copied ? <CheckIcon className="text-success" /> : <CopyIcon />}
-    </Button>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-  mono,
-  copyValue,
-}: {
-  label: string;
-  value: ReactNode;
-  mono?: boolean;
-  copyValue?: string;
-}) {
-  const t = useTranslations();
-  return (
-    <div className="flex h-12 items-center justify-between gap-4">
-      <span className="shrink-0 text-sm text-tertiary">{label}</span>
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className={cn("truncate text-sm text-primary", mono && "font-mono text-xs")}>
-          {value}
-        </span>
-        {copyValue ? (
-          <CopyButton
-            value={copyValue}
-            label={t("DashboardPayments.transferDetails.copy", { label })}
-          />
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TransferDetailModal({
-  transfer,
-  counterpartyName,
-  onClose,
-}: {
-  transfer: PaymentTransferSummary | null;
-  counterpartyName: string;
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-  const cluster = useSolanaCluster();
-  const [memoJsonOpen, setMemoJsonOpen] = useState(false);
-  if (!transfer) {
-    return null;
-  }
-
-  const closeModal = () => {
-    setMemoJsonOpen(false);
-    onClose();
-  };
-
-  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
-  const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const moneygram = transfer.moneygram;
-  const signature = transfer.signature ?? moneygram?.solanaTxSignature ?? null;
-  const flow = resolveTransferFlow(transfer);
-  const counterpartyParty = transfer.fiatCurrency
-    ? `${counterpartyName} · ${transfer.fiatCurrency.toUpperCase()}`
-    : counterpartyName;
-
-  const walletRow = walletAddress ? (
-    <DetailRow
-      label={isInbound ? t("DashboardPayments.requests.to") : t("DashboardPayments.requests.from")}
-      value={shortenAddress(walletAddress)}
-      mono
-      copyValue={walletAddress}
-    />
-  ) : null;
-  const counterpartyRow = (
-    <DetailRow
-      label={isInbound ? t("DashboardPayments.requests.from") : t("DashboardPayments.requests.to")}
-      value={counterpartyParty}
-    />
-  );
-
-  return (
-    <Modal
-      isOpen
-      ariaLabel={t("DashboardPayments.counterparty.transactionDetails")}
-      onClose={closeModal}
-      size="lg"
-    >
-      <div className="space-y-5 p-6">
-        <div className="flex items-start justify-between gap-4 pr-8">
-          <div className="space-y-1">
-            <h2 className="text-xl font-medium tracking-tight text-primary">
-              {formatPaymentTransferType(transfer.type, t)}
-            </h2>
-            {transfer.createdAt ? (
-              <p className="text-sm text-secondary">{formatTimestamp(transfer.createdAt, t)}</p>
-            ) : null}
-          </div>
-          <TransferStatusBadge status={transfer.status} />
-        </div>
-
-        <div className="flex items-center justify-between gap-4 rounded-2xl bg-fill-subtle p-5">
-          <div className="min-w-0 space-y-0.5">
-            <p className="text-xs font-medium uppercase tracking-wide text-secondary">
-              {isInbound
-                ? t("DashboardPayments.counterparty.youDeposit")
-                : t("DashboardPayments.counterparty.youSend")}
-            </p>
-            <p className="truncate text-xl font-semibold tracking-tight text-primary">
-              {flow.send ?? "—"}
-            </p>
-          </div>
-          <ArrowRightIcon className="size-5 shrink-0 text-tertiary" />
-          <div className="min-w-0 space-y-0.5 text-right">
-            <p className="text-xs font-medium uppercase tracking-wide text-secondary">
-              {t("DashboardPayments.counterparty.recipientGets")}
-            </p>
-            <p className="truncate text-xl font-semibold tracking-tight text-primary">
-              {flow.receive ?? "—"}
-            </p>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-border-default px-4 py-1">
-          <div>
-            {isInbound ? (
-              <>
-                {walletRow}
-                {counterpartyRow}
-              </>
-            ) : (
-              <>
-                {counterpartyRow}
-                {walletRow}
-              </>
-            )}
-            {transfer.provider ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.provider")}
-                value={<TransferProviderCell provider={transfer.provider} />}
-              />
-            ) : null}
-            <DetailRow
-              label={t("DashboardPayments.transferDetails.transactionId")}
-              value={transfer.id}
-              mono
-              copyValue={transfer.id}
-            />
-            {transfer.providerReference ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.providerReference")}
-                value={transfer.providerReference}
-                mono
-                copyValue={transfer.providerReference}
-              />
-            ) : null}
-            {transfer.status === "failed" && transfer.error ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.failureReason")}
-                value={transfer.error}
-              />
-            ) : null}
-            {transfer.memo ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.memo")}
-                value={transfer.memo}
-              />
-            ) : null}
-            {Object.keys(transfer.rampsMemo).length > 0 ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.memo")}
-                value={
-                  <Button type="button" size="xs" onClick={() => setMemoJsonOpen(true)}>
-                    {t("DashboardPayments.ramps.memoViewJson")}
-                  </Button>
-                }
-              />
-            ) : null}
-            {providerTransferDetailRows(transfer, { cluster }, t).map((row) => (
-              <DetailRow
-                key={row.key}
-                label={row.label}
-                value={
-                  row.href ? (
-                    <a
-                      href={row.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      {row.value}
-                      <ExternalLinkIcon className="size-3.5" />
-                    </a>
-                  ) : (
-                    row.value
-                  )
-                }
-                mono={row.mono}
-                copyValue={row.copyValue}
-              />
-            ))}
-            {moneygram?.referenceNumber ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.cashPickupCode")}
-                value={moneygram.referenceNumber}
-                mono
-                copyValue={moneygram.referenceNumber}
-              />
-            ) : null}
-            {moneygram?.transactionId ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.moneygramTransactionId")}
-                value={moneygram.transactionId}
-                mono
-                copyValue={moneygram.transactionId}
-              />
-            ) : null}
-            {moneygram?.payoutStatus ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.payoutStatus")}
-                value={toTitleCase(moneygram.payoutStatus)}
-              />
-            ) : null}
-            {moneygram?.payoutAmount !== undefined && transfer.fiatCurrency ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.payoutAmount")}
-                value={formatDisplayAmount(String(moneygram.payoutAmount), transfer.fiatCurrency)}
-              />
-            ) : null}
-            {moneygram?.cryptoTransferId ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.cryptoTransferId")}
-                value={moneygram.cryptoTransferId}
-                mono
-                copyValue={moneygram.cryptoTransferId}
-              />
-            ) : null}
-            {moneygram?.solanaTxSignature ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.solanaSignature")}
-                value={shortenAddress(moneygram.solanaTxSignature)}
-                mono
-                copyValue={moneygram.solanaTxSignature}
-              />
-            ) : null}
-            {moneygram?.lastWidgetError ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.moneygramError")}
-                value={moneygram.lastWidgetError}
-              />
-            ) : null}
-            {transfer.updatedAt ? (
-              <DetailRow
-                label={t("DashboardPayments.transferDetails.lastUpdated")}
-                value={formatTimestamp(transfer.updatedAt, t)}
-              />
-            ) : null}
-          </div>
-        </div>
-
-        {signature ? (
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            iconLeft={<ExternalLinkIcon className="size-4" />}
-            onClick={() =>
-              window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
-            }
-          >
-            {t("DashboardPayments.counterparty.viewOnExplorer")}
-          </Button>
-        ) : null}
-      </div>
-
-      <Modal
-        isOpen={memoJsonOpen}
-        onClose={() => setMemoJsonOpen(false)}
-        ariaLabel={t("DashboardPayments.ramps.memoJsonTitle")}
-        size="lg"
-      >
-        <div className="p-6">
-          <MemoJsonView json={transfer.rampsMemo} />
-        </div>
-      </Modal>
-    </Modal>
-  );
-}
-
-type InfoRowData = { label: string; value: string; icon: ReactNode; mono?: boolean };
-
-function FieldList({ rows }: { rows: InfoRowData[] }) {
+function FieldList({ rows }: { rows: { label: string; value: string; icon: ReactNode }[] }) {
   return (
     <dl className="grid gap-x-6 gap-y-4 sm:grid-flow-col sm:grid-rows-3">
       {rows.map((row) => (
@@ -1150,16 +59,58 @@ function FieldList({ rows }: { rows: InfoRowData[] }) {
             <dt className="text-xs font-medium uppercase tracking-wide text-secondary">
               {row.label}
             </dt>
-            <dd
-              className={cn("truncate text-sm text-primary", row.mono && "font-mono text-xs")}
-              title={row.value}
-            >
+            <dd className="truncate text-sm text-primary" title={row.value}>
               {row.value}
             </dd>
           </div>
         </div>
       ))}
     </dl>
+  );
+}
+
+function ExternalAccountsList({ accounts }: { accounts: CounterpartyAccount[] }) {
+  const t = useTranslations();
+  if (accounts.length === 0) {
+    return (
+      <ListEmptyState
+        className="min-h-0 rounded-lg border border-dashed border-border-strong py-10"
+        icon={<WalletIcon className="size-5" />}
+        message={t("DashboardPayments.counterparty.noExternalAccounts")}
+      />
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
+      {accounts.map((account) => (
+        <div
+          key={account.id}
+          className="flex items-center justify-between gap-4 border-b border-border-default px-4 py-2.5 last:border-b-0"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-primary">
+              {account.label === null
+                ? t("DashboardPayments.counterparty.cryptoWallet")
+                : account.label}
+            </p>
+            <div className="flex h-5 items-center gap-1">
+              <p className="truncate font-mono text-xs text-secondary">{account.details.address}</p>
+              <WalletAddressCopyButton address={account.details.address} />
+            </div>
+          </div>
+          <span className="flex shrink-0 items-center gap-1.5 text-xs text-secondary">
+            <Image
+              src="/landing/solana-logo.svg"
+              alt=""
+              width={16}
+              height={14}
+              className="h-3.5 w-auto"
+            />
+            Solana
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1171,15 +122,11 @@ export function CounterpartyDetailWorkspace({
   const t = useTranslations();
   const locale = useLocale();
   const router = useRouter();
-  const { copy, copied } = useCopy(1200);
-  const { data: providerAccounts, error: providerAccountsError } = useCounterpartyProviderAccounts(
-    counterparty.id
-  );
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const providerAccounts = useCounterpartyProviderAccounts(counterparty.id);
   const [accounts, setAccounts] = useState(initialAccounts);
   const [addOpen, setAddOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"details" | "transactions">("details");
+  const [activeTab, setActiveTab] = useState<DetailTab>("details");
 
   async function confirmDelete() {
     const result = await dashboardFetch(
@@ -1227,7 +174,7 @@ export function CounterpartyDetailWorkspace({
         </div>
 
         <div className="flex gap-6 border-b border-border-default">
-          {(["details", "transactions"] as const).map((tab) => (
+          {DETAIL_TABS.map((tab) => (
             <button
               key={tab}
               type="button"
@@ -1237,9 +184,7 @@ export function CounterpartyDetailWorkspace({
                 activeTab === tab ? "text-primary" : "text-secondary hover:text-primary"
               )}
             >
-              {tab === "details"
-                ? t("DashboardPayments.counterparty.details")
-                : t("DashboardPayments.counterparty.transactions")}
+              {t(`DashboardPayments.counterparty.${tab}`)}
               {activeTab === tab ? (
                 <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />
               ) : null}
@@ -1254,76 +199,51 @@ export function CounterpartyDetailWorkspace({
           />
         ) : (
           <>
-            <div className="grid gap-6">
-              <section className="space-y-3">
-                <h3 className="text-2xl font-medium text-primary">
-                  {t("DashboardPayments.counterparty.details")}
-                </h3>
-                <div className="rounded-lg border border-border-default bg-surface-raised p-5">
-                  <FieldList
-                    rows={[
-                      {
-                        label: t("DashboardPayments.counterparty.displayName"),
-                        value: counterparty.displayName,
-                        icon: <UserIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.transferType"),
-                        value: toTitleCase(counterparty.entityType),
-                        icon: <UsersIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.externalId"),
-                        value: counterparty.externalId ?? "—",
-                        icon: <HashIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.transferStatus"),
-                        value: toTitleCase(counterparty.status),
-                        icon: <ShieldCheckIcon />,
-                      },
-                      {
-                        label: t("DashboardPayments.counterparty.createdLabel"),
-                        value: new Date(counterparty.createdAt).toLocaleDateString(locale, {
-                          month: "short",
-                          day: "2-digit",
-                          year: "numeric",
-                        }),
-                        icon: <CalendarIcon />,
-                      },
-                    ]}
-                  />
-                </div>
-              </section>
-            </div>
+            <section className="space-y-3">
+              <h3 className="text-2xl font-medium text-primary">
+                {t("DashboardPayments.counterparty.details")}
+              </h3>
+              <div className="rounded-lg border border-border-default bg-surface-raised p-5">
+                <FieldList
+                  rows={[
+                    {
+                      label: t("DashboardPayments.counterparty.displayName"),
+                      value: counterparty.displayName,
+                      icon: <UserIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.transferType"),
+                      value: toTitleCase(counterparty.entityType),
+                      icon: <UsersIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.externalId"),
+                      value: counterparty.externalId === null ? "—" : counterparty.externalId,
+                      icon: <HashIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.transferStatus"),
+                      value: toTitleCase(counterparty.status),
+                      icon: <ShieldCheckIcon />,
+                    },
+                    {
+                      label: t("DashboardPayments.counterparty.createdLabel"),
+                      value: formatCreatedDate(counterparty.createdAt, locale),
+                      icon: <CalendarIcon />,
+                    },
+                  ]}
+                />
+              </div>
+            </section>
 
             <section className="space-y-3">
               <h3 className="text-2xl font-medium text-primary">
                 {t("DashboardPayments.counterparty.providerAccounts")}
               </h3>
-              {providerAccountsError ? (
-                <div className="rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-                  {providerAccountsError instanceof Error ? providerAccountsError.message : null}
-                </div>
-              ) : providerAccounts === undefined ? (
-                <div className="flex items-center gap-2 rounded-lg border border-border-default bg-surface-raised px-4 py-5 text-sm text-tertiary">
-                  <LoaderCircleIcon className="size-4 animate-spin" />
-                  {t("DashboardPayments.counterparty.loadingProviderAccounts")}
-                </div>
-              ) : providerAccounts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
-                  <WalletIcon className="size-7 text-muted" />
-                  <p className="text-sm text-tertiary">
-                    {t("DashboardPayments.counterparty.noProviderAccounts")}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {groupProviderAccounts(providerAccounts).map((group) => (
-                    <ProviderCustomerCard key={group.provider} group={group} />
-                  ))}
-                </div>
-              )}
+              <CounterpartyProviderAccounts
+                accounts={providerAccounts.data}
+                error={providerAccounts.error}
+              />
             </section>
 
             <section className="space-y-3">
@@ -1340,70 +260,7 @@ export function CounterpartyDetailWorkspace({
                   {t("DashboardPayments.counterparty.addExternalAccountTitle")}
                 </Button>
               </div>
-              {accounts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-strong py-10 text-center">
-                  <WalletIcon className="size-7 text-muted" />
-                  <p className="text-sm text-tertiary">
-                    {t("DashboardPayments.counterparty.noExternalAccounts")}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
-                  {accounts.map((account) => {
-                    const details = account.details as { network?: string; address?: string };
-                    return (
-                      <div
-                        key={account.id}
-                        className="flex items-center justify-between gap-4 border-b border-border-default px-4 py-2.5 last:border-b-0"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-primary">
-                            {account.label ?? t("DashboardPayments.counterparty.cryptoWallet")}
-                          </p>
-                          <div className="flex h-5 items-center gap-1">
-                            <p className="truncate font-mono text-xs text-secondary">
-                              {details.address}
-                            </p>
-                            {details.address && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-xs"
-                                className="size-5"
-                                aria-label={t("DashboardPayments.counterparty.copyAddress")}
-                                onClick={() => {
-                                  if (!details.address) return;
-                                  setCopiedId(account.id);
-                                  void copy(details.address);
-                                  toast.success(t("DashboardPayments.counterparty.addressCopied"), {
-                                    position: "bottom-right",
-                                  });
-                                }}
-                              >
-                                {copied && copiedId === account.id ? (
-                                  <CheckIcon className="text-success" />
-                                ) : (
-                                  <CopyIcon />
-                                )}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                        <span className="flex shrink-0 items-center gap-1.5 text-xs text-secondary">
-                          <Image
-                            src="/landing/solana-logo.svg"
-                            alt=""
-                            width={16}
-                            height={14}
-                            className="h-3.5 w-auto"
-                          />
-                          Solana
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              <ExternalAccountsList accounts={accounts} />
             </section>
           </>
         )}
