@@ -466,11 +466,7 @@ async function syncProcessingTransfersOnChain(
       !hasSignedSubmission(transfer) &&
       now.getTime() - new Date(transfer.updated_at).getTime() > STUCK_PROCESSING_AFTER_MS
   );
-  for (const transfer of expiredLegacyTransfers) {
-    if (!(await applyOnChainVerdict(env, repo, transfer, null, nowIso))) {
-      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "verdict_write_failed");
-    }
-  }
+  await reconcileExpiredLegacyCacheMisses(env, repo, rpc, expiredLegacyTransfers, nowIso);
 
   await reconcileSignedSubmissionCacheMisses(
     env,
@@ -479,6 +475,38 @@ async function syncProcessingTransfersOnChain(
     cacheMisses.filter(hasSignedSubmission),
     nowIso
   );
+}
+
+/**
+ * Resolves expired signature-bearing rows without a signed submission from
+ * transaction history: the recent-status cache alone cannot distinguish a
+ * dropped transaction from one that landed and aged out of the cache.
+ */
+async function reconcileExpiredLegacyCacheMisses(
+  env: Env,
+  repo: PaymentsRepository,
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  transfers: PaymentTransferWithSignature[],
+  nowIso: string
+): Promise<void> {
+  if (transfers.length === 0) return;
+
+  const archived = await getArchivedStatuses(rpc, transfers);
+  if (archived === null) {
+    for (const transfer of transfers) {
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "history_unavailable");
+    }
+    return;
+  }
+
+  for (let i = 0; i < transfers.length; i++) {
+    const transfer = transfers[i];
+    const status = archived[i] ?? null;
+    if (!(await applyOnChainVerdict(env, repo, transfer, status, nowIso))) {
+      if (status && unresolvedReasonForStatus(status) === "processed_only") continue;
+      await keepStartedSubmissionForReconciliation(repo, transfer, nowIso, "verdict_write_failed");
+    }
+  }
 }
 
 async function reconcileSignedSubmissionCacheMisses(
