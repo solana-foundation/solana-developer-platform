@@ -208,6 +208,37 @@ describe("Earn queued withdrawal repository", () => {
     return repository.createSignedRequest(input);
   }
 
+  it("rejects null mechanism-required terms at the database boundary", async () => {
+    const db = getDb(env);
+    const solverRequest = await createRequest();
+    for (const column of ["discount_bps", "maturity_timestamp", "deadline_timestamp"] as const) {
+      await expect(
+        db
+          .prepare(`UPDATE earn_vault_withdrawal_requests SET ${column} = NULL WHERE id = ?`)
+          .bind(solverRequest.request.id)
+          .run()
+      ).rejects.toThrow(/earn_vault_withdrawal_requests_mechanism_terms_check/);
+    }
+
+    const operatorRequest = await createRequest({
+      mechanism: "operator_redemption",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    });
+    for (const column of ["intermediate_mint", "intermediate_amount"] as const) {
+      await expect(
+        db
+          .prepare(`UPDATE earn_vault_withdrawal_requests SET ${column} = NULL WHERE id = ?`)
+          .bind(operatorRequest.request.id)
+          .run()
+      ).rejects.toThrow(/earn_vault_withdrawal_requests_mechanism_terms_check/);
+    }
+  });
+
   it("replays an identical create and rejects a divergent use of the same key", async () => {
     const input = await reserveInput(requestInput());
     const first = await repository.createSignedRequest(input);
