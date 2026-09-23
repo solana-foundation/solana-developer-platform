@@ -1287,6 +1287,13 @@ export class SigningService {
     assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
+    if (auditContext) {
+      return this.createDefaultWallet(auditContext, orgId, projectId, config, parsed, {
+        label: params.label,
+        purpose: params.purpose,
+      });
+    }
+
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
       orgId,
@@ -1297,15 +1304,6 @@ export class SigningService {
       parsed,
       cipher: this.getCustodyCipher(),
     });
-
-    if (auditContext) {
-      return this.createDefaultWallet(auditContext, orgId, projectId, config, {
-        walletId,
-        publicKey,
-        label: params.label,
-        purpose: params.purpose,
-      });
-    }
 
     let wallet: CustodyConfigWallet;
     try {
@@ -1331,7 +1329,8 @@ export class SigningService {
     orgId: string,
     projectId: string | undefined,
     config: SigningConfigRecord,
-    params: { walletId: string; publicKey: string; label?: string; purpose?: WalletPurpose }
+    parsed: Parameters<typeof createProviderWallet>[0]["parsed"],
+    params: { label?: string; purpose?: WalletPurpose }
   ): Promise<CustodyConfigWallet> {
     const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
     const auditService = new AuditService(getDb(this.env));
@@ -1344,26 +1343,50 @@ export class SigningService {
         ownerKind: "config",
         provider: config.provider,
         custodyWalletId,
-        walletId: params.walletId,
         projectId: projectId ?? null,
       },
     });
+
+    let provisioned: { walletId: string; publicKey: string };
+    try {
+      provisioned = await createProviderWallet({
+        env: this.env,
+        orgId,
+        projectId,
+        params: { label: params.label },
+        parsed,
+        cipher: this.getCustodyCipher(),
+      });
+    } catch (error) {
+      if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
+        this.logWalletOrphanRisk(orgId, projectId, config, "provider_result_unknown", intent.id);
+      } else {
+        await auditService.completeCritical(c, intent, {
+          status: "failure",
+          metadata: { event: "default_wallet_change_failed", reason: "provider_rejected" },
+        });
+      }
+      throw error;
+    }
 
     let created: Awaited<ReturnType<CustodyConfigStore["createDefaultWallet"]>>;
     try {
       created = await this.configStore.createDefaultWallet(config.id, {
         id: custodyWalletId,
-        ...params,
+        walletId: provisioned.walletId,
+        publicKey: provisioned.publicKey,
+        label: params.label,
+        purpose: params.purpose,
       });
     } catch (error) {
-      getLogger().error({
-        event: "custody_default_wallet_audit_unresolved",
-        auditIntentId: intent.id,
-        organizationId: orgId,
-        projectId: projectId ?? null,
-        ownerId: config.id,
-        reason: "persistence_result_unknown",
-      });
+      this.logWalletOrphanRisk(
+        orgId,
+        projectId,
+        config,
+        "persistence_failed",
+        intent.id,
+        provisioned.walletId
+      );
       throw new SigningError(
         `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
         "NETWORK_ERROR",
@@ -1371,9 +1394,21 @@ export class SigningService {
       );
     }
     if (!created) {
+      this.logWalletOrphanRisk(
+        orgId,
+        projectId,
+        config,
+        "persistence_failed",
+        intent.id,
+        provisioned.walletId
+      );
       await auditService.completeCritical(c, intent, {
         status: "failure",
-        metadata: { event: "default_wallet_change_failed", reason: "selection_unavailable" },
+        metadata: {
+          event: "default_wallet_change_failed",
+          reason: "selection_unavailable",
+          walletId: provisioned.walletId,
+        },
       });
       throw new SigningError("Custody not initialized", "NOT_FOUND");
     }
@@ -1382,12 +1417,35 @@ export class SigningService {
     await auditService.completeCritical(c, intent, {
       metadata: {
         event: "default_wallet_changed",
+        walletId: provisioned.walletId,
         previousCustodyWalletId: created.previous.custody_wallet_id,
         previousWalletId: created.previous.wallet_id,
       },
     });
 
     return created.wallet;
+  }
+
+  private logWalletOrphanRisk(
+    orgId: string,
+    projectId: string | undefined,
+    config: SigningConfigRecord,
+    reason: "provider_result_unknown" | "persistence_failed",
+    auditIntentId: string,
+    walletId?: string
+  ): void {
+    getLogger().error(
+      {
+        organizationId: orgId,
+        projectId: projectId ?? null,
+        custodyConfigId: config.id,
+        provider: config.provider,
+        reason,
+        auditIntentId,
+        walletId,
+      },
+      "custody_wallet_orphan_risk"
+    );
   }
 
   /**

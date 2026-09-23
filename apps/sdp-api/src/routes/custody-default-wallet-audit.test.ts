@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { getLogger } from "@/runtime/logger";
+import { createProviderWallet } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -329,7 +331,6 @@ describe("default wallet audit admission", () => {
             ownerKind: "config",
             provider: "privy",
             custodyWalletId,
-            walletId: "privy_config_new",
             projectId: project,
           },
         },
@@ -386,6 +387,7 @@ describe("default wallet audit admission", () => {
   });
 
   it("does not create or promote a Config wallet if audit admission fails", async () => {
+    vi.mocked(createProviderWallet).mockClear();
     vi.spyOn(getDb(env), "lockedTransactionWithPostCommit")
       .mockRejectedValueOnce(new Error("audit unavailable"))
       .mockRejectedValueOnce(new Error("audit unavailable"));
@@ -406,6 +408,51 @@ describe("default wallet audit admission", () => {
       ])
     ).toEqual([]);
     expect(await readAuditRows()).toEqual([]);
+    expect(createProviderWallet).not.toHaveBeenCalled();
+  });
+
+  it("logs the provisioned wallet as an orphan risk when the Config disappears", async () => {
+    const db = getDb(env);
+    vi.mocked(createProviderWallet).mockImplementationOnce(async () => {
+      await db.execute("DELETE FROM custody_scope_defaults WHERE default_custody_config_id = ?", [
+        config,
+      ]);
+      await db.execute("UPDATE custody_configs SET default_wallet_id = NULL WHERE id = ?", [
+        config,
+      ]);
+      await db.execute("DELETE FROM custody_wallets WHERE custody_config_id = ?", [config]);
+      await db.execute("DELETE FROM custody_configs WHERE id = ?", [config]);
+      return {
+        walletId: "privy_config_orphan",
+        publicKey: "SysvarRent111111111111111111111111111111111",
+      };
+    });
+    const errorLog = vi.spyOn(getLogger(), "error");
+
+    const response = await createConfigWallet({ setDefault: true });
+
+    expect(response.status).toBe(404);
+    const rows = await readAuditRows();
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        custodyConfigId: config,
+        provider: "privy",
+        reason: "persistence_failed",
+        auditIntentId: rows[0]?.resource_id,
+        walletId: "privy_config_orphan",
+      }),
+      "custody_wallet_orphan_risk"
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      status: "failure",
+      metadata: {
+        auditPhase: "outcome",
+        event: "default_wallet_change_failed",
+        reason: "selection_unavailable",
+        walletId: "privy_config_orphan",
+      },
+    });
   });
 
   it("keeps Config selection available while BYOK is disabled", async () => {
