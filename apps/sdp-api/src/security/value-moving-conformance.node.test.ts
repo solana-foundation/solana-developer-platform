@@ -258,8 +258,8 @@ const contracts: ValueMovingContract[] = [
       evidence: "createRequestSponsorshipFeePayment(c)",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/index.ts",
-      section: '"/transfers",',
+      file: "apps/sdp-api/src/routes/payments/transfers/index.ts",
+      section: "transfers.post(",
       before: "extract: extractTransferPolicyCandidate",
       after: "\n  createTransfer\n",
     },

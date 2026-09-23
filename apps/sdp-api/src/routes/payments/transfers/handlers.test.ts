@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { mapTransferExecutionError } from "./transfers";
+import { mapTransferExecutionError } from "./handlers";
 
 describe("mapTransferExecutionError", () => {
   it("maps a frozen token account program error to ACCOUNT_FROZEN", () => {
