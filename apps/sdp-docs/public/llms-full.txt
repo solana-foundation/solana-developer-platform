@@ -14,16 +14,15 @@
 ### What is SDP?
 Source: https://platform.solana.com/docs/introduction
 
-> One API for tokenization, custody, payments, embedded yield, and compliance on Solana.
+> One API for tokenization, custody, payments, and compliance on Solana.
 
-SDP provides tokenization, custody, payments, embedded yield, and compliance through one stable API in front of interchangeable providers. Most operations use project-scoped authentication. Embedded Yield also offers keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds for self-custodial integrations.
+SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
 | **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
-| **Embedded Yield** | Discover curated strategies and build self-custodial instant deposits or direct withdrawals [with or without an API key](/docs/guides/embedded-yield); use an API key for submission, tracking, and queued actions |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
@@ -249,20 +248,20 @@ Source: https://platform.solana.com/docs/developing-with-sdp
 SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
 
 - **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API:** programmatic access for backend integrations. Most routes authenticate with an API key in the `Authorization` header. Embedded Yield also has a [keyless catalogue and unsigned-build tier](/docs/guides/embedded-yield#without-an-api-key).
+- **REST API:** programmatic access for backend integrations. Routes authenticate with an API key in the `Authorization` header.
 
 Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment. A keyless Earn strategy list instead chooses its shelf with `?environment=sandbox|production` (production by default); a preview or instant build follows the environment of the strategy it names.
+Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
 
 | Environment  | Network      | API key prefix |
 | ------------ | ------------ | -------------- |
 | `sandbox`    | devnet       | `sk_test_`     |
 | `production` | mainnet-beta | `sk_live_`     |
 
-Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key. A keyless integration selects the sandbox shelf explicitly while testing and must treat a production build as a real-funds transaction.
+Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
 
 ## Response conventions
 
@@ -287,7 +286,7 @@ Include the `requestId` when reporting an issue — it links your request to our
 
 ## Execution model
 
-SDP executes custody operations by building, signing, and submitting with the configured custody wallet. For Embedded Yield, the customer's external wallet signs. A keyless integration broadcasts and tracks that signed transaction itself; an authenticated integration may submit it back to SDP for durable tracking.
+SDP executes custody operations by building, signing, and submitting with the configured custody wallet.
 
 ---
 
@@ -352,8 +351,6 @@ curl https://api.solana.com/v1/wallets \
 ```
 
 The `Bearer` prefix is optional — a raw key in the `Authorization` header is also accepted.
-
-Embedded Yield strategy reads, deposit and withdrawal previews, withdrawal-route discovery, and instant deposit or direct-withdrawal builders also support [keyless access](/docs/guides/embedded-yield#without-an-api-key). Those requests have no organization or project identity and cannot submit transactions, build queued request or cancellation actions, or read tenant state.
 
 ## Key scope
 
@@ -889,504 +886,6 @@ HttpRequest request = HttpRequest.newBuilder()
 
 </Tab>
 </Tabs>
-
----
-
-### Embedded Yield
-Source: https://platform.solana.com/docs/guides/embedded-yield
-
-> Offer yield from your own app. SDP builds the transactions, your customer's wallet signs, and your backend can pay the fees with a co-signing wallet.
-
-{/* Keep this guide and the dashboard integration module (apps/sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts) in sync: they document the same flow. */}
-
-Embedded Yield lets your platform offer vault yield without SDP ever holding your users' funds. SDP **builds** an unsigned Solana transaction for the customer's own wallet and the customer signs it in your app. With an API key, your backend **submits** the signed bytes to SDP for verification, durable tracking, and broadcast. Without a key, you broadcast and track the signed transaction yourself. Withdrawals work the same way in reverse.
-
-Two properties define the surface:
-
-- **Non-custodial.** SDP holds no key for your customers' wallets. The customer's signature is the authorization, every time.
-- **Backend-safe.** If you use an SDP API key, it stays on your backend. The browser or mobile app only ever sees unsigned transaction bytes and returns signed ones; the keyless tier needs no secret.
-
-All endpoints live under `/v1/earn`. Every code sample uses one Solana SDK, `@solana/kit`; nothing here needs `@solana/web3.js`.
-
-## Choose an access tier
-
-| Capability | Without an API key | With an API key |
-| --- | --- | --- |
-| List and inspect strategies | Yes | Yes |
-| Preview deposits and withdrawals | Yes | Yes |
-| Build instant deposit and withdrawal transactions | Yes, owner pays | Yes, owner or your `feePayer` |
-| Discover and preview asynchronous withdrawals | Yes | Yes |
-| Build, submit, track, and recover an asynchronous withdrawal | No | Yes |
-| Submit signed transactions through SDP | No | Yes, `earn:write` |
-| Track movements, positions, balances, and earnings | No | Yes, `earn:read` |
-
-Keyless requests carry no project, so you pick the shelf: `GET /v1/earn/strategies?environment=sandbox` lists devnet strategies, the default `production` lists mainnet ones, and an instant quote or build follows the strategy you name. They create no record: the response carries no `movementId`, and you sign, broadcast, and track the transaction yourself. A signed production build moves real funds. Asynchronous request and cancellation builds are intentionally keyed-only because durable status and recovery are part of that money-out contract. Keyed requests carry your project's environment (sandbox runs on devnet), can name a `feePayer`, and can be submitted to SDP, which records the movement or request before broadcast and reconciles it to a terminal state.
-
-**The key.** Create a Developer API key for your project in the dashboard; that role includes `earn:read` and `earn:write`. Start in sandbox, which runs on devnet. A strategy is depositable when `fundable` is `true` and `status` is `active`.
-
-## Without an API key
-
-List the sandbox shelf, inspect `depositSlippage`, and build with nothing but a strategy id and the customer's funded devnet wallet. Drop `?environment=sandbox` for the production shelf. When `depositSlippage` is non-null, quote first and set `<MIN_SHARES_OUT>` to the quote's `sharesOut` less the tolerance your customer accepts (`defaultToleranceBps` is the suggested start; see [Floors and previews](#floors-and-previews)). A next-NAV subscription may publish null because its later share settlement has no enforceable on-chain floor.
-
-```bash
-export SDP_API_URL=https://api.solana.com
-
-curl --fail-with-body --silent --show-error "$SDP_API_URL/v1/earn/strategies?environment=sandbox"
-
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{ "strategyId": "<STRATEGY_ID>", "amount": "1" }' \
-  "$SDP_API_URL/v1/earn/vault-deposit-previews"
-
-curl --fail-with-body --silent --show-error \
-  --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{ "strategyId": "<STRATEGY_ID>", "ownerAddress": "<OWNER_ADDRESS>", "amount": "1", "minSharesOut": "<MIN_SHARES_OUT>" }' \
-  "$SDP_API_URL/v1/earn/external-wallet/deposit-transactions"
-```
-
-Sign and broadcast the response's base64 `transaction.transaction` yourself. `build` is the parsed JSON of the build response; `owner` is a kit `CryptoKeyPair` here, or your wallet's signer in a real app:
-
-```ts
-  createSolanaRpc,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getSignatureFromTransaction,
-  getTransactionDecoder,
-  partiallySignTransaction,
-} from "@solana/kit";
-
-const rpc = createSolanaRpc("https://api.devnet.solana.com"); // mainnet-beta for the production shelf
-const transaction = getTransactionDecoder().decode(
-  getBase64Encoder().encode(build.data.transaction.transaction),
-);
-const signed = await partiallySignTransaction([owner], transaction);
-await rpc.sendTransaction(getBase64EncodedWireTransaction(signed), { encoding: "base64" }).send();
-const signature = getSignatureFromTransaction(signed);
-// Poll rpc.getSignatureStatuses([signature]) until finalized, and give up once
-// the block height passes build.data.transaction.lastValidBlockHeight.
-```
-
-Do not call SDP's submit endpoint for a keyless build; there is no server-side row to consume. For a keyless withdrawal, preview and build take `{ strategyId, ownerAddress, shares }`; an anonymous caller never supplies a `positionId`.
-
-## With an API key
-
-Authenticate with `Authorization: Bearer <SDP_API_KEY>`. The dashboard's **Embedded Yield → Integrate** page generates a complete server module for the strategy you pick; the calls below are the same ones, in order.
-
-| Step | Endpoint |
-| --- | --- |
-| Discover strategies | `GET /v1/earn/strategies` |
-| Preview a deposit | `POST /v1/earn/vault-deposit-previews` |
-| Build a deposit | `POST /v1/earn/external-wallet/deposit-transactions` |
-| Submit the signed deposit | `POST /v1/earn/external-wallet/deposits` |
-| Poll a movement | `GET /v1/earn/external-wallet/movements/{movementId}` |
-| Balance and earnings | `GET /v1/earn/external-wallet/earnings?ownerAddress=…` |
-| Activity feed | `GET /v1/earn/external-wallet/movements?ownerAddress=…` |
-| Live positions | `GET /v1/earn/external-wallet/positions?ownerAddress=…` |
-| Portfolio totals | `GET /v1/earn/external-wallet/positions/summary` |
-| Preview a withdrawal | `POST /v1/earn/external-wallet/withdrawal-previews` |
-| Build a withdrawal | `POST /v1/earn/external-wallet/withdrawal-transactions` |
-| Submit the signed withdrawal | `POST /v1/earn/external-wallet/withdrawals` |
-| Discover available withdrawal routes | `POST /v1/earn/external-wallet/withdrawal-options` |
-| Preview an asynchronous withdrawal | `POST /v1/earn/external-wallet/queued-withdrawal-previews` |
-| Build an asynchronous request | `POST /v1/earn/external-wallet/withdrawal-request-transactions` |
-| Submit an asynchronous request | `POST /v1/earn/external-wallet/withdrawal-requests` |
-| Restore asynchronous requests | `GET /v1/earn/external-wallet/withdrawal-requests?ownerAddress=…&settled=false` |
-| Poll an asynchronous request | `GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` |
-| Build request recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions` |
-| Submit request recovery | `POST /v1/earn/external-wallet/withdrawal-request-cancellations` |
-
-Every per-owner read addresses the customer's wallet the same way: a required `ownerAddress` query parameter.
-
-## 1. Pick a strategy
-
-`GET /v1/earn/strategies` returns the catalogue, ranked by deposit size, with the live APY your UI can show. All a build needs from a row is its `id`; the cluster comes from your key's environment and the deposit token from the strategy itself.
-
-Two fields gate what you may offer:
-
-- **`fundable`** answers whether the instrument exists on your environment's cluster. `false` is definitive: the row is browse-only (a mainnet strategy seen from sandbox, for example).
-- **`status`** is the catalogue lifecycle; only `active` strategies accept new deposits. Positions in a strategy that later pauses stay fully withdrawable: money out is never gated by money-in rules.
-
-`depositSlippage` and `withdrawalSlippage` say whether that direction needs a quote-derived floor in your environment. Most production deposits do; an asynchronous next-NAV subscription can answer null when its Solana transaction cannot enforce the later share price. See [Floors and previews](#floors-and-previews). `feeSponsored` describes SDP's own Treasury paymaster and has no effect on Embedded Yield builds: your customer pays unless you name a `feePayer`.
-
-Jupiter Lend contributes its mainnet USDT Earn market (deposits mint jlUSDT receipt tokens; withdrawals redeem them when protocol liquidity allows). Ondo contributes USDY on mainnet with no vault program: a deposit is a USDC to USDY swap through Jupiter, the position is the wallet's USDY balance, a withdrawal is the reverse swap, and both directions require a live quote. Both are mainnet-only and appear in sandbox as browse-only rows.
-
-## 2. Deposit: build, sign, submit, poll
-
-```ts
-const SDP_API_URL = process.env.SDP_API_URL ?? "https://api.solana.com";
-const STRATEGY_ID = "earn_strategy_…"; // from the catalogue or the Integrate page
-
-function sdpHeaders(extra: Record<string, string> = {}) {
-  const apiKey = process.env.SDP_API_KEY;
-  if (!apiKey) throw new Error("SDP_API_KEY is required");
-  return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", ...extra };
-}
-
-async function sdpFetch(path: string, init?: RequestInit) {
-  const response = await fetch(`${SDP_API_URL}${path}`, init);
-  const result = await response.json().catch(() => null);
-  if (!response.ok) {
-    const code = result?.error?.code ? ` ${result.error.code}` : "";
-    throw new Error(`SDP ${response.status}${code}: ${result?.error?.message ?? "Request failed"}`);
-  }
-  return result.data;
-}
-```
-
-**Build.** SDP simulates the deposit before handing anything out, so a wallet that cannot fund it fails here with a readable 400 instead of a landed, failed transaction.
-
-```ts
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify({
-    strategyId: STRATEGY_ID,
-    ownerAddress, // the customer's wallet
-    amount: "25", // decimal string in the strategy's deposit token
-  }),
-});
-// { transactionId, transaction, lastValidBlockHeight, feePayer?, ... }
-```
-
-Add `minSharesOut` whenever the strategy's `depositSlippage` is non-null ([Floors and previews](#floors-and-previews)). Omit it when the field is null; for next-NAV subscriptions a floor cannot be encoded in the on-chain leg.
-
-**Sign.** Hand the base64 `transaction.transaction` to the customer's wallet and get signed bytes back. With a kit wallet signer (for example `useWalletAccountTransactionSigner` from `@solana/react`):
-
-```ts
-
-const unsigned = getTransactionDecoder().decode(getBase64Encoder().encode(transaction.transaction));
-const [signed] = await walletSigner.modifyAndSignTransactions([unsigned]);
-const signedTransaction = getBase64EncodedWireTransaction(signed);
-```
-
-Any wallet library works as long as it returns the signed transaction as base64; the submit only checks signatures.
-
-A built transaction expires with its blockhash, about a minute. If the customer walks away, build a fresh one: submitting an expired build is refused with `409 TRANSACTION_EXPIRED` before anything is recorded.
-
-**Submit.** The `Idempotency-Key` header is required. Reuse the same key when retrying: a retry returns the original movement with `replayed: true` instead of moving money twice, and each built transaction is consumable exactly once.
-
-```ts
-const { deposit } = await sdpFetch("/v1/earn/external-wallet/deposits", {
-  method: "POST",
-  headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
-  body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
-});
-// { movementId, positionId, status, signature, ... }
-```
-
-**Poll.** Each read of the movement checks the transaction's exact signature on chain and advances the recorded status immediately, so state lands as fast as the network decides it. A background reconciler covers RPC outages.
-
-```ts
-const { movement } = await sdpFetch(
-  `/v1/earn/external-wallet/movements/${encodeURIComponent(deposit.movementId)}`,
-  { headers: sdpHeaders() },
-);
-```
-
-Statuses are `requested` (SDP recorded the signed transaction but has not yet seen it on the network), `submitted`, `confirmed`, `finalized`, `failed`. Do not treat `confirmed` as universal economic settlement: it is a Solana observation, and for a provider-order strategy it proves only that the payment or share leg landed. Keep polling until `finalized` or `failed` before accounting for settlement. An atomic strategy's UI may present chain confirmation sooner if it clearly keeps finality distinct and continues the durable poll. A `failed` movement carries a `failureReason`.
-
-## 3. Who pays fees and rent
-
-**By default, the customer's wallet pays everything**: the network fee, plus about 0.002 SOL of rent when a first deposit creates their share token account (refunded when the position fully exits). A customer holding only stablecoins cannot complete that transaction.
-
-**To pay on your customers' behalf, name a `feePayer` on the build.** The named wallet, one you control, becomes the transaction's fee payer and funds the account rent, and the build echoes it back. The transaction then needs its signature alongside the customer's: co-sign server-side after the customer signs, then submit.
-
-```ts
-  createKeyPairFromBytes,
-  getAddressFromPublicKey,
-  getBase64EncodedWireTransaction,
-  getBase64Encoder,
-  getCompiledTransactionMessageDecoder,
-  getTransactionDecoder,
-  partiallySignTransaction,
-} from "@solana/kit";
-
-// 1. Build with your sponsor wallet as the fee payer.
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/deposit-transactions", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify({ strategyId: STRATEGY_ID, ownerAddress, amount, feePayer: SPONSOR_ADDRESS }),
-});
-
-// 2. The customer signs in your app, exactly as before.
-
-// 3. Verify the customer returned the exact message SDP built.
-const decoder = getTransactionDecoder();
-const original = decoder.decode(getBase64Encoder().encode(transaction.transaction));
-const customerSigned = decoder.decode(getBase64Encoder().encode(customerSignedTransaction));
-if (
-  original.messageBytes.length !== customerSigned.messageBytes.length ||
-  original.messageBytes.some((byte, index) => byte !== customerSigned.messageBytes[index])
-) {
-  throw new Error("Customer signer changed the transaction message");
-}
-
-// 4. Verify the configured sponsor is the compiled fee payer, co-sign, then submit.
-const sponsor = await createKeyPairFromBytes(SPONSOR_SECRET_KEY);
-const sponsorAddress = await getAddressFromPublicKey(sponsor.publicKey);
-const message = getCompiledTransactionMessageDecoder().decode(customerSigned.messageBytes);
-if (sponsorAddress !== SPONSOR_ADDRESS || message.staticAccounts[0] !== SPONSOR_ADDRESS) {
-  throw new Error("Sponsor key or transaction fee payer does not match configuration");
-}
-const signedTransaction = getBase64EncodedWireTransaction(
-  await partiallySignTransaction([sponsor], customerSigned),
-);
-```
-
-The generated module wraps these checks as `createSponsorSigner(secretKey, expectedFeePayer)`. Its `signEarnTransaction(built, customerSigner, sponsorSigner)` verifies that neither signer changed the message before it returns the co-signed bytes.
-
-What to know when sponsoring:
-
-- **Both signatures are required.** The submit verifies every signature and names a missing or invalid fee-payer signature, so a co-signing bug on your side is distinguishable from a customer-side one.
-- **The fee payer is committed at build time.** It is inside the signed message, so it cannot be swapped at submit; rebuild if you need a different sponsor.
-- **Keep a SOL float.** The sponsor pays the fee on every sponsored transaction and the rent on every first deposit. The build simulates with your sponsor as the payer and refuses with a 400 naming it when it cannot pay.
-- **Rent comes back to you.** SDP records your sponsor as the rent funder, and a full exit refunds the share account's rent to the recorded funder, not to the customer.
-- **Mind the clock.** Build, customer signature, your co-signature, and submit must all fit inside the blockhash window. Co-sign programmatically, not through a manual approval step.
-- Passing the customer's own address as `feePayer` means the default; the build does not echo it. Program-derived addresses cannot sign, so an off-curve fee payer can never be submitted.
-- Applies to `withdrawal-transactions` identically, and to the standalone swap transaction of a split swap-funded deposit.
-
-### Protect the sponsor key
-
-The sponsor is a hot key on your backend by design: it has to co-sign inside the blockhash window, so it cannot sit behind a manual approval. That makes it a target. Nothing SDP does limits what a stolen or abused sponsor key can spend, because the key never touches SDP; the controls are yours. Treat the following as the minimum before you sponsor on mainnet.
-
-- **Dedicated signer.** Use a keypair whose only job is co-signing SDP builds. Never reuse a treasury, deployer, or hot-wallet key: a compromise of the sponsor must cost you at most the sponsor's float.
-- **Programmatic co-sign only, and only of SDP builds.** Sign transactions your own backend just received from `deposit-transactions`, `withdrawal-transactions`, or a split swap, for a customer session you authenticated, and nothing else. Do not expose a "sign this" endpoint that accepts arbitrary bytes, and do not let the key sign from a client. Verify the fee payer and the program IDs in the decoded message match what you asked SDP to build before signing.
-- **Bound the float.** Keep only what a day or two of expected sponsorship costs in the sponsor wallet, and top it up from a cold or multisig-controlled source on a schedule.
-- **Monitor spend and alert on it.** Track the sponsor's SOL balance and outflow per hour. Alert on the balance crossing your refill threshold, on outflow above your expected ceiling, and on any transfer from the sponsor that is not a fee or rent payment.
-- **Rate-limit sponsorship per customer.** A build costs you nothing until you co-sign, so decide per customer and per session how many sponsored transactions you will sign in a window. SDP does not know which of your customers a wallet belongs to.
-- **Plan rotation.** Keep the sponsor address in configuration, not code. Rent refunds go to the funder recorded at deposit time, so a position sponsored by a retired key still refunds to that key on exit; keep retired sponsor keys retrievable until their positions are closed.
-- **Store the key like a secret.** A secrets manager or KMS-backed signer, never an environment variable in a repository or a file in an image.
-
-## 4. Show balances and activity
-
-A customer who has not deposited yet is not an error: every per-owner read answers `200` with empty lists and zero counts.
-
-- `GET /v1/earn/external-wallet/earnings?ownerAddress=…` returns, per deposit token, `currentValue`, `totalDeposited`, `totalWithdrawn`, and `earned`, where `earned` is current value plus withdrawn minus deposited. It covers positions the customer currently holds; a fully exited position's history lives in the activity feed. `earned` is stated only when exact; while a movement is still pending, or when a withdrawal's payout could not yet be read from its landed transaction (SDP keeps retrying that read for two weeks), it is absent with a named `earnedUnavailableReason`. Render a dash for an absent figure, never $0.
-- `GET /v1/earn/external-wallet/movements?ownerAddress=…` is the customer's activity feed, newest first, keyset-paged via `before`. Render `tokenAmount` in `tokenMint` units for both directions; `amount` and `denomination` are the on-chain quantity, which is shares on a withdrawal. A withdrawal's `tokenAmount` is `null` until it finalizes.
-- `GET /v1/earn/external-wallet/positions?ownerAddress=…` lists live positions. Page it to completion; a silently short list hides withdrawable money. Read `id` and `withdrawableShares` here to drive withdrawals. When `withdrawableShares` is zero and `unlockTimestamp` is present, show the provider's unlock time and keep exit actions disabled until a fresh position read reports withdrawable shares. A position closes when a withdrawal empties it and drops out of this list (`closedAt` set); a later deposit reopens it. If live RPC hydration fails, `shares`, `withdrawableShares`, `unlockTimestamp`, and `tokenValue` are absent, never zero: show an unavailable state and disable withdrawal until a fresh read returns the ceiling.
-- `GET /v1/earn/external-wallet/positions/summary` aggregates your whole project across customers, by strategy and token. By default it is address-free: each strategy total carries `walletCount` and token totals, and no `ownerAddresses`. Pass `includeOwnerAddresses=true` only from a surface that has to show per-customer detail; that list is the full set of your customers' wallet addresses, and any `earn:read` key that requests it becomes a holder of personal data. Add `includePositions=true` to receive the hydrated positions inside each strategy total; it is rejected without the explicit `includeOwnerAddresses=true`.
-
-  **Changed in 0.77:** earlier releases included `ownerAddresses` unless you passed `includeOwnerAddresses=false`. If your integration reads that field, or passes `includePositions=true` on its own, add `includeOwnerAddresses=true` to the request.
-
-## 5. Withdraw
-
-Same build, sign, submit shape. The build names the customer's **position** (never a strategy), so exits keep working even when a vault is delisted or its provider is disabled for new deposits.
-
-```ts
-// What would these shares pay right now? Read-only; nothing is built.
-const quote = await sdpFetch("/v1/earn/external-wallet/withdrawal-previews", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify({ positionId, shares }),
-});
-// { assetsOut, assetDecimals, blockingIssues }
-
-const { transaction } = await sdpFetch("/v1/earn/external-wallet/withdrawal-transactions", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify({ positionId, shares }), // + minAmountOut when withdrawalSlippage is non-null, + feePayer to sponsor
-});
-// customer signs (and your sponsor co-signs, if sponsoring), then submit:
-const { withdrawal } = await sdpFetch("/v1/earn/external-wallet/withdrawals", {
-  method: "POST",
-  headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
-  body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
-});
-```
-
-## 6. Asynchronous withdrawals
-
-Some vaults offer a durable asynchronous exit in addition to, or instead of, an instant exit. Discover the live routes when the customer starts withdrawing. Do not infer them from `liquidityTerm`, and do not silently fall back from the route the customer selected.
-
-There are two distinct mechanisms:
-
-- **Solver queue.** The request escrows shares. After maturity, a solver may pay the discounted asset amount through the deadline. If no solver fulfills it, the owner can recover the shares after the deadline.
-- **Operator redemption.** The request converts the position shares into the provider's `intermediateMint` and delegates that token for settlement. The provider operator later burns it and pays `assetMint` at par. A cancellation revokes the operator's claim but leaves the owner holding the intermediate token; it does not recreate the original shares.
-
-```ts
-const options = await sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify({ positionId }),
-});
-
-if (!options.queued && !options.parRedemption) {
-  throw new Error("Asynchronous withdrawals are not currently available");
-}
-```
-
-When an instant route and either asynchronous mechanism are available, present each as a separate choice. An instant withdrawal pays assets atomically; an asynchronous request does not.
-
-For a solver queue, require `options.queued`, `options.queueAsset`, and `queueAsset.allowWithdrawals`. Show the customer its live terms before confirmation:
-
-- `minimumShares`
-- `minimumDiscountBps` through `maximumDiscountBps`
-- `minimumSecondsToDeadline` through `maximumSecondsToDeadline`
-- `secondsToMaturity`
-
-For an operator redemption, require `options.parRedemption`. Show `minimumShares`, `intermediateMint`, `assetMint`, and whether `cancelable` is true. `operatorSettled: true` means the request transaction is not the payout.
-
-Use exact decimal comparison for shares. Do not convert token quantities to JavaScript numbers. The maximum solver window is currently 90 days, but integrations should always honor the live `maximumSecondsToDeadline` rather than copying that value.
-
-Preview the exact mechanism after validating its live terms. `mechanism: "solverQueue"` is optional for backwards compatibility but should be sent explicitly; `operatorRedemption` is always explicit.
-
-```ts
-const requestTerms =
-  mechanism === "operatorRedemption"
-    ? { positionId, shares, mechanism: "operatorRedemption" as const }
-    : {
-        positionId,
-        shares,
-        mechanism: "solverQueue" as const,
-        discountBps,
-        deadlineSeconds,
-      };
-
-const preview = await sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
-  method: "POST",
-  headers: sdpHeaders(),
-  body: JSON.stringify(requestTerms),
-});
-
-if (preview.blockingIssues.length > 0) {
-  throw new Error(preview.blockingIssues.map((issue) => issue.message).join("; "));
-}
-// Solver preview: assets, discountBps, maturityTimestamp, deadlineTimestamp.
-// Operator preview: mechanism, assets, intermediateMint, intermediateAmount.
-```
-
-Build, sign and submit the request with the same customer and optional sponsor flow used above:
-
-```ts
-const { transaction } = await sdpFetch(
-  "/v1/earn/external-wallet/withdrawal-request-transactions",
-  {
-    method: "POST",
-    headers: sdpHeaders(),
-    body: JSON.stringify({ ...requestTerms, feePayer }),
-  },
-);
-
-// The customer signs transaction.transaction. If feePayer is present, verify
-// the message and fee payer before adding the sponsor signature.
-const { withdrawalRequest } = await sdpFetch(
-  "/v1/earn/external-wallet/withdrawal-requests",
-  {
-    method: "POST",
-    headers: sdpHeaders({ "Idempotency-Key": idempotencyKey }),
-    body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
-  },
-);
-```
-
-Persist `withdrawalRequest.withdrawalRequestId` and branch on `withdrawalRequest.mechanism`. Solver records have numeric `discountBps`, string `maturityTimestamp` and `deadlineTimestamp`, and null intermediate fields. Operator-redemption records have `intermediateMint` and `intermediateAmount`, while the three solver-only fields are null. Confirmation here means the owner-signed request was recorded and submitted. It does not mean assets were paid.
-
-Poll the durable request and restore outstanding requests after every startup, reconnect or browser refresh:
-
-```ts
-const { withdrawalRequest: current } = await sdpFetch(
-  `/v1/earn/external-wallet/withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`,
-  { headers: sdpHeaders() },
-);
-
-const query = new URLSearchParams({ ownerAddress, settled: "false" });
-const page = await sdpFetch(`/v1/earn/external-wallet/withdrawal-requests?${query}`, {
-  headers: sdpHeaders(),
-});
-// Follow nextCursor until hasMore is false. Refuse a missing or repeated cursor.
-```
-
-| Status | Customer meaning | Action |
-| --- | --- | --- |
-| `creating` | Signed request recorded; chain outcome unresolved. | Keep polling. Do not credit assets. |
-| `pending` | The solver request is waiting for maturity, or the operator redemption is waiting for settlement. | For a solver request, show maturity. For a cancelable operator redemption, recovery may already be offered. |
-| `fulfillable` | The solver window is open. | Keep polling through the deadline. Solver queue only. |
-| `expiredCancelable` | The solver deadline passed without an authenticated fulfilment. | Offer share recovery. Solver queue only. |
-| `cancelling` | Recovery was submitted. | Keep polling because fulfilment may race it. |
-| `closedOrUnknown` | The request account closed, but its finalized close event has not yet proved payout or recovery. | Keep polling. Credit neither assets nor shares. |
-| `fulfilled` | A finalized provider event proved the asset payout. | Terminal. The payout appears once in activity and earnings. |
-| `cancelled` | A finalized provider event proved recovery. | Terminal. A solver request returned shares; an operator redemption left the intermediate token with the owner. Refresh balances. |
-| `failed` | Request creation or recovery failed definitively. | Terminal. Show `failureReason`. |
-
-The solver queue permits fulfilment at the deadline, so use `expiredCancelable` rather than a client clock to enable its recovery. A cancelable operator redemption can be revoked while `pending`; use its mechanism and the discovered `parRedemption.cancelable` term rather than waiting for a nonexistent deadline:
-
-```ts
-const canRecover =
-  current.mechanism === "operatorRedemption"
-    ? current.status === "pending" && options.parRedemption?.cancelable === true
-    : current.status === "expiredCancelable";
-
-if (canRecover) {
-  const { transaction } = await sdpFetch(
-    "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
-    {
-      method: "POST",
-      headers: sdpHeaders(),
-      body: JSON.stringify({ withdrawalRequestId: current.withdrawalRequestId, feePayer }),
-    },
-  );
-
-  // Collect the required signatures, then submit with a new idempotency key.
-  await sdpFetch("/v1/earn/external-wallet/withdrawal-request-cancellations", {
-    method: "POST",
-    headers: sdpHeaders({ "Idempotency-Key": cancelIdempotencyKey }),
-    body: JSON.stringify({ transactionId: transaction.transactionId, signedTransaction }),
-  });
-}
-```
-
-A request transaction and a cancellation transaction are lifecycle actions, not payouts. Never add either to the customer's available payout-asset balance. Only `fulfilled` creates the corresponding withdrawal movement. On `cancelled`, refresh the original share balance for a solver request or the intermediate-token balance for an operator redemption.
-
-## Floors and previews
-
-Both previews work for every provider and are the figures to show a customer before they confirm. Whether a build also takes a protection floor depends on the strategy row:
-
-| Field | Non-null | Null |
-| --- | --- | --- |
-| `depositSlippage` | The build requires `minSharesOut`. Preview first and derive the floor from `sharesOut` minus the tolerance your customer chose (`defaultToleranceBps` is a suggested start). | The build does not accept a share floor. This can mean a sandbox live-rate deposit or a next-NAV subscription whose later settlement cannot be bounded by its on-chain leg. |
-| `withdrawalSlippage` | The build requires `minAmountOut`, derived from `assetsOut` the same way. | The vault's withdraw instruction takes only a share amount, so no floor can be enforced on chain. Do not pass `minAmountOut`; the build refuses it with a 400. |
-
-`depositSlippage` is answered for your environment, like `fundable`: most production deposits require `minSharesOut`, and a provider whose builder refuses an implicit floor requires one in sandbox too. A next-NAV provider can explicitly publish null because no instruction can enforce the price of later transfer-agent settlement. `withdrawalSlippage` depends on the provider alone. A build that omits a floor its row said it needs fails with a 400 that names the preview endpoint.
-
-Derive a floor from the live quote, never from the amount you sent; the tolerance covers only the state moving between the quote and the transaction landing. The generated module includes `floorForTolerance`, an exact decimal floor without a JavaScript number round-trip, and applies it only for strategies that require one.
-
-## Swap-funded deposits
-
-Pass `sourceTokenMint` to accept a stablecoin the vault does not take: SDP prepends a Jupiter swap inside the same transaction, `amount` becomes the source amount, and the response's `transaction.swap` reports the derived deposit. Accepted source tokens are USDC, USDG, PYUSD, and USDT on mainnet; USDT has no devnet mint. Jupiter has no devnet routes, so swap-funded deposits cannot be exercised in sandbox.
-
-If the composed transaction cannot fit one Solana packet, the response is `{ requiresSeparateSwap: true, swap, followUp }` instead: have the wallet sign `swap.transaction` and broadcast it yourself, then build again with the `followUp` body, which echoes your original `minSharesOut` and `feePayer` so the follow-up keeps the same protections.
-
-Recovery across that split is yours: persist the swap signature and the `followUp` body before broadcasting, and reconcile before you rebuild, because SDP records no movement for the standalone swap. For keyed builds SDP records that it handed the swap out and flags owners whose deposit-token balance rose by the swap's floor with no follow-up deposit after a grace period, so a dropped follow-up will be noticed; it will not be repaired for you. Keyless builds store nothing.
-
-## Idempotency and errors, in one place
-
-| Call | Rule |
-| --- | --- |
-| Builds | No `Idempotency-Key`. A build moves no money and expires with its blockhash. |
-| Submits | `Idempotency-Key` header required. Same key on retry returns the original movement or asynchronous request (`replayed: true`). Use a different key for a later cancellation action. |
-
-| Response | Meaning | What to do |
-| --- | --- | --- |
-| `400` | The request or the current vault state must change. | Fix the request or show the message; do not retry unchanged. |
-| `409 TRANSACTION_EXPIRED` | The build's blockhash expired before submit. Nothing was recorded. | Build again and have the customer sign the new transaction. |
-| `409 CONFLICT` (any other message) | The build was already consumed under a different idempotency key, or the key was reused with a different body. | Look up the existing movement or asynchronous request; do not rebuild blindly. |
-| `422 SIGNING_REJECTED` | A fee sponsor refused the transaction by policy. | The same transaction will be refused again; change it. |
-| `503 PROVIDER_UNAVAILABLE` | Live provider or RPC state could not be read. | Retry the read-only preview or build with bounded backoff. |
-| Timeout or 5xx on a submit | Outcome uncertain. | Retry the exact signed bytes with the same `Idempotency-Key`. |
-
-## Before production
-
-Work through this in sandbox before you go live. Each item is something SDP cannot check for you.
-
-- Your submit path retries an uncertain response with the same signed bytes and the same `Idempotency-Key`, rebuilds on `409 TRANSACTION_EXPIRED`, and looks up the movement on any other `409`.
-- Your UI does not equate `confirmed` with provider settlement. It keeps provider-order payment/share legs pending, and any workflow that accounts for settlement tracks `finalized` or `failed`.
-- Absent fields render as absent (a dash, never `$0`), and you handle every status in the vocabulary rather than collapsing unknown ones.
-- If you accept swap-funded deposits, you have run one small split-swap recovery drill on mainnet: a swap broadcast, a simulated crash, and the follow-up deposit rebuilt from persisted state. Sandbox cannot exercise it.
-- If you sponsor fees, the sponsor key meets every point in [Protect the sponsor key](#protect-the-sponsor-key), and the spend alerts have fired at least once in a drill.
-
-Full request and response shapes: [Earn API reference](/docs/reference/api/earn).
 
 ---
 
@@ -2637,7 +2136,7 @@ Source: https://platform.solana.com/docs/wallet-operations
 
 > Configure custody-wallet controls, operation permissions, and balances.
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity such as Earn vault deposits, whichever product flow initiates the request.
+This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
 
 ## What's in this section
 
@@ -2787,13 +2286,13 @@ A `velocity` rule caps volume over a rolling window instead of per operation:
 
 ```json title="velocity-rule.json"
 {
-  "id": "daily-usdc-deposits",
+  "id": "daily-usdc-transfers",
   "kind": "velocity",
   "scope": "organization",
   "window": "P1D",
   "max": "100000",
   "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  "operationTypes": ["earn_vault_deposit"],
+  "operationTypes": ["payment_transfer_execute"],
   "action": "approval_required"
 }
 ```
@@ -2821,7 +2320,7 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
 | `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
-| `program` | On-chain program interactions signed by the wallet. | Earn vault deposits |
+| `program` | On-chain program interactions signed by the wallet. | No current public operation type |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
@@ -2844,7 +2343,6 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
 | `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
 | `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
-| `earn_vault_deposit` | `program` | Deposits custody-wallet assets into a supported non-custodial Earn vault. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
@@ -5567,8 +5065,6 @@ For provider-managed co-signer runtimes that live outside the default stack, see
 | `SDP_API_PORT` | `8787` | Host port for the API. |
 | `SDP_WEB_PORT` | `3000` | Host port for the dashboard. |
 | `SDP_DOCS_PORT` | `3001` | Host port for these docs. |
-| `EARN_ANONYMOUS_RPC_MAX_REQUESTS` | `20` | Paid-upstream calls allowed per anonymous client IP in one Earn RPC quota window. |
-| `EARN_ANONYMOUS_RPC_WINDOW_SECONDS` | `60` | Anonymous Earn RPC quota window in seconds. |
 | `TRUST_PROXY_HEADERS` | `false` | Trust the first `X-Forwarded-For` address outside Cloud Run. Enable only behind an ingress that replaces caller-supplied forwarding headers; direct deployments share the fail-closed unidentified quota bucket. |
 
 `SDP_API_BASE_URL` defaults to the in-network service name `http://sdp-api:8787`
@@ -6012,7 +5508,6 @@ Use this page when you need the public AI-facing entry points for Solana Develop
 - Token issuance and lifecycle operations
 - Payments, transfers, and ramps
 - Compliance screening
-- Embedded Yield strategy discovery, caller-signed transactions, and queued withdrawals
 
 ---
 
@@ -6038,13 +5533,6 @@ When you import the collection into Postman, set:
 - `baseUrl` to the SDP API environment you want to target
 - `sdpApiKey` to your bearer API key
 
-The eight optional-auth Earn requests import with **No Auth**: strategy list and
-detail, deposit preview and build, direct-withdrawal preview and build,
-withdrawal-route discovery, and queued-withdrawal preview. To exercise their
-authenticated behavior, switch the individual request to **Inherit auth from
-parent**. Queued request or cancellation builds, tenant reads, and transaction
-submissions always inherit the collection API key.
-
 ---
 
 ## API
@@ -6069,7 +5557,6 @@ Source: https://platform.solana.com/docs/reference/api
 - [Policies](/docs/reference/api/policies)
 - [Compliance](/docs/reference/api/compliance)
 - [Asset Profiles](/docs/reference/api/asset-profiles)
-- [Earn](/docs/reference/api/earn)
 
 ---
 
@@ -6285,37 +5772,6 @@ Source: https://platform.solana.com/docs/reference/api/asset-profiles
 | `PATCH` | `/v1/issuance/asset-profiles/{profileId}` | Update asset profile |
 | `GET` | `/v1/issuance/asset-profiles/by-token/{tokenId}` | Get asset profile by token |
 | `GET` | `/v1/issuance/asset-profiles/field-options` | Get asset profile field options |
-
----
-
-### Earn
-Source: https://platform.solana.com/docs/reference/api/earn
-
-> Keyless strategy reads, previews, withdrawal-route discovery, and instant unsigned builds, plus authenticated submission, queued actions, and tenant tracking.
-
-| Method | Endpoint | Summary |
-| --- | --- | --- |
-| `POST` | `/v1/earn/external-wallet/deposit-transactions` | Build an unsigned external-wallet deposit transaction |
-| `POST` | `/v1/earn/external-wallet/deposits` | Submit a signed external-wallet deposit |
-| `GET` | `/v1/earn/external-wallet/earnings` | Get one external wallet's balance and earnings |
-| `GET` | `/v1/earn/external-wallet/movements` | List one external wallet's activity |
-| `GET` | `/v1/earn/external-wallet/movements/{movementId}` | Get one external-wallet movement |
-| `GET` | `/v1/earn/external-wallet/positions` | List one external wallet's positions |
-| `GET` | `/v1/earn/external-wallet/positions/summary` | Get external-wallet position totals |
-| `POST` | `/v1/earn/external-wallet/queued-withdrawal-previews` | Preview an asynchronous external-wallet withdrawal |
-| `POST` | `/v1/earn/external-wallet/withdrawal-options` | Discover external-wallet withdrawal routes |
-| `POST` | `/v1/earn/external-wallet/withdrawal-previews` | Preview an external-wallet exit |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancel-transactions` | Build an unsigned asynchronous-withdrawal cancellation |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-cancellations` | Submit a signed asynchronous-withdrawal cancellation |
-| `POST` | `/v1/earn/external-wallet/withdrawal-request-transactions` | Build an unsigned asynchronous-withdrawal request |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests` | List an external wallet's asynchronous withdrawals |
-| `POST` | `/v1/earn/external-wallet/withdrawal-requests` | Submit a signed asynchronous-withdrawal request |
-| `GET` | `/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}` | Get one asynchronous-withdrawal request |
-| `POST` | `/v1/earn/external-wallet/withdrawal-transactions` | Build an unsigned external-wallet exit transaction |
-| `POST` | `/v1/earn/external-wallet/withdrawals` | Submit a signed external-wallet withdrawal |
-| `GET` | `/v1/earn/strategies` | List yield strategies |
-| `GET` | `/v1/earn/strategies/{strategyId}` | Get one yield strategy |
-| `POST` | `/v1/earn/vault-deposit-previews` | Preview a direct vault deposit |
 
 ## Notes
 - Generated from docs source. Hidden or internal-only APIs are intentionally excluded.

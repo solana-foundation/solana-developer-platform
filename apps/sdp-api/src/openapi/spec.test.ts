@@ -91,9 +91,30 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
+  it("holds the Earn family out of the public document until launch", () => {
+    // PUBLICATION HOLD (PRO-2038). The default public document, which is what
+    // api.solana.com/openapi.json, Swagger UI, the API reference, the Postman
+    // collection, the playground catalog and the AI files are built from,
+    // carries no Earn operation and no Earn tag. Flipping
+    // EARN_PUBLIC_SURFACE_PUBLISHED is a PRO-1872 security sign-off PR; when it
+    // flips, move these assertions to the publishable document below.
+    const publicDocument = createPublicOpenApiDocument();
+    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.startsWith("/v1/earn"))).toEqual(
+      []
+    );
+    expect(publicDocument.tags?.map((tag) => tag.name)).not.toContain("Earn");
+    expect(JSON.stringify(publicDocument)).not.toMatch(/\/v1\/earn/);
+    // Deliberately still present: the wallet-policy `operationTypes` enum keeps
+    // `earn_vault_deposit`, `earn_vault_withdrawal` and `earn_program_withdrawal`,
+    // because the policy API accepts them today and the public schema must not
+    // lie about accepted values. Nothing else in the document names Earn.
+  });
+
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
-    const publicDocument = createPublicOpenApiDocument();
+    // The publishable Earn document: what partners see once PRO-2038 flips the
+    // hold. Pinned here so the contract cannot drift while it is held.
+    const publicDocument = createPublicOpenApiDocument({ publishEarn: true });
 
     expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
       type: "http",
@@ -315,10 +336,12 @@ describe("OpenAPI spec", () => {
     );
   });
 
-  it("keeps every literal Embedded Yield guide route in public OpenAPI", () => {
-    const publicDocument = createPublicOpenApiDocument();
+  it("keeps every literal Embedded Yield guide route in the publishable Earn document", () => {
+    const publicDocument = createPublicOpenApiDocument({ publishEarn: true });
+    // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
+    // "Unpublishing a Page") but its route contract is still pinned here.
     const guide = readFileSync(
-      new URL("../../../sdp-docs/content/docs/guides/embedded-yield.mdx", import.meta.url),
+      new URL("../../../sdp-docs/content/unpublished/guides/embedded-yield.mdx", import.meta.url),
       "utf8"
     );
     const generatedModule = readFileSync(
@@ -347,7 +370,7 @@ describe("OpenAPI spec", () => {
   });
 
   it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
-    const doc = createPublicOpenApiDocument();
+    const doc = createPublicOpenApiDocument({ publishEarn: true });
     const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
 
     const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
@@ -684,8 +707,10 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
-      "Earn",
     ]);
+    expect(
+      createPublicOpenApiDocument({ publishEarn: true }).tags?.map((tag) => tag.name)
+    ).toContain("Earn");
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

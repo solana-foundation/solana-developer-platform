@@ -50,7 +50,6 @@ const FEATURE_SUMMARY = [
   "Payments, transfers, and ramps",
   "Compliance screening",
   "Asset profiles and public token metadata",
-  "Caller-signed Earn vault deposits and exits",
 ];
 
 const KEY_PAGE_SLUGS = [
@@ -78,7 +77,6 @@ const KEY_PAGE_SLUGS = [
   "reference/api/payments",
   "reference/api/compliance",
   "reference/api/asset-profiles",
-  "reference/api/earn",
 ];
 
 function stripMarkdownFormatting(value: string): string {

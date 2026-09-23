@@ -292,7 +292,7 @@ function toPostmanCollection(spec) {
     info: {
       name: "Solana Developer Platform Public API",
       description:
-        "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded, and keyless Earn operations are imported with No Auth.",
+        "Public Postman collection generated from the SDP OpenAPI contract. Internal-only endpoint families are excluded.",
       schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     },
     auth: {

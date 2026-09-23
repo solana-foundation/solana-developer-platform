@@ -18,7 +18,8 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * The sections concatenate into one server module. `@solana/kit` is the only
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
- * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+ * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
+ * unpublished until PRO-2038)
  * documents this same authenticated flow plus the keyless catalogue and
  * unsigned-build tier. Keep the shared contract aligned in both.
  */

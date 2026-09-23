@@ -29,9 +29,10 @@ Do not hand-edit generated artifacts. Regenerate them with the owning script.
 
 Public docs and AI artifacts should mirror the supported public surface only.
 
-- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`, `earn`
+- Public API families: `health`, `api-keys`, `wallets`, `projects`, `issuance`, `payments`, `policies`, `compliance`
+- `earn` is held out of every public surface until launch (PRO-2038): `EARN_PUBLIC_SURFACE_PUBLISHED` in `apps/sdp-api/src/openapi/spec.ts` drops the family from the public OpenAPI document, and the API reference, Postman collection, playground catalog and AI files regenerate from it. Flipping it back is a PRO-1872 security sign-off PR. The runtime and the internal document are unchanged.
 - Hidden/internal families stay out of public AI resources unless product policy changes: `rpc`, `admin`, `onboarding`, `auth`, `organizations`, `members`
-- Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, withdrawal-route discovery, and unsigned instant deposit/direct-withdrawal builds may be keyless. Queued request and cancellation builds, submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, OpenAPI, API reference, Embedded Yield guide, and AI discovery resources.
+- Earn has two access tiers. Only strategy catalogue reads, deposit and withdrawal previews, withdrawal-route discovery, and unsigned instant deposit/direct-withdrawal builds may be keyless. Queued request and cancellation builds, submits, tenant reads, programs, custody routes, and the aggregate movement feed always require authentication. Keep this matrix aligned across the router, the internal OpenAPI document and the Embedded Yield guide, which is unpublished until PRO-2038 and lives at `apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, outside the built `content/docs` tree.
 - Promoting a route into the public OpenAPI document is a security-relevant scope change, not a docs edit: the PR needs a named security sign-off. For `earn` the pinned list in `apps/sdp-api/src/openapi/spec.test.ts` enforces this (see `apps/sdp-api/src/routes/earn/CLAUDE.md`, "Public OpenAPI promotion").
 
 ## Preferred checks

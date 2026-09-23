@@ -117,6 +117,14 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
+  **Publication hold (PRO-2038):** since PR #2005 the whole family is held out
+  of the DEFAULT public document by `EARN_PUBLIC_SURFACE_PUBLISHED` in
+  `../../openapi/spec.ts`, so api.solana.com/openapi.json, Swagger UI, the API
+  reference, Postman, the playground catalog and the AI files carry no Earn
+  until launch. The pinned list is asserted against
+  `createPublicOpenApiDocument({ publishEarn: true })`, and a sibling test
+  asserts the default document is Earn-free. Flipping the constant is the
+  sign-off PR.
   The current contract pins eight optional-auth operations: strategy list/detail,
   vault deposit preview, external-wallet deposit build, withdrawal preview,
   withdrawal build, withdrawal-options discovery, and queued-withdrawal preview.
