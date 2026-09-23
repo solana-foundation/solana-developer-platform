@@ -327,7 +327,8 @@
     "holdingsCount": "{count} Token",
     "holdingsCountSingle": "1 Token",
     "categoryPayments": "Thanh toán",
-    "categoryIssuance": "Phát hành"
+    "categoryIssuance": "Phát hành",
+    "somePaymentsActivityUnavailable": "Một số hoạt động thanh toán không tải được."
   },
   "integrations": {
     "pageDescription": "Mọi nhà cung cấp SDP có thể chạy cho tổ chức này, kèm những gì đã kết nối và bước tiếp theo. Custody cài từ Wallets; các nhóm khác được cấp phát theo deployment.",

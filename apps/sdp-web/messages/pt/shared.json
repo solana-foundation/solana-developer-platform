@@ -326,7 +326,8 @@
     "quickActionApiKeysBody": "Autentique sua primeira requisição.",
     "quickActionPayments": "Enviar um pagamento",
     "quickActionPaymentsBody": "Transfira fundos para uma contraparte.",
-    "quickActionPolicies": "Definir uma política de Wallet"
+    "quickActionPolicies": "Definir uma política de Wallet",
+    "somePaymentsActivityUnavailable": "Parte da atividade de Pagamentos não pôde ser carregada."
   },
   "integrations": {
     "pageDescription": "Todos os provedores que a SDP pode executar para esta organização, com o que está conectado e o que fazer em seguida. A Custody é instalada pelas Wallets; as outras famílias são provisionadas por deployment.",

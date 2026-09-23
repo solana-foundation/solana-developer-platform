@@ -327,7 +327,8 @@
     "holdingsSharePercent": "{percent}%",
     "holdingsUnavailable": "La tenencia no está disponible en este momento.",
     "holdingsCount": "{count} Tokens",
-    "holdingsCountSingle": "1 Token"
+    "holdingsCountSingle": "1 Token",
+    "somePaymentsActivityUnavailable": "No se pudo cargar parte de la actividad de pagos."
   },
   "integrations": {
     "pageDescription": "Cada proveedor que SDP puede ejecutar para esta organización, con lo que está conectado y qué hacer a continuación. Custody se instala desde Wallets; las demás familias se aprovisionan por despliegue.",
