@@ -140,8 +140,9 @@ nothing else; the program create still sends the body `requestId` form.
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
-  documented in the public docs guide
-  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`). That public guide
+  documented in the docs guide
+  (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, unpublished
+  until PRO-1802). That guide
   also owns the keyless quickstart; these dashboard snippets intentionally stay
   keyed because they include submit and tenant read routes. Keep the shared
   authenticated flow aligned across both. The guide is

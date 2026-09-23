@@ -180,6 +180,17 @@ export default function MyPage() {
 4. For full-width layout (no TOC): `<DocsPage full>`
 5. For TOC: pass `toc` array of `{ title, url, depth }` to `<DocsPage toc={toc}>`
 
+## Unpublishing a Page
+
+Every MDX under `content/docs/` is built and served (static params, search index, `llms-full.txt`) whether or not `meta.json` lists it, so removing the nav entry alone only hides the sidebar link. To take a page down while keeping it in the repo:
+
+1. `git mv` it under `content/unpublished/` (same relative path). Nothing reads that directory.
+2. Remove it from the section `meta.json`.
+3. Repoint or drop inbound links from other pages; `check:links` fails on a link to a missing page.
+4. Run `pnpm generate:api && pnpm generate:ai` and commit `public/llms*.txt`; CI diffs them against the generated output.
+
+Currently unpublished: `guides/embedded-yield` (until PRO-1802).
+
 ---
 
 ## Do's and Don'ts
