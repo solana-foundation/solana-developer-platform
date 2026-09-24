@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
-import { extractProviderErrorMessage, providerFetch } from "./fetch";
+import { SdpPaymentsError } from "../errors";
+import { extractProviderErrorMessage, PROVIDER_MAX_RESPONSE_BYTES, providerFetch } from "./fetch";
 
 const originalFetch = globalThis.fetch;
 
@@ -66,5 +67,44 @@ describe("providerFetch abort signal", () => {
     assert.equal(capturedSignal, controller.signal);
     assert.deepEqual(result.parsed, { ok: true });
     assert.equal(result.raw, '{"ok":true}');
+  });
+});
+
+describe("providerFetch fences", () => {
+  it("providerFetch_applies_a_default_timeout_without_a_caller_signal", async () => {
+    let capturedSignal: AbortSignal | null | undefined;
+    globalThis.fetch = async (_input, init) => {
+      capturedSignal = init?.signal;
+      return new Response("{}", { status: 200 });
+    };
+
+    await providerFetch("mural", "https://api.example.test/ping", { method: "GET" });
+
+    assert.ok(capturedSignal instanceof AbortSignal);
+    assert.equal(capturedSignal.aborted, false);
+  });
+
+  it("providerFetch_refuses_a_body_over_the_byte_cap", async () => {
+    const chunk = new Uint8Array(1024 * 1024);
+    let pulled = 0;
+    globalThis.fetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(chunk);
+          },
+        }),
+        { status: 200 }
+      );
+
+    await assert.rejects(
+      providerFetch("mural", "https://api.example.test/huge", { method: "GET" }),
+      (error: unknown) =>
+        error instanceof SdpPaymentsError &&
+        error.code === "PROVIDER_UNAVAILABLE" &&
+        error.message.includes(String(PROVIDER_MAX_RESPONSE_BYTES))
+    );
+    assert.ok(pulled <= PROVIDER_MAX_RESPONSE_BYTES / chunk.byteLength + 2);
   });
 });

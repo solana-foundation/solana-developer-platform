@@ -14,6 +14,16 @@ describe("unified transaction module permissions", () => {
     expect(permittedUnifiedTransactionModules(["earn:read"])).toEqual(["earn"]);
   });
 
+  it("requires both wallet and payment read access for DvP", () => {
+    expect(permittedUnifiedTransactionModules(["wallets:read"])).toEqual([]);
+    expect(permittedUnifiedTransactionModules(["wallets:read", "payments:read"])).toEqual([
+      "payments",
+      "dvp",
+      "private_channels",
+      "rings",
+    ]);
+  });
+
   it("allows wildcard identities to see every module", () => {
     expect(permittedUnifiedTransactionModules("*")).toEqual([
       "payments",
