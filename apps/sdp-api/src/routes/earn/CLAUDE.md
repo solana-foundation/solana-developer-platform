@@ -225,7 +225,7 @@ widen the surface just to make a test pass.
     in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
     shows ONLY those vaults, so a newly created one does not appear until someone
     adds it). Both push into SQL so `total` moves with the rows. Since PRO-1727
-    the allowlists are POPULATED — the six-vault V1 Kamino shelf on
+    the allowlists are POPULATED — the curated V1 Kamino shelf on
     mainnet-beta, its devnet equivalents for sandbox — so a new Kamino vault
     does not surface until someone adds it to `handlers/curation.ts`, and
     every route test seeding an uncurated reference relies on the
