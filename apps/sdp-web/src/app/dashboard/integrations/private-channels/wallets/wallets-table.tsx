@@ -29,6 +29,11 @@ import type { WalletChannelBalance } from "../private-channels-page.data";
 import { deleteVerifiedWalletAction, verifyWalletAction } from "./actions";
 
 interface Props {
+  /**
+   * The project this table's data was rendered under; verify and revoke submit
+   * bound to it rather than re-reading the mutable selection cookie.
+   */
+  projectId: string;
   verifiedWallets: PrivateChannelVerifiedWalletDto[];
   custodyWallets: CustodyWalletSummary[];
   /** Keyed by wallet pubkey; entry present when the balance read succeeded. */
@@ -71,6 +76,7 @@ function WalletBalanceCell({
 }
 
 export function WalletsTable({
+  projectId,
   verifiedWallets,
   custodyWallets,
   channelBalances,
@@ -96,7 +102,7 @@ export function WalletsTable({
   function handleVerify(walletId: string, pubkey: string) {
     setPendingKey(walletId);
     startTransition(async () => {
-      const result = await verifyWalletAction(walletId);
+      const result = await verifyWalletAction({ walletId, projectId });
       if (result.ok) {
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.verifySuccess", { key: shortKey(pubkey) })
@@ -118,7 +124,7 @@ export function WalletsTable({
   function handleDelete(pubkey: string) {
     setPendingKey(pubkey);
     startTransition(async () => {
-      const result = await deleteVerifiedWalletAction(pubkey);
+      const result = await deleteVerifiedWalletAction({ pubkey, projectId });
       if (result.ok) {
         toast.success(
           t("DashboardPrivateChannels.verifiedWallets.revokeSuccess", { key: shortKey(pubkey) })

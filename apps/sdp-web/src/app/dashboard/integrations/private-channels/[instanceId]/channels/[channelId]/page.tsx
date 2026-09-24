@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { getTranslations } from "@/i18n/server";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
 import { ChannelTokensPanel } from "../../../channels/channel-tokens-panel";
 import { requirePrivateChannelsAccess } from "../../../private-channels-access";
 import { PrivateChannelsLoadError } from "../../../private-channels-load-error";
@@ -89,11 +89,17 @@ export default async function PrivateChannelDetailPage({
 }) {
   await requirePrivateChannelsAccess();
 
-  const [{ instanceId, channelId }, t, client] = await Promise.all([
+  // The scope this page's wallet data was loaded under; the wallets table's
+  // verify/revoke actions re-bind to it instead of the mutable cookie.
+  const [{ instanceId, channelId }, t, client, projectId] = await Promise.all([
     params,
     getTranslations(),
     createSdpApiClient(),
+    getSelectedProjectId(),
   ]);
+  if (!projectId) {
+    throw new Error("Selected project required");
+  }
   const result = await loadPrivateChannelDetail(instanceId, channelId, t, client);
   if (!result.ok) return <PrivateChannelsLoadError message={result.error} />;
 
@@ -175,6 +181,7 @@ export default async function PrivateChannelDetailPage({
       </Card>
 
       <WalletsTable
+        projectId={projectId}
         verifiedWallets={verifiedWallets}
         custodyWallets={custodyWallets}
         channelBalances={{}}

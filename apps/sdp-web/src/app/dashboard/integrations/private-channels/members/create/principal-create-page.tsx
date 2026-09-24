@@ -29,7 +29,14 @@ function walletLabel(wallet: CustodyWalletSummary): string {
   return `${name} (${shortKey(wallet.publicKey)})`;
 }
 
-export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary[] }) {
+export function PrincipalCreatePage({
+  projectId,
+  wallets,
+}: {
+  /** The project this wizard rendered under; wallet verification binds to it. */
+  projectId: string;
+  wallets: CustodyWalletSummary[];
+}) {
   const router = useRouter();
   const t = useTranslations();
   const workspace = useOptionalDashboardWorkspace();
@@ -55,7 +62,7 @@ export function PrincipalCreatePage({ wallets }: { wallets: CustodyWalletSummary
         setCreatedPrincipalId(principalId);
       }
 
-      const walletResult = await verifyWalletAction(walletId, principalId);
+      const walletResult = await verifyWalletAction({ walletId, projectId, principalId });
       if (!walletResult.ok) {
         toast.error(walletResult.message);
         return;
