@@ -963,7 +963,7 @@ export function getDashboardPageConfig(
   }
   if (pathname === "/dashboard/payments/recurring/create") {
     return {
-      title: t("Shared.dashboardShell.recurringPayment"),
+      title: t("DashboardPayments.recurring.newSchedule"),
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
       backAction: {

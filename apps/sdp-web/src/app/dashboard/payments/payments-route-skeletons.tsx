@@ -187,7 +187,13 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
  * A refresh flow's first step: the step name and bar, its fields, and the footer band pinned
  * to the bottom of the viewport, as WizardFrame lays them out.
  */
-function FlowPageSkeleton({ layout, children }: { layout: "payments-pay"; children: ReactNode }) {
+function FlowPageSkeleton({
+  layout,
+  children,
+}: {
+  layout: "payments-pay" | "recurring-payment-create";
+  children: ReactNode;
+}) {
   return (
     <div
       className="flex h-full min-h-0 w-full flex-col"
@@ -217,35 +223,6 @@ function FlowPageSkeleton({ layout, children }: { layout: "payments-pay"; childr
   );
 }
 
-function CounterpartyPickerSkeleton() {
-  return (
-    <div className="space-y-3" data-loading-counterparty-picker>
-      <div
-        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left"
-        data-loading-add-counterparty
-      >
-        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle">
-          <SkeletonBlock className="size-4 rounded-full" />
-        </div>
-        <div className="min-w-0 flex-1 space-y-2">
-          <SkeletonBlock className="h-4 w-40 max-w-full" />
-          <SkeletonBlock className="h-4 w-64 max-w-full" />
-        </div>
-      </div>
-      <div className="flex flex-col gap-2" data-loading-combobox>
-        <SkeletonBlock className="h-4 w-28" />
-        <div className="flex h-[var(--input-height-xl)] w-full items-center gap-2 rounded-[var(--input-radius-xl)] border border-border-default bg-transparent px-[var(--input-padding-x-xl)]">
-          <SkeletonBlock className="size-5 shrink-0 rounded-full" />
-          <div className="min-w-0 flex-1">
-            <SkeletonBlock className="h-4 w-40 max-w-full" />
-          </div>
-          <SkeletonBlock className="size-5 shrink-0 rounded-full" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function WizardProgressSkeleton({ steps }: { steps: number }) {
   return (
     <div className="flex items-center gap-4">
@@ -258,41 +235,6 @@ function WizardProgressSkeleton({ steps }: { steps: number }) {
         ))}
       </div>
       <SkeletonBlock className="h-3 w-16" />
-    </div>
-  );
-}
-
-function WizardPageSkeleton({
-  layout,
-  steps = 2,
-}: {
-  layout: "payments-pay" | "payments-deposit" | "recurring-payment-create";
-  steps?: number;
-}) {
-  return (
-    <div
-      className="flex h-full min-h-0 w-full flex-col"
-      data-loading-layout={layout}
-      data-loading-wizard
-      aria-busy="true"
-    >
-      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
-        <div className="mx-auto w-full max-w-3xl">
-          <WizardProgressSkeleton steps={steps} />
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden px-4 md:px-6">
-        <div className="mx-auto w-full max-w-3xl space-y-6 pb-8">
-          <SkeletonBlock className="h-8 w-80 max-w-[88%]" />
-          <CounterpartyPickerSkeleton />
-        </div>
-      </div>
-      <div className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          <SkeletonBlock className="h-10 w-24 rounded-lg" />
-          <SkeletonBlock className="h-10 w-24 rounded-lg" />
-        </div>
-      </div>
     </div>
   );
 }
@@ -355,8 +297,19 @@ export function PaymentsDepositPageSkeleton() {
   );
 }
 
+/** New schedule's payment step: the step's question, contact, source wallet, amount beside token. */
 export function RecurringPaymentCreateSkeleton() {
-  return <WizardPageSkeleton layout="recurring-payment-create" steps={4} />;
+  return (
+    <FlowPageSkeleton layout="recurring-payment-create">
+      <SkeletonBlock className="h-6 w-56 max-w-full" />
+      <UnderlineFieldSkeleton value="w-40" />
+      <UnderlineFieldSkeleton value="w-56" />
+      <div className="grid grid-cols-2 gap-6">
+        <UnderlineFieldSkeleton value="w-24" />
+        <UnderlineFieldSkeleton value="w-16" />
+      </div>
+    </FlowPageSkeleton>
+  );
 }
 
 export function CounterpartyCreateSkeleton() {

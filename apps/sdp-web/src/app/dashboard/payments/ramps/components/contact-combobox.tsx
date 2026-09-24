@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
 import { useThemeScope } from "@/components/theme-scope";
 import { Combobox } from "@/components/ui/combobox";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -21,7 +21,13 @@ export function ContactCombobox({
   onChange,
   value,
   hint,
-}: ContactControls & { value: string; hint: string }) {
+  footer,
+}: ContactControls & {
+  value: string;
+  hint: string;
+  /** Rendered under the list, e.g. a "New contact" action; called with a function that closes it. */
+  footer?: (close: () => void) => ReactNode;
+}) {
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
   const options = useMemo(
@@ -44,6 +50,7 @@ export function ContactCombobox({
       options={options}
       placeholder={t("DashboardPayments.payForm.selectContact")}
       searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
+      footer={footer}
       error={
         counterpartiesResult.ok
           ? undefined

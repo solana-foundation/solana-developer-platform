@@ -66,6 +66,14 @@
    package derives its text and component tokens from its gray ramp at :root, so each one the
    design touches is re-stated here to resolve against the scope's palette. */
 [data-sdp-theme="refresh"] {
+  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
+     which the browser matches to the Medium face, so every plain run came out heavy. The design's
+     body text is the Regular face, drawn antialiased. */
+  --font-weight-regular-base: 400;
+  font-weight: var(--font-weight-regular);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
   --text-extra-high: var(--emph-xh);
   --text-high: var(--emph-m);
   --text-medium: var(--emph-m);

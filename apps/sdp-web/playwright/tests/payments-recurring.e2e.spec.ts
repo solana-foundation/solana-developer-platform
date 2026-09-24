@@ -78,42 +78,48 @@ test.describe
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/create$/);
 
       const app = page.locator("main");
-      const next = app.getByRole("button", { name: "Next", exact: true });
+      const next = app.getByRole("button", { name: "Continue", exact: true });
 
-      await app.getByRole("button", { name: "Counterparty", exact: true }).click();
-      await page.getByPlaceholder("Search counterparties").fill(recurringCounterpartyName);
+      // Payment: the contact's only Solana address is the destination; a contact with several
+      // gets a Destination field instead.
+      await app.getByRole("button", { name: "Contact", exact: true }).click();
+      await page.getByPlaceholder("Search contacts").fill(recurringCounterpartyName);
       await page.getByRole("button", { name: recurringCounterpartyName }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
+      const destination = app.getByRole("button", { name: "Destination", exact: true });
+      if (await destination.isVisible()) {
+        await destination.click();
+        await page.getByRole("button", { name: recurringAccountLabel }).click();
+      }
 
-      await app.getByRole("button", { name: "Destination account", exact: true }).click();
-      await page.getByRole("button", { name: recurringAccountLabel }).click();
-      await expect(next).toBeEnabled({ timeout: 120_000 });
-      await next.click();
-
-      await app.getByRole("button", { name: "Funding wallet", exact: true }).click();
+      await app.getByRole("button", { name: "Source wallet", exact: true }).click();
       await page.getByPlaceholder("Search wallets").fill(recurringWalletLabel);
       await page.getByRole("button", { name: recurringWalletLabel }).click();
 
-      await app.getByRole("button", { name: "Asset", exact: true }).click();
+      await app.getByRole("button", { name: "Token", exact: true }).click();
       await expect(page.getByRole("button", { name: /^SOL(?:\s|$)/ })).toHaveCount(0);
       await page
         .getByRole("button", { name: new RegExp(`^${recurringTokenSymbol}( SDP-Minted)?$`) })
         .click();
 
       await app.getByLabel("Amount", { exact: true }).fill("7.5");
-      await app.getByRole("button", { name: "Billing interval", exact: true }).click();
+      await expect(next).toBeEnabled({ timeout: 120_000 });
+      await next.click();
+
+      // When: every day, starting after activation.
+      await app.getByRole("button", { name: "Repeats", exact: true }).click();
       await page.getByRole("button", { name: "Every day" }).click();
       await expect(next).toBeEnabled({ timeout: 120_000 });
       await next.click();
 
-      await expect(app.getByText("Review schedule")).toBeVisible();
-      await expect(app.getByText(recurringCounterpartyName)).toBeVisible();
-      await expect(app.getByText(recurringWalletLabel)).toBeVisible();
-      await expect(app.getByText(`7.5 ${recurringTokenSymbol}`)).toBeVisible();
+      // Review.
+      await expect(
+        app.getByText(`7.50 ${recurringTokenSymbol} to ${recurringCounterpartyName}`)
+      ).toBeVisible();
+      await expect(app.getByText(`From ${recurringWalletLabel}`)).toBeVisible();
+      await expect(app.getByText("Every day", { exact: true })).toBeVisible();
 
       const createButton = app.getByRole("button", {
-        name: "Create schedule",
+        name: "Create the schedule",
         exact: true,
       });
       await expect(createButton).toBeEnabled({ timeout: 120_000 });
@@ -129,7 +135,7 @@ test.describe
       await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
       await expect(page.getByText("Every day", { exact: true }).first()).toBeVisible();
 
-      await page.getByRole("link", { name: "Back to schedules" }).click();
+      await page.getByRole("link", { name: "Schedules", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       const recurringRow = page
         .locator("tbody tr")
@@ -146,7 +152,7 @@ test.describe
       await expect(
         page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
       ).toBeVisible();
-      await expect(page.getByRole("link", { name: "Back to schedules" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Schedules", exact: true })).toBeVisible();
       await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();
       await expect(page.getByText("Billing interval", { exact: true })).toBeVisible();
       await expect(page.getByText("Funding wallet", { exact: true })).toBeVisible();

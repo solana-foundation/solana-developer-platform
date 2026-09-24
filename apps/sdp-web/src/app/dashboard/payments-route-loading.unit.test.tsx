@@ -149,16 +149,16 @@ describe("home and payments route loading states", () => {
     navigationMock.tab = null;
   });
 
-  it("keeps the counterparty picker as the recurring wizard's first step", () => {
+  it("opens the schedule wizard on its payment step", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentCreateSkeleton />);
 
+    // The step's question, then contact, source wallet, and amount beside token.
     expect(markup).toContain('data-loading-layout="recurring-payment-create"');
-    expect(markup.match(/data-loading-counterparty-picker=/g)).toHaveLength(1);
-    expect(markup.match(/data-loading-add-counterparty=/g)).toHaveLength(1);
-    expect(markup.match(/data-loading-combobox=/g)).toHaveLength(1);
-    expect(markup).toContain("border-dashed");
-    expect(markup).toContain("h-[var(--input-height-xl)]");
-    expect(markup).toContain("rounded-[var(--input-radius-xl)]");
+    expect(markup.match(/data-loading-stepper=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-field=/g)).toHaveLength(4);
+    expect(markup).toContain("overflow-y-auto");
+    expect(markup).toContain("shrink-0 border-t");
+    expect(markup).not.toContain("data-loading-counterparty-picker");
   });
 
   it("opens Pay on its details step and Deposit on its address tab", () => {

@@ -126,7 +126,7 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     first.unmount();
 
@@ -185,20 +185,24 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Destination account" }));
-    await user.click(screen.getByRole("button", { name: /Receiving wallet/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    // The contact's only Solana address is the destination; no field asks for it.
+    await user.click(screen.getByRole("button", { name: "Source wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Create schedule" }));
+    const next = () => screen.getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(next().hasAttribute("disabled")).toBe(false));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole("button", { name: "Create the schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toMatchObject({ sourceCustodyWalletId: source.id, amount: "1" });
+    expect(writes[0]).toMatchObject({
+      sourceCustodyWalletId: source.id,
+      counterpartyAccountId: account.id,
+      amount: "1",
+    });
   });
 
   it.each(["current", "replacement"])(
