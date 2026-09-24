@@ -75,6 +75,232 @@ function WalletBalanceCell({
   return <TableCell className="text-secondary tabular-nums">{balanceLabel(t, balance)}</TableCell>;
 }
 
+function VerifiedWalletRow({
+  verified,
+  wallet,
+  showBalance,
+  t,
+  balance,
+  busy,
+  onRevoke,
+}: {
+  verified: PrivateChannelVerifiedWalletDto;
+  /** Matched custody wallet, or undefined when the row is orphaned. */
+  wallet: CustodyWalletSummary | undefined;
+  showBalance: boolean;
+  t: Translate;
+  balance: WalletChannelBalance | undefined;
+  busy: boolean;
+  onRevoke: (pubkey: string) => void;
+}) {
+  return (
+    <TableRow key={verified.id}>
+      <TableCell>
+        <span className="flex min-w-0 items-center gap-3">
+          {wallet?.provider && isKnownCustodyProvider(wallet.provider) ? (
+            <WalletProviderMark provider={wallet.provider} size="sm" />
+          ) : null}
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate font-medium">
+              {wallet
+                ? (wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet"))
+                : shortKey(verified.pubkey)}
+            </span>
+            <span className="truncate text-xs text-secondary">
+              {wallet
+                ? shortKey(wallet.publicKey)
+                : t("DashboardPrivateChannels.verifiedWallets.orphaned")}
+            </span>
+          </span>
+        </span>
+      </TableCell>
+      <WalletBalanceCell showBalance={showBalance} t={t} balance={balance} />
+      <TableCell align="right">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("DashboardPrivateChannels.verifiedWallets.revokeAria", {
+            pubkey: verified.pubkey,
+          })}
+          title={t("DashboardPrivateChannels.verifiedWallets.revokeTitle")}
+          disabled={busy}
+          onClick={() => onRevoke(verified.pubkey)}
+        >
+          {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
+        </Button>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function VerifiedWalletsContent({
+  t,
+  loadError,
+  custodyEnabled,
+  showBalance,
+  custodyWallets,
+  verifiedWallets,
+  channelBalances,
+  custodyByPubkey,
+  pending,
+  pendingKey,
+  onRevoke,
+}: {
+  t: Translate;
+  loadError: boolean;
+  custodyEnabled: boolean;
+  showBalance: boolean;
+  custodyWallets: CustodyWalletSummary[];
+  verifiedWallets: PrivateChannelVerifiedWalletDto[];
+  channelBalances: Record<string, WalletChannelBalance>;
+  custodyByPubkey: Map<string, CustodyWalletSummary>;
+  pending: boolean;
+  /** Pubkey of the row whose mutation is in flight. */
+  pendingKey: string | null;
+  onRevoke: (pubkey: string) => void;
+}) {
+  if (loadError) {
+    return (
+      <p className="text-sm text-error">
+        {t("DashboardPrivateChannels.verifiedWallets.loadError")}
+      </p>
+    );
+  }
+  if (custodyWallets.length === 0 && verifiedWallets.length === 0) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <p className="text-sm text-secondary">
+          {t("DashboardPrivateChannels.verifiedWallets.noWallets")}
+        </p>
+        {custodyEnabled ? (
+          <Button asChild>
+            <Link href="/dashboard/wallets">
+              {t("DashboardPrivateChannels.verifiedWallets.createWallet")}
+            </Link>
+          </Button>
+        ) : null}
+      </div>
+    );
+  }
+  if (verifiedWallets.length === 0) {
+    return (
+      <p className="text-sm text-secondary">
+        {t("DashboardPrivateChannels.verifiedWallets.empty")}
+      </p>
+    );
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("DashboardPrivateChannels.overview.colWallet")}</TableHead>
+          {showBalance ? (
+            <TableHead>{t("DashboardPrivateChannels.overview.colBalance")}</TableHead>
+          ) : null}
+          <TableHead align="right"> </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {verifiedWallets.map((verified) => (
+          <VerifiedWalletRow
+            key={verified.id}
+            verified={verified}
+            wallet={custodyByPubkey.get(verified.pubkey)}
+            showBalance={showBalance}
+            t={t}
+            balance={channelBalances[verified.pubkey]}
+            busy={pending && pendingKey === verified.pubkey}
+            onRevoke={onRevoke}
+          />
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function EnrollWalletModal({
+  t,
+  isOpen,
+  onClose,
+  pending,
+  availableWallets,
+  selectedWalletId,
+  onSelectWallet,
+  onSubmit,
+}: {
+  t: Translate;
+  isOpen: boolean;
+  onClose: () => void;
+  pending: boolean;
+  availableWallets: CustodyWalletSummary[];
+  selectedWalletId: string | null;
+  onSelectWallet: (walletId: string | null) => void;
+  onSubmit: (walletId: string, pubkey: string) => void;
+}) {
+  const selectedWallet = availableWallets.find((wallet) => wallet.walletId === selectedWalletId);
+  return (
+    <Modal
+      isOpen={isOpen}
+      ariaLabel={t("DashboardPrivateChannels.verifiedWallets.enroll")}
+      onClose={onClose}
+      closeDisabled={pending}
+      size="sm"
+    >
+      <form
+        action={() => {
+          if (selectedWallet) onSubmit(selectedWallet.walletId, selectedWallet.publicKey);
+        }}
+        className="space-y-6 p-6"
+      >
+        <div className="space-y-2 pr-8">
+          <h2 className="text-xl font-medium text-primary">
+            {t("DashboardPrivateChannels.verifiedWallets.enroll")}
+          </h2>
+          <p className="text-sm text-secondary">
+            {t("DashboardPrivateChannels.verifiedWallets.enrollDescription")}
+          </p>
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-primary">
+            {t("DashboardPrivateChannels.verifiedWallets.walletLabel")}
+          </p>
+          <Select
+            ariaLabel={t("DashboardPrivateChannels.verifiedWallets.walletLabel")}
+            value={selectedWalletId}
+            onValueChange={onSelectWallet}
+            placeholder={t("DashboardPrivateChannels.verifiedWallets.walletPlaceholder")}
+            disabled={pending}
+          >
+            {availableWallets.map((wallet) => (
+              <SelectItem key={wallet.walletId} value={wallet.walletId}>
+                {wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet")} ·{" "}
+                {shortKey(wallet.publicKey)}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        <div className="flex justify-end gap-3">
+          <Button type="button" variant="secondary" disabled={pending} onClick={onClose}>
+            {t("DashboardPrivateChannels.common.cancel")}
+          </Button>
+          <Button
+            type="submit"
+            className="w-44 whitespace-nowrap"
+            disabled={!selectedWallet || pending}
+            iconLeft={
+              pending ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
+            }
+          >
+            {pending
+              ? t("DashboardPrivateChannels.verifiedWallets.enrolling")
+              : t("DashboardPrivateChannels.verifiedWallets.enroll")}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function WalletsTable({
   projectId,
   verifiedWallets,
@@ -92,12 +318,10 @@ export function WalletsTable({
   const workspace = useOptionalDashboardWorkspace();
   const custodyEnabled = workspace?.flags.custody ?? true;
 
-  const custodyByPubkey = new Map(custodyWallets.map((w) => [w.publicKey, w]));
   const verifiedPubkeys = new Set(verifiedWallets.map((w) => w.pubkey));
   const availableWallets = custodyWallets.filter(
     (wallet) => !verifiedPubkeys.has(wallet.publicKey)
   );
-  const selectedWallet = availableWallets.find((wallet) => wallet.walletId === selectedWalletId);
 
   function handleVerify(walletId: string, pubkey: string) {
     setPendingKey(walletId);
@@ -149,154 +373,30 @@ export function WalletsTable({
         ) : null}
       </CardHeader>
       <CardContent>
-        {loadError ? (
-          <p className="text-sm text-error">
-            {t("DashboardPrivateChannels.verifiedWallets.loadError")}
-          </p>
-        ) : custodyWallets.length === 0 && verifiedWallets.length === 0 ? (
-          <div className="flex flex-col items-start gap-3">
-            <p className="text-sm text-secondary">
-              {t("DashboardPrivateChannels.verifiedWallets.noWallets")}
-            </p>
-            {custodyEnabled ? (
-              <Button asChild>
-                <Link href="/dashboard/wallets">
-                  {t("DashboardPrivateChannels.verifiedWallets.createWallet")}
-                </Link>
-              </Button>
-            ) : null}
-          </div>
-        ) : verifiedWallets.length === 0 ? (
-          <p className="text-sm text-secondary">
-            {t("DashboardPrivateChannels.verifiedWallets.empty")}
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("DashboardPrivateChannels.overview.colWallet")}</TableHead>
-                {showBalance ? (
-                  <TableHead>{t("DashboardPrivateChannels.overview.colBalance")}</TableHead>
-                ) : null}
-                <TableHead align="right"> </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {verifiedWallets.map((verified) => {
-                const wallet = custodyByPubkey.get(verified.pubkey);
-                const busy = pending && pendingKey === verified.pubkey;
-                return (
-                  <TableRow key={verified.id}>
-                    <TableCell>
-                      <span className="flex min-w-0 items-center gap-3">
-                        {wallet?.provider && isKnownCustodyProvider(wallet.provider) ? (
-                          <WalletProviderMark provider={wallet.provider} size="sm" />
-                        ) : null}
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate font-medium">
-                            {wallet
-                              ? (wallet.label ??
-                                formatCustodyProviderName(wallet.provider ?? "wallet"))
-                              : shortKey(verified.pubkey)}
-                          </span>
-                          <span className="truncate text-xs text-secondary">
-                            {wallet
-                              ? shortKey(wallet.publicKey)
-                              : t("DashboardPrivateChannels.verifiedWallets.orphaned")}
-                          </span>
-                        </span>
-                      </span>
-                    </TableCell>
-                    <WalletBalanceCell
-                      showBalance={showBalance}
-                      t={t}
-                      balance={channelBalances[verified.pubkey]}
-                    />
-                    <TableCell align="right">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={t("DashboardPrivateChannels.verifiedWallets.revokeAria", {
-                          pubkey: verified.pubkey,
-                        })}
-                        title={t("DashboardPrivateChannels.verifiedWallets.revokeTitle")}
-                        disabled={busy}
-                        onClick={() => handleDelete(verified.pubkey)}
-                      >
-                        {busy ? <Loader2Icon className="animate-spin" /> : <Trash2Icon />}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
+        <VerifiedWalletsContent
+          t={t}
+          loadError={loadError}
+          custodyEnabled={custodyEnabled}
+          showBalance={showBalance}
+          custodyWallets={custodyWallets}
+          verifiedWallets={verifiedWallets}
+          channelBalances={channelBalances}
+          custodyByPubkey={new Map(custodyWallets.map((w) => [w.publicKey, w]))}
+          pending={pending}
+          pendingKey={pendingKey}
+          onRevoke={handleDelete}
+        />
       </CardContent>
-      <Modal
+      <EnrollWalletModal
+        t={t}
         isOpen={enrollOpen}
-        ariaLabel={t("DashboardPrivateChannels.verifiedWallets.enroll")}
         onClose={() => setEnrollOpen(false)}
-        closeDisabled={pending}
-        size="sm"
-      >
-        <form
-          action={() => {
-            if (selectedWallet) handleVerify(selectedWallet.walletId, selectedWallet.publicKey);
-          }}
-          className="space-y-6 p-6"
-        >
-          <div className="space-y-2 pr-8">
-            <h2 className="text-xl font-medium text-primary">
-              {t("DashboardPrivateChannels.verifiedWallets.enroll")}
-            </h2>
-            <p className="text-sm text-secondary">
-              {t("DashboardPrivateChannels.verifiedWallets.enrollDescription")}
-            </p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-primary">
-              {t("DashboardPrivateChannels.verifiedWallets.walletLabel")}
-            </p>
-            <Select
-              ariaLabel={t("DashboardPrivateChannels.verifiedWallets.walletLabel")}
-              value={selectedWalletId}
-              onValueChange={setSelectedWalletId}
-              placeholder={t("DashboardPrivateChannels.verifiedWallets.walletPlaceholder")}
-              disabled={pending}
-            >
-              {availableWallets.map((wallet) => (
-                <SelectItem key={wallet.walletId} value={wallet.walletId}>
-                  {wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet")} ·{" "}
-                  {shortKey(wallet.publicKey)}
-                </SelectItem>
-              ))}
-            </Select>
-          </div>
-          <div className="flex justify-end gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={pending}
-              onClick={() => setEnrollOpen(false)}
-            >
-              {t("DashboardPrivateChannels.common.cancel")}
-            </Button>
-            <Button
-              type="submit"
-              className="w-44 whitespace-nowrap"
-              disabled={!selectedWallet || pending}
-              iconLeft={
-                pending ? <Loader2Icon className="size-4 shrink-0 animate-spin" /> : undefined
-              }
-            >
-              {pending
-                ? t("DashboardPrivateChannels.verifiedWallets.enrolling")
-                : t("DashboardPrivateChannels.verifiedWallets.enroll")}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+        pending={pending}
+        availableWallets={availableWallets}
+        selectedWalletId={selectedWalletId}
+        onSelectWallet={setSelectedWalletId}
+        onSubmit={handleVerify}
+      />
     </Card>
   );
 }

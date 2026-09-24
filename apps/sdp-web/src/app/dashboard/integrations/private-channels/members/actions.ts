@@ -9,17 +9,29 @@ import {
   removePrincipalChannelMembership,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { bindRenderedProjectClient } from "../private-channels-project-client";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
 export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; message: string };
 
-export async function createPrincipalAction(
-  name: string
-): Promise<ActionResult<PrivateChannelPrincipalDto>> {
+/**
+ * Creates the principal under the project the wizard rendered with instead of
+ * re-resolving the mutable selection cookie at submit time. The stale-selection
+ * check runs before the write, so a sibling tab that moved the shared cookie
+ * makes the submission reload instead of leaving a principal stranded in
+ * another project's scope before its wallet verification can bind to it.
+ */
+export async function createPrincipalAction(input: {
+  name: string;
+  projectId: string;
+}): Promise<ActionResult<PrivateChannelPrincipalDto>> {
   try {
-    const client = await createSdpApiClient();
-    const { principal } = await createPrivateChannelPrincipal(client, { name });
+    const bound = await bindRenderedProjectClient(input.projectId);
+    if (!bound.ok) {
+      return bound;
+    }
+    const { principal } = await createPrivateChannelPrincipal(bound.client, { name: input.name });
     revalidatePath(PRINCIPALS_PATH);
     return { ok: true, value: principal };
   } catch (error) {

@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/i18n/server", () => ({
+  getTranslations: vi.fn(async () => (key: string) => key),
+}));
 vi.mock("@/lib/private-channels", () => ({
   verifyPrivateChannelWallet: mocks.verifyPrivateChannelWallet,
   deletePrivateChannelVerifiedWallet: mocks.deletePrivateChannelVerifiedWallet,

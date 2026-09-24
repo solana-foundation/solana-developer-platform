@@ -53,7 +53,7 @@ export function PrincipalCreatePage({
     startTransition(async () => {
       let principalId = createdPrincipalId;
       if (!principalId) {
-        const principalResult = await createPrincipalAction(trimmedName);
+        const principalResult = await createPrincipalAction({ name: trimmedName, projectId });
         if (!principalResult.ok) {
           toast.error(principalResult.message);
           return;

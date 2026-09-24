@@ -35,7 +35,9 @@
       "channelBalance": "Channel balance:",
       "amountRequired": "Enter an amount of USDC.",
       "amountInvalid": "Enter a USDC amount greater than zero with up to 6 decimal places.",
-      "amountWithUnit": "{amount} USDC"
+      "amountWithUnit": "{amount} USDC",
+      "projectRequired": "A project is required.",
+      "staleProject": "The selected project changed while this page was open. Reload the page and try again."
     },
     "overview": {
       "title": "Overview",
@@ -91,6 +93,7 @@
       "title": "Verified wallets",
       "description": "Verify a custody wallet against this instance to unlock transactions. Verifying signs a challenge with the wallet; revoking removes it.",
       "loadError": "Couldn't load your wallets. Refresh the page to try again.",
+      "walletRequired": "A wallet is required.",
       "noWallets": "No wallets found for user, create one.",
       "createWallet": "Create a wallet",
       "empty": "No wallets enrolled yet.",
