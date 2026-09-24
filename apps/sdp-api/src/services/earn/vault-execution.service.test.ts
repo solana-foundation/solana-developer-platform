@@ -8,6 +8,7 @@ import {
   type Blockhash,
   createNoopSigner,
   generateKeyPairSigner,
+  getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
@@ -472,7 +473,17 @@ describe("vault execution validation", () => {
 
 describe("vault lookup-table reads", () => {
   const lookupTable = "11111111111111111111111111111113";
-  const planWithLookupTable = { ...plan, lookupTables: [lookupTable] };
+  const planWithLookupTable: EarnVaultTransactionPlan = {
+    ...plan,
+    lookupTables: [lookupTable],
+    instructions: [
+      {
+        programAddress: "11111111111111111111111111111111",
+        accounts: [{ address: plan.assetIdentity.depositTokenMint, role: AccountRole.READONLY }],
+        data: "",
+      },
+    ],
+  };
 
   function simulate() {
     return simulateVaultPlan(env, {
@@ -510,7 +521,7 @@ describe("vault lookup-table reads", () => {
     expect(simulateSend).not.toHaveBeenCalled();
   });
 
-  it("recovers a transient read and carries the fetched addresses into simulation preparation", async () => {
+  it("recovers a transient read and uses the fetched table in the simulated transaction", async () => {
     vi.useFakeTimers();
     lookupTableSend.mockRejectedValueOnce(new Error("fetch failed")).mockResolvedValue({
       context: { slot: 1n },
@@ -542,6 +553,18 @@ describe("vault lookup-table reads", () => {
     });
     expect(lookupTableSend).toHaveBeenCalledTimes(2);
     expect(simulateSend).toHaveBeenCalledOnce();
+
+    const transaction = getTransactionDecoder().decode(
+      Buffer.from(simulatedWire.at(-1) ?? "", "base64")
+    );
+    const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+    if (message.version !== 0) throw new Error("expected a v0 simulation transaction");
+    expect(message.addressTableLookups).toEqual([
+      { lookupTableAddress: lookupTable, readonlyIndexes: [0], writableIndexes: [] },
+    ]);
+    expect(message.staticAccounts).not.toContain(plan.assetIdentity.depositTokenMint);
+    // The instruction must reference the loaded address, after all static accounts.
+    expect(message.instructions[0]?.accountIndices).toEqual([message.staticAccounts.length]);
   });
 });
 
