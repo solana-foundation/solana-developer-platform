@@ -518,3 +518,137 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     });
   });
 });
+
+describe("MosaicService mint and transfer — fee payer", () => {
+  type SignAndSubmitProto = {
+    signAndSubmit: (fullTx: unknown) => Promise<{ signature: string; slot: bigint }>;
+  };
+
+  let signer: TransactionSigner;
+  let clientAddress: Address;
+  let koraAddress: Address;
+  let mint: Address;
+  let destination: Address;
+  let service: MosaicService;
+  let fee: ReturnType<typeof makeFeePayment>;
+  let mintToSpy: ReturnType<typeof vi.spyOn>;
+  let transferSpy: ReturnType<typeof vi.spyOn>;
+  let submitSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    signer = await Kit.generateKeyPairSigner();
+    clientAddress = (await Kit.generateKeyPairSigner()).address;
+    koraAddress = (await Kit.generateKeyPairSigner()).address;
+    mint = (await Kit.generateKeyPairSigner()).address;
+    destination = (await Kit.generateKeyPairSigner()).address;
+    fee = makeFeePayment(koraAddress);
+    service = new MosaicService(
+      env as ConstructorParameters<typeof MosaicService>[0],
+      signer,
+      fee.port,
+      {
+        transactionFailedError: transactionFailed,
+      }
+    );
+
+    mintToSpy = vi
+      .spyOn(MosaicSdk, "createMintToTransaction")
+      .mockResolvedValue(FAKE_FULL_TX as never);
+    transferSpy = vi
+      .spyOn(MosaicSdk, "createTransferTransaction")
+      .mockResolvedValue(FAKE_FULL_TX as never);
+    vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
+      tokenAccount: destination,
+    } as never);
+    vi.spyOn(Kit, "compileTransaction").mockReturnValue({ __sentinel: "compiled" } as never);
+    vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+    submitSpy = vi
+      .spyOn(MosaicService.prototype as unknown as SignAndSubmitProto, "signAndSubmit")
+      .mockResolvedValue({ signature: "sig", slot: 1n });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function feePayerAddress(feePayer: unknown): Address {
+    return typeof feePayer === "string"
+      ? (feePayer as Address)
+      : (feePayer as TransactionSigner).address;
+  }
+
+  it("prepareMintTo uses the client signer as fee payer when Kora is configured", async () => {
+    const result = await service.prepareMintTo({
+      mint,
+      destination,
+      amount: 5,
+      mintAuthority: clientAddress,
+      feePayer: clientAddress,
+    });
+
+    expect(fee.getFeePayer).not.toHaveBeenCalled();
+    expect(feePayerAddress(mintToSpy.mock.calls[0][5])).toBe(clientAddress);
+    expect(result.serializedTx).toBe("base64-tx");
+    expect(submitSpy).not.toHaveBeenCalled();
+  });
+
+  it("prepareMintTo keeps the service signer as fee payer when it is the requested payer", async () => {
+    await service.prepareMintTo({
+      mint,
+      destination,
+      amount: 5,
+      mintAuthority: signer.address,
+      feePayer: signer.address,
+    });
+
+    expect(fee.getFeePayer).not.toHaveBeenCalled();
+    expect(mintToSpy.mock.calls[0][5]).toBe(signer);
+  });
+
+  it("prepareTransfer uses the client signer as fee payer when Kora is configured", async () => {
+    const result = await service.prepareTransfer({
+      mint,
+      from: clientAddress,
+      to: destination,
+      amount: "1",
+      authority: clientAddress,
+      feePayer: clientAddress,
+    });
+
+    expect(fee.getFeePayer).not.toHaveBeenCalled();
+    const [args] = transferSpy.mock.calls[0] as [{ feePayer: unknown }];
+    expect(feePayerAddress(args.feePayer)).toBe(clientAddress);
+    expect(result.serializedTx).toBe("base64-tx");
+    expect(submitSpy).not.toHaveBeenCalled();
+  });
+
+  it("mintTo still sponsors the fee through Kora", async () => {
+    await service.mintTo({
+      mint,
+      destination,
+      amount: 5,
+      mintAuthority: signer.address,
+      feePayer: signer.address,
+    });
+
+    expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
+    expect(feePayerAddress(mintToSpy.mock.calls[0][5])).toBe(koraAddress);
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("transfer still sponsors the fee through Kora", async () => {
+    await service.transfer({
+      mint,
+      from: signer.address,
+      to: destination,
+      amount: "1",
+      authority: signer,
+      feePayer: signer,
+    });
+
+    expect(fee.getFeePayer).toHaveBeenCalledTimes(1);
+    const [args] = transferSpy.mock.calls[0] as [{ feePayer: unknown }];
+    expect(feePayerAddress(args.feePayer)).toBe(koraAddress);
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+});
