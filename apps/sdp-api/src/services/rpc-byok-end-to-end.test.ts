@@ -411,9 +411,10 @@ describe("BYOK end to end", () => {
     });
 
     expect(failed).toBe(0);
-    // Still serving, because the verdict was about a credential this
-    // connection no longer points at.
-    await expect(resolveRpcTarget(relayInput())).resolves.toBeTruthy();
+    // Still serving the SAME connection, because the verdict was about a
+    // credential this connection no longer points at.
+    const target = await resolveRpcTarget(relayInput());
+    expect(target.connectionId).toBe(CONNECTION_ID);
   });
 
   it("recovers on re-activation rather than requiring a new connection", async () => {
