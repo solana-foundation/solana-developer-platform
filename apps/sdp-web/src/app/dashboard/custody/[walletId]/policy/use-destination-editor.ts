@@ -40,7 +40,9 @@ function destinationField(mode: DestinationMode): "destinationAllowText" | "dest
 
 /**
  * Collects the screening results that should block an unattended add: high-risk
- * verdicts plus providers that did not return a usable result.
+ * verdicts, unrecognized verdicts (read as high-risk until reviewed, so an
+ * ambiguous result can never auto-commit into an allowlist — SOLA9-160), and
+ * providers that did not return a usable result.
  *
  * @param snapshot - The completed screening snapshot.
  * @returns The provider results that make the address require review.

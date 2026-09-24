@@ -10,11 +10,17 @@ export type ComplianceScreeningIntent =
  * space (HOO-1012):
  *  - `ok`          — the provider COMPLETED the screening and returned an
  *                    unambiguous verdict; only this value may read as a pass.
+ *                    `ok` additionally requires the verdict to map to a
+ *                    recognized entry of the shared provider-neutral
+ *                    vocabulary (`resolveComplianceVerdict` in `@sdp/types`);
+ *                    an unrecognized label or a verdictless completion is
+ *                    contract drift and fails closed as `error` (SOLA9-160).
  *  - `pending`     — the provider accepted the request but has not finished
  *                    (e.g. Chainalysis non-COMPLETE); never a pass.
  *  - `unavailable` — the provider is not configured for this deployment.
- *  - `error`       — the call failed, or the response was malformed or
- *                    ambiguous; fail closed rather than guess.
+ *  - `error`       — the call failed, or the response was malformed,
+ *                    ambiguous, or carried an unrecognized verdict; fail
+ *                    closed rather than guess.
  */
 export type ComplianceScreeningStatus = "ok" | "pending" | "unavailable" | "error";
 

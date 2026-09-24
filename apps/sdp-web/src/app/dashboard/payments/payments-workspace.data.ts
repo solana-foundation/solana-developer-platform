@@ -31,6 +31,7 @@ import type {
   PaymentsDashboardWallet as WalletRecord,
   PaymentsDashboardWalletsEnvelope as WalletsEnvelope,
 } from "@sdp/types";
+import { resolveComplianceVerdict } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -115,59 +116,29 @@ export function resolveRiskTone(result: ComplianceProviderResult): RiskTone {
     return "neutral";
   }
 
-  if (result.provider === "elliptic" && result.riskLevel?.toLowerCase() === "check passed") {
-    return "green";
-  }
-
-  if (result.provider === "trm" && result.riskScore === null && !result.riskLevel?.trim()) {
-    return "green";
-  }
-
-  if (typeof result.riskScore === "number") {
-    if (result.riskScore >= 7) {
+  // Classification goes through the shared provider-neutral verdict, never
+  // through substring matching: an `ok` result whose verdict maps to nothing
+  // (an unknown label, or no score and no recognized completion shape) is not
+  // a clean screening. It reads red so every consumer that treats high-risk
+  // results as review-required — the custody destination allowlist editor
+  // included — fails closed on it instead of auto-committing it (SOLA9-160).
+  switch (resolveComplianceVerdict(result)) {
+    case "high":
+    case "unrecognized":
       return "red";
-    }
-    if (result.riskScore >= 3) {
+    case "medium":
       return "yellow";
-    }
-    return "green";
+    case "pass":
+    case "low":
+      return "green";
   }
-
-  const riskLevel = result.riskLevel?.toLowerCase() ?? "";
-  if (!riskLevel) {
-    return "neutral";
-  }
-
-  if (
-    riskLevel.includes("severe") ||
-    riskLevel.includes("high") ||
-    riskLevel.includes("critical") ||
-    riskLevel.includes("elevated")
-  ) {
-    return "red";
-  }
-
-  if (
-    riskLevel.includes("medium") ||
-    riskLevel.includes("moderate") ||
-    riskLevel.includes("watch")
-  ) {
-    return "yellow";
-  }
-
-  if (
-    riskLevel.includes("low") ||
-    riskLevel.includes("very low") ||
-    riskLevel.includes("none") ||
-    riskLevel.includes("minimal")
-  ) {
-    return "green";
-  }
-
-  return "neutral";
 }
 
-/** Providers that flagged the address as high risk (red tone). */
+/**
+ * Providers whose result must not read as clean: high-risk verdicts plus
+ * unrecognized ones — an `ok` response whose verdict maps to nothing is
+ * unreadable, not clean (SOLA9-160).
+ */
 export function getHighRiskProviders(snapshot: ComplianceSnapshot): ComplianceProviderResult[] {
   return snapshot.providers.filter((result) => resolveRiskTone(result) === "red");
 }

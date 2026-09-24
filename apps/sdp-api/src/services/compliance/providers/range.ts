@@ -1,3 +1,4 @@
+import { resolveComplianceVerdict } from "@sdp/types";
 import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
@@ -89,6 +90,21 @@ export class RangeComplianceProvider implements ComplianceProvider {
       const payload = (await response.json().catch(() => ({}))) as RangeAddressRiskResponse;
       const riskScore = typeof payload.riskScore === "number" ? payload.riskScore : null;
       const riskLevel = typeof payload.riskLevel === "string" ? payload.riskLevel : undefined;
+
+      // An `ok` result must carry a verdict this product recognizes. A 200
+      // with no usable score and a label outside the shared vocabulary (or no
+      // verdict at all) is contract drift that used to normalize as a clean
+      // screening and auto-allowlist the address (SOLA9-160).
+      const verdict = resolveComplianceVerdict({ provider: this.name, riskScore, riskLevel });
+      if (verdict === "unrecognized") {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `Range returned an unrecognized risk verdict (score: ${JSON.stringify(riskScore)}, level: ${JSON.stringify(riskLevel ?? null)}); refusing to treat it as a screening.`,
+          evaluatedAt,
+        };
+      }
 
       return {
         provider: this.name,

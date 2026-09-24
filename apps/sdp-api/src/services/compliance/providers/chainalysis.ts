@@ -1,3 +1,4 @@
+import { resolveComplianceVerdict } from "@sdp/types";
 import { z } from "zod";
 import type {
   ComplianceAddressScreeningInput,
@@ -173,6 +174,28 @@ export class ChainalysisComplianceProvider implements ComplianceProvider {
           verdictless.providerStatus = providerStatus;
         }
         return verdictless;
+      }
+
+      // An `ok` result must carry a verdict this product recognizes: no score
+      // plus a label outside the shared vocabulary is contract drift that
+      // used to normalize as a clean screening (SOLA9-160).
+      const verdict = resolveComplianceVerdict({
+        provider: this.name,
+        riskScore: read.score,
+        riskLevel,
+      });
+      if (verdict === "unrecognized") {
+        const unrecognized: ComplianceProviderResult = {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `Chainalysis returned an unrecognized risk verdict (score: ${JSON.stringify(read.score)}, level: ${JSON.stringify(riskLevel ?? null)}); refusing to treat it as a screening.`,
+          evaluatedAt,
+        };
+        if (providerStatus !== undefined) {
+          unrecognized.providerStatus = providerStatus;
+        }
+        return unrecognized;
       }
 
       const passed: ComplianceProviderResult = {
