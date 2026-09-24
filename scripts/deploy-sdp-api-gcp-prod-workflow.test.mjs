@@ -65,7 +65,7 @@ test("release deploys verify and promote the signed image; manual redeploys skip
 test("manual redeploys verify the promoted image signature before rollout", () => {
   assert.match(
     workflow,
-    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}/
   );
 });
 
@@ -177,11 +177,15 @@ test("service and cron use the resolved digest", () => {
 test("merge deploys promote signed per-merge images and migrate before rollout", () => {
   assert.match(
     workflow,
-    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
+    /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\)\)\) && 'true' \|\| 'false' \}\}/
   );
   assert.match(
     workflow,
-    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch' \}\}/
+    /- name: Verify and promote merge image\n\s+if: \$\{\{ inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\) \}\}/
+  );
+  assert.match(
+    workflow,
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}/
   );
   assert.match(
     workflow,
@@ -198,10 +202,10 @@ test("merge deploys promote signed per-merge images and migrate before rollout",
   assert.ok(execute < label && label < capture);
 });
 
-test("pending migrations route the merge deploy through the reviewed environment", () => {
+test("pending migrations hold the merge deploy and surface it to the caller", () => {
   assert.match(
     workflow,
-    / {2}schema:\n\s+name: Check pending migrations against prod\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.event_name != 'workflow_dispatch' &&\n\s+inputs\.image_sha != ''/
+    / {2}schema:\n\s+name: Check pending migrations against prod\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.event_name != 'workflow_dispatch' &&\n\s+inputs\.image_sha != '' &&\n\s+!inputs\.approved_schema/
   );
   assert.match(workflow, /--format 'value\(metadata\.labels\.sdp_schema_sha\)'/);
   assert.match(
@@ -212,12 +216,37 @@ test("pending migrations route the merge deploy through the reviewed environment
   assert.match(workflow, /needs: \[smoke, schema\]/);
   assert.match(
     workflow,
-    /\(needs\.schema\.result == 'success' \|\| needs\.schema\.result == 'skipped'\) &&/
+    /\(needs\.schema\.result == 'skipped' \|\|\n\s+\(needs\.schema\.result == 'success' && needs\.schema\.outputs\.pending != 'true'\)\) &&/
+  );
+  assert.match(workflow, /\n\s+environment: production\n/);
+  assert.doesNotMatch(workflow, /environment: \$\{\{/);
+  assert.match(
+    workflow,
+    /outputs:\n\s+pending_migrations:\n\s+description:[^\n]*\n\s+value: \$\{\{ jobs\.schema\.outputs\.pending \}\}/
   );
   assert.match(
     workflow,
-    /environment: \$\{\{ needs\.schema\.outputs\.pending == 'true' && 'release-production' \|\| 'production' \}\}/
+    /ref: \$\{\{ inputs\.release_sha != '' && inputs\.release_sha \|\| \(inputs\.approved_schema && inputs\.image_sha\) \|\| github\.sha \}\}/
   );
+});
+
+test("the approval workflow waits outside the deploy concurrency groups", () => {
+  const approval = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/apply-prod-migrations.yml"),
+    "utf8"
+  );
+  assert.doesNotMatch(approval, /^concurrency:/m);
+  assert.match(
+    approval,
+    / {2}approve:\n[\s\S]*?environment: release-production\n\s+concurrency:\n\s+group: sdp-prod-schema-approval\n\s+cancel-in-progress: true/
+  );
+  assert.match(
+    approval,
+    / {2}deploy:\n[\s\S]*?needs: approve\n[\s\S]*?uses: \.\/\.github\/workflows\/deploy-sdp-api-gcp-prod\.yml\n\s+with:\n\s+image_sha: \$\{\{ inputs\.image_sha \}\}\n\s+approved_schema: true/
+  );
+  const approve = approval.indexOf("  approve:");
+  const deploy = approval.indexOf("  deploy:");
+  assert.ok(approve !== -1 && approve < deploy);
 });
 
 test("the orchestrator sends every continuous merge to prod", () => {
@@ -236,6 +265,18 @@ test("the orchestrator sends every continuous merge to prod", () => {
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
   assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);
   assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
+  assert.match(
+    prodJob,
+    / {2}request-schema-approval:\n[\s\S]*?needs: deploy-api-prod\n\s+if: needs\.deploy-api-prod\.outputs\.pending_migrations == 'true'\n[\s\S]*?permissions:\n\s+actions: write/
+  );
+  assert.match(
+    prodJob,
+    /gh workflow run apply-prod-migrations\.yml --repo "\$\{\{ github\.repository \}\}" --ref main -f image_sha="\$\{\{ github\.sha \}\}"/
+  );
+  assert.match(
+    orchestrator,
+    /needs\.deploy-api-prod\.outputs\.pending_migrations == 'true' && 'stage \(prod held: pending migrations, approval run dispatched\)'/
+  );
 });
 
 test("merge mode skips the internal smoke gate but requires the caller's", () => {
@@ -252,7 +293,7 @@ test("merge mode skips the internal smoke gate but requires the caller's", () =>
 test("rollback verification accepts release-tag and merge-to-main identities", () => {
   assert.match(
     workflow,
-    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' \}\}/
+    /- name: Verify rollback image signature\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}/
   );
   assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
 });

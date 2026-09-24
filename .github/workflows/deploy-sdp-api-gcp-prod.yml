@@ -18,6 +18,15 @@ on:
         type: string
         required: false
         default: ""
+      approved_schema:
+        description: "Set by apply-prod-migrations.yml after release-production approval: deploy image_sha and run its pending migrations"
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      pending_migrations:
+        description: "true when the merge deploy was held because prod has not applied every migration on image_sha"
+        value: ${{ jobs.schema.outputs.pending }}
   workflow_dispatch:
     inputs:
       image_sha:
@@ -91,7 +100,8 @@ jobs:
     if: >-
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.event_name != 'workflow_dispatch' &&
-      inputs.image_sha != ''
+      inputs.image_sha != '' &&
+      !inputs.approved_schema
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
@@ -126,7 +136,7 @@ jobs:
           fi
           if [[ -n "${pending}" ]]; then
             echo "pending=true" >> "${GITHUB_OUTPUT}"
-            printf 'Prod deploy waits for release-production approval. Pending migrations:\n\n%s\n' "${pending}" >> "${GITHUB_STEP_SUMMARY}"
+            printf 'Prod deploy held. The caller dispatches apply-prod-migrations.yml; approve it in the release-production environment. Pending migrations:\n\n%s\n' "${pending}" >> "${GITHUB_STEP_SUMMARY}"
           else
             echo "pending=false" >> "${GITHUB_OUTPUT}"
           fi
@@ -142,14 +152,15 @@ jobs:
       (needs.smoke.result == 'success' ||
        (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped') ||
        (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
-      (needs.schema.result == 'success' || needs.schema.result == 'skipped') &&
+      (needs.schema.result == 'skipped' ||
+       (needs.schema.result == 'success' && needs.schema.outputs.pending != 'true')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (inputs.image_sha != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 150
-    environment: ${{ needs.schema.outputs.pending == 'true' && 'release-production' || 'production' }}
+    environment: production
     env:
       PROJECT_ID: solana-developer-platform
       REGION: us-central1
@@ -158,7 +169,7 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
-      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && github.event_name != 'workflow_dispatch')) && 'true' || 'false' }}
+      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema))) && 'true' || 'false' }}
     steps:
       - name: Validate deploy image SHA
         env:
@@ -175,7 +186,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
+          ref: ${{ inputs.release_sha != '' && inputs.release_sha || (inputs.approved_schema && inputs.image_sha) || github.sha }}
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
@@ -271,7 +282,7 @@ jobs:
       # this exact commit and promote the SAME digest — merge deploys ship the
       # identical trust chain as releases, never a rebuild.
       - name: Verify and promote merge image
-        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
         timeout-minutes: 45
         run: |
           set -euo pipefail
@@ -342,7 +353,7 @@ jobs:
       # signed promotion fails here by design; break-glass is documented in the
       # HOO-991 design note.
       - name: Verify rollback image signature
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.approved_schema }}
         run: |
           set -euo pipefail
           # Modern cosign stores signatures as OCI referrer bundles, which

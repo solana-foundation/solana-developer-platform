@@ -150,7 +150,9 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.deploy-api-prod.result != 'skipped' && 'stage → prod' || 'stage' }}
+            ${{ needs.deploy-api-prod.outputs.pending_migrations == 'true' && 'stage (prod held: pending migrations, approval run dispatched)' ||
+                needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
+                'stage' }}
           OUTCOME: >-
             ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
                 (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
@@ -213,3 +215,17 @@ jobs:
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     with:
       image_sha: ${{ github.sha }}
+
+  request-schema-approval:
+    name: Request schema approval
+    needs: deploy-api-prod
+    if: needs.deploy-api-prod.outputs.pending_migrations == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the approval run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run apply-prod-migrations.yml --repo "${{ github.repository }}" --ref main -f image_sha="${{ github.sha }}"

@@ -1,0 +1,40 @@
+name: Apply pending migrations to prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "Merge commit on main to deploy to prod together with its pending migrations"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+  packages: read
+
+jobs:
+  approve:
+    name: Schema approval
+    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: release-production
+    concurrency:
+      group: sdp-prod-schema-approval
+      cancel-in-progress: true
+    steps:
+      - name: Record the approved commit
+        run: echo "Approved prod deploy with migrations for ${{ inputs.image_sha }}" >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy:
+    name: sdp-api + worker + cron — prod
+    needs: approve
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
+    with:
+      image_sha: ${{ inputs.image_sha }}
+      approved_schema: true
