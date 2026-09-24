@@ -68,7 +68,8 @@ export const ACTIVITY_KIND_MESSAGE_KEYS = {
 
 /**
  * A decimal amount with grouping and at least two fraction digits ("12,000.00"), keeping up
- * to six so small token amounts are not rounded away. Non-numeric input passes through.
+ * to nine (the most an SPL token carries) so no nonzero amount rounds to "0.00". Non-numeric
+ * input passes through.
  *
  * @param value - Decimal string.
  * @param locale - Formatting locale.
@@ -79,7 +80,7 @@ export function formatDecimalAmount(value: string, locale?: string): string {
   if (!Number.isFinite(numeric)) return value;
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
+    maximumFractionDigits: 9,
   }).format(numeric);
 }
 

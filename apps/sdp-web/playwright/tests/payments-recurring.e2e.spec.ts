@@ -150,7 +150,7 @@ test.describe
         new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
       );
       await expect(
-        page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
+        page.locator("main").getByRole("heading", { level: 1, name: "Schedule" })
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "Schedules", exact: true })).toBeVisible();
       await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();

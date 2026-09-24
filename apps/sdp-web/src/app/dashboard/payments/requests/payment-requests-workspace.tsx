@@ -438,13 +438,29 @@ interface PaymentRequestsWorkspaceProps {
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   wallets: PaymentsDashboardWallet[];
   counterparties: Counterparty[];
+  /** The project's full request count; more than the rows given when the load was capped. */
+  total?: number;
 }
 
 const REQUEST_STATUSES = Object.keys(STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
 
+/** Says when the load cap left older requests out, so search and filters are known to miss them. */
+function DirectoryCapNotice({ count, total }: { count: number; total: number }) {
+  const t = useTranslations();
+  if (total <= count) {
+    return null;
+  }
+  return (
+    <p className="text-meta text-tertiary">
+      {t("DashboardPayments.requests.directoryCapped", { count, total })}
+    </p>
+  );
+}
+
 /**
- * The Requests list. It holds the newest page the server returned (the API has no search), so
- * search, the status filter and paging all run over that page here.
+ * The Requests list. The API has no search, so the page loads the newest requests up to a cap
+ * and search, the status filter and paging all run over those here. When the cap cut the list
+ * short, the list says so.
  */
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
@@ -452,6 +468,7 @@ export function PaymentRequestsWorkspace({
   initialLocalErrorCode,
   wallets,
   counterparties,
+  total = initialPaymentRequests.length,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -616,6 +633,7 @@ export function PaymentRequestsWorkspace({
                 className="w-full sm:w-56"
               />
             </ListToolbar>
+            <DirectoryCapNotice count={requests.length} total={total} />
             {rows.length === 0 ? (
               <p className="py-12 text-center text-body text-tertiary">
                 {t("DashboardPayments.requests.noMatches")}

@@ -45,6 +45,7 @@ export default async function CounterpartyPage({
       counterpartiesTotal: directory.total,
       accountsOk: accounts.ok,
       accountsCount: accounts.data.length,
+      accountsTotal: accounts.total,
     });
 
     return (
@@ -52,6 +53,7 @@ export default async function CounterpartyPage({
         counterparties={directory.data}
         total={directory.total}
         accounts={accounts.data}
+        accountsTotal={accounts.total}
       />
     );
   });

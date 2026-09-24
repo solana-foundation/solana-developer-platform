@@ -5,7 +5,7 @@ import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { paymentsPlaygroundHref } from "@/lib/payments-routes";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
-import { fetchPaymentRequests } from "./payment-requests-page.data";
+import { fetchPaymentRequestDirectory } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function PaymentRequestsPage({
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
     const [result, walletsResult, counterpartiesResult] = await Promise.all([
-      trace.step("fetch_payment_requests", () => fetchPaymentRequests(apiClient.request)),
+      trace.step("fetch_payment_requests", () => fetchPaymentRequestDirectory(apiClient.request)),
       trace.step("fetch_wallets", () => fetchPaymentsWallets(apiClient.request)),
       // The API's largest page, so the From column names every contact a request is likely to
       // carry (the default page of 10 left the rest as raw ids).
@@ -45,6 +45,7 @@ export default async function PaymentRequestsPage({
     return (
       <PaymentRequestsWorkspace
         initialPaymentRequests={result.data}
+        total={result.total}
         initialError={result.error}
         initialLocalErrorCode={result.localErrorCode}
         wallets={wallets}

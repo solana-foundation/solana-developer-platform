@@ -34,7 +34,7 @@ import {
   shortenAddress,
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import { formatDate } from "../payments-presentation";
+import { formatDateTime } from "../payments-presentation";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
   RECURRING_PAYMENT_STATUSES,
@@ -330,7 +330,7 @@ export function RecurringPaymentsWorkspace({
                       )}
                     >
                       {recurringPayment.nextCollectionDueAt
-                        ? formatDate(recurringPayment.nextCollectionDueAt, locale)
+                        ? formatDateTime(recurringPayment.nextCollectionDueAt, locale)
                         : t("DashboardPayments.recurring.notScheduled")}
                     </TableCell>
                   </TableRow>

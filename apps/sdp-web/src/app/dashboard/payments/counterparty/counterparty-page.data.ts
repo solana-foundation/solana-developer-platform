@@ -96,30 +96,33 @@ export async function fetchCounterpartyDirectory(
 
 /**
  * The project's saved Solana addresses across every counterparty, up to `cap`, for the Contact
- * list's Address column and address search.
+ * list's Address column and address search. `total` is the project's full account count, so
+ * the list can say when the cap left some contacts' addresses unloaded.
  *
  * @param request - Authenticated API request function.
  * @param cap - Most accounts to read.
- * @returns The accounts, or an empty list when they could not be read.
+ * @returns The accounts and the full total, or what was read when they could not all be read.
  */
 export async function fetchProjectCounterpartyAccounts(
   request: SdpApiClient["request"],
   cap = CONTACT_DIRECTORY_CAP * 2
-): Promise<{ ok: boolean; data: CounterpartyAccountSummary[] }> {
+): Promise<{ ok: boolean; data: CounterpartyAccountSummary[]; total: number }> {
   const accounts: CounterpartyAccountSummary[] = [];
+  let total = 0;
   for (let page = 1; accounts.length < cap; page += 1) {
     try {
       const response = await request(
         `/v1/counterparties/accounts?page=${page}&pageSize=${DIRECTORY_PAGE_SIZE}`
       );
-      if (!response.ok) return { ok: false, data: accounts };
+      if (!response.ok) return { ok: false, data: accounts, total };
       const json = (await response.json()) as { data?: ListProjectCounterpartyAccountsResponse };
       const rows = json.data?.accounts ?? [];
+      total = json.data?.total ?? total;
       accounts.push(...rows);
-      if (rows.length < DIRECTORY_PAGE_SIZE || accounts.length >= (json.data?.total ?? 0)) break;
+      if (rows.length < DIRECTORY_PAGE_SIZE || accounts.length >= total) break;
     } catch {
-      return { ok: false, data: accounts };
+      return { ok: false, data: accounts, total };
     }
   }
-  return { ok: true, data: accounts.slice(0, cap) };
+  return { ok: true, data: accounts.slice(0, cap), total: Math.max(total, accounts.length) };
 }

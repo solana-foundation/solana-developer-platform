@@ -1,15 +1,8 @@
 "use client";
 
-import { privateChannelInstanceInputSchema, SANDBOX_DEFAULTS } from "@sdp/private-channels";
-import type {
-  PrivateChannelInstance,
-  PrivateChannelInstanceInput,
-  PrivateChannelProbeResult,
-} from "@sdp/types";
+import type { PrivateChannelInstance } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useReducer, useTransition } from "react";
-import { toast } from "sonner";
 import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,24 +14,7 @@ import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
 } from "../private-channels-routes";
-import {
-  type ConnectPrivateChannelResult,
-  connectPrivateChannelAction,
-  type FieldErrors,
-  testConnectionAction,
-  updatePrivateChannelAction,
-} from "./actions";
-import { isProjectRpcProbeFailure } from "./probe-error";
-
-type FormValues = Omit<PrivateChannelInstanceInput, "chainRpcUrl">;
-
-const FORM_PREFILL: FormValues = {
-  gatewayUrl: SANDBOX_DEFAULTS.gatewayUrl,
-  escrowProgramId: SANDBOX_DEFAULTS.escrowProgramId,
-  withdrawProgramId: SANDBOX_DEFAULTS.withdrawProgramId,
-  escrowInstanceAddr: SANDBOX_DEFAULTS.escrowInstanceAddr,
-  authUrl: SANDBOX_DEFAULTS.authUrl,
-};
+import { type ReactivatePrompt, useConnectForm } from "./use-connect-form";
 
 interface Props {
   initialInstance: PrivateChannelInstance | null;
@@ -49,34 +25,6 @@ interface Props {
   /** Match the full-page Payments creation flow rather than an embedded card or modal. */
   pageLayout?: boolean;
   onSuccess?: () => void;
-}
-
-function toValues(instance: PrivateChannelInstance | null): FormValues {
-  if (!instance) return { ...FORM_PREFILL };
-  return {
-    gatewayUrl: instance.gatewayUrl,
-    escrowProgramId: instance.escrowProgramId,
-    withdrawProgramId: instance.withdrawProgramId,
-    escrowInstanceAddr: instance.escrowInstanceAddr,
-    authUrl: instance.authUrl,
-  };
-}
-
-interface ConnectFormState {
-  instance: PrivateChannelInstance | null;
-  values: FormValues;
-  errors: FieldErrors;
-  formError: string | null;
-  reactivatePrompt: { existing: PrivateChannelInstance; message: string } | null;
-}
-
-type ConnectFormUpdate =
-  | Partial<ConnectFormState>
-  | ((state: ConnectFormState) => Partial<ConnectFormState>);
-
-function connectFormReducer(state: ConnectFormState, update: ConnectFormUpdate): ConnectFormState {
-  const patch = typeof update === "function" ? update(state) : update;
-  return { ...state, ...patch };
 }
 
 /**
@@ -134,6 +82,48 @@ function RefreshSetupFooter({
   );
 }
 
+/** The embedded and legacy layouts' buttons: Test connection, then Connect or Update. */
+function ActionButtons({
+  showTestAction,
+  form,
+}: {
+  showTestAction: boolean;
+  form: ReturnType<typeof useConnectForm>;
+}) {
+  const t = useTranslations();
+  const { busy, isValid, isTesting, isConnecting, isUpdating, initiallyConnected } = form;
+  return (
+    <>
+      {showTestAction ? (
+        <Button
+          type="button"
+          variant="secondary"
+          className="min-w-36"
+          onClick={form.runTest}
+          disabled={busy}
+        >
+          {isTesting
+            ? t("DashboardPrivateChannels.instance.testing")
+            : t("DashboardPrivateChannels.instance.testConnection")}
+        </Button>
+      ) : null}
+      {initiallyConnected ? (
+        <Button type="button" onClick={form.runUpdate} disabled={!isValid || busy}>
+          {isUpdating
+            ? t("DashboardPrivateChannels.instance.updating")
+            : t("DashboardPrivateChannels.instance.update")}
+        </Button>
+      ) : (
+        <Button type="button" onClick={() => form.runConnect(false)} disabled={!isValid || busy}>
+          {isConnecting
+            ? t("DashboardPrivateChannels.instance.connecting")
+            : t("DashboardPrivateChannels.instance.connect")}
+        </Button>
+      )}
+    </>
+  );
+}
+
 export function PrivateChannelsConnectForm({
   initialInstance,
   stayOnPageAfterConnect = false,
@@ -141,145 +131,26 @@ export function PrivateChannelsConnectForm({
   pageLayout = false,
   onSuccess,
 }: Props) {
-  const [state, updateState] = useReducer(connectFormReducer, {
-    instance: initialInstance,
-    values: toValues(initialInstance),
-    errors: {},
-    formError: null,
-    reactivatePrompt: null,
-  });
-  const [isTesting, startTesting] = useTransition();
-  const [isConnecting, startConnecting] = useTransition();
-  const [isUpdating, startUpdating] = useTransition();
   const t = useTranslations();
   const router = useRouter();
-  const { instance, values, errors, formError, reactivatePrompt } = state;
-
-  const initiallyConnected = initialInstance?.isActive === true;
-  const busy = isTesting || isConnecting || isUpdating;
   const refresh = useThemeScope() === "refresh";
-
-  const parsed = useMemo(() => privateChannelInstanceInputSchema.safeParse(values), [values]);
-  const isValid = parsed.success;
-
-  const update = <K extends keyof FormValues>(key: K, value: FormValues[K]) => {
-    updateState((current) => ({
-      values: { ...current.values, [key]: value },
-      errors: { ...current.errors, [key]: undefined },
-      formError: null,
-    }));
-  };
-
-  const applyConnectResult = (result: ConnectPrivateChannelResult) => {
-    if (result.ok) {
-      updateState({
-        instance: result.instance,
-        values: toValues(result.instance),
-        errors: {},
-        formError: null,
-      });
-      toast.success(t("DashboardPrivateChannels.instance.connectSuccess"));
-      onSuccess?.();
-      if (stayOnPageAfterConnect) {
-        router.refresh();
-      } else {
-        // Match other integrations: successful setup returns to the provider detail.
-        router.push(privateChannelsInstancePath(result.instance.id));
-      }
-      return;
-    }
-    if (result.kind === "validation") {
-      updateState({ errors: result.fieldErrors, formError: null });
-      return;
-    }
-    if (result.kind === "probe") {
-      updateState({ formError: probeFailureMessage(t, result.probe) });
-      return;
-    }
-    if (result.kind === "requires-reactivate-confirmation") {
-      updateState({
-        reactivatePrompt: { existing: result.existingInstance, message: result.message },
-      });
-      return;
-    }
-    if (result.kind === "conflict-active") {
-      // Shouldn't hit unless another tab connected concurrently — reflect state and stop.
-      updateState({
-        instance: result.activeInstance,
-        values: toValues(result.activeInstance),
-      });
-      toast.error(result.message);
-      return;
-    }
-    // `server` carries the API's own message (RPC resolution, principal
-    // provisioning, feature gate). Surface it like runUpdate does — the generic
-    // fallback named a connection test that never ran and hid the real failure.
-    updateState({ formError: result.message });
-  };
-
-  const runTest = () => {
-    startTesting(async () => {
-      const result = await testConnectionAction({
-        gatewayUrl: values.gatewayUrl,
-        authUrl: values.authUrl,
-        escrowProgramId: values.escrowProgramId,
-        escrowInstanceAddr: values.escrowInstanceAddr,
-      });
-      if (result.kind === "validation") {
-        updateState((current) => ({
-          errors: { ...current.errors, ...result.fieldErrors },
-          formError: null,
-        }));
-        return;
-      }
-      if (result.kind === "request-error") {
-        // The request never produced a probe verdict, so there are no per-check
-        // badges to show — but the reason still belongs on screen.
-        toast.error(result.message);
-        return;
-      }
-      if (result.probe.ok) {
-        toast.success(t("DashboardPrivateChannels.instance.connectionTestSuccess"));
-      } else {
-        toast.error(probeFailureMessage(t, result.probe));
-      }
-    });
-  };
-
-  const runConnect = (confirmReactivate = false) => {
-    startConnecting(async () => {
-      const result = await connectPrivateChannelAction({ ...values, confirmReactivate });
-      applyConnectResult(result);
-    });
-  };
-
-  const runUpdate = () => {
-    if (!instance) return;
-    startUpdating(async () => {
-      const result = await updatePrivateChannelAction({ ...values, instanceId: instance.id });
-      if (result.ok) {
-        updateState({
-          instance: result.instance,
-          values: toValues(result.instance),
-          errors: {},
-          formError: null,
-        });
-        toast.success(t("DashboardPrivateChannels.instance.updateSuccess"));
-        onSuccess?.();
-        router.refresh();
-        return;
-      }
-      if (result.kind === "validation") {
-        updateState({ errors: result.fieldErrors, formError: null });
-        return;
-      }
-      if (result.kind === "probe") {
-        updateState({ formError: probeFailureMessage(t, result.probe) });
-        return;
-      }
-      updateState({ formError: result.message });
-    });
-  };
+  const form = useConnectForm({ initialInstance, stayOnPageAfterConnect, onSuccess });
+  const {
+    instance,
+    values,
+    errors,
+    formError,
+    busy,
+    isValid,
+    initiallyConnected,
+    isTesting,
+    isConnecting,
+    isUpdating,
+    update,
+    runTest,
+    runConnect,
+    runUpdate,
+  } = form;
 
   const endpointFields = (
     <>
@@ -366,49 +237,15 @@ export function PrivateChannelsConnectForm({
     </>
   );
 
-  const actionButtons = (
-    <>
-      {showTestAction ? (
-        <Button
-          type="button"
-          variant="secondary"
-          className="min-w-36"
-          onClick={runTest}
-          disabled={busy}
-        >
-          {isTesting
-            ? t("DashboardPrivateChannels.instance.testing")
-            : t("DashboardPrivateChannels.instance.testConnection")}
-        </Button>
-      ) : null}
-      {initiallyConnected ? (
-        <Button type="button" onClick={runUpdate} disabled={!isValid || busy}>
-          {isUpdating
-            ? t("DashboardPrivateChannels.instance.updating")
-            : t("DashboardPrivateChannels.instance.update")}
-        </Button>
-      ) : (
-        <Button type="button" onClick={() => runConnect(false)} disabled={!isValid || busy}>
-          {isConnecting
-            ? t("DashboardPrivateChannels.instance.connecting")
-            : t("DashboardPrivateChannels.instance.connect")}
-        </Button>
-      )}
-    </>
-  );
+  const actionButtons = <ActionButtons showTestAction={showTestAction} form={form} />;
 
   const confirmationDialogs = (
-    <>
-      <ReactivateConfirmationDialog
-        prompt={reactivatePrompt}
-        working={isConnecting}
-        onCancel={() => updateState({ reactivatePrompt: null })}
-        onConfirm={() => {
-          updateState({ reactivatePrompt: null });
-          runConnect(true);
-        }}
-      />
-    </>
+    <ReactivateConfirmationDialog
+      prompt={form.reactivatePrompt}
+      working={isConnecting}
+      onCancel={form.dismissReactivatePrompt}
+      onConfirm={form.confirmReactivate}
+    />
   );
 
   if (pageLayout) {
@@ -501,14 +338,6 @@ export function PrivateChannelsConnectForm({
   );
 }
 
-type Translate = ReturnType<typeof useTranslations>;
-
-function probeFailureMessage(t: Translate, probe: PrivateChannelProbeResult): string {
-  return isProjectRpcProbeFailure(probe)
-    ? t("DashboardPrivateChannels.instance.projectRpcTestFailed")
-    : t("DashboardPrivateChannels.instance.connectionTestFailed");
-}
-
 function UrlField(props: {
   id: string;
   label: string;
@@ -568,7 +397,7 @@ function TextField(props: {
 }
 
 function ReactivateConfirmationDialog(props: {
-  prompt: { existing: PrivateChannelInstance; message: string } | null;
+  prompt: ReactivatePrompt | null;
   working: boolean;
   onCancel: () => void;
   onConfirm: () => void;

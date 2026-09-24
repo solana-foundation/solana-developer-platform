@@ -37,19 +37,21 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
 }
 
 /**
- * Fetches the first {@link PAYMENT_REQUESTS_PAGE_SIZE} payment requests for
- * the authenticated project.
+ * Fetches one page of payment requests for the authenticated project, newest first, up to
+ * {@link PAYMENT_REQUESTS_PAGE_SIZE} rows.
  *
  * @param request - Authenticated SDP API fetcher.
+ * @param options - The page (1-based), its size and an optional status.
  * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
  *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
  */
 export async function fetchPaymentRequests(
   request: SdpApiClient["request"],
-  options: { pageSize?: number; status?: PaymentRequest["status"] } = {}
+  options: { page?: number; pageSize?: number; status?: PaymentRequest["status"] } = {}
 ): Promise<PaymentRequestsResult> {
   try {
     const query = new URLSearchParams({
+      page: String(options.page ?? 1),
       pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
       ...(options.status ? { status: options.status } : {}),
     });
@@ -68,4 +70,38 @@ export async function fetchPaymentRequests(
       localErrorCode: error instanceof Error ? undefined : "paymentRequestsLoadFailed",
     };
   }
+}
+
+/** The most requests the Requests list loads for local search, filtering and paging. */
+export const PAYMENT_REQUESTS_CAP = 500;
+
+/**
+ * The newest payment requests up to `cap`, read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}.
+ * The list API has no search, so the Requests list loads this once and searches it locally;
+ * `total` is the project's full count, so the list can say when the cap cut it short.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param cap - Most rows to read.
+ * @returns The loaded requests and the full total; never throws.
+ */
+export async function fetchPaymentRequestDirectory(
+  request: SdpApiClient["request"],
+  cap = PAYMENT_REQUESTS_CAP
+): Promise<PaymentRequestsResult> {
+  const first = await fetchPaymentRequests(request, { page: 1 });
+  if (!first.ok) return first;
+  const target = Math.min(first.total, cap);
+  const pages = Math.ceil(target / PAYMENT_REQUESTS_PAGE_SIZE);
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+      fetchPaymentRequests(request, { page: index + 2 })
+    )
+  );
+  const failed = rest.find((result) => !result.ok);
+  if (failed) return failed;
+  return {
+    ok: true,
+    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
+    total: first.total,
+  };
 }

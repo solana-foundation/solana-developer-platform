@@ -240,6 +240,15 @@ export function useBatchSendWizard({
       return { unresolved };
     }
 
+    // One batch pays one token. The paste dialog checks this before it gets here; the CSV
+    // drop does not, so the guard lives where both arrive.
+    const currencies = [...new Set(rows.map((row) => row.currency))];
+    if (currencies.length > 1) {
+      throw new Error(
+        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
+      );
+    }
+
     const { currency } = rows[0];
     const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
     if (!mint) {
