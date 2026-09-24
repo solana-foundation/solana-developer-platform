@@ -40,7 +40,7 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -405,14 +405,36 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
   );
 }
 
+interface EarnVaultPositionsRead {
+  positions: EarnVaultPosition[];
+  /**
+   * Client clock when the read was issued. Treasury retires an optimistic
+   * balance only once a read that STARTED after it saw a movement committed
+   * has landed; the balance a read carries never decides that on its own.
+   */
+  readStartedAt: number;
+}
+
+async function readEarnVaultPositions(): Promise<EarnVaultPositionsRead> {
+  const readStartedAt = Date.now();
+  return { positions: await fetchEarnVaultPositions(), readStartedAt };
+}
+
 /** Live position values refresh while the surface is mounted. */
 export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
-    () => fetchEarnVaultPositions(),
+    readEarnVaultPositions,
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
-  return { positions: data, error, isLoading, refresh: () => void mutate() };
+  const refresh = useCallback(() => void mutate(), [mutate]);
+  return {
+    positions: data?.positions,
+    readStartedAt: data?.readStartedAt,
+    error,
+    isLoading,
+    refresh,
+  };
 }
 
 /**

@@ -504,6 +504,16 @@ never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
 about whether the deposit landed.
 
+Treasury's optimistic balance lives in the pure module
+`../treasury-solutions/treasury-vault-balance-projection.ts`. A committed
+deposit or atomic withdrawal is added to the balance the row showed when it
+was submitted, never to the current live value, and the projection retires
+only once a positions read that STARTED after this tab saw the commit has
+landed; `useEarnVaultPositions` exposes `readStartedAt` for exactly that.
+Nothing compares values to decide a projection is done: Kamino's live value
+reproduces a deposit exactly while Veda's redeemable value lands a hair under
+it, and the old threshold rule double counted the latter until a TTL expired.
+
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
