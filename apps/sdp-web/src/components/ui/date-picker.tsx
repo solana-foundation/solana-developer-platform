@@ -5,6 +5,7 @@ import { enUS, fr } from "date-fns/locale";
 import { CalendarIcon, ChevronDownIcon, ClockIcon } from "lucide-react";
 import { useState } from "react";
 import type { DateRange } from "react-day-picker";
+import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { Calendar } from "@/components/ui/calendar";
 import { triggerSizeClassName } from "@/components/ui/select";
 import { TimeField } from "@/components/ui/time-field";
@@ -203,6 +204,7 @@ function Picker({
 }: PickerProps) {
   const locale = useLocale();
   const t = useTranslations();
+  const themeScopeAttributes = useThemeScopeAttributes();
   const [open, setOpen] = useState(false);
   const selectedDate = parseDateValue(value);
   const currentYear = new Date().getFullYear();
@@ -242,7 +244,13 @@ function Picker({
           label={label}
         />
         <Popover.Portal>
-          <Popover.Positioner className="z-50" side="bottom" align="start" sideOffset={4}>
+          <Popover.Positioner
+            {...themeScopeAttributes}
+            className="z-50"
+            side="bottom"
+            align="start"
+            sideOffset={4}
+          >
             <Popover.Popup className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit")}>
               <Calendar
                 mode="single"
@@ -324,6 +332,7 @@ export function DateRangePicker({
 }: DateRangePickerProps) {
   const locale = useLocale();
   const t = useTranslations();
+  const themeScopeAttributes = useThemeScopeAttributes();
   const [internalRange, setInternalRange] = useState({ from: defaultFrom, to: defaultTo });
   const [draftRange, setDraftRange] = useState({ from: defaultFrom, to: defaultTo });
   const [open, setOpen] = useState(false);
@@ -374,7 +383,13 @@ export function DateRangePicker({
           label={label}
         />
         <Popover.Portal>
-          <Popover.Positioner className="z-50" side="bottom" align="start" sideOffset={4}>
+          <Popover.Positioner
+            {...themeScopeAttributes}
+            className="z-50"
+            side="bottom"
+            align="start"
+            sideOffset={4}
+          >
             <Popover.Popup className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit")}>
               <Calendar
                 mode="range"

@@ -5,7 +5,6 @@ import DashboardLoading from "./(home)/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
 import CounterpartyLoading from "./payments/counterparty/loading";
-import { CounterpartyPlaygroundLoading } from "./payments/counterparty-menu-loading";
 import DepositLoading from "./payments/deposit/loading";
 import PaymentsLoading from "./payments/loading";
 import PayLoading from "./payments/pay/loading";
@@ -92,35 +91,48 @@ describe("home and payments route loading states", () => {
     const markup = renderScopedLoadingStates();
 
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
-    expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-wizard/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
 
-  it("keeps the transaction toolbar and loading table contained beside the expanded sidebar", () => {
-    const markup = renderToStaticMarkup(<TransactionsLoading />);
-
-    expect(markup).toContain("sm:grid-cols-2");
-    expect(markup).toContain("xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
-    expect(markup).not.toContain("lg:grid-cols-[minmax(280px,1fr)_190px_190px_auto]");
-    expect(markup).toContain("hidden overflow-x-auto lg:block");
-    expect(markup).toContain("[&amp;_table]:min-w-[1040px]");
-    expect(markup).toContain("[&amp;_table]:table-fixed");
-  });
-
-  it("matches each settled route's native table columns and responsive visibility", () => {
-    const tableCases = [
+  it("draws the refresh lists as a toolbar over a scrolling table in the title's column", () => {
+    const listCases = [
+      {
+        layout: "payments-transactions",
+        markup: renderToStaticMarkup(<TransactionsLoading />),
+        columns: ["status", "type", "amount", "contact", "wallet", "created"],
+      },
       {
         layout: "payment-requests",
         markup: renderToStaticMarkup(<PaymentRequestsPageSkeleton />),
-        columnClasses: ["w-[16%]", "w-[20%]", "w-[22%]", "w-[22%]", "w-[20%]"],
+        columns: ["status", "amount", "from", "to", "created", "actions"],
       },
       {
         layout: "counterparty-directory",
         markup: renderToStaticMarkup(<CounterpartyDirectorySkeleton />),
-        columnClasses: ["w-[30%]", "w-[12%]", "w-[24%]", "w-[16%]", "w-[18%]", "w-[56px]"],
+        columns: ["name", "type", "external-id", "address", "created", "actions"],
       },
+    ];
+
+    for (const { layout, markup, columns } of listCases) {
+      expect(markup).toContain(`data-loading-layout="${layout}"`);
+      expect(markup).toContain(`data-loading-table-variant="${layout}"`);
+      expect(markup.match(/data-loading-list-toolbar=/g)).toHaveLength(1);
+      expect(markup.match(/data-loading-column="([^"]+)"/g)).toEqual(
+        columns.map((column) => `data-loading-column="${column}"`)
+      );
+      expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
+      // The settled lists scroll sideways on narrow screens rather than swapping to cards.
+      expect(markup).toContain("overflow-x-auto");
+      expect(markup).toContain("min-w-[760px]");
+      expect(markup).not.toContain("data-loading-mobile-rows");
+    }
+  });
+
+  it("matches the recurring table's native columns and responsive visibility", () => {
+    const tableCases = [
       {
         layout: "recurring-payments",
         markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
@@ -160,41 +172,45 @@ describe("home and payments route loading states", () => {
     expect(markup).not.toContain("md:table-cell xl:hidden 2xl:table-cell");
   });
 
-  it("keeps counterparty menu loading aligned with the selected tab", () => {
+  it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
+    // Both pages redirect ?tab=playground to the Payments playground, so a leftover tab never
+    // swaps in a playground skeleton.
     navigationMock.tab = "playground";
-
-    const expectedPlayground = renderToStaticMarkup(<CounterpartyPlaygroundLoading />);
-    expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(expectedPlayground);
-    expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(expectedPlayground);
-    expect(expectedPlayground).toContain('data-loading-layout="counterparty-playground"');
-
-    navigationMock.tab = null;
     expect(renderToStaticMarkup(<CounterpartyLoading />)).toContain(
       'data-loading-layout="counterparty-directory"'
     );
     expect(renderToStaticMarkup(<PaymentRequestsLoading />)).toContain(
       'data-loading-layout="payment-requests"'
     );
+    navigationMock.tab = null;
   });
 
-  it("matches the initial counterparty picker in every payment wizard", () => {
-    const wizardCases = [
-      ["payments-pay", renderToStaticMarkup(<PaymentsPayPageSkeleton />)],
-      ["payments-deposit", renderToStaticMarkup(<PaymentsDepositPageSkeleton />)],
-      ["recurring-payment-create", renderToStaticMarkup(<RecurringPaymentCreateSkeleton />)],
-    ];
+  it("keeps the counterparty picker as the recurring wizard's first step", () => {
+    const markup = renderToStaticMarkup(<RecurringPaymentCreateSkeleton />);
 
-    for (const [layout, markup] of wizardCases) {
-      expect(markup).toContain(`data-loading-layout="${layout}"`);
-      expect(markup.match(/data-loading-counterparty-picker=/g)).toHaveLength(1);
-      expect(markup.match(/data-loading-add-counterparty=/g)).toHaveLength(1);
-      expect(markup.match(/data-loading-combobox=/g)).toHaveLength(1);
-      expect(markup).toContain("border-dashed");
-      expect(markup).toContain("h-[var(--input-height-xl)]");
-      expect(markup).toContain("rounded-[var(--input-radius-xl)]");
-      expect(markup).not.toContain("data-loading-option");
-      expect(markup).not.toContain("min-h-16");
-    }
+    expect(markup).toContain('data-loading-layout="recurring-payment-create"');
+    expect(markup.match(/data-loading-counterparty-picker=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-add-counterparty=/g)).toHaveLength(1);
+    expect(markup.match(/data-loading-combobox=/g)).toHaveLength(1);
+    expect(markup).toContain("border-dashed");
+    expect(markup).toContain("h-[var(--input-height-xl)]");
+    expect(markup).toContain("rounded-[var(--input-radius-xl)]");
+  });
+
+  it("opens Pay on its details step and Deposit on its address tab", () => {
+    const pay = renderToStaticMarkup(<PaymentsPayPageSkeleton />);
+    expect(pay).toContain('data-loading-layout="payments-pay"');
+    expect(pay.match(/data-loading-stepper=/g)).toHaveLength(1);
+    expect(pay.match(/data-loading-field=/g)).toHaveLength(5);
+    expect(pay).toContain("max-w-flow");
+    expect(pay).toContain("sticky bottom-16");
+    expect(pay).not.toContain("data-loading-counterparty-picker");
+
+    const deposit = renderToStaticMarkup(<PaymentsDepositPageSkeleton />);
+    expect(deposit).toContain('data-loading-layout="payments-deposit"');
+    expect(deposit.match(/data-loading-deposit-address=/g)).toHaveLength(1);
+    expect(deposit).toContain("size-28");
+    expect(deposit).not.toContain("data-loading-wizard");
   });
 
   it("keeps recurring detail scrollable while its data is pending", () => {

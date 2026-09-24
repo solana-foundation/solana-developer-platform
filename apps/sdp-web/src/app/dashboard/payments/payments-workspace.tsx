@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { CounterpartyPlaygroundView } from "./counterparty/counterparty-playground-config";
 
 const PaymentsPlayground = dynamic(
   () => import("./payments-playground").then((module) => module.PaymentsPlayground),
@@ -28,6 +29,7 @@ interface PaymentsPlaygroundWorkspaceProps {
   walletsError: string | null;
   transfers: PaymentTransferSummary[];
   transfersError: string | null;
+  counterparties: CounterpartyPlaygroundView[];
 }
 
 export function PaymentsPlaygroundWorkspace({
@@ -37,6 +39,7 @@ export function PaymentsPlaygroundWorkspace({
   walletsError,
   transfers,
   transfersError,
+  counterparties,
 }: PaymentsPlaygroundWorkspaceProps) {
   const { selectedPlaygroundApiKeyId, setPlaygroundApiKeys } = useDashboardWorkspace();
 
@@ -57,6 +60,7 @@ export function PaymentsPlaygroundWorkspace({
       transfersError={transfersError}
       wallets={wallets}
       walletsError={walletsError}
+      counterparties={counterparties}
     />
   );
 }

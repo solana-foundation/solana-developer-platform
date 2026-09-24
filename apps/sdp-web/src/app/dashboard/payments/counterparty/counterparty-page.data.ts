@@ -1,7 +1,9 @@
 import type {
   Counterparty,
+  CounterpartyAccountSummary,
   CounterpartyResponse,
   ListCounterpartiesResponse,
+  ListProjectCounterpartyAccountsResponse,
   PaginatedResponse,
 } from "@sdp/types";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -56,4 +58,68 @@ export async function fetchCounterparty(
   } catch {
     return null;
   }
+}
+
+/** The most contacts the Contact list loads for local search and filtering. */
+export const CONTACT_DIRECTORY_CAP = 500;
+const DIRECTORY_PAGE_SIZE = 100;
+
+/**
+ * Every counterparty up to `cap`, read in pages of 100. The list API has no search or type
+ * filter, so the Contact list loads the directory once and searches it locally.
+ *
+ * @param request - Authenticated API request function.
+ * @param cap - Most rows to read.
+ * @returns The loaded counterparties and the directory's full total.
+ */
+export async function fetchCounterpartyDirectory(
+  request: SdpApiClient["request"],
+  cap = CONTACT_DIRECTORY_CAP
+): Promise<PaginatedResponse<Counterparty>> {
+  const first = await fetchCounterparties(request, { page: 1, pageSize: DIRECTORY_PAGE_SIZE });
+  if (!first.ok) return first;
+  const target = Math.min(first.total, cap);
+  const pages = Math.ceil(target / DIRECTORY_PAGE_SIZE);
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+      fetchCounterparties(request, { page: index + 2, pageSize: DIRECTORY_PAGE_SIZE })
+    )
+  );
+  const failed = rest.find((result) => !result.ok);
+  if (failed) return failed;
+  return {
+    ok: true,
+    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
+    total: first.total,
+  };
+}
+
+/**
+ * The project's saved Solana addresses across every counterparty, up to `cap`, for the Contact
+ * list's Address column and address search.
+ *
+ * @param request - Authenticated API request function.
+ * @param cap - Most accounts to read.
+ * @returns The accounts, or an empty list when they could not be read.
+ */
+export async function fetchProjectCounterpartyAccounts(
+  request: SdpApiClient["request"],
+  cap = CONTACT_DIRECTORY_CAP * 2
+): Promise<{ ok: boolean; data: CounterpartyAccountSummary[] }> {
+  const accounts: CounterpartyAccountSummary[] = [];
+  for (let page = 1; accounts.length < cap; page += 1) {
+    try {
+      const response = await request(
+        `/v1/counterparties/accounts?page=${page}&pageSize=${DIRECTORY_PAGE_SIZE}`
+      );
+      if (!response.ok) return { ok: false, data: accounts };
+      const json = (await response.json()) as { data?: ListProjectCounterpartyAccountsResponse };
+      const rows = json.data?.accounts ?? [];
+      accounts.push(...rows);
+      if (rows.length < DIRECTORY_PAGE_SIZE || accounts.length >= (json.data?.total ?? 0)) break;
+    } catch {
+      return { ok: false, data: accounts };
+    }
+  }
+  return { ok: true, data: accounts.slice(0, cap) };
 }

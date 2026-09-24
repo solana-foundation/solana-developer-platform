@@ -33,7 +33,6 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
     ["onramp", "USD", "usdc.solana", "25.00"],
   ],
   [paymentsQueryKeys.counterpartyAccounts({ counterpartyId: "cpty_1" }), ["cpty_1"]],
-  [paymentsQueryKeys.counterpartyRecentTransfers({ counterpartyId: "cpty_2" }), ["cpty_2"]],
   [paymentsQueryKeys.batchRecipients({ page: 3, search: "acme" }), [3, "acme"]],
   [paymentsQueryKeys.batchEstimate({ serializedRequest: '{"a":1}' }), ['{"a":1}']],
   [paymentsQueryKeys.paymentRequestCounterpartyAccounts({ counterpartyId: "cpty_3" }), ["cpty_3"]],

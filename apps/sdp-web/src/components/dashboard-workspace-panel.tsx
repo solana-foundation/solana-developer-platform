@@ -9,8 +9,11 @@ import { cn } from "@/lib/utils";
 // space, so there's no width jump to compensate for. The `html` rule in
 // globals.css is inert here because the shell locks the viewport and this inner
 // panel is what actually scrolls.
+//
+// A refresh surface already sets the page in its own column, so the panel adds no inset and no
+// gutter: its content shares the title's left and right edges.
 export const dashboardWorkspaceOverviewPanelClassName =
-  "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6";
+  "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6 refresh:px-0 refresh:pt-4 refresh:pb-0 refresh:[scrollbar-gutter:auto] md:refresh:px-0 md:refresh:pb-0";
 
 /**
  * The standard playground/chrome panel: absolutely positioned to fill the

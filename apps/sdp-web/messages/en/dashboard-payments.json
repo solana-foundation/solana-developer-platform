@@ -270,7 +270,31 @@
         "preparingDescription": "We are waiting for the transfer record tied to this quote.",
         "waitingForPayment": "Waiting for payment",
         "waitingForPaymentHostedDescription": "Complete the payment in the provider window above. This deposit updates automatically once the provider confirms it."
-      }
+      },
+      "sandboxOnly": "Sandbox only",
+      "walletReceives": "Wallet receives",
+      "recipientReceives": "Recipient receives",
+      "enterAmountForQuote": "Enter an amount to see a quote",
+      "providerDetailsStep": "Provider details",
+      "reviewBeforeContinue": "Review before you continue",
+      "completeStep": "Complete",
+      "whatProviderNeeds": "What {provider} needs",
+      "continueWithProvider": "Continue with {provider}",
+      "pickProviderHint": "Pick a provider",
+      "continue": "Continue",
+      "preflight": "Preflight",
+      "reviewFrom": "From",
+      "youPay": "You pay",
+      "providerFee": "Provider fee",
+      "feeShare": "{share} of the amount",
+      "estimateConfirmedNext": "Estimate, confirmed on the next step",
+      "into": "Into",
+      "estimateHoldsFor": "Estimate holds for",
+      "thenItExpires": "Then it expires",
+      "cannotBeUndone": "This cannot be undone.",
+      "cannotBeUndoneBody": "Once the provider takes the payment, only they can reverse it.",
+      "memoStep": "Memo",
+      "cancelDeposit": "Cancel deposit"
     },
     "onchainSend": {
       "noAssets": "This wallet has no assets available to send.",
@@ -455,7 +479,22 @@
       "importFailed": "Import failed.",
       "cancel": "Cancel",
       "importing": "Importing…",
-      "import": "Import"
+      "import": "Import",
+      "referencePlaceholder": "Your batch id, for reconciliation",
+      "rows": "Rows",
+      "uploadCsv": "Upload a CSV",
+      "pickFromContacts": "Pick from contacts",
+      "dropCsv": "Drop a CSV here, or",
+      "chooseFile": "choose a file",
+      "downloadTemplate": "Download the template",
+      "pasteRows": "Paste rows instead",
+      "csvRowError": "Row {row}: {message}",
+      "csvEmpty": "That file has no rows to import.",
+      "csvUnresolved": "No saved address matches {ids}. Check the counterparty_wallet_id column.",
+      "csvImported": "Imported {count} rows.",
+      "removeRecipient": "Remove {name}",
+      "addRowsHint": "Add rows from a CSV or from your contacts",
+      "reviewPayments": "Review payments"
     },
     "manualInstructions": {
       "copied": "{label} copied.",
@@ -491,7 +530,11 @@
       "virtualAccount": "{currency} virtual account",
       "payin": "{currency} payin",
       "paymentReferenceRequired": "Payment reference (required)",
-      "remittancePrefix": "Remittance prefix"
+      "remittancePrefix": "Remittance prefix",
+      "sendExactly": "Send exactly",
+      "throughProvider": "Through {provider}, with the reference below",
+      "waitingBody": "Send the amount below to this account, with the reference. This deposit updates on its own once the provider receives the funds.",
+      "copyLabel": "Copy {label}"
     },
     "providerRisk": {
       "close": "Close {title}",
@@ -627,7 +670,19 @@
       "details": "Details",
       "transactions": "Transactions",
       "copyAddress": "Copy address",
-      "addressCopied": "Address copied"
+      "addressCopied": "Address copied",
+      "add": "Add",
+      "name": "Name",
+      "address": "Address",
+      "noAddress": "No address",
+      "hasAddress": "Has an address",
+      "andMore": "and {count} more",
+      "searchPlaceholder": "Search name, id, address",
+      "clearSearch": "Clear contact search",
+      "noMatches": "No contacts match these filters.",
+      "noContacts": "No contacts yet",
+      "noContactsDescription": "Add the people and businesses you pay or get paid by.",
+      "directoryCapped": "Showing the first {count} of {total} contacts. Search and filters cover these."
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -652,17 +707,23 @@
       "selectProvider": "Select provider",
       "counterpartyIdPlaceholder": "Counterparty ID (e.g. cpty_abc123)",
       "selectFiatCurrency": "Select fiat currency",
-      "createOfframpQuote": "Create Offramp Quote"
+      "createOfframpQuote": "Create Offramp Quote",
+      "groupPayments": "Payments",
+      "groupContacts": "Contacts",
+      "groupRequests": "Payment requests",
+      "resultsPerPage": "Results per page",
+      "transferStatus": "Status",
+      "anyStatus": "Any status"
     },
     "commandCenter": {
       "moveMoney": "Move money",
       "moveMoneyDescription": "Start the payment flow that matches what you need to do.",
-      "payDescription": "Onchain or fiat",
-      "depositDescription": "Receive crypto or fiat",
-      "requestPayment": "Request payment",
-      "requestPaymentDescription": "Share a sponsored QR or link",
+      "payDescription": "Onchain or fiat, checked.",
+      "depositDescription": "Crypto in, or a fiat ramp.",
+      "requestPayment": "Request",
+      "requestPaymentDescription": "A sponsored QR or a link.",
       "schedule": "Schedule",
-      "scheduleDescription": "Create a recurring payment",
+      "scheduleDescription": "A payment that repeats.",
       "availableBalance": "Available balance",
       "availableBalanceDescription": "Across {count} {walletLabel}",
       "balanceUnavailable": "Balance is temporarily unavailable.",
@@ -686,7 +747,29 @@
       "networkUnavailable": "Payment network is temporarily unavailable.",
       "manageCounterparties": "Manage counterparties",
       "viewRecurring": "View recurring payments",
-      "viewRequests": "View payment requests"
+      "viewRequests": "View payment requests",
+      "viewAllBatches": "View all batches",
+      "noBatches": "No batches yet",
+      "batchFallbackName": "Batch {id}",
+      "summaryUnavailable": "Counts are temporarily unavailable.",
+      "summary": {
+        "contacts": {
+          "one": "contact",
+          "other": "contacts"
+        },
+        "openRequests": {
+          "one": "open request",
+          "other": "open requests"
+        },
+        "schedules": {
+          "one": "schedule",
+          "other": "schedules"
+        },
+        "providers": {
+          "one": "provider",
+          "other": "providers"
+        }
+      }
     },
     "totalSdpBalance": "Total SDP balance",
     "aggregatedAcrossWallets": "Aggregated across {count} {walletLabel}.",
@@ -1107,7 +1190,14 @@
         "succeeded": "Succeeded",
         "failed": "Failed",
         "canceled": "Canceled"
-      }
+      },
+      "downloadCsv": "Download CSV",
+      "contact": "Contact",
+      "filterState": "State",
+      "filterToken": "Token",
+      "filterContact": "Contact",
+      "filterDate": "Date",
+      "searchIdOrSignature": "Search id or signature"
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",
@@ -1157,7 +1247,89 @@
       "splMintAddress": "SPL mint address",
       "listRequests": "List Payment Requests",
       "createRequest": "Create Payment Request",
-      "playgroundProductName": "Payment Requests"
+      "playgroundProductName": "Payment Requests",
+      "new": "New",
+      "anyone": "anyone",
+      "searchPlaceholder": "Search requests",
+      "clearSearch": "Clear request search",
+      "noMatches": "No requests match these filters."
+    },
+    "depositMethod": {
+      "address": "Solana address",
+      "provider": "Card or bank through a provider",
+      "noProvider": "No card or bank provider is enabled for this project yet.",
+      "manageProviders": "Manage providers in Integrations",
+      "contactHint": "Who is paying the provider. Their details go to the provider you pick."
+    },
+    "activityKind": {
+      "pay": "Pay",
+      "deposit": "Deposit",
+      "transfer": "Transfer",
+      "batch": "Batch"
+    },
+    "batchSummary": {
+      "allSettled": "{count} payments, all settled",
+      "someFailed": "{failed} of {count} failed",
+      "confirmedOf": "{confirmed} of {count} confirmed",
+      "allFailed": "All {count} failed",
+      "partiallyFailed": "Some of {count} failed",
+      "sending": "{count} payments, sending",
+      "pending": "{count} payments, pending",
+      "archived": "{count} payments, archived"
+    },
+    "back": "Back",
+    "payForm": {
+      "contact": "Contact",
+      "contactHint": "The person or business you are paying. Manage them in the Contact list.",
+      "selectContact": "Select a contact",
+      "searchContacts": "Search contacts",
+      "destination": "Destination",
+      "selectDestination": "Select a destination",
+      "noDestinations": "No Solana address on file",
+      "selectContactFirst": "Select a contact first",
+      "addSolanaAddress": "Add a Solana address",
+      "payByBank": "Pay to a bank account instead",
+      "token": "Token",
+      "max": "Max",
+      "available": "{amount} {asset} available",
+      "memo": "Memo",
+      "memoPlaceholder": "A note for this payment",
+      "continueToReview": "Continue to review",
+      "sent": "Sent",
+      "sendPrivately": "Send privately",
+      "noPrivateChannel": "No private channel is connected for this project, so nothing can be sent privately yet.",
+      "privateChannelConnected": "Private sends go member to member through your private channel, not from this form.",
+      "openPrivateChannels": "Open Private Channels"
+    },
+    "depositAddress": {
+      "noWallets": "This project has no wallet to deposit into yet.",
+      "chooseWallet": "Choose the wallet to deposit into",
+      "networkDevnet": "Solana Devnet",
+      "networkMainnet": "Solana Mainnet",
+      "networkWarning": "{network} only. Sent on another network, it is lost.",
+      "copyFailed": "Could not copy the address.",
+      "accepts": "Accepts",
+      "acceptsValue": "SOL and SPL tokens",
+      "minimum": "Minimum",
+      "minimumValue": "None",
+      "arrives": "Arrives",
+      "arrivesValue": "In seconds",
+      "arrivesHint": "A deposit lands once the Solana network confirms the transaction, usually within seconds.",
+      "watching": "Watching for deposits",
+      "watchingLast": "Watching for deposits · last {date}",
+      "simulate": "Simulate a deposit",
+      "simulated": "Requested 1 devnet SOL for this wallet. It shows up here once it lands.",
+      "recentTitle": "Recent deposits to this wallet",
+      "openInTransactions": "Open in Transactions",
+      "recentUnavailable": "Recent deposits are temporarily unavailable.",
+      "noDeposits": "No deposits to this wallet yet."
+    },
+    "depositTimeline": {
+      "label": "Deposit progress",
+      "quoteAgreed": "Quote agreed",
+      "fundsSent": "Funds sent",
+      "receivedByProvider": "Received by provider",
+      "current": "(current step)"
     }
   }
 }

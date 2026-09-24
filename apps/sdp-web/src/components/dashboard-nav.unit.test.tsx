@@ -193,7 +193,7 @@ describe("Payments dashboard navigation", () => {
     expect(item?.subnavKey).toBe("payments");
     expect(item?.children?.map((child) => child.label)).toEqual([
       "Shared.dashboardShell.transactions",
-      "Shared.dashboardShell.counterparty",
+      "Shared.dashboardShell.contacts",
       "Shared.dashboardShell.pay",
       "Shared.dashboardShell.deposit",
       "Shared.dashboardShell.requests",

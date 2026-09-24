@@ -4,6 +4,7 @@ import type { Counterparty } from "@sdp/types";
 import { motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useTranslations } from "@/i18n/provider";
@@ -37,6 +38,110 @@ interface RampWizardShellProps {
   secondaryDisabled?: boolean;
   hideSecondary?: boolean;
   completionTitle?: string;
+  /**
+   * Refresh surfaces only: leaves the whole flow, set as a quiet "Cancel" beside the primary
+   * action. With it, the secondary action is "Back" on the left from the second step on.
+   */
+  onCancel?: () => void;
+  /** Refresh surfaces only: the Cancel's label (default "Cancel"). */
+  cancelLabel?: string;
+  /** Refresh surfaces only: confirm before running `onCancel`, as for a live transaction. */
+  confirmCancel?: boolean;
+  /** Refresh surfaces only: what the primary action is waiting for, on the footer's left. */
+  footerHint?: ReactNode;
+  /** Refresh surfaces only: set the review step's title at heading size. */
+  prominentTitle?: boolean;
+}
+
+/**
+ * The refresh wizard footer: Back (or a hint) on the left; Cancel and the primary action on
+ * the right. A primary action that cannot run yet is drawn outlined, as the design does, so the
+ * band never shows a filled button that does nothing.
+ */
+function RefreshFooter({
+  showBack,
+  backLabel,
+  backDisabled,
+  onBack,
+  cancel,
+  hint,
+  actions,
+  primary,
+}: {
+  showBack: boolean;
+  backLabel: string;
+  backDisabled: boolean;
+  onBack: () => void;
+  cancel: { label: string; onClick: () => void } | null;
+  hint: ReactNode;
+  actions: ReactNode;
+  primary: { label: string; disabled: boolean; onClick: () => void } | null;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {showBack ? (
+        <Button type="button" variant="outline" disabled={backDisabled} onClick={onBack}>
+          {backLabel}
+        </Button>
+      ) : hint ? (
+        <p className="min-w-0 text-body text-secondary">{hint}</p>
+      ) : null}
+      <div className="ml-auto flex items-center gap-2">
+        {actions}
+        {cancel ? (
+          <Button type="button" variant="ghost" onClick={cancel.onClick}>
+            {cancel.label}
+          </Button>
+        ) : null}
+        {primary ? (
+          <Button
+            type="button"
+            variant={primary.disabled ? "outline" : "default"}
+            disabled={primary.disabled}
+            onClick={primary.onClick}
+          >
+            {primary.label}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** The footer outside refresh surfaces: Previous or Cancel on the left, actions and primary right. */
+function LegacyFooter({
+  secondary,
+  actions,
+  primary,
+}: {
+  secondary: { label: string; disabled?: boolean; onClick: () => void } | null;
+  actions?: ReactNode;
+  primary: { label: string; disabled?: boolean; onClick: () => void } | null;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      {secondary ? (
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={secondary.disabled}
+          onClick={secondary.onClick}
+        >
+          {secondary.label}
+        </Button>
+      ) : (
+        <div />
+      )}
+      <div className="ml-auto flex items-center gap-3">
+        {actions}
+        {primary ? (
+          <Button type="button" disabled={primary.disabled} onClick={primary.onClick}>
+            {primary.label}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function RampWizardShell({
@@ -59,13 +164,74 @@ export function RampWizardShell({
   secondaryDisabled,
   hideSecondary,
   completionTitle,
+  onCancel,
+  cancelLabel,
+  confirmCancel,
+  footerHint,
+  prominentTitle,
 }: RampWizardShellProps) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  // What the confirm dialog runs: the secondary action, or the refresh footer's Cancel.
+  const [confirmTarget, setConfirmTarget] = useState<"secondary" | "cancel">("secondary");
   const cancelConfirmationAvailable =
-    confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
+    confirmTarget === "cancel"
+      ? confirmCancel === true && onCancel !== undefined
+      : confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
   const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
   const isLastStep = stepIndex === steps.length - 1;
+  const askToConfirm = (target: "secondary" | "cancel") => () => {
+    setConfirmTarget(target);
+    setCancelConfirmOpen(true);
+  };
+  const onSecondaryClick = confirmSecondary ? askToConfirm("secondary") : onSecondary;
+  const primary = hidePrimary
+    ? null
+    : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary };
+  // The refresh footer's Cancel: the flow's own exit when it has one, else the first step's
+  // secondary action (which is a cancel there).
+  const refreshCancel = onCancel
+    ? {
+        label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
+        onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
+      }
+    : stepIndex === 0 && hideSecondary !== true
+      ? {
+          label: secondaryLabel ?? t("DashboardPayments.counterparty.cancel"),
+          onClick: onSecondaryClick,
+        }
+      : null;
+  const legacySecondary = hideSecondary
+    ? null
+    : {
+        label:
+          secondaryLabel ??
+          (stepIndex === 0
+            ? t("DashboardPayments.counterparty.cancel")
+            : t("DashboardPayments.previous")),
+        disabled: secondaryDisabled,
+        onClick: onSecondaryClick,
+      };
+  let footer: ReactNode;
+  if (!showFooter) {
+    footer = undefined;
+  } else if (refresh) {
+    footer = (
+      <RefreshFooter
+        showBack={hideSecondary !== true && stepIndex > 0}
+        backLabel={secondaryLabel ?? t("DashboardPayments.back")}
+        backDisabled={secondaryDisabled === true}
+        onBack={onSecondaryClick}
+        cancel={refreshCancel}
+        hint={footerHint}
+        actions={footerActions}
+        primary={primary}
+      />
+    );
+  } else {
+    footer = <LegacyFooter secondary={legacySecondary} actions={footerActions} primary={primary} />;
+  }
   return (
     <>
       <WizardFrame
@@ -79,35 +245,8 @@ export function RampWizardShell({
         header={header}
         summary={isLastStep ? undefined : summary}
         summaryTrigger={isLastStep ? undefined : summaryTrigger}
-        footer={
-          showFooter ? (
-            <div className="flex items-center justify-between gap-3">
-              {hideSecondary ? (
-                <div />
-              ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={secondaryDisabled}
-                  onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
-                >
-                  {secondaryLabel ??
-                    (stepIndex === 0
-                      ? t("DashboardPayments.counterparty.cancel")
-                      : t("DashboardPayments.previous"))}
-                </Button>
-              )}
-              <div className="ml-auto flex items-center gap-3">
-                {footerActions}
-                {hidePrimary ? null : (
-                  <Button type="button" disabled={primaryDisabled} onClick={onPrimary}>
-                    {primaryLabel}
-                  </Button>
-                )}
-              </div>
-            </div>
-          ) : undefined
-        }
+        prominentTitle={prominentTitle}
+        footer={footer}
       >
         <div className="space-y-6">
           {walletsError ? (
@@ -138,12 +277,19 @@ export function RampWizardShell({
 
       <CancelTransactionDialog
         open={cancelConfirmOpen && cancelConfirmationAvailable}
-        onKeepGoing={() => setCancelConfirmOpen(false)}
+        onKeepGoing={() => {
+          setCancelConfirmOpen(false);
+          setConfirmTarget("secondary");
+        }}
         onCancel={() => {
           setCancelConfirmOpen(false);
-          if (cancelConfirmationAvailable) {
+          if (!cancelConfirmationAvailable) return;
+          if (confirmTarget === "cancel") {
+            onCancel?.();
+          } else {
             onSecondary();
           }
+          setConfirmTarget("secondary");
         }}
       />
     </>

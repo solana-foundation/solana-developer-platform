@@ -2,7 +2,11 @@
 
 import { useTranslations } from "@/i18n/provider";
 import { WizardSummaryList } from "../wizard-summary-list";
-import { OnchainSendStepContent } from "./components/onchain-send-step-content";
+import {
+  type OnchainSendContactControls,
+  OnchainSendStepContent,
+  type PrivateSendStatus,
+} from "./components/onchain-send-step-content";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import {
   getOnchainSendSteps,
@@ -24,7 +28,7 @@ function sendPrimaryLabel(
     case wizard.isLastStep:
       return t("DashboardPayments.sendTransfer");
     default:
-      return t("DashboardPayments.counterparty.next");
+      return t("DashboardPayments.payForm.continueToReview");
   }
 }
 
@@ -45,6 +49,16 @@ function sendCompletionTitle(
   return undefined;
 }
 
+export interface OnchainSendRailProps extends RailProps {
+  /** The contact picker at the top of the details step; the contact is fixed without it. */
+  contact?: OnchainSendContactControls;
+  privateSend?: PrivateSendStatus | null;
+  /** Switches to a bank payout through a provider, offered once a contact is picked. */
+  onPayByBank?: () => void;
+  /** Leaves the flow entirely (the footer's Cancel). */
+  onCancel?: () => void;
+}
+
 export function OnchainSendRail({
   wallets,
   walletsError,
@@ -54,7 +68,11 @@ export function OnchainSendRail({
   methodLabel,
   preSteps,
   onExit,
-}: RailProps) {
+  contact,
+  privateSend,
+  onPayByBank,
+  onCancel,
+}: OnchainSendRailProps) {
   const t = useTranslations();
   const wizard = useOnchainSendWizard({
     wallets,
@@ -63,16 +81,24 @@ export function OnchainSendRail({
     counterpartyId,
     onExit,
   });
+  // The review step shows the outcome once sent; the progress names that moment as its own
+  // step, so a finished payment reads "Step 3 of 3".
+  const sentStep = {
+    label: t("DashboardPayments.payForm.sent"),
+    title: t("DashboardPayments.onchainSend.transferSubmitted"),
+  };
   return (
     <RampWizardShell
-      steps={[...preSteps, ...getOnchainSendSteps(t)]}
-      stepIndex={preSteps.length + wizard.stepIndex}
+      steps={[...preSteps, ...getOnchainSendSteps(t), sentStep]}
+      stepIndex={preSteps.length + (wizard.finished ? wizard.stepIndex + 1 : wizard.stepIndex)}
       completionTitle={sendCompletionTitle(wizard, t)}
+      prominentTitle={wizard.currentStepId === "REVIEW"}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
       primaryLabel={sendPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={() => void wizard.handlePrimary()}
       onSecondary={wizard.handleSecondary}
+      onCancel={wizard.finished || wizard.submitting ? undefined : onCancel}
       // A sent or held transfer has nothing to go back to.
       hideSecondary={wizard.finished}
       counterpartyDialog={null}
@@ -85,7 +111,13 @@ export function OnchainSendRail({
         />
       }
     >
-      <OnchainSendStepContent wizard={wizard} counterpartyName={counterpartyName} />
+      <OnchainSendStepContent
+        wizard={wizard}
+        counterpartyName={counterpartyName}
+        contact={contact}
+        privateSend={privateSend}
+        onPayByBank={onPayByBank}
+      />
     </RampWizardShell>
   );
 }

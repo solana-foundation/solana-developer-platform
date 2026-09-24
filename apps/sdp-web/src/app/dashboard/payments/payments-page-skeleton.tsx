@@ -1,41 +1,26 @@
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
+  PaymentsActionsSkeleton,
   PaymentsActivitySkeleton,
   PaymentsBalanceSkeleton,
-  PaymentsNetworkSkeleton,
-  PaymentsUpcomingSkeleton,
+  PaymentsSummarySkeleton,
 } from "./payments-command-center-skeletons";
-
-const ACTION_SKELETON_IDS = ["pay", "deposit", "request", "schedule"];
-
-function PaymentsActionsSkeleton() {
-  return (
-    <section className="rounded-lg border border-border-default bg-surface-raised p-4">
-      <SkeletonBlock className="h-5 w-28" />
-      <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
-        {ACTION_SKELETON_IDS.map((id) => (
-          <SkeletonBlock key={id} className="h-36 w-full rounded-md xl:h-44" />
-        ))}
-      </div>
-    </section>
-  );
-}
 
 export function PaymentsPageSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel
       aria-busy="true"
-      className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.63fr)_minmax(20rem,1fr)]"
+      className="flex min-w-0 flex-col gap-16 pt-4"
       data-loading-layout="payments-overview"
     >
-      <PaymentsActionsSkeleton />
-      <PaymentsBalanceSkeleton />
-      <PaymentsActivitySkeleton />
-      <div className="grid min-w-0 content-start gap-4">
-        <PaymentsUpcomingSkeleton />
-        <PaymentsNetworkSkeleton />
+      <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
+        <div className="min-w-0">
+          <PaymentsBalanceSkeleton />
+          <PaymentsSummarySkeleton />
+        </div>
+        <PaymentsActionsSkeleton />
       </div>
+      <PaymentsActivitySkeleton />
     </DashboardWorkspaceOverviewPanel>
   );
 }

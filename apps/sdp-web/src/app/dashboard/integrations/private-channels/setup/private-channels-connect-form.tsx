@@ -10,6 +10,7 @@ import { Loader2Icon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useReducer, useTransition } from "react";
 import { toast } from "sonner";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,6 +79,61 @@ function connectFormReducer(state: ConnectFormState, update: ConnectFormUpdate):
   return { ...state, ...patch };
 }
 
+/**
+ * The refresh Privacy page's footer: Test connection on the left; Cancel and the commit
+ * (Connect, or Update once connected) on the right. A commit that cannot run yet is drawn
+ * outlined, as the design does.
+ */
+function RefreshSetupFooter({
+  onTest,
+  testing,
+  onCancel,
+  commit,
+  canCommit,
+  busy,
+}: {
+  onTest?: () => void;
+  testing: boolean;
+  onCancel: () => void;
+  commit: { kind: "connect" | "update"; working: boolean; onClick: () => void };
+  canCommit: boolean;
+  busy: boolean;
+}) {
+  const t = useTranslations();
+  const commitLabel =
+    commit.kind === "update"
+      ? commit.working
+        ? t("DashboardPrivateChannels.instance.updating")
+        : t("DashboardPrivateChannels.instance.update")
+      : commit.working
+        ? t("DashboardPrivateChannels.instance.connecting")
+        : t("DashboardPrivateChannels.instance.connect");
+  return (
+    <div className="flex items-center gap-2">
+      {onTest ? (
+        <Button type="button" variant="outline" onClick={onTest} disabled={busy}>
+          {testing
+            ? t("DashboardPrivateChannels.instance.testing")
+            : t("DashboardPrivateChannels.instance.testConnection")}
+        </Button>
+      ) : null}
+      <div className="ml-auto flex items-center gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
+          {t("DashboardPrivateChannels.common.cancel")}
+        </Button>
+        <Button
+          type="button"
+          variant={canCommit ? "default" : "outline"}
+          onClick={commit.onClick}
+          disabled={!canCommit || busy}
+        >
+          {commitLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PrivateChannelsConnectForm({
   initialInstance,
   stayOnPageAfterConnect = false,
@@ -101,6 +157,7 @@ export function PrivateChannelsConnectForm({
 
   const initiallyConnected = initialInstance?.isActive === true;
   const busy = isTesting || isConnecting || isUpdating;
+  const refresh = useThemeScope() === "refresh";
 
   const parsed = useMemo(() => privateChannelInstanceInputSchema.safeParse(values), [values]);
   const isValid = parsed.success;
@@ -224,7 +281,7 @@ export function PrivateChannelsConnectForm({
     });
   };
 
-  const fields = (
+  const endpointFields = (
     <>
       <UrlField
         id="gateway-url"
@@ -247,11 +304,16 @@ export function PrivateChannelsConnectForm({
         large={pageLayout}
         onChange={(v) => update("authUrl", v)}
       />
+    </>
+  );
 
-      <div className="grid gap-2 sm:grid-cols-2">
+  const programFields = (
+    <>
+      <div className="grid gap-2 sm:grid-cols-2 refresh:gap-6 refresh:sm:grid-cols-1">
         <TextField
           id="escrow-program-id"
           label={t("DashboardPrivateChannels.instance.escrowProgramId")}
+          placeholder={t("DashboardPrivateChannels.instance.programAddressPlaceholder")}
           value={values.escrowProgramId}
           error={errors.escrowProgramId}
           disabled={busy}
@@ -261,6 +323,7 @@ export function PrivateChannelsConnectForm({
         <TextField
           id="withdraw-program-id"
           label={t("DashboardPrivateChannels.instance.withdrawProgramId")}
+          placeholder={t("DashboardPrivateChannels.instance.programAddressPlaceholder")}
           value={values.withdrawProgramId}
           error={errors.withdrawProgramId}
           disabled={busy}
@@ -272,13 +335,18 @@ export function PrivateChannelsConnectForm({
       <TextField
         id="escrow-instance-addr"
         label={t("DashboardPrivateChannels.instance.escrowInstanceAddr")}
+        placeholder={t("DashboardPrivateChannels.instance.accountAddressPlaceholder")}
         value={values.escrowInstanceAddr}
         error={errors.escrowInstanceAddr}
         disabled={busy}
         large={pageLayout}
         onChange={(v) => update("escrowInstanceAddr", v)}
       />
+    </>
+  );
 
+  const formErrorAlert = (
+    <>
       {formError ? (
         <div
           role="alert"
@@ -287,6 +355,14 @@ export function PrivateChannelsConnectForm({
           {formError}
         </div>
       ) : null}
+    </>
+  );
+
+  const fields = (
+    <>
+      {endpointFields}
+      {programFields}
+      {formErrorAlert}
     </>
   );
 
@@ -339,6 +415,50 @@ export function PrivateChannelsConnectForm({
     const cancelPath = instance
       ? privateChannelsInstancePath(instance.id)
       : PRIVATE_CHANNELS_INTEGRATION_PATH;
+
+    if (refresh) {
+      // The refresh Privacy page: one form in two sections, no step header; Test connection
+      // on the footer's left, the commit on its right.
+      return (
+        <WizardFrame
+          steps={[{ label: t("DashboardPrivateChannels.instance.setupStepLabel"), title: "" }]}
+          currentStep={0}
+          progressLabel={t("DashboardPrivateChannels.instance.setupStepProgress")}
+          hideProgress
+          footer={
+            <RefreshSetupFooter
+              onTest={showTestAction ? runTest : undefined}
+              testing={isTesting}
+              onCancel={() => router.push(cancelPath)}
+              commit={
+                initiallyConnected
+                  ? { kind: "update", working: isUpdating, onClick: runUpdate }
+                  : { kind: "connect", working: isConnecting, onClick: () => runConnect(false) }
+              }
+              canCommit={isValid}
+              busy={busy}
+            />
+          }
+        >
+          <div className="space-y-12">
+            <section className="space-y-6">
+              <h2 className="text-body font-medium text-primary">
+                {t("DashboardPrivateChannels.instance.endpointsSection")}
+              </h2>
+              {endpointFields}
+            </section>
+            <section className="space-y-6">
+              <h2 className="text-body font-medium text-primary">
+                {t("DashboardPrivateChannels.instance.programsSection")}
+              </h2>
+              {programFields}
+            </section>
+            {formErrorAlert}
+          </div>
+          {confirmationDialogs}
+        </WizardFrame>
+      );
+    }
 
     return (
       <WizardFrame
@@ -421,6 +541,7 @@ function UrlField(props: {
 function TextField(props: {
   id: string;
   label: string;
+  placeholder?: string;
   value: string;
   error?: string;
   disabled?: boolean;
@@ -435,6 +556,7 @@ function TextField(props: {
         name={props.id}
         value={props.value}
         onChange={(e) => props.onChange(e.currentTarget.value)}
+        placeholder={props.placeholder}
         autoComplete="off"
         spellCheck={false}
         disabled={props.disabled}

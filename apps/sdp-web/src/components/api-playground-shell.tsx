@@ -4,6 +4,11 @@ import { Badge } from "@solana/design-system/badge";
 import { Braces, Clock3, Copy, Loader2, Play, Sparkles } from "lucide-react";
 import type { ComponentProps, Dispatch, ReactNode, SetStateAction } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiPlaygroundEndpointOptions,
+  ApiPlaygroundRefreshLayout,
+} from "@/components/api-playground-refresh-layout";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
@@ -45,12 +50,20 @@ export interface ApiPlaygroundEndpointConfig {
   pathFields: ApiPlaygroundFieldConfig[];
   bodyFields: ApiPlaygroundFieldConfig[];
   expectedResponse: unknown;
+  /** The API family this endpoint belongs to, grouping the endpoint picker when set. */
+  group?: string;
 }
 
 export interface ApiPlaygroundMessage {
   text: string;
   tone?: "critical" | "neutral";
 }
+
+/** Where the last run stands, as the refresh layout reports it beside the response. */
+export type ApiPlaygroundExecution =
+  | { state: "idle" }
+  | { state: "running" }
+  | { state: "done" | "error"; ok: boolean; label: string; durationMs?: number };
 
 interface ExecutionResult {
   ok: boolean;
@@ -71,6 +84,37 @@ interface ApiPlaygroundShellProps {
   requiresApiKey?: boolean;
   productName: string;
   rightMessages?: ApiPlaygroundMessage[];
+}
+
+function apiHostOf(baseUrl: string): string | null {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return null;
+  }
+}
+
+function getRefreshExecution(
+  isExecuting: boolean,
+  executionResult: ExecutionResult | null,
+  executeError: string | null,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundExecution {
+  if (isExecuting) {
+    return { state: "running" };
+  }
+  if (executionResult) {
+    return {
+      state: "done",
+      ok: executionResult.ok,
+      label: `${executionResult.status} ${executionResult.statusText}`.trim(),
+      durationMs: executionResult.durationMs,
+    };
+  }
+  if (executeError) {
+    return { state: "error", ok: false, label: t("Shared.SharedComponents.requestFailed") };
+  }
+  return { state: "idle" };
 }
 
 function getDefaultApiBaseUrl(): string {
@@ -518,6 +562,7 @@ export function ApiPlaygroundShell({
   rightMessages = [],
 }: ApiPlaygroundShellProps) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
   const initialEndpoint =
     endpoints.find((endpoint) => endpoint.id === defaultEndpointId) ?? endpoints[0];
@@ -686,6 +731,34 @@ export function ApiPlaygroundShell({
     });
   };
 
+  if (refresh) {
+    return (
+      <ApiPlaygroundRefreshLayout
+        endpoints={endpoints}
+        activeEndpoint={activeEndpoint}
+        onEndpointChange={updateEndpointInUrl}
+        apiKeySelector={apiKeySelector}
+        apiHost={apiHostOf(effectiveApiBaseUrl)}
+        requiresApiKey={requiresApiKey}
+        messages={[...leftMessages, ...rightMessages]}
+        fieldValues={fieldValues}
+        onFieldChange={updateFieldValue}
+        getFieldId={getFieldId}
+        resolvedPath={resolvedPath}
+        requestBody={requestBody}
+        codeSnippet={codeSnippet}
+        aiInstructions={aiInstructions}
+        exampleBody={exampleBody}
+        execution={getRefreshExecution(isExecuting, executionResult, executeError, t)}
+        responseBody={responseBody}
+        onRun={handleExecute}
+        onReset={handleReset}
+        onCopy={(text, action) => void copyText(text, action)}
+        copiedAction={copiedAction}
+      />
+    );
+  }
+
   const { statusToneVariant, statusLabel } = getExecutionStatus(executionResult, executeError, t);
 
   return (
@@ -710,15 +783,7 @@ export function ApiPlaygroundShell({
               value={activeEndpoint.id}
               onChange={(event) => updateEndpointInUrl(event.currentTarget.value)}
             >
-              {endpoints.map((endpoint) => (
-                <option
-                  key={endpoint.id}
-                  value={endpoint.id}
-                  className="bg-surface-raised text-primary"
-                >
-                  {endpoint.method} {endpoint.title}
-                </option>
-              ))}
+              <ApiPlaygroundEndpointOptions endpoints={endpoints} />
             </select>
             <svg
               aria-hidden="true"

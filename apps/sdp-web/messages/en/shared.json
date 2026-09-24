@@ -182,7 +182,25 @@
     "playgroundExecutionFailed": "Playground execution failed.",
     "requestExecutionFailed": "Request execution failed.",
     "unknownToken": "Unknown",
-    "sdpMintedToken": "SDP-Minted"
+    "sdpMintedToken": "SDP-Minted",
+    "rowsCount": "{count} rows",
+    "filter": "Filter",
+    "filterBy": "Filter by…",
+    "any": "Any",
+    "copyLink": "Copy link",
+    "notSet": "Not set",
+    "clearFilter": "Clear {filter} filter",
+    "playgroundForm": "Form",
+    "playgroundRaw": "Raw",
+    "clearField": "Clear {field}",
+    "apiKeyLabel": "API key",
+    "noParameters": "This endpoint takes no parameters.",
+    "playgroundParameters": "Parameters",
+    "playgroundBody": "Body",
+    "playgroundKeyPlaceholder": "<your API key>",
+    "exampleResponse": "Example response",
+    "notRunYet": "Not run yet",
+    "running": "Running…"
   },
   "dashboardShell": {
     "workspace": "Workspace",
@@ -262,7 +280,10 @@
     "allowlist": "Allowlist",
     "integrations": "Integrations",
     "holdings": "Holdings",
-    "backToHome": "Back to Home"
+    "backToHome": "Back to Home",
+    "privacy": "Privacy",
+    "contactList": "Contact list",
+    "contacts": "Contacts"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

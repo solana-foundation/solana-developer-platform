@@ -11,6 +11,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { Badge, type BadgeVariant } from "./badge";
@@ -76,6 +77,8 @@ interface ComboboxProps {
   label: string;
   /** Visually hides the label while preserving it for the trigger's accessible name. */
   hideLabel?: boolean;
+  /** Rendered after the label, e.g. an info tooltip; not part of the accessible name. */
+  labelAccessory?: ReactNode;
   required?: boolean;
   className?: string;
   placeholder?: string;
@@ -144,6 +147,7 @@ export function Combobox({
   options,
   label,
   hideLabel,
+  labelAccessory,
   required,
   className,
   placeholder,
@@ -167,6 +171,7 @@ export function Combobox({
   const resolvedSearchPlaceholder = searchPlaceholder ?? t("Shared.SharedComponents.search");
   const labelId = useId();
   const portalContainer = usePortalContainer();
+  const themeScopeAttributes = useThemeScopeAttributes();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -246,6 +251,11 @@ export function Combobox({
       onClick={variant === "dialog" ? () => handleOpenChange(!open) : undefined}
       className={cn(
         "flex w-full items-center gap-2 border border-transparent bg-fill-subtle text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:cursor-not-allowed disabled:opacity-50",
+        // Refresh surfaces draw the trigger as an underline field (radius and inset come from
+        // the scope's input tokens).
+        "refresh:border-x-0 refresh:border-t-0 refresh:border-b-border-default refresh:bg-transparent refresh:hover:border-b-border-strong refresh:focus-visible:border-b-primary refresh:focus-visible:ring-0",
+        // Underline fields carry no leading icon; the label names the field.
+        "refresh:[&>svg:first-child]:hidden",
         SIZE_CLASSES[size],
         className,
         validationError && "border-error-border hover:border-error-border"
@@ -274,7 +284,10 @@ export function Combobox({
       </span>
       {trailing ? <span className="shrink-0">{trailing}</span> : null}
       <ChevronDownIcon
-        className={cn("size-5 shrink-0 text-tertiary transition-transform", open && "rotate-180")}
+        className={cn(
+          "size-5 shrink-0 text-tertiary transition-transform refresh:size-4 refresh:text-secondary",
+          open && "rotate-180"
+        )}
       />
     </button>
   );
@@ -372,17 +385,20 @@ export function Combobox({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className={hideLabel ? "sr-only" : undefined} id={labelId}>
-        {label}
-        {required ? (
-          <>
-            <span aria-hidden className="text-destructive">
-              *
-            </span>
-            <span className="sr-only"> {t("Shared.SharedComponents.required")}</span>
-          </>
-        ) : null}
-      </Label>
+      <div className={cn("flex items-center gap-1.5", hideLabel && "sr-only")}>
+        <Label id={labelId}>
+          {label}
+          {required ? (
+            <>
+              <span aria-hidden className="text-destructive">
+                *
+              </span>
+              <span className="sr-only"> {t("Shared.SharedComponents.required")}</span>
+            </>
+          ) : null}
+        </Label>
+        {labelAccessory}
+      </div>
       {variant === "dialog" ? (
         <>
           {trigger}
@@ -402,6 +418,7 @@ export function Combobox({
           <Popover.Trigger asChild>{trigger}</Popover.Trigger>
           <Popover.Portal container={portalContainer ?? undefined}>
             <Popover.Content
+              {...themeScopeAttributes}
               sideOffset={8}
               align="start"
               style={{ width: "max(var(--radix-popover-trigger-width), 240px)" }}

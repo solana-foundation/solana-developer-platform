@@ -170,3 +170,147 @@ export function ProviderCard({
     </motion.button>
   );
 }
+
+function QuoteCardEstimate({
+  estimate,
+  estimateLoading,
+  unavailableReason,
+}: {
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
+  unavailableReason?: string;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  if (unavailableReason !== undefined) {
+    return (
+      <span className="space-y-1">
+        <span className="block text-meta text-tertiary">
+          {t("DashboardPayments.ramps.unavailable")}
+        </span>
+        <span className="block text-body text-secondary">{unavailableReason}</span>
+      </span>
+    );
+  }
+  if (estimateLoading) {
+    return (
+      <span className="space-y-2" aria-busy="true">
+        <span className="block h-3.5 w-24 animate-pulse rounded bg-fill" />
+        <span className="block h-7 w-32 animate-pulse rounded bg-fill" />
+      </span>
+    );
+  }
+  if (estimate?.status !== "ok") {
+    return (
+      <span className="block text-meta text-tertiary">
+        {estimate?.status === "unsupported"
+          ? t("DashboardPayments.ramps.rateKnownAtQuote")
+          : estimate?.status === "error"
+            ? t("DashboardPayments.ramps.unavailable")
+            : t("DashboardPayments.ramps.enterAmountForQuote")}
+      </span>
+    );
+  }
+  const ok = estimate.estimate;
+  const isFiatOut = ok.direction === "offramp";
+  return (
+    <span className="space-y-1">
+      <span className="block text-meta text-secondary">
+        {isFiatOut
+          ? t("DashboardPayments.ramps.recipientReceives")
+          : t("DashboardPayments.ramps.walletReceives")}
+      </span>
+      <span className="flex items-baseline gap-1.5">
+        <span className="text-quote font-medium text-primary tabular-nums">
+          {formatEstimateDecimal(isFiatOut ? ok.fiatAmount : ok.cryptoAmount, locale)}
+        </span>
+        <span className="text-body text-secondary">
+          {isFiatOut ? ok.fiatCurrency : getCryptoRailAssetLabel(ok.assetRail)}
+        </span>
+      </span>
+      <span className="block text-meta text-tertiary">{buildFeeLabel(t, ok.fees, locale)}</span>
+    </span>
+  );
+}
+
+/**
+ * A provider as one tile in the refresh quote grid: logo and name with a radio mark, then what
+ * the wallet receives and the fee. The tile is a label around a native radio, so the grid
+ * gets radio-group keyboard behaviour for free. An unavailable provider keeps its tile,
+ * disabled, with the first reason it cannot be used, so the grid shows every option.
+ */
+export function ProviderQuoteCard({
+  name,
+  option,
+  active,
+  estimate,
+  estimateLoading,
+  sandboxOnly,
+  unavailableReason,
+  onSelect,
+}: {
+  /** Shared by every tile in one grid, which makes them one radio group. */
+  name: string;
+  option: RampProviderOption;
+  active: boolean;
+  estimate?: RampProviderEstimateResult;
+  estimateLoading?: boolean;
+  sandboxOnly?: boolean;
+  unavailableReason?: string;
+  onSelect: () => void;
+}) {
+  const t = useTranslations();
+  const disabled = unavailableReason !== undefined;
+  return (
+    <label
+      className={cn(
+        "flex min-h-40 w-full cursor-pointer flex-col justify-between gap-6 rounded-card border p-5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary",
+        active ? "border-primary" : "border-border-strong hover:bg-fill-subtle",
+        disabled && "cursor-not-allowed hover:bg-transparent"
+      )}
+    >
+      <input
+        type="radio"
+        name={name}
+        value={option.id}
+        checked={active}
+        disabled={disabled}
+        onChange={onSelect}
+        className="sr-only"
+      />
+      <span className="flex w-full items-start gap-3">
+        <Image
+          src={RAMP_PROVIDER_LOGOS[option.id]}
+          alt=""
+          width={40}
+          height={40}
+          className={cn("size-10 shrink-0 rounded-full object-contain", disabled && "opacity-50")}
+        />
+        <span className="min-w-0 flex-1 pt-2">
+          <span className={cn("block text-body text-primary", disabled && "text-muted")}>
+            {option.title}
+          </span>
+          {sandboxOnly ? (
+            <span className="block text-body text-secondary">
+              {t("DashboardPayments.ramps.sandboxOnly")}
+            </span>
+          ) : null}
+        </span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            "mt-2 flex size-5 shrink-0 items-center justify-center rounded-full border",
+            active ? "border-primary" : "border-border-strong"
+          )}
+        >
+          {active ? <span className="size-2.5 rounded-full bg-primary" /> : null}
+        </span>
+      </span>
+      <QuoteCardEstimate
+        estimate={estimate}
+        estimateLoading={estimateLoading}
+        unavailableReason={unavailableReason}
+      />
+    </label>
+  );
+}

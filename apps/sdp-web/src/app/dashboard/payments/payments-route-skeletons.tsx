@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -31,17 +32,47 @@ const DETAIL_ROW_IDS = [
   "payments-loading-detail-7",
   "payments-loading-detail-8",
 ];
-const TRANSACTION_SKELETON_COLUMNS = [
-  { id: "transaction", className: "w-[23%]" },
-  { id: "status", className: "w-[12%]" },
-  { id: "amount", className: "w-[13%]" },
-  { id: "direction", className: "w-[10%]" },
-  { id: "counterparty", className: "w-[15%]" },
-  { id: "wallet", className: "w-[13%]" },
-  { id: "created", className: "w-[14%]" },
-] as const;
+interface ListSkeletonColumn {
+  id: string;
+  headerClassName?: string;
+  cellSkeletonClassName: string;
+}
 
-type TableSkeletonVariant = "payment-requests" | "counterparty-directory" | "recurring-payments";
+type ListSkeletonVariant = "payments-transactions" | "counterparty-directory" | "payment-requests";
+
+/** The refresh lists' columns, in order, so a loading list lines up with the settled one. */
+const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonColumn[]> = {
+  "payments-transactions": [
+    { id: "status", cellSkeletonClassName: "h-4 w-20" },
+    { id: "type", cellSkeletonClassName: "h-4 w-24" },
+    { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
+    { id: "contact", cellSkeletonClassName: "h-4 w-28" },
+    { id: "wallet", cellSkeletonClassName: "h-4 w-24" },
+    { id: "created", cellSkeletonClassName: "h-4 w-24" },
+  ],
+  "counterparty-directory": [
+    { id: "name", cellSkeletonClassName: "h-4 w-32" },
+    { id: "type", cellSkeletonClassName: "h-4 w-16" },
+    { id: "external-id", cellSkeletonClassName: "h-4 w-20" },
+    { id: "address", cellSkeletonClassName: "h-4 w-28" },
+    { id: "created", cellSkeletonClassName: "h-4 w-20" },
+    {
+      id: "actions",
+      headerClassName: "w-12",
+      cellSkeletonClassName: "ml-auto size-8 rounded-control",
+    },
+  ],
+  "payment-requests": [
+    { id: "status", cellSkeletonClassName: "h-4 w-20" },
+    { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
+    { id: "from", cellSkeletonClassName: "h-4 w-28" },
+    { id: "to", cellSkeletonClassName: "h-4 w-28" },
+    { id: "created", cellSkeletonClassName: "h-4 w-20" },
+    { id: "actions", headerClassName: "w-px", cellSkeletonClassName: "ml-auto h-4 w-16" },
+  ],
+};
+
+type TableSkeletonVariant = "recurring-payments";
 
 interface TableSkeletonColumn {
   id: string;
@@ -58,84 +89,6 @@ interface TableSkeletonConfig {
 }
 
 const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> = {
-  "payment-requests": {
-    tableClassName: "rounded-none border-0 [&_table]:min-w-[800px] [&_table]:table-fixed",
-    containerClassName: "min-h-0 flex-1 overflow-y-auto",
-    columns: [
-      {
-        id: "status",
-        headerClassName: "w-[16%]",
-        headerSkeletonClassName: "h-4 w-16",
-        cellSkeletonClassName: "h-5 w-20 max-w-full rounded-full",
-      },
-      {
-        id: "amount",
-        headerClassName: "w-[20%]",
-        headerSkeletonClassName: "h-4 w-20",
-        cellSkeletonClassName: "h-4 w-24 max-w-full",
-      },
-      {
-        id: "from",
-        headerClassName: "w-[22%]",
-        headerSkeletonClassName: "h-4 w-16",
-        cellSkeletonClassName: "h-4 w-28 max-w-full",
-      },
-      {
-        id: "to",
-        headerClassName: "w-[22%]",
-        headerSkeletonClassName: "h-4 w-12",
-        cellSkeletonClassName: "h-4 w-28 max-w-full",
-      },
-      {
-        id: "created",
-        headerClassName: "w-[20%]",
-        headerSkeletonClassName: "h-4 w-20",
-        cellSkeletonClassName: "h-4 w-24 max-w-full",
-      },
-    ],
-  },
-  "counterparty-directory": {
-    tableClassName: "rounded-none border-0 [&_table]:min-w-[880px] [&_table]:table-fixed",
-    containerClassName: "min-h-0 flex-1 overflow-y-auto",
-    columns: [
-      {
-        id: "display-name",
-        headerClassName: "w-[30%]",
-        headerSkeletonClassName: "h-4 w-24",
-        cellSkeletonClassName: "h-4 w-32 max-w-full",
-      },
-      {
-        id: "type",
-        headerClassName: "w-[12%]",
-        headerSkeletonClassName: "h-4 w-12",
-        cellSkeletonClassName: "h-4 w-16 max-w-full rounded-full",
-      },
-      {
-        id: "email",
-        headerClassName: "w-[24%]",
-        headerSkeletonClassName: "h-4 w-16",
-        cellSkeletonClassName: "h-4 w-28 max-w-full",
-      },
-      {
-        id: "external-id",
-        headerClassName: "w-[16%]",
-        headerSkeletonClassName: "h-4 w-20",
-        cellSkeletonClassName: "h-4 w-24 max-w-full",
-      },
-      {
-        id: "created",
-        headerClassName: "w-[18%]",
-        headerSkeletonClassName: "h-4 w-20",
-        cellSkeletonClassName: "h-4 w-20 max-w-full",
-      },
-      {
-        id: "actions",
-        headerClassName: "w-[56px]",
-        cellClassName: "text-right",
-        cellSkeletonClassName: "ml-auto size-8 rounded-lg",
-      },
-    ],
-  },
   "recurring-payments": {
     tableClassName: "rounded-none border-0 w-full [&_table]:table-fixed",
     containerClassName: "min-h-0 flex-1 overflow-hidden",
@@ -257,24 +210,118 @@ function RouteTableSkeleton({ variant }: { variant: TableSkeletonVariant }) {
   );
 }
 
-function WorkspaceTablePageSkeleton({
+function ListToolbarSkeleton() {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3" data-loading-list-toolbar>
+      <SkeletonBlock className="h-control-md w-24 rounded-control" />
+      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:flex-nowrap">
+        <SkeletonBlock className="h-control-md w-32 shrink-0 rounded-control" />
+        <SkeletonBlock className="h-control-md w-full rounded-control sm:w-80" />
+      </div>
+    </div>
+  );
+}
+
+function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
+  const columns = LIST_SKELETON_COLUMNS[variant];
+  return (
+    <div className="overflow-x-auto" data-loading-table data-loading-table-variant={variant}>
+      <Table className="min-w-[760px] rounded-none border-0">
+        <TableHeader>
+          <TableRow>
+            {columns.map((column) => (
+              <TableHead
+                key={column.id}
+                className={column.headerClassName}
+                data-loading-column={column.id}
+              >
+                {column.id === "actions" ? null : (
+                  <SkeletonBlock
+                    className={
+                      column.headerClassName === "text-right" ? "ml-auto h-3 w-14" : "h-3 w-14"
+                    }
+                  />
+                )}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {TABLE_ROW_IDS.map((rowId) => (
+            <TableRow key={`${variant}-${rowId}`} data-loading-table-row>
+              {columns.map((column) => (
+                <TableCell key={column.id}>
+                  <SkeletonBlock className={`${column.cellSkeletonClassName} max-w-full`} />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** A refresh list page: the filter and search row over the list, both in the title's column. */
+function ListPageSkeleton({
   layout,
+  children,
 }: {
-  layout: "payment-requests" | "counterparty-directory";
+  layout: ListSkeletonVariant;
+  children?: ReactNode;
 }) {
   return (
     <DashboardWorkspaceOverviewPanel
-      className="flex min-h-0 flex-col overflow-hidden"
+      className="flex flex-col gap-5"
       data-loading-layout={layout}
       aria-busy="true"
     >
-      <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-        <WorkspaceCardHeaderSkeleton />
-        <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-          <RouteTableSkeleton variant={layout} />
-        </CardContent>
-      </Card>
+      <ListToolbarSkeleton />
+      {children ?? <ListTableSkeleton variant={layout} />}
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
+  return (
+    <div className="space-y-1.5" data-loading-field>
+      <SkeletonBlock className="h-3.5 w-24" />
+      <div className="flex h-11 items-center border-b border-border-default">
+        <SkeletonBlock className={`h-4 max-w-full ${value}`} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A refresh flow's first step: the step name and bar, its fields, and the footer band pinned
+ * to the bottom of the viewport, as WizardFrame lays them out.
+ */
+function FlowPageSkeleton({ layout, children }: { layout: "payments-pay"; children: ReactNode }) {
+  return (
+    <div
+      className="flex min-h-full w-full flex-col"
+      data-loading-layout={layout}
+      data-loading-wizard
+      aria-busy="true"
+    >
+      <div className="mx-auto w-full max-w-flow flex-1 pb-10">
+        <div className="mb-10 space-y-3" data-loading-stepper>
+          <div className="flex items-center justify-between gap-3">
+            <SkeletonBlock className="h-4 w-24" />
+            <SkeletonBlock className="h-4 w-20" />
+          </div>
+          <SkeletonBlock className="h-1 w-full rounded-full" />
+        </div>
+        <div className="space-y-8">{children}</div>
+      </div>
+      <div className="sticky bottom-16 -mx-3 -mb-5 rounded-b-2xl border-t border-border-subtle bg-[color-mix(in_srgb,var(--surface-raised)_97%,var(--emph-xh))] px-3 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-0 md:-mx-6 md:-mb-6 md:px-6">
+        <div className="mx-auto flex w-full max-w-flow items-center justify-end gap-3">
+          <SkeletonBlock className="h-control-lg w-20 rounded-control" />
+          <SkeletonBlock className="h-control-lg w-40 rounded-control" />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -372,19 +419,48 @@ function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
 }
 
 export function PaymentRequestsPageSkeleton() {
-  return <WorkspaceTablePageSkeleton layout="payment-requests" />;
+  return <ListPageSkeleton layout="payment-requests" />;
 }
 
 export function CounterpartyDirectorySkeleton() {
-  return <WorkspaceTablePageSkeleton layout="counterparty-directory" />;
+  return <ListPageSkeleton layout="counterparty-directory" />;
 }
 
+/** Pay's details step: contact, destination, source wallet, then amount beside token. */
 export function PaymentsPayPageSkeleton() {
-  return <WizardPageSkeleton layout="payments-pay" />;
+  return (
+    <FlowPageSkeleton layout="payments-pay">
+      <UnderlineFieldSkeleton value="w-40" />
+      <UnderlineFieldSkeleton value="w-56" />
+      <UnderlineFieldSkeleton value="w-36" />
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)] gap-6">
+        <UnderlineFieldSkeleton value="w-24" />
+        <UnderlineFieldSkeleton value="w-16" />
+      </div>
+    </FlowPageSkeleton>
+  );
 }
 
+/** Deposit opens on its address tab: the wallet's address and QR card, then its terms. */
 export function PaymentsDepositPageSkeleton() {
-  return <WizardPageSkeleton layout="payments-deposit" />;
+  return (
+    <div
+      className="mx-auto w-full max-w-flow space-y-10 pt-2"
+      data-loading-layout="payments-deposit"
+      data-loading-deposit-address
+      aria-busy="true"
+    >
+      <div className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-6 sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1 space-y-4">
+          <SkeletonBlock className="h-5 w-40 max-w-full" />
+          <SkeletonBlock className="h-5 w-full" />
+          <SkeletonBlock className="h-4 w-64 max-w-full" />
+        </div>
+        <SkeletonBlock className="size-28 shrink-0 rounded-control" />
+      </div>
+      <DetailRowsSkeleton count={3} />
+    </div>
+  );
 }
 
 export function RecurringPaymentCreateSkeleton() {
@@ -542,79 +618,16 @@ export function RecurringPaymentDetailSkeleton() {
 
 export function TransactionsResultsSkeleton() {
   return (
-    <section data-loading-transaction-results data-loading-table aria-busy="true">
-      <div className="hidden overflow-x-auto lg:block">
-        <Table className="rounded-none border-0 [&_table]:min-w-[1040px] [&_table]:table-fixed">
-          <TableHeader>
-            <TableRow>
-              {TRANSACTION_SKELETON_COLUMNS.map(({ id, className }) => (
-                <TableHead key={id} className={className} data-loading-column={id}>
-                  <SkeletonBlock className="h-4 w-20 max-w-full" />
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {TABLE_ROW_IDS.map((rowId) => (
-              <TableRow key={`transactions-${rowId}`} data-loading-table-row>
-                <TableCell>
-                  <SkeletonBlock className="h-9 w-40 max-w-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-5 w-20 max-w-full rounded-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-4 w-16 max-w-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </TableCell>
-                <TableCell>
-                  <SkeletonBlock className="h-4 w-24 max-w-full" />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      <div className="divide-y divide-border-default lg:hidden" data-loading-mobile-rows>
-        {TABLE_ROW_IDS.map((rowId) => (
-          <div key={`transactions-mobile-${rowId}`} className="space-y-3 p-4">
-            <SkeletonBlock className="h-9 w-44 max-w-full" />
-            <SkeletonBlock className="h-4 w-full" />
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center justify-between gap-4 border-t border-border-default p-4">
-        <SkeletonBlock className="h-9 w-28" />
-        <SkeletonBlock className="h-9 w-44" />
-      </div>
+    <section data-loading-transaction-results aria-busy="true">
+      <ListTableSkeleton variant="payments-transactions" />
     </section>
   );
 }
 
 export function PaymentsTransactionsPageSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel
-      className="h-full min-h-0 overflow-y-auto"
-      data-loading-layout="payments-transactions"
-      aria-busy="true"
-    >
-      <div className="overflow-hidden rounded-lg border border-border-default bg-surface-raised">
-        <div className="grid gap-2 border-b border-border-default p-3 sm:grid-cols-2 xl:grid-cols-[minmax(280px,1fr)_190px_190px_auto]">
-          <SkeletonBlock className="h-10 w-full rounded-lg" />
-          <SkeletonBlock className="h-10 w-full rounded-lg" />
-          <SkeletonBlock className="h-10 w-full rounded-lg" />
-          <SkeletonBlock className="h-10 w-full rounded-lg" />
-        </div>
-        <TransactionsResultsSkeleton />
-      </div>
-    </DashboardWorkspaceOverviewPanel>
+    <ListPageSkeleton layout="payments-transactions">
+      <TransactionsResultsSkeleton />
+    </ListPageSkeleton>
   );
 }

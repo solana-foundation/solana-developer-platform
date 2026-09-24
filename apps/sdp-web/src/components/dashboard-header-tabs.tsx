@@ -127,7 +127,7 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
         replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
       }}
     >
-      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]">
+      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6">
         {tabs.map((tab) => (
           <Tab key={tab.id} value={tab.id}>
             {tab.id in headerTabCountByTabId

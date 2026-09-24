@@ -11,10 +11,7 @@ import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
-const urlState = vi.hoisted(() => ({ tab: null as string | null }));
 vi.mock("@/lib/dashboard-url-state", () => ({
-  useDashboardTab: () => urlState.tab,
-  readDashboardTabFromUrl: () => urlState.tab,
   replaceDashboardSearchParams: vi.fn(),
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
@@ -60,7 +57,6 @@ const DVP_LEG: UnifiedTransaction = {
 };
 
 function renderResults(result: TransactionsPageResult, filters: TransactionFilters) {
-  urlState.tab = filters.module === undefined ? null : filters.module;
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <I18nProvider locale="en" messages={getMessages("en")}>
@@ -68,6 +64,8 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
           initialFilters={filters}
           initialResult={result}
           issuedTokensByMint={ISSUED_TOKENS}
+          wallets={[]}
+          counterparties={[{ id: "cpty_test", name: "Acme Treasury" }]}
         />
       </I18nProvider>
     </SWRConfig>
@@ -77,46 +75,40 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
 afterEach(cleanup);
 
 describe("TransactionsResults", () => {
-  it("renders module, kind and status labels from the registry on the All tab", () => {
+  it("renders payments states in their own words and other modules by ledger status", () => {
     renderResults({ transactions: [PAYMENT, DVP_LEG], nextCursor: "cursor_2" }, { cursors: [] });
 
-    expect(screen.getByRole("columnheader", { name: "Module" })).toBeDefined();
-    expect(screen.getByText("Payments")).toBeDefined();
-    expect(screen.getByText("Delivery vs Payments")).toBeDefined();
+    for (const header of ["Status", "Type", "Amount", "Contact", "Wallet", "Created"]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeDefined();
+    }
     expect(screen.getByText("Pay")).toBeDefined();
     expect(screen.getByText("Fund leg")).toBeDefined();
-    expect(screen.getByText("confirmed")).toBeDefined();
-    expect(screen.getByText("funded")).toBeDefined();
+    expect(screen.getByText("Confirmed")).toBeDefined();
+    expect(screen.getByText("Pending")).toBeDefined();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("resolves the issued token symbol, the wallet label and an explorer link per row", () => {
+  it("resolves the token symbol, the contact name and the wallet label per row", () => {
     renderResults({ transactions: [PAYMENT], nextCursor: null }, { cursors: [] });
 
-    expect(screen.getByText("12.5 ACME")).toBeDefined();
-    expect(screen.getByText("Treasury").closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/wallets/cwlt_test"
-    );
-    const signature = screen.getByText("sig_pay").closest("a");
-    expect(signature?.getAttribute("href")).toBe(
-      "https://explorer.solana.com/tx/sig_pay?cluster=devnet"
-    );
-    expect(signature?.getAttribute("target")).toBe("_blank");
+    expect(screen.getByText("12.50").parentElement?.textContent).toBe("12.50 ACME");
+    expect(screen.getByText("Acme Treasury")).toBeDefined();
+    expect(screen.getByText("Treasury")).toBeDefined();
   });
 
-  it("hides the module column inside a module tab and opens the detail modal", () => {
+  it("opens the detail modal with the contact link and no self-link for payments", () => {
     renderResults(
       { transactions: [PAYMENT], nextCursor: null },
       { module: "payments", cursors: [] }
     );
 
-    expect(screen.queryByRole("columnheader", { name: "Module" })).toBeNull();
     act(() => {
       fireEvent.click(screen.getByText("Pay"));
     });
     expect(screen.getByText("Transaction details")).toBeDefined();
     expect(screen.queryByText("View in Payments")).toBeNull();
-    expect(screen.getByText("cpty_test").closest("a")?.getAttribute("href")).toBe(
+    expect(screen.getByText("sig_pay")).toBeDefined();
+    expect(screen.getAllByText("Acme Treasury").at(-1)?.closest("a")?.getAttribute("href")).toBe(
       "/dashboard/payments/counterparty/cpty_test"
     );
   });

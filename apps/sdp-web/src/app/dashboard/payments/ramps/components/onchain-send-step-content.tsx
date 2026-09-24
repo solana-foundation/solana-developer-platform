@@ -1,9 +1,11 @@
 "use client";
 
 import { compareDecimalAmounts } from "@sdp/solana/amount";
-import type { PaymentsDashboardWallet } from "@sdp/types";
+import { type PaymentsDashboardWallet, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
+  ArrowUpRightIcon,
   ExternalLinkIcon,
+  LandmarkIcon,
   PlusIcon,
   StickyNoteIcon,
   UserRoundIcon,
@@ -12,22 +14,40 @@ import {
 import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
 import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
-import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
+import {
+  formatTokenAmount,
+  shortenAddress,
+} from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { cn } from "@/lib/utils";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard";
 import { walletComboboxOptions } from "../wallet-options";
-import { AmountBalanceReadout } from "./amount-balance-readout";
-import { CounterpartyAccountSelector } from "./counterparty-account-selector";
+import { ContactCombobox, type ContactControls } from "./contact-combobox";
+
+/** Whether this project can send privately, for the "Send privately" row; null hides it. */
+export interface PrivateSendStatus {
+  /** The Private Channels feature is on. */
+  enabled: boolean;
+  /** The project has an active private channel instance. */
+  connected: boolean;
+}
+
+export type OnchainSendContactControls = ContactControls;
 
 interface StepProps {
   wizard: OnchainSendWizard;
   counterpartyName: string;
+  /** The contact picker at the top of the details step; omitted when the contact is fixed. */
+  contact?: OnchainSendContactControls;
+  privateSend?: PrivateSendStatus | null;
+  /** Switches the payment to a bank payout through a provider. */
+  onPayByBank?: () => void;
 }
 
 function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: number }) {
@@ -40,14 +60,16 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
 
 function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <span className="flex items-center gap-2.5 text-sm text-tertiary">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary">
+    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 refresh:py-3.5 refresh:first:pt-3.5">
+      <span className="flex items-center gap-2.5 text-sm text-tertiary refresh:text-body refresh:text-secondary">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary refresh:hidden">
           {icon}
         </span>
         {label}
       </span>
-      <div className="min-w-0 truncate text-right text-sm font-medium text-primary">{value}</div>
+      <div className="min-w-0 truncate text-right text-sm font-medium text-primary refresh:text-body refresh:font-normal">
+        {value}
+      </div>
     </div>
   );
 }
@@ -62,63 +84,61 @@ function sourceWalletName(wallet: PaymentsDashboardWallet | null): string {
   return wallet.label;
 }
 
-function DestinationStep({ wizard, counterpartyName }: StepProps) {
+function DestinationOptions(wizard: OnchainSendWizard) {
+  return wizard.cryptoAccounts.map((account) => {
+    const destination = typeof account.details.address === "string" ? account.details.address : "";
+    const short = shortenAddress(destination);
+    return {
+      value: account.id,
+      label: account.label ? `${account.label} · ${short}` : short,
+    };
+  });
+}
+
+/**
+ * The design's "Send privately" row. A transfer from this form cannot be private (the transfer
+ * API has no such option; private sends go member to member through Private Channels), so the
+ * row never offers a working checkbox: without a connected channel it explains why and links
+ * to set one up; with one it points there instead.
+ */
+function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
   const t = useTranslations();
-  const {
-    cryptoAccounts,
-    accountsLoading,
-    counterpartyId,
-    fields,
-    setField,
-    addAccountOpen,
-    setAddAccountOpen,
-    handleAccountAdded,
-  } = wizard;
-  const counterpartyLabel =
-    counterpartyName === ""
-      ? t("DashboardPayments.onchainSend.thisCounterparty")
-      : counterpartyName;
+  if (status === null || !status.enabled) {
+    return null;
+  }
   return (
-    <div className="space-y-3">
-      <CounterpartyAccountSelector
-        accounts={cryptoAccounts}
-        value={fields.accountId === "" ? null : fields.accountId}
-        onChange={(id) => setField("accountId", id)}
-        isLoading={accountsLoading}
-      />
-      <button
-        type="button"
-        onClick={() => setAddAccountOpen(true)}
-        className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-      >
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
-          <PlusIcon className="size-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-primary">
-            {t("DashboardPayments.onchainSend.addSolanaAddress")}
-          </span>
-          <span className="block text-sm text-tertiary">
-            {cryptoAccounts.length === 0
-              ? t("DashboardPayments.onchainSend.counterpartyNoAddress", {
-                  counterparty: counterpartyLabel,
-                })
-              : t("DashboardPayments.onchainSend.attachDestination")}
-          </span>
-        </span>
-      </button>
-      <AddExternalAccountDialog
-        isOpen={addAccountOpen}
-        counterpartyId={counterpartyId}
-        onAdded={handleAccountAdded}
-        onClose={() => setAddAccountOpen(false)}
-      />
+    <div className="flex items-start gap-3">
+      {status.connected ? null : (
+        <input
+          type="checkbox"
+          disabled
+          aria-describedby="private-send-reason"
+          aria-label={t("DashboardPayments.payForm.sendPrivately")}
+          className="mt-0.5 size-4 shrink-0 cursor-not-allowed rounded-control-inner border border-border-strong bg-surface-raised"
+        />
+      )}
+      <div className="min-w-0 space-y-1">
+        <p className="text-body text-secondary">{t("DashboardPayments.payForm.sendPrivately")}</p>
+        <p id="private-send-reason" className="text-meta text-secondary">
+          {status.connected
+            ? t("DashboardPayments.payForm.privateChannelConnected")
+            : t("DashboardPayments.payForm.noPrivateChannel")}
+        </p>
+        <Link
+          href="/dashboard/integrations/private-channels"
+          className="inline-flex items-center gap-1 text-body font-medium text-primary hover:underline"
+        >
+          {t("DashboardPayments.payForm.openPrivateChannels")}
+          <ArrowUpRightIcon className="size-4" aria-hidden="true" />
+        </Link>
+      </div>
     </div>
   );
 }
 
-function DetailsStep({ wizard }: StepProps) {
+function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const {
     liveWallets,
     walletsLoading,
@@ -130,6 +150,11 @@ function DetailsStep({ wizard }: StepProps) {
     setField,
     selectWallet,
     sourceWalletHint,
+    accountsLoading,
+    counterpartyId,
+    addAccountOpen,
+    setAddAccountOpen,
+    handleAccountAdded,
   } = wizard;
   const walletOptions = useMemo(
     () =>
@@ -142,75 +167,138 @@ function DetailsStep({ wizard }: StepProps) {
     () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
     [assetOptions]
   );
+  const destinationOptions = DestinationOptions(wizard);
+  const hasContact = counterpartyId !== "";
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
+  const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
+
   return (
-    <div className="space-y-4">
-      <Combobox
-        label={t("DashboardPayments.onchainSend.sourceWallet")}
-        value={fields.walletId === "" ? null : fields.walletId}
-        onChange={selectWallet}
-        options={walletOptions}
-        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
-        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-        icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
-        isLoading={walletsLoading}
-      />
-      <p hidden={!sourceWalletHint} className="text-sm text-warning">
-        {sourceWalletHint}
-      </p>
-      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_160px]">
-        <div className="flex flex-col gap-2">
-          <Label className="text-tertiary" htmlFor="onchain-send-amount">
-            {t("DashboardPayments.onchainSend.amount")}
-          </Label>
-          <Input
-            id="onchain-send-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
-            placeholder="1.0"
-            size="xl"
-            action={
-              availableAmount === null ? undefined : (
-                <AmountBalanceReadout
-                  available={availableAmount}
-                  assetLabel={selectedAsset === null ? fields.asset : selectedAsset.label}
-                  exceeds={exceedsBalance}
-                  onMax={
-                    compareDecimalAmounts(availableAmount, "0") > 0
-                      ? () => setField("amount", availableAmount)
-                      : undefined
-                  }
-                />
-              )
-            }
-          />
-        </div>
+    <div className="space-y-6">
+      {contact ? (
+        <ContactCombobox
+          {...contact}
+          value={counterpartyId}
+          hint={t("DashboardPayments.payForm.contactHint")}
+        />
+      ) : null}
+      <div className="space-y-3">
         <Combobox
-          label={t("DashboardPayments.onchainSend.asset")}
-          value={fields.asset === "" ? null : fields.asset}
-          onChange={(value) => setField("asset", value)}
-          options={assetSelectOptions}
-          placeholder={t("DashboardPayments.onchainSend.selectAsset")}
-          searchable={false}
-          disabled={fields.walletId === "" || assetSelectOptions.length === 0}
+          label={t("DashboardPayments.payForm.destination")}
+          value={fields.accountId === "" ? null : fields.accountId}
+          onChange={(id) => setField("accountId", id)}
+          options={destinationOptions}
+          placeholder={
+            !hasContact
+              ? t("DashboardPayments.payForm.selectContactFirst")
+              : destinationOptions.length === 0 && !accountsLoading
+                ? t("DashboardPayments.payForm.noDestinations")
+                : t("DashboardPayments.payForm.selectDestination")
+          }
+          searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
+          isLoading={hasContact && accountsLoading}
+          disabled={!hasContact || destinationOptions.length === 0}
+        />
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <button
+            type="button"
+            disabled={!hasContact}
+            onClick={() => setAddAccountOpen(true)}
+            className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PlusIcon className="size-4" aria-hidden="true" />
+            {t("DashboardPayments.payForm.addSolanaAddress")}
+          </button>
+          {onPayByBank && hasContact ? (
+            <button
+              type="button"
+              onClick={onPayByBank}
+              className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary"
+            >
+              <LandmarkIcon className="size-4" aria-hidden="true" />
+              {t("DashboardPayments.payForm.payByBank")}
+            </button>
+          ) : null}
+        </div>
+        <AddExternalAccountDialog
+          isOpen={addAccountOpen}
+          counterpartyId={counterpartyId}
+          onAdded={handleAccountAdded}
+          onClose={() => setAddAccountOpen(false)}
         />
       </div>
-      <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
+      <div className="space-y-2">
+        <Combobox
+          label={t("DashboardPayments.onchainSend.sourceWallet")}
+          value={fields.walletId === "" ? null : fields.walletId}
+          onChange={selectWallet}
+          options={walletOptions}
+          placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
+          searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
+          isLoading={walletsLoading}
+        />
+        <p hidden={!sourceWalletHint} className="text-meta text-warning">
+          {sourceWalletHint}
+        </p>
+      </div>
+      <div className="space-y-2">
+        <div className="grid items-end gap-x-4 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)]">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="onchain-send-amount">{t("DashboardPayments.onchainSend.amount")}</Label>
+            <Input
+              id="onchain-send-amount"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              value={fields.amount}
+              onChange={(event) => setField("amount", event.currentTarget.value)}
+              placeholder="0.00"
+              size="xl"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mb-1 self-end"
+            disabled={!canMax}
+            onClick={() => {
+              if (availableAmount !== null) setField("amount", availableAmount);
+            }}
+          >
+            {t("DashboardPayments.payForm.max")}
+          </Button>
+          <Combobox
+            label={t("DashboardPayments.payForm.token")}
+            value={fields.asset === "" ? null : fields.asset}
+            onChange={(value) => setField("asset", value)}
+            options={assetSelectOptions}
+            placeholder={t("DashboardPayments.onchainSend.selectAsset")}
+            searchable={false}
+            disabled={fields.walletId === "" || assetSelectOptions.length === 0}
+          />
+        </div>
+        {availableAmount === null ? null : (
+          <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
+            {t("DashboardPayments.payForm.available", {
+              amount: formatTokenAmount(availableAmount, locale),
+              asset: WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel,
+            })}
+          </p>
+        )}
+        <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
+      </div>
       <div className="flex flex-col gap-2">
-        <Label className="text-tertiary" htmlFor="onchain-send-memo">
-          {t("DashboardPayments.onchainSend.memoOptional")}
-        </Label>
+        <Label htmlFor="onchain-send-memo">{t("DashboardPayments.payForm.memo")}</Label>
         <Input
           id="onchain-send-memo"
           value={fields.memo}
           onChange={(event) => setField("memo", event.currentTarget.value)}
-          placeholder={t("DashboardPayments.onchainSend.memoPlaceholder")}
+          placeholder={t("DashboardPayments.payForm.memoPlaceholder")}
           size="xl"
         />
       </div>
+      <PrivateSendOption status={privateSend ?? null} />
     </div>
   );
 }
@@ -221,12 +309,12 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
   const memo = fields.memo.trim();
   return (
     <>
-      <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4">
-        <p className="text-3xl font-semibold tracking-tight text-primary">
+      <div className="flex flex-col items-center gap-0.5 border-b border-border-default pb-4 refresh:items-start refresh:pb-6">
+        <p className="text-3xl font-semibold tracking-tight text-primary refresh:text-amount refresh:font-medium">
           {fields.amount === "" ? "0" : fields.amount}{" "}
           {selectedAsset === null ? fields.asset : selectedAsset.label}
         </p>
-        <p className="text-sm text-tertiary">
+        <p className="text-sm text-tertiary refresh:text-body refresh:text-secondary">
           {t("DashboardPayments.onchainSend.toCounterparty", {
             counterparty:
               counterpartyName === ""
@@ -244,11 +332,7 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.destination")}
-          value={
-            <span className="font-mono text-xs">
-              {destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
-            </span>
-          }
+          value={destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
         />
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
@@ -272,7 +356,7 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   const cluster = useSolanaCluster();
   const { transferResult, heldApprovalRequestId } = wizard;
   const summary = (
-    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5">
+    <section className="w-full space-y-4 rounded-2xl bg-fill-subtle p-5 refresh:rounded-none refresh:bg-transparent refresh:p-0">
       <ReviewSummary wizard={wizard} counterpartyName={counterpartyName} />
     </section>
   );
@@ -322,12 +406,11 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
   );
 }
 
-export function OnchainSendStepContent({ wizard, counterpartyName }: StepProps) {
+export function OnchainSendStepContent(props: StepProps) {
+  const { wizard, counterpartyName } = props;
   switch (wizard.currentStepId) {
-    case "DESTINATION":
-      return <DestinationStep wizard={wizard} counterpartyName={counterpartyName} />;
     case "DETAILS":
-      return <DetailsStep wizard={wizard} counterpartyName={counterpartyName} />;
+      return <DetailsStep {...props} />;
     case "REVIEW":
       return <ReviewStep wizard={wizard} counterpartyName={counterpartyName} />;
   }

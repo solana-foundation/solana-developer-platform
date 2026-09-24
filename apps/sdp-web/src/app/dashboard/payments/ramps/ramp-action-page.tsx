@@ -6,6 +6,7 @@ import type {
   PaymentsDashboardWallet,
   RampProviderId,
 } from "@sdp/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
@@ -16,21 +17,15 @@ import {
   fetchCounterpartyAccounts,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import { useTranslations } from "@/i18n/provider";
+import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { BatchSendRail } from "./batch-send-rail";
-import { CounterpartyPicker } from "./components/counterparty-picker";
-import { CounterpartyRecentTransfers } from "./components/counterparty-recent-transfers";
-import {
-  getPaymentMethodLabel,
-  type PaymentMethod,
-  PaymentMethodStep,
-} from "./components/payment-method-step";
-import { RampWizardShell } from "./components/ramp-wizard-shell";
-import { type SendMode, SendModeToggle } from "./components/send-mode-toggle";
+import { DepositAddressPanel } from "./components/deposit-address-panel";
+import type { PrivateSendStatus } from "./components/onchain-send-step-content";
 import { OfframpRail } from "./offramp-rail";
-import { OnchainReceiveRail } from "./onchain-receive-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
 import { OnrampRail } from "./onramp-rail";
+import { getPaymentMethodLabel, type PaymentMethod } from "./payment-method";
 
 interface PaymentsActionPageProps {
   mode: "send" | "receive";
@@ -41,6 +36,8 @@ interface PaymentsActionPageProps {
   enabledRampProviders: RampProviderId[];
   rampProviderAccess: RampProviderAccess | null;
   counterpartiesResult: CounterpartiesResult;
+  /** Pay only: whether the project can send privately, for the details step's notice. */
+  privateSend?: PrivateSendStatus | null;
 }
 
 type WizardStep = { label: string; title: string };
@@ -60,20 +57,24 @@ export interface RailProps {
   onExit: () => void;
 }
 
-type RampsPhase = "counterparty" | "method" | "rail";
-
+/**
+ * Pay and Deposit. The header's tabs pick the variant (Pay: Single / Batch; Deposit: Solana
+ * address / Card or bank through a provider). Each flow opens on one details step with the
+ * contact inside it; a single payment can hand off to a bank payout, and a deposit to an
+ * address needs no contact at all.
+ */
 export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const t = useTranslations();
   const { mode, rampProviderAccess } = props;
   const router = useRouter();
+  const tab = useDashboardTab();
 
-  const [phase, setPhase] = useState<RampsPhase>("counterparty");
-  const [sendMode, setSendMode] = useState<SendMode>("single");
   const [counterpartyId, setCounterpartyId] = useState("");
-  const [method, setMethod] = useState<PaymentMethod | null>(null);
-  const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
+  // Pay's fiat hand-off; a deposit's method comes from its tab.
+  const [payByBank, setPayByBank] = useState(false);
+  const exitToPayments = () => router.push("/dashboard/payments");
 
-  const { data: counterpartiesResult, mutate: mutateCounterparties } = useSWR(
+  const { data: counterpartiesResult } = useSWR(
     paymentsQueryKeys.actionCounterparties(),
     fetchAllCounterparties,
     {
@@ -93,27 +94,15 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   };
 
   const fiatEnabled = hasEnabledRampProvider(rampProviderAccess);
-  const availableMethods: PaymentMethod[] = fiatEnabled ? ["onchain", "ramp"] : ["onchain"];
-  const showMethodStep = availableMethods.length > 1;
 
-  const counterpartyTitle =
+  const effectiveMethod: PaymentMethod =
     mode === "send"
-      ? t("DashboardPayments.whoAreYouPaying")
-      : t("DashboardPayments.whoIsThisDepositFrom");
-  const methodTitle =
-    mode === "send"
-      ? t("DashboardPayments.howWouldYouLikeToPay")
-      : t("DashboardPayments.howWouldYouLikeToDeposit");
-
-  const preSteps = useMemo<WizardStep[]>(
-    () => [
-      { label: t("DashboardPayments.counterpartyLabel"), title: counterpartyTitle },
-      ...(showMethodStep ? [{ label: t("DashboardPayments.method"), title: methodTitle }] : []),
-    ],
-    [counterpartyTitle, methodTitle, showMethodStep, t]
-  );
-
-  const effectiveMethod: PaymentMethod = showMethodStep ? (method ?? "onchain") : "onchain";
+      ? payByBank && fiatEnabled
+        ? "ramp"
+        : "onchain"
+      : tab === "provider" && fiatEnabled
+        ? "ramp"
+        : "onchain";
   const methodLabel = getPaymentMethodLabel(t, mode, effectiveMethod);
   const selectedCounterparty = useMemo(() => {
     const found = liveCounterparties.data.find((cp) => cp.id === counterpartyId);
@@ -121,32 +110,18 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   }, [liveCounterparties.data, counterpartyId]);
   const counterpartyName = selectedCounterparty ? selectedCounterparty.displayName : "";
 
-  const handleCounterpartyCreated = (created: Counterparty) => {
-    selectCounterparty(created.id);
-    void mutateCounterparties(
-      (prev) => (prev ? { ...prev, data: [created, ...prev.data] } : { ok: true, data: [created] }),
-      { revalidate: true }
-    );
-    setCounterpartyDialogOpen(false);
-  };
-
-  const railOnExit = () => setPhase(showMethodStep ? "method" : "counterparty");
-
-  if (mode === "send" && sendMode === "batch") {
-    return (
-      <BatchSendRail
-        wallets={props.wallets}
-        walletsError={props.walletsError}
-        issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
-        onExit={() => router.push("/dashboard/payments")}
-        sendMode={sendMode}
-        onSendModeChange={setSendMode}
-      />
-    );
-  }
-
-  if (phase === "rail") {
-    const railProps: RailProps = {
+  if (mode === "send") {
+    if (tab === "batch") {
+      return (
+        <BatchSendRail
+          wallets={props.wallets}
+          walletsError={props.walletsError}
+          issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+          onExit={exitToPayments}
+        />
+      );
+    }
+    const sendRailProps: RailProps = {
       wallets: props.wallets,
       walletsError: props.walletsError,
       issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
@@ -157,84 +132,67 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       counterpartyId,
       counterpartyName,
       methodLabel,
-      preSteps,
-      onExit: railOnExit,
+      preSteps: [],
+      onExit: exitToPayments,
     };
-
-    const railKey = `${mode}:${effectiveMethod}` as const;
-    switch (railKey) {
-      case "send:onchain":
-        return <OnchainSendRail {...railProps} />;
-      case "send:ramp":
-        return <OfframpRail {...railProps} />;
-      case "receive:onchain":
-        return <OnchainReceiveRail {...railProps} />;
-      case "receive:ramp":
-        return <OnrampRail {...railProps} />;
-      default: {
-        const exhaustive: never = railKey;
-        throw new Error(`Unhandled rail: ${JSON.stringify(exhaustive)}`);
-      }
+    if (effectiveMethod === "ramp") {
+      // A bank payout keeps the contact picked on the details step; leaving it returns there.
+      return <OfframpRail {...sendRailProps} onExit={() => setPayByBank(false)} />;
     }
+    return (
+      <OnchainSendRail
+        {...sendRailProps}
+        contact={{ counterpartiesResult: liveCounterparties, onChange: selectCounterparty }}
+        privateSend={props.privateSend ?? null}
+        onPayByBank={fiatEnabled ? () => setPayByBank(true) : undefined}
+        onCancel={exitToPayments}
+      />
+    );
   }
 
-  const stepIndex = phase === "counterparty" ? 0 : 1;
-  const primaryDisabled = phase === "counterparty" ? !counterpartyId : !method;
-  const onPrimary = () => {
-    if (phase === "counterparty") {
-      if (!counterpartyId) {
-        return;
-      }
-      setPhase(showMethodStep ? "method" : "rail");
-      return;
-    }
-    if (!method) {
-      return;
-    }
-    setPhase("rail");
-  };
-  const onSecondary = () => {
-    if (phase === "counterparty") {
-      router.push("/dashboard/payments");
-      return;
-    }
-    setPhase("counterparty");
-  };
+  if (tab === "provider" && !fiatEnabled) {
+    return (
+      <div className="mx-auto w-full max-w-flow space-y-2 pt-2">
+        <p className="text-body text-primary">{t("DashboardPayments.depositMethod.noProvider")}</p>
+        <Link
+          href="/dashboard/integrations"
+          className="text-body font-medium text-secondary hover:text-primary hover:underline"
+        >
+          {t("DashboardPayments.depositMethod.manageProviders")}
+        </Link>
+      </div>
+    );
+  }
+  if (effectiveMethod === "onchain") {
+    // The address tab needs no contact: anyone can send to a wallet address.
+    return (
+      <div className="mx-auto w-full max-w-flow pt-2">
+        <DepositAddressPanel
+          wallets={props.wallets}
+          walletsError={props.walletsError}
+          issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+        />
+      </div>
+    );
+  }
 
+  // The provider tab picks its contact on its own details step.
   return (
-    <RampWizardShell
-      steps={preSteps}
-      stepIndex={stepIndex}
-      primaryDisabled={primaryDisabled}
-      primaryLabel={t("DashboardPayments.counterparty.next")}
-      walletsError={null}
-      onPrimary={onPrimary}
-      onSecondary={onSecondary}
-      counterpartyDialog={{
-        open: counterpartyDialogOpen,
-        setOpen: setCounterpartyDialogOpen,
-        onCreated: handleCounterpartyCreated,
-      }}
-      header={
-        mode === "send" && phase === "counterparty" ? (
-          <SendModeToggle value={sendMode} onChange={setSendMode} />
-        ) : undefined
-      }
-    >
-      {phase === "counterparty" ? (
-        <>
-          <CounterpartyPicker
-            mode={mode}
-            counterpartiesResult={liveCounterparties}
-            value={counterpartyId || null}
-            onChange={selectCounterparty}
-            onAddClick={() => setCounterpartyDialogOpen(true)}
-          />
-          {counterpartyId ? <CounterpartyRecentTransfers counterpartyId={counterpartyId} /> : null}
-        </>
-      ) : (
-        <PaymentMethodStep mode={mode} value={method} onChange={setMethod} />
-      )}
-    </RampWizardShell>
+    <OnrampRail
+      wallets={props.wallets}
+      walletsError={props.walletsError}
+      issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+      enabledRampProviders={props.enabledRampProviders}
+      rampProviderAccess={rampProviderAccess}
+      counterpartiesResult={liveCounterparties}
+      selectedCounterparty={selectedCounterparty}
+      counterpartyId={counterpartyId}
+      counterpartyName={counterpartyName}
+      methodLabel={methodLabel}
+      preSteps={[]}
+      onExit={exitToPayments}
+      contact={{ counterpartiesResult: liveCounterparties, onChange: selectCounterparty }}
+      onCancel={exitToPayments}
+    />
   );
 }

@@ -315,8 +315,8 @@
 
 /* Two classes so it beats `.controlCopy span` above, which would otherwise mute
    it back down to the description colour. `--color-warning` is the same token
-   `text-warning` resolves to (sdp-theme.css:92), so light and dark both follow
-   the design system rather than a hardcoded amber. */
+   `text-warning` resolves to (@sdp/design-tokens theme.css), so light and dark
+   both follow the design system rather than a hardcoded amber. */
 .controlCopy .controlWarning {
   color: var(--color-warning);
   font-weight: 600;

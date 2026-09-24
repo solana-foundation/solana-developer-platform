@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -51,6 +52,21 @@ async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: 
   }
 }
 
+const ROLE_LABEL_KEYS = {
+  api_admin: "DashboardCustody.admin",
+  api_readonly: "DashboardCustody.readOnly",
+  api_developer: "DashboardCustody.developer",
+} as const;
+
+const ENVIRONMENT_LABEL_KEYS = {
+  production: "DashboardCustody.production",
+  sandbox: "DashboardCustody.sandbox",
+} as const;
+
+function labelKeyFor<T extends Record<string, string>>(keys: T, value: string): T[keyof T] | null {
+  return Object.hasOwn(keys, value) ? keys[value as keyof T] : null;
+}
+
 /**
  * One control, not two. You paste key material and the server tells us which key
  * it is, by hashing the whole key inside the project boundary.
@@ -68,6 +84,7 @@ async function resolveApiKey(apiKey: string): Promise<ResolvedApiKey | { error: 
  */
 export function PlaygroundApiKeySelector() {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const {
     dashboardAccess,
     playgroundApiKeys,
@@ -154,10 +171,70 @@ export function PlaygroundApiKeySelector() {
       return null;
     }
 
-    return (
+    return refresh ? (
+      <Link href="/dashboard/api-keys" className="text-primary underline-offset-4 hover:underline">
+        {t("Shared.SharedComponents.createApiKey")}
+      </Link>
+    ) : (
       <Button asChild className="h-11 rounded-[14px] px-4 whitespace-nowrap">
         <Link href="/dashboard/api-keys">{t("Shared.SharedComponents.createApiKey")}</Link>
       </Button>
+    );
+  }
+
+  if (refresh) {
+    // Inline on the playground's key line: the field, then what the attached key is allowed to
+    // do and where, from the project's own key list.
+    // Only a key whose secret is still held here is in use; an expired one names nothing.
+    const attached = storedSecret
+      ? playgroundApiKeys.find((key) => key.id === selectedPlaygroundApiKeyId)
+      : undefined;
+    const roleKey = attached ? labelKeyFor(ROLE_LABEL_KEYS, attached.role) : null;
+    const environmentKey = attached
+      ? labelKeyFor(ENVIRONMENT_LABEL_KEYS, attached.environment)
+      : null;
+    const details = [
+      attached?.name,
+      roleKey ? t(roleKey) : null,
+      environmentKey ? t(environmentKey) : null,
+    ].filter((entry): entry is string => Boolean(entry));
+    return (
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <Input
+          aria-label={t("Shared.SharedComponents.apiKeyValue")}
+          autoComplete="new-password"
+          className="w-64 max-w-full"
+          size="md"
+          onBlur={onIdentify}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          placeholder={t("Shared.SharedComponents.apiKeySecretPlaceholder")}
+          spellCheck={false}
+          type="password"
+          value={draft ?? storedSecret ?? ""}
+        />
+        {resolution.kind === "checking" ? (
+          <span className="text-tertiary">{t("Shared.SharedComponents.apiKeyChecking")}</span>
+        ) : null}
+        {resolution.kind === "rejected" ? (
+          <span className="text-error" role="alert">
+            {resolution.message}
+          </span>
+        ) : null}
+        {resolution.kind !== "checking" && resolution.kind !== "rejected"
+          ? details.map((detail) => (
+              <span
+                key={detail}
+                className="flex items-center gap-3 text-primary"
+                data-testid={detail === attached?.name ? "playground-api-key-identity" : undefined}
+              >
+                <span aria-hidden="true" className="text-secondary">
+                  ·
+                </span>
+                {detail}
+              </span>
+            ))
+          : null}
+      </span>
     );
   }
 

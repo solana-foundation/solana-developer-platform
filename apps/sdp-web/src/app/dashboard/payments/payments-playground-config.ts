@@ -1,3 +1,4 @@
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
 import type {
   ApiPlaygroundEndpointConfig,
   ApiPlaygroundFieldConfig,
@@ -277,8 +278,21 @@ export function buildPaymentsPlaygroundEndpointConfigs(
       id: "list-transfers",
       title: t("DashboardPayments.playground.listTransfers"),
       method: "GET",
-      path: "/v1/payments/transfers",
-      pathFields: [],
+      path: "/v1/payments/transfers?status={status}&pageSize={pageSize}",
+      pathFields: [
+        {
+          key: "pageSize",
+          label: t("DashboardPayments.playground.resultsPerPage"),
+          defaultValue: "25",
+        },
+        {
+          key: "status",
+          label: t("DashboardPayments.playground.transferStatus"),
+          kind: "select",
+          placeholder: t("DashboardPayments.playground.anyStatus"),
+          options: PAYMENT_TRANSFER_STATUSES.map((status) => ({ label: status, value: status })),
+        },
+      ],
       bodyFields: [],
       expectedResponse: {
         data:

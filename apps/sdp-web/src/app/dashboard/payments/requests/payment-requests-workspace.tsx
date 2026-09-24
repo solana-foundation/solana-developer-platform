@@ -10,7 +10,6 @@ import {
 } from "@sdp/types";
 import {
   BanknoteIcon,
-  ChevronRightIcon,
   ClockIcon,
   CoinsIcon,
   CopyIcon,
@@ -19,7 +18,6 @@ import {
   UserIcon,
   WalletIcon,
 } from "lucide-react";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
@@ -33,24 +31,17 @@ import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
-import {
-  dashboardWorkspaceOverviewPanelClassName,
-  dashboardWorkspacePlaygroundPanelClassName,
-} from "@/components/dashboard-workspace-panel";
-import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { Modal } from "@/components/ui/modal";
+import { SearchInput } from "@/components/ui/search-input";
 import { Select, SelectItem } from "@/components/ui/select";
+import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -59,31 +50,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  type DashboardPlaygroundApiKeyOption,
-  useDashboardWorkspace,
-} from "@/contexts/dashboard-workspace-context";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { PAYMENT_REQUEST_CREATE_PARAM } from "@/lib/payments-routes";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
-import { CounterpartyPlaygroundLoading } from "../counterparty-menu-loading";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import { syncPlaygroundApiKeysForActiveTab } from "../payments-playground-api-key-state";
+import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
   type PaymentRequestTokenOption,
 } from "./payment-requests-page.data";
-
-const PaymentRequestsPlayground = dynamic(
-  () => import("./payment-requests-playground").then((module) => module.PaymentRequestsPlayground),
-  { loading: () => <CounterpartyPlaygroundLoading /> }
-);
 
 const STATUS_TRANSLATION_KEYS = {
   awaiting_payment: "DashboardPayments.requests.awaitingPayment",
@@ -131,33 +114,19 @@ function formatLocalExpiry(date: Date): string {
   });
 }
 
-function statusTone(status: PaymentRequestStatus): "success" | "error" | "pending" {
-  switch (status) {
-    case "paid":
-      return "success";
-    case "expired":
-      return "error";
-    case "canceled":
-      return "error";
-    case "awaiting_payment":
-      return "pending";
-  }
-}
+const REQUEST_STATUS_TONE = {
+  paid: "positive",
+  awaiting_payment: "attention",
+  canceled: "neutral",
+  expired: "neutral",
+} as const satisfies Record<PaymentRequestStatus, StatusTone>;
 
 function StatusBadge({ status }: { status: PaymentRequestStatus }) {
   const t = useTranslations();
-  const tone = statusTone(status);
   return (
-    <span
-      className={cn(
-        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        tone === "success" && "bg-success-bg text-success",
-        tone === "error" && "bg-error-bg text-error",
-        tone === "pending" && "bg-fill-strong text-secondary"
-      )}
-    >
+    <StatusText tone={REQUEST_STATUS_TONE[status]} className="text-body">
       {t(STATUS_TRANSLATION_KEYS[status])}
-    </span>
+    </StatusText>
   );
 }
 
@@ -172,6 +141,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+// The create form's "from anyone" choice; a sentinel value, never shown.
 const ANYONE_OPTION = "anyone";
 
 function resolveAccountAddress(account: CounterpartyAccount): string {
@@ -466,42 +436,49 @@ interface PaymentRequestsWorkspaceProps {
   initialPaymentRequests: PaymentRequest[];
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
-  apiBaseUrl: string | null;
-  apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   counterparties: Counterparty[];
 }
 
+const REQUEST_STATUSES = Object.keys(STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
+
+/**
+ * The Requests list. It holds the newest page the server returned (the API has no search), so
+ * search, the status filter and paging all run over that page here.
+ */
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
   initialLocalErrorCode,
-  apiBaseUrl,
-  apiKeys,
   wallets,
   counterparties,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
-  const { sdpEnvironment, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
-    useDashboardWorkspace();
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const { searchParams, replaceSearchParams } = useDashboardUrlState();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const isPlaygroundTab = useDashboardTab() === "playground";
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<PaymentRequestStatus | undefined>();
+  const [pageSize, setPageSize] = useState(25);
+  const [page, setPage] = useState(1);
   const requests = initialPaymentRequests;
+  const createRequested = searchParams.get(PAYMENT_REQUEST_CREATE_PARAM) === "1";
 
+  // The header's "New" is a link carrying ?create=1: open the dialog once, then drop the param
+  // so a refresh or the back button does not reopen it.
   useEffect(() => {
-    syncPlaygroundApiKeysForActiveTab(isPlaygroundTab, apiKeys, setPlaygroundApiKeys);
-  }, [apiKeys, isPlaygroundTab, setPlaygroundApiKeys]);
+    if (!createRequested) return;
+    setCreateOpen(true);
+    replaceSearchParams({ [PAYMENT_REQUEST_CREATE_PARAM]: null });
+  }, [createRequested, replaceSearchParams]);
 
-  const selectedPlaygroundApiKey = useMemo(
-    () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId),
-    [apiKeys, selectedPlaygroundApiKeyId]
-  );
   const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;
 
   const walletNameById = useMemo(
@@ -519,186 +496,209 @@ export function PaymentRequestsWorkspace({
   );
   const fromLabel = (counterpartyId: string | null): string => {
     if (!counterpartyId) {
-      return ANYONE_OPTION;
+      return t("DashboardPayments.requests.anyone");
     }
     const name = counterpartyNameById.get(counterpartyId);
     return name ? name : counterpartyId;
   };
+  const amountLabel = (request: PaymentRequest) => {
+    const symbol = tokenSymbolByMint.get(request.token);
+    return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
+  };
   const selectedWalletName = selected ? walletNameById.get(selected.walletId) : null;
   const selectedTokenSymbol = selected ? tokenSymbolByMint.get(selected.token) : undefined;
 
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return requests.filter((request) => {
+      if (statusFilter !== undefined && request.status !== statusFilter) return false;
+      if (!needle) return true;
+      return [
+        request.amount,
+        tokenSymbolByMint.get(request.token) ?? request.token,
+        request.counterpartyId ? (counterpartyNameById.get(request.counterpartyId) ?? "") : "",
+        request.destinationAddress,
+        request.reference,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [requests, statusFilter, query, tokenSymbolByMint, counterpartyNameById]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  const copyLink = (request: PaymentRequest) => {
+    void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
+    toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+  };
+
   return (
     <>
-      <DashboardWorkspaceTabShell
-        panels={[
-          {
-            id: "overview",
-            className: cn(
-              dashboardWorkspaceOverviewPanelClassName,
-              "flex min-h-0 flex-col overflow-hidden"
-            ),
-            content: (
-              <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0">
-                <CardHeader className="p-4">
-                  <CardTitle>{t("DashboardPayments.requests.paymentRequests")}</CardTitle>
-                  <CardDescription>
-                    {t("DashboardPayments.requests.paymentRequestsDescription")}
-                  </CardDescription>
-                  {requests.length > 0 && (
-                    <CardAction>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => setCreateOpen(true)}
-                      >
-                        {t("DashboardPayments.requests.create")}
-                      </Button>
-                    </CardAction>
-                  )}
-                </CardHeader>
-                <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-                  {initialError || initialLocalErrorCode ? (
-                    <p className="text-sm text-error">
-                      {initialError ?? t("DashboardPayments.requests.loadFailed")}
-                    </p>
-                  ) : requests.length === 0 ? (
-                    <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
-                      <ReceiptTextIcon className="h-10 w-10 text-muted" />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-primary">
-                          {t("DashboardPayments.requests.noPaymentRequests")}
-                        </p>
-                        <p className="text-sm text-tertiary">
-                          {t("DashboardPayments.requests.noPaymentRequestsDescription")}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        iconLeft={<PlusIcon />}
-                        onClick={() => setCreateOpen(true)}
-                      >
-                        {t("DashboardPayments.requests.create")}
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="min-h-0 flex-1 overflow-y-auto">
-                      <div className="divide-y divide-border-default md:hidden">
-                        {requests.map((request) => {
-                          const symbol = tokenSymbolByMint.get(request.token);
-                          return (
-                            <button
-                              key={request.id}
-                              type="button"
-                              onClick={() => setSelected(request)}
-                              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
-                            >
-                              <span className="min-w-0 flex-1 space-y-1.5">
-                                <span className="flex items-center justify-between gap-3">
-                                  <StatusBadge status={request.status} />
-                                  <span className="truncate text-sm font-medium text-primary">
-                                    {formatDisplayAmount(
-                                      request.amount,
-                                      symbol ? symbol : shortenAddress(request.token)
-                                    )}
-                                  </span>
-                                </span>
-                                <span className="block truncate text-xs text-secondary">
-                                  {fromLabel(request.counterpartyId)} ·{" "}
-                                  {formatTimestamp(request.createdAt, t)}
-                                </span>
-                              </span>
-                              <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <Table className="hidden rounded-none border-0 [&_table]:min-w-[800px] [&_table]:table-fixed md:block">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-[16%]">
-                              {t("DashboardPayments.status")}
-                            </TableHead>
-                            <TableHead className="w-[20%]">
-                              {t("DashboardPayments.requests.amount")}
-                            </TableHead>
-                            <TableHead className="w-[22%]">
-                              {t("DashboardPayments.requests.from")}
-                            </TableHead>
-                            <TableHead className="w-[22%]">
-                              {t("DashboardPayments.requests.to")}
-                            </TableHead>
-                            <TableHead className="w-[20%]">
-                              {t("DashboardPayments.recurring.created")}
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {requests.map((request) => {
-                            const symbol = tokenSymbolByMint.get(request.token);
-                            return (
-                              <TableRow
-                                key={request.id}
-                                role="button"
-                                tabIndex={0}
-                                onClick={() => setSelected(request)}
-                                onKeyDown={(event: KeyboardEvent) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    setSelected(request);
-                                  }
-                                }}
-                                className="cursor-pointer"
-                              >
-                                <TableCell>
-                                  <StatusBadge status={request.status} />
-                                </TableCell>
-                                <TableCell className="font-medium">
-                                  <span className="block truncate">
-                                    {formatDisplayAmount(
-                                      request.amount,
-                                      symbol ? symbol : shortenAddress(request.token)
-                                    )}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-sm text-secondary">
-                                  <span className="block truncate">
-                                    {fromLabel(request.counterpartyId)}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="font-mono text-sm text-secondary">
-                                  <span className="block truncate">
-                                    {shortenAddress(request.destinationAddress)}
-                                  </span>
-                                </TableCell>
-                                <TableCell className="text-sm text-secondary">
-                                  {formatTimestamp(request.createdAt, t)}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ),
-          },
-          {
-            id: "playground",
-            className: dashboardWorkspacePlaygroundPanelClassName,
-            content: (
-              <PaymentRequestsPlayground
-                apiBaseUrl={apiBaseUrl}
-                apiKeyId={selectedPlaygroundApiKey?.id ?? null}
-                hasActiveApiKeys={apiKeys.length > 0}
-                wallets={wallets}
-                tokens={tokens}
+      <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+        {initialError || initialLocalErrorCode ? (
+          <p className="text-body text-error">
+            {initialError ?? t("DashboardPayments.requests.loadFailed")}
+          </p>
+        ) : requests.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
+            <ReceiptTextIcon className="size-8 text-tertiary" strokeWidth={1.5} aria-hidden />
+            <div className="space-y-1">
+              <p className="text-body font-medium text-primary">
+                {t("DashboardPayments.requests.noPaymentRequests")}
+              </p>
+              <p className="text-body text-secondary">
+                {t("DashboardPayments.requests.noPaymentRequestsDescription")}
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              iconLeft={<PlusIcon />}
+              onClick={() => setCreateOpen(true)}
+            >
+              {t("DashboardPayments.requests.new")}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <ListToolbar
+              filters={
+                <FilterMenu
+                  label={t("Shared.SharedComponents.filter")}
+                  searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+                  sections={[
+                    {
+                      id: "status",
+                      label: t("DashboardPayments.status"),
+                      value:
+                        statusFilter === undefined
+                          ? undefined
+                          : t(STATUS_TRANSLATION_KEYS[statusFilter]),
+                      content: (
+                        <FilterMenuOptions
+                          value={statusFilter}
+                          anyLabel={t("Shared.SharedComponents.any")}
+                          options={REQUEST_STATUSES.map((status) => ({
+                            value: status,
+                            label: t(STATUS_TRANSLATION_KEYS[status]),
+                          }))}
+                          onChange={(value) => {
+                            setStatusFilter(REQUEST_STATUSES.find((status) => status === value));
+                            setPage(1);
+                          }}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              }
+            >
+              <RowsPerPageSelect
+                value={pageSize}
+                onChange={(size) => {
+                  setPageSize(size);
+                  setPage(1);
+                }}
               />
-            ),
-          },
-        ]}
-      />
+              <SearchInput
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                clear={{
+                  label: t("DashboardPayments.requests.clearSearch"),
+                  onClear: () => setQuery(""),
+                }}
+                placeholder={t("DashboardPayments.requests.searchPlaceholder")}
+                className="w-full sm:w-80"
+              />
+            </ListToolbar>
+            {rows.length === 0 ? (
+              <p className="py-12 text-center text-body text-tertiary">
+                {t("DashboardPayments.requests.noMatches")}
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table className="min-w-[760px] rounded-none border-0">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("DashboardPayments.status")}</TableHead>
+                      <TableHead className="text-right">
+                        {t("DashboardPayments.requests.amount")}
+                      </TableHead>
+                      <TableHead>{t("DashboardPayments.requests.from")}</TableHead>
+                      <TableHead>{t("DashboardPayments.requests.to")}</TableHead>
+                      <TableHead>{t("DashboardPayments.recurring.created")}</TableHead>
+                      <TableHead className="w-px">
+                        <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((request) => (
+                      <TableRow
+                        key={request.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelected(request)}
+                        onKeyDown={(event: KeyboardEvent) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelected(request);
+                          }
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <TableCell>
+                          <StatusBadge status={request.status} />
+                        </TableCell>
+                        <TableCell className="text-right text-body whitespace-nowrap text-primary tabular-nums">
+                          {amountLabel(request)}
+                        </TableCell>
+                        <TableCell
+                          className={cn(
+                            "max-w-56 truncate text-body",
+                            request.counterpartyId ? "text-primary" : "text-tertiary"
+                          )}
+                        >
+                          {fromLabel(request.counterpartyId)}
+                        </TableCell>
+                        <TableCell className="text-body whitespace-nowrap text-secondary">
+                          {shortenAddress(request.destinationAddress)}
+                        </TableCell>
+                        <TableCell className="text-body whitespace-nowrap text-secondary">
+                          {formatDateTime(request.createdAt, locale)}
+                        </TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="xs"
+                            iconLeft={<CopyIcon />}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              copyLink(request);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            {t("Shared.SharedComponents.copyLink")}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {filtered.length > pageSize ? (
+              <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+            ) : null}
+          </>
+        )}
+      </DashboardWorkspaceOverviewPanel>
 
       {selected && payLink ? (
         <Modal

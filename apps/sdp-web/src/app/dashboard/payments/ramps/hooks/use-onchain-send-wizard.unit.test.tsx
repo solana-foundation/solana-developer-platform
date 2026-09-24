@@ -235,10 +235,10 @@ afterEach(() => {
 });
 
 describe("useOnchainSendWizard", () => {
-  it("loads active crypto destinations and navigates destination steps", async () => {
+  it("loads active crypto destinations and holds the details step until it is complete", async () => {
     const { result, onExit } = renderWizard();
 
-    expect(result.current.currentStepId).toBe("DESTINATION");
+    expect(result.current.currentStepId).toBe("DETAILS");
     expect(result.current.canProceed).toBe(false);
     expect(result.current.accountsLoading).toBe(true);
 
@@ -248,12 +248,11 @@ describe("useOnchainSendWizard", () => {
 
     act(() => result.current.setField("accountId", cryptoAccount.id));
     expect(result.current.destinationAddress).toBe(DESTINATION);
-    expect(result.current.canProceed).toBe(true);
+    // A destination alone is not a payment: the wallet, token and amount share the step.
+    expect(result.current.canProceed).toBe(false);
 
     await act(async () => result.current.handlePrimary());
     expect(result.current.currentStepId).toBe("DETAILS");
-    act(() => result.current.handleSecondary());
-    expect(result.current.currentStepId).toBe("DESTINATION");
     act(() => result.current.handleSecondary());
     expect(onExit).toHaveBeenCalledOnce();
   });

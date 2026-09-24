@@ -57,6 +57,7 @@ const MODULE_METADATA = [
     // @sdp/issuance is imported only through its mosaic-free `capabilities`
     // subpath (the advanced-settings catalog + lookups the editor renders).
     allowedDependencies: [
+      "@sdp/design-tokens",
       "@sdp/issuance",
       "@sdp/policy",
       "@sdp/private-channels",
@@ -89,6 +90,13 @@ const MODULE_METADATA = [
     directory: "packages/sdp-custody",
     purpose: "Custody provider abstractions and keychain adapters.",
     allowedDependencies: ["@sdp/redaction", "@sdp/types"],
+  },
+  {
+    name: "@sdp/design-tokens",
+    directory: "packages/sdp-design-tokens",
+    purpose:
+      "Design tokens (CSS custom properties, Tailwind theme mapping, typed catalog) for SDP UI.",
+    allowedDependencies: [],
   },
   {
     name: "@sdp/dvp",

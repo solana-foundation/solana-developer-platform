@@ -1,7 +1,6 @@
 "use client";
 
-import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
-import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
+import { ArrowLeftIcon, DownloadIcon, PanelRightIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
@@ -13,9 +12,10 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { LanguagePicker } from "@/components/language-picker";
-import type { MessageKey } from "@/i18n/messages";
+import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { PAYMENT_REQUEST_CREATE_PARAM } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -30,6 +30,13 @@ type DashboardPageConfig = {
   routeTabs?: DashboardRouteTabsConfig;
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
+  /**
+   * Refresh pages set the title and tabs in the page's column; this names that column when it
+   * is narrower than the content box, as on a flow whose footer band spans the whole card.
+   */
+  headerWidthClass?: string;
+  /** The page's one primary action, set in the title row (Download CSV, Add, New). */
+  headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
   hideTitleOnMobile?: boolean;
   backAction?: {
@@ -38,7 +45,52 @@ type DashboardPageConfig = {
   };
 };
 
+export type DashboardHeaderActionConfig = {
+  label: string;
+  href: string;
+  icon: "plus" | "download";
+  variant: "primary" | "outline";
+  /** Appends the page's current query string, so an export follows the list's filters. */
+  withCurrentQuery?: boolean;
+  /** A file download rather than a page: rendered as a plain anchor with `download`. */
+  download?: boolean;
+};
+
 const TRAILING_CONTENT = <LanguagePicker />;
+
+/**
+ * The title row's page action.
+ *
+ * @param props - The action config and the page's current query string.
+ * @returns The action button.
+ */
+export function DashboardHeaderAction({
+  action,
+  search,
+}: {
+  action: DashboardHeaderActionConfig;
+  search: string;
+}) {
+  const Icon = action.icon === "plus" ? PlusIcon : DownloadIcon;
+  const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
+  const content = (
+    <>
+      <Icon className="size-4" aria-hidden="true" />
+      {action.label}
+    </>
+  );
+  return (
+    <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
+      {action.download ? (
+        <a href={href} download>
+          {content}
+        </a>
+      ) : (
+        <Link href={href}>{content}</Link>
+      )}
+    </Button>
+  );
+}
 
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
@@ -48,6 +100,7 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
+  action?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -127,7 +180,7 @@ export function CenteredDashboardTopBar({
           hideTitleOnMobile && "max-xl:sr-only"
         )}
       >
-        <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
+        <h1 className="min-w-0 max-w-full text-center text-page-title font-medium text-primary">
           {title}
         </h1>
       </div>
@@ -165,7 +218,7 @@ export function StandardDashboardTopBar({
       ) : (
         <h1
           className={cn(
-            "col-span-2 row-start-2 min-w-0 max-w-full break-words text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary sm:col-span-1 sm:col-start-2 sm:row-start-1",
+            "col-span-2 row-start-2 min-w-0 max-w-full break-words text-page-title font-medium text-primary sm:col-span-1 sm:col-start-2 sm:row-start-1",
             alignTitleWithTabs && "xl:pl-[var(--tab-padding-x-md)]"
           )}
         >
@@ -187,7 +240,16 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
+  action,
 }: DashboardTopBarProps) {
+  const trailingContent = action ? (
+    <>
+      {action}
+      {TRAILING_CONTENT}
+    </>
+  ) : (
+    TRAILING_CONTENT
+  );
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
@@ -206,7 +268,7 @@ export function DashboardTopBar({
             {topBarLeadingContent}
           </>
         }
-        trailingContent={TRAILING_CONTENT}
+        trailingContent={trailingContent}
       />
     );
   }
@@ -225,7 +287,7 @@ export function DashboardTopBar({
           {topBarLeadingContent}
         </>
       }
-      trailingContent={TRAILING_CONTENT}
+      trailingContent={trailingContent}
     />
   );
 }
@@ -239,6 +301,27 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
     hideOnMobile: true,
   };
 }
+
+/**
+ * A refresh-design payments flow (Pay, Deposit): the title sits left above the flow's own tabs,
+ * both in the flow's column, and the content box stays full width so the flow's footer band
+ * can span the card. No back action: the footer's Cancel returns to Payments.
+ */
+function refreshFlowPageConfig(config: {
+  title: string;
+  tabs: readonly { id: string; label: string }[];
+}): DashboardPageConfig {
+  return {
+    title: config.title,
+    titlePosition: "left",
+    headerTabs: { tabs: config.tabs, hideOnMobile: false },
+    contentWidthClass: "max-w-none",
+    headerWidthClass: "max-w-flow",
+  };
+}
+
+/** Width of the refresh Payments overview and list pages. */
+const REFRESH_PAGE_WIDTH = "max-w-5xl";
 
 function actionPageConfig(config: {
   title: string;
@@ -283,6 +366,16 @@ function privateChannelsSubPageTitle(
   }
 }
 
+/** The Privacy connect form, on the refresh design: a left title over the form's column. */
+function privacySetupPageConfig(t: ReturnType<typeof useTranslations>): DashboardPageConfig {
+  return {
+    title: t("Shared.dashboardShell.privacy"),
+    titlePosition: "left",
+    contentWidthClass: "max-w-none",
+    headerWidthClass: "max-w-flow",
+  };
+}
+
 /**
  * Header config for the Private Channels segment. The Overview hub is a plain
  * section title; every other view is entered from the Overview and so carries a
@@ -306,12 +399,7 @@ function getPrivateChannelsRoutePageConfig(
     };
   }
   if (pathname === "/dashboard/integrations/private-channels/setup") {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: "/dashboard/integrations/private-channels",
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
+    return privacySetupPageConfig(t);
   }
   const privateChannelsSegments = pathname.split("/");
   const instanceId = privateChannelsSegments[4];
@@ -320,12 +408,7 @@ function getPrivateChannelsRoutePageConfig(
   const instanceSubpage = privateChannelsSegments[5];
   const instanceNestedPage = privateChannelsSegments[6];
   if (instanceRoute && instanceSubpage === "setup") {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: privateChannelsInstancePath(instanceId),
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
+    return privacySetupPageConfig(t);
   }
   if (instanceRoute && instanceSubpage === "channels" && instanceNestedPage === "new") {
     return actionPageConfig({
@@ -697,6 +780,83 @@ function getWalletSectionPageConfig(
   return null;
 }
 
+/**
+ * Header config for the Payments pages built on the refresh design: the overview, the three
+ * lists and the two flows. Returns null for every other route.
+ */
+function getRefreshPaymentsPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.contactList"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.counterparty.add"),
+        href: "/dashboard/payments/counterparty/create",
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments") {
+    return {
+      title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+    };
+  }
+  if (pathname === "/dashboard/payments/transactions") {
+    return {
+      title: t("Shared.dashboardShell.transactions"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.transactions.downloadCsv"),
+        href: "/api/dashboard/payments/transactions/export",
+        icon: "download",
+        variant: "outline",
+        withCurrentQuery: true,
+        download: true,
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments/requests") {
+    return {
+      title: t("Shared.dashboardShell.requests"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.requests.new"),
+        href: `/dashboard/payments/requests?${PAYMENT_REQUEST_CREATE_PARAM}=1`,
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments/pay") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.pay"),
+      tabs: [
+        { id: "single", label: t("DashboardPayments.sendMode.single") },
+        { id: "batch", label: t("DashboardPayments.sendMode.batch") },
+      ],
+    });
+  }
+  if (pathname === "/dashboard/payments/deposit") {
+    return refreshFlowPageConfig({
+      title: t("Shared.dashboardShell.deposit"),
+      tabs: [
+        { id: "address", label: t("DashboardPayments.depositMethod.address") },
+        { id: "provider", label: t("DashboardPayments.depositMethod.provider") },
+      ],
+    });
+  }
+  return null;
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -752,12 +912,9 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  if (pathname === "/dashboard/payments/counterparty") {
-    return {
-      title: t("Shared.dashboardShell.counterparty"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
+  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
+  if (refreshPaymentsConfig) {
+    return refreshPaymentsConfig;
   }
   const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
   if (counterpartyRouteConfig) {
@@ -766,36 +923,6 @@ export function getDashboardPageConfig(
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
-  }
-  if (pathname === "/dashboard/payments") {
-    return {
-      title: t("Shared.dashboardShell.payments"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/transactions") {
-    return {
-      title: t("Shared.dashboardShell.transactions"),
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
-            id: module,
-            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
-          })),
-        ],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/requests") {
-    return {
-      title: t("Shared.dashboardShell.requests"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
   }
   if (pathname === "/dashboard/payments/recurring") {
     return {

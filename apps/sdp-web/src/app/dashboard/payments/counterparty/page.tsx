@@ -2,13 +2,20 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../../playground-api-data";
-import { fetchCounterparties } from "./counterparty-page.data";
+import { paymentsPlaygroundHref } from "@/lib/payments-routes";
+import {
+  fetchCounterpartyDirectory,
+  fetchProjectCounterpartyAccounts,
+} from "./counterparty-page.data";
 import { CounterpartyWorkspace } from "./counterparty-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyPage() {
+export default async function CounterpartyPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -16,33 +23,36 @@ export default async function CounterpartyPage() {
   if (!orgId) {
     redirect("/dashboard");
   }
-
-  const apiBaseUrl = resolvePlaygroundApiBaseUrl();
+  if ((await searchParams).tab === "playground") {
+    // The contact list no longer has a playground tab; its endpoints moved into the Payments one.
+    redirect(paymentsPlaygroundHref("list-counterparties"));
+  }
 
   return withDashboardPageTrace("dashboard.counterparty.page", async ({ trace, apiClient }) => {
-    const [counterpartiesResult, apiKeysResult] = await Promise.all([
-      trace.step("fetch_counterparties", () => fetchCounterparties(apiClient.request)),
-      trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
+    const [directory, accounts] = await Promise.all([
+      trace.step("fetch_counterparty_directory", () =>
+        fetchCounterpartyDirectory(apiClient.request)
+      ),
+      trace.step("fetch_counterparty_accounts", () =>
+        fetchProjectCounterpartyAccounts(apiClient.request)
+      ),
     ]);
 
     trace.log({
       ok: true,
-      counterpartiesOk: counterpartiesResult.ok,
-      counterpartiesCount: counterpartiesResult.data.length,
-      counterpartiesTotal: counterpartiesResult.total,
-      apiKeysOk: apiKeysResult.ok,
-      apiKeysCount: apiKeysResult.data?.length ?? 0,
+      counterpartiesOk: directory.ok,
+      counterpartiesCount: directory.data.length,
+      counterpartiesTotal: directory.total,
+      accountsOk: accounts.ok,
+      accountsCount: accounts.data.length,
     });
 
     return (
-      <div className="flex h-full min-h-0 w-full flex-col">
-        <CounterpartyWorkspace
-          initialCounterparties={counterpartiesResult.data}
-          initialTotal={counterpartiesResult.total}
-          apiKeys={apiKeysResult.data ?? []}
-          apiBaseUrl={apiBaseUrl}
-        />
-      </div>
+      <CounterpartyWorkspace
+        counterparties={directory.data}
+        total={directory.total}
+        accounts={accounts.data}
+      />
     );
   });
 }

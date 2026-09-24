@@ -126,7 +126,7 @@ describe("dashboard route headers", () => {
     ],
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "Shared.dashboardShell.newAsset"],
-    ["/dashboard/payments/counterparty", "Shared.dashboardShell.counterparty"],
+    ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
     ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newCounterparty"],
     ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.manageCounterparty"],
     ["/dashboard/payments", "Shared.dashboardShell.payments"],
@@ -140,15 +140,12 @@ describe("dashboard route headers", () => {
     ["/dashboard/integrations", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/helius", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/private-channels", "Shared.dashboardShell.integrations"],
-    ["/dashboard/integrations/private-channels/setup", "DashboardPrivateChannels.instance.title"],
+    ["/dashboard/integrations/private-channels/setup", "Shared.dashboardShell.privacy"],
     [
       "/dashboard/integrations/private-channels/instance_1",
       "Shared.dashboardShell.privateChannels",
     ],
-    [
-      "/dashboard/integrations/private-channels/instance_1/setup",
-      "DashboardPrivateChannels.instance.title",
-    ],
+    ["/dashboard/integrations/private-channels/instance_1/setup", "Shared.dashboardShell.privacy"],
     [
       "/dashboard/integrations/private-channels/instance_1/channels/new",
       "DashboardPrivateChannels.directory.setupChannel",

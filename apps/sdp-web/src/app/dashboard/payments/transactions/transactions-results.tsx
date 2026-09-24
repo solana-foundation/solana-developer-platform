@@ -1,13 +1,18 @@
 "use client";
 
-import type { UnifiedTransaction, UnifiedTransactionStatus } from "@sdp/types";
-import { ExternalLinkIcon, ReceiptTextIcon } from "lucide-react";
+import {
+  PAYMENT_TRANSFER_STATUSES,
+  type PaymentTransferStatus,
+  type UnifiedTransaction,
+  type UnifiedTransactionStatus,
+} from "@sdp/types";
+import { ReceiptTextIcon } from "lucide-react";
 import { useState } from "react";
 import { EntityLink } from "@/components/entity-link";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
+import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -18,30 +23,62 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { explorerTxUrl } from "@/lib/explorer";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, resolveTokenByMint } from "../payments-overview.utils";
+import { resolveTokenByMint, shortenAddress, statusMessageKey } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { formatDateTime, formatDecimalAmount, PAYMENT_STATUS_TONE } from "../payments-presentation";
 import { counterpartyHref, TRANSACTION_MODULE_HREFS, walletHref } from "./transaction-module-hrefs";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import { useTransactionFilters } from "./transactions-workspace";
 import { useCursorPagination } from "./use-cursor-pagination";
 
-const statusVariants = {
-  pending: "warning",
-  succeeded: "success",
-  failed: "danger",
-  canceled: "outline",
-} as const satisfies Record<UnifiedTransactionStatus, BadgeVariant>;
+const UNIFIED_STATUS_TONE = {
+  pending: "attention",
+  succeeded: "positive",
+  failed: "critical",
+  canceled: "neutral",
+} as const satisfies Record<UnifiedTransactionStatus, StatusTone>;
+
+function isPaymentTransferStatus(status: string): status is PaymentTransferStatus {
+  return PAYMENT_TRANSFER_STATUSES.some((candidate) => candidate === status);
+}
+
+/**
+ * A row's status in words and tone. Payments rows keep their own state ("Settling",
+ * "Awaiting payment"); other modules read by the ledger's four-way status, since their module
+ * states have no copy here.
+ */
+function useTransactionStatus() {
+  const t = useTranslations();
+  return (transaction: UnifiedTransaction): { label: string; tone: StatusTone } =>
+    transaction.module === "payments" && isPaymentTransferStatus(transaction.moduleStatus)
+      ? {
+          label: t(statusMessageKey(transaction.moduleStatus)),
+          tone: PAYMENT_STATUS_TONE[transaction.moduleStatus],
+        }
+      : {
+          label: t(`DashboardPayments.transactions.statuses.${transaction.status}` as MessageKey),
+          tone: UNIFIED_STATUS_TONE[transaction.status],
+        };
+}
+
+function kindLabel(t: ReturnType<typeof useTranslations>, transaction: UnifiedTransaction) {
+  return t(
+    `DashboardPayments.transactions.kinds.${transaction.module}.${transaction.kind}` as MessageKey
+  );
+}
 
 function TransactionDetail({
   transaction,
   issuedTokensByMint,
+  counterpartyName,
 }: {
   transaction: UnifiedTransaction;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  counterpartyName: string | undefined;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
+  const status = useTransactionStatus()(transaction);
   const fields = [
     { label: t("DashboardPayments.transactions.transactionId"), value: transaction.id, href: null },
     {
@@ -50,17 +87,16 @@ function TransactionDetail({
       href: null,
     },
     {
-      label: t("DashboardPayments.transactions.kind"),
-      value: t(
-        `DashboardPayments.transactions.kinds.${transaction.module}.${transaction.kind}` as MessageKey
-      ),
+      label: t("DashboardPayments.transactions.module"),
+      value: t(`DashboardPayments.transactions.modules.${transaction.module}` as MessageKey),
       href: null,
     },
     {
-      label: t("DashboardPayments.transactions.status"),
-      value: transaction.moduleStatus,
+      label: t("DashboardPayments.transactions.kind"),
+      value: kindLabel(t, transaction),
       href: null,
     },
+    { label: t("DashboardPayments.transactions.status"), value: status.label, href: null },
     { label: t("DashboardPayments.transactions.amount"), value: transaction.amount, href: null },
     {
       label: t("DashboardPayments.transactions.token"),
@@ -75,14 +111,15 @@ function TransactionDetail({
       value:
         transaction.custodyWalletId === null
           ? null
-          : transaction.custodyWalletLabel === null
-            ? transaction.custodyWalletId
-            : transaction.custodyWalletLabel,
+          : (transaction.custodyWalletLabel ?? transaction.custodyWalletId),
       href: transaction.custodyWalletId === null ? null : walletHref(transaction.custodyWalletId),
     },
     {
       label: t("DashboardPayments.transactions.counterparty"),
-      value: transaction.counterpartyId,
+      value:
+        transaction.counterpartyId === null
+          ? null
+          : (counterpartyName ?? transaction.counterpartyId),
       href:
         transaction.counterpartyId === null ? null : counterpartyHref(transaction.counterpartyId),
     },
@@ -93,20 +130,20 @@ function TransactionDetail({
     },
     {
       label: t("DashboardPayments.transactions.created"),
-      value: transaction.createdAt,
+      value: formatDateTime(transaction.createdAt, locale) ?? transaction.createdAt,
       href: null,
     },
   ].filter((field): field is typeof field & { value: string } => field.value !== null);
   return (
     <div className="p-6">
-      <h2 className="text-lg font-semibold text-primary">
+      <h2 className="text-subheading font-medium text-primary">
         {t("DashboardPayments.transactions.details")}
       </h2>
-      <dl className="mt-4 divide-y divide-border-default">
+      <dl className="mt-4 divide-y divide-border-subtle">
         {fields.map((field) => (
           <div key={field.label} className="grid gap-2 py-3 sm:grid-cols-3">
-            <dt className="text-xs text-tertiary">{field.label}</dt>
-            <dd className="break-all text-sm text-primary sm:col-span-2">
+            <dt className="text-meta text-secondary">{field.label}</dt>
+            <dd className="break-all text-body text-primary sm:col-span-2">
               {field.href === null ? (
                 field.value
               ) : (
@@ -133,13 +170,15 @@ function TransactionDetail({
 export function TransactionsResults({
   result,
   issuedTokensByMint,
+  counterpartyNames,
 }: {
   result: TransactionsPageResult;
   issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
+  counterpartyNames: ReadonlyMap<string, string>;
 }) {
   const locale = useLocale();
   const t = useTranslations();
-  const cluster = useSolanaCluster();
+  const statusOf = useTransactionStatus();
   const { filters, pending, navigate } = useTransactionFilters();
   const pagination = useCursorPagination(filters, result.nextCursor, navigate);
   const [selected, setSelected] = useState<UnifiedTransaction | null>(null);
@@ -154,88 +193,84 @@ export function TransactionsResults({
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-busy={pending}>
       <div className="overflow-x-auto">
-        <Table className="rounded-none border-0">
+        <Table className="min-w-[760px] rounded-none border-0">
           <TableHeader>
             <TableRow>
-              <TableHead>{t("DashboardPayments.transactions.created")}</TableHead>
-              {filters.module === undefined ? (
-                <TableHead>{t("DashboardPayments.transactions.module")}</TableHead>
-              ) : null}
-              <TableHead>{t("DashboardPayments.transactions.kind")}</TableHead>
-              <TableHead>{t("DashboardPayments.transactions.amount")}</TableHead>
               <TableHead>{t("DashboardPayments.transactions.status")}</TableHead>
+              <TableHead>{t("DashboardPayments.transactions.type")}</TableHead>
+              <TableHead className="text-right">
+                {t("DashboardPayments.transactions.amount")}
+              </TableHead>
+              <TableHead>{t("DashboardPayments.transactions.contact")}</TableHead>
               <TableHead>{t("DashboardPayments.transactions.wallet")}</TableHead>
-              <TableHead>{t("DashboardPayments.transactions.signature")}</TableHead>
+              <TableHead>{t("DashboardPayments.transactions.created")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {result.transactions.map((transaction) => (
-              <TableRow
-                key={`${transaction.module}:${transaction.id}`}
-                onClick={() => setSelected(transaction)}
-                className="cursor-pointer"
-              >
-                <TableCell className="text-sm text-secondary">
-                  {formatTimestamp(transaction.createdAt, t, locale)}
-                </TableCell>
-                {filters.module === undefined ? (
-                  <TableCell className="text-sm text-secondary">
-                    {t(
-                      `DashboardPayments.transactions.modules.${transaction.module}` as MessageKey
+            {result.transactions.map((transaction) => {
+              const status = statusOf(transaction);
+              const token =
+                transaction.token === null
+                  ? null
+                  : resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName;
+              const contact =
+                transaction.counterpartyId === null
+                  ? null
+                  : (counterpartyNames.get(transaction.counterpartyId) ??
+                    shortenAddress(transaction.counterpartyId));
+              const wallet =
+                transaction.custodyWalletId === null
+                  ? null
+                  : (transaction.custodyWalletLabel ?? shortenAddress(transaction.custodyWalletId));
+              return (
+                <TableRow
+                  key={`${transaction.module}:${transaction.id}`}
+                  onClick={() => setSelected(transaction)}
+                  className="cursor-pointer"
+                >
+                  <TableCell>
+                    <StatusText tone={status.tone} className="text-body">
+                      {status.label}
+                    </StatusText>
+                  </TableCell>
+                  <TableCell className="text-body text-secondary">
+                    {kindLabel(t, transaction)}
+                  </TableCell>
+                  <TableCell className="text-right text-body whitespace-nowrap tabular-nums">
+                    {transaction.amount === null ? (
+                      <span className="text-tertiary">—</span>
+                    ) : (
+                      <>
+                        <span className="text-primary">
+                          {formatDecimalAmount(transaction.amount, locale)}
+                        </span>
+                        {token === null ? null : <span className="text-secondary"> {token}</span>}
+                      </>
                     )}
                   </TableCell>
-                ) : null}
-                <TableCell className="text-sm text-primary">
-                  {t(
-                    `DashboardPayments.transactions.kinds.${transaction.module}.${transaction.kind}` as MessageKey
-                  )}
-                </TableCell>
-                <TableCell className="text-sm text-secondary">
-                  {transaction.amount === null
-                    ? "—"
-                    : transaction.token === null
-                      ? transaction.amount
-                      : `${transaction.amount} ${resolveTokenByMint(transaction.token, issuedTokensByMint).tokenName}`}
-                </TableCell>
-                <TableCell>
-                  <Badge variant={statusVariants[transaction.status]}>
-                    {transaction.moduleStatus}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-secondary">
-                  {transaction.custodyWalletId === null ? (
-                    "—"
-                  ) : (
-                    <EntityLink href={walletHref(transaction.custodyWalletId)}>
-                      {transaction.custodyWalletLabel === null
-                        ? transaction.custodyWalletId
-                        : transaction.custodyWalletLabel}
-                    </EntityLink>
-                  )}
-                </TableCell>
-                <TableCell className="max-w-48 text-sm text-secondary">
-                  {transaction.signature === null ? (
-                    "—"
-                  ) : (
-                    <a
-                      href={explorerTxUrl(transaction.signature, cluster)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(event) => event.stopPropagation()}
-                      className="flex min-w-0 items-center gap-1 text-primary underline underline-offset-2"
-                    >
-                      <span className="block min-w-0 truncate">{transaction.signature}</span>
-                      <ExternalLinkIcon className="size-3 shrink-0" />
-                    </a>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+                  <TableCell
+                    className="max-w-48 truncate text-body text-primary"
+                    title={contact ?? undefined}
+                  >
+                    {contact ?? <span className="text-tertiary">—</span>}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-44 truncate text-body text-secondary"
+                    title={wallet ?? undefined}
+                  >
+                    {wallet ?? <span className="text-tertiary">—</span>}
+                  </TableCell>
+                  <TableCell className="text-body whitespace-nowrap text-secondary">
+                    {formatDateTime(transaction.createdAt, locale)}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
       <ArrowPagination
-        className="mt-auto border-t border-border-default p-3"
+        className="mt-4"
         page={pagination.page}
         pageCount={pagination.pageCount}
         disabled={pending}
@@ -248,7 +283,15 @@ export function TransactionsResults({
         size="xl"
       >
         {selected === null ? null : (
-          <TransactionDetail transaction={selected} issuedTokensByMint={issuedTokensByMint} />
+          <TransactionDetail
+            transaction={selected}
+            issuedTokensByMint={issuedTokensByMint}
+            counterpartyName={
+              selected.counterpartyId === null
+                ? undefined
+                : counterpartyNames.get(selected.counterpartyId)
+            }
+          />
         )}
       </Modal>
     </section>

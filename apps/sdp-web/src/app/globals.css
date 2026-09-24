@@ -1,7 +1,9 @@
 @import "tailwindcss";
 @import "@solana/design-system/styles";
-/* SDP color theme (primitives → semantic tokens → package retheme).
-   Imported after the package so its Tier 3 retheme wins. */
+/* SDP tokens (palettes, refresh scope, scale) and their Tailwind utilities, then the app's
+   own wiring (Clerk, design-system retheme). All after the package so SDP names win. */
+@import "@sdp/design-tokens/tokens.css";
+@import "@sdp/design-tokens/theme.css";
 @import "./sdp-theme.css";
 
 /* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an

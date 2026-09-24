@@ -47,11 +47,8 @@ export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
 export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
-    {
-      id: "RECIPIENTS",
-      label: t("DashboardPayments.batchSend.recipientsStep"),
-      title: t("DashboardPayments.batchSend.recipientsTitle"),
-    },
+    // The rows form speaks for itself; the step header already says "Details".
+    { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {
       id: "REVIEW",
       label: t("DashboardPayments.batchSend.reviewStep"),
@@ -430,6 +427,14 @@ export function useBatchSendWizard({
     onExit();
   };
 
+  // Back from review to the rows; nothing has been sent yet.
+  const handleBack = () => {
+    if (submitting || batchResult) {
+      return;
+    }
+    setStepIndex((current) => Math.max(0, current - 1));
+  };
+
   return {
     stepIndex,
     currentStepId,
@@ -479,6 +484,7 @@ export function useBatchSendWizard({
     batchResult,
     handlePrimary,
     handleSecondary,
+    handleBack,
   };
 }
 

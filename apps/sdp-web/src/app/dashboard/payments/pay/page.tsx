@@ -13,6 +13,6 @@ export default async function PaymentsPayPage() {
     redirect("/dashboard");
   }
 
-  const actionPageData = await loadPaymentsActionPageData();
+  const actionPageData = await loadPaymentsActionPageData({ includePrivateSendStatus: true });
   return <PaymentsActionPage mode="send" wallets={[]} walletsError={null} {...actionPageData} />;
 }

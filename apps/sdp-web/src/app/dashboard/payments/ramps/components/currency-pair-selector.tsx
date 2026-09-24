@@ -101,7 +101,7 @@ export function CurrencyPairSelector() {
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 refresh:gap-6">
       <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
         <div className="flex flex-col gap-2">
           <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
@@ -135,7 +135,14 @@ export function CurrencyPairSelector() {
         {isOfframp ? assetCombobox : fiatCombobox}
       </div>
 
-      <div className={showWallet ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px]" : "grid gap-4"}>
+      {/* A refresh surface stacks the wallet and the asset full width, one question per row. */}
+      <div
+        className={
+          showWallet
+            ? "grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px] refresh:gap-6 refresh:sm:grid-cols-1"
+            : "grid gap-4 refresh:gap-6"
+        }
+      >
         {showWallet ? (
           <Combobox
             label={

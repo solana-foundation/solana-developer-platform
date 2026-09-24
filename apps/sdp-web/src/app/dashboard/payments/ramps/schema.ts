@@ -59,6 +59,13 @@ export const depositAmountSchema = depositSelectionSchema.pick({
   amount: true,
   provider: true,
 });
+/** Deposit's details step: the amount and provider fields plus the contact picked beside them. */
+export const depositDetailsSchema = depositSelectionSchema.pick({
+  walletId: true,
+  amount: true,
+  provider: true,
+  counterpartyId: true,
+});
 export const sourceWalletSchema = withdrawSelectionSchema.pick({ walletId: true });
 export const withdrawAmountSchema = withdrawSelectionSchema.pick({
   amount: true,

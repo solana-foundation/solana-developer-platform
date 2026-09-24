@@ -3,16 +3,21 @@
 import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { DollarSignIcon } from "lucide-react";
+import { useThemeScope } from "@/components/theme-scope";
+import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
+import { ContactCombobox, type ContactControls } from "./contact-combobox";
+import { DepositTimeline } from "./deposit-timeline";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
+import { OnrampReview } from "./onramp-review";
 import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
@@ -30,8 +35,16 @@ import { StripeOnrampFrame } from "./stripe-onramp-frame";
  * @returns The active onramp step content.
  */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every onramp stage in one component while each branch stays simple.
-export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
+export function OnrampStepContent({
+  wizard,
+  contact,
+}: {
+  wizard: OnrampWizard;
+  /** Deposit picks its contact on the details step; omitted when it was picked before. */
+  contact?: ContactControls;
+}) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const {
     currentStepId,
     enabledRampProviders,
@@ -72,6 +85,10 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
   }
 
+  if (currentStepId === "REVIEW") {
+    return <OnrampReview wizard={wizard} />;
+  }
+
   if (currentStepId === "DEPOSIT") {
     if (!hasEnabledRampProvider(rampProviderAccess)) {
       return (
@@ -82,7 +99,14 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
     }
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
+        {contact ? (
+          <ContactCombobox
+            {...contact}
+            value={fields.counterpartyId}
+            hint={t("DashboardPayments.depositMethod.contactHint")}
+          />
+        ) : null}
         <RampPairProviderSelector
           direction="onramp"
           enabledRampProviders={enabledRampProviders}
@@ -240,7 +264,7 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
           doneLabel: labels.done,
         }
       : undefined;
-    return (
+    const instructionsQuote = (
       <ManualInstructionsQuote
         amount={fields.amount.trim()}
         quote={quote}
@@ -249,6 +273,17 @@ export function OnrampStepContent({ wizard }: { wizard: OnrampWizard }) {
         instructions={quote.paymentInstructions}
         action={simulateAction}
       />
+    );
+    return refresh ? (
+      <div className="space-y-8">
+        <Callout variant="warning" title={t("DashboardPayments.ramps.status.waitingForFunding")}>
+          {t("DashboardPayments.manualInstructions.waitingBody")}
+        </Callout>
+        {instructionsQuote}
+        <DepositTimeline status={transferStatus?.status} />
+      </div>
+    ) : (
+      instructionsQuote
     );
   }
 

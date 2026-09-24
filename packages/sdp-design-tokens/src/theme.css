@@ -1,0 +1,107 @@
+/*
+  Tailwind v4 mapping for @sdp/design-tokens. Import it after tailwindcss and after any design
+  system that declares its own @theme, so these names win:
+
+    @import "tailwindcss";
+    @import "@solana/design-system/styles";
+    @import "@sdp/design-tokens/tokens.css";
+    @import "@sdp/design-tokens/theme.css";
+
+  `inline` makes every utility reference the token directly (color: var(--emph-xh)), which is
+  what lets [data-sdp-theme="refresh"] re-theme a subtree by re-pointing the tokens.
+*/
+
+/* `refresh:` styles an element only inside a refresh surface, for the structural changes a
+   token swap cannot express (underline fields, a borderless track). Zero-specificity :where,
+   so it overrides the base utility by source order, exactly like `dark:`. */
+@custom-variant refresh (&:where([data-sdp-theme="refresh"], [data-sdp-theme="refresh"] *));
+
+@theme inline {
+  --color-primary: var(--emph-xh);
+  --color-secondary: var(--emph-m);
+  --color-tertiary: var(--emph-l);
+  --color-muted: var(--emph-xl);
+  --color-on-primary: var(--on-primary);
+
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+
+  --color-fill-subtle: var(--t4);
+  --color-fill: var(--t8);
+  --color-fill-strong: var(--t12);
+  /* --fill, composited by hand so it is opaque. The tinted fills above are ink at 4/8/12%
+     alpha, so whatever sits behind an element painted in one of them shows through it.
+     Overlays that have to *occlude* what is behind them — a mark covering the edge of a
+     band, say — take this instead: sRGB is the space the browser composites in, so over a
+     raised card it is pixel-identical to --color-fill, and the only thing it changes is
+     what it lets through. Only correct on --surface-raised; it names its ground. */
+  --color-fill-opaque: color-mix(in srgb, var(--surface-raised) 92%, var(--emph-xh));
+
+  --color-border-subtle: var(--border-xl);
+  --color-border-default: var(--border-l);
+  --color-border-strong: var(--border-m);
+
+  --color-success: var(--green-tx);
+  --color-success-bg: var(--green-bg);
+  --color-success-border: var(--green-brd);
+  --color-warning: var(--amber-tx);
+  --color-warning-bg: var(--amber-bg);
+  --color-warning-border: var(--amber-brd);
+  --color-error: var(--red-tx);
+  --color-error-bg: var(--red-bg);
+  --color-error-border: var(--red-brd);
+  --color-info: var(--blue-tx);
+  --color-info-bg: var(--blue-bg);
+  --color-info-border: var(--blue-brd);
+
+  --color-destructive: var(--crimson);
+  --color-destructive-strong: var(--crimson-strong);
+  --color-destructive-strongest: var(--crimson-strongest);
+  --color-destructive-bg: var(--crimson-bg);
+  --color-destructive-border: var(--crimson-brd);
+
+  /* Type scale: text-amount, text-quote, text-heading, text-subheading, text-field,
+     text-body, text-meta, and text-page-title for the shell title. */
+  --text-amount: var(--font-size-amount);
+  --text-amount--line-height: var(--line-height-amount);
+  --text-amount--letter-spacing: var(--letter-spacing-amount);
+  --text-quote: var(--font-size-quote);
+  --text-quote--line-height: var(--line-height-quote);
+  --text-quote--letter-spacing: var(--letter-spacing-quote);
+  --text-heading: var(--font-size-heading);
+  --text-heading--line-height: var(--line-height-heading);
+  --text-heading--letter-spacing: var(--letter-spacing-heading);
+  --text-subheading: var(--font-size-subheading);
+  --text-subheading--line-height: var(--line-height-subheading);
+  --text-subheading--letter-spacing: var(--letter-spacing-subheading);
+  --text-field: var(--font-size-field);
+  --text-field--line-height: var(--line-height-field);
+  --text-body: var(--font-size-body);
+  --text-body--line-height: var(--line-height-body);
+  --text-meta: var(--font-size-meta);
+  --text-meta--line-height: var(--line-height-meta);
+  --text-page-title: var(--page-title-size);
+  --text-page-title--line-height: var(--page-title-line-height);
+  --text-page-title--letter-spacing: var(--page-title-letter-spacing);
+
+  /* rounded-control, rounded-control-inner, rounded-card */
+  --radius-control: var(--corner-control);
+  --radius-control-inner: var(--corner-control-inner);
+  --radius-card: var(--corner-card);
+
+  /* h-control-sm / -md / -lg (and every other spacing utility) */
+  --spacing-control-sm: var(--control-height-sm);
+  --spacing-control-md: var(--control-height-md);
+  --spacing-control-lg: var(--control-height-lg);
+
+  /* max-w-flow */
+  --container-flow: var(--flow-max-width);
+
+  --shadow-ring: var(--elevation-popover);
+
+  /* Project-wide default for transition/transition-colors/transition-all
+     utilities that don't set an explicit duration-* (Tailwind's built-in
+     default is 150ms). DS components with hardcoded durations are unaffected. */
+  --default-transition-duration: var(--motion-duration-default);
+}

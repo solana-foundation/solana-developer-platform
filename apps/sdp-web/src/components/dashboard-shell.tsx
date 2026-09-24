@@ -7,6 +7,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
+  DashboardHeaderAction,
   DashboardTopBar,
   getDashboardPageConfig,
   HeaderBackAction,
@@ -31,6 +32,7 @@ import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
+import { ThemeScopeProvider, themeScopeAttributes } from "@/components/theme-scope";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
@@ -39,6 +41,8 @@ import {
   isDashboardNavItemActive,
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
+import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
 
 const navItemBase =
@@ -431,6 +435,16 @@ export function DashboardShell({
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
+  const themeScope = themeScopeForPath(pathname);
+  // The dashboard's own URL store rather than useSearchParams: list filters update the query
+  // shallowly, and an export has to follow them.
+  const { searchParams: urlSearchParams } = useDashboardUrlState();
+  const headerAction = pageConfig.headerAction ? (
+    <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
+  ) : null;
+  // Refresh pages put the title and tabs in the page's own column, so the title, the tab text
+  // and the content share one left edge, and drop the full-bleed rule under the tabs.
+  const alignsHeaderWithContent = themeScope === "refresh" && !shouldLockViewportScroll;
 
   useEffect(() => {
     const tabletViewport = window.matchMedia("(min-width: 768px)");
@@ -672,106 +686,122 @@ export function DashboardShell({
           </div>
         ) : null}
 
-        <section
-          className={[
-            "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
-            shouldLockViewportScroll
-              ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
-              : "px-3 py-5 md:p-6",
-          ].join(" ")}
-        >
-          <div
+        <ThemeScopeProvider scope={themeScope}>
+          <section
+            {...themeScopeAttributes(themeScope)}
             className={[
-              "min-w-0 w-full",
+              "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
               shouldLockViewportScroll
-                ? "flex min-h-0 flex-1 flex-col"
-                : pageConfig.hideTitleOnMobile
-                  ? "space-y-4 sm:space-y-6"
-                  : "space-y-6",
+                ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+                : "px-3 py-5 md:p-6",
             ].join(" ")}
           >
-            <div className="shrink-0 space-y-4">
-              <div
-                className={cn(
-                  shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
-                  shouldLockViewportScroll
-                    ? "px-3 pt-5 md:px-6 md:pt-6"
-                    : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
-                )}
-              >
-                <DashboardTopBar
-                  isMobileSidebarOpen={isMobileSidebarOpen}
-                  setMobileSidebarOpen={setMobileSidebarOpen}
-                  titleVisibility={
-                    pageConfig.hideTitle
-                      ? "screen-reader-only"
-                      : pageConfig.hideTitleOnMobile
-                        ? "desktop-only"
-                        : "visible"
-                  }
-                  title={pageConfig.title}
-                  titlePosition={pageConfig.titlePosition}
-                  topBarLeadingContent={topBarLeadingContent}
-                  hasHeaderTabs={hasHeaderTabs}
-                />
-              </div>
-
-              {headerTabs ? (
-                <div
-                  className={cn(
-                    "border-b border-border-default",
-                    !shouldLockViewportScroll && "-mx-3 md:-mx-6"
-                  )}
-                >
-                  <div className="flex items-end px-3 md:px-6">
-                    <DashboardHeaderTabs {...headerTabs} />
-                  </div>
-                </div>
-              ) : null}
-
-              {routeTabs ? (
-                <div
-                  className={cn(
-                    "border-b border-border-default",
-                    !shouldLockViewportScroll && "-mx-3 md:-mx-6"
-                  )}
-                >
-                  <div className="flex items-end px-3 md:px-6">
-                    <DashboardRouteTabs {...routeTabs} pathname={pathname} />
-                  </div>
-                </div>
-              ) : null}
-            </div>
             <div
-              data-dashboard-page-content={isWorkspaceSwitching ? undefined : ""}
               className={[
-                "mx-auto min-w-0 w-full",
-                contentWidthClass,
-                // Clears the fixed mobile bottom bar so the last row of any page is
-                // still reachable; the bar is md:hidden, so the padding is too.
-                !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
-                shouldClipHorizontalOverflow && !shouldLockViewportScroll
-                  ? "overflow-x-hidden"
-                  : "",
-                shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
+                "min-w-0 w-full",
+                shouldLockViewportScroll
+                  ? "flex min-h-0 flex-1 flex-col"
+                  : pageConfig.hideTitleOnMobile
+                    ? "space-y-4 sm:space-y-6"
+                    : "space-y-6",
               ].join(" ")}
             >
-              {isWorkspaceSwitching ? (
+              <div
+                className={cn(
+                  "shrink-0 space-y-4",
+                  alignsHeaderWithContent && [
+                    "mx-auto w-full",
+                    pageConfig.headerWidthClass ?? contentWidthClass,
+                  ]
+                )}
+              >
                 <div
-                  className="h-full min-h-0"
-                  data-dashboard-navigation-pending={loadingRoute}
-                  role="status"
-                  aria-live="polite"
+                  className={cn(
+                    shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
+                    shouldLockViewportScroll
+                      ? "px-3 pt-5 md:px-6 md:pt-6"
+                      : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6"
+                  )}
                 >
-                  <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
-                  <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+                  <DashboardTopBar
+                    isMobileSidebarOpen={isMobileSidebarOpen}
+                    setMobileSidebarOpen={setMobileSidebarOpen}
+                    titleVisibility={
+                      pageConfig.hideTitle
+                        ? "screen-reader-only"
+                        : pageConfig.hideTitleOnMobile
+                          ? "desktop-only"
+                          : "visible"
+                    }
+                    title={pageConfig.title}
+                    titlePosition={pageConfig.titlePosition}
+                    topBarLeadingContent={topBarLeadingContent}
+                    hasHeaderTabs={hasHeaderTabs}
+                    action={headerAction}
+                  />
                 </div>
-              ) : (
-                children
-              )}
+
+                {headerTabs ? (
+                  <div
+                    className={cn(
+                      !alignsHeaderWithContent && "border-b border-border-default",
+                      !shouldLockViewportScroll && !alignsHeaderWithContent && "-mx-3 md:-mx-6"
+                    )}
+                  >
+                    <div
+                      className={cn("flex items-end", !alignsHeaderWithContent && "px-3 md:px-6")}
+                    >
+                      <DashboardHeaderTabs {...headerTabs} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {routeTabs ? (
+                  <div
+                    className={cn(
+                      "border-b border-border-default",
+                      !shouldLockViewportScroll && "-mx-3 md:-mx-6"
+                    )}
+                  >
+                    <div className="flex items-end px-3 md:px-6">
+                      <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div
+                data-dashboard-page-content={isWorkspaceSwitching ? undefined : ""}
+                className={[
+                  "mx-auto min-w-0 w-full",
+                  contentWidthClass,
+                  // Clears the fixed mobile bottom bar so the last row of any page is
+                  // still reachable; the bar is md:hidden, so the padding is too.
+                  !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
+                  // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
+                  // footer inside it would then pin to this box instead of the viewport.
+                  shouldClipHorizontalOverflow && !shouldLockViewportScroll
+                    ? "overflow-x-clip"
+                    : "",
+                  shouldLockViewportScroll ? "min-h-0 flex-1 overflow-hidden" : "",
+                ].join(" ")}
+              >
+                {isWorkspaceSwitching ? (
+                  <div
+                    className="h-full min-h-0"
+                    data-dashboard-navigation-pending={loadingRoute}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="sr-only">{t("Shared.dashboardShell.loadingDashboard")}</span>
+                    <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+                  </div>
+                ) : (
+                  children
+                )}
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        </ThemeScopeProvider>
       </div>
     </main>
   );
