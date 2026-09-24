@@ -67,7 +67,7 @@
     "@types/qrcode": "1.5.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@vitest/coverage-istanbul": "4.1.11",
+    "@vitest/coverage-istanbul": "5.0.1",
     "eslint": "10.10.0",
     "eslint-config-next": "16.3.4",
     "jsdom": "30.0.1",
