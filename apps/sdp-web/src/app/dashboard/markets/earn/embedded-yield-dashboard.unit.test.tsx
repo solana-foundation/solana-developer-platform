@@ -143,7 +143,7 @@ describe("EmbeddedYieldDashboard", () => {
       screen.getByRole("link", { name: "Integrate Embedded Yield" }).getAttribute("href")
     ).toBe("/dashboard/markets/embedded-yield/configure");
     expect(screen.getByText("USDC Core Yield")).toBeTruthy();
-    expect(screen.getByText("1,250.42 USDC")).toBeTruthy();
+    expect(screen.getByText("$1,250.42")).toBeTruthy();
     expect(screen.getByText("Instant")).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
   });
@@ -350,7 +350,7 @@ describe("EmbeddedYieldDashboard", () => {
 
     expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("0 USDC");
+    expect(document.body.textContent).not.toContain("$0.00");
   });
 
   it("renders settled portfolio data without the initial skeleton", () => {
@@ -569,7 +569,7 @@ describe("EmbeddedYieldDashboard", () => {
     const details = screen.getByRole("region", { name: "USDC Core Yield" });
     expect(screen.getByText("September 2, 2026")).toBeTruthy();
     expect(within(details).getAllByRole("article")).toHaveLength(positions.length);
-    expect(within(details).getAllByText("1 USDC")).toHaveLength(positions.length);
+    expect(within(details).getAllByText("$1.00")).toHaveLength(positions.length);
     expect(mocks.fetchPositions).not.toHaveBeenCalled();
   });
 

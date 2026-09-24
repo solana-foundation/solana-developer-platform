@@ -195,7 +195,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     expect(screen.queryByText("Waiting for payment")).toBeNull();
     expect(
       screen.getByText(
-        /4.9875 USDC expected · payment can start after Unavailable · get shares back after Unavailable/
+        /\$4.98 expected · payment can start after Unavailable · get shares back after Unavailable/
       )
     ).toBeTruthy();
   });

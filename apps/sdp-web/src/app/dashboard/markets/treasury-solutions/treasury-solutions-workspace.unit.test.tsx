@@ -859,7 +859,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing legacy program row");
-    expect(legacyRow.textContent).toContain("900.50 USD");
+    expect(legacyRow.textContent).toContain("$900.50");
   });
 
   it("shows an automatically updating deposit status beside the affected position", async () => {
@@ -1098,7 +1098,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const projectedBalance = document.querySelector('[data-earn-vault-balance="projected"]');
     expect(projectedBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
-      "135.25"
+      "$135.25"
     );
     expect(projectedBalance?.className).toContain("animate-pulse");
     expect(projectedBalance?.textContent).toContain(
@@ -1117,7 +1117,7 @@ describe("TreasurySolutionsWorkspace", () => {
     await waitFor(() =>
       expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
     );
-    expect(screen.getAllByText("135.25").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$135.25").length).toBeGreaterThan(0);
   });
 
   it("keeps a first deposit synced from pending row through provider reconciliation", async () => {
@@ -1170,7 +1170,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       within(pendingRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
-    const projectedBalance = within(pendingRow).getByText("10");
+    const projectedBalance = within(pendingRow).getByText("$10.00");
     const projectedBalanceContainer = projectedBalance.closest("[data-earn-vault-balance]");
     expect(projectedBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("projected");
     expect(projectedBalanceContainer?.className).toContain("animate-pulse");
@@ -1193,7 +1193,7 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     expect(reconciledRows).toHaveLength(1);
-    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("10")).toBeTruthy();
+    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("$10.00")).toBeTruthy();
   });
 
   it("combines concurrent confirmed movements without dropping either projection", async () => {
@@ -1239,7 +1239,7 @@ describe("TreasurySolutionsWorkspace", () => {
       document
         .querySelector('[data-earn-vault-balance="projected"]')
         ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("135.25");
+    ).toBe("$135.25");
     expect(
       screen.getByRole("button", {
         name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
@@ -1260,7 +1260,7 @@ describe("TreasurySolutionsWorkspace", () => {
       document
         .querySelector('[data-earn-vault-balance="projected"]')
         ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("140.25");
+    ).toBe("$140.25");
     const positionRow = screen
       .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
@@ -1405,7 +1405,7 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
-    const projectedBalance = within(positionRow).getByText("119.25");
+    const projectedBalance = within(positionRow).getByText("$119.25");
     expect(projectedBalance.closest("[data-earn-vault-balance]")?.className).toContain(
       "animate-pulse"
     );
@@ -1963,9 +1963,15 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("0.0%")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
-    // The wallet's deployed line refuses a partial total for the same reason.
+    // The wallet's deployed line refuses a partial total for the same reason:
+    // the one readable value appears only as that position's own balance,
+    // never as a wallet or summary total.
     expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
-    expect(screen.queryByText("$5.25")).toBeNull();
+    const readableValues = screen.getAllByText("$5.25");
+    expect(readableValues.length).toBeGreaterThan(0);
+    expect(readableValues.every((el) => el.closest("[data-earn-vault-balance]") !== null)).toBe(
+      true
+    );
   });
 
   it("opens the vault exit modal from a position row", async () => {

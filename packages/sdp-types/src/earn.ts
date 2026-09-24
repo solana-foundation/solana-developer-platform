@@ -315,7 +315,12 @@ export interface EarnVaultPosition {
    * Absent when no lock applies or when live provider state is unavailable.
    */
   unlockTimestamp?: string | null;
-  /** Deposit-token value, absent when the provider cannot hydrate the position. */
+  /**
+   * Value of the shares in the deposit token (`tokenMint`): shares × the provider's current
+   * rate, so a deposit-token amount, not a share count and not a USD conversion. Every Earn
+   * deposit token is a USD stablecoin, so at par this is a dollar figure. Absent when the
+   * provider cannot hydrate the position.
+   */
   tokenValue?: string;
 }
 
@@ -342,7 +347,10 @@ export interface EarnExternalWalletPosition {
   withdrawableShares?: string;
   /** Unix epoch seconds when provider-locked shares become eligible to exit, when applicable. */
   unlockTimestamp?: string | null;
-  /** Deposit-token value, absent when the live provider read failed. */
+  /**
+   * Shares × the provider's current rate, in the deposit token (`tokenMint`): a dollar figure
+   * at par, never a share count. Absent when the live provider read failed.
+   */
   tokenValue?: string;
 }
 
@@ -359,7 +367,10 @@ export interface EarnExternalWalletTokenTotal {
   walletCount: number;
   positionCount: number;
   unavailablePositionCount: number;
-  /** Absent when any contributing position is unavailable, so the total is never partial. */
+  /**
+   * Sum of the positions' `tokenValue` in `tokenMint`, a dollar figure at par. Absent when any
+   * contributing position is unavailable, so the total is never partial.
+   */
   tokenValue?: string;
 }
 

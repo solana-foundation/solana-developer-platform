@@ -937,7 +937,10 @@ export interface EarnVaultPositionSnapshot {
   withdrawableShares: string;
   /** Unix epoch seconds when the shares unlock; null when the provider reports no lock. */
   unlockTimestamp?: string | null;
-  /** Value of those shares in the deposit token; omitted when unreadable. */
+  /**
+   * Shares × the provider's current rate, in the deposit token (`tokenMint`): a deposit-token
+   * amount, never a share count. Omitted when unreadable.
+   */
   tokenValue?: string;
   tokenMint: string;
   shareMint: string;

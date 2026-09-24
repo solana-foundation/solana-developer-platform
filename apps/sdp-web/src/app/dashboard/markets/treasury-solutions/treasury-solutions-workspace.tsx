@@ -58,6 +58,7 @@ import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
   formatProviderAmount,
+  formatTokenValue,
   formatUsd,
   positionDisplayName,
   shortenMarketAddress,
@@ -611,11 +612,11 @@ function TreasuryAllocationCard({
             : "DashboardMarkets.treasury.summaryDeployedCaption",
           allocation.deployedValue === undefined
             ? undefined
-            : { value: formatUsd(allocation.deployedValue, locale, 2) }
+            : { value: formatUsd(allocation.deployedValue, locale) }
         )}
         label={t("DashboardMarkets.treasury.summaryDeposited")}
         showInfo={allocation.deployedValue === undefined}
-        value={formatUsd(allocation.deployedValue, locale, 2)}
+        value={formatUsd(allocation.deployedValue, locale)}
       />
       <TreasurySummaryFigure
         description={t(
@@ -625,7 +626,7 @@ function TreasuryAllocationCard({
         )}
         label={t("DashboardMarkets.treasury.summaryCash")}
         showInfo
-        value={formatUsd(allocation.availableCash, locale, 2)}
+        value={formatUsd(allocation.availableCash, locale)}
       />
       <TreasurySummaryFigure
         description={t(
@@ -727,7 +728,7 @@ function TreasuryWalletsCard({
                       <TreasuryInfoTip label={t("DashboardMarkets.treasury.summaryCashCaption")} />
                     </dt>
                     <dd className="text-sm text-primary tabular-nums">
-                      {formatUsd(availableTreasuryCashForWallet(wallet), locale, 2)}
+                      {formatUsd(availableTreasuryCashForWallet(wallet), locale)}
                     </dd>
                   </div>
                   {deployment.kind === "none" ? null : (
@@ -737,7 +738,7 @@ function TreasuryWalletsCard({
                       </dt>
                       <dd className="text-sm text-primary tabular-nums">
                         {deployment.kind === "value"
-                          ? formatUsd(deployment.value, locale, 2)
+                          ? formatUsd(deployment.value, locale)
                           : t("DashboardMarkets.treasury.positionValueUnavailable")}
                       </dd>
                     </div>
@@ -1097,7 +1098,9 @@ function StrategyTable({
                       ? "—"
                       : position.count === 0
                         ? "—"
-                        : formatProviderAmount(position.value, locale)}
+                        : asset
+                          ? formatTokenValue(position.value, asset.mint, locale)
+                          : formatProviderAmount(position.value, locale)}
                   </p>
                   {position === null ||
                   position.unrecorded ||
@@ -1111,7 +1114,7 @@ function StrategyTable({
                   {formatProviderApy(strategy.currentApy, locale)}
                 </TableCell>
                 <TableCell className="text-sm text-primary tabular-nums">
-                  {formatUsd(tvlUsd, locale, 2)}
+                  {formatUsd(tvlUsd, locale)}
                 </TableCell>
                 <TableCell>
                   <StrategyInformationCell strategy={strategy} />
@@ -1275,7 +1278,11 @@ function ActiveVaultPositionsCard({
                     withdrawals
                   );
                   const displayedBalance = projectedBalance ?? position.tokenValue;
-                  const formattedBalance = formatProviderAmount(displayedBalance, locale);
+                  const formattedBalance = formatTokenValue(
+                    displayedBalance,
+                    position.tokenMint,
+                    locale
+                  );
                   return (
                     <TableRow key={position.id}>
                       <TableCell>
@@ -1408,13 +1415,7 @@ function ExistingProgramsCard({
                       </span>
                     </TableCell>
                     <TableCell className="text-sm text-primary tabular-nums">
-                      {formatProviderAmount(
-                        program.wallet.balance.totalUsd,
-                        locale,
-                        t("DashboardMarkets.treasury.usdSymbol"),
-                        2,
-                        2
-                      )}
+                      {formatUsd(program.wallet.balance.totalUsd, locale)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={program.wallet.status === "failed" ? "danger" : "outline"}>
