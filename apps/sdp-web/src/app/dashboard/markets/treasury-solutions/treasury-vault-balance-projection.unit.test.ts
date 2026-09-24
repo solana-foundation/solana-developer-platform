@@ -21,9 +21,14 @@ const SUBMITTED_AT = 5_000;
 const COMMITTED_AT = 10_000;
 
 function read(
-  overrides: Partial<VaultPositionsRead> & { shares?: string; value?: string | undefined }
+  overrides: Partial<VaultPositionsRead> & {
+    shares?: string | undefined;
+    value?: string | undefined;
+  }
 ): VaultPositionsRead {
-  const { shares = "119.5", ...rest } = overrides;
+  const { shares: _shares, value: _value, ...rest } = overrides;
+  // Explicit `undefined` must survive: a default parameter would swallow it.
+  const shares = "shares" in overrides ? overrides.shares : "119.5";
   const value = "value" in overrides ? overrides.value : "125.25";
   return {
     startedAt: COMMITTED_AT + 1,
@@ -56,6 +61,10 @@ function deposit(overrides: Partial<ProjectedVaultMovement> = {}): VaultActivity
 function withdrawal(overrides: Partial<ProjectedVaultMovement> = {}): VaultActivity {
   return { kind: "withdrawal", movement: movement(overrides) };
 }
+
+/** A read started before the commit was seen but already holding the movement. */
+const earlyRead = (shares: string) =>
+  read({ startedAt: COMMITTED_AT - 1, landedAt: COMMITTED_AT - 1, shares });
 
 describe("observeVaultMovementCommit", () => {
   it("stamps the first sighting of a committed status and keeps it afterwards", () => {
@@ -103,74 +112,61 @@ describe("holdingInRead and projectionBaseline", () => {
       startedAt: 1_000,
       shares: "0",
     });
-    expect(projectionBaseline([], POSITION, SUBMITTED_AT)).toBeUndefined();
   });
 
-  it("needs a decimal amount", () => {
-    expect(createVaultBalanceProjection("ten", undefined)).toBeUndefined();
-    expect(createVaultBalanceProjection("10", undefined)).toEqual({
+  it("has no baseline without a hydrated pre-POST read, and then projects nothing", () => {
+    expect(projectionBaseline([], POSITION, SUBMITTED_AT)).toBeUndefined();
+    const unhydrated = read({ startedAt: 1_000, landedAt: 1_500, shares: undefined });
+    expect(projectionBaseline([unhydrated], POSITION, SUBMITTED_AT)).toBeUndefined();
+    expect(createVaultBalanceProjection("10", undefined)).toBeUndefined();
+    expect(createVaultBalanceProjection("ten", { startedAt: 1, shares: "1" })).toBeUndefined();
+    expect(createVaultBalanceProjection("10", { startedAt: 1, shares: "1" })).toEqual({
       amount: "10",
-      baseline: undefined,
+      baseline: { startedAt: 1, shares: "1" },
     });
   });
 });
 
 describe("isVaultProjectionReflected", () => {
   it("is never reflected before the chain commits", () => {
-    const submitted = movement({ status: "submitted", committedObservedAt: undefined });
+    const submitted = deposit({ status: "submitted", committedObservedAt: undefined });
     expect(isVaultProjectionReflected(submitted, read({ shares: "129.5" }), [])).toBe(false);
   });
 
   it("requires the shares to have moved off the baseline, however late the read started", () => {
     // A read issued after the commit but served by a lagging node.
-    expect(isVaultProjectionReflected(movement(), read({ shares: "119.5" }), [])).toBe(false);
-    expect(isVaultProjectionReflected(movement(), read({ shares: "129.5" }), [])).toBe(true);
+    expect(isVaultProjectionReflected(deposit(), read({ shares: "119.5" }), [])).toBe(false);
+    expect(isVaultProjectionReflected(deposit(), read({ shares: "129.5" }), [])).toBe(true);
+  });
+
+  it("requires the move to be in the movement's own direction", () => {
+    // Shares fell after a deposit: something else moved them, not this deposit.
+    expect(isVaultProjectionReflected(deposit(), read({ shares: "100" }), [])).toBe(false);
+    expect(isVaultProjectionReflected(withdrawal(), read({ shares: "129.5" }), [])).toBe(false);
+    expect(isVaultProjectionReflected(withdrawal(), read({ shares: "100" }), [])).toBe(true);
   });
 
   it("proves nothing from an unhydrated row", () => {
     expect(
-      isVaultProjectionReflected(movement(), read({ shares: undefined, value: undefined }), [])
+      isVaultProjectionReflected(deposit(), read({ shares: undefined, value: undefined }), [])
     ).toBe(false);
-  });
-
-  it("falls back to timing when no read predates the transaction", () => {
-    const blind = movement({ balanceProjection: { amount: "10", baseline: undefined } });
-    expect(isVaultProjectionReflected(blind, read({ startedAt: COMMITTED_AT - 1 }), [])).toBe(
-      false
-    );
-    expect(isVaultProjectionReflected(blind, read({ startedAt: COMMITTED_AT + 1 }), [])).toBe(true);
   });
 
   it("attributes moved shares to the only movement that could have moved them", () => {
     // Started before the commit was seen, yet already contains it: the single
     // movement in flight is the only explanation, so it is reflected and can
     // never be added on top of the value again.
-    const early = read({
-      startedAt: COMMITTED_AT - 1,
-      landedAt: COMMITTED_AT - 1,
-      shares: "129.5",
-    });
     const solo = deposit();
-    expect(isVaultProjectionReflected(solo.movement, early, [solo])).toBe(true);
+    expect(isVaultProjectionReflected(solo, earlyRead("129.5"), [solo])).toBe(true);
   });
 
   it("does not attribute moved shares while a sibling could explain them", () => {
-    const early = read({
-      startedAt: COMMITTED_AT - 1,
-      landedAt: COMMITTED_AT - 1,
-      shares: "129.5",
-    });
     const first = deposit({ movementId: "first", observedOrder: 1, committedObservedAt: 9_000 });
     const second = deposit({ movementId: "second", observedOrder: 2 });
-    expect(isVaultProjectionReflected(second.movement, early, [first, second])).toBe(false);
+    expect(isVaultProjectionReflected(second, earlyRead("129.5"), [first, second])).toBe(false);
   });
 
   it("ignores siblings that failed, were submitted after the read landed, or predate the baseline", () => {
-    const early = read({
-      startedAt: COMMITTED_AT - 1,
-      landedAt: COMMITTED_AT - 1,
-      shares: "129.5",
-    });
     const target = deposit();
     const failed = deposit({ movementId: "failed", status: "failed" });
     const later = deposit({ movementId: "later", submittedAt: COMMITTED_AT + 50 });
@@ -178,17 +174,14 @@ describe("isVaultProjectionReflected", () => {
       movementId: "settled-before",
       committedObservedAt: BASELINE_READ_STARTED_AT - 1,
     });
-    const otherPosition = deposit({
-      movementId: "elsewhere",
-      positionId: "earn_vault_position_other",
-    });
+    const elsewhere = deposit({ movementId: "elsewhere", positionId: "earn_vault_position_other" });
     expect(
-      isVaultProjectionReflected(target.movement, early, [
+      isVaultProjectionReflected(target, earlyRead("129.5"), [
         target,
         failed,
         later,
         settledBefore,
-        otherPosition,
+        elsewhere,
       ])
     ).toBe(true);
   });
@@ -268,23 +261,20 @@ describe("anchorRead and displayedVaultBalance", () => {
     // Two deposits in flight; a read started between their commits contains
     // the first only. The second is added to THAT value, not to a stale one.
     const first = deposit({ movementId: "first", observedOrder: 1, committedObservedAt: 9_000 });
-    const second = deposit({ movementId: "second", observedOrder: 2, committedObservedAt: 11_000 });
+    const second = deposit({
+      movementId: "second",
+      observedOrder: 2,
+      committedObservedAt: 11_000,
+      balanceProjection: {
+        amount: "5",
+        baseline: { startedAt: BASELINE_READ_STARTED_AT, shares: "119.5" },
+      },
+    });
     const between = read({ startedAt: 10_000, landedAt: 10_500, shares: "129.5", value: "135.25" });
-    expect(
-      displayedVaultBalance([between], POSITION, [
-        first,
-        {
-          ...second,
-          movement: {
-            ...second.movement,
-            balanceProjection: {
-              amount: "5",
-              baseline: second.movement.balanceProjection?.baseline,
-            },
-          },
-        },
-      ])
-    ).toEqual({ value: "140.25", projected: true });
+    expect(displayedVaultBalance([between], POSITION, [first, second])).toEqual({
+      value: "140.25",
+      projected: true,
+    });
   });
 
   it("applies pending movements in observed order and floors an exit at zero", () => {
@@ -293,12 +283,14 @@ describe("anchorRead and displayedVaultBalance", () => {
       withdrawal({
         movementId: "exit",
         observedOrder: 2,
-        balanceProjection: { amount: "6", baseline: undefined },
+        balanceProjection: {
+          amount: "6",
+          baseline: { startedAt: BASELINE_READ_STARTED_AT, shares: "119.5" },
+        },
       }),
     ];
-    // Timing-blind exit, shares unchanged for the deposit: both pending.
-    const stale = read({ startedAt: COMMITTED_AT - 1, shares: "119.5" });
-    expect(displayedVaultBalance([stale], POSITION, pending)).toEqual({
+    // Shares unchanged: both still pending.
+    expect(displayedVaultBalance([read({ shares: "119.5" })], POSITION, pending)).toEqual({
       value: "129.25",
       projected: true,
     });
@@ -308,9 +300,13 @@ describe("anchorRead and displayedVaultBalance", () => {
   });
 
   it("reports an unknown projected value rather than a fabricated one", () => {
-    const malformed = deposit({ balanceProjection: { amount: "ten", baseline: undefined } });
-    const beforeCommit = read({ startedAt: COMMITTED_AT - 1, shares: "119.5" });
-    expect(displayedVaultBalance([beforeCommit], POSITION, [malformed])).toEqual({
+    const malformed = deposit({
+      balanceProjection: {
+        amount: "ten",
+        baseline: { startedAt: BASELINE_READ_STARTED_AT, shares: "119.5" },
+      },
+    });
+    expect(displayedVaultBalance([read({ shares: "119.5" })], POSITION, [malformed])).toEqual({
       value: undefined,
       projected: true,
     });

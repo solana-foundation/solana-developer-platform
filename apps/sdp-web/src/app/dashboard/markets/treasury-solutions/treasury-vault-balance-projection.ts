@@ -17,17 +17,20 @@ import type { EarnVaultPosition } from "@sdp/types";
  * Nothing here compares balances to decide a projection is done: provider
  * valuations legitimately land above or below the arithmetic (Kamino
  * accrues, Veda quotes the redeemable value net of its premium). A movement
- * counts as reflected in a read only when that read shows the position's
- * SHARES moved off a baseline taken from a read that landed before the POST
- * began, and the change can be attributed to it: the read started after this
- * tab saw the commit, or the movement is the only one that could have moved
- * the shares.
+ * counts as contained in a read only when that read shows the position's
+ * SHARES moved in the movement's own direction off a baseline taken from a
+ * read that landed before the POST began, and the change can be attributed
+ * to it: the read started after this tab saw the commit, or the movement is
+ * the only one that could have moved the shares. A movement with no hydrated
+ * pre-POST baseline is not projected at all; timing alone is never evidence.
  *
- * Residual, stated plainly: two movements on one position in flight at the
- * same time can misstate the row for one read cycle when a read started
- * between their commits already includes the second (overstated) or a
- * lagging node omits the second after a read started past its commit
- * (understated). One movement at a time is exact.
+ * Residual, stated plainly: the row never overstates, because a read that
+ * contains a movement necessarily shows its shares moved. It can understate
+ * for one read cycle when shares move in the same direction from a source
+ * this tab cannot see (another session, a transfer outside SDP) or when two
+ * movements on one position overlap; the next read heals it. Attributing a
+ * share change to one transaction would need a chain slot on the positions
+ * read, which the API does not expose.
  */
 
 export type VaultMovementKind = "deposit" | "withdrawal";
@@ -53,20 +56,17 @@ export interface VaultHoldingSnapshot {
   shares: string | undefined;
 }
 
-/** The read a projection measures share movement against. */
+/** The hydrated holding a projection measures share movement against. */
 export interface VaultProjectionBaseline {
   startedAt: number;
-  shares: string | undefined;
+  shares: string;
 }
 
 export interface VaultBalanceProjection {
   /** Movement size in the position's deposit token, decimal string. */
   amount: string;
-  /**
-   * Taken from the last read that landed before the POST began, so it cannot
-   * contain the movement. Undefined when no read had landed by then.
-   */
-  baseline: VaultProjectionBaseline | undefined;
+  /** From the last read that landed before the POST began, so it cannot contain the movement. */
+  baseline: VaultProjectionBaseline;
 }
 
 /** Per-tab state a tracked movement carries on top of its API record. */
@@ -120,7 +120,12 @@ export function holdingInRead(read: VaultPositionsRead, positionId: string): Vau
   return { value: position.tokenValue, shares: position.shares };
 }
 
-/** The latest read that landed before the POST began, as a projection baseline. */
+/**
+ * The latest read that landed before the POST began, as a projection baseline.
+ * Undefined when no read had landed by then or that read left the position
+ * unhydrated: without a baseline nothing can prove a later read contains the
+ * movement, so nothing is projected.
+ */
 export function projectionBaseline(
   reads: readonly VaultPositionsRead[],
   positionId: string,
@@ -128,9 +133,9 @@ export function projectionBaseline(
 ): VaultProjectionBaseline | undefined {
   for (let index = reads.length - 1; index >= 0; index -= 1) {
     const read = reads[index];
-    if (read !== undefined && read.landedAt < submittedAt) {
-      return { startedAt: read.startedAt, shares: holdingInRead(read, positionId).shares };
-    }
+    if (read === undefined || read.landedAt >= submittedAt) continue;
+    const { shares } = holdingInRead(read, positionId);
+    return shares === undefined ? undefined : { startedAt: read.startedAt, shares };
   }
   return undefined;
 }
@@ -139,7 +144,7 @@ export function createVaultBalanceProjection(
   amount: string,
   baseline: VaultProjectionBaseline | undefined
 ): VaultBalanceProjection | undefined {
-  return isDecimalString(amount) ? { amount, baseline } : undefined;
+  return baseline !== undefined && isDecimalString(amount) ? { amount, baseline } : undefined;
 }
 
 /** Deposits add, withdrawals subtract and floor at zero, all in fixed point. */
@@ -169,25 +174,23 @@ export function vaultActivities<
   ];
 }
 
-function decimalsDiffer(left: string, right: string): boolean | undefined {
-  if (!isDecimalString(left) || !isDecimalString(right)) return undefined;
-  const scale = Math.max(decimalScale(left), decimalScale(right));
-  return parseDecimalAmount(left, scale) !== parseDecimalAmount(right, scale);
-}
-
 /**
- * Whether the read shows shares moved off the projection's baseline. Undefined
- * when there is no baseline to measure against; false when the read came back
- * unhydrated, which proves nothing.
+ * Whether the read shows the shares moved in the movement's own direction off
+ * the baseline: up for a deposit, down for a withdrawal. An unhydrated or
+ * malformed row proves nothing.
  */
-function sharesMoved(
-  projection: VaultBalanceProjection,
+function sharesMovedBy(
+  kind: VaultMovementKind,
+  baseline: VaultProjectionBaseline,
   holding: VaultHoldingSnapshot
-): boolean | undefined {
-  const baseline = projection.baseline?.shares;
-  if (baseline === undefined) return undefined;
-  if (holding.shares === undefined) return false;
-  return decimalsDiffer(baseline, holding.shares);
+): boolean {
+  const live = holding.shares;
+  if (live === undefined || !isDecimalString(live) || !isDecimalString(baseline.shares)) {
+    return false;
+  }
+  const scale = Math.max(decimalScale(live), decimalScale(baseline.shares));
+  const delta = parseDecimalAmount(live, scale) - parseDecimalAmount(baseline.shares, scale);
+  return kind === "deposit" ? delta > 0n : delta < 0n;
 }
 
 /**
@@ -201,7 +204,7 @@ function isSoleMover(
   read: VaultPositionsRead,
   activities: readonly VaultActivity[]
 ): boolean {
-  const baselineStartedAt = movement.balanceProjection?.baseline?.startedAt;
+  const baselineStartedAt = movement.balanceProjection?.baseline.startedAt;
   return !activities.some(({ movement: other }) => {
     if (other.movementId === movement.movementId || other.positionId !== movement.positionId) {
       return false;
@@ -218,10 +221,10 @@ function isSoleMover(
 
 /**
  * Whether a read already contains a committed movement. The share witness
- * decides; timing only attributes a movement the witness alone cannot.
+ * decides; timing only attributes a change the witness alone cannot.
  */
 export function isVaultProjectionReflected(
-  movement: ProjectedVaultMovement,
+  { kind, movement }: VaultActivity,
   read: VaultPositionsRead,
   activities: readonly VaultActivity[]
 ): boolean {
@@ -229,15 +232,12 @@ export function isVaultProjectionReflected(
   if (
     projection === undefined ||
     movement.committedObservedAt === undefined ||
-    !isCommittedVaultMovement(movement)
+    !isCommittedVaultMovement(movement) ||
+    !sharesMovedBy(kind, projection.baseline, holdingInRead(read, movement.positionId))
   ) {
     return false;
   }
-  const startedAfterCommit = read.startedAt > movement.committedObservedAt;
-  const moved = sharesMoved(projection, holdingInRead(read, movement.positionId));
-  if (moved === undefined) return startedAfterCommit;
-  if (!moved) return false;
-  return startedAfterCommit || isSoleMover(movement, read, activities);
+  return read.startedAt > movement.committedObservedAt || isSoleMover(movement, read, activities);
 }
 
 /**
@@ -252,11 +252,11 @@ export function pendingVaultProjections<Activity extends VaultActivity>(
 ): Activity[] {
   return activities
     .filter(
-      ({ movement }) =>
-        (positionId === undefined || movement.positionId === positionId) &&
-        movement.balanceProjection !== undefined &&
-        isCommittedVaultMovement(movement) &&
-        (read === undefined || !isVaultProjectionReflected(movement, read, activities))
+      (activity) =>
+        (positionId === undefined || activity.movement.positionId === positionId) &&
+        activity.movement.balanceProjection !== undefined &&
+        isCommittedVaultMovement(activity.movement) &&
+        (read === undefined || !isVaultProjectionReflected(activity, read, activities))
     )
     .sort((left, right) => left.movement.observedOrder - right.movement.observedOrder);
 }
