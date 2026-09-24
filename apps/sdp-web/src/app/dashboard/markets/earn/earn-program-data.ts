@@ -40,7 +40,7 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -405,36 +405,53 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
   );
 }
 
-interface EarnVaultPositionsRead {
+/**
+ * One landed positions read with the client clock at both ends. Treasury's
+ * optimistic balances judge a movement against reads: one that landed before
+ * the POST began cannot contain it, one that started after the commit was
+ * seen should. The balance a read carries never decides that on its own.
+ */
+export interface EarnVaultPositionsRead {
   positions: EarnVaultPosition[];
-  /**
-   * Client clock when the read was issued. Treasury retires an optimistic
-   * balance only once a read that STARTED after it saw a movement committed
-   * has landed; the balance a read carries never decides that on its own.
-   */
-  readStartedAt: number;
+  startedAt: number;
+  landedAt: number;
 }
 
 async function readEarnVaultPositions(): Promise<EarnVaultPositionsRead> {
-  const readStartedAt = Date.now();
-  return { positions: await fetchEarnVaultPositions(), readStartedAt };
+  const startedAt = Date.now();
+  const positions = await fetchEarnVaultPositions();
+  return { positions, startedAt, landedAt: Date.now() };
 }
 
-/** Live position values refresh while the surface is mounted. */
+/** Three minutes at the live cadence: enough to hold a read that predates any movement still projected. */
+const RECENT_VAULT_POSITIONS_READS = 12;
+
+function appendVaultPositionsRead(
+  reads: readonly EarnVaultPositionsRead[],
+  read: EarnVaultPositionsRead
+): readonly EarnVaultPositionsRead[] {
+  if (reads[reads.length - 1]?.startedAt === read.startedAt) return reads;
+  return [...reads, read].slice(-RECENT_VAULT_POSITIONS_READS);
+}
+
+/** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
 export function useEarnVaultPositions() {
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
     readEarnVaultPositions,
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
+  const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
+  useEffect(() => {
+    if (data) setHistory((current) => appendVaultPositionsRead(current, data));
+  }, [data]);
+  // The history state lands one render late; fold the newest read in directly.
+  const reads = useMemo(
+    () => (data ? appendVaultPositionsRead(history, data) : history),
+    [data, history]
+  );
   const refresh = useCallback(() => void mutate(), [mutate]);
-  return {
-    positions: data?.positions,
-    readStartedAt: data?.readStartedAt,
-    error,
-    isLoading,
-    refresh,
-  };
+  return { positions: data?.positions, reads, error, isLoading, refresh };
 }
 
 /**

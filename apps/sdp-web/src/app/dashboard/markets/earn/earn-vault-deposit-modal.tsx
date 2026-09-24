@@ -728,6 +728,8 @@ export interface EarnVaultDepositModalProps {
       custodyWalletId: string;
       /** False when an approval already executed this replayed intent. */
       projectBalance: boolean;
+      /** Client clock when the POST began; a positions read that landed earlier cannot contain this deposit. */
+      submittedAt: number;
     }
   ) => void;
   onMovementUpdated?: (deposit: EarnVaultDepositRecord) => void;
@@ -1437,6 +1439,7 @@ export function EarnVaultDepositModal({
     // resubmit mints a fresh key — a second approval request for one intent.
     // The controller still exists, but it gates the UI below, never the
     // request or the key bookkeeping.
+    const submittedAt = Date.now();
     const result = await createEarnVaultDeposit(
       {
         strategyId: strategy.id,
@@ -1493,6 +1496,7 @@ export function EarnVaultDepositModal({
         // position is denominated in the vault token. Wait for the provider
         // value instead of presenting those unlike amounts as one balance.
         projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
+        submittedAt,
       });
     }
   }

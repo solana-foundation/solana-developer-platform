@@ -98,7 +98,12 @@ const mocks = vi.hoisted(() => ({
             positionId: string;
             status: string;
           },
-          intent?: { amount: string; custodyWalletId: string; projectBalance: boolean }
+          intent?: {
+            amount: string;
+            custodyWalletId: string;
+            projectBalance: boolean;
+            submittedAt: number;
+          }
         ) => void;
         onMovementUpdated?: (deposit: {
           createdAt?: string;
@@ -119,7 +124,7 @@ const mocks = vi.hoisted(() => ({
             positionId: string;
             status: string;
           },
-          intent?: { amount: string; projectBalance: boolean }
+          intent?: { amount: string; projectBalance: boolean; submittedAt: number }
         ) => void;
         onMovementUpdated?: (withdrawal: {
           createdAt: string;
@@ -146,8 +151,10 @@ const mocks = vi.hoisted(() => ({
       }>
     | undefined,
   livePositionTokenValue: "125.25" as string | undefined,
-  // Far in the past, so it predates any commit a test observes.
-  positionsReadStartedAt: 1_000 as number | undefined,
+  // Far in the past, so the read predates any movement a test submits.
+  positionsReadStartedAt: 1_000,
+  positionsReadLandedAt: 1_000,
+  livePositionShares: "119.5",
   positionsError: false,
   positionsEmpty: false,
   strategiesLoading: false,
@@ -444,14 +451,8 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
           ],
     };
   },
-  useEarnVaultPositions: () => ({
-    // Real SWR keeps stale data alongside an error; the workspace guard is
-    // what must refuse to render it as live.
-    error: mocks.positionsError ? new Error("positions unavailable") : undefined,
-    isLoading: false,
-    refresh: mocks.refreshPositions,
-    readStartedAt: mocks.positionsReadStartedAt,
-    positions: mocks.positionsEmpty
+  useEarnVaultPositions: () => {
+    const positions = mocks.positionsEmpty
       ? []
       : [
           {
@@ -465,7 +466,7 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
             createdAt: "2026-08-18T00:00:00.000Z",
             closedAt: null,
             feeSponsored: false,
-            shares: "119.5",
+            shares: mocks.livePositionShares,
             tokenValue: mocks.livePositionTokenValue,
           },
           {
@@ -496,8 +497,25 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
             shares: "0",
             tokenValue: "0",
           },
-        ],
-  }),
+        ];
+    return {
+      // Real SWR keeps stale data alongside an error; the workspace guard is
+      // what must refuse to render it as live.
+      error: mocks.positionsError ? new Error("positions unavailable") : undefined,
+      isLoading: false,
+      refresh: mocks.refreshPositions,
+      positions,
+      // One read whose contents follow the mocks; a test moves its clock and
+      // shares to stand for the next read landing.
+      reads: [
+        {
+          startedAt: mocks.positionsReadStartedAt,
+          landedAt: mocks.positionsReadLandedAt,
+          positions,
+        },
+      ],
+    };
+  },
   useEarnPrograms: () => ({
     error: undefined,
     isLoading: false,
@@ -574,7 +592,7 @@ vi.mock("../earn/earn-vault-withdraw-modal", () => ({
         positionId: string;
         status: string;
       },
-      intent?: { amount: string; projectBalance: boolean }
+      intent?: { amount: string; projectBalance: boolean; submittedAt: number }
     ) => void;
     onMovementUpdated?: (withdrawal: {
       createdAt: string;
@@ -650,7 +668,7 @@ vi.mock("../earn/earn-vault-exit-modal", () => ({
         positionId: string;
         status: string;
       },
-      intent?: { amount: string; projectBalance: boolean }
+      intent?: { amount: string; projectBalance: boolean; submittedAt: number }
     ) => void;
     onMovementUpdated?: (withdrawal: {
       createdAt: string;
@@ -683,7 +701,12 @@ vi.mock("../earn/earn-vault-deposit-modal", () => ({
         positionId: string;
         status: string;
       },
-      intent?: { amount: string; custodyWalletId: string; projectBalance: boolean }
+      intent?: {
+        amount: string;
+        custodyWalletId: string;
+        projectBalance: boolean;
+        submittedAt: number;
+      }
     ) => void;
     onMovementUpdated?: (deposit: {
       createdAt?: string;
@@ -776,6 +799,8 @@ beforeEach(() => {
   ];
   mocks.livePositionTokenValue = "125.25";
   mocks.positionsReadStartedAt = 1_000;
+  mocks.positionsReadLandedAt = 1_000;
+  mocks.livePositionShares = "119.5";
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
   mocks.strategiesLoading = false;
@@ -985,6 +1010,7 @@ describe("TreasurySolutionsWorkspace", () => {
           amount: "10",
           custodyWalletId: "cwlt_live",
           projectBalance: true,
+          submittedAt: Date.now(),
         }
       );
     });
@@ -1121,6 +1147,7 @@ describe("TreasurySolutionsWorkspace", () => {
           amount: "10",
           custodyWalletId: "cwlt_live",
           projectBalance: true,
+          submittedAt: Date.now(),
         }
       );
       mocks.vaultDepositModal?.onMovementUpdated?.({
@@ -1143,20 +1170,83 @@ describe("TreasurySolutionsWorkspace", () => {
     // One read for the submission, one asked for by the commit.
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(2);
 
-    // A read that started BEFORE the commit was seen may already carry the
-    // deposit (here Veda's redeemable value, a hair under baseline + amount).
-    // The row must neither trust it nor add the amount on top of it again.
-    mocks.livePositionTokenValue = "135.249985";
+    // A read issued after the commit but served by a node that has not caught
+    // up carries the old shares: the projection stays, nothing is dropped.
+    mocks.positionsReadStartedAt = Date.now() + 1_000;
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBe("135.25");
-    expect(screen.queryByText("145.249985")).toBeNull();
 
-    mocks.positionsReadStartedAt = Date.now() + 1_000;
+    // A read that started BEFORE the commit was seen but already contains the
+    // deposit (Veda's redeemable value, a hair under baseline + amount): the
+    // moved shares retire the projection, so the amount is never added twice.
+    mocks.positionsReadStartedAt = 1_000;
+    mocks.livePositionShares = "129.5";
+    mocks.livePositionTokenValue = "135.249985";
     rerenderWorkspace(view);
     await waitFor(() =>
       expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
     );
     expect(within(livePositionRow()).getByText("135.249985")).toBeTruthy();
+    expect(screen.queryByText("145.249985")).toBeNull();
+  });
+
+  it("keeps the second deposit projected over a read that contains only the first", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T12:00:00.000Z"));
+    const user = userEvent.setup();
+    const view = renderWorkspace();
+    const strategyRow = devnetStrategyRow("Steakhouse USDC");
+    if (!strategyRow) throw new Error("Expected strategy row");
+    await user.click(within(strategyRow).getByRole("button", { name: "Deposit" }));
+
+    const submit = (movementId: string, amount: string) =>
+      mocks.vaultDepositModal?.onDeposited?.(
+        {
+          failureReason: null,
+          movementId,
+          positionId: "earn_vault_position_live",
+          status: "submitted",
+        },
+        { amount, custodyWalletId: "cwlt_live", projectBalance: true, submittedAt: Date.now() }
+      );
+    const confirm = (movementId: string) =>
+      mocks.vaultDepositModal?.onMovementUpdated?.({
+        createdAt: "2026-09-24T12:00:00.000Z",
+        failureReason: null,
+        movementId,
+        positionId: "earn_vault_position_live",
+        status: "confirmed",
+      });
+
+    act(() => {
+      submit("earn_vault_movement_between_1", "10");
+      submit("earn_vault_movement_between_2", "5");
+    });
+    act(() => confirm("earn_vault_movement_between_1"));
+    expect(projectedBalanceText(livePositionRow())).toBe("135.25");
+
+    // A read issued after the first commit lands containing the first deposit.
+    mocks.positionsReadStartedAt = Date.now() + 1_000;
+    mocks.positionsReadLandedAt = Date.now() + 1_500;
+    mocks.livePositionShares = "129.5";
+    mocks.livePositionTokenValue = "135.25";
+    rerenderWorkspace(view);
+    expect(projectedBalanceText(livePositionRow())).toBeUndefined();
+    expect(within(livePositionRow()).getByText("135.25")).toBeTruthy();
+
+    // The second commit is seen after that read started, so its amount stacks
+    // on the read's value rather than on a baseline that predates the first.
+    vi.setSystemTime(new Date("2026-09-24T12:00:03.000Z"));
+    act(() => confirm("earn_vault_movement_between_2"));
+    expect(projectedBalanceText(livePositionRow())).toBe("140.25");
+
+    mocks.positionsReadStartedAt = Date.now() + 1_000;
+    mocks.positionsReadLandedAt = Date.now() + 1_500;
+    mocks.livePositionShares = "134.5";
+    mocks.livePositionTokenValue = "140.25";
+    rerenderWorkspace(view);
+    expect(projectedBalanceText(livePositionRow())).toBeUndefined();
+    expect(within(livePositionRow()).getByText("140.25")).toBeTruthy();
   });
 
   it("reconciles a deposit then a withdrawal in one session against fresh reads", async () => {
@@ -1176,7 +1266,12 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "submitted",
         },
-        { amount: "10", custodyWalletId: "cwlt_live", projectBalance: true }
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+          submittedAt: Date.now(),
+        }
       );
       mocks.vaultDepositModal?.onMovementUpdated?.({
         createdAt: "2026-09-24T12:00:00.000Z",
@@ -1189,7 +1284,9 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(projectedBalanceText(livePositionRow())).toBe("135.25");
 
     mocks.livePositionTokenValue = "135.2499";
+    mocks.livePositionShares = "129.5";
     mocks.positionsReadStartedAt = Date.now() + 1;
+    mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
     expect(within(livePositionRow()).getByText("135.2499")).toBeTruthy();
@@ -1205,7 +1302,7 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "requested",
         },
-        { amount: "6", projectBalance: true }
+        { amount: "6", projectBalance: true, submittedAt: Date.now() }
       );
       mocks.vaultWithdrawalModal?.onMovementUpdated?.({
         createdAt: "2026-09-24T12:00:05.000Z",
@@ -1220,7 +1317,9 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(projectedBalanceText(livePositionRow())).toBe("129.2499");
 
     mocks.livePositionTokenValue = "129.2499";
+    mocks.livePositionShares = "123.5";
     mocks.positionsReadStartedAt = Date.now() + 1;
+    mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
     expect(within(livePositionRow()).getByText("129.2499")).toBeTruthy();
@@ -1241,7 +1340,7 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "submitted",
         },
-        { amount, custodyWalletId: "cwlt_live", projectBalance: true }
+        { amount, custodyWalletId: "cwlt_live", projectBalance: true, submittedAt: Date.now() }
       );
     const confirm = (movementId: string) =>
       mocks.vaultDepositModal?.onMovementUpdated?.({
@@ -1286,6 +1385,7 @@ describe("TreasurySolutionsWorkspace", () => {
           amount: "10",
           custodyWalletId: "cwlt_live",
           projectBalance: true,
+          submittedAt: Date.now(),
         }
       );
     });
@@ -1300,7 +1400,7 @@ describe("TreasurySolutionsWorkspace", () => {
         name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
     ).toBeTruthy();
-    expect(within(pendingRow).getByText("—")).toBeTruthy();
+    expect(within(pendingRow).getByText("0")).toBeTruthy();
 
     act(() => {
       mocks.vaultDepositModal?.onMovementUpdated?.({
@@ -1351,7 +1451,12 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "submitted",
         },
-        { amount: "10", custodyWalletId: "cwlt_live", projectBalance: true }
+        {
+          amount: "10",
+          custodyWalletId: "cwlt_live",
+          projectBalance: true,
+          submittedAt: Date.now(),
+        }
       );
     });
     act(() => {
@@ -1362,7 +1467,7 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "submitted",
         },
-        { amount: "5", custodyWalletId: "cwlt_live", projectBalance: true }
+        { amount: "5", custodyWalletId: "cwlt_live", projectBalance: true, submittedAt: Date.now() }
       );
     });
     act(() => {
@@ -1534,7 +1639,7 @@ describe("TreasurySolutionsWorkspace", () => {
           positionId: "earn_vault_position_live",
           status: "requested",
         },
-        { amount: "6", projectBalance: true }
+        { amount: "6", projectBalance: true, submittedAt: Date.now() }
       );
       mocks.vaultWithdrawalModal?.onMovementUpdated?.({
         createdAt: "2026-09-01T17:23:00.000Z",

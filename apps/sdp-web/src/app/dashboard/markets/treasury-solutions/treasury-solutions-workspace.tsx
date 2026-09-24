@@ -119,12 +119,13 @@ import {
 } from "./treasury-allocation";
 import {
   createVaultBalanceProjection,
-  type DisplayedVaultBalance,
   displayedVaultBalance,
   observeVaultMovementCommit,
   type ProjectedVaultMovement,
   pendingVaultProjections,
+  projectionBaseline,
   type VaultMovementProjectionState,
+  type VaultPositionsRead,
   vaultActivities,
 } from "./treasury-vault-balance-projection";
 
@@ -340,19 +341,6 @@ function latestVaultActivityByPosition(
   };
   for (const activity of activities) rememberLatest(activity);
   return latestActivityByPositionId;
-}
-
-/** The balance one row shows: live, or bridged over committed movements the live read predates. */
-function trackedVaultBalance(
-  position: EarnVaultPosition | undefined,
-  positionId: string,
-  activities: readonly TrackedVaultActivity[],
-  positionsReadStartedAt: number | undefined
-): DisplayedVaultBalance {
-  return displayedVaultBalance(
-    position?.tokenValue,
-    pendingVaultProjections(activities, positionsReadStartedAt, positionId)
-  );
 }
 
 function provisionalVaultPosition(
@@ -1044,7 +1032,7 @@ function ActiveVaultPositionsCard({
   isLoading,
   onWithdraw,
   positions,
-  positionsReadStartedAt,
+  positionsReads,
   unrecordedShareMints,
   wallets,
   withdrawals,
@@ -1054,7 +1042,7 @@ function ActiveVaultPositionsCard({
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
-  positionsReadStartedAt: number | undefined;
+  positionsReads: readonly VaultPositionsRead[];
   unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
   withdrawals: readonly TrackedVaultWithdrawal[];
@@ -1073,9 +1061,8 @@ function ActiveVaultPositionsCard({
     [deposits, positions]
   );
   const balanceOf = useCallback(
-    (position: EarnVaultPosition) =>
-      trackedVaultBalance(position, position.id, activities, positionsReadStartedAt),
-    [activities, positionsReadStartedAt]
+    (position: EarnVaultPosition) => displayedVaultBalance(positionsReads, position.id, activities),
+    [activities, positionsReads]
   );
   const activePositions = useMemo(
     () =>
@@ -1667,7 +1654,7 @@ interface TreasuryWorkspaceContentProps {
   positions: readonly EarnVaultPosition[] | undefined;
   positionsError: unknown;
   positionsLoading: boolean;
-  positionsReadStartedAt: number | undefined;
+  positionsReads: readonly VaultPositionsRead[];
   programs: readonly EarnProgram[];
   programsLoading: boolean;
   programsUnavailable: boolean;
@@ -1699,7 +1686,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     positions,
     positionsError,
     positionsLoading,
-    positionsReadStartedAt,
+    positionsReads,
     programs,
     programsLoading,
     programsUnavailable,
@@ -1736,7 +1723,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
         positions={readablePositions}
-        positionsReadStartedAt={positionsReadStartedAt}
+        positionsReads={positionsReads}
         unrecordedShareMints={allocation.unrecordedShareMints}
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
@@ -1914,7 +1901,7 @@ export function TreasurySolutionsWorkspace({
   } = useTreasuryCatalogueShelves(sdpEnvironment);
   const {
     positions,
-    readStartedAt: positionsReadStartedAt,
+    reads: positionsReads,
     error: positionsError,
     isLoading: positionsLoading,
     refresh: refreshPositions,
@@ -2018,17 +2005,18 @@ export function TreasurySolutionsWorkspace({
   }, [positions]);
 
   // Every committed movement asks for one fresh read. Its projection retires
-  // by itself once a read that started after the commit lands (see
+  // by itself once a read shows the shares moved (see
   // `pendingVaultProjections`), so nothing here clears state.
+  const latestPositionsRead = positionsReads[positionsReads.length - 1];
   const refreshRequestedFor = useRef(new Set<string>());
   useEffect(() => {
-    const unrequested = pendingVaultProjections(trackedActivities, positionsReadStartedAt).filter(
+    const unrequested = pendingVaultProjections(trackedActivities, latestPositionsRead).filter(
       ({ movement }) => !refreshRequestedFor.current.has(movement.movementId)
     );
     if (unrequested.length === 0) return;
     for (const { movement } of unrequested) refreshRequestedFor.current.add(movement.movementId);
     refreshPositions();
-  }, [positionsReadStartedAt, refreshPositions, trackedActivities]);
+  }, [latestPositionsRead, refreshPositions, trackedActivities]);
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
@@ -2131,7 +2119,7 @@ export function TreasurySolutionsWorkspace({
         positions={positions}
         positionsError={positionsError}
         positionsLoading={positionsLoading}
-        positionsReadStartedAt={positionsReadStartedAt}
+        positionsReads={positionsReads}
         programs={programs}
         programsLoading={programsLoading}
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
@@ -2158,15 +2146,11 @@ export function TreasurySolutionsWorkspace({
             const provisionalPosition = authoritativePosition
               ? undefined
               : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
-            const baselineValue =
-              trackedVaultBalance(
-                authoritativePosition,
-                deposit.positionId,
-                trackedActivities,
-                positionsReadStartedAt
-              ).value ?? (provisionalPosition ? "0" : undefined);
             const balanceProjection = intent.projectBalance
-              ? createVaultBalanceProjection(baselineValue, intent.amount)
+              ? createVaultBalanceProjection(
+                  intent.amount,
+                  projectionBaseline(positionsReads, deposit.positionId, intent.submittedAt)
+                )
               : undefined;
             addVaultDepositWatches([
               {
@@ -2176,6 +2160,7 @@ export function TreasurySolutionsWorkspace({
                 positionId: deposit.positionId,
                 provisionalPosition,
                 status: deposit.status,
+                submittedAt: intent.submittedAt,
               },
             ]);
             refreshPositions();
@@ -2205,13 +2190,8 @@ export function TreasurySolutionsWorkspace({
           onWithdrawn={(withdrawal, intent) => {
             const balanceProjection = intent.projectBalance
               ? createVaultBalanceProjection(
-                  trackedVaultBalance(
-                    positions?.find((position) => position.id === withdrawal.positionId),
-                    withdrawal.positionId,
-                    trackedActivities,
-                    positionsReadStartedAt
-                  ).value,
-                  intent.amount
+                  intent.amount,
+                  projectionBaseline(positionsReads, withdrawal.positionId, intent.submittedAt)
                 )
               : undefined;
             addVaultWithdrawalWatches([
@@ -2222,6 +2202,7 @@ export function TreasurySolutionsWorkspace({
                 movementId: withdrawal.movementId,
                 positionId: withdrawal.positionId,
                 status: withdrawal.status,
+                submittedAt: intent.submittedAt,
               },
             ]);
             refreshPositions();
