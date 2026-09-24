@@ -352,7 +352,7 @@ describe("wallet policy destination rule allowlist schema", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry must be a base58 Solana address");
+      expect(messages).toContain("allowlist entry must be 32 to 44 characters (got 20)");
     }
   });
 
@@ -364,7 +364,7 @@ describe("wallet policy destination rule allowlist schema", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry must be a base58 Solana address");
+      expect(messages).toContain("allowlist entry contains characters outside the base58 alphabet");
     }
   });
 });
