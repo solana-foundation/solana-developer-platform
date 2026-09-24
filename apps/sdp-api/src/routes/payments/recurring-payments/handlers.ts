@@ -24,14 +24,6 @@ import { walletOperationActorFromAuth } from "@/services/policy/enforcement.serv
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
 import {
-  type activateRecurringPaymentSchema,
-  type collectRecurringPaymentSchema,
-  type createRecurringPaymentSchema,
-  listRecurringPaymentsQuerySchema,
-  recurringPaymentIdParamsSchema,
-  type updateRecurringPaymentSchema,
-} from "../schemas";
-import {
   assertFreshPaymentWalletAccess,
   assertPaymentWalletExactAccess,
   assertPaymentWalletReadAccess,
@@ -39,6 +31,14 @@ import {
   resolveScope,
   resolveWalletByCustodyWalletId,
 } from "../wallets";
+import {
+  type activateRecurringPaymentSchema,
+  type collectRecurringPaymentSchema,
+  type createRecurringPaymentSchema,
+  listRecurringPaymentsQuerySchema,
+  recurringPaymentIdParamsSchema,
+  type updateRecurringPaymentSchema,
+} from "./schemas";
 
 function mapRecurringPayment(row: PaymentRecurringPaymentRow): PaymentRecurringPayment {
   return {

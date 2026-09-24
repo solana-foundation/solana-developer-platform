@@ -10,6 +10,13 @@ import {
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
 import {
+  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
+  listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
+  paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
+  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
+  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
+} from "@/routes/payments/recurring-payments/schemas";
+import {
   createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
   listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
@@ -46,15 +53,10 @@ import {
 } from "@/routes/payments/transfers/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
-  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
-  listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
-  paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
-  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
-  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";

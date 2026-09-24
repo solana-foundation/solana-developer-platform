@@ -3,8 +3,10 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
-  PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
+} from "./recurring-payments/schemas";
+import {
+  PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateWalletPolicySchema,
   walletPolicyRuleSchema,
 } from "./schemas";

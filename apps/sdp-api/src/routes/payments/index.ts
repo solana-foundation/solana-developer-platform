@@ -10,49 +10,36 @@ import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
 import {
-  activateRecurringPayment,
   cancelRampTransfer,
-  cancelRecurringPayment,
-  collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
-  createRecurringPayment,
   estimateOfframp,
   estimateOnramp,
   extractOfframpQuotePolicyCandidate,
   extractOnrampQuotePolicyCandidate,
-  getRecurringPayment,
   getWalletBalances,
   getWalletPolicy,
   getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
-  listRecurringPayments,
   listWalletControlProfileRevisions,
   listWalletPolicyEvaluations,
   recordCoinbaseRampEvent,
   recordMoneygramRampEvent,
-  resumeRecurringPayment,
   simulateSandboxTransfer,
-  updateRecurringPayment,
   updateWalletPolicy,
 } from "./handlers";
 import paymentRequests from "./payment-requests";
+import recurringPayments from "./recurring-payments";
 import {
-  activateRecurringPaymentSchema,
   cancelRampTransferSchema,
-  cancelRecurringPaymentSchema,
   coinbaseRampEventSchema,
-  collectRecurringPaymentSchema,
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
-  createRecurringPaymentSchema,
   estimateOfframpSchema,
   estimateOnrampSchema,
   moneygramRampEventSchema,
-  resumeRecurringPaymentSchema,
   simulateSandboxTransferSchema,
-  updateRecurringPaymentSchema,
   updateWalletPolicySchema,
 } from "./schemas";
 import subscriptionPlans from "./subscription-plans";
@@ -97,47 +84,10 @@ payments.put(
   validateBody(updateWalletPolicySchema),
   updateWalletPolicy
 );
-payments.post(
-  "/recurring-payments",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  validateBody(createRecurringPaymentSchema),
-  createRecurringPayment
-);
-payments.get("/recurring-payments", requirePermissions("payments:read"), listRecurringPayments);
-payments.patch(
-  "/recurring-payments/:id",
-  requirePermissions("payments:write", "wallets:read", "counterparties:read"),
-  validateBody(updateRecurringPaymentSchema),
-  updateRecurringPayment
-);
-payments.post(
-  "/recurring-payments/:id/activate",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(activateRecurringPaymentSchema),
-  activateRecurringPayment
-);
-payments.post(
-  "/recurring-payments/:id/cancel",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(cancelRecurringPaymentSchema),
-  cancelRecurringPayment
-);
-payments.post(
-  "/recurring-payments/:id/collect",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(collectRecurringPaymentSchema),
-  collectRecurringPayment
-);
-payments.post(
-  "/recurring-payments/:id/resume",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(resumeRecurringPaymentSchema),
-  resumeRecurringPayment
-);
-payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
 payments.route("/transfers", transfers);
 payments.route("/transfer-batches", transferBatches);
 payments.route("/requests", paymentRequests);
+payments.route("/recurring-payments", recurringPayments);
 payments.route("/subscription-plans", subscriptionPlans);
 payments.route("/subscriptions", subscriptions);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
