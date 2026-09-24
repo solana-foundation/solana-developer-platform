@@ -1,7 +1,7 @@
 import { PERMISSIONS } from "@sdp/types";
 import { z } from "zod";
 import { isValidIpAllowlistEntry } from "@/lib/ip-allowlist";
-import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/schemas";
+import { refinePolicyRules, walletPolicyRuleSchema } from "../payments/wallet-policies/schemas";
 
 const apiKeyAllowedIpSchema = z.string().refine(isValidIpAllowlistEntry, {
   message: "Must be a valid IPv4 or IPv6 address or CIDR range",

@@ -1,9 +1,3 @@
-export { getWalletBalances, getWalletPolicy, updateWalletPolicy } from "./handlers/balances";
-export {
-  getWalletPolicyEvaluation,
-  listWalletControlProfileRevisions,
-  listWalletPolicyEvaluations,
-} from "./handlers/policy-audit";
 export {
   cancelRampTransfer,
   createOfframpQuote,

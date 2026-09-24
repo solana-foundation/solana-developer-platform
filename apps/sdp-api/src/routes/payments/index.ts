@@ -1,9 +1,5 @@
 import { Hono } from "hono";
-import {
-  requireAdminApiKeyRole,
-  requirePermissions,
-  unifiedAuthMiddleware,
-} from "@/middleware/auth";
+import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { projectContextMiddleware } from "@/middleware/project-context";
@@ -17,17 +13,11 @@ import {
   estimateOnramp,
   extractOfframpQuotePolicyCandidate,
   extractOnrampQuotePolicyCandidate,
-  getWalletBalances,
-  getWalletPolicy,
-  getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
-  listWalletControlProfileRevisions,
-  listWalletPolicyEvaluations,
   recordCoinbaseRampEvent,
   recordMoneygramRampEvent,
   simulateSandboxTransfer,
-  updateWalletPolicy,
 } from "./handlers";
 import paymentRequests from "./payment-requests";
 import recurringPayments from "./recurring-payments";
@@ -40,56 +30,25 @@ import {
   estimateOnrampSchema,
   moneygramRampEventSchema,
   simulateSandboxTransferSchema,
-  updateWalletPolicySchema,
 } from "./schemas";
 import subscriptionPlans from "./subscription-plans";
 import subscriptions from "./subscriptions";
 import transferBatches from "./transfer-batches";
 import transfers from "./transfers";
+import walletPolicies from "./wallet-policies";
 
 const payments = new Hono<{ Bindings: Env }>();
 
 payments.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 payments.use("*", projectContextMiddleware());
 
-payments.get(
-  "/wallets/:walletId/balances",
-  requirePermissions("wallets:read", "payments:read"),
-  getWalletBalances
-);
-payments.get(
-  "/wallets/:walletId/policies",
-  requirePermissions("wallets:read", "payments:read"),
-  getWalletPolicy
-);
-payments.get(
-  "/wallets/:walletId/policies/revisions",
-  requirePermissions("wallets:read", "payments:read"),
-  listWalletControlProfileRevisions
-);
-payments.get(
-  "/wallets/:walletId/policies/evaluations",
-  requirePermissions("wallets:read", "payments:read"),
-  listWalletPolicyEvaluations
-);
-payments.get(
-  "/wallets/:walletId/policies/evaluations/:policyEvaluationId",
-  requirePermissions("wallets:read", "payments:read"),
-  getWalletPolicyEvaluation
-);
-payments.put(
-  "/wallets/:walletId/policies",
-  requirePermissions("wallets:write", "payments:write"),
-  requireAdminApiKeyRole(),
-  validateBody(updateWalletPolicySchema),
-  updateWalletPolicy
-);
 payments.route("/transfers", transfers);
 payments.route("/transfer-batches", transferBatches);
 payments.route("/requests", paymentRequests);
 payments.route("/recurring-payments", recurringPayments);
 payments.route("/subscription-plans", subscriptionPlans);
 payments.route("/subscriptions", subscriptions);
+payments.route("/wallets", walletPolicies);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 // Estimates fan out one live call per provider on the corridor and quotes
