@@ -45,10 +45,10 @@ import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
 
-// The refresh sidebar is the design's: 40px rows, 6px corners, 15px medium labels, an ink wash
-// for the active row and a lighter one on hover, no border.
+// The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
+// the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
 const navItemBase =
-  "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors refresh:h-control-lg refresh:rounded-control refresh:px-2 refresh:text-nav refresh:font-medium";
+  "relative flex h-10 w-full items-center gap-3 rounded-[var(--button-radius-lg)] px-3 text-base transition-colors refresh:h-control-lg refresh:gap-4 refresh:rounded-control refresh:px-2 refresh:text-nav refresh:font-medium";
 const navItemActive =
   "border border-border-subtle bg-surface-raised text-primary refresh:border-0 refresh:bg-fill-strong";
 const navItemInactive =
@@ -96,7 +96,7 @@ function SidebarGroup({
     <div className="space-y-2">
       <p
         className={cn(
-          "relative px-3 text-xs uppercase leading-normal tracking-wide refresh:px-2 refresh:text-meta refresh:normal-case refresh:tracking-normal",
+          "relative px-3 text-xs uppercase leading-normal tracking-wide refresh:px-2 refresh:text-meta refresh:normal-case refresh:leading-4 refresh:tracking-normal",
           isCollapsed ? "text-transparent" : "text-muted refresh:text-secondary"
         )}
       >
@@ -108,7 +108,7 @@ function SidebarGroup({
           />
         ) : null}
       </p>
-      <div className="space-y-0.5">
+      <div className="space-y-0.5 refresh:space-y-0">
         {/* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: each branch preserves the shared navigation item and accessible payments disclosure in one rendering pass. */}
         {items.map((item) => {
           const Icon = item.icon;
@@ -148,7 +148,7 @@ function SidebarGroup({
                   )}
                 >
                   <Icon
-                    className="h-5 w-5 shrink-0 refresh:size-[18px] refresh:text-primary/45"
+                    className="h-5 w-5 shrink-0 refresh:size-5 refresh:text-primary/45"
                     strokeWidth={1.9}
                   />
                   {isCollapsed ? null : (
@@ -180,7 +180,7 @@ function SidebarGroup({
                       { section: item.label }
                     )}
                     onClick={() => onSubnavToggle(subnavKey)}
-                    className="absolute right-1 inline-flex size-9 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong hover:text-primary"
+                    className="absolute right-1 inline-flex size-9 items-center justify-center rounded-lg text-secondary transition-colors hover:bg-fill-strong hover:text-primary refresh:right-0 refresh:size-8 refresh:rounded-control"
                   >
                     <ChevronDownIcon
                       className={cn(
@@ -285,8 +285,12 @@ function DashboardSidebarContent({
   const showMobileClose = variant === "mobile";
   return (
     <>
-      <div className="min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3">
-        <div className="py-3">
+      {/* Refresh: an 8px inset, the workspace row hugging the top, and a scrollbar that only
+          shows under the pointer, so the rows keep the design's full 256px width. */}
+      <div className="sdp-quiet-scroll min-h-0 flex-1 space-y-6 overflow-x-hidden overflow-y-auto overscroll-contain p-3 refresh:p-2">
+        {/* -4px above pulls the 32px avatar to the 8px inset inside its 40px row; 20px below
+            keeps the group gap at 24 from the avatar's bottom. */}
+        <div className="py-3 refresh:-mt-1 refresh:mb-5 refresh:py-0">
           {showMobileClose ? (
             <div className="flex items-center justify-between gap-2">
               <WorkspaceSwitcher
@@ -325,7 +329,7 @@ function DashboardSidebarContent({
           />
         ))}
       </div>
-      <div className="shrink-0 space-y-3 px-3 pb-3">
+      <div className="shrink-0 space-y-3 px-3 pb-3 refresh:px-2 refresh:pb-2">
         {showQuickStart ? <DashboardQuickStart collapsed={isCollapsed} /> : null}
         <SidebarUserMenu
           collapsed={isCollapsed}
@@ -420,8 +424,8 @@ export function DashboardShell({
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname);
   const isRefresh = themeScope === "refresh";
-  // The design's sidebar is 280px; the base shell keeps its 296.
-  const sidebarExpandedWidth = isRefresh ? 280 : 296;
+  // The design's sidebar is 272px (17rem) including its rule; the base shell keeps its 296.
+  const sidebarExpandedWidth = isRefresh ? 272 : 296;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
     pathname,
@@ -446,20 +450,23 @@ export function DashboardShell({
     privateChannelsEnabled,
   });
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
+  const headerTabs = pageConfig.headerTabs;
+  const routeTabs = pageConfig.routeTabs;
+  const hasHeaderTabs = Boolean(headerTabs || routeTabs);
+  // A refresh action page sets its way back over a left title, in the page's column, as the
+  // design does; the base shell keeps it in the title row beside a centred title.
+  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction) && !hasHeaderTabs;
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
       href={pageConfig.backAction.href}
       label={pageConfig.backAction.label}
-      compactOnMobile
+      compactOnMobile={!stacksBackAboveTitle}
     />
   ) : null;
-  const headerTabs = pageConfig.headerTabs;
-  const routeTabs = pageConfig.routeTabs;
-  const hasHeaderTabs = Boolean(headerTabs || routeTabs);
-  const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs;
+  const showBackInTopBar = Boolean(backAction) && !hasHeaderTabs && !stacksBackAboveTitle;
   const topBarLeadingContent = showBackInTopBar ? backAction : pageConfig.topBarLeadingContent;
   const shouldRenderTopBarBorder =
-    (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs;
+    (pageConfig.titlePosition === "center" || showBackInTopBar) && !hasHeaderTabs && !isRefresh;
   const shouldClipHorizontalOverflow = clipsDashboardHorizontalOverflow(pathname);
   const shouldLockViewportScroll = usesWorkspaceViewport(pathname);
   const shouldLockShellViewport = shouldLockViewportScroll || isMobileSidebarOpen;
@@ -746,12 +753,13 @@ export function DashboardShell({
               ].join(" ")}
             >
               {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
-                  the content's at every width; 40px above the title is the design's. */}
-              <div className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-8 md:pt-10"])}>
+                  the content's at every width; 32px above the title and 24px from the title to
+                  the tabs are the design's. */}
+              <div className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-6 md:pt-8"])}>
                 <div
                   className={cn(
                     "space-y-4",
-                    alignsHeaderWithContent && ["mx-auto w-full space-y-8", pageColumnClass]
+                    alignsHeaderWithContent && ["mx-auto w-full space-y-6", pageColumnClass]
                   )}
                 >
                   <div
@@ -774,10 +782,11 @@ export function DashboardShell({
                             : "visible"
                       }
                       title={pageConfig.title}
-                      titlePosition={pageConfig.titlePosition}
+                      titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}
                       topBarLeadingContent={topBarLeadingContent}
                       hasHeaderTabs={hasHeaderTabs}
                       action={headerAction}
+                      above={stacksBackAboveTitle ? backAction : undefined}
                     />
                   </div>
 

@@ -49,7 +49,7 @@ export function RowsPerPageSelect({
         const size = Number(next);
         if (Number.isFinite(size)) onChange(size);
       }}
-      className="w-32 shrink-0"
+      className="w-auto shrink-0"
     >
       {sizes.map((size) => (
         <SelectItem key={size} value={String(size)}>

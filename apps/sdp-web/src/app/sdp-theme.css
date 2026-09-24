@@ -82,10 +82,13 @@
   --button-radius-lg: var(--corner-control);
   --button-radius-md: var(--corner-control);
   --button-radius-sm: var(--corner-control-inner);
+  /* The design's 40px control carries a 14px label. */
+  --text-button-lg: var(--font-size-body);
 
   /* Underline fields: no box, no fill, no ring; the bottom rule darkens on hover and focus.
-     The field components draw only the bottom edge (refresh: variants in components/ui). */
-  --input-height-xl: 44px;
+     The field components draw only the bottom edge (refresh: variants in components/ui). The
+     design has one form field height, 36px, so the xl field a wizard asks for is that. */
+  --input-height-xl: 36px;
   --input-radius-xl: 0px;
   --input-radius-lg: 0px;
   --input-radius-md: 0px;
@@ -106,15 +109,19 @@
   --input-focus-ring: transparent;
   --input-placeholder-color: var(--emph-l);
 
-  /* Tabs sit on the text: no inset, so the indicator is exactly the label's width. */
+  /* Tabs sit on the text: no inset, so the indicator is exactly the label's width. The row is
+     the design's 36px (14px label, 11px above and below). */
   --tab-padding-x-sm: 0px;
   --tab-padding-x-md: 0px;
+  --tab-padding-y-md: 11px;
   --tab-text-idle: var(--emph-m);
   --tab-text-hover: var(--emph-xh);
   --tab-text-active: var(--emph-xh);
   --tab-indicator-color: var(--emph-xh);
 
-  /* Tables sit on the page: a plain header over a rule, faint rules between rows. */
+  /* Tables sit on the page: a 30px header over a rule, 44px rows with faint rules between. */
+  --table-header-height: 30px;
+  --table-header-padding-y: 5px;
   --table-header-bg: transparent;
   --table-header-bg-solid: var(--surface-raised);
   --table-header-text: var(--emph-l);
@@ -134,6 +141,18 @@
    regular. Scoped to labels that head a design-system input. */
 [data-sdp-theme="refresh"] div:has(+ .group\/input) > label {
   font-weight: 400;
+}
+
+/* The refresh sidebar scrolls without a track eating its width: a thin bar, invisible until the
+   pointer is over the list. Standard properties only, which Chrome 121+, Firefox and Safari 18.2+
+   honour; older engines keep their default bar. */
+[data-sdp-theme="refresh"] .sdp-quiet-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+[data-sdp-theme="refresh"] .sdp-quiet-scroll:hover {
+  scrollbar-color: var(--t12) transparent;
 }
 
 :root.dark {

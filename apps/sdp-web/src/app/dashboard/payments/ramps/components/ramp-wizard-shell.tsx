@@ -49,8 +49,6 @@ interface RampWizardShellProps {
   confirmCancel?: boolean;
   /** Refresh surfaces only: what the primary action is waiting for, on the footer's left. */
   footerHint?: ReactNode;
-  /** Refresh surfaces only: set the review step's title at heading size. */
-  prominentTitle?: boolean;
 }
 
 /**
@@ -84,9 +82,9 @@ function RefreshFooter({
           {backLabel}
         </Button>
       ) : hint ? (
-        <p className="min-w-0 text-body text-secondary">{hint}</p>
+        <p className="min-w-0 text-meta text-secondary">{hint}</p>
       ) : null}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-4">
         {actions}
         {cancel ? (
           <Button type="button" variant="ghost" onClick={cancel.onClick}>
@@ -168,7 +166,6 @@ export function RampWizardShell({
   cancelLabel,
   confirmCancel,
   footerHint,
-  prominentTitle,
 }: RampWizardShellProps) {
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
@@ -245,7 +242,6 @@ export function RampWizardShell({
         header={header}
         summary={isLastStep ? undefined : summary}
         summaryTrigger={isLastStep ? undefined : summaryTrigger}
-        prominentTitle={prominentTitle}
         footer={footer}
       >
         <div className="space-y-6">

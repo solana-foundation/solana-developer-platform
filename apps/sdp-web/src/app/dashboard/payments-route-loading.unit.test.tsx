@@ -167,7 +167,9 @@ describe("home and payments route loading states", () => {
     expect(pay.match(/data-loading-stepper=/g)).toHaveLength(1);
     expect(pay.match(/data-loading-field=/g)).toHaveLength(5);
     expect(pay).toContain("max-w-flow");
-    expect(pay).toContain("sticky bottom-16");
+    // The step scrolls in its own column; the footer band stays at the bottom of the page.
+    expect(pay).toContain("overflow-y-auto");
+    expect(pay).toContain("shrink-0 border-t");
     expect(pay).not.toContain("data-loading-counterparty-picker");
 
     const deposit = renderToStaticMarkup(<PaymentsDepositPageSkeleton />);

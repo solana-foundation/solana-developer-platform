@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import {
@@ -150,9 +150,16 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
     );
   }
 
+  // A tab without a wizard frame lays out the same column the frame does: the shell's gutter,
+  // 36px under the tabs, the flow's width, and its own scrolling when it outgrows the viewport.
+  const tabColumn = (children: ReactNode) => (
+    <div className="h-full min-h-0 overflow-y-auto px-4 pt-9 pb-16 md:px-6">
+      <div className="mx-auto w-full max-w-flow">{children}</div>
+    </div>
+  );
   if (tab === "provider" && !fiatEnabled) {
-    return (
-      <div className="mx-auto w-full max-w-flow space-y-2 pt-2">
+    return tabColumn(
+      <div className="space-y-2">
         <p className="text-body text-primary">{t("DashboardPayments.depositMethod.noProvider")}</p>
         <Link
           href="/dashboard/integrations"
@@ -165,14 +172,12 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   }
   if (effectiveMethod === "onchain") {
     // The address tab needs no contact: anyone can send to a wallet address.
-    return (
-      <div className="mx-auto w-full max-w-flow pt-2">
-        <DepositAddressPanel
-          wallets={props.wallets}
-          walletsError={props.walletsError}
-          issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
-        />
-      </div>
+    return tabColumn(
+      <DepositAddressPanel
+        wallets={props.wallets}
+        walletsError={props.walletsError}
+        issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+      />
     );
   }
 

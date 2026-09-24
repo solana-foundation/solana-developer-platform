@@ -24,8 +24,9 @@ function formatEstimateDecimal(value: string, locale: string): string {
     return value;
   }
 
+  // Two places at least, so "99.10" and "Fee 0.90 USD" read as money; up to six for dust.
   return new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 6,
   }).format(parsed);
 }
@@ -194,9 +195,10 @@ function QuoteCardEstimate({
   }
   if (estimateLoading) {
     return (
-      <span className="space-y-2" aria-busy="true">
-        <span className="block h-3.5 w-24 animate-pulse rounded bg-fill" />
-        <span className="block h-7 w-32 animate-pulse rounded bg-fill" />
+      <span className="block" aria-busy="true">
+        <span className="block h-4 w-24 animate-pulse rounded bg-fill" />
+        <span className="mt-1.5 block h-[30px] w-32 animate-pulse rounded bg-fill" />
+        <span className="mt-1 block h-4 w-20 animate-pulse rounded bg-fill" />
       </span>
     );
   }
@@ -213,14 +215,15 @@ function QuoteCardEstimate({
   }
   const ok = estimate.estimate;
   const isFiatOut = ok.direction === "offramp";
+  // 13px line, 6px, the 24px figure on its 30px line, 4px, 13px line: 72px, as the design draws it.
   return (
-    <span className="space-y-1">
+    <span className="block">
       <span className="block text-meta text-secondary">
         {isFiatOut
           ? t("DashboardPayments.ramps.recipientReceives")
           : t("DashboardPayments.ramps.walletReceives")}
       </span>
-      <span className="flex items-baseline gap-1.5">
+      <span className="mt-1.5 flex items-baseline gap-1.5">
         <span className="text-quote font-medium text-primary tabular-nums">
           {formatEstimateDecimal(isFiatOut ? ok.fiatAmount : ok.cryptoAmount, locale)}
         </span>
@@ -228,16 +231,21 @@ function QuoteCardEstimate({
           {isFiatOut ? ok.fiatCurrency : getCryptoRailAssetLabel(ok.assetRail)}
         </span>
       </span>
-      <span className="block text-meta text-tertiary">{buildFeeLabel(t, ok.fees, locale)}</span>
+      <span className="mt-1 block text-meta text-tertiary">
+        {buildFeeLabel(t, ok.fees, locale)}
+      </span>
     </span>
   );
 }
 
 /**
- * A provider as one tile in the refresh quote grid: logo and name with a radio mark, then what
- * the wallet receives and the fee. The tile is a label around a native radio, so the grid
- * gets radio-group keyboard behaviour for free. An unavailable provider keeps its tile,
- * disabled, with the first reason it cannot be used, so the grid shows every option.
+ * A provider as one tile in the refresh quote grid: a 28px logo and the name with a 16px radio
+ * mark, then what the wallet receives and the fee pinned to the foot. The tile has no height
+ * of its own: the grid gives every row the tallest tile's height, so a tile with a second
+ * name line ("Sandbox only") sets the height for all of them and the quotes line up. The tile
+ * is a label around a native radio, so the grid gets radio-group keyboard behaviour for free.
+ * An unavailable provider keeps its tile, disabled, with the first reason it cannot be used,
+ * so the grid shows every option.
  */
 export function ProviderQuoteCard({
   name,
@@ -264,7 +272,7 @@ export function ProviderQuoteCard({
   return (
     <label
       className={cn(
-        "flex min-h-40 w-full cursor-pointer flex-col justify-between gap-6 rounded-card border p-5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary",
+        "flex w-full cursor-pointer flex-col justify-between gap-6 rounded-card border p-5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary",
         active ? "border-primary" : "border-border-strong hover:bg-fill-subtle",
         disabled && "cursor-not-allowed hover:bg-transparent"
       )}
@@ -282,16 +290,18 @@ export function ProviderQuoteCard({
         <Image
           src={RAMP_PROVIDER_LOGOS[option.id]}
           alt=""
-          width={40}
-          height={40}
-          className={cn("size-10 shrink-0 rounded-full object-contain", disabled && "opacity-50")}
+          width={28}
+          height={28}
+          className={cn("size-7 shrink-0 rounded-full object-contain", disabled && "opacity-50")}
         />
-        <span className="min-w-0 flex-1 pt-2">
-          <span className={cn("block text-body text-primary", disabled && "text-muted")}>
+        <span className="min-w-0 flex-1 pt-1">
+          <span
+            className={cn("block text-body font-medium text-primary", disabled && "text-muted")}
+          >
             {option.title}
           </span>
           {sandboxOnly ? (
-            <span className="block text-body text-secondary">
+            <span className="block text-meta text-secondary">
               {t("DashboardPayments.ramps.sandboxOnly")}
             </span>
           ) : null}
@@ -299,11 +309,11 @@ export function ProviderQuoteCard({
         <span
           aria-hidden="true"
           className={cn(
-            "mt-2 flex size-5 shrink-0 items-center justify-center rounded-full border",
+            "mt-1.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
             active ? "border-primary" : "border-border-strong"
           )}
         >
-          {active ? <span className="size-2.5 rounded-full bg-primary" /> : null}
+          {active ? <span className="size-2 rounded-full bg-primary" /> : null}
         </span>
       </span>
       <QuoteCardEstimate

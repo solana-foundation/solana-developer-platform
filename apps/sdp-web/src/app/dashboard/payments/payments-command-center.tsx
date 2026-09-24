@@ -150,7 +150,8 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
         {formatCurrencyAmount(resolveTotalBalance(balances), locale)}
       </p>
       {topBalances.length > 0 ? (
-        <ul className="mt-8 space-y-5">
+        // 52px rows: a 32px mark beside a 16px name over its 14px amount, 8px apart.
+        <ul className="mt-8 space-y-2">
           {topBalances.map((balance) => {
             const resolved = resolveTokenByMint(balance.mint, issuedTokensByMint, balance.token);
             const label =
@@ -167,11 +168,11 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
                   mint={resolved.mint}
                   symbol={resolved.tokenName}
                   logoUrl={resolved.metadataImageUrl}
-                  size="lg"
+                  size="md"
                 />
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-body text-primary" title={resolved.tokenName}>
+                    <span className="truncate text-field text-primary" title={resolved.tokenName}>
                       {label}
                     </span>
                     {resolved.tokenId ? (
@@ -180,12 +181,12 @@ async function AvailableBalance({ apiClientPromise }: { apiClientPromise: ApiCli
                       </Badge>
                     ) : null}
                   </span>
-                  <span className="block text-meta text-secondary tabular-nums">
+                  <span className="block text-body text-secondary tabular-nums">
                     {formatTokenAmount(balance.uiAmount, locale)}
                   </span>
                 </span>
                 {usdValue === null ? null : (
-                  <span className="shrink-0 text-body font-medium text-primary tabular-nums">
+                  <span className="shrink-0 text-field text-primary tabular-nums">
                     {formatCurrencyAmount(usdValue, locale)}
                   </span>
                 )}
@@ -262,10 +263,11 @@ async function PaymentsSummaryLine({
   ];
   return (
     <section
-      className="mt-8 border-t border-border-default pt-6"
+      className="mt-9 border-t border-border-default pt-6"
       data-payments-overview-section="summary"
     >
-      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-body text-secondary">
+      {/* The counts read at 18px over their 14px words, on one baseline. */}
+      <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-body text-secondary">
         {items.map((item, index) => (
           <Fragment key={item.key}>
             {index > 0 ? (
@@ -274,7 +276,9 @@ async function PaymentsSummaryLine({
               </span>
             ) : null}
             <Link href={item.href} className="transition-colors hover:text-primary">
-              <span className="font-medium text-primary tabular-nums">{item.count ?? "—"}</span>{" "}
+              <span className="text-subheading font-medium text-primary tabular-nums">
+                {item.count ?? "—"}
+              </span>{" "}
               {countLabel(t, `${base}.${item.key}`, item.count)}
             </Link>
           </Fragment>
@@ -301,27 +305,28 @@ function ActivityRow({
 }) {
   return (
     <li>
+      {/* 60px rows: a 16px line over a 14px line, 8px above and below. */}
       <Link
         href={href}
-        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-0.5 rounded-control px-2 py-3 transition-colors hover:bg-fill-subtle sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]"
+        className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-0.5 rounded-control px-2 py-2 transition-colors hover:bg-fill-subtle sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto]"
       >
         <span className="col-start-1 row-start-1 min-w-0">
-          <span className="block truncate text-body text-primary" title={name}>
+          <span className="block truncate text-field text-primary" title={name}>
             {name}
           </span>
-          <span className="block truncate text-meta text-secondary" title={detail}>
+          <span className="block truncate text-body text-secondary" title={detail}>
             {detail}
           </span>
         </span>
         <StatusText
           tone={status.tone}
-          className="col-start-1 row-start-2 truncate text-body sm:col-start-2 sm:row-start-1"
+          className="col-start-1 row-start-2 truncate text-field sm:col-start-2 sm:row-start-1"
         >
           {status.label}
         </StatusText>
         <span className="col-start-2 row-start-1 min-w-0 text-right sm:col-start-3">
-          <span className="block text-body text-primary tabular-nums">{amount ?? "—"}</span>
-          {when ? <span className="block text-meta text-tertiary">{when}</span> : null}
+          <span className="block text-field text-primary tabular-nums">{amount ?? "—"}</span>
+          {when ? <span className="block text-body text-tertiary">{when}</span> : null}
         </span>
       </Link>
     </li>
@@ -538,7 +543,7 @@ export function PaymentsCommandCenter({
   organizationId: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-16 pt-4" data-payments-command-center>
+    <div className="flex min-w-0 flex-col gap-16" data-payments-command-center>
       <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
         <div className="min-w-0">
           <Suspense fallback={<PaymentsBalanceSkeleton />}>

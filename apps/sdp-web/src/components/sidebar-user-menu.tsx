@@ -83,11 +83,13 @@ export function SidebarUserMenu({
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-nav refresh:font-medium">
+                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
                   {name}
                 </span>
                 {email ? (
-                  <span className="truncate text-xs leading-tight text-tertiary">{email}</span>
+                  <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
+                    {email}
+                  </span>
                 ) : null}
               </span>
               <ChevronsUpDownIcon className="size-4 shrink-0 text-tertiary" />

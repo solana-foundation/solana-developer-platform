@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowLeftIcon, DownloadIcon, PanelRightIcon, PlusIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronLeftIcon,
+  DownloadIcon,
+  PanelRightIcon,
+  PlusIcon,
+} from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
@@ -101,6 +107,8 @@ type DashboardTopBarProps = {
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
   action?: ReactNode;
+  /** Set over a left title: a refresh action page's way back. */
+  above?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -115,12 +123,13 @@ export function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
     >
-      <ArrowLeftIcon className="h-4 w-4" />
+      <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
+      <ChevronLeftIcon className="hidden size-4 refresh:block" />
       <span
         className={[
-          "text-[13px] leading-[18px] font-medium",
+          "text-[13px] leading-[18px] font-medium refresh:text-body refresh:leading-5 refresh:font-normal",
           compactOnMobile ? "hidden sm:inline" : "",
         ].join(" ")}
       >
@@ -197,16 +206,21 @@ export function StandardDashboardTopBar({
   trailingContent,
   hideTitle = false,
   alignTitleWithTabs = false,
+  above,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
   hideTitle?: boolean;
   alignTitleWithTabs?: boolean;
+  /** Set over the title in its column: a refresh action page's way back. */
+  above?: ReactNode;
 }) {
   return (
+    // Refresh: the row is exactly the title's height, so the 24px to the tabs is measured from
+    // the title itself and a taller page action centres on it.
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0"
+      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 refresh:min-h-0 refresh:items-center"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
@@ -216,14 +230,17 @@ export function StandardDashboardTopBar({
       {hideTitle ? (
         <h1 className="sr-only">{title}</h1>
       ) : (
-        <h1
+        <div
           className={cn(
-            "col-span-2 row-start-2 min-w-0 max-w-full break-words text-page-title font-medium text-primary sm:col-span-1 sm:col-start-2 sm:row-start-1",
+            "col-span-2 row-start-2 min-w-0 max-w-full sm:col-span-1 sm:col-start-2 sm:row-start-1",
             alignTitleWithTabs && "xl:pl-[var(--tab-padding-x-md)]"
           )}
         >
-          {title}
-        </h1>
+          {above ? <div className="mb-2">{above}</div> : null}
+          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+            {title}
+          </h1>
+        </div>
       )}
       <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 xl:ml-3">
         {trailingContent}
@@ -241,6 +258,7 @@ export function DashboardTopBar({
   topBarLeadingContent,
   hasHeaderTabs = false,
   action,
+  above,
 }: DashboardTopBarProps) {
   const trailingContent = action ? (
     <>
@@ -278,6 +296,7 @@ export function DashboardTopBar({
       hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
       alignTitleWithTabs={hasHeaderTabs}
+      above={above}
       leadingContent={
         <>
           <SidebarToggle
@@ -464,12 +483,17 @@ function getCounterpartyRoutePageConfig(
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
   if (pathname === "/dashboard/payments/counterparty/create") {
-    return actionPageConfig({
+    // A refresh flow: the way back over the title in the form's column; the footer band spans
+    // the page.
+    return {
       title: t("Shared.dashboardShell.newCounterparty"),
-      backHref: "/dashboard/payments/counterparty",
-      backLabel: t("Shared.dashboardShell.backToCounterparty"),
       contentWidthClass: "max-w-none",
-    });
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.contactList"),
+      },
+    };
   }
   if (pathname.startsWith("/dashboard/payments/counterparty/")) {
     return {
@@ -477,7 +501,7 @@ function getCounterpartyRoutePageConfig(
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard/payments/counterparty",
-        label: t("Shared.dashboardShell.backToCounterparty"),
+        label: t("Shared.dashboardShell.contactList"),
       },
     };
   }
@@ -938,12 +962,15 @@ export function getDashboardPageConfig(
     return marketsRouteConfig;
   }
   if (pathname === "/dashboard/payments/recurring/create") {
-    return actionPageConfig({
+    return {
       title: t("Shared.dashboardShell.recurringPayment"),
-      backHref: "/dashboard/payments/recurring",
-      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
       contentWidthClass: "max-w-none",
-    });
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.backToRecurringPayments"),
+      },
+    };
   }
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
@@ -969,12 +996,15 @@ export function getDashboardPageConfig(
         ? t("Shared.dashboardShell.receive")
         : t("Shared.dashboardShell.send");
 
-    return actionPageConfig({
+    return {
       title,
-      backHref: "/dashboard/payments",
-      backLabel: t("Shared.dashboardShell.backToPayments"),
       contentWidthClass: "max-w-none",
-    });
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments",
+        label: t("Shared.dashboardShell.backToPayments"),
+      },
+    };
   }
   const integrationsConfig = getIntegrationsPageConfig(pathname, t);
   if (integrationsConfig) {

@@ -19,11 +19,6 @@ interface WizardFrameProps {
   maxWidthClassName?: string;
   /** Refresh surfaces only: omit the step header, for a single-page form such as a settings page. */
   hideProgress?: boolean;
-  /**
-   * Refresh surfaces set step titles at section size; a review step that has to read as the
-   * page's decision point takes the heading size instead.
-   */
-  prominentTitle?: boolean;
   progressLabel: string;
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
@@ -51,7 +46,6 @@ export function WizardFrame({
   header,
   maxWidthClassName = "max-w-3xl",
   hideProgress = false,
-  prominentTitle = false,
   progressLabel,
   summary,
   summaryTrigger,
@@ -86,14 +80,16 @@ export function WizardFrame({
             <h2
               className={cn(
                 "text-2xl font-medium tracking-tight text-primary",
-                refresh && (prominentTitle ? "text-heading" : "text-subheading")
+                refresh && "text-heading"
               )}
             >
               {currentStepTitle ?? activeStep.title}
             </h2>
             {titleBadge}
           </div>
-          {description ? <div className="text-sm text-secondary">{description}</div> : null}
+          {description ? (
+            <div className="text-sm text-secondary refresh:text-body">{description}</div>
+          ) : null}
         </div>
         {header || showSummaryButton ? (
           <div
@@ -136,36 +132,43 @@ export function WizardFrame({
     );
 
   if (refresh) {
-    // The refresh flow is one column in the page's own width: step header, content, and a
-    // footer band pinned to the bottom of the viewport that bleeds to the content card's
-    // edges (the negative margins undo the shell section's padding).
+    // The refresh flow is one column in the shell's gutter: 36px under the title or tabs, the
+    // step header, 48px, the content, then a footer band across the bottom of the page on the
+    // sidebar's paper (a step darker than the page in both themes, as the design draws it). The
+    // column scrolls on its own when a step outgrows the viewport; the band stays put. The shell
+    // section has no padding on a refresh route, so the band reaches the edges as it is.
     return (
-      <div className="flex min-h-full w-full flex-col" data-wizard-frame>
-        <div className="mx-auto w-full max-w-flow flex-1 pb-10" data-wizard-scroll-region>
-          <div
-            className={cn("mb-10 flex items-start gap-3", hideProgress && "hidden")}
-            data-wizard-stepper
-          >
-            <WizardStepProgress
-              className="min-w-0 flex-1"
-              currentStep={currentStep}
-              progressLabel={progressLabel}
-              steps={steps.map((step) => step.label)}
-            />
-            {toolbarActions}
-          </div>
-          {aside ? (
-            <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_440px]">
-              <main className="min-w-0">{stepContent}</main>
-              {aside}
+      <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6"
+          data-wizard-scroll-region
+        >
+          <div className="mx-auto w-full max-w-flow">
+            <div
+              className={cn("mb-12 flex items-start gap-3", hideProgress && "hidden")}
+              data-wizard-stepper
+            >
+              <WizardStepProgress
+                className="min-w-0 flex-1"
+                currentStep={currentStep}
+                progressLabel={progressLabel}
+                steps={steps.map((step) => step.label)}
+              />
+              {toolbarActions}
             </div>
-          ) : (
-            stepContent
-          )}
+            {aside ? (
+              <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_440px]">
+                <main className="min-w-0">{stepContent}</main>
+                {aside}
+              </div>
+            ) : (
+              stepContent
+            )}
+          </div>
         </div>
         {footer ? (
           <footer
-            className="sticky bottom-16 -mx-3 -mb-5 rounded-b-2xl border-t border-border-subtle bg-[color-mix(in_srgb,var(--surface-raised)_97%,var(--emph-xh))] px-3 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-0 md:-mx-6 md:-mb-6 md:px-6"
+            className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
             data-wizard-actions
           >
             <div className="mx-auto w-full max-w-flow">{footer}</div>

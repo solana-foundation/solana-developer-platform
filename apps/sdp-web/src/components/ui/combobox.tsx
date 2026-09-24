@@ -274,8 +274,11 @@ export function Combobox({
                 {selected.badge}
               </Badge>
             ) : null}
+            {/* An underline field shows the choice alone; the list still carries the detail. */}
             {selected.description ? (
-              <span className="truncate text-sm text-tertiary">{selected.description}</span>
+              <span className="truncate text-sm text-tertiary refresh:hidden">
+                {selected.description}
+              </span>
             ) : null}
           </span>
         ) : (

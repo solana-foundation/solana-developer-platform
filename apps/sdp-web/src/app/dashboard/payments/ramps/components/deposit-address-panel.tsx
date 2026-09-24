@@ -52,26 +52,29 @@ function walletProviderLabel(wallet: PaymentsDashboardWallet): string | null {
   return wallet.provider ? CUSTODY_PROVIDER_CATALOG_BY_ID[wallet.provider].label : null;
 }
 
-/** A deposit's amount, signed as money in: the fiat side for a ramp, else the token. */
+/**
+ * A deposit's amount, signed as money in, beside what it is in: the fiat side for a ramp, else
+ * the token. Two parts, so the table can set the asset in the secondary colour as the design does.
+ */
 function depositAmount(
   deposit: PaymentTransferSummary,
   issuedTokenSymbolsByMint: Readonly<Record<string, string>>,
   locale: string
-): string | null {
-  if (deposit.fiatAmount !== undefined && deposit.fiatCurrency) {
-    return formatSignedAmount(
-      deposit.fiatAmount,
-      "inbound",
-      deposit.fiatCurrency.toUpperCase(),
-      locale
-    );
-  }
-  return formatSignedAmount(
-    deposit.amount,
+): { amount: string; asset: string | undefined } | null {
+  const isFiat = deposit.fiatAmount !== undefined && deposit.fiatCurrency !== undefined;
+  const amount = formatSignedAmount(
+    isFiat ? deposit.fiatAmount : deposit.amount,
     "inbound",
-    resolveTransferTokenLabel(deposit.token, issuedTokenSymbolsByMint),
+    undefined,
     locale
   );
+  if (amount === null) return null;
+  return {
+    amount,
+    asset: isFiat
+      ? deposit.fiatCurrency?.toUpperCase()
+      : resolveTransferTokenLabel(deposit.token, issuedTokenSymbolsByMint),
+  };
 }
 
 function walletName(wallet: PaymentsDashboardWallet): string {
@@ -91,13 +94,13 @@ function AddressQr({ address }: { address: string }) {
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
   return (
-    <div className="size-28 shrink-0">
+    <div className="size-32 shrink-0">
       {data ? (
         <Image
           src={data}
           alt={t("DashboardPayments.ramps.walletAddressQrCode")}
-          width={112}
-          height={112}
+          width={128}
+          height={128}
           unoptimized
           className="size-full dark:invert"
         />
@@ -190,52 +193,58 @@ export function DepositAddressPanel({
     });
 
   return (
-    <div className="space-y-10">
-      <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-6 sm:flex-row sm:items-start">
-        <div className="min-w-0 flex-1 space-y-4">
-          <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span className="truncate text-body font-medium text-primary">
-                {walletName(wallet)}
-              </span>
-              {provider ? (
-                <span className="shrink-0 text-body text-tertiary">{provider}</span>
-              ) : null}
-              <ChevronDownIcon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
-              <span className="sr-only">{t("DashboardPayments.depositAddress.chooseWallet")}</span>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-64">
-              <DropdownMenuRadioGroup value={wallet.id} onValueChange={setSelectedId}>
-                {liveWallets.map((candidate) => (
-                  <DropdownMenuRadioItem
-                    key={candidate.id}
-                    value={candidate.id}
-                    className="text-body font-normal"
-                  >
-                    <span className="min-w-0 truncate">{walletName(candidate)}</span>
-                    {walletProviderLabel(candidate) ? (
-                      <span className="ml-auto pl-3 text-meta text-tertiary">
-                        {walletProviderLabel(candidate)}
-                      </span>
-                    ) : null}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <div className="flex items-start gap-2">
-            <p className="min-w-0 font-mono text-field break-all text-primary">
-              {wallet.publicKey}
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("DashboardPayments.ramps.copyAddress")}
-              onClick={() => void copyAddress()}
-            >
-              <CopyIcon className="size-4" />
-            </Button>
+    <div>
+      {/* The design's 160px card: a 128px code in a 16px inset; the wallet and its address at
+          the top of the text column, the network warning at its foot. */}
+      <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-6 px-2 pt-2">
+          <div className="space-y-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                <span className="truncate text-field font-medium text-primary">
+                  {walletName(wallet)}
+                </span>
+                {provider ? (
+                  <span className="shrink-0 text-field text-tertiary">{provider}</span>
+                ) : null}
+                <ChevronDownIcon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+                <span className="sr-only">
+                  {t("DashboardPayments.depositAddress.chooseWallet")}
+                </span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-64">
+                <DropdownMenuRadioGroup value={wallet.id} onValueChange={setSelectedId}>
+                  {liveWallets.map((candidate) => (
+                    <DropdownMenuRadioItem
+                      key={candidate.id}
+                      value={candidate.id}
+                      className="text-body font-normal"
+                    >
+                      <span className="min-w-0 truncate">{walletName(candidate)}</span>
+                      {walletProviderLabel(candidate) ? (
+                        <span className="ml-auto pl-3 text-meta text-tertiary">
+                          {walletProviderLabel(candidate)}
+                        </span>
+                      ) : null}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 font-mono text-field break-all text-primary">
+                {wallet.publicKey}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("DashboardPayments.ramps.copyAddress")}
+                onClick={() => void copyAddress()}
+              >
+                <CopyIcon className="size-4" />
+              </Button>
+            </div>
           </div>
           <p className="text-body text-secondary">
             {t("DashboardPayments.depositAddress.networkWarning", { network })}
@@ -244,7 +253,8 @@ export function DepositAddressPanel({
         <AddressQr address={wallet.publicKey} />
       </section>
 
-      <dl className="divide-y divide-border-subtle">
+      {/* 40px rows of 16px text over faint rules, 24px under the card. */}
+      <dl className="mt-6 divide-y divide-border-subtle">
         {[
           {
             label: t("DashboardPayments.depositAddress.accepts"),
@@ -260,9 +270,9 @@ export function DepositAddressPanel({
             hint: t("DashboardPayments.depositAddress.arrivesHint"),
           },
         ].map((row) => (
-          <div key={row.label} className="flex items-center justify-between gap-4 py-4">
-            <dt className="text-body text-secondary">{row.label}</dt>
-            <dd className="flex items-center gap-2 text-body text-primary">
+          <div key={row.label} className="flex items-center justify-between gap-4 py-2">
+            <dt className="text-field text-secondary">{row.label}</dt>
+            <dd className="flex items-center gap-2 text-field text-primary">
               {row.value}
               {row.hint ? (
                 <TooltipProvider>
@@ -287,8 +297,8 @@ export function DepositAddressPanel({
         ))}
       </dl>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-center gap-2.5 text-body text-secondary" aria-live="polite">
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="flex items-center gap-2.5 text-field text-secondary" aria-live="polite">
           <span aria-hidden="true" className="size-2 rounded-full border border-border-strong" />
           {lastDeposit
             ? t("DashboardPayments.depositAddress.watchingLast", {
@@ -309,7 +319,7 @@ export function DepositAddressPanel({
         ) : null}
       </div>
 
-      <section className="space-y-4">
+      <section className="mt-14 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-subheading font-medium text-primary">
             {t("DashboardPayments.depositAddress.recentTitle")}
@@ -355,8 +365,17 @@ export function DepositAddressPanel({
                         {t(statusMessageKey(deposit.status))}
                       </StatusText>
                     </TableCell>
-                    <TableCell className="text-body text-primary tabular-nums">
-                      {amount ?? "—"}
+                    <TableCell className="text-body whitespace-nowrap text-primary tabular-nums">
+                      {amount === null ? (
+                        "—"
+                      ) : (
+                        <>
+                          {amount.amount}
+                          {amount.asset ? (
+                            <span className="text-secondary"> {amount.asset}</span>
+                          ) : null}
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-body text-primary">{contact ?? "—"}</TableCell>
                     <TableCell className="text-body text-secondary">

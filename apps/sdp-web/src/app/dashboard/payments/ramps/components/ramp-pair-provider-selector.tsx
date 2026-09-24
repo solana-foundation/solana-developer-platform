@@ -387,7 +387,7 @@ export function RampPairProviderSelector({
   );
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-7 refresh:space-y-6">
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
@@ -395,14 +395,15 @@ export function RampPairProviderSelector({
       </RampSelectionProvider>
 
       {refresh ? (
-        <div className="space-y-4">
-          <p className="text-body font-medium text-primary">
+        // The heading is a 13px field label; the tiles sit 12px under it in equal-height rows.
+        <div className="space-y-3">
+          <p className="text-meta font-medium text-primary">
             {t("DashboardPayments.ramps.chooseProvider")}
           </p>
           <div
             role="radiogroup"
             aria-label={t("DashboardPayments.ramps.chooseProvider")}
-            className="grid gap-3 sm:grid-cols-2"
+            className="grid auto-rows-fr gap-3 sm:grid-cols-2"
           >
             {availableProviders.map((option) => (
               <ProviderQuoteCard

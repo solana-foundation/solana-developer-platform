@@ -7,6 +7,7 @@ import {
   formatCurrencyAmount,
   resolveTotalBalance,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { useThemeScope } from "@/components/theme-scope";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,6 +19,7 @@ import { useRampSelection } from "./ramp-selection-context";
 
 export function CurrencyPairSelector() {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const {
     direction,
     fiatCurrencies,
@@ -35,7 +37,14 @@ export function CurrencyPairSelector() {
     onAssetRailChange,
   } = useRampSelection();
 
-  const currencyOptions = useMemo(() => fiatCurrencyOptions(fiatCurrencies), [fiatCurrencies]);
+  // The design's unit picker reads "USD", not a flag and code; the list keeps the currency name.
+  const currencyOptions = useMemo(
+    () =>
+      refresh
+        ? fiatCurrencyOptions(fiatCurrencies).map((option) => ({ ...option, label: option.value }))
+        : fiatCurrencyOptions(fiatCurrencies),
+    [fiatCurrencies, refresh]
+  );
 
   const walletOptions = useMemo(
     () =>
@@ -69,11 +78,14 @@ export function CurrencyPairSelector() {
   const offrampExceeds =
     offrampBalance !== null && amount !== "" && Number(amount) > Number(offrampBalance);
 
-  const fiatCombobox = (
+  // `hideLabel` is for the select beside the amount: on a refresh surface the design draws it
+  // as a 96px unit picker under the amount's own label.
+  const fiatCombobox = (hideLabel = false) => (
     <Combobox
       label={
         isOfframp ? t("DashboardPayments.ramps.convertTo") : t("DashboardPayments.ramps.currency")
       }
+      hideLabel={hideLabel}
       value={selectedPair.fiatCurrency}
       onChange={(v) => {
         const currency = fiatCurrencies.find((c) => c === v);
@@ -86,9 +98,10 @@ export function CurrencyPairSelector() {
     />
   );
 
-  const assetCombobox = (
+  const assetCombobox = (hideLabel = false) => (
     <Combobox
       label={isOfframp ? t("DashboardPayments.asset") : t("DashboardPayments.ramps.convertTo")}
+      hideLabel={hideLabel}
       value={selectedPair.assetRail}
       onChange={(v) => {
         const rail = assetRails.find((r) => r === v);
@@ -102,7 +115,7 @@ export function CurrencyPairSelector() {
 
   return (
     <div className="flex flex-col gap-4 refresh:gap-6">
-      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
+      <div className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_200px] refresh:gap-3 refresh:sm:grid-cols-[minmax(0,1fr)_96px]">
         <div className="flex flex-col gap-2">
           <Label className="text-tertiary" htmlFor={`${direction}-ramp-amount`}>
             {t("DashboardPayments.ramps.amount")}
@@ -132,7 +145,7 @@ export function CurrencyPairSelector() {
             }
           />
         </div>
-        {isOfframp ? assetCombobox : fiatCombobox}
+        {isOfframp ? assetCombobox(refresh) : fiatCombobox(refresh)}
       </div>
 
       {/* A refresh surface stacks the wallet and the asset full width, one question per row. */}
@@ -163,7 +176,7 @@ export function CurrencyPairSelector() {
             isLoading={walletsLoading}
           />
         ) : null}
-        {isOfframp ? fiatCombobox : assetCombobox}
+        {isOfframp ? fiatCombobox() : assetCombobox()}
       </div>
     </div>
   );

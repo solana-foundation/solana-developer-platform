@@ -219,7 +219,7 @@ export function CounterpartyWorkspace({
             onClear: () => setQuery(""),
           }}
           placeholder={t("DashboardPayments.counterparty.searchPlaceholder")}
-          className="w-full sm:w-80"
+          className="w-full sm:w-56"
         />
       </ListToolbar>
       {total > initialCounterparties.length ? (

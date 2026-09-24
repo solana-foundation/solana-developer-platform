@@ -248,8 +248,8 @@
      and review headings; subheading is a section or question; field is a form value; nav is
      sidebar items and tabs; body is list and table text; meta is labels, hints and secondary
      lines. */
-  --font-size-amount: 48px;
-  --line-height-amount: 52px;
+  --font-size-amount: 40px;
+  --line-height-amount: 44px;
   --letter-spacing-amount: -0.02em;
   --font-size-quote: 24px;
   --line-height-quote: 30px;

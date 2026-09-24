@@ -135,7 +135,6 @@ export function OnrampRail({
     <RampWizardShell
       steps={[...preSteps, ...displaySteps(wizard, t)]}
       stepIndex={preSteps.length + wizard.stepIndex}
-      prominentTitle={wizard.currentStepId === "REVIEW"}
       footerHint={
         wizard.currentStepId === "DEPOSIT" && wizard.fields.provider === null
           ? t("DashboardPayments.ramps.pickProviderHint")

@@ -100,7 +100,7 @@ function TransactionSearch({
       }}
       placeholder={t("DashboardPayments.transactions.searchIdOrSignature")}
       aria-label={t("DashboardPayments.transactions.searchTransactions")}
-      className="w-full sm:w-80"
+      className="w-full sm:w-56"
     />
   );
 }

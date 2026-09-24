@@ -92,7 +92,6 @@ export function OnchainSendRail({
       steps={[...preSteps, ...getOnchainSendSteps(t), sentStep]}
       stepIndex={preSteps.length + (wizard.finished ? wizard.stepIndex + 1 : wizard.stepIndex)}
       completionTitle={sendCompletionTitle(wizard, t)}
-      prominentTitle={wizard.currentStepId === "REVIEW"}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
       primaryLabel={sendPrimaryLabel(wizard, t)}
       walletsError={wizard.liveWalletsError}

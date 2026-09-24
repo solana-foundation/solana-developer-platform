@@ -26,7 +26,7 @@ export function WizardStepProgress({
       {...props}
       className={cn(
         "flex shrink-0 items-center gap-4",
-        "refresh:grid refresh:w-full refresh:grid-cols-[minmax(0,1fr)_auto] refresh:items-baseline refresh:gap-x-4 refresh:gap-y-3",
+        "refresh:grid refresh:w-full refresh:grid-cols-[minmax(0,1fr)_auto] refresh:items-baseline refresh:gap-x-4 refresh:gap-y-2",
         className
       )}
     >

@@ -57,7 +57,6 @@ export function BatchSendRail({
     <RampWizardShell
       steps={steps}
       stepIndex={finished ? wizard.stepIndex + 1 : wizard.stepIndex}
-      prominentTitle={wizard.isLastStep && !finished}
       primaryDisabled={wizard.submitting || !wizard.canProceed}
       primaryLabel={batchPrimaryLabel(wizard, t)}
       secondaryDisabled={wizard.submitting}

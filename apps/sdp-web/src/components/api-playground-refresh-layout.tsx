@@ -29,8 +29,9 @@ const REQUEST_VIEWS = [
 const TAB_LIST_CLASS =
   "gap-6 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
 
+// The design's playground fields: 36px underline controls with 14px values.
 const SELECT_CLASS =
-  "h-11 w-full cursor-pointer appearance-none border-0 border-b border-border-default bg-transparent pr-8 text-field text-primary outline-none transition-colors hover:border-border-strong focus:border-border-strong";
+  "h-9 w-full cursor-pointer appearance-none border-0 border-b border-border-default bg-transparent pr-8 text-body text-primary outline-none transition-colors hover:border-border-strong focus:border-border-strong";
 
 function subscribeToNothing() {
   return () => {};
@@ -153,6 +154,7 @@ function PlaygroundField({
     control = (
       <Input
         id={id}
+        size="md"
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
         placeholder={field.placeholder}
@@ -201,11 +203,12 @@ function RunShortcut() {
   );
 }
 
+// Code reads at 13px on 20px lines, the design's.
 function CodeBody({ content, language }: { content: string; language: "javascript" | "json" }) {
   return (
     <div
       data-testid="api-playground-code"
-      className="min-h-0 overflow-x-auto font-mono text-meta [&_.shiki]:!text-meta"
+      className="min-h-0 overflow-x-auto font-mono text-meta leading-5 [&_.shiki]:!text-meta [&_.shiki]:!leading-5 [&_pre]:!leading-5"
     >
       <HighlightedCode content={content} language={language} />
     </div>
@@ -214,7 +217,7 @@ function CodeBody({ content, language }: { content: string; language: "javascrip
 
 function PlainCode({ content }: { content: string }) {
   return (
-    <pre className="overflow-x-auto font-mono text-meta leading-7 whitespace-pre text-primary">
+    <pre className="overflow-x-auto font-mono text-meta leading-5 whitespace-pre text-primary">
       {content}
     </pre>
   );
@@ -416,7 +419,8 @@ export function ApiPlaygroundRefreshLayout({
   return (
     <div className="w-full pb-12">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="relative flex min-w-0 items-center gap-5 rounded-control border border-border-default px-5 py-3 transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
+        {/* 60px tall: two lines of 18/24 and 13/16 inside 9px and the rule. */}
+        <div className="relative flex min-w-0 items-center gap-5 rounded-control border border-border-default px-5 py-[9px] transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
           <span className="w-12 shrink-0 font-mono text-meta text-tertiary">
             {activeEndpoint.method}
           </span>
@@ -459,10 +463,10 @@ export function ApiPlaygroundRefreshLayout({
         </Button>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-meta text-secondary">
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-body text-secondary">
         {apiKeySelector ? (
           <>
-            <span className="text-tertiary">{t("Shared.SharedComponents.apiKeyLabel")}</span>
+            <span>{t("Shared.SharedComponents.apiKeyLabel")}</span>
             {apiKeySelector}
           </>
         ) : null}
@@ -492,13 +496,15 @@ export function ApiPlaygroundRefreshLayout({
         </div>
       ) : null}
 
-      <div className="mt-8 grid border-t border-border-default lg:grid-cols-2">
+      {/* The design's rhythm: 24px to the rule, 48px under it to the two 14px medium section
+          names, 32px to the view tabs, 32px more to the fields. */}
+      <div className="mt-6 grid border-t border-border-default lg:grid-cols-2">
         <section
           aria-labelledby="api-playground-request"
-          className="min-w-0 pt-8 lg:border-r lg:border-border-default lg:pr-12"
+          className="min-w-0 pt-12 lg:border-r lg:border-border-default lg:pr-12"
         >
           <div className="flex items-baseline justify-between gap-4">
-            <h2 id="api-playground-request" className="text-subheading text-primary">
+            <h2 id="api-playground-request" className="text-body font-medium text-primary">
               {t("Shared.SharedComponents.request")}
             </h2>
             <button
@@ -516,7 +522,7 @@ export function ApiPlaygroundRefreshLayout({
             bordered={false}
             value={view}
             onValueChange={(value) => setView(value as RequestView)}
-            className="mt-6"
+            className="mt-8"
           >
             <TabList className={TAB_LIST_CLASS}>
               {REQUEST_VIEWS.map((entry) => (
@@ -560,10 +566,10 @@ export function ApiPlaygroundRefreshLayout({
 
         <section
           aria-labelledby="api-playground-response"
-          className="min-w-0 border-t border-border-default pt-8 lg:border-t-0 lg:pl-12"
+          className="min-w-0 border-t border-border-default pt-12 lg:border-t-0 lg:pl-12"
         >
           <div className="flex items-baseline justify-between gap-4">
-            <h2 id="api-playground-response" className="text-subheading text-primary">
+            <h2 id="api-playground-response" className="text-body font-medium text-primary">
               {hasRun
                 ? t("Shared.SharedComponents.response")
                 : t("Shared.SharedComponents.exampleResponse")}
@@ -572,7 +578,9 @@ export function ApiPlaygroundRefreshLayout({
               <ExecutionStatus execution={execution} />
             </p>
           </div>
-          <div className="mt-6">
+          {/* The body starts level with the request's view tabs; the design's Body / Headers
+              tabs wait on the proxy passing response headers through. */}
+          <div className="mt-8">
             <CodeBody content={hasRun ? responseBody : exampleBody} language="json" />
           </div>
         </section>

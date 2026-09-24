@@ -551,7 +551,8 @@
       "loadFailed": "Unable to load counterparties",
       "metadataMissing": "Counterparty metadata response was empty.",
       "validation": {
-        "required": "Required"
+        "required": "Required",
+        "invalidAddress": "Enter a valid Solana address."
       },
       "addExternalAccount": "Add crypto address",
       "addExternalAccountDescription": "Attach a crypto wallet for this counterparty. The address is screened for risk before it's added.",
@@ -583,7 +584,17 @@
       "businessNamePlaceholder": "Acme Corp",
       "externalId": "External ID",
       "optional": "(optional)",
-      "externalIdPlaceholder": "your-internal-id",
+      "externalIdPlaceholder": "customer-4821",
+      "nameLabel": "Name",
+      "typeHint": "Whether this contact is a person or a business.",
+      "nameHint": "How this contact appears across Payments.",
+      "walletAddressHint": "A Solana address to pay this contact at. More can be added later.",
+      "walletAddressPlaceholder": "Solana address",
+      "externalIdHint": "Your own reference for this contact, such as a customer ID.",
+      "optionalWord": "optional",
+      "addToContacts": "Add to contacts",
+      "skipAddress": "Skip the address",
+      "addressNotAttached": "{name} was added, but the address could not be attached: {error}",
       "basics": "Basics",
       "entityType": "Entity type",
       "individual": "Individual",

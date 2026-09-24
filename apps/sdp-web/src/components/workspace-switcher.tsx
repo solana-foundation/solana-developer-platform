@@ -98,7 +98,7 @@ export function WorkspaceSwitcher({
           aria-busy={isOrganizationSwitching || isProjectSwitching}
           aria-label={activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization")}
           className={cn(
-            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:h-12 refresh:hover:bg-fill",
+            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:h-10 refresh:hover:bg-fill",
             collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2 refresh:gap-3"
           )}
         >
@@ -106,11 +106,11 @@ export function WorkspaceSwitcher({
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-nav refresh:font-medium">
+                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-field refresh:leading-tight refresh:font-medium">
                   {activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization")}
                 </span>
                 {activeProject ? (
-                  <span className="truncate text-xs leading-tight text-tertiary">
+                  <span className="truncate text-xs leading-tight text-tertiary refresh:text-meta refresh:leading-tight refresh:text-secondary">
                     {activeProject.name}
                   </span>
                 ) : null}

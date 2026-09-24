@@ -105,8 +105,8 @@ function ListToolbarSkeleton() {
     <div className="flex flex-wrap items-center justify-between gap-3" data-loading-list-toolbar>
       <SkeletonBlock className="h-control-md w-24 rounded-control" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:flex-nowrap">
-        <SkeletonBlock className="h-control-md w-32 shrink-0 rounded-control" />
-        <SkeletonBlock className="h-control-md w-full rounded-control sm:w-80" />
+        <SkeletonBlock className="h-control-md w-24 shrink-0 rounded-control" />
+        <SkeletonBlock className="h-control-md w-full rounded-control sm:w-56" />
       </div>
     </div>
   );
@@ -176,7 +176,7 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
   return (
     <div className="space-y-1.5" data-loading-field>
       <SkeletonBlock className="h-3.5 w-24" />
-      <div className="flex h-11 items-center border-b border-border-default">
+      <div className="flex h-9 items-center border-b border-border-default">
         <SkeletonBlock className={`h-4 max-w-full ${value}`} />
       </div>
     </div>
@@ -190,22 +190,24 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
 function FlowPageSkeleton({ layout, children }: { layout: "payments-pay"; children: ReactNode }) {
   return (
     <div
-      className="flex min-h-full w-full flex-col"
+      className="flex h-full min-h-0 w-full flex-col"
       data-loading-layout={layout}
       data-loading-wizard
       aria-busy="true"
     >
-      <div className="mx-auto w-full max-w-flow flex-1 pb-10">
-        <div className="mb-10 space-y-3" data-loading-stepper>
-          <div className="flex items-center justify-between gap-3">
-            <SkeletonBlock className="h-4 w-24" />
-            <SkeletonBlock className="h-4 w-20" />
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6">
+        <div className="mx-auto w-full max-w-flow">
+          <div className="mb-12 space-y-2" data-loading-stepper>
+            <div className="flex items-center justify-between gap-3">
+              <SkeletonBlock className="h-4 w-24" />
+              <SkeletonBlock className="h-4 w-20" />
+            </div>
+            <SkeletonBlock className="h-1 w-full rounded-full" />
           </div>
-          <SkeletonBlock className="h-1 w-full rounded-full" />
+          <div className="space-y-8">{children}</div>
         </div>
-        <div className="space-y-8">{children}</div>
       </div>
-      <div className="sticky bottom-16 -mx-3 -mb-5 rounded-b-2xl border-t border-border-subtle bg-[color-mix(in_srgb,var(--surface-raised)_97%,var(--emph-xh))] px-3 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-0 md:-mx-6 md:-mb-6 md:px-6">
+      <div className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
         <div className="mx-auto flex w-full max-w-flow items-center justify-end gap-3">
           <SkeletonBlock className="h-control-lg w-20 rounded-control" />
           <SkeletonBlock className="h-control-lg w-40 rounded-control" />

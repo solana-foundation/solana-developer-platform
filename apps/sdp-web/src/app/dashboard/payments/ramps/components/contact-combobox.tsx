@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useThemeScope } from "@/components/theme-scope";
 import { Combobox } from "@/components/ui/combobox";
 import { InfoHint } from "@/components/ui/info-hint";
 import { useTranslations } from "@/i18n/provider";
@@ -11,7 +12,10 @@ export interface ContactControls {
   onChange: (counterpartyId: string) => void;
 }
 
-/** The "Contact" field Pay and Deposit open with: active contacts, searchable, with a hint. */
+/**
+ * The "Contact" field Pay and Deposit open with: active contacts, searchable. Outside a refresh
+ * surface the label carries a hint; the design's label stands alone.
+ */
 export function ContactCombobox({
   counterpartiesResult,
   onChange,
@@ -19,6 +23,7 @@ export function ContactCombobox({
   hint,
 }: ContactControls & { value: string; hint: string }) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const options = useMemo(
     () =>
       counterpartiesResult.data
@@ -33,7 +38,7 @@ export function ContactCombobox({
   return (
     <Combobox
       label={t("DashboardPayments.payForm.contact")}
-      labelAccessory={<InfoHint text={hint} />}
+      labelAccessory={refresh ? undefined : <InfoHint text={hint} />}
       value={value === "" ? null : value}
       onChange={onChange}
       options={options}
