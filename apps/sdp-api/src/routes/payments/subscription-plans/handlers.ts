@@ -18,13 +18,16 @@ import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
-import { type AppContext, getPaymentSubscriptionsRepository } from "../context";
 import {
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
   resolvePlanRuntime,
-  resolvePlanWriteWallet,
-} from "../shared/subscriptions";
+} from "@/services/payments/recurring-payments/shared";
+import {
+  type AppContext,
+  getPaymentSubscriptionsRepository,
+  getSponsoredFeePayer,
+} from "../context";
 import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionPlanSchema,
@@ -247,7 +250,7 @@ export const prepareCreateSubscriptionPlan = async (
   const pullers = (
     body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
   ).map((value) => assertValidAddress(value, "pullers entry"));
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
   const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
   const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
 
@@ -264,7 +267,12 @@ export const prepareCreateSubscriptionPlan = async (
     tokenProgram,
   });
   const updatedPlan = await persistPlanPda(c, plan, planPda);
-  const preparedTransaction = await buildPreparedSubscriptionTransaction(c, [instruction], [owner]);
+  const preparedTransaction = await buildPreparedSubscriptionTransaction(
+    c.env,
+    await getSponsoredFeePayer(c),
+    [instruction],
+    [owner]
+  );
   const response: PreparePaymentSubscriptionPlanResponse = {
     subscriptionPlan: mapPlan(updatedPlan),
     planPda,
@@ -298,7 +306,9 @@ export const updateSubscriptionPlan = async (
     throw new AppError("NOT_FOUND", "Subscription plan not found");
   }
 
-  await resolvePlanWriteWallet(c, existingPlan);
+  const scope = await resolveScope(c);
+  const ownerWallet = resolveWallet(scope.wallets, existingPlan.owner_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const updated = await repo.updatePlan({

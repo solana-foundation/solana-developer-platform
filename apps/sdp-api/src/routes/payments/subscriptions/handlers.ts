@@ -33,20 +33,21 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { parseI64String, parseU64String } from "@/services/payment-operation.service";
+import {
+  assertSubscriptionTokenMint,
+  buildPreparedSubscriptionTransaction,
+  derivePlanAddresses,
+  resolvePlanRuntime,
+} from "@/services/payments/recurring-payments/shared";
 import {
   type AppContext,
   getPaymentSubscriptionsRepository,
   getSponsoredFeePayer,
 } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
-import {
-  assertSubscriptionTokenMint,
-  buildPreparedSubscriptionTransaction,
-  derivePlanAddresses,
-  resolvePlanRuntime,
-  resolvePlanWriteWallet,
-} from "../shared/subscriptions";
+import { resolveScope, resolveWallet } from "../wallets";
 import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
@@ -274,7 +275,7 @@ export const prepareSubscriptionAuthorization = async (
     body.subscriberTokenAccount,
     "subscriberTokenAccount"
   );
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
   const expectedCreatedAt = parseU64String(body.expectedPlanCreatedAt, "expectedPlanCreatedAt");
   const expectedSubscriptionAuthorityInitId = parseI64String(
     body.expectedSubscriptionAuthorityInitId,
@@ -313,10 +314,10 @@ export const prepareSubscriptionAuthorization = async (
     subscriptionPda,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c,
+    c.env,
+    feePayer,
     [initAuthorityInstruction, subscribeInstruction],
-    [subscriber],
-    feePayer
+    [subscriber]
   );
   const response: PreparePaymentSubscriptionAuthorizationResponse = {
     subscription: mapSubscription(updatedSubscription),
@@ -418,7 +419,8 @@ async function prepareSubscriptionLifecycle(
           tokenMint,
         });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c,
+    c.env,
+    await getSponsoredFeePayer(c),
     [instruction],
     [subscriber]
   );
@@ -457,13 +459,11 @@ export const prepareSubscriptionCollection = async (
     throw badRequest("Subscription plan must be active before collection");
   }
 
-  const callerWallet = await resolvePlanWriteWallet(
-    c,
-    plan,
-    plan.puller_wallet_id ?? plan.owner_wallet_id
-  );
+  const scope = await resolveScope(c);
+  const callerWallet = resolveWallet(scope.wallets, plan.puller_wallet_id ?? plan.owner_wallet_id);
+  assertApiKeyWalletAccess(scope.auth, callerWallet.walletId, ["payments:write"]);
 
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan, plan.amount);
+  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c.env, plan);
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
@@ -483,7 +483,8 @@ export const prepareSubscriptionCollection = async (
     tokenProgram,
   });
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
-    c,
+    c.env,
+    await getSponsoredFeePayer(c),
     [instruction],
     [caller]
   );
