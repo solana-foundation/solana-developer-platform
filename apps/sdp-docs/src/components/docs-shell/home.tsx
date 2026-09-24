@@ -145,13 +145,13 @@ type HomeCard = {
 const modelSteps: HomeCard[] = [
   {
     name: "Understanding SDP",
-    desc: "Interfaces, authentication, and core conventions.",
+    desc: "The interfaces, the authentication model, and the shared conventions.",
     href: "/docs/introduction",
     graphic: <ArchitectureSketch />,
   },
   {
     name: "Wallets & Policies",
-    desc: "Provision custody wallets and control signing with policies.",
+    desc: "Create custody wallets and control how they sign with policies.",
     href: "/docs/guides/setup-wallets",
     graphic: <WalletsSketch />,
   },
@@ -163,19 +163,19 @@ const modelSteps: HomeCard[] = [
   },
   {
     name: "Ramps",
-    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    desc: "Move between fiat and tokens through the onramp and offramp providers.",
     href: "/docs/payments/ramps",
     graphic: <RampsSketch />,
   },
   {
     name: "Onchain Transfers",
-    desc: "Send batch transfers, recurring payments, or public payment requests onchain.",
+    desc: "Send batch transfers, recurring payments, and payment requests onchain.",
     href: "/docs/payments/send-basic-payment",
     graphic: <TransfersSketch />,
   },
   {
     name: "Markets",
-    desc: "Enable secondary market activity for your issued assets.",
+    desc: "Trade the assets you issue on a secondary market.",
     graphic: <MarketsSketch />,
     badge: "Coming soon",
     disabled: true,
@@ -185,37 +185,37 @@ const modelSteps: HomeCard[] = [
 const tutorials: HomeCard[] = [
   {
     name: "Issue a Regulated Stablecoin",
-    desc: "Build a GENIUS-compliant digital dollar on Solana with institutional custody and integrated compliance.",
+    desc: "Issue a GENIUS-compliant digital dollar with institutional custody and compliance controls.",
     href: "/docs/tutorials/issue-a-regulated-stablecoin",
     Icon: CircleDollarSignIcon,
   },
   {
     name: "Manage Payroll with Recurring Payments",
-    desc: "Schedule recurring onchain transfers to pay your team on time, every time.",
+    desc: "Schedule recurring onchain transfers to pay your team.",
     href: "/docs/payments/send-payouts",
     Icon: RepeatIcon,
   },
   {
     name: "Cash In, Cash Out",
-    desc: "Move between fiat and crypto through our onramp and offramp partners.",
+    desc: "Move between fiat and tokens through the onramp and offramp providers.",
     href: "/docs/payments/ramps",
     Icon: ArrowLeftRightIcon,
   },
   {
     name: "Batch Payments",
-    desc: "Disburse to many recipients in a single batch transfer.",
+    desc: "Pay many recipients in one batch transfer.",
     href: "/docs/payments/send-payouts",
     Icon: LayersIcon,
   },
   {
     name: "Payment Requests",
-    desc: "Request and track inbound payments to your custody wallets.",
+    desc: "Request an inbound payment to a custody wallet, then track it.",
     href: "/docs/payments/accept-overview",
     Icon: ReceiptTextIcon,
   },
   {
     name: "Self-Hosting",
-    desc: "Deploy and operate SDP on your own infrastructure. Customize it to your use case.",
+    desc: "Deploy and run SDP on your own infrastructure.",
     href: "/docs/self-hosting",
     Icon: ServerIcon,
   },
@@ -224,19 +224,19 @@ const tutorials: HomeCard[] = [
 const aiResources: HomeCard[] = [
   {
     name: "Documentation for AI",
-    desc: "Machine-readable entry points and ingestion guidance for agents consuming SDP.",
+    desc: "Machine-readable entry points, and how an agent should read them.",
     href: "/docs/reference/docs-for-ai",
     Icon: BotIcon,
   },
   {
     name: "llms.txt",
-    desc: "Concise discovery file with canonical URLs, supported surfaces, and key starting pages.",
+    desc: "A short discovery file with the canonical URLs and the pages to start from.",
     href: "/docs/ai/llms.txt",
     Icon: FileTextIcon,
   },
   {
     name: "OpenAPI Contract",
-    desc: "Machine-readable API contract for the public SDP API.",
+    desc: "The machine-readable contract for the public SDP API.",
     href: "https://api.solana.com/openapi.json",
     Icon: BracesIcon,
   },
@@ -288,8 +288,8 @@ export function DocsHome() {
       <section className="launch-home-section">
         <SectionHeading {...HOME_SECTIONS.partners} />
         <p className="launch-home-section-intro">
-          Access the best of the Solana ecosystem with a unified experience. We provide a stable and
-          consistent API and dashboard to utilize these providers according to your requirements.
+          SDP connects you to these providers through one API and one dashboard. Choose the
+          providers you need. The interface stays the same.
         </p>
         <div className="launch-home-partners">
           {PARTNER_ROWS.map((row) => (
@@ -330,8 +330,8 @@ export function ProviderCallout() {
         Interested in being a provider?
       </p>
       <p className="launch-docs-toc-card-desc">
-        We onboard custody, RPC, compliance, and ramp integrations through a self-service
-        contribution process.
+        You can add a custody, RPC, compliance, or ramp integration yourself. The guide explains
+        each step.
       </p>
       <Link href="/docs/reference/provider-onboarding" className="launch-docs-toc-card-link">
         Visit our guide <ArrowRightIcon size={12} aria-hidden="true" />

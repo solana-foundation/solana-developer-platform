@@ -1,15 +1,30 @@
 ---
-title: Infrastructure Provider Onboarding
-description: Add an infrastructure provider integration to SDP through the self-service contribution process.
+title: Infrastructure provider onboarding
+description: How a vendor contributes a new infrastructure provider integration to the SDP codebase.
 ---
 
-SDP currently supports infrastructure provider integrations across custody, RPC, compliance, and ramps. We will add future integration categories as SDP expands.
+This page is for a vendor who wants to contribute an infrastructure provider integration to SDP. It
+covers the intake forms, the evaluation criteria, and what the contributed pull request must
+contain.
 
-Onboarded providers are presented as available integrations, not endorsed or recommended partners. Institutions using SDP are responsible for their own provider due diligence.
+This page is not an activation guide. It does not explain how to enable an existing provider for
+your organization, and it does not explain how to configure a provider on a self-hosted deployment.
+If you arrived here looking for either of those, see
+[Ramp providers](/docs/payments/ramps-providers) for how SDP checks provider availability on every
+call, and see the
+[self-hosting environment reference](/docs/self-hosting/env-reference) for the variables a
+self-hosted deployment reads.
 
-## Start here
+SDP supports infrastructure provider integrations across custody, RPC, compliance, and ramps. SDP
+adds more integration categories as the product expands.
 
-Select the category that matches your integration, complete the intake form, and review the criteria before opening a pull request.
+An onboarded provider appears as an available integration. SDP does not endorse or recommend it.
+Each institution that uses SDP is responsible for its own provider due diligence.
+
+## Categories and intake forms
+
+Select the category that matches your integration. Complete the intake form, and review the
+criteria, before you open a pull request.
 
 | Category | Intake form | Criteria |
 | --- | --- | --- |
@@ -17,52 +32,64 @@ Select the category that matches your integration, complete the intake form, and
 | RPC infrastructure | [Complete RPC intake](https://solanafoundation.typeform.com/to/cq5m65jI) | [Download RPC criteria PDF](/provider-onboarding/rpc-providers.pdf) |
 | Ramp | [Complete ramp intake](https://solanafoundation.typeform.com/to/sxTGbwXt) | [Download ramp criteria PDF](/provider-onboarding/ramp-criteria.pdf) |
 
-If your integration is for compliance or another infrastructure category without a published intake, contact the SDP team before opening a pull request.
+Contact the SDP team before you open a pull request if your integration is for compliance, or for
+another infrastructure category without a published intake.
 
 ## Onboarding steps
 
 1. Review the criteria PDF for your category.
 2. Complete the matching intake form.
 3. Provide sandbox or playground API access.
-4. Share documentation, test credentials, supported networks, rate limits, and sandbox limitations.
-5. Build the SDP integration with tests and docs.
-6. Open a pull request that links to the intake submission or tracking issue.
+4. Share your documentation, test credentials, supported Solana clusters, rate limits, and sandbox
+   limitations.
+5. Build the SDP integration, with tests and documentation.
+6. Open a pull request that links to the intake submission or to the tracking issue.
 
-The SDP team reviews intake completeness within five business days. Gate evaluation usually takes one to three weeks depending on category, documentation completeness, and required technical validation.
+The SDP team reviews intake completeness within five business days. Gate evaluation usually takes
+one to three weeks. The exact time depends on the category, the completeness of the documentation,
+and the technical validation the category requires.
 
 ## Evaluation
 
-Each category uses the finalized criteria linked above. Every review starts with hard gates, followed by scored evaluation when applicable.
+Each category uses the finalized criteria linked above. Every review starts with the hard gates. A
+scored evaluation follows, where one applies.
 
-At a high level, SDP evaluates:
+SDP evaluates the following:
 
 - Solana compatibility for the category.
 - Stable sandbox or playground access.
 - Clear API and integration documentation.
 - Predictable error handling and testability.
 - Operational readiness and support.
-- Required regulatory, compliance, or security posture for the category.
+- The regulatory, compliance, or security posture that the category requires.
 
-Providers that do not clear the required gates may be tracked for future support, but should not be presented as available in SDP until gaps are resolved. A provider that clears evaluation becomes available per the deployment's configuration — either generally available to every organization, or gated behind a per-organization Manual Provider Activation when commercial or operational onboarding is still required.
+The SDP team can track a provider that does not clear the required gates, for future support. SDP
+does not present that provider as available until the gaps are resolved.
+
+A provider that clears evaluation becomes available according to the deployment's configuration.
+It is either generally available to every organization, or it is gated behind a per-organization
+Manual Provider Activation. The gated path applies when commercial or operational onboarding is
+still required.
 
 ## Access requirements
 
-Provide access suitable for repeatable validation, including:
+Provide access that supports repeatable validation, including:
 
-- Sandbox API keys or equivalent credentials.
-- Test accounts, wallets, endpoints, or settlement rails when required.
-- Supported Solana networks.
-- Known rate limits, feature flags, and sandbox limitations.
-- Technical support contact for review.
+- Sandbox API keys, or equivalent credentials.
+- Test accounts, wallets, endpoints, or settlement routes, where the flow requires them.
+- The Solana clusters you support.
+- Known rate limits, feature conditions, and sandbox limitations.
+- A technical support contact for the review.
 
 ## Pull request expectations
 
 An SDP infrastructure provider contribution usually includes:
 
 - Provider metadata and capability registration.
-- API support for setup, configuration, and category-specific runtime operations.
-- Dashboard support where applicable.
+- API support for setup, configuration, and the runtime operations of the category.
+- Dashboard support, where it applies.
 - Tests for setup, success paths, failure states, disabled configuration, and missing credentials.
-- User-facing docs for setup, sandbox behavior, and provider limits.
+- User-facing documentation for setup, sandbox behavior, and provider limits.
 
-Open the pull request after intake is complete, or after the SDP team has created a tracking issue while intake is being finalized.
+Open the pull request after your intake is complete. You can also open it after the SDP team
+creates a tracking issue while the intake is being finalized.

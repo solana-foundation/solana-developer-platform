@@ -90,6 +90,58 @@ function toPageSlug(filePath: string): string {
   return relativePath.replace(/\.mdx$/, "");
 }
 
+/**
+ * Mirrors the GitHub-style ids rehype-slug gives our headings: strip the inline
+ * markup, lowercase, drop everything that is not a word character or a space,
+ * then hyphenate. A second heading with the same text gets the `-1`, `-2`, …
+ * suffix, same as rehype-slug.
+ */
+function toHeadingId(headingText: string): string {
+  return headingText
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_~]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/\s+/g, "-");
+}
+
+function extractHeadingIds(source: string): Set<string> {
+  const ids = new Set<string>();
+  const seen = new Map<string, number>();
+
+  for (const match of source.matchAll(/^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm)) {
+    const base = toHeadingId(match[1] ?? "");
+    if (!base) {
+      continue;
+    }
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    ids.add(count === 0 ? base : `${base}-${count}`);
+  }
+
+  return ids;
+}
+
+async function loadHeadingIds(pages: Map<string, string>): Promise<Map<string, Set<string>>> {
+  const headings = new Map<string, Set<string>>();
+
+  for (const [slug, filePath] of pages) {
+    const raw = await fs.readFile(filePath, "utf8");
+    headings.set(
+      normalizePathname(getDocsPagePath(slug)),
+      extractHeadingIds(stripMarkdownSource(raw))
+    );
+  }
+
+  return headings;
+}
+
+function extractFragment(destination: string): string {
+  return destination.split("#").slice(1).join("#").split("?")[0] ?? "";
+}
+
 async function loadDocsMeta(): Promise<DocsMeta> {
   const json = await fs.readFile(docsMetaPath, "utf8");
   return JSON.parse(json) as DocsMeta;
@@ -278,6 +330,7 @@ async function run(): Promise<void> {
     loadSectionDirs(),
     loadPublicAssetPaths(),
   ]);
+  const headingIds = await loadHeadingIds(pages);
   const allowedInternalPaths = createAllowedInternalPaths(pages.keys());
   for (const assetPath of publicAssetPaths) {
     allowedInternalPaths.add(normalizePathname(assetPath));
@@ -287,9 +340,27 @@ async function run(): Promise<void> {
   const links = await collectLinks(pages);
   const externalUrls = new Map<string, LinkReference[]>();
 
+  function checkFragment(link: LinkReference, targetPath: string, destination: string): void {
+    const fragment = extractFragment(destination);
+    if (!fragment) {
+      return;
+    }
+    const targetHeadings = headingIds.get(targetPath);
+    if (!targetHeadings || targetHeadings.has(fragment)) {
+      return;
+    }
+    findings.push(
+      `${link.sourcePath}:${link.line} references missing heading "#${fragment}" on "${targetPath}"`
+    );
+  }
+
   for (const link of links) {
     const destination = link.destination.trim();
-    if (!destination || destination.startsWith("#") || destination.startsWith("mailto:")) {
+    if (!destination || destination.startsWith("mailto:")) {
+      continue;
+    }
+    if (destination.startsWith("#")) {
+      checkFragment(link, normalizePathname(getDocsPagePath(link.sourceSlug)), destination);
       continue;
     }
     if (destination.startsWith("tel:")) {
@@ -317,7 +388,10 @@ async function run(): Promise<void> {
       findings.push(
         `${link.sourcePath}:${link.line} references missing docs path "${destination}" (resolved to "${normalizedInternalPath}")`
       );
+      continue;
     }
+
+    checkFragment(link, normalizedInternalPath, destination);
   }
 
   const externalProbeResults = await Promise.all(

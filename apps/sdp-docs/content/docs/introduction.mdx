@@ -7,28 +7,38 @@ description: One API for tokenization, custody, payments, and compliance on Sola
 import { Steps, Step } from "fumadocs-ui/components/steps";
 import "../../src/styles/ramp-rotator.css";
 
-SDP provides tokenization, custody, payments, and compliance through one stable API in front of interchangeable providers. Operations use project-scoped authentication.
+SDP gives you tokenization, custody, payments, and compliance through one API. The API stays the same
+when you change providers. Every operation authenticates against a project.
 
 | Module | What it does |
 | --- | --- |
 | **Issuance** | Deploy, mint, burn, freeze, pause, and seize tokens built on Token-2022 |
 | **Custody** | Provision and operate Solana wallets through interchangeable custody providers |
-| **Payments** | Move funds onchain — transfers, batches, recurring payments, payment requests, and ramps |
+| **Payments** | Move funds onchain: transfers, batches, recurring payments, payment requests, and ramps |
 | **Compliance** | Screen wallets and transactions against your regulatory program |
 
 ## Background
 
-Institutional capital is moving onchain: [$35 billion in tokenized real-world assets](https://app.rwa.xyz/) across public blockchains, [$3.2 billion of it on Solana](https://app.rwa.xyz/networks/solana), and [tokenized stocks](https://app.rwa.xyz/stocks) — where Solana settles most trading volume — as the fastest-growing slice.
+Institutional capital is moving onchain. Public blockchains now hold
+[$35 billion in tokenized real-world assets](https://app.rwa.xyz/), and
+[$3.2 billion of that sits on Solana](https://app.rwa.xyz/networks/solana).
+[Tokenized stocks](https://app.rwa.xyz/stocks) grow fastest, and Solana settles most of their
+trading volume.
 
-Assets at this scale need regulated custody, enforceable compliance, and auditable controls. SDP provides them as one API, so bringing an asset onchain does not require a team of Solana developers.
+Assets at this scale need regulated custody, enforceable compliance, and auditable controls. SDP
+gives you all three through one API. You do not need a team of Solana developers to bring an asset
+onchain.
 
-## Core Features
+## Core features
 
 <Steps>
 <Step>
-### Unified Programming Interface
+### One interface for every provider
 
-SDP puts one stable API in front of the Solana ecosystem's providers, so you integrate once and swap or add providers without changing your code. The same onramp call works for every ramp provider. The `provider` field is the only thing that changes.
+SDP puts one API in front of the providers in the Solana ecosystem. You integrate once. You can
+then add a provider, or change to another one, without changing your code.
+
+The onramp call below works for every ramp provider. Only the `provider` field changes.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
@@ -91,28 +101,41 @@ curl -X POST https://api.solana.com/v1/payments/ramps/onramp/quote \
 </Tabs>
 </Step>
 <Step>
-### Wallet Custody
+### Wallet custody
 
-Provision signing wallets through integrated custody providers, so your team never handles private keys. Hosted keys never leave the provider's MPC or TEE infrastructure and SDP only handles the signed transaction. Local development keys are encrypted at rest with `AES-256-GCM` using per-organization derived keys, and every signing request passes policy and permission checks before it executes.
+Create signing wallets through a custody provider. Your team never handles a private key.
+
+A hosted key never leaves the provider's MPC or TEE infrastructure. SDP receives only the signed
+transaction. SDP encrypts local development keys at rest with `AES-256-GCM`, using a key derived
+per organization. Every signing request passes a policy check and a permission check before it
+runs.
 
 - **Built on `@solana/keychain`**
 
-   The unified Solana signing interface. Every custody backend is a keychain adapter behind the same signing API, which is what makes providers interchangeable.
+   `@solana/keychain` is the common signing interface for Solana. Each custody provider is an
+   adapter behind that interface. This is what lets you change providers.
 
 - **[Wallet policies](/docs/wallet-operations/policies)**
 
-   Constrain how a wallet can move funds. Destination controls, amount limits, operation permissions, approval requirements, and audit visibility, enforced before any operation executes.
+   A policy limits how a wallet moves funds. It can restrict destinations, cap amounts, allow or
+   deny operations, and require an approval. SDP applies the policy before the operation runs.
 
-- **Scoped custody configuration**
+- **Custody settings resolve by scope**
 
-   Custody settings resolve per project, then organization, then environment, so different teams can run different providers side by side.
+   SDP reads custody settings from the project first, then the organization, then the environment.
+   Two teams can therefore run two different providers side by side.
 </Step>
 <Step>
-### Issuance and Compliance with Token-2022
+### Issuance and compliance with Token-2022
 
-Create tokens from pre-built templates (stablecoin, tokenized security) or configure your own using Token-2022 extensions. Deploy, mint, burn, and manage supply through the dashboard or API.
+Create a token from a template, such as a stablecoin or a tokenized security. You can also
+configure your own token with Token-2022 extensions. Deploy the token, then mint, burn, and manage
+its supply from the dashboard or the API.
 
-Those same extensions are what make compliance enforceable onchain. Freeze individual accounts, pause token activity, seize tokens, and manage each token's **Token Access Control** list for regulated issuance flows. Selected compliance actions accept reason or memo fields for audit trails. Every enforcement action is one POST on the same token surface.
+The same extensions make compliance enforceable onchain. You can freeze one balance, pause all
+transfers, seize tokens, and manage the token's **Token Access Control** list. Some compliance
+actions accept a reason or a memo for the audit trail. Each action is one POST to the same token
+endpoints.
 
 <Tabs items={["JavaScript", "Python", "curl"]}>
 <Tab value="JavaScript">
@@ -154,9 +177,13 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 </Tabs>
 </Step>
 <Step>
-### Ramps and Onchain Transfers
+### Ramps and onchain transfers
 
-SDP exposes unified endpoints for onchain transfers and ramps across providers, built on official Solana program implementations like [Subscriptions](https://github.com/solana-program/subscriptions) and [Solana Pay](https://github.com/solana-foundation/pay). These power Recurring Payments, Payment Requests, and Batch Transfers within SDP.
+SDP gives you one set of endpoints for onchain transfers and for ramps, across every provider. They
+build on the official Solana programs
+[Subscriptions](https://github.com/solana-program/subscriptions) and
+[Solana Pay](https://github.com/solana-foundation/pay). SDP uses these programs for recurring
+payments, payment requests, and batch transfers.
 
 <Tabs items={["Recurring Payments", "Payment Requests", "Batch Transfers"]}>
 <Tab value="Recurring Payments">
@@ -184,7 +211,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
     "counterpartyId": "cp_...",
     "token": "USDC",
     "amount": "25.00",
-    "expiresAt": "2026-08-31T00:00:00.000Z"
+    "expiresAt": "2027-08-31T00:00:00.000Z"
   }'
 ```
 </Tab>
@@ -210,12 +237,24 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tab>
 </Tabs>
 
-The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
+The same API covers onramps and offramps. Rate estimates, quotes, and settlement behave the same way
+for every provider and every corridor.
+
+Money can therefore enter as fiat, stay onchain as a token you issued, and leave again as fiat. You
+get the full cycle, from issuance to circulation to redemption, without a separate integration for
+each provider.
+
+See [Payments](/docs/payments) for transfers. See [Ramps](/docs/payments/ramps) for the supported
+providers, currencies, and corridors.
 </Step>
 <Step>
-### Audit Trails
+### Audit trails
 
-Every sensitive operation is recorded automatically. Each entry captures the acting user or API key, the resource touched, success or failure, client IP, user agent, request id, and secret-redacted metadata, and is queryable per organization.
+SDP records every sensitive operation. You can query the records for your organization.
+
+Each entry holds the user or API key that acted, the resource it touched, and whether the operation
+succeeded. It also holds the client IP address, the user agent, the request ID, and metadata with
+the secrets removed.
 
 | Area                    | Recorded events                                                                    |
 | ----------------------- | ---------------------------------------------------------------------------------- |

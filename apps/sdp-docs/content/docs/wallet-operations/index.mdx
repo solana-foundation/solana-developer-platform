@@ -1,21 +1,46 @@
 ---
 title: Overview
-description: Configure custody-wallet controls, operation permissions, and balances.
+description: Configure the controls, permissions, and balances of a custody wallet.
 ---
 
-This section covers the controls and audit trail attached to a custody wallet: **wallet policies** that gate every wallet operation, and balance visibility. A wallet policy applies uniformly across payment, ramp, issuance, signing, and on-chain program activity, whichever product flow initiates the request.
+This section covers the controls that SDP applies to a custody wallet, and the record it keeps of
+every decision.
+
+A **wallet policy** applies to every operation on the wallet. The same policy covers payments,
+ramps, issuance, signing, and calls to onchain programs. The part of SDP that starts the operation
+does not change the result.
 
 ## What's in this section
 
-- [Wallet policies](/docs/wallet-operations/policies) — configure default decisions, destination controls, amount limits, operation permissions, approval requirements, and audit visibility.
-- [Wallet balances](/docs/wallet-operations/balances) — retrieve token balances and optional USD valuations for a custody wallet.
+- [Wallet policies](/docs/wallet-operations/policies). Set the default decision, restrict
+  destinations, cap amounts, allow or deny operations, require an approval, and read the audit
+  record.
+- [Wallet balances](/docs/wallet-operations/balances). Read the token balances of a custody wallet,
+  with a USD value when a price source is configured.
 
-## API surface
+## Which wallet identifier to use
 
-The current wallet-policy and balance endpoints remain under `/v1/payments/wallets` because they were introduced with the Payments API. Their behavior is wallet-wide: policy operation families include transfer, payment, ramp, issuance, and program.
+SDP gives every wallet two identifiers. Use the right one, or the request returns `404`.
+
+| Identifier | Where it comes from | Where you use it |
+| --- | --- | --- |
+| Provider wallet ID, for example `privy_wallet_123` | The `walletId` field of `GET /v1/wallets` | The `{walletId}` path segment of every endpoint on this page, and the body of `POST /v1/wallets/default-wallet` |
+| SDP wallet ID, for example `cwlt_abc123` | The `id` field of `GET /v1/wallets` | The `sourceCustodyWalletId` and `destinationCustodyWalletId` fields of the payments and ramps endpoints |
+
+The endpoints on this page accept the provider wallet ID only. They do not accept the SDP wallet ID
+and they do not accept the wallet address.
+
+## Where these endpoints live
+
+The wallet policy and balance endpoints sit under `/v1/payments/wallets`. They apply to the whole
+wallet, not only to payments. A policy can cover the transfer, payment, ramp, issuance, and program
+operation families.
 
 ## Related
 
-- [Set up wallets](/docs/guides/setup-wallets) — provision the wallet before configuring controls.
-- [Payments](/docs/payments) — payment and ramp flows that can use a policy-controlled wallet.
-- [Manage API keys](/docs/developing-with-sdp/manage-api-keys) — an API key policy narrows or routes to approval; it never expands what the wallet policy allows.
+- [Set up wallets](/docs/guides/setup-wallets). Create the wallet before you configure its
+  controls.
+- [Payments](/docs/payments). The payment and ramp flows that use a wallet with a policy.
+- [Manage API keys](/docs/developing-with-sdp/manage-api-keys). An API key policy can narrow a
+  wallet policy, or send an operation for approval. It can never widen what the wallet policy
+  allows.

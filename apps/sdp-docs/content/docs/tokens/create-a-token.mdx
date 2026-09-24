@@ -1,24 +1,29 @@
 ---
-title: Create a Token
-description: Define a new token using a template or custom configuration.
+title: Create a token
+description: Define a new token from a template or your own configuration, and save it as a draft.
 steps:
   - Choose a template
   - Configure token identity
   - Set operational settings
-  - Confirm creation
+  - Confirm the draft
 ---
 
-Token creation defines your token's metadata, extensions, and operational rules. The token is saved in SDP but **not yet deployed** onchain — see [Deploy a Token](/docs/tokens/deploy-a-token) for the next step.
+Creating a token defines its metadata, its extensions, and its operational rules. SDP saves the
+result as a **draft**. A draft is not onchain yet. See [Deploy a token](/docs/tokens/deploy-a-token)
+for the step that writes the mint account to Solana.
 
-![Empty Issuance page with a create card](/images/tokens/token-list-empty.png)
+![Issuance page with no tokens yet and a card that starts a new token](/images/tokens/token-list-empty.png)
 
 ## Templates
 
 | Template | Decimals | Key extensions | Use case |
 | --- | --- | --- | --- |
 | `stablecoin` | 6 | Permanent delegate, pausable | USD-backed tokens |
-| `tokenized-security` | 8 | Permanent delegate, pausable, scaled UI amount, allowlist required | Regulated assets |
+| `tokenized-security` | 8 | Permanent delegate, pausable, scaled UI amount, allowlist on by default | Regulated assets |
 | `custom` | 9 | None — you choose | Full control |
+
+These templates cover the common cases. `GET /v1/issuance/templates` returns every template that is
+available to your project.
 
 ## How it works
 
@@ -26,28 +31,33 @@ Token creation defines your token's metadata, extensions, and operational rules.
 
 <Step number={1} title="Choose a template">
 
-Select the **Tokenization Template** that matches your asset model. Templates pre-fill extensions and constraints you can review before confirming.
+Select the **Template** that matches your asset model. A template pre-fills a set of extensions and
+constraints. You can review them before you save the draft.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Navigate to **Issuance** in the sidebar and click **Create token** in the top right corner.
+The dashboard shows a card for each template:
 
-The first screen shows three template cards:
+- **Stablecoin**. USD-backed tokens with compliance controls.
+- **Tokenized Security**. Regulated assets with the allowlist on by default.
+- **Custom**. A Token-2022 setup that you configure yourself.
 
-- **Stablecoin** — USD-backed tokens with compliance controls
-- **Tokenized Security** — regulated assets with allowlist requirement
-- **Custom** — fully configurable Token-2022 setup
+To open those cards and pick one:
 
-Select a template and click **Continue**.
+1. Select **Issuance** in the sidebar.
+2. Select **Add new token** on an empty Issuance page. Select **New** when the list already holds
+   tokens.
+3. Select a template.
+4. Select **Continue**.
 
-![Template selection modal showing Stablecoin, Tokenized Security, and Custom cards](/images/tokens/token-create-templates.png)
+![Template cards for Stablecoin, Tokenized Security, and Custom, with one card selected](/images/tokens/token-create-templates.png)
 
 </Tab>
 <Tab value="API">
 
-List available templates to see what fields each one pre-configures:
+List the templates to see which fields each one pre-configures:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/templates \
@@ -70,27 +80,25 @@ const { data } = await res.json();
 
 <Step number={2} title="Configure token identity">
 
-Set the core metadata: name, symbol, decimals, and a URI pointing to your token metadata JSON.
+Set the core metadata of the token. This is the name, the symbol, the decimal count, and a URI that
+points to your token metadata JSON.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 2 of 3, fill in the identity fields:
+1. Enter the **Metadata URI**. This is an HTTPS URL for the token metadata JSON.
+2. Enter the **Token Name**, for example `Acme Dollar`.
+3. Enter the **Symbol**. Use 1 to 10 characters, made of letters, numbers, or periods.
+4. Enter the **Decimals**. The selected template sets the default value.
+5. Select **Continue**.
 
-- **Metadata URI** — HTTPS URL for the token metadata JSON
-- **Token name** — e.g., "Acme Dollar"
-- **Symbol** — 1–10 uppercase alphanumeric characters, e.g., `ACME`
-- **Decimals** — options depend on the selected template
-
-Click **Continue** when ready.
-
-![Identity configuration form with Metadata URI, Token Name, Symbol, and Decimals fields](/images/tokens/token-create-identity.png)
+![Identity form with the Metadata URI, Token Name, Symbol, and Decimals fields completed](/images/tokens/token-create-identity.png)
 
 </Tab>
 <Tab value="API">
 
-Pass identity fields in the `POST /v1/issuance/tokens` body:
+Pass the identity fields in the `POST /v1/issuance/tokens` body:
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/issuance/tokens \
@@ -113,25 +121,31 @@ curl -X POST https://api.solana.com/v1/issuance/tokens \
 
 <Step number={3} title="Set operational settings">
 
-Choose the exact SDP Wallet that will deploy the token, and configure Token Access Control and supply controls.
+Choose the custody wallet that deploys the token. Configure Token Access Control and the supply
+controls in the same place.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In step 3 of 3, configure:
+1. Select the **Main Signer**. This is the custody wallet that SDP uses for the deployment.
+2. Set the transfer control. **Allowlist** lets only approved destinations receive the token.
+   **Blocklist** blocks the listed destinations instead.
+3. Select **Create draft** to save the token.
 
-- **Main signer** — the exact SDP-controlled wallet selected for deployment
-- **Allowlist** — Token Access Control's allowlist mode; toggle on or off, required and locked for `tokenized-security`
+The `tokenized-security` template turns the allowlist on by default. You can change that setting
+while the token is a draft.
 
-Click **Create token** to save the draft.
-
-![Operational settings form showing Main Signer and Transfer Controls with Allowlist and Denylist toggles](/images/tokens/token-create-settings.png)
+![Operational settings with the Main Signer chosen and the Allowlist and Blocklist transfer controls visible](/images/tokens/token-create-settings.png)
 
 </Tab>
 <Tab value="API">
 
-Add operational fields to the same body. `signingCustodyWalletId` is the exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`), not the provider-specific `walletId` or the wallet's public key. You can omit it while drafting and provide it when you deploy.
+Add the operational fields to the same body.
+
+`signingCustodyWalletId` is the exact SDP wallet `id` that `GET /v1/wallets` returns, for example
+`cwlt_abc123`. Do not pass the provider-specific `walletId`. Do not pass the public key of the
+wallet. You can omit the field while you draft the token and supply it when you deploy.
 
 ```typescript title="create-token.ts"
 const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
@@ -154,7 +168,7 @@ const res = await fetch("https://api.solana.com/v1/issuance/tokens", {
 });
 ```
 
-For a custom token, omit `template` or set it to `"custom"` and pass `overrides.extensions`:
+For a custom token, omit `template` or set it to `"custom"`. Then pass `overrides.extensions`:
 
 ```typescript title="create-custom-token.ts"
 body: JSON.stringify({
@@ -180,21 +194,23 @@ body: JSON.stringify({
 
 </Step>
 
-<Step number={4} title="Confirm creation">
+<Step number={4} title="Confirm the draft">
 
-The token is saved in SDP with status `pending`. Nothing has been written to Solana yet.
+SDP saves the token with the status `pending`. SDP writes nothing to Solana at this point.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-A success toast confirms creation. The token appears in the **Issuance** list with a `Draft` badge.
+A success message confirms that SDP saved the draft. The token then appears in the **Issuance**
+list with a **Draft** badge.
 
-![Issuance list showing the newly created token with a Draft badge](/images/tokens/token-list-draft.png)
+![Issuance list with the new token and its Draft badge](/images/tokens/token-list-draft.png)
 
-Open the token to see its detail page. The status shows **Not deployed** and a **Deploy** button is available to move to the next step.
+Open the token to see its detail page. The status reads **Not deployed**, and a **Deploy** control
+takes you to the next step.
 
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+![Token detail page with the status Not deployed and the Deploy control available](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
@@ -208,7 +224,8 @@ const { data } = await res.json();
 // data.token.signingCustodyWalletId — exact wallet selected for deployment
 ```
 
-The token is not yet onchain. Pass `data.token.id` to [Deploy a Token](/docs/tokens/deploy-a-token).
+The token is not onchain yet. Pass `data.token.id` to
+[Deploy a token](/docs/tokens/deploy-a-token).
 
 </Tab>
 </Tabs>
