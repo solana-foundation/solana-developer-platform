@@ -261,9 +261,10 @@ describe("provisionCustomRing", () => {
       const deps = await bringingUp();
       listRegisteredRings.mockResolvedValue(listed(false));
 
-      await expect(
-        provisionCustomRing(deps, { ringProgramId: RING_PROGRAM })
-      ).resolves.toBeDefined();
+      // The gate does not fire and bring-up runs to completion, so the
+      // published auditor key comes back rather than just any object.
+      const result = await provisionCustomRing(deps, { ringProgramId: RING_PROGRAM });
+      expect(result.auditorPublicKeyHex).toBe(hex(AUDITOR.toUncompressed()));
     });
 
     it("refuses when the registry cannot be read, rather than skipping the check", async () => {
