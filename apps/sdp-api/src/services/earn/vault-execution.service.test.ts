@@ -1,5 +1,4 @@
 import type { EarnVaultTransactionPlan } from "@sdp/earn/types";
-import * as rpcCore from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import {
@@ -9,6 +8,7 @@ import {
   type Blockhash,
   createNoopSigner,
   generateKeyPairSigner,
+  getCompiledTransactionMessageDecoder,
   getSignatureFromTransaction,
   getTransactionDecoder,
   getTransactionEncoder,
@@ -55,10 +55,12 @@ const plan: EarnVaultTransactionPlan = {
 
 const genesisSend = vi.fn();
 const simulateSend = vi.fn();
+const lookupTableSend = vi.fn();
 /** Base64 wire transactions handed to `simulateTransaction`, newest last. */
 const simulatedWire: string[] = [];
 const rpc = {
   getGenesisHash: () => ({ send: genesisSend }),
+  getMultipleAccounts: vi.fn(() => ({ send: lookupTableSend })),
   simulateTransaction: (wire: string) => {
     simulatedWire.push(wire);
     return { send: simulateSend };
@@ -101,6 +103,8 @@ beforeEach(() => {
   resetClusterEndpointProofs();
   genesisSend.mockReset().mockResolvedValue(GENESIS_HASH_BY_CLUSTER.devnet);
   simulateSend.mockReset().mockResolvedValue({ value: { err: null, logs: [] } });
+  lookupTableSend.mockReset();
+  rpc.getMultipleAccounts.mockClear();
   vi.spyOn(solanaRpc, "createRpc").mockReturnValue(rpc as never);
   vi.spyOn(solanaRpc, "getRecentBlockhash").mockResolvedValue({
     blockhash,
@@ -465,26 +469,102 @@ describe("vault execution validation", () => {
     expect(result.error).toContain("SDP's fee sponsor holds no SOL");
     expect(result.fault).toBe("sponsor");
   });
+});
 
-  it("rejects lookup-table transport failures instead of returning a simulation verdict", async () => {
-    const retry = vi.spyOn(rpcCore, "withTransientRpcRetry");
-    const planWithLookupTable = {
-      ...plan,
-      lookupTables: ["11111111111111111111111111111112"],
-    };
+describe("vault lookup-table reads", () => {
+  const lookupTable = "11111111111111111111111111111113";
+  const planWithLookupTable: EarnVaultTransactionPlan = {
+    ...plan,
+    lookupTables: [lookupTable],
+    instructions: [
+      {
+        programAddress: "11111111111111111111111111111111",
+        accounts: [{ address: plan.assetIdentity.depositTokenMint, role: AccountRole.READONLY }],
+        data: "",
+      },
+    ],
+  };
 
-    await expect(
-      simulateVaultPlan(env, {
-        cluster: "devnet",
-        deadline: createVaultDeadline(),
-        expectedAssetIdentity: plan.assetIdentity,
-        plan: planWithLookupTable,
-        owner: ownerAddress,
-        rpcUrl,
-        fee: { kind: "wallet-pays" },
-      })
-    ).rejects.toBeTruthy();
-    expect(retry).toHaveBeenCalledOnce();
+  function simulate() {
+    return simulateVaultPlan(env, {
+      cluster: "devnet",
+      deadline: createVaultDeadline(),
+      expectedAssetIdentity: plan.assetIdentity,
+      plan: planWithLookupTable,
+      owner: ownerAddress,
+      rpcUrl,
+      fee: { kind: "wallet-pays" },
+    });
+  }
+
+  it("rethrows an exhausted transport failure without simulating an unprepared plan", async () => {
+    vi.useFakeTimers();
+    const failure = new Error("lookup-table service unavailable");
+    lookupTableSend.mockRejectedValue(failure);
+
+    // A missing RPC mock method used to satisfy a truthy-rejection assertion.
+    // Require the exact transport error and real retries, not just any throw.
+    const rejection = expect(simulate()).rejects.toBe(failure);
+    await Promise.all([rejection, vi.runAllTimersAsync()]);
+
+    expect(lookupTableSend).toHaveBeenCalledTimes(4);
+    expect(simulateSend).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a permanent lookup-table read failure", async () => {
+    const failure = new Error("Invalid params: invalid account address");
+    lookupTableSend.mockRejectedValue(failure);
+
+    await expect(simulate()).rejects.toBe(failure);
+
+    expect(lookupTableSend).toHaveBeenCalledOnce();
+    expect(simulateSend).not.toHaveBeenCalled();
+  });
+
+  it("recovers a transient read and uses the fetched table in the simulated transaction", async () => {
+    vi.useFakeTimers();
+    lookupTableSend.mockRejectedValueOnce(new Error("fetch failed")).mockResolvedValue({
+      context: { slot: 1n },
+      value: [
+        {
+          owner: "AddressLookupTab1e1111111111111111111111111",
+          executable: false,
+          lamports: 1n,
+          data: {
+            program: "address-lookup-table",
+            parsed: {
+              type: "lookupTable",
+              info: { addresses: [plan.assetIdentity.depositTokenMint] },
+            },
+            space: 88n,
+          },
+        },
+      ],
+    });
+
+    const result = expect(simulate()).resolves.toMatchObject({
+      ok: true,
+      prepared: { lookupTables: { [lookupTable]: [plan.assetIdentity.depositTokenMint] } },
+    });
+    await Promise.all([result, vi.runAllTimersAsync()]);
+
+    expect(rpc.getMultipleAccounts).toHaveBeenCalledWith([lookupTable], {
+      encoding: "jsonParsed",
+    });
+    expect(lookupTableSend).toHaveBeenCalledTimes(2);
+    expect(simulateSend).toHaveBeenCalledOnce();
+
+    const transaction = getTransactionDecoder().decode(
+      Buffer.from(simulatedWire.at(-1) ?? "", "base64")
+    );
+    const message = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+    if (message.version !== 0) throw new Error("expected a v0 simulation transaction");
+    expect(message.addressTableLookups).toEqual([
+      { lookupTableAddress: lookupTable, readonlyIndexes: [0], writableIndexes: [] },
+    ]);
+    expect(message.staticAccounts).not.toContain(plan.assetIdentity.depositTokenMint);
+    // The instruction must reference the loaded address, after all static accounts.
+    expect(message.instructions[0]?.accountIndices).toEqual([message.staticAccounts.length]);
   });
 });
 
