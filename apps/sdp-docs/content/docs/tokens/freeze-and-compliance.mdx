@@ -100,20 +100,25 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: freeze-001" \
   -d '{
     "accountAddress": "3xYZa...2aBc",
     "reason": "Suspicious activity investigation"
   }'
 ```
 
-`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed.
+`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed. Reuse the same `Idempotency-Key` when retrying the exact request so a lost response replays the original action instead of submitting it twice.
 
 **Unfreeze:**
 
 ```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
-  headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
+  headers: {
+    Authorization: "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "unfreeze-001",
+  },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
 });
 ```
@@ -165,12 +170,14 @@ To resume, click **Unpause token** and confirm.
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: pause-001" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: unpause-001" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
 

@@ -1,0 +1,203 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  examplePathMatchesTemplate,
+  extractCodeBlocks,
+  extractIdempotencyPostPaths,
+  findMissingIdempotencyKeyExamples,
+} from "./lib/idempotency-examples.mjs";
+
+const specWithOperationHeader = {
+  paths: {
+    "/v1/payments/transfer-batches": {
+      post: {
+        parameters: [{ name: "Idempotency-Key", in: "header", required: false }],
+      },
+    },
+    "/v1/issuance/tokens/{tokenId}/freeze": {
+      parameters: [{ name: "Idempotency-Key", in: "header", required: false }],
+      post: {},
+    },
+    "/v1/issuance/tokens": {
+      post: {},
+    },
+    "/v1/payments/transfers": {
+      get: {
+        parameters: [{ name: "Idempotency-Key", in: "header", required: false }],
+      },
+    },
+  },
+};
+
+test("derives idempotency-consuming POST paths from operation and path-item parameters", () => {
+  assert.deepEqual(
+    extractIdempotencyPostPaths(specWithOperationHeader),
+    new Set(["/v1/payments/transfer-batches", "/v1/issuance/tokens/{tokenId}/freeze"])
+  );
+});
+
+test("derives nothing from a document without paths", () => {
+  assert.deepEqual(extractIdempotencyPostPaths({}), new Set());
+  assert.deepEqual(extractIdempotencyPostPaths(null), new Set());
+});
+
+test("matches concrete example paths against OpenAPI templates", () => {
+  assert.equal(
+    examplePathMatchesTemplate(
+      "/v1/issuance/tokens/tok_abc123/freeze",
+      "/v1/issuance/tokens/{tokenId}/freeze"
+    ),
+    true
+  );
+  assert.equal(
+    examplePathMatchesTemplate("/v1/payments/transfer-batches", "/v1/payments/transfer-batches"),
+    true
+  );
+  assert.equal(
+    examplePathMatchesTemplate(
+      "/v1/issuance/tokens/freeze",
+      "/v1/issuance/tokens/{tokenId}/freeze"
+    ),
+    false
+  );
+  assert.equal(
+    examplePathMatchesTemplate(
+      "/v1/issuance/tokens/tok_abc123/freeze/extra",
+      "/v1/issuance/tokens/{tokenId}/freeze"
+    ),
+    false
+  );
+});
+
+test("extracts fenced blocks with their opening line numbers", () => {
+  const source = [
+    "# Title",
+    "",
+    "```bash",
+    "one",
+    "```",
+    "",
+    "text",
+    "```typescript",
+    "two",
+    "```",
+    "",
+  ].join("\n");
+  assert.deepEqual(extractCodeBlocks(source), [
+    { language: "bash", content: "one", line: 3 },
+    { language: "typescript", content: "two", line: 8 },
+  ]);
+});
+
+test("flags a curl POST example that omits the replay fence", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfer-batches"]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          '```bash title="Terminal"',
+          "curl -X POST https://api.solana.com/v1/payments/transfer-batches \\",
+          '  -H "Authorization: Bearer sk_test_..." \\',
+          "  -d '{}'",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "introduction.mdx", line: 1, endpoint: "/v1/payments/transfer-batches" },
+  ]);
+});
+
+test("accepts an example that shows the Idempotency-Key fence", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfer-batches"]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          '```bash title="Terminal"',
+          "curl -X POST https://api.solana.com/v1/payments/transfer-batches \\",
+          '  -H "Idempotency-Key: payroll-2026-05-14" \\',
+          "  -d '{}'",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});
+
+test("ignores GET examples, non-POST blocks, and endpoints without the fence contract", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set([
+      "/v1/payments/transfer-batches",
+      "/v1/issuance/tokens/{tokenId}/freeze",
+    ]),
+    files: [
+      {
+        path: "send-payouts.mdx",
+        source: [
+          "```bash",
+          "curl https://api.solana.com/v1/payments/transfer-batches/batch_1 \\",
+          '  -H "Authorization: Bearer sk_test_..."',
+          "```",
+        ].join("\n"),
+      },
+      {
+        path: "create-a-token.mdx",
+        source: [
+          "```bash",
+          "curl -X POST https://api.solana.com/v1/issuance/tokens \\",
+          '  -H "Authorization: Bearer sk_test_..." \\',
+          "  -d '{}'",
+          "```",
+        ].join("\n"),
+      },
+      {
+        path: "notes.mdx",
+        source: ["```text", "POST /v1/payments/transfer-batches is fenced", "```"].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});
+
+test("flags fetch and requests.post examples in any language", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set([
+      "/v1/issuance/tokens/{tokenId}/freeze",
+      "/v1/payments/transfers",
+    ]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          "```javascript",
+          'await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze", {',
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+      {
+        path: "memo.mdx",
+        source: [
+          "```python",
+          "requests.post(",
+          '    "https://api.solana.com/v1/payments/transfers",',
+          "    json={'amount': '100.00'},",
+          ")",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "introduction.mdx", line: 1, endpoint: "/v1/issuance/tokens/{tokenId}/freeze" },
+    { file: "memo.mdx", line: 1, endpoint: "/v1/payments/transfers" },
+  ]);
+});

@@ -132,6 +132,7 @@ const response = await fetch(
     headers: {
       Authorization: "Bearer sk_test_...",
       "Content-Type": "application/json",
+      "Idempotency-Key": "compliance-freeze-001",
     },
     body: JSON.stringify(operationParams),
   },
@@ -144,7 +145,10 @@ const result = await response.json();
 
 response = requests.post(
     "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze",
-    headers={"Authorization": "Bearer sk_test_..."},
+    headers={
+        "Authorization": "Bearer sk_test_...",
+        "Idempotency-Key": "compliance-freeze-001",
+    },
     json=operation_params,
 )
 result = response.json()
@@ -155,10 +159,13 @@ result = response.json()
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: compliance-freeze-001" \
   -d "$OPERATION_PARAMS"
 ```
 </Tab>
 </Tabs>
+
+Every enforcement action carries an `Idempotency-Key`: reuse the same key when retrying the exact request so a lost response replays the original action instead of submitting it twice.
 </Step>
 <Step>
 ### Ramps and Onchain Transfers
@@ -200,6 +207,7 @@ curl -X POST https://api.solana.com/v1/payments/requests \
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: batch-2026-06-30" \
   -d '{
     "externalId": "payroll_2026_06_30",
     "sourceCustodyWalletId": "cwlt_example",
@@ -216,6 +224,8 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 ```
 </Tab>
 </Tabs>
+
+Batch Transfers are value-moving, so every request carries an `Idempotency-Key`. Reuse the same key when retrying the exact request: a retry after a lost response then replays the original batch instead of creating a second one and paying every recipient twice.
 
 The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>
@@ -1861,20 +1871,25 @@ The "Unfreeze transaction finalized." toast appears and the Frozen Accounts coun
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: freeze-001" \
   -d '{
     "accountAddress": "3xYZa...2aBc",
     "reason": "Suspicious activity investigation"
   }'
 ```
 
-`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed.
+`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed. Reuse the same `Idempotency-Key` when retrying the exact request so a lost response replays the original action instead of submitting it twice.
 
 **Unfreeze:**
 
 ```typescript title="unfreeze-account.ts"
 await fetch("https://api.solana.com/v1/issuance/tokens/tok_abc123/unfreeze", {
   method: "POST",
-  headers: { Authorization: "Bearer sk_test_...", "Content-Type": "application/json" },
+  headers: {
+    Authorization: "Bearer sk_test_...",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "unfreeze-001",
+  },
   body: JSON.stringify({ accountAddress: "3xYZa...2aBc" }),
 });
 ```
@@ -1926,12 +1941,14 @@ To resume, click **Unpause token** and confirm.
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: pause-001" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 
 # Unpause
 curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: unpause-001" \
   -d '{"signingCustodyWalletId":"cwlt_example"}'
 ```
 
@@ -2894,6 +2911,7 @@ Memos are stored by SDP. They are **not** automatically attached as a Solana mem
 curl -X POST https://api.solana.com/v1/payments/transfers \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: payment-memo-4837" \
   -d '{
     "sourceCustodyWalletId": "cwlt_123",
     "destination": "7xKXz...9fGh",
@@ -2912,6 +2930,7 @@ const response = await fetch(
     headers: {
       "Authorization": "Bearer sk_test_...",
       "Content-Type": "application/json",
+      "Idempotency-Key": "payment-memo-4837",
     },
     body: JSON.stringify({
       sourceCustodyWalletId: "cwlt_123",
@@ -2931,6 +2950,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .uri(URI.create("https://api.solana.com/v1/payments/transfers"))
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
+    .header("Idempotency-Key", "payment-memo-4837")
     .POST(HttpRequest.BodyPublishers.ofString("""
         {
           "sourceCustodyWalletId": "cwlt_123",
@@ -2943,6 +2963,8 @@ HttpRequest request = HttpRequest.newBuilder()
 ```
 </Tab>
 </Tabs>
+
+Reuse the same `Idempotency-Key` for retries of that exact request so a lost response replays the original transfer instead of creating a second one.
 
 The memo is preserved on the transfer record:
 
