@@ -5,17 +5,14 @@ import {
   createRecurringPaymentSchema,
   updateRecurringPaymentSchema,
 } from "./recurring-payments/schemas";
-import {
-  PAYMENT_TOKEN_VALIDATION_MESSAGE,
-  updateWalletPolicySchema,
-  walletPolicyRuleSchema,
-} from "./schemas";
+import { PAYMENT_TOKEN_VALIDATION_MESSAGE } from "./schemas";
 import { createSubscriptionSchema } from "./subscriptions/schemas";
 import {
   createTransferBatchSchema,
   listTransferBatchesQuerySchema,
 } from "./transfer-batches/schemas";
 import { createTransferSchema, listTransfersQuerySchema } from "./transfers/schemas";
+import { updateWalletPolicySchema, walletPolicyRuleSchema } from "./wallet-policies/schemas";
 
 const USDC_MINT = WELL_KNOWN_TOKENS.USDC.mints["mainnet-beta"].address;
 const VALID_DESTINATION = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";

@@ -52,13 +52,15 @@ import {
   transferTypeSchema as transferTypeSchemaBase,
 } from "@/routes/payments/transfers/schemas";
 import {
+  updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
+  walletIdParamsSchema as walletIdParamsSchemaBase,
+} from "@/routes/payments/wallet-policies/schemas";
+import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
   listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
   simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   transferIdParamsSchema as transferIdParamsSchemaBase,
-  updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
-  walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "../../routes/payments/schemas";
 import {
   base64Schema,
