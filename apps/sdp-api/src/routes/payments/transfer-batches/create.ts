@@ -37,6 +37,15 @@ type TransferBatchResponse = Awaited<ReturnType<typeof buildTransferBatchRespons
 
 interface TransferBatchGateResolved extends ResolvedBatchRequest {
   idempotencyFingerprint: string;
+  /**
+   * The same fingerprint computed the pre-SOLA9-418 way: the batch `externalId`
+   * omitted entirely, matching how every fingerprint was recorded before the
+   * reference joined it. Replay resolution uses it to keep recognizing
+   * identical retries of batches created before that change.
+   */
+  legacyIdempotencyFingerprint: string;
+  /** The request's top-level batch external reference (null when absent). */
+  externalId: string | null;
 }
 
 async function assertApprovedBatchReplayCompleted(
@@ -110,6 +119,11 @@ export async function extractTransferBatchPolicyCandidate(
       ? input.sourceCustodyWalletId
       : undefined
   );
+  const { fingerprint, legacyFingerprint } = buildBatchIdempotencyFingerprints(
+    resolved,
+    input.externalId,
+    input.options
+  );
   const candidate: PolicyCandidate = {
     organizationId: resolved.scope.auth.organizationId,
     projectId: resolved.scope.auth.projectId,
@@ -142,7 +156,9 @@ export async function extractTransferBatchPolicyCandidate(
     body: input,
     resolved: {
       ...resolved,
-      idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
+      idempotencyFingerprint: fingerprint,
+      legacyIdempotencyFingerprint: legacyFingerprint,
+      externalId: input.externalId ?? null,
     },
     // HOO-1023: remove this legacy envelope when K2 rollback support ends.
     executionRequestBody: { ...legacyBody, source: resolved.sourceWallet.walletId },
@@ -177,17 +193,30 @@ export async function admitTransferBatchRuntimeExecution(
 }
 
 /**
- * Build the batch idempotency fingerprint from the resolved request.
+ * Build the batch idempotency fingerprints from the resolved request.
+ *
+ * The top-level `externalId` is durable batch data persisted with the batch,
+ * so it joins the fingerprint (SOLA9-418): a key reused with a changed
+ * reference conflicts instead of replaying the original batch. The dashboard's
+ * client fingerprint already includes it.
+ *
+ * The companion legacy fingerprint is the same payload computed the way every
+ * stored fingerprint was recorded before the reference joined: `externalId`
+ * omitted entirely. Batches created before that change carry reference-blind
+ * stored fingerprints, so replay resolution matches those rows through the
+ * legacy shape plus the row's persisted `external_id`.
  *
  * @param resolved - The resolved batch request.
+ * @param externalId - The request's top-level batch external reference.
  * @param options - The request's batch options.
- * @returns The fingerprint string.
+ * @returns The current fingerprint and its pre-SOLA9-418 legacy shape.
  */
-function buildBatchIdempotencyFingerprint(
+function buildBatchIdempotencyFingerprints(
   resolved: ResolvedBatchRequest,
+  externalId: CreateTransferBatchInput["externalId"],
   options: CreateTransferBatchInput["options"]
-): string {
-  return buildTransferBatchFingerprint({
+): { fingerprint: string; legacyFingerprint: string } {
+  const fingerprintInput = {
     sourceCustodyWalletId: resolved.sourceWallet.id,
     sourceAddress: resolved.sourceAddress,
     token: resolved.tokenContext.token,
@@ -199,7 +228,11 @@ function buildBatchIdempotencyFingerprint(
       amount: recipient.amount,
     })),
     options,
-  });
+  };
+  return {
+    fingerprint: buildTransferBatchFingerprint({ ...fingerprintInput, externalId }),
+    legacyFingerprint: buildTransferBatchFingerprint(fingerprintInput),
+  };
 }
 
 /**
@@ -222,7 +255,9 @@ export async function findTransferBatchIdempotentKeyReplay(
     resolved.projectId,
     idempotencyKey,
     resolved.idempotencyFingerprint,
-    resolved.sourceWallet.id
+    resolved.sourceWallet.id,
+    resolved.legacyIdempotencyFingerprint,
+    resolved.externalId
   );
   if (replay === null) {
     return null;
@@ -340,7 +375,9 @@ export async function createTransferBatch(c: AppContext) {
         resolved.projectId,
         idempotencyKey,
         idempotencyFingerprint,
-        resolved.sourceWallet.id
+        resolved.sourceWallet.id,
+        resolved.legacyIdempotencyFingerprint,
+        resolved.externalId
       );
       if (replay) {
         return respondToTransferBatchReplay(

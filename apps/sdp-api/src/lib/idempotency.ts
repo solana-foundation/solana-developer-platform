@@ -145,6 +145,20 @@ export interface TransferBatchFingerprintInput {
   sourceCustodyWalletId: string;
   sourceAddress: string;
   token: string;
+  /**
+   * The caller's top-level batch correlation reference, as the request body
+   * carried it (SOLA9-418). It is persisted with the batch, so it is durable
+   * request data rather than presentation metadata: a key reused with a
+   * changed reference is a different request and must conflict instead of
+   * replaying the original batch under the new reference. Leave it undefined
+   * when the request has none — an undefined field is dropped by
+   * `normalizeForFingerprint`, so fingerprints recorded before this field
+   * existed keep matching byte-for-byte for externalId-less requests. Replays
+   * of batches recorded before the change resolve through that legacy
+   * reference-blind shape plus the row's persisted reference — see
+   * `resolveTransferBatchIdempotencyReplay`.
+   */
+  externalId?: string;
   recipients: TransferBatchFingerprintRecipientInput[];
   options: Record<string, unknown> | undefined;
 }
@@ -180,6 +194,7 @@ function transferBatchFingerprint(
       sourceCustodyWalletId,
       sourceAddress: input.sourceAddress,
       token: input.token,
+      externalId: input.externalId,
       recipients: input.recipients,
       options: input.options ?? null,
     })

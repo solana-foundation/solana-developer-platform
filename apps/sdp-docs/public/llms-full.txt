@@ -3009,7 +3009,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-Reuse the same `Idempotency-Key` for retries of that exact request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+Reuse the same `Idempotency-Key` for retries of that exact request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key — but it is durable batch data, so reusing a key with a different `externalId` returns `409` instead of replaying the original batch.
 
 The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
 
