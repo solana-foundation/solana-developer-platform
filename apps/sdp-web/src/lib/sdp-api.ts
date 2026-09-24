@@ -369,6 +369,31 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
 }
 
 /**
+ * Creates a client pinned to an explicit project id for server actions that
+ * must stay bound to the page they were rendered with instead of re-reading
+ * the mutable selection cookie: a feed mounted for project A keeps asking for
+ * project A even after the shared cookie has moved to B.
+ *
+ * The id is validated against this organization's project list first, so an
+ * arbitrary or no-longer-listed project is refused here rather than sent
+ * upstream; the list read reuses the request-cached `/v1/projects` call the
+ * layout already made. A failed list read fails closed — without the list
+ * there is nothing to validate the scope against. The API still authorizes
+ * the caller's membership on every request.
+ */
+export async function createProjectBoundSdpApiClient(
+  projectId: string,
+  traceContext?: TraceContext
+): Promise<SdpApiClient> {
+  const token = await getRequestClerkToken();
+  const projects = await fetchRequestProjects(token);
+  if (!projects.some((project) => project.id === projectId)) {
+    throw new Error("Requested project is not available for this organization");
+  }
+  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
+}
+
+/**
  * Convenience helper for server actions that need to make a raw request to SDP
  * API with the current project and Clerk auth context.
  */

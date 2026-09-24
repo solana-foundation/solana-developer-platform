@@ -116,6 +116,7 @@ function renderEvents(
   return render(
     <I18nProvider locale={locale} messages={messages}>
       <EventsList
+        projectId={props.projectId ?? "project_test"}
         initialEvents={props.initialEvents ?? [makeEvent()]}
         initialHasMore={props.initialHasMore ?? false}
         initialNextCursor={props.initialNextCursor ?? null}
@@ -365,6 +366,7 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(1, {
+        projectId: "project_test",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,
       });
@@ -376,6 +378,7 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(2, {
+        projectId: "project_test",
         before: "cursor_transfer",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,
