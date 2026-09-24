@@ -54,7 +54,7 @@ test("release deploys verify and promote the signed image; manual redeploys skip
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
   assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
   assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
@@ -174,7 +174,7 @@ test("service and cron use the resolved digest", () => {
   assert.match(workflow, /- name: Promote service and cron with rollback\n\s+timeout-minutes: 10/);
 });
 
-test("merge deploys promote signed per-merge images and never migrate", () => {
+test("merge deploys promote signed per-merge images and migrate before rollout", () => {
   assert.match(
     workflow,
     /BUILD_IMAGE: \$\{\{ \(inputs\.release_sha != '' \|\| \(inputs\.image_sha != '' && github\.event_name != 'workflow_dispatch'\)\) && 'true' \|\| 'false' \}\}/
@@ -188,26 +188,39 @@ test("merge deploys promote signed per-merge images and never migrate", () => {
     /certificate-identity "https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/release-images\.yml@refs\/heads\/main"/
   );
   assert.doesNotMatch(workflow, /- name: Build and push image/);
-  assert.match(
-    workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \}\}/
-  );
-  assert.match(workflow, /- name: Gate merge deploys on pending migrations/);
-  assert.match(
-    workflow,
-    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
-  );
+  assert.doesNotMatch(workflow, /prod-merge-gate/);
 
-  // A held merge must cost seconds and leave nothing behind: the gate runs
-  // before GCP auth and before any image is promoted into prod Artifact Registry.
-  const gate = workflow.indexOf("- name: Gate merge deploys on pending migrations");
-  const gcpAuth = workflow.indexOf("- name: Authenticate to GCP");
-  const mergePromotion = workflow.indexOf("- name: Verify and promote merge image");
-  assert.ok(gate !== -1 && gate < gcpAuth, "gate must run before GCP auth");
-  assert.ok(gate < mergePromotion, "gate must run before the merge image is promoted");
+  const migrate = workflow.indexOf("- name: Run database migrations");
+  const execute = workflow.indexOf('gcloud run jobs execute "${MIGRATE_JOB}"', migrate);
+  const label = workflow.indexOf('--update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"', execute);
+  const capture = workflow.indexOf("- name: Capture rollback state", migrate);
+  assert.ok(migrate !== -1 && migrate < execute);
+  assert.ok(execute < label && label < capture);
 });
 
-test("the orchestrator holds merge deploys on pending migrations instead of failing them", () => {
+test("pending migrations route the merge deploy through the reviewed environment", () => {
+  assert.match(
+    workflow,
+    / {2}schema:\n\s+name: Check pending migrations against prod\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.event_name != 'workflow_dispatch' &&\n\s+inputs\.image_sha != ''/
+  );
+  assert.match(workflow, /--format 'value\(metadata\.labels\.sdp_schema_sha\)'/);
+  assert.match(
+    workflow,
+    /git diff --name-only "\$\{applied\}\.\.HEAD" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
+  );
+  assert.match(workflow, /pending="prod schema position unknown/);
+  assert.match(workflow, /needs: \[smoke, schema\]/);
+  assert.match(
+    workflow,
+    /\(needs\.schema\.result == 'success' \|\| needs\.schema\.result == 'skipped'\) &&/
+  );
+  assert.match(
+    workflow,
+    /environment: \$\{\{ needs\.schema\.outputs\.pending == 'true' && 'release-production' \|\| 'production' \}\}/
+  );
+});
+
+test("the orchestrator sends every continuous merge to prod", () => {
   const orchestrator = fs.readFileSync(
     path.resolve(here, "../.github/workflows/deploy.yml"),
     "utf8"
@@ -217,28 +230,12 @@ test("the orchestrator holds merge deploys on pending migrations instead of fail
     orchestrator.indexOf("  notify-start:")
   );
   assert.match(changes, /prod: \$\{\{ steps\.detect\.outputs\.prod \}\}/);
-  assert.match(changes, /prod_hold: \$\{\{ steps\.detect\.outputs\.prod_hold \}\}/);
   assert.match(changes, /CONTINUOUS_PROD_DEPLOY: \$\{\{ vars\.CONTINUOUS_PROD_DEPLOY \}\}/);
-  assert.match(
-    changes,
-    /verdict="\$\(\.github\/scripts\/prod-merge-gate\.sh\)" \|\| gate_status=\$\?/
-  );
-  // A gate that cannot run must fail the job, never masquerade as a hold.
-  assert.match(
-    changes,
-    /\*\)\n\s+echo "::error::Prod merge gate could not be evaluated \(exit \$\{gate_status\}\)\."\n\s+exit 1/
-  );
+  assert.doesNotMatch(orchestrator, /prod_hold|prod-merge-gate/);
 
   const prodJob = orchestrator.slice(orchestrator.indexOf("  deploy-api-prod:"));
   assert.match(prodJob, /if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&/);
   assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
-
-  // Both Slack posts name the hold; neither promises "stage → prod" for a
-  // merge that was never going to prod.
-  const heldTargets = orchestrator.match(
-    /format\('stage \(prod held: \{0\}\)', needs\.changes\.outputs\.prod_hold\)/g
-  );
-  assert.equal(heldTargets?.length, 2, "notify-start and notify-end must both report a hold");
 });
 
 test("merge mode skips the internal smoke gate but requires the caller's", () => {

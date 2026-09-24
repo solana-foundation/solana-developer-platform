@@ -7,7 +7,7 @@
 | Event | Target | Result |
 | --- | --- | --- |
 | Relevant push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service, worker, and cron job, then runs the stage smoke |
-| Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, promotes the signed per-merge image without running migrations. Held (prod job skipped, Slack reports `prod held`) while `apps/sdp-api/src/db/migrations` differs from the last `v*` tag; cutting the release resumes merge deploys |
+| Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the deploy first waits for a `release-production` reviewer to approve it |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
 | Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
 | Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
@@ -191,8 +191,12 @@ Migrations must remain backward-compatible across the rollback window:
 
 - Add columns or tables before code depends on them.
 - Avoid deleting or renaming data that the previous release reads.
-- Separate destructive cleanup into a later release after rollback support expires.
+- Separate destructive cleanup into a later change after rollback support expires.
 - Test the previous application image against the migrated schema when a change is high risk.
+
+CI enforces this with `pnpm check:migration-compat`: a changed migration that drops, renames, retypes, adds NOT NULL without a default, or rewrites rows fails the pull request. A deliberate contraction declares `-- sdp:migration-compat: breaking` at the top of the file and ships in a pull request that touches only the migrations directory, after the code that used the old shape is already in production.
+
+Production applies pending migrations on a merge deploy only after a `release-production` reviewer approves the run. Stage has already run the same migration by then; approve once the stage smoke is green and the change has baked long enough to trust.
 
 ## One-time Cloudflare teardown
 

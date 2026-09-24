@@ -86,24 +86,70 @@ jobs:
       contents: read
       id-token: write
 
+  schema:
+    name: Check pending migrations against prod
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.event_name != 'workflow_dispatch' &&
+      inputs.image_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    outputs:
+      pending: ${{ steps.pending.outputs.pending }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Diff migrations against the schema prod last applied
+        id: pending
+        run: |
+          set -euo pipefail
+          applied="$(gcloud run jobs describe sdp-prod-api-public-migrate \
+            --region us-central1 --project solana-developer-platform \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
+            pending="$(git diff --name-only "${applied}..HEAD" -- apps/sdp-api/src/db/migrations/postgres)"
+          else
+            pending="prod schema position unknown (sdp_schema_sha=${applied:-unset})"
+          fi
+          if [[ -n "${pending}" ]]; then
+            echo "pending=true" >> "${GITHUB_OUTPUT}"
+            printf 'Prod deploy waits for release-production approval. Pending migrations:\n\n%s\n' "${pending}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "pending=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   deploy:
     outputs:
       canary: ${{ steps.canary_outcome.outputs.result }}
       tail_clean: ${{ steps.tail_outcome.outputs.clean }}
     name: Deploy production image
-    needs: smoke
+    needs: [smoke, schema]
     if: >-
       always() &&
       (needs.smoke.result == 'success' ||
        (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped') ||
        (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
+      (needs.schema.result == 'success' || needs.schema.result == 'skipped') &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (inputs.image_sha != ''))
     runs-on: ubuntu-latest
     timeout-minutes: 150
-    environment: production
+    environment: ${{ needs.schema.outputs.pending == 'true' && 'release-production' || 'production' }}
     env:
       PROJECT_ID: solana-developer-platform
       REGION: us-central1
@@ -143,28 +189,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag }}
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: .github/scripts/verify-release-identity.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
-
-      # deploy.yml evaluates this same gate before calling the prod job and
-      # skips the job when held; this is the fail-closed backstop for any other
-      # caller. It runs before GCP auth and image promotion so a held merge
-      # costs seconds and leaves nothing behind in prod Artifact Registry.
-      - name: Gate merge deploys on pending migrations
-        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
-        run: |
-          set -euo pipefail
-          gate_status=0
-          verdict="$(.github/scripts/prod-merge-gate.sh)" || gate_status=$?
-          case "${gate_status}" in
-            0) echo "${verdict}" ;;
-            2)
-              echo "::error::Prod merge deploy held: ${verdict}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
-              exit 1
-              ;;
-            *)
-              echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
-              exit 1
-              ;;
-          esac
 
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -341,13 +365,15 @@ jobs:
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
-        if: ${{ inputs.release_sha != '' }}
+        if: ${{ env.BUILD_IMAGE == 'true' }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs execute "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"
 
       - name: Capture rollback state
         run: |

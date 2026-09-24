@@ -28,7 +28,6 @@ jobs:
     outputs:
       api: ${{ steps.detect.outputs.api }}
       prod: ${{ steps.detect.outputs.prod }}
-      prod_hold: ${{ steps.detect.outputs.prod_hold }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -64,35 +63,12 @@ jobs:
           echo "api=$api" >> "$GITHUB_OUTPUT"
           echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
 
-          # Prod merge deploys are held while main carries migrations the last
-          # release does not: schema changes ship through a release. Deciding
-          # that here, before the prod job exists, keeps a hold from failing
-          # the run, promoting an unused image into prod Artifact Registry, or
-          # posting "[FAILED] stage → prod" for a merge that was never going
-          # to prod. A gate that cannot run fails this job instead, so a broken
-          # gate never masquerades as a hold and silently suppresses prod. The
-          # prod workflow keeps the same gate as its own backstop.
           prod=false
-          prod_hold=""
           if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ] \
             && [[ "$HEAD_COMMIT_MESSAGE" != "chore(main): release"* ]]; then
-            gate_status=0
-            verdict="$(.github/scripts/prod-merge-gate.sh)" || gate_status=$?
-            case "$gate_status" in
-              0) prod=true ;;
-              2) prod_hold="$verdict" ;;
-              *)
-                echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
-                exit 1
-                ;;
-            esac
-          fi
-          if [ -n "$prod_hold" ]; then
-            echo "::notice::Prod merge deploy held: ${prod_hold}. Schema changes ship through a release; cut it and merge deploys resume."
-            echo "Prod: held (${prod_hold})" >> "$GITHUB_STEP_SUMMARY"
+            prod=true
           fi
           echo "prod=$prod" >> "$GITHUB_OUTPUT"
-          echo "prod_hold=$prod_hold" >> "$GITHUB_OUTPUT"
 
 
   notify-start:
@@ -118,9 +94,7 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.changes.outputs.prod == 'true' && 'stage → prod' ||
-                needs.changes.outputs.prod_hold != '' && format('stage (prod held: {0})', needs.changes.outputs.prod_hold) ||
-                'stage' }}
+            ${{ needs.changes.outputs.prod == 'true' && 'stage → prod' || 'stage' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
@@ -176,9 +150,7 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
-                needs.changes.outputs.prod_hold != '' && format('stage (prod held: {0})', needs.changes.outputs.prod_hold) ||
-                'stage' }}
+            ${{ needs.deploy-api-prod.result != 'skipped' && 'stage → prod' || 'stage' }}
           OUTCOME: >-
             ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
                 (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
