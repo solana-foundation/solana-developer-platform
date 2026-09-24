@@ -273,3 +273,82 @@ test("splits multi-request blocks on comments, blank lines, and new statements",
     { content: "// second\nawait client.post(url2, {});", line: 4 },
   ]);
 });
+
+test("flags a fetch example that POSTs through a declared URL variable", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfer-batches"]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          "```typescript",
+          'const url = "https://api.solana.com/v1/payments/transfer-batches";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "introduction.mdx", line: 4, endpoint: "/v1/payments/transfer-batches" },
+  ]);
+});
+
+test("flags a client.post example that uses a declared relative-path variable", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/issuance/tokens/{tokenId}/unfreeze"]),
+    files: [
+      {
+        path: "tutorial.mdx",
+        source: [
+          "```javascript",
+          `const unfreezePath = \`/v1/issuance/tokens/\${tokenId}/unfreeze\`;`,
+          "",
+          "await sdpAdmin.post(unfreezePath, {",
+          "  signingCustodyWalletId,",
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "tutorial.mdx", line: 4, endpoint: "/v1/issuance/tokens/{tokenId}/unfreeze" },
+  ]);
+});
+
+test("accepts a variable-target POST that shows the fence and ignores variable-target GETs", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfers"]),
+    files: [
+      {
+        path: "fenced.mdx",
+        source: [
+          "```typescript",
+          'const url = "https://api.solana.com/v1/payments/transfers";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { "Idempotency-Key": "payment-001" },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+      {
+        path: "listing.mdx",
+        source: [
+          "```typescript",
+          'const url = "https://api.solana.com/v1/payments/transfers";',
+          "",
+          "const page = await fetch(url);",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});

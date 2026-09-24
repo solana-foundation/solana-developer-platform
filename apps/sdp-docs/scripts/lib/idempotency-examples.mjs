@@ -29,6 +29,14 @@ const IDEMPOTENCY_HEADER = /(?:Idempotency-Key|idempotencyKey)["']?\s*[:=,]/i;
 const REQUEST_START =
   /^(?:curl\b|await\b|(?:const|let|var)\b|fetch\s*\(|[\w$][\w$\s]*=\s*(?:await\s+)?(?:fetch\s*\(|[\w$.]*\.(?:post|request)\s*\(|[\w$][\w$.]*\.newBuilder)|[\w$.]*\.(?:post|request)\s*\()/;
 const COMMENT_LINE = /^\s*(?:#|\/\/)/;
+// Request targets stored in a variable first, for example
+// `const url = "https://api.solana.com/v1/payments/transfer-batches";`. The
+// value must be a plain quoted string (absolute URL or relative path).
+const URL_VARIABLE_DECLARATION =
+  /^\s*(?:const|let|var)\s+([\w$]+)\s*=\s*(["'`])([^'"`]*)\2;?\s*(?:\/\/.*)?$/;
+// A request call whose first argument is a bare identifier, for example
+// `fetch(url, { ... })` or `client.post(url, { ... })`.
+const REQUEST_CALL_TARGET = /\b(?:fetch|post|request)\s*\(\s*([\w$]+)/g;
 
 function stripQueryString(url) {
   const queryStart = url.search(/[?#]/);
@@ -116,6 +124,18 @@ export function extractCodeBlocks(source) {
   return blocks;
 }
 
+function requestTargetPath(value) {
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      return stripQueryString(new URL(value).pathname);
+    } catch {
+      return null;
+    }
+  }
+  return value.startsWith("/") ? stripQueryString(value) : null;
+}
+
 function exampleRequestPaths(block) {
   const found = [];
   for (const match of block.content.matchAll(API_URL)) {
@@ -168,6 +188,40 @@ export function splitBlockIntoRequests(content) {
 }
 
 /**
+ * Checks every request of one fenced block against the idempotency-consuming
+ * endpoints and reports the ones missing the Idempotency-Key header.
+ */
+function checkBlock({ file, block, idempotencyPostPaths, report }) {
+  // Request targets can be declared in a variable before the request call
+  // (`const url = "..."; await fetch(url, { method: "POST" })`), which splits
+  // the URL and the POST across two chunks. Track the declared targets per
+  // block so the request chunk is still checked against the endpoint it posts
+  // to.
+  const urlVariables = new Map();
+  for (const request of splitBlockIntoRequests(block.content)) {
+    const declaration = request.content.match(URL_VARIABLE_DECLARATION);
+    if (declaration) {
+      const target = requestTargetPath(declaration[3]);
+      if (target) urlVariables.set(declaration[1], target);
+    }
+    if (!POST_HINT.test(request.content)) continue;
+    if (IDEMPOTENCY_HEADER.test(request.content)) continue;
+    const pathnames = exampleRequestPaths(request);
+    for (const match of request.content.matchAll(REQUEST_CALL_TARGET)) {
+      const declared = urlVariables.get(match[1]);
+      if (declared) pathnames.push(declared);
+    }
+    for (const pathname of pathnames) {
+      for (const template of idempotencyPostPaths) {
+        if (!examplePathMatchesTemplate(pathname, template)) continue;
+        report(file, block.line + 1 + request.line, template);
+        break;
+      }
+    }
+  }
+}
+
+/**
  * Finds public docs examples that POST to an idempotency-consuming endpoint
  * without showing the Idempotency-Key header.
  *
@@ -188,17 +242,7 @@ export function findMissingIdempotencyKeyExamples({ files, idempotencyPostPaths 
   };
   for (const file of files) {
     for (const block of extractCodeBlocks(file.source)) {
-      for (const request of splitBlockIntoRequests(block.content)) {
-        if (!POST_HINT.test(request.content)) continue;
-        if (IDEMPOTENCY_HEADER.test(request.content)) continue;
-        for (const pathname of exampleRequestPaths(request)) {
-          for (const template of idempotencyPostPaths) {
-            if (!examplePathMatchesTemplate(pathname, template)) continue;
-            report(file.path, block.line + 1 + request.line, template);
-            break;
-          }
-        }
-      }
+      checkBlock({ file: file.path, block, idempotencyPostPaths, report });
     }
   }
   return violations;
