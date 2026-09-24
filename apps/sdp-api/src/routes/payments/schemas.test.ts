@@ -206,21 +206,35 @@ describe("payments destination schema", () => {
     expect(destinationSchema.parse(` ${VALID_DESTINATION} `)).toBe(VALID_DESTINATION);
   });
 
-  const rejections: Array<[string, string]> = [
-    ["empty string", ""],
-    ["too-short string", "x".repeat(20)],
-    ["too-long string", "x".repeat(50)],
-    ["right-length non-base58 string", "!".repeat(43)],
-    ["right-length string with non-base58 char (0)", `0${"1".repeat(42)}`],
+  const rejections: Array<[string, string, string]> = [
+    ["empty string", "", "destination must be 32 to 44 characters (got 0)"],
+    ["too-short string", "x".repeat(20), "destination must be 32 to 44 characters (got 20)"],
+    ["too-long string", "x".repeat(50), "destination must be 32 to 44 characters (got 50)"],
+    [
+      "right-length non-base58 string",
+      "!".repeat(43),
+      "destination contains characters outside the base58 alphabet",
+    ],
+    [
+      "right-length string with non-base58 char (0)",
+      `0${"1".repeat(42)}`,
+      "destination contains characters outside the base58 alphabet",
+    ],
+    [
+      "right-length base58 string decoding to the wrong byte length",
+      "1".repeat(43),
+      "destination must decode to 32 bytes (got 43)",
+    ],
   ];
 
-  for (const [label, input] of rejections) {
-    it(`rejects ${label} with the destination-specific message`, () => {
+  for (const [label, input, expectedMessage] of rejections) {
+    it(`rejects ${label} with a cause-specific message`, () => {
       const result = destinationSchema.safeParse(input);
       expect(result.success).toBe(false);
       if (!result.success) {
+        expect(result.error.issues).toHaveLength(1);
         const messages = result.error.issues.map((issue) => issue.message);
-        expect(messages).toContain("destination must be a base58 Solana address");
+        expect(messages).toContain(expectedMessage);
       }
     });
   }
@@ -338,7 +352,7 @@ describe("wallet policy destination rule allowlist schema", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry must be a base58 Solana address");
+      expect(messages).toContain("allowlist entry must be 32 to 44 characters (got 20)");
     }
   });
 
@@ -350,7 +364,7 @@ describe("wallet policy destination rule allowlist schema", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain("allowlist entry must be a base58 Solana address");
+      expect(messages).toContain("allowlist entry contains characters outside the base58 alphabet");
     }
   });
 });

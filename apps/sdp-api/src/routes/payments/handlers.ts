@@ -1,5 +1,4 @@
 export { getWalletBalances, getWalletPolicy, updateWalletPolicy } from "./handlers/balances";
-export { createPaymentRequest, listPaymentRequests } from "./handlers/payment-requests";
 export {
   getWalletPolicyEvaluation,
   listWalletControlProfileRevisions,

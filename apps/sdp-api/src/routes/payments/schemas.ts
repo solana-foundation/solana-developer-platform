@@ -1,5 +1,5 @@
 import { isIsoDuration } from "@sdp/policy";
-import { isAddress } from "@sdp/solana/address";
+import { assertIsAddress, isAddress } from "@sdp/solana/address";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
   COUNTRY_CODES,
@@ -20,23 +20,52 @@ import {
   WALLET_OPERATION_TYPES,
 } from "@sdp/types";
 import { RAMP_FIAT_CURRENCIES } from "@sdp/types/generated/ramp";
-import { getI64Encoder, getU64Encoder } from "@solana/kit";
+import {
+  getI64Encoder,
+  getU64Encoder,
+  isSolanaError,
+  SOLANA_ERROR__ADDRESSES__INVALID_BYTE_LENGTH,
+  SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE,
+  SOLANA_ERROR__CODECS__INVALID_STRING_FOR_BASE,
+} from "@solana/kit";
 import { z } from "zod";
 import { SOL_MINT } from "@/services/payment-operation.service";
 
-// Per-field schema for any input that expects a base58 Solana address
-// (destination, referenceAddress, allowlist entries, ring program ids). Trim
-// whitespace in a preprocess and require both the 32–44 length window and
-// `isAddress` to pass. Validating here returns 400 BAD_REQUEST with an
-// actionable per-field message instead of letting `assertValidAddress` throw a
-// plain Error downstream (500).
 export function solanaAddressSchema(fieldName: string) {
-  return z.preprocess(
-    (value) => (typeof value === "string" ? value.trim() : value),
-    z.string().refine((value) => value.length >= 32 && value.length <= 44 && isAddress(value), {
-      message: `${fieldName} must be a base58 Solana address`,
-    })
-  );
+  return z
+    .string()
+    .trim()
+    .superRefine((value, ctx) => {
+      try {
+        assertIsAddress(value);
+      } catch (error) {
+        if (isSolanaError(error, SOLANA_ERROR__ADDRESSES__STRING_LENGTH_OUT_OF_RANGE)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${fieldName} must be 32 to 44 characters (got ${error.context.actualLength})`,
+            input: value,
+          });
+          return;
+        }
+        if (isSolanaError(error, SOLANA_ERROR__CODECS__INVALID_STRING_FOR_BASE)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${fieldName} contains characters outside the base58 alphabet`,
+            input: value,
+          });
+          return;
+        }
+        if (isSolanaError(error, SOLANA_ERROR__ADDRESSES__INVALID_BYTE_LENGTH)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${fieldName} must decode to 32 bytes (got ${error.context.actualLength})`,
+            input: value,
+          });
+          return;
+        }
+        throw error;
+      }
+    });
 }
 
 // Payments token field: a well-known token symbol (SOL, USDC, ...) or a base58
