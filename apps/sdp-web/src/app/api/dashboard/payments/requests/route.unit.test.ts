@@ -91,10 +91,15 @@ function implementVerifyDouble(): void {
   );
 }
 
-async function expectRejected(response: Response, status: number, message: string): Promise<void> {
+async function expectRejected(
+  response: Response,
+  status: number,
+  message: string,
+  code: string
+): Promise<void> {
   expect(response.status).toBe(status);
   expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
-  await expect(response.json()).resolves.toEqual({ error: { message } });
+  await expect(response.json()).resolves.toEqual({ error: { code, message } });
 }
 
 describe("POST /api/dashboard/payments/requests render-scope binding", () => {
@@ -104,8 +109,8 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
     mocks.getSelectedProjectId.mockResolvedValue("prj_rendered");
     mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 202 }));
     mocks.proxyFailure.mockImplementation(
-      (_trace: unknown, status: number, message: string) =>
-        new Response(JSON.stringify({ error: { message } }), {
+      (_trace: unknown, status: number, message: string, code?: string) =>
+        new Response(JSON.stringify({ error: { ...(code ? { code } : {}), message } }), {
           status,
           headers: { "content-type": "application/json" },
         })
@@ -134,7 +139,12 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 409, "Project selection changed. Reload the page and try again.");
+    expectRejected(
+      response,
+      409,
+      "Project selection changed. Reload the page and try again.",
+      "render_scope_project_mismatch"
+    );
     expect(mocks.verifyRenderScope).toHaveBeenCalledWith(
       renderScopeToken("prj_rendered"),
       SESSION,
@@ -149,7 +159,12 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 409, "This page is out of date. Reload the page and try again.");
+    expectRejected(
+      response,
+      409,
+      "This page is out of date. Reload the page and try again.",
+      "render_scope_stale"
+    );
   });
 
   it("rejects creation when the render scope is not a valid sealed token", async () => {
@@ -160,7 +175,12 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 409, "This page is out of date. Reload the page and try again.");
+    expectRejected(
+      response,
+      409,
+      "This page is out of date. Reload the page and try again.",
+      "render_scope_stale"
+    );
   });
 
   it("rejects creation when the render scope was minted for another Clerk session", async () => {
@@ -172,7 +192,12 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 409, "This page is out of date. Reload the page and try again.");
+    expectRejected(
+      response,
+      409,
+      "This page is out of date. Reload the page and try again.",
+      "render_scope_stale"
+    );
   });
 
   it("rejects creation when the render scope has expired", async () => {
@@ -184,7 +209,12 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 409, "This page is out of date. Reload the page and try again.");
+    expectRejected(
+      response,
+      409,
+      "This page is out of date. Reload the page and try again.",
+      "render_scope_stale"
+    );
   });
 
   it("returns 401 without proxying when the request carries no session", async () => {
@@ -195,7 +225,7 @@ describe("POST /api/dashboard/payments/requests render-scope binding", () => {
 
     const response = await POST(request);
 
-    expectRejected(response, 401, "Authentication required");
+    expectRejected(response, 401, "Authentication required", "authentication_required");
   });
 
   it("creates the request when the render scope matches the current selection", async () => {

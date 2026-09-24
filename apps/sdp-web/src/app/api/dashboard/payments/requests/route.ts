@@ -6,7 +6,18 @@ import { getSelectedProjectId, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api
 
 const TRACE_SOURCE = "route.dashboard.payment-requests.create";
 
+/**
+ * English fallback copy plus a stable machine-readable code: the dashboard
+ * client maps the code to localized catalog copy
+ * (`DashboardPayments.requests.*`), while the message keeps the response
+ * readable for callers that do not localize.
+ */
+const AUTH_REQUIRED_MESSAGE = "Authentication required";
+const AUTH_REQUIRED_CODE = "authentication_required";
 const STALE_PAGE_MESSAGE = "This page is out of date. Reload the page and try again.";
+const STALE_PAGE_CODE = "render_scope_stale";
+const PROJECT_CHANGED_MESSAGE = "Project selection changed. Reload the page and try again.";
+const PROJECT_CHANGED_CODE = "render_scope_project_mismatch";
 
 /**
  * Payment-request creation is bound to the render scope of the page that
@@ -33,14 +44,15 @@ export async function POST(request: Request) {
         return proxyFailure(
           createTimedTrace(TRACE_SOURCE, request),
           401,
-          "Authentication required"
+          AUTH_REQUIRED_MESSAGE,
+          AUTH_REQUIRED_CODE
         );
       }
-      const message =
+      const [message, code] =
         verification.reason === "project_mismatch"
-          ? "Project selection changed. Reload the page and try again."
-          : STALE_PAGE_MESSAGE;
-      return proxyFailure(createTimedTrace(TRACE_SOURCE, request), 409, message);
+          ? [PROJECT_CHANGED_MESSAGE, PROJECT_CHANGED_CODE]
+          : [STALE_PAGE_MESSAGE, STALE_PAGE_CODE];
+      return proxyFailure(createTimedTrace(TRACE_SOURCE, request), 409, message, code);
     }
   }
 
