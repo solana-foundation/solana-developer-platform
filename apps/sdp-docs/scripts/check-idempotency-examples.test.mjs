@@ -6,6 +6,7 @@ import {
   extractCodeBlocks,
   extractIdempotencyPostPaths,
   findMissingIdempotencyKeyExamples,
+  splitBlockIntoRequests,
 } from "./lib/idempotency-examples.mjs";
 
 const specWithOperationHeader = {
@@ -107,7 +108,7 @@ test("flags a curl POST example that omits the replay fence", () => {
     ],
   });
   assert.deepEqual(violations, [
-    { file: "introduction.mdx", line: 1, endpoint: "/v1/payments/transfer-batches" },
+    { file: "introduction.mdx", line: 2, endpoint: "/v1/payments/transfer-batches" },
   ]);
 });
 
@@ -197,7 +198,78 @@ test("flags fetch and requests.post examples in any language", () => {
     ],
   });
   assert.deepEqual(violations, [
-    { file: "introduction.mdx", line: 1, endpoint: "/v1/issuance/tokens/{tokenId}/freeze" },
-    { file: "memo.mdx", line: 1, endpoint: "/v1/payments/transfers" },
+    { file: "introduction.mdx", line: 2, endpoint: "/v1/issuance/tokens/{tokenId}/freeze" },
+    { file: "memo.mdx", line: 2, endpoint: "/v1/payments/transfers" },
+  ]);
+});
+
+test("flags relative-path client.post examples without the replay fence", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/issuance/tokens/{tokenId}/unfreeze"]),
+    files: [
+      {
+        path: "tutorial.mdx",
+        source: [
+          "```javascript",
+          `await sdpAdmin.post(\`/v1/issuance/tokens/\${tokenId}/unfreeze\`, {`,
+          "  signingCustodyWalletId,",
+          "  accountAddress: destinationAddress,",
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "tutorial.mdx", line: 2, endpoint: "/v1/issuance/tokens/{tokenId}/unfreeze" },
+  ]);
+});
+test("checks each request in a shared block separately", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set([
+      "/v1/issuance/tokens/{tokenId}/pause",
+      "/v1/issuance/tokens/{tokenId}/unpause",
+    ]),
+    files: [
+      {
+        path: "freeze-and-compliance.mdx",
+        source: [
+          "```bash",
+          "# Pause",
+          "curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/pause \\",
+          '  -H "Authorization: Bearer sk_test_..." \\',
+          '  -H "Idempotency-Key: pause-001" \\',
+          "  -d '{}'",
+          "",
+          "# Unpause",
+          "curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/unpause \\",
+          '  -H "Authorization: Bearer sk_test_..." \\',
+          "  -d '{}'",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    {
+      file: "freeze-and-compliance.mdx",
+      line: 8,
+      endpoint: "/v1/issuance/tokens/{tokenId}/unpause",
+    },
+  ]);
+});
+
+test("splits multi-request blocks on comments, blank lines, and new statements", () => {
+  const content = [
+    "const first = await fetch(url, {",
+    '  method: "POST",',
+    "});",
+    "",
+    "// second",
+    "await client.post(url2, {});",
+  ].join("\n");
+  assert.deepEqual(splitBlockIntoRequests(content), [
+    { content: 'const first = await fetch(url, {\n  method: "POST",\n});', line: 0 },
+    { content: "// second\nawait client.post(url2, {});", line: 4 },
   ]);
 });

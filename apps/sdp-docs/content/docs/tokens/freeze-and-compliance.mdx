@@ -107,7 +107,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
   }'
 ```
 
-`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed. Reuse the same `Idempotency-Key` when retrying the exact request so a lost response replays the original action instead of submitting it twice.
+`accountAddress` accepts a holder wallet or its token account — SDP derives the associated token account when needed. Reuse the same `Idempotency-Key` when retrying the exact request so a lost response replays the original action instead of submitting it twice. Each new freeze is a new operation and gets a fresh key; replaying the old key with different details returns a conflict.
 
 **Unfreeze:**
 

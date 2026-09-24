@@ -158,7 +158,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze \
 </Tab>
 </Tabs>
 
-Every enforcement action carries an `Idempotency-Key`: reuse the same key when retrying the exact request so a lost response replays the original action instead of submitting it twice.
+Every enforcement action carries an `Idempotency-Key`: reuse the same key when retrying the exact request so a lost response replays the original action instead of submitting it twice. Each new action gets a fresh key — a different token or account is a new operation, not a retry.
 </Step>
 <Step>
 ### Ramps and Onchain Transfers
@@ -218,7 +218,7 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
 </Tab>
 </Tabs>
 
-Batch Transfers are value-moving, so every request carries an `Idempotency-Key`. Reuse the same key when retrying the exact request: a retry after a lost response then replays the original batch instead of creating a second one and paying every recipient twice.
+Batch Transfers are value-moving, so every request carries an `Idempotency-Key`. Reuse the same key when retrying the exact request: a retry after a lost response then replays the original batch instead of creating a second one and paying every recipient twice. A new batch — different recipients, amounts, or payout date — is a new operation and needs a fresh key; replaying the old key with changed details returns a conflict rather than silently creating the wrong batch.
 
 The same API extends to on/offramps: rate estimates, quotes, and settlement work identically across every provider and corridor, so money can enter as fiat, live onchain as a token you issued, and exit back to fiat: a complete lifecycle from issuance through circulation to redemption, without stitching together provider-specific integrations. See [Payments](/docs/payments) for transfers and [Ramps](/docs/payments/ramps) for supported providers, currencies, and corridors.
 </Step>

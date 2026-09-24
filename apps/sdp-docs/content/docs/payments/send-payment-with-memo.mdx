@@ -76,7 +76,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Reuse the same `Idempotency-Key` for retries of that exact request so a lost response replays the original transfer instead of creating a second one.
+Reuse the same `Idempotency-Key` for retries of that exact request so a lost response replays the original transfer instead of creating a second one. A new payment — different amount or destination — is a new operation and needs a fresh key; only an exact retry reuses one.
 
 The memo is preserved on the transfer record:
 
