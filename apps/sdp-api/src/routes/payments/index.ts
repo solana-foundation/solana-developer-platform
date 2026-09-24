@@ -16,7 +16,6 @@ import {
   collectRecurringPayment,
   createOfframpQuote,
   createOnrampQuote,
-  createPaymentRequest,
   createRecurringPayment,
   createSubscription,
   createSubscriptionPlan,
@@ -32,7 +31,6 @@ import {
   getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
-  listPaymentRequests,
   listRecurringPayments,
   listSubscriptionCollectionAttempts,
   listSubscriptionPlans,
@@ -52,7 +50,7 @@ import {
   updateSubscriptionPlan,
   updateWalletPolicy,
 } from "./handlers";
-import { createPaymentRequestSchema } from "./handlers/payment-requests";
+import paymentRequests from "./payment-requests";
 import {
   activateRecurringPaymentSchema,
   cancelRampTransferSchema,
@@ -222,13 +220,7 @@ payments.get(
 );
 payments.route("/transfers", transfers);
 payments.route("/transfer-batches", transferBatches);
-payments.get("/requests", requirePermissions("payments:read"), listPaymentRequests);
-payments.post(
-  "/requests",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(createPaymentRequestSchema),
-  createPaymentRequest
-);
+payments.route("/requests", paymentRequests);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 // Estimates fan out one live call per provider on the corridor and quotes
