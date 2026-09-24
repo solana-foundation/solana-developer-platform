@@ -153,6 +153,29 @@ describe("verifyRenderScope", () => {
     });
   });
 
+  it("reports a project mismatch for an expired scope recorded against another project", async () => {
+    // An expired scope is still authentic, so its recorded project decides
+    // between "stale page" and "selection moved": the client may only keep a
+    // filled-in form across the re-render recovery when the selection still
+    // matches the project the form rendered under.
+    const mintedAt = Date.now();
+    const sealed = (await sealRenderScope(
+      { projectId: "prj_rendered" },
+      SESSION,
+      1800,
+      mintedAt
+    )) as string;
+
+    expect(await verifyRenderScope(sealed, SESSION, "prj_sibling", mintedAt + 1800_000)).toEqual({
+      ok: false,
+      reason: "project_mismatch",
+    });
+    expect(await verifyRenderScope(sealed, SESSION, "prj_rendered", mintedAt + 1800_000)).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+  });
+
   it("reports a project mismatch when the rendered project differs from the current one", async () => {
     const sealed = (await sealRenderScope({ projectId: "prj_a" }, SESSION, 1800)) as string;
 

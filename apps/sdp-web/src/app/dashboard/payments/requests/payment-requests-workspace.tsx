@@ -130,13 +130,22 @@ function localizedRequestError(
 }
 
 /**
- * Whether the create was refused because its render scope no longer matches
- * the project the BFF resolved (stale page or moved cookie), rather than by
- * the upstream API.
+ * Which render-scope refusal a failed create carried, if any. `stale` means
+ * the scope was missing, unreadable, or expired while the current selection
+ * still matches the project the form rendered under (the server reclassifies
+ * an expired scope as a mismatch when the selection has moved), so re-render
+ * recovery is safe. `project_mismatch` means the shared selection moved to
+ * another project after render.
  */
-function isRenderScopeRejection(result: { body: unknown }): boolean {
+function renderScopeRejection(result: { body: unknown }): "stale" | "project_mismatch" | null {
   const code = readApiErrorCode(result.body);
-  return code === "render_scope_stale" || code === "render_scope_project_mismatch";
+  if (code === "render_scope_stale") {
+    return "stale";
+  }
+  if (code === "render_scope_project_mismatch") {
+    return "project_mismatch";
+  }
+  return null;
 }
 
 /**
@@ -394,16 +403,26 @@ function CreateRequestModal({
     setSubmitting(false);
     if (!res.ok) {
       toast.error(localizedRequestError(res, t));
-      if (isRenderScopeRejection(res)) {
-        // The scope was refused because this render no longer matches the
-        // project the BFF resolved for the submit: the page went stale
-        // (expired/invalid scope) or the shared cookie moved (project
-        // mismatch). Refresh the server component so a fresh scope — sealed
-        // for the project the cookie names right now — replaces the stale one
-        // while the still-open form keeps every entered value. The resubmit
-        // itself stays manual on purpose: retrying automatically would
-        // silently attribute the request to whatever project the cookie
-        // points at after the refresh (APE-706).
+      const scopeRejection = renderScopeRejection(res);
+      if (scopeRejection === "stale") {
+        // The scope expired or went unreadable while the current selection
+        // still matches the project this form rendered under: refresh the
+        // server component so a fresh scope — sealed for the same project —
+        // replaces the expired one while the still-open form keeps every
+        // entered value. The resubmit itself stays manual on purpose:
+        // retrying automatically would repeat the submission without the
+        // user seeing the error (APE-706).
+        router.refresh();
+      } else if (scopeRejection === "project_mismatch") {
+        // The shared selection moved to another project, so the refreshed
+        // page mints its fresh scope for THAT project. The form must not
+        // survive the refresh with values entered under the old one — a
+        // manual retry would then pass the scope check and silently
+        // attribute the request to the new project, whose org-level custody
+        // wallet may resolve identically. Close the form, discarding those
+        // values, and let the refresh re-render the workspace for the
+        // current selection (APE-706).
+        onClose();
         router.refresh();
       }
       return;

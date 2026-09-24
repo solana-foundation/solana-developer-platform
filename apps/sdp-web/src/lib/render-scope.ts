@@ -100,24 +100,32 @@ export async function sealRenderScope(
   ].join(".");
 }
 
-/**
- * Unseal a render scope for the current session. Returns null on any
- * failure: malformed value, wrong key, tampering, session or user mismatch,
- * or expiry.
- */
-export async function unsealRenderScope(
+type UnsealOutcome =
+  | { ok: true; scope: SealedRenderScope }
+  | {
+      ok: false;
+      reason: "malformed" | "session_mismatch" | "expired";
+      /**
+       * The decrypted scope when the failure was expiry — the payload is
+       * authentic, only the timestamp lapsed — and null for every other
+       * failure, where no project can be attributed to the value.
+       */
+      scope: SealedRenderScope | null;
+    };
+
+async function unsealRenderScopeDetailed(
   sealed: string,
   claims: RenderScopeClaims,
-  now: number = Date.now()
-): Promise<SealedRenderScope | null> {
+  now: number
+): Promise<UnsealOutcome> {
   const secret = getScopeSecret();
   if (!secret) {
-    return null;
+    return { ok: false, reason: "malformed", scope: null };
   }
 
   const [version, ivPart, cipherPart, ...rest] = sealed.split(".");
   if (version !== SEAL_VERSION || !ivPart || !cipherPart || rest.length > 0) {
-    return null;
+    return { ok: false, reason: "malformed", scope: null };
   }
 
   try {
@@ -128,23 +136,37 @@ export async function unsealRenderScope(
     const payload = JSON.parse(new TextDecoder().decode(plaintext)) as SealedScopePayload;
 
     if (payload.sid !== claims.sessionId || payload.uid !== claims.userId) {
-      return null;
-    }
-    if (typeof payload.exp !== "number" || payload.exp <= now) {
-      return null;
+      return { ok: false, reason: "session_mismatch", scope: null };
     }
     if (
       !payload.scope ||
       typeof payload.scope.projectId !== "string" ||
       payload.scope.projectId.length === 0
     ) {
-      return null;
+      return { ok: false, reason: "malformed", scope: null };
+    }
+    if (typeof payload.exp !== "number" || payload.exp <= now) {
+      return { ok: false, reason: "expired", scope: payload.scope };
     }
 
-    return payload.scope;
+    return { ok: true, scope: payload.scope };
   } catch {
-    return null;
+    return { ok: false, reason: "malformed", scope: null };
   }
+}
+
+/**
+ * Unseal a render scope for the current session. Returns null on any
+ * failure: malformed value, wrong key, tampering, session or user mismatch,
+ * or expiry.
+ */
+export async function unsealRenderScope(
+  sealed: string,
+  claims: RenderScopeClaims,
+  now: number = Date.now()
+): Promise<SealedRenderScope | null> {
+  const outcome = await unsealRenderScopeDetailed(sealed, claims, now);
+  return outcome.ok ? outcome.scope : null;
 }
 
 /**
@@ -153,6 +175,10 @@ export async function unsealRenderScope(
  * the route can log and answer precisely: an unauthenticated caller is 401,
  * a missing/expired/tampered/wrong-session scope means the page is stale,
  * and a project mismatch means the shared selection moved after render.
+ * Expiry alone does not decide between the two: an expired scope is still
+ * authentic, so when its recorded project differs from the current selection
+ * the mismatch is reported — the client may only recover from a stale page
+ * by re-rendering a form whose project still matches the selection.
  */
 export async function verifyRenderScope(
   sealed: string | null | undefined,
@@ -167,16 +193,23 @@ export async function verifyRenderScope(
     return { ok: false, reason: "missing" };
   }
 
-  const scope = await unsealRenderScope(
+  const outcome = await unsealRenderScopeDetailed(
     sealed,
     { sessionId: claims.sessionId, userId: claims.userId },
     now
   );
-  if (!scope) {
+  if (!outcome.ok) {
+    if (
+      outcome.reason === "expired" &&
+      outcome.scope &&
+      outcome.scope.projectId !== expectedProjectId
+    ) {
+      return { ok: false, reason: "project_mismatch" };
+    }
     return { ok: false, reason: "invalid" };
   }
-  if (scope.projectId !== expectedProjectId) {
+  if (outcome.scope.projectId !== expectedProjectId) {
     return { ok: false, reason: "project_mismatch" };
   }
-  return { ok: true, projectId: scope.projectId };
+  return { ok: true, projectId: outcome.scope.projectId };
 }
