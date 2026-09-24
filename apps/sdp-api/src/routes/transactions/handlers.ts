@@ -27,7 +27,7 @@ export async function listUnifiedTransactions(
   }
   const moduleWalletScopes = permittedModules.flatMap((module) => {
     const authorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
-      UNIFIED_TRANSACTION_MODULE_PERMISSIONS[module],
+      ...UNIFIED_TRANSACTION_MODULE_PERMISSIONS[module],
     ]);
     return authorization === null
       ? []
