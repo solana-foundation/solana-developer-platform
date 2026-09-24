@@ -376,8 +376,9 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
  *
  * The id is validated against this organization's project list first, so an
  * arbitrary or no-longer-listed project is refused here rather than sent
- * upstream; the list read reuses the request-cached `/v1/projects` call the
- * layout already made. A failed list read fails closed — without the list
+ * upstream. Each server-action request loads `/v1/projects` before the event
+ * request; its request-scoped cache is not shared with the earlier layout
+ * request. A failed list read fails closed — without the list
  * there is nothing to validate the scope against. The API still authorizes
  * the caller's membership on every request.
  */

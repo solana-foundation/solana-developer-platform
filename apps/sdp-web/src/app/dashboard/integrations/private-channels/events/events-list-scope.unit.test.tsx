@@ -14,7 +14,7 @@ import {
   type PrivateChannelEventDto,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -66,6 +66,7 @@ vi.mock("@/components/ui/select", () => ({
 
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import type { LoadEventsResult } from "./actions";
 import { EventsList } from "./events-list";
 
 const MINT = WELL_KNOWN_TOKENS.USDC.mints.devnet.address;
@@ -127,6 +128,14 @@ function rerenderFeed(
 /** Every event renders twice — the stacked list and the table — so row assertions name the table. */
 function eventTable() {
   return within(screen.getByRole("table"));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 afterEach(() => cleanup());
@@ -249,4 +258,101 @@ describe("stale project events feed (SOLA9-230)", () => {
       });
     });
   });
+
+  it.each(["failure", "out-of-scope response"])(
+    "does not revert the new project's filter after a stale %s",
+    async (outcome) => {
+      const user = userEvent.setup();
+      // Project A: transfer filter loads, then the user reverts to "all"; that
+      // request is still in flight when the page switches to project B.
+      const staleA = deferred<LoadEventsResult>();
+      mocks.loadProjectEventsAction
+        .mockResolvedValueOnce({
+          ok: true,
+          data: {
+            events: [event("project_a", "filtered_a")],
+            hasMore: true,
+            nextCursor: "filtered_cursor_a",
+          },
+        })
+        .mockReturnValueOnce(staleA.promise)
+        .mockResolvedValueOnce({
+          ok: true,
+          data: { events: [], hasMore: false, nextCursor: null },
+        });
+      const { rerender } = renderFeed(feed("project_a"));
+      const filter = screen.getByRole("combobox", { name: "Event category" });
+      await user.selectOptions(filter, PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER);
+      await user.selectOptions(filter, "all");
+      expect(mocks.loadProjectEventsAction).toHaveBeenCalledTimes(2);
+
+      rerenderFeed(rerender, feed("project_b"));
+      await act(async () => {
+        staleA.resolve(
+          outcome === "failure"
+            ? { ok: false, message: "Unavailable" }
+            : {
+                ok: true,
+                data: {
+                  events: [event("project_b", "wrong_scope")],
+                  hasMore: false,
+                  nextCursor: null,
+                },
+              }
+        );
+        await staleA.promise;
+      });
+
+      // B's filter stays on the "all" it reset to, and its unfiltered rows and
+      // cursor are intact for the next pagination request.
+      expect((filter as HTMLSelectElement).value).toBe("all");
+      expect(eventTable().getByText(/999\.00 USDC/)).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Load more" }));
+      expect(mocks.loadProjectEventsAction).toHaveBeenLastCalledWith({
+        projectId: "project_b",
+        before: "cursor_from_project_b",
+        limit: 50,
+      });
+    }
+  );
+
+  it.each(["project_b", "project_a"])(
+    "preserves %s's event details when an earlier scope's filter response completes",
+    async (currentProject) => {
+      const user = userEvent.setup();
+      const staleA = deferred<LoadEventsResult>();
+      mocks.loadProjectEventsAction.mockReturnValueOnce(staleA.promise);
+      const { rerender } = renderFeed(feed("project_a"));
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Event category" }),
+        PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER
+      );
+      expect(mocks.loadProjectEventsAction).toHaveBeenCalledTimes(1);
+
+      rerenderFeed(rerender, feed("project_b"));
+      if (currentProject === "project_a") {
+        rerenderFeed(rerender, feed("project_a"));
+      }
+      await user.click(eventTable().getByRole("button", { name: /View details/i }));
+      expect(screen.getByRole("dialog")).toBeTruthy();
+
+      await act(async () => {
+        staleA.resolve({
+          ok: true,
+          data: { events: [], hasMore: false, nextCursor: null },
+        });
+        await staleA.promise;
+      });
+
+      // The stale response dropped whole (no feed rewrite), so the details the
+      // user opened stay open until they close them.
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByText(`${currentProject}_channel`)).toBeTruthy();
+      await user.keyboard("{Escape}");
+      expect(
+        eventTable().getByText(currentProject === "project_a" ? /10\.00 USDC/ : /999\.00 USDC/)
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy();
+    }
+  );
 });

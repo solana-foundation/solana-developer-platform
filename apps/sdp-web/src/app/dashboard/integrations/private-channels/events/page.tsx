@@ -12,15 +12,17 @@ import { EventsList } from "./events-list";
 export default async function PrivateChannelsEventsPage() {
   await requirePrivateChannelsAccess();
 
-  const [t, { orgRole }] = await Promise.all([getTranslations(), auth()]);
-  const { permissions } = resolveDashboardAccess(orgRole);
-  const canViewRawPayload = hasPermission(permissions, "org:admin");
-
-  const client = await createSdpApiClient();
   // The same request-scoped resolution the client used: the scope the initial
   // rows were loaded under. Follow-up loads re-bind to it instead of the
   // mutable cookie, so the feed can never mix projects.
-  const projectId = await getSelectedProjectId();
+  const [t, { orgRole }, client, projectId] = await Promise.all([
+    getTranslations(),
+    auth(),
+    createSdpApiClient(),
+    getSelectedProjectId(),
+  ]);
+  const { permissions } = resolveDashboardAccess(orgRole);
+  const canViewRawPayload = hasPermission(permissions, "org:admin");
   if (!projectId) {
     throw new Error("Selected project required");
   }
