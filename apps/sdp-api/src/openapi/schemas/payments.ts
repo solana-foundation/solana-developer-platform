@@ -9,6 +9,12 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
+import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
+import {
+  createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
+  listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
+} from "@/routes/payments/ramps/onramp/schemas";
+import { simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
@@ -55,13 +61,7 @@ import {
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
 } from "@/routes/payments/wallet-policies/schemas";
-import {
-  createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
-  listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
-  listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
-  simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
-  transferIdParamsSchema as transferIdParamsSchemaBase,
-} from "../../routes/payments/schemas";
+import { transferIdParamsSchema as transferIdParamsSchemaBase } from "../../routes/payments/schemas";
 import {
   base64Schema,
   cryptoAssetSymbolSchema,

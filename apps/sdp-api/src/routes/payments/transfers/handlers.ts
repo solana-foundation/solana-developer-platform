@@ -58,7 +58,7 @@ import { isDryRunRequest } from "@/middleware/dry-run";
 import { enforceMeteredQuota } from "@/middleware/metered-quota";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { isRampQuoteBindingExpired } from "@/routes/payments/handlers/ramps/quote-binding";
+import { isRampQuoteBindingExpired } from "@/routes/payments/ramps/quote-binding";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";

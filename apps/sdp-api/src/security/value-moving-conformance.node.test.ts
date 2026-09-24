@@ -359,12 +359,12 @@ const contracts: ValueMovingContract[] = [
   {
     family: "ramps",
     trustedContext: {
-      file: "apps/sdp-api/src/routes/payments/handlers/ramps.ts",
+      file: "apps/sdp-api/src/routes/payments/ramps/onramp/handlers.ts",
       evidence: "scope.auth.organizationId",
     },
     authorization: {
-      file: "apps/sdp-api/src/routes/payments/index.ts",
-      section: '"/ramps/onramp/quote",',
+      file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
+      section: '"/quote",',
       before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
       after: "\n  createOnrampQuote\n",
     },

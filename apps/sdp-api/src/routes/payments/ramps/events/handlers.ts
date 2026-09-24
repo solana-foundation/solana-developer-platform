@@ -17,8 +17,8 @@ import { noContent } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "../../schemas";
-import { isRampQuoteBindingExpired } from "./quote-binding";
+import { isRampQuoteBindingExpired } from "../quote-binding";
+import type { coinbaseRampEventSchema, moneygramRampEventSchema } from "./schemas";
 
 function readMoneygramData(transfer: PaymentTransferRow): Record<string, unknown> {
   const value = transfer.provider_data.moneygram;

@@ -54,7 +54,7 @@ For an unsupported pair/direction, or a provider whose price exists only at host
 
 ## Dispatch + route
 
-The dashboard runtime routes are `POST /v1/payments/ramps/{onramp|offramp}/estimate` (`apps/sdp-api/src/routes/payments/handlers/ramps.ts` → `estimateAcrossProviders`). They are availability-gated and metered. They are not currently part of the public OpenAPI surface, so do not advertise them as public endpoints unless the OpenAPI policy changes.
+The dashboard runtime routes are `POST /v1/payments/ramps/{onramp|offramp}/estimate` (`apps/sdp-api/src/routes/payments/ramps/shared.ts` → `estimateAcrossProviders`). They are availability-gated and metered. They are not currently part of the public OpenAPI surface, so do not advertise them as public endpoints unless the OpenAPI policy changes.
 
 ## Variety
 

@@ -23,7 +23,7 @@ import type { PaymentRampEstimate } from "@sdp/types";
 import { logEvent } from "@/runtime/money-path-events";
 import type { Observability } from "@/runtime/observability";
 import type { AppContext } from "../context";
-import { estimateAcrossProviders } from "./ramps";
+import { estimateAcrossProviders } from "./shared";
 
 function buildContext(options?: { sentryDsn?: string; observability?: Observability }) {
   const vars = new Map<string, unknown>([["observability", options?.observability]]);
