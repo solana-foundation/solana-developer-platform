@@ -18,19 +18,28 @@ import type { EarnVaultPosition } from "@sdp/types";
  * valuations legitimately land above or below the arithmetic (Kamino
  * accrues, Veda quotes the redeemable value net of its premium). A movement
  * counts as contained in a read only when that read shows the position's
- * SHARES moved in the movement's own direction off a baseline taken from a
- * read that landed before the POST began, and the change can be attributed
- * to it: the read started after this tab saw the commit, or the movement is
- * the only one that could have moved the shares. A movement with no hydrated
- * pre-POST baseline is not projected at all; timing alone is never evidence.
+ * SHARES moved off a baseline taken from a read that landed before the POST
+ * began, and the change can be attributed to it: the read started after this
+ * tab saw the commit, or the movement is the only one that could have moved
+ * the shares. A movement with no hydrated pre-POST baseline is not projected
+ * at all; timing alone is never evidence.
  *
- * Residual, stated plainly: the row never overstates, because a read that
- * contains a movement necessarily shows its shares moved. It can understate
- * for one read cycle when shares move in the same direction from a source
- * this tab cannot see (another session, a transfer outside SDP) or when two
- * movements on one position overlap; the next read heals it. Attributing a
- * share change to one transaction would need a chain slot on the positions
- * read, which the API does not expose.
+ * Any net change counts, in either direction, on purpose. Requiring the
+ * movement's own direction would let an unseen opposite move (another
+ * session withdrawing more than this tab deposited) mask the movement for
+ * good, pinning a projection over a value that already contains it: an
+ * overstatement no later read of the settled holding could clear. With the
+ * net rule a projection can only outlive its read while the shares sit
+ * exactly on the baseline, which a read containing the movement cannot show
+ * unless an unseen move cancels it to the share, and any later change
+ * clears it.
+ *
+ * Residual, stated plainly: a share move from a source this tab cannot see
+ * (another session, a transfer outside SDP), or two movements on one
+ * position in flight at once, can misjudge a movement for one read cycle;
+ * the next read heals it. Attributing a share change to one transaction
+ * would need a chain slot on the positions read, which the API does not
+ * expose.
  */
 
 export type VaultMovementKind = "deposit" | "withdrawal";
@@ -175,22 +184,17 @@ export function vaultActivities<
 }
 
 /**
- * Whether the read shows the shares moved in the movement's own direction off
- * the baseline: up for a deposit, down for a withdrawal. An unhydrated or
- * malformed row proves nothing.
+ * Whether the read shows the shares moved off the baseline, in either
+ * direction (see the module note on why direction is not required). An
+ * unhydrated or malformed row proves nothing.
  */
-function sharesMovedBy(
-  kind: VaultMovementKind,
-  baseline: VaultProjectionBaseline,
-  holding: VaultHoldingSnapshot
-): boolean {
+function sharesMoved(baseline: VaultProjectionBaseline, holding: VaultHoldingSnapshot): boolean {
   const live = holding.shares;
   if (live === undefined || !isDecimalString(live) || !isDecimalString(baseline.shares)) {
     return false;
   }
   const scale = Math.max(decimalScale(live), decimalScale(baseline.shares));
-  const delta = parseDecimalAmount(live, scale) - parseDecimalAmount(baseline.shares, scale);
-  return kind === "deposit" ? delta > 0n : delta < 0n;
+  return parseDecimalAmount(live, scale) !== parseDecimalAmount(baseline.shares, scale);
 }
 
 /**
@@ -224,7 +228,7 @@ function isSoleMover(
  * decides; timing only attributes a change the witness alone cannot.
  */
 export function isVaultProjectionReflected(
-  { kind, movement }: VaultActivity,
+  { movement }: VaultActivity,
   read: VaultPositionsRead,
   activities: readonly VaultActivity[]
 ): boolean {
@@ -233,7 +237,7 @@ export function isVaultProjectionReflected(
     projection === undefined ||
     movement.committedObservedAt === undefined ||
     !isCommittedVaultMovement(movement) ||
-    !sharesMovedBy(kind, projection.baseline, holdingInRead(read, movement.positionId))
+    !sharesMoved(projection.baseline, holdingInRead(read, movement.positionId))
   ) {
     return false;
   }

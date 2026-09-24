@@ -139,11 +139,31 @@ describe("isVaultProjectionReflected", () => {
     expect(isVaultProjectionReflected(deposit(), read({ shares: "129.5" }), [])).toBe(true);
   });
 
-  it("requires the move to be in the movement's own direction", () => {
-    // Shares fell after a deposit: something else moved them, not this deposit.
-    expect(isVaultProjectionReflected(deposit(), read({ shares: "100" }), [])).toBe(false);
-    expect(isVaultProjectionReflected(withdrawal(), read({ shares: "129.5" }), [])).toBe(false);
-    expect(isVaultProjectionReflected(withdrawal(), read({ shares: "100" }), [])).toBe(true);
+  it("counts a net move in either direction, so opposing movements cannot pin a projection", () => {
+    // Baseline 119.5; this tab deposits and an unseen session withdraws more:
+    // the read contains the deposit yet shows fewer shares. Requiring the
+    // deposit's own direction would keep it pending over a value that already
+    // holds it, for every later read of the settled holding.
+    expect(isVaultProjectionReflected(deposit(), read({ shares: "100" }), [])).toBe(true);
+    expect(isVaultProjectionReflected(withdrawal(), read({ shares: "129.5" }), [])).toBe(true);
+  });
+
+  it("retires a deposit and a larger withdrawal together once a read contains both", () => {
+    const inflow = deposit({ movementId: "in", observedOrder: 1, committedObservedAt: 9_000 });
+    const outflow = withdrawal({
+      movementId: "out",
+      observedOrder: 2,
+      balanceProjection: {
+        amount: "20",
+        baseline: { startedAt: BASELINE_READ_STARTED_AT, shares: "119.5" },
+      },
+    });
+    const settled = read({ shares: "109.5", value: "115.25" });
+    expect(pendingVaultProjections([inflow, outflow], settled, POSITION)).toEqual([]);
+    expect(displayedVaultBalance([settled], POSITION, [inflow, outflow])).toEqual({
+      value: "115.25",
+      projected: false,
+    });
   });
 
   it("proves nothing from an unhydrated row", () => {
