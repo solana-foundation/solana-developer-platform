@@ -61,7 +61,14 @@
   --color-destructive-bg: var(--crimson-bg);
   --color-destructive-border: var(--crimson-brd);
 
-  /* Type scale: text-amount, text-quote, text-heading, text-subheading, text-field,
+  /* bg-chip + shadow-chip: the raised segment of a segmented control. */
+  --color-chip: var(--chip);
+  --shadow-chip: var(--chip-ring);
+
+  /* Fonts are not mapped here: tokens.css declares --font-sans and --font-mono directly,
+     the names Tailwind's font-sans / font-mono utilities already read. */
+
+  /* Type scale: text-amount, text-quote, text-heading, text-subheading, text-field, text-nav,
      text-body, text-meta, and text-page-title for the shell title. */
   --text-amount: var(--font-size-amount);
   --text-amount--line-height: var(--line-height-amount);
@@ -77,6 +84,8 @@
   --text-subheading--letter-spacing: var(--letter-spacing-subheading);
   --text-field: var(--font-size-field);
   --text-field--line-height: var(--line-height-field);
+  --text-nav: var(--font-size-nav);
+  --text-nav--line-height: var(--line-height-nav);
   --text-body: var(--font-size-body);
   --text-body--line-height: var(--line-height-body);
   --text-meta: var(--font-size-meta);
@@ -95,7 +104,8 @@
   --spacing-control-md: var(--control-height-md);
   --spacing-control-lg: var(--control-height-lg);
 
-  /* max-w-flow */
+  /* max-w-page (a page's content column) and max-w-flow (a wizard or settings form) */
+  --container-page: var(--page-max-width);
   --container-flow: var(--flow-max-width);
 
   --shadow-ring: var(--elevation-popover);

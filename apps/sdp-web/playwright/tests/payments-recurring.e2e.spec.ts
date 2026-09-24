@@ -64,17 +64,17 @@ test.describe
     test("creates and displays a recurring payment", async ({ page }) => {
       await page.goto("/dashboard/payments");
 
-      await expect(page.getByRole("link", { name: "Recurring", exact: true })).toBeVisible();
-      await page.getByRole("link", { name: "Recurring", exact: true }).click();
+      await expect(page.getByRole("link", { name: "Scheduled", exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Scheduled", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       await expect(
-        page.locator("main").getByRole("heading", { name: "Recurring payments" }).first()
+        page.locator("main").getByRole("heading", { name: "Schedules" }).first()
       ).toBeVisible();
       await expect(
-        page.getByText("No recurring payments yet.").or(page.locator("tbody tr").first())
+        page.getByText("No schedules yet.").or(page.locator("tbody tr").first())
       ).toBeVisible({ timeout: 120_000 });
 
-      await page.getByRole("link", { name: "Create recurring payment" }).first().click();
+      await page.getByRole("link", { name: "New", exact: true }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring\/create$/);
 
       const app = page.locator("main");
@@ -107,13 +107,13 @@ test.describe
       await expect(next).toBeEnabled({ timeout: 120_000 });
       await next.click();
 
-      await expect(app.getByText("Review recurring payment")).toBeVisible();
+      await expect(app.getByText("Review schedule")).toBeVisible();
       await expect(app.getByText(recurringCounterpartyName)).toBeVisible();
       await expect(app.getByText(recurringWalletLabel)).toBeVisible();
       await expect(app.getByText(`7.5 ${recurringTokenSymbol}`)).toBeVisible();
 
       const createButton = app.getByRole("button", {
-        name: "Create recurring payment",
+        name: "Create schedule",
         exact: true,
       });
       await expect(createButton).toBeEnabled({ timeout: 120_000 });
@@ -129,10 +129,10 @@ test.describe
       await expect(page.getByText("Pending activation", { exact: true })).toBeVisible();
       await expect(page.getByText("Every day", { exact: true }).first()).toBeVisible();
 
-      await page.getByRole("link", { name: "Back to recurring payments" }).click();
+      await page.getByRole("link", { name: "Back to schedules" }).click();
       await expect(page).toHaveURL(/\/dashboard\/payments\/recurring$/);
       const recurringRow = page
-        .getByRole("button")
+        .locator("tbody tr")
         .filter({ hasText: recurringCounterpartyName })
         .first();
       await expect(recurringRow).toBeVisible();
@@ -146,7 +146,7 @@ test.describe
       await expect(
         page.locator("main").getByRole("heading", { level: 1, name: "Recurring payment" })
       ).toBeVisible();
-      await expect(page.getByRole("link", { name: "Back to recurring payments" })).toBeVisible();
+      await expect(page.getByRole("link", { name: "Back to schedules" })).toBeVisible();
       await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();
       await expect(page.getByText("Billing interval", { exact: true })).toBeVisible();
       await expect(page.getByText("Funding wallet", { exact: true })).toBeVisible();

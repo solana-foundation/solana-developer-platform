@@ -1,16 +1,18 @@
 /*
-  @sdp/design-tokens: every colour, type size, radius and control size SDP UI is built from.
+  @sdp/design-tokens: every colour, font, type size, radius and control size SDP UI is built
+  from.
 
   Three layers, all plain CSS custom properties so any consumer (the dashboard, a Storybook,
   a static prototype) can read them without Tailwind:
 
     1. Base palette: the SDP product palette every dashboard screen uses today.
-    2. Refresh palette: the 2026 Payments design (darker inks, lighter hairlines, muted
-       status hues). Defined alongside the base palette so both can be documented side by side.
-    3. Refresh scope: [data-sdp-theme="refresh"] re-points the base names at the refresh values.
-       Everything inside a refresh surface, shared components included, renders in the new
-       design without per-component overrides. Payments and Privacy opt in today; moving the
-       attribute to <html> adopts it app-wide.
+    2. Refresh palette: the 2026 Payments design, light and dark, taken from the design's own
+       stylesheet (SDP prototype 0.3). Defined alongside the base palette so both can be
+       documented side by side.
+    3. Refresh scope: [data-sdp-theme="refresh"] re-points the base names at the refresh values
+       and switches the font. Everything inside a refresh surface, shared components included,
+       renders in the new design without per-component overrides. Payments and Privacy opt in
+       today; moving the attribute to <html> adopts it app-wide.
 
   Scale, radius and control tokens are theme-independent. theme.css maps all of this onto
   Tailwind utilities, and index.ts is the typed catalog a Storybook reads.
@@ -55,6 +57,11 @@
   --crimson-strongest: #8a1f2a;
   --crimson-bg: rgba(199, 31, 55, 0.08);
   --crimson-brd: rgba(199, 31, 55, 0.2);
+
+  /* The base design's type. These are the names Tailwind's font-sans / font-mono utilities
+     and @solana/design-system read, so re-pointing them re-fonts a whole subtree. */
+  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 :root.dark {
@@ -102,73 +109,104 @@
 
 /* ── 2. Refresh palette ──────────────────────────────────────────────────── */
 
-/* Measured from the 2026 Payments design. Inks are opaque and slightly violet; every wash
-   and rule is the ink at an alpha, so they stay correct on any light surface. */
+/* The design's light values, verbatim from its stylesheet. Papers are the three grounds
+   (page, sidebar, card); the ink is opaque and slightly violet; every wash and rule is the ink
+   at an alpha, so they stay correct on any of the papers. Status washes and rules are the hue
+   at an alpha, derived here so a hue change carries through. */
 :root {
-  --ink: #0f0f12;
-  --ink-secondary: #4a4851;
-  --ink-tertiary: #66646f;
-  --ink-disabled: rgba(15, 15, 18, 0.5);
+  --paper: oklch(98.56% 0.0017 67.8);
+  --paper-side: oklch(96.41% 0.0041 91.45);
+  --paper-card: oklch(100% 0 0);
 
-  --wash: rgba(15, 15, 18, 0.03);
-  --wash-strong: rgba(15, 15, 18, 0.06);
-  --wash-strongest: rgba(15, 15, 18, 0.1);
+  --ink: oklch(17.03% 0.0083 285.49);
+  --ink-secondary: oklch(40.73% 0.0167 294.82);
+  --ink-tertiary: oklch(50.92% 0.0189 293.37);
+  --ink-disabled: oklch(17.03% 0.0083 285.49 / 0.45);
 
-  --rule-faint: rgba(15, 15, 18, 0.05);
-  --rule: rgba(15, 15, 18, 0.1);
-  --rule-strong: rgba(15, 15, 18, 0.18);
+  --wash: oklch(17.03% 0.0083 285.49 / 0.03);
+  --wash-strong: oklch(17.03% 0.0083 285.49 / 0.06);
+  --wash-strongest: oklch(17.03% 0.0083 285.49 / 0.1);
 
-  --positive: #347852;
-  --positive-wash: rgba(52, 120, 82, 0.08);
-  --positive-rule: rgba(52, 120, 82, 0.3);
-  --progress: #2751d0;
-  --progress-wash: rgba(39, 81, 208, 0.08);
-  --progress-rule: rgba(39, 81, 208, 0.3);
-  --attention: #7e4f1f;
-  --attention-wash: rgba(126, 79, 31, 0.07);
-  --attention-rule: rgba(126, 79, 31, 0.3);
-  --critical: #aa2e26;
-  --critical-wash: rgba(170, 46, 38, 0.08);
-  --critical-rule: rgba(170, 46, 38, 0.35);
+  --rule-faint: oklch(17.03% 0.0083 285.49 / 0.05);
+  --rule: oklch(17.03% 0.0083 285.49 / 0.09);
+  --rule-strong: oklch(17.03% 0.0083 285.49 / 0.18);
+
+  /* The raised segment of a segmented control: a paper chip with a hairline ring. */
+  --chip: oklch(100% 0 0);
+  --chip-ring:
+    0 1px 2px oklch(17.03% 0.0083 285.49 / 0.08), 0 0 0 1px oklch(17.03% 0.0083 285.49 / 0.06);
+
+  --positive: oklch(51.11% 0.1164 159.59);
+  --positive-wash: color-mix(in oklab, var(--positive) 8%, transparent);
+  --positive-rule: color-mix(in oklab, var(--positive) 30%, transparent);
+  --progress: oklch(48.82% 0.2172 264.38);
+  --progress-wash: color-mix(in oklab, var(--progress) 8%, transparent);
+  --progress-rule: color-mix(in oklab, var(--progress) 30%, transparent);
+  --attention: oklch(47.62% 0.1034 61.91);
+  --attention-wash: color-mix(in oklab, var(--attention) 8%, transparent);
+  --attention-rule: color-mix(in oklab, var(--attention) 30%, transparent);
+  --critical: oklch(50.54% 0.1905 27.52);
+  --critical-wash: color-mix(in oklab, var(--critical) 8%, transparent);
+  --critical-rule: color-mix(in oklab, var(--critical) 35%, transparent);
+
+  /* The design's faces. The app loads the files in src/assets/fonts with next/font and
+     exposes them as --font-season-sans and --font-geist-mono; without those, the installed
+     family name is tried before the system stack. */
+  --font-brand-sans:
+    var(--font-season-sans, "Season Sans"), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-brand-mono:
+    var(--font-geist-mono, "Geist Mono Variable"), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* The design has no dark comps yet, so the refresh palette resolves to the base dark palette:
-   a refresh surface in dark mode looks exactly like the rest of the dark dashboard. */
+/* The design's dark values, verbatim from its stylesheet: near-black papers with the sidebar
+   a step darker than the page, and status hues lifted for contrast. */
 :root.dark {
-  --ink: var(--emph-xh);
-  --ink-secondary: var(--emph-m);
-  --ink-tertiary: var(--emph-l);
-  --ink-disabled: var(--emph-xl);
+  --paper: oklch(13.54% 0.0047 285.76);
+  --paper-side: oklch(11.56% 0.0032 285.88);
+  --paper-card: oklch(16.52% 0.0062 285.7);
 
-  --wash: var(--t4);
-  --wash-strong: var(--t8);
-  --wash-strongest: var(--t12);
+  --ink: oklch(98.56% 0.0017 67.8);
+  --ink-secondary: oklch(76.48% 0.0202 298.96);
+  --ink-tertiary: oklch(63.44% 0.0197 299.86);
+  --ink-disabled: oklch(98.56% 0.0017 67.8 / 0.45);
 
-  --rule-faint: var(--border-xl);
-  --rule: var(--border-l);
-  --rule-strong: var(--border-m);
+  --wash: oklch(100% 0 0 / 0.04);
+  --wash-strong: oklch(100% 0 0 / 0.06);
+  --wash-strongest: oklch(100% 0 0 / 0.1);
 
-  --positive: var(--green-tx);
-  --positive-wash: var(--green-bg);
-  --positive-rule: var(--green-brd);
-  --progress: var(--blue-tx);
-  --progress-wash: var(--blue-bg);
-  --progress-rule: var(--blue-brd);
-  --attention: var(--amber-tx);
-  --attention-wash: var(--amber-bg);
-  --attention-rule: var(--amber-brd);
-  --critical: var(--red-tx);
-  --critical-wash: var(--red-bg);
-  --critical-rule: var(--red-brd);
+  --rule-faint: oklch(100% 0 0 / 0.05);
+  --rule: oklch(100% 0 0 / 0.13);
+  --rule-strong: oklch(100% 0 0 / 0.18);
+
+  --chip: oklch(24.5% 0.008 285.6);
+  --chip-ring: 0 0 0 1px oklch(100% 0 0 / 0.08);
+
+  --positive: oklch(62.76% 0.1004 159.73);
+  --positive-wash: color-mix(in oklab, var(--positive) 12%, transparent);
+  --positive-rule: color-mix(in oklab, var(--positive) 35%, transparent);
+  --progress: oklch(61.13% 0.1869 264.4);
+  --progress-wash: color-mix(in oklab, var(--progress) 12%, transparent);
+  --progress-rule: color-mix(in oklab, var(--progress) 35%, transparent);
+  --attention: oklch(60.14% 0.0893 61.86);
+  --attention-wash: color-mix(in oklab, var(--attention) 12%, transparent);
+  --attention-rule: color-mix(in oklab, var(--attention) 35%, transparent);
+  --critical: oklch(62.37% 0.1634 27.66);
+  --critical-wash: color-mix(in oklab, var(--critical) 12%, transparent);
+  --critical-rule: color-mix(in oklab, var(--critical) 40%, transparent);
 }
 
 /* ── 3. Refresh scope ────────────────────────────────────────────────────── */
 
 [data-sdp-theme="refresh"] {
+  --surface: var(--paper-side);
+  --surface-sunken: var(--paper-card);
+  --surface-raised: var(--paper);
+
   --emph-xh: var(--ink);
   --emph-m: var(--ink-secondary);
   --emph-l: var(--ink-tertiary);
   --emph-xl: var(--ink-disabled);
+  --on-primary: var(--paper);
 
   --t4: var(--wash);
   --t8: var(--wash-strong);
@@ -191,35 +229,45 @@
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
 
+  --font-sans: var(--font-brand-sans);
+  --font-mono: var(--font-brand-mono);
+
   --page-title-size: var(--font-size-heading);
   --page-title-line-height: var(--line-height-heading);
   --page-title-letter-spacing: var(--letter-spacing-heading);
+
+  /* The one non-token declaration: text inside the scope inherits the design's face without
+     every element asking for it. Utilities (font-sans, font-mono) resolve to the same tokens. */
+  font-family: var(--font-sans);
 }
 
 /* ── Scale, radius and control tokens (theme-independent) ────────────────── */
 
 :root {
   /* Type. Amount is the hero figure (balances, "send exactly"); heading is the page title
-     and review headings; subheading is a section or question; field is a form value; body
-     is list and table text; meta is labels, hints and secondary lines. */
-  --font-size-amount: 40px;
-  --line-height-amount: 44px;
-  --letter-spacing-amount: -0.03em;
+     and review headings; subheading is a section or question; field is a form value; nav is
+     sidebar items and tabs; body is list and table text; meta is labels, hints and secondary
+     lines. */
+  --font-size-amount: 48px;
+  --line-height-amount: 52px;
+  --letter-spacing-amount: -0.02em;
   --font-size-quote: 24px;
   --line-height-quote: 30px;
   --letter-spacing-quote: -0.02em;
   --font-size-heading: 24px;
   --line-height-heading: 32px;
-  --letter-spacing-heading: -0.02em;
+  --letter-spacing-heading: -0.01em;
   --font-size-subheading: 18px;
-  --line-height-subheading: 26px;
-  --letter-spacing-subheading: -0.01em;
+  --line-height-subheading: 24px;
+  --letter-spacing-subheading: 0;
   --font-size-field: 16px;
   --line-height-field: 24px;
+  --font-size-nav: 15px;
+  --line-height-nav: 20px;
   --font-size-body: 14px;
   --line-height-body: 20px;
   --font-size-meta: 13px;
-  --line-height-meta: 18px;
+  --line-height-meta: 16px;
 
   /* The shell's page title. Base keeps the current 36px; the refresh scope drops it to the
      heading size. */
@@ -239,8 +287,10 @@
   --control-height-md: 36px;
   --control-height-lg: 40px;
 
-  /* The single column wizard and settings forms sit in. */
-  --flow-max-width: 640px;
+  /* Layout. A page's content column is 900px including its 24px gutters, so 852px of
+     content; the single column wizard and settings forms sit in is 660px. */
+  --page-max-width: 852px;
+  --flow-max-width: 660px;
 
   /* The one elevation SDP uses: floating popovers and menus. Surfaces stay flat. */
   --elevation-popover:

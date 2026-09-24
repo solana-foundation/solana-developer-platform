@@ -1,8 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  DashboardWorkspaceCard,
-  DashboardWorkspaceOverviewPanel,
-} from "@/components/dashboard-workspace-panel";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -13,7 +10,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY } from "./recurring/recurring-payments-table-layout";
 
 const TABLE_ROW_IDS = [
   "payments-loading-row-1",
@@ -38,7 +34,11 @@ interface ListSkeletonColumn {
   cellSkeletonClassName: string;
 }
 
-type ListSkeletonVariant = "payments-transactions" | "counterparty-directory" | "payment-requests";
+type ListSkeletonVariant =
+  | "payments-transactions"
+  | "counterparty-directory"
+  | "payment-requests"
+  | "recurring-payments";
 
 /** The refresh lists' columns, in order, so a loading list lines up with the settled one. */
 const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonColumn[]> = {
@@ -70,70 +70,12 @@ const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonCo
     { id: "created", cellSkeletonClassName: "h-4 w-20" },
     { id: "actions", headerClassName: "w-px", cellSkeletonClassName: "ml-auto h-4 w-16" },
   ],
-};
-
-type TableSkeletonVariant = "recurring-payments";
-
-interface TableSkeletonColumn {
-  id: string;
-  headerClassName: string;
-  cellClassName?: string;
-  headerSkeletonClassName?: string;
-  cellSkeletonClassName: string;
-}
-
-interface TableSkeletonConfig {
-  tableClassName: string;
-  containerClassName: string;
-  columns: readonly TableSkeletonColumn[];
-}
-
-const TABLE_SKELETON_CONFIGS: Record<TableSkeletonVariant, TableSkeletonConfig> = {
-  "recurring-payments": {
-    tableClassName: "rounded-none border-0 w-full [&_table]:table-fixed",
-    containerClassName: "min-h-0 flex-1 overflow-hidden",
-    columns: [
-      {
-        id: "status",
-        headerClassName: "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]",
-        headerSkeletonClassName: "h-4 w-16",
-        cellSkeletonClassName: "h-5 w-20 max-w-full rounded-full",
-      },
-      {
-        id: "amount",
-        headerClassName: "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]",
-        headerSkeletonClassName: "h-4 w-20",
-        cellSkeletonClassName: "h-4 w-24 max-w-full",
-      },
-      {
-        id: "counterparty",
-        headerClassName: "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]",
-        headerSkeletonClassName: "h-4 w-24",
-        cellSkeletonClassName: "h-4 w-28 max-w-full",
-      },
-      {
-        id: "funding-wallet",
-        headerClassName: "hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]",
-        cellClassName: "hidden lg:table-cell",
-        headerSkeletonClassName: "h-4 w-24",
-        cellSkeletonClassName: "h-4 w-28 max-w-full",
-      },
-      {
-        id: "interval",
-        headerClassName: "hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]",
-        cellClassName: "hidden xl:table-cell",
-        headerSkeletonClassName: "h-4 w-16",
-        cellSkeletonClassName: "h-4 w-20 max-w-full",
-      },
-      {
-        id: "next-payment",
-        headerClassName: `${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} md:w-[18%] 2xl:w-[16%]`,
-        cellClassName: RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY,
-        headerSkeletonClassName: "h-4 w-24",
-        cellSkeletonClassName: "h-4 w-24 max-w-full",
-      },
-    ],
-  },
+  "recurring-payments": [
+    { id: "status", cellSkeletonClassName: "h-4 w-24" },
+    { id: "schedule", cellSkeletonClassName: "h-4 w-48" },
+    { id: "repeats", cellSkeletonClassName: "h-4 w-24" },
+    { id: "next-run", cellSkeletonClassName: "h-4 w-24" },
+  ],
 };
 
 function WorkspaceCardHeaderSkeleton({
@@ -155,58 +97,6 @@ function WorkspaceCardHeaderSkeleton({
         </CardAction>
       ) : null}
     </CardHeader>
-  );
-}
-
-function RouteTableSkeleton({ variant }: { variant: TableSkeletonVariant }) {
-  const config = TABLE_SKELETON_CONFIGS[variant];
-
-  return (
-    <div
-      className={config.containerClassName}
-      data-loading-table
-      data-loading-table-variant={variant}
-    >
-      <div className="divide-y divide-border-default md:hidden" data-loading-mobile-rows>
-        {TABLE_ROW_IDS.map((rowId) => (
-          <div key={`${variant}-mobile-${rowId}`} className="space-y-2 px-4 py-3">
-            <div className="flex items-center justify-between gap-3">
-              <SkeletonBlock className="h-5 w-20 rounded-full" />
-              <SkeletonBlock className="h-4 w-24" />
-            </div>
-            <SkeletonBlock className="h-3 w-48 max-w-full" />
-          </div>
-        ))}
-      </div>
-      <Table className={`hidden md:block ${config.tableClassName}`}>
-        <TableHeader>
-          <TableRow>
-            {config.columns.map((column) => (
-              <TableHead
-                key={column.id}
-                className={column.headerClassName}
-                data-loading-column={column.id}
-              >
-                {column.headerSkeletonClassName ? (
-                  <SkeletonBlock className={column.headerSkeletonClassName} />
-                ) : null}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {TABLE_ROW_IDS.map((rowId) => (
-            <TableRow key={rowId} data-loading-table-row>
-              {config.columns.map((column) => (
-                <TableCell key={column.id} className={column.cellClassName}>
-                  <SkeletonBlock className={column.cellSkeletonClassName} />
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
   );
 }
 
@@ -553,24 +443,7 @@ export function CounterpartyDetailSkeleton() {
 }
 
 export function RecurringPaymentsPageSkeleton() {
-  return (
-    <DashboardWorkspaceOverviewPanel
-      className="flex min-h-0 flex-col overflow-hidden"
-      data-loading-layout="recurring-payments"
-      aria-busy="true"
-    >
-      <DashboardWorkspaceCard clamp>
-        <div className="border-b border-border-default px-4 py-3">
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
-            <SkeletonBlock className="h-10 w-full rounded-lg" />
-            <SkeletonBlock className="h-10 w-full rounded-lg" />
-            <SkeletonBlock className="h-10 w-40 rounded-lg" />
-          </div>
-        </div>
-        <RouteTableSkeleton variant="recurring-payments" />
-      </DashboardWorkspaceCard>
-    </DashboardWorkspaceOverviewPanel>
-  );
+  return <ListPageSkeleton layout="recurring-payments" />;
 }
 
 export function RecurringPaymentDetailSkeleton() {

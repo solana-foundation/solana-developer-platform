@@ -151,7 +151,7 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     await user.click(screen.getByRole("button", { name: "Actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit schedule" }));
     await user.click(screen.getByRole("button", { name: "Funding wallet" }));
     expect(await screen.findByRole("button", { name: /Other Project/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
@@ -196,7 +196,7 @@ describe("Recurring Payment exact source selection", () => {
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
     await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Create recurring payment" }));
+    await user.click(screen.getByRole("button", { name: "Create schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toMatchObject({ sourceCustodyWalletId: source.id, amount: "1" });
   });
@@ -237,14 +237,14 @@ describe("Recurring Payment exact source selection", () => {
       );
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "Actions" }));
-      const edit = screen.getByRole("menuitem", { name: "Edit payment" });
+      const edit = screen.getByRole("menuitem", { name: "Edit schedule" });
       if (unavailableWallet === "current") {
         // Nothing about an active payment can be saved without its wallet's
         // signature, so the editor stays shut and the band carries the reason.
         expect(edit.getAttribute("aria-disabled")).toBe("true");
         expect(
           screen.getByText(
-            /You cannot collect, change, or cancel this payment until signing is enabled for Treasury/
+            /You cannot collect, change, or cancel this schedule until signing is enabled for Treasury/
           )
         ).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Save" })).toBeNull();

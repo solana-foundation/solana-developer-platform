@@ -82,7 +82,8 @@
 }
 
 :root {
-  --sdp-shell-bg: var(--surface);
+  /* --sdp-shell-bg is declared in sdp-theme.css, on :root and again on the refresh scope so it
+     re-resolves against the scope's --surface. */
   --sdp-field-radius: var(--input-radius-xl, 12px);
   --sdp-surface-radius: var(--radius-xl, 12px);
   --sdp-color-info-bg: rgba(33, 99, 182, 0.12);

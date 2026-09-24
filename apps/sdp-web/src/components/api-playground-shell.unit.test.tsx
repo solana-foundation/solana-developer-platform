@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
+import { ThemeScopeProvider } from "./theme-scope";
 
 const mocks = vi.hoisted(() => ({
   replaceSearchParams: vi.fn(),
@@ -61,5 +63,31 @@ describe("ApiPlaygroundShell secret redaction", () => {
 
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
+  });
+});
+
+describe("ApiPlaygroundShell refresh layout", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  // playwright/tests/theme.e2e.spec.ts reads the code tokens off this panel.
+  it("shows the fetch snippet in the first code panel once the Code view is open", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ThemeScopeProvider scope="refresh">
+          <ApiPlaygroundShell apiKeyId={null} endpoints={[endpoint]} productName="Test product" />
+        </ThemeScopeProvider>
+      </I18nProvider>
+    );
+
+    expect(view.getAllByTestId("api-playground-code")).toHaveLength(1);
+
+    await user.click(view.getByRole("tab", { name: "Code" }));
+
+    const panels = view.getAllByTestId("api-playground-code");
+    expect(panels).toHaveLength(2);
+    expect(panels[0].textContent).toContain("/v1/test");
   });
 });

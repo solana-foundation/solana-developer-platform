@@ -204,8 +204,8 @@ function RunShortcut() {
 function CodeBody({ content, language }: { content: string; language: "javascript" | "json" }) {
   return (
     <div
-      className="min-h-0 overflow-x-auto text-meta [&_.shiki]:!text-meta"
-      style={{ fontFamily: "var(--font-berkeley-mono), ui-monospace, monospace" }}
+      data-testid="api-playground-code"
+      className="min-h-0 overflow-x-auto font-mono text-meta [&_.shiki]:!text-meta"
     >
       <HighlightedCode content={content} language={language} />
     </div>
@@ -414,7 +414,7 @@ export function ApiPlaygroundRefreshLayout({
   const hasRun = execution.state === "done" || execution.state === "error";
 
   return (
-    <div className="mx-auto w-full max-w-5xl pb-12">
+    <div className="w-full pb-12">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
         <div className="relative flex min-w-0 items-center gap-5 rounded-control border border-border-default px-5 py-3 transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
           <span className="w-12 shrink-0 font-mono text-meta text-tertiary">

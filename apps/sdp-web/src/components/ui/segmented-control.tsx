@@ -22,7 +22,7 @@ export function SegmentedControl({
   ariaLabel,
   className,
   optionClassName,
-  selectedClassName = "bg-surface-raised text-primary refresh:ring-1 refresh:ring-inset refresh:ring-border-default",
+  selectedClassName = "bg-surface-raised text-primary refresh:bg-chip refresh:shadow-chip",
 }: {
   options: readonly SegmentedOption[];
   value: string;

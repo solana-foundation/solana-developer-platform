@@ -30,6 +30,8 @@
    carry the base palette into a refresh subtree. */
 :root,
 [data-sdp-theme="refresh"] {
+  --sdp-shell-bg: var(--surface);
+
   --gray-1400: var(--emph-xh);
   --gray-1300: var(--emph-xh);
 

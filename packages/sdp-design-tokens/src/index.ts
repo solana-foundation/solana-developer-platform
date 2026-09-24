@@ -17,10 +17,10 @@ export const refreshThemeProps = { [REFRESH_THEME_ATTRIBUTE]: REFRESH_THEME_VALU
  * `text-secondary` (a colour); without them `cn("text-success", "text-body")` drops the colour.
  */
 export const tailwindThemeScales = {
-  text: ["amount", "quote", "heading", "subheading", "field", "body", "meta", "page-title"],
+  text: ["amount", "quote", "heading", "subheading", "field", "nav", "body", "meta", "page-title"],
   radius: ["control", "control-inner", "card"],
   spacing: ["control-sm", "control-md", "control-lg"],
-  container: ["flow"],
+  container: ["page", "flow"],
 } as const;
 
 export type DesignTokenGroup =
@@ -30,6 +30,8 @@ export type DesignTokenGroup =
   | "border"
   | "status"
   | "destructive"
+  | "font"
+  | "refresh-surface"
   | "refresh-ink"
   | "refresh-wash"
   | "refresh-rule"
@@ -58,6 +60,7 @@ export const THEMED_GROUPS: readonly DesignTokenGroup[] = [
   "border",
   "status",
   "destructive",
+  "refresh-surface",
   "refresh-ink",
   "refresh-wash",
   "refresh-rule",
@@ -109,6 +112,27 @@ export const designTokens: readonly DesignToken[] = [
   token("--crimson-bg", "destructive", "Destructive tint.", "bg-destructive-bg"),
   token("--crimson-brd", "destructive", "Destructive border.", "border-destructive-border"),
 
+  token("--font-sans", "font", "Body face; the font-sans utility and the design system read it."),
+  token("--font-mono", "font", "Code and address face; the font-mono utility reads it."),
+  token("--font-brand-sans", "font", "Refresh: Season Sans, loaded from src/assets/fonts."),
+  token("--font-brand-mono", "font", "Refresh: Geist Mono, loaded from src/assets/fonts."),
+
+  token("--paper", "refresh-surface", "Refresh: the page ground."),
+  token("--paper-side", "refresh-surface", "Refresh: the sidebar ground, a step off the page."),
+  token("--paper-card", "refresh-surface", "Refresh: cards, popovers and wells on the page."),
+  token(
+    "--chip",
+    "refresh-surface",
+    "Refresh: the raised segment of a segmented control.",
+    "bg-chip"
+  ),
+  token(
+    "--chip-ring",
+    "refresh-surface",
+    "Refresh: the hairline ring around a chip.",
+    "shadow-chip"
+  ),
+
   token("--ink", "refresh-ink", "Refresh: headings and values."),
   token("--ink-secondary", "refresh-ink", "Refresh: labels and secondary lines."),
   token("--ink-tertiary", "refresh-ink", "Refresh: hints, placeholders, timestamps, table heads."),
@@ -149,6 +173,8 @@ export const designTokens: readonly DesignToken[] = [
   token("--letter-spacing-subheading", "type", "Tracking for text-subheading."),
   token("--font-size-field", "type", "Form field values.", "text-field"),
   token("--line-height-field", "type", "Line height for text-field."),
+  token("--font-size-nav", "type", "Sidebar items and tabs.", "text-nav"),
+  token("--line-height-nav", "type", "Line height for text-nav."),
   token("--font-size-body", "type", "List and table text.", "text-body"),
   token("--line-height-body", "type", "Line height for text-body."),
   token("--font-size-meta", "type", "Labels, hints, secondary lines.", "text-meta"),
@@ -166,6 +192,7 @@ export const designTokens: readonly DesignToken[] = [
   token("--control-height-md", "control", "Outlined page actions.", "h-control-md"),
   token("--control-height-lg", "control", "Wizard footer actions.", "h-control-lg"),
 
+  token("--page-max-width", "layout", "A page's content column, inside its gutters.", "max-w-page"),
   token("--flow-max-width", "layout", "Wizard and settings form column.", "max-w-flow"),
 
   token("--elevation-popover", "elevation", "Floating popovers and menus.", "shadow-ring"),

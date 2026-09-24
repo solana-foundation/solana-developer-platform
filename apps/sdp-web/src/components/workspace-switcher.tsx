@@ -56,14 +56,14 @@ function OrgAvatar({ name, imageUrl }: { name: string; imageUrl: string | null }
       <img
         src={imageUrl}
         alt=""
-        className="size-6 shrink-0 rounded-md object-cover"
+        className="size-6 shrink-0 rounded-md object-cover refresh:size-8"
         aria-hidden="true"
       />
     );
   }
   const initials = name.trim().slice(0, 2).toUpperCase() || "?";
   return (
-    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-semibold text-on-primary">
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[10px] font-semibold text-on-primary refresh:size-8 refresh:text-body refresh:font-medium">
       {initials}
     </span>
   );
@@ -98,15 +98,15 @@ export function WorkspaceSwitcher({
           aria-busy={isOrganizationSwitching || isProjectSwitching}
           aria-label={activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization")}
           className={cn(
-            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2"
+            "flex h-10 items-center rounded-[var(--button-radius-lg)] text-left transition-colors hover:bg-fill-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary refresh:h-12 refresh:hover:bg-fill",
+            collapsed ? "w-10 justify-center" : "w-full min-w-0 gap-2 px-2 refresh:gap-3"
           )}
         >
           <OrgAvatar name={activeOrg?.name ?? ""} imageUrl={activeOrg?.imageUrl ?? null} />
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-semibold leading-tight text-primary">
+                <span className="truncate text-sm font-semibold leading-tight text-primary refresh:text-nav refresh:font-medium">
                   {activeOrg?.name ?? t("Shared.SharedComponents.selectOrganization")}
                 </span>
                 {activeProject ? (

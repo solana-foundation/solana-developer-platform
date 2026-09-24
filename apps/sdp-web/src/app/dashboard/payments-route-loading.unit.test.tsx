@@ -114,6 +114,11 @@ describe("home and payments route loading states", () => {
         markup: renderToStaticMarkup(<CounterpartyDirectorySkeleton />),
         columns: ["name", "type", "external-id", "address", "created", "actions"],
       },
+      {
+        layout: "recurring-payments",
+        markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
+        columns: ["status", "schedule", "repeats", "next-run"],
+      },
     ];
 
     for (const { layout, markup, columns } of listCases) {
@@ -129,47 +134,6 @@ describe("home and payments route loading states", () => {
       expect(markup).toContain("min-w-[760px]");
       expect(markup).not.toContain("data-loading-mobile-rows");
     }
-  });
-
-  it("matches the recurring table's native columns and responsive visibility", () => {
-    const tableCases = [
-      {
-        layout: "recurring-payments",
-        markup: renderToStaticMarkup(<RecurringPaymentsPageSkeleton />),
-        columnClasses: [
-          "w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]",
-          "w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]",
-          "w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]",
-          "hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]",
-          "hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]",
-          "hidden md:table-cell lg:hidden 2xl:table-cell md:w-[18%] 2xl:w-[16%]",
-        ],
-      },
-    ];
-
-    for (const { layout, markup, columnClasses } of tableCases) {
-      expect(markup).toContain(`data-loading-layout="${layout}"`);
-      expect(markup).toContain(`data-loading-table-variant="${layout}"`);
-      expect(markup.match(/data-loading-column=/g)).toHaveLength(columnClasses.length);
-      expect(markup.match(/data-loading-table-row=/g)).toHaveLength(5);
-      expect(markup).toContain("[&amp;_table]:table-fixed");
-      for (const className of columnClasses) {
-        expect(markup).toContain(className);
-      }
-    }
-
-    for (const { markup } of tableCases) {
-      expect(markup).toContain("data-loading-mobile-rows");
-      expect(markup).toContain("md:hidden");
-      expect(markup).toContain("hidden md:block");
-    }
-  });
-
-  it("uses the same next-payment breakpoints in the recurring header, rows, and loader", () => {
-    const markup = renderToStaticMarkup(<RecurringPaymentsPageSkeleton />);
-
-    expect(markup.match(/hidden md:table-cell lg:hidden 2xl:table-cell/g)).toHaveLength(6);
-    expect(markup).not.toContain("md:table-cell xl:hidden 2xl:table-cell");
   });
 
   it("loads Contacts and Requests as lists, whatever tab the URL carries", () => {
@@ -252,9 +216,10 @@ describe("home and payments route loading states", () => {
   it("keeps the recurring list loader contained at a 390px viewport", () => {
     const markup = renderToStaticMarkup(<RecurringPaymentsLoading />);
 
-    expect(markup).toContain("grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]");
-    expect(markup).toContain("flex min-w-0 grow flex-col overflow-hidden");
-    expect(markup).toContain("table-scroll-container overflow-x-auto");
+    // The Schedules list scrolls sideways inside its column, like the other refresh lists.
+    expect(markup).toContain('data-loading-layout="recurring-payments"');
+    expect(markup).toContain("overflow-x-auto");
+    expect(markup).toContain("min-w-[760px]");
   });
 
   it("uses theme-aware surfaces for every authenticated loading state", () => {

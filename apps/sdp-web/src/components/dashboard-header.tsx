@@ -320,8 +320,8 @@ function refreshFlowPageConfig(config: {
   };
 }
 
-/** Width of the refresh Payments overview and list pages. */
-const REFRESH_PAGE_WIDTH = "max-w-5xl";
+/** Width of the refresh Payments overview and list pages: the design's 900px column. */
+const REFRESH_PAGE_WIDTH = "max-w-page";
 
 function actionPageConfig(config: {
   title: string;
@@ -836,6 +836,19 @@ function getRefreshPaymentsPageConfig(
       },
     };
   }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: t("Shared.dashboardShell.recurringPayments"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.recurring.new"),
+        href: "/dashboard/payments/recurring/create",
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
   if (pathname === "/dashboard/payments/pay") {
     return refreshFlowPageConfig({
       title: t("Shared.dashboardShell.pay"),
@@ -923,12 +936,6 @@ export function getDashboardPageConfig(
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
-  }
-  if (pathname === "/dashboard/payments/recurring") {
-    return {
-      title: t("Shared.dashboardShell.recurringPayments"),
-      contentWidthClass: "max-w-none",
-    };
   }
   if (pathname === "/dashboard/payments/recurring/create") {
     return actionPageConfig({
