@@ -1,0 +1,102 @@
+.footer {
+  /* Tucked a pixel under the door above, so no sliver of paper shows between two night grounds. */
+  margin-top: -1px;
+  padding: 64px 0 34px;
+  background: var(--hp-night);
+  color: var(--hp-night-ink-3);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 0.6fr));
+  gap: 40px;
+}
+
+.brand {
+  position: relative;
+  display: block;
+  width: 78px;
+  height: 30px;
+  color: var(--hp-night-ink);
+}
+
+.brandMark {
+  position: absolute;
+  left: 5.7px;
+  top: 50%;
+  width: 19.15px;
+  height: 16.91px;
+  filter: invert(1) brightness(2);
+  transform: translateY(-50%);
+}
+
+.brandWord {
+  position: absolute;
+  left: 29.4px;
+  top: 50%;
+  font-size: 22.76px;
+  font-weight: 500;
+  line-height: 0.9;
+  transform: translateY(-50%);
+}
+
+.tagline {
+  max-width: 30ch;
+  margin: 14px 0 0;
+  font-size: 14px;
+}
+
+.column h2 {
+  margin: 0 0 14px;
+  color: var(--hp-night-ink-3);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.column ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.column a {
+  display: block;
+  padding: 5px 0;
+  color: var(--hp-night-ink-2);
+  font-size: 14px;
+  text-decoration: none;
+  transition: color 160ms var(--hp-micro);
+}
+
+.column a:hover {
+  color: var(--hp-night-ink);
+}
+
+.column a:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+.bottom {
+  margin: 48px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid #232329;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1000px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid > :first-child {
+    grid-column: 1 / -1;
+  }
+}

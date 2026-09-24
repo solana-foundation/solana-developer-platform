@@ -1,0 +1,54 @@
+/* The last word: one big light button on the night ground. */
+.door {
+  padding: 72px 0 112px;
+}
+
+.link {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: clamp(26px, 3.4vw, 44px) clamp(24px, 3.4vw, 48px);
+  border-radius: 18px;
+  background: var(--hp-night-ink);
+  color: #0f0f13;
+  font-size: clamp(28px, 3.6vw, 52px);
+  line-height: 1;
+  letter-spacing: -0.025em;
+  text-decoration: none;
+  transition: background 200ms var(--hp-micro);
+}
+
+.link:hover {
+  background: #fff;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 4px;
+}
+
+.words {
+  display: grid;
+  gap: 8px;
+}
+
+.words small {
+  color: #585660;
+  font-size: clamp(15px, 1.2vw, 18px);
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.icon {
+  width: 0.72em;
+  height: 0.72em;
+  stroke-width: 1.2;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link {
+    transition: none;
+  }
+}

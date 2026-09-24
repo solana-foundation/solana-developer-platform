@@ -82,7 +82,7 @@ export default defineConfig({
   projects: [
     {
       name: "public",
-      testMatch: /.*auth-entry.*\.e2e\.spec\.ts/,
+      testMatch: /.*(auth-entry|homepage-public).*\.e2e\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
       },
@@ -99,7 +99,7 @@ export default defineConfig({
       name: "dashboard",
       testMatch: /.*\.e2e\.spec\.ts/,
       testIgnore: [
-        /.*(issuance|auth-entry|gcp-read-only).*.e2e\.spec\.ts/,
+        /.*(issuance|auth-entry|homepage-public|gcp-read-only).*.e2e\.spec\.ts/,
         /(^|\/)(payments-recurring|payments-transfer|wallets)\.e2e\.spec\.ts$/,
       ],
       dependencies: ["auth-setup"],

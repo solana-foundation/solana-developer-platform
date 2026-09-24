@@ -1,7 +1,13 @@
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { resolvePreference, resolveTheme, THEME_PREFERENCES, useTheme } from "./theme-context";
+import {
+  forcedThemeFor,
+  resolvePreference,
+  resolveTheme,
+  THEME_PREFERENCES,
+  useTheme,
+} from "./theme-context";
 
 function ThemeConsumer() {
   useTheme();
@@ -23,6 +29,18 @@ describe("theme resolution", () => {
     expect(() => renderToString(createElement(ThemeConsumer))).toThrow(
       "useTheme must be used within a ThemeProvider"
     );
+  });
+});
+
+describe("forced themes", () => {
+  it("paints the homepage light, whatever the visitor chose", () => {
+    expect(forcedThemeFor("/")).toBe("light");
+  });
+
+  it("leaves every other page to the visitor's choice", () => {
+    expect(forcedThemeFor("/dashboard")).toBeUndefined();
+    expect(forcedThemeFor("/sign-in")).toBeUndefined();
+    expect(forcedThemeFor(null)).toBeUndefined();
   });
 });
 
