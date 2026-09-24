@@ -41,11 +41,7 @@ import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { truncateMiddle } from "../truncate-middle";
 import { isPositiveDecimal } from "./earn-decimal";
-import {
-  earnStrategyLiquidityLabel,
-  formatEpochSeconds,
-  formatProviderAmount,
-} from "./earn-format";
+import { earnStrategyLiquidityLabel, formatEpochSeconds, formatTokenValue } from "./earn-format";
 import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
@@ -454,7 +450,7 @@ function StrategyWalletDetails({
                   <p className="mt-0.5 text-sm text-primary tabular-nums">
                     {position.tokenValue === undefined
                       ? t("DashboardMarkets.earnProgram.valueUnavailable")
-                      : formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                      : formatTokenValue(position.tokenValue, asset.mint, locale)}
                   </p>
                 </div>
                 <div>
@@ -624,7 +620,7 @@ function PortfolioByStrategy({
                                 className="text-sm text-primary tabular-nums"
                                 key={total.tokenMint}
                               >
-                                {formatProviderAmount(total.tokenValue, locale, asset.symbol)}
+                                {formatTokenValue(total.tokenValue, asset.mint, locale)}
                               </span>
                             );
                           })}

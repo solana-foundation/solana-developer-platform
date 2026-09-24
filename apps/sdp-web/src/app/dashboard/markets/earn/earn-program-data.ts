@@ -435,7 +435,7 @@ const earnExternalWalletTokenTotalSchema: z.ZodType<EarnExternalWalletTokenTotal
   walletCount: z.number().int().nonnegative(),
   positionCount: z.number().int().nonnegative(),
   unavailablePositionCount: z.number().int().nonnegative(),
-  /** Absent when any contributing position is unavailable; never a partial total. */
+  /** Sum of the positions' `tokenValue` in `tokenMint`, a dollar figure at par; absent when any position is unavailable. */
   tokenValue: z.string().optional(),
 });
 
@@ -453,6 +453,7 @@ const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPositi
   shares: z.string().optional(),
   withdrawableShares: z.string().optional(),
   unlockTimestamp: z.string().nullable().optional(),
+  /** Provider-reported value in `tokenMint` (rate or exit quote), a dollar figure at par; never a share count. */
   tokenValue: z.string().optional(),
 });
 

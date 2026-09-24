@@ -1096,7 +1096,13 @@ const earnExternalWalletPositionSchema = z
         example: "1789722000",
       }),
     tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
-      description: "Live deposit-token value. Absent when hydration is unavailable.",
+      description:
+        "Live value of the position in the deposit token (`tokenMint`), as the provider reports " +
+        "it: shares × rate for rate-based vaults, an exit quote for the whole position for " +
+        "quote-based providers (Veda, Ondo), so spread and price impact are already inside it and " +
+        "it does not scale to other share amounts. A deposit-token amount, not a share count and " +
+        "not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a " +
+        "dollar figure. Absent when hydration is unavailable.",
     }),
   })
   .openapi({ description: "One live vault position owned by a partner end-user wallet." });
@@ -1108,7 +1114,9 @@ const earnExternalWalletTokenTotalSchema = z.object({
   unavailablePositionCount: z.number().int().nonnegative(),
   tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
     description:
-      "Exact live total. Absent when any contributing position is unavailable, so partial money is never presented as complete.",
+      "Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue`, " +
+      "a dollar figure at par. Absent when any contributing position is unavailable, so partial " +
+      "money is never presented as complete.",
   }),
 });
 
