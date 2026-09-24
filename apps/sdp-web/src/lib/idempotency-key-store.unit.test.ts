@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { floorToReplay } from "../app/dashboard/markets/earn/earn-vault-slippage";
 import {
+  createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
   resolveHeldIdempotencyKey,
@@ -140,5 +142,125 @@ describe("resolveHeldIdempotencyKey reuse reporting", () => {
     );
 
     expect(resolution).toEqual({ kind: "aborted" });
+  });
+});
+
+describe("FloorMemo partial-write divergence", () => {
+  const FLOOR_KEY = "test:earn:floor:v1";
+  const KEY_STORE_KEY = "test:earn:idempotency:v1";
+  const FINGERPRINT = '["project_1","strategy_1","wallet_1","10",10]';
+
+  function seedReadableStorage(
+    key: string,
+    value: string,
+    setItem: typeof Storage.prototype.setItem
+  ): void {
+    setItem.call(sessionStorage, key, value);
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("replays a floor a quota failure stranded in memory while storage stayed readable", () => {
+    const keyStore = createIdempotencyKeyStore(KEY_STORE_KEY);
+    const floorMemo = createFloorMemo(FLOOR_KEY);
+    const originalSetItem = Storage.prototype.setItem;
+    // Quota-shaped asymmetric failure: `setItem` refuses the floor key only,
+    // while `getItem` keeps serving the stale previous state.
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (key === FLOOR_KEY) throw new Error("QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+
+    // State a previous page load left behind: readable, and about to be stale.
+    seedReadableStorage(FLOOR_KEY, JSON.stringify({}), originalSetItem);
+
+    const first = keyStore.claimReportingReuse(FINGERPRINT);
+    // The non-held branch of `resolveHeldIdempotencyKey`: a plain claim's
+    // reuse flag rides the resolution with `wasHeld: false`.
+    const firstResolution = { wasHeld: false, wasReused: first.wasReused };
+    const fresh = floorToReplay(
+      firstResolution,
+      (fp) => floorMemo.recall(fp),
+      FINGERPRINT,
+      "0.99899"
+    );
+    if (fresh.kind !== "fresh") throw new Error("expected a fresh floor resolution");
+    expect(fresh).toEqual({ kind: "fresh", floor: "0.99899" });
+    floorMemo.remember(FINGERPRINT, fresh.floor);
+
+    // The first value-moving POST may have been accepted before its response
+    // was lost; its key is intentionally kept for an ambiguous retry. The
+    // floor-only storage failure must not disturb the key store.
+    const retryClaim = keyStore.claimReportingReuse(FINGERPRINT);
+    expect(retryClaim.key).toBe(first.key);
+    expect(retryClaim.wasReused).toBe(true);
+
+    // The retry must resubmit the floor the key was MINTED with, verbatim —
+    // the API's idempotency fingerprint includes it, and a freshly derived
+    // floor paired with the reused key retires it and opens a second deposit.
+    const retryResolution = { wasHeld: false, wasReused: retryClaim.wasReused };
+    const retry = floorToReplay(retryResolution, (fp) => floorMemo.recall(fp), FINGERPRINT, "0.5");
+    expect(retry).toEqual({ kind: "replay", floor: "0.99899" });
+  });
+
+  it("keeps a forgotten floor forgotten across divergent writes", () => {
+    const floorMemo = createFloorMemo(FLOOR_KEY);
+    const originalSetItem = Storage.prototype.setItem;
+
+    // The first write succeeds, so storage holds fp-a and is the authority.
+    floorMemo.remember("fp-a", "0.999");
+    expect(JSON.parse(sessionStorage.getItem(FLOOR_KEY) ?? "{}")).toEqual({ "fp-a": "0.999" });
+
+    // Quota starts refusing floor writes: the next write diverges, and memory
+    // becomes the newer snapshot.
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (key === FLOOR_KEY) throw new Error("QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    });
+    floorMemo.remember("fp-b", "0.99");
+
+    // The forget must stick even though its storage write cannot land: a
+    // retired key's floor must not resurface from stale storage.
+    floorMemo.forget("fp-a");
+    expect(floorMemo.recall("fp-a")).toBeUndefined();
+    expect(floorMemo.recall("fp-b")).toBe("0.99");
+
+    // Quota recovers; the next successful write synchronizes the FULL
+    // snapshot and returns authority to storage.
+    setItem.mockImplementation(originalSetItem);
+    floorMemo.remember("fp-c", "0.98");
+    expect(floorMemo.recall("fp-a")).toBeUndefined();
+    expect(floorMemo.recall("fp-b")).toBe("0.99");
+    expect(floorMemo.recall("fp-c")).toBe("0.98");
+    expect(JSON.parse(sessionStorage.getItem(FLOOR_KEY) ?? "{}")).toEqual({
+      "fp-b": "0.99",
+      "fp-c": "0.98",
+    });
+
+    // Storage is the authority again: an external clear genuinely clears.
+    sessionStorage.removeItem(FLOOR_KEY);
+    expect(floorMemo.recall("fp-c")).toBeUndefined();
+  });
+
+  it("keeps a normal write readable immediately (negative control)", () => {
+    const floorMemo = createFloorMemo(FLOOR_KEY);
+    floorMemo.remember("fp", "0.999");
+    expect(floorMemo.recall("fp")).toBe("0.999");
+    expect(JSON.parse(sessionStorage.getItem(FLOOR_KEY) ?? "{}")).toEqual({ fp: "0.999" });
   });
 });

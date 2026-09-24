@@ -165,6 +165,10 @@ const memoryEntries = new Map<string, readonly StoredEntry[]>();
  * healthy it stays the authority, so an external clear genuinely clears and a
  * state written by a previous page load is honoured.
  *
+ * The `FloorMemo` stores below share this set under their own versioned keys,
+ * with the same semantics: memory there is the newest floor snapshot, and a
+ * readable-but-stale storage must never un-remember a live key's floor.
+ *
  * The residual, stated honestly: memory dies with the page, so a failed write
  * followed by a RELOAD serves the stale storage. Nothing client-side can close
  * that — durability was refused — which is exactly why the server double-checks
@@ -431,12 +435,29 @@ export interface FloorMemo {
 
 const FLOOR_MEMO_BOUND = 32;
 
-/** One per money flow, each under its own versioned `sessionStorage` key. */
+/**
+ * One per money flow, each under its own versioned `sessionStorage` key.
+ *
+ * Reads and writes honour the same quota-divergence rule as the key store
+ * above: a floor `setItem()` that throws while `getItem()` still answers is a
+ * PARTIAL write — the readable storage is now behind the memory snapshot the
+ * write did reach, and serving it would un-remember the floor a live key was
+ * just minted with (the retry then reads `unavailable`, and once the key's TTL
+ * lapses the unchanged intent mints a fresh key and a second value-moving
+ * deposit). So a failed write flips this storage key to memory-preferred until
+ * a later write lands and re-synchronizes the full snapshot — including
+ * `forget()`, whose removal must not resurface from stale storage.
+ */
 export function createFloorMemo(storageKey: string): FloorMemo {
   type Entries = Record<string, string | null>;
   let memory: Entries = {};
 
   function read(): Entries {
+    if (storageDivergedKeys.has(storageKey)) {
+      // Storage is behind memory for this key (a write failed after the page
+      // loaded), so the readable state is stale by construction.
+      return { ...memory };
+    }
     try {
       const raw = window.sessionStorage.getItem(storageKey);
       if (raw === null) return {};
@@ -456,8 +477,14 @@ export function createFloorMemo(storageKey: string): FloorMemo {
     memory = { ...entries };
     try {
       window.sessionStorage.setItem(storageKey, JSON.stringify(entries));
+      // Storage has caught up with memory; it is the authority again.
+      storageDivergedKeys.delete(storageKey);
     } catch {
-      // The memory tier above still serves this tab's lifetime.
+      // Quota or a refusing store. The memory tier above still serves this
+      // tab's lifetime — and since a readable storage is now BEHIND it, this
+      // key is memory-preferred until a write lands (see the divergence rule
+      // on this store).
+      storageDivergedKeys.add(storageKey);
     }
   }
 
@@ -483,6 +510,7 @@ export function createFloorMemo(storageKey: string): FloorMemo {
     },
     resetForTests() {
       memory = {};
+      storageDivergedKeys.delete(storageKey);
       try {
         window.sessionStorage.removeItem(storageKey);
       } catch {
