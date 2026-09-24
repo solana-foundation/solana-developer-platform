@@ -142,7 +142,11 @@ export async function extractTransferBatchPolicyCandidate(
     body: input,
     resolved: {
       ...resolved,
-      idempotencyFingerprint: buildBatchIdempotencyFingerprint(resolved, input.options),
+      idempotencyFingerprint: buildBatchIdempotencyFingerprint(
+        resolved,
+        input.externalId,
+        input.options
+      ),
     },
     // HOO-1023: remove this legacy envelope when K2 rollback support ends.
     executionRequestBody: { ...legacyBody, source: resolved.sourceWallet.walletId },
@@ -179,18 +183,26 @@ export async function admitTransferBatchRuntimeExecution(
 /**
  * Build the batch idempotency fingerprint from the resolved request.
  *
+ * The top-level `externalId` is durable batch data persisted with the batch,
+ * so it joins the fingerprint (SOLA9-418): a key reused with a changed
+ * reference conflicts instead of replaying the original batch. The dashboard's
+ * client fingerprint already includes it.
+ *
  * @param resolved - The resolved batch request.
+ * @param externalId - The request's top-level batch external reference.
  * @param options - The request's batch options.
  * @returns The fingerprint string.
  */
 function buildBatchIdempotencyFingerprint(
   resolved: ResolvedBatchRequest,
+  externalId: CreateTransferBatchInput["externalId"],
   options: CreateTransferBatchInput["options"]
 ): string {
   return buildTransferBatchFingerprint({
     sourceCustodyWalletId: resolved.sourceWallet.id,
     sourceAddress: resolved.sourceAddress,
     token: resolved.tokenContext.token,
+    externalId,
     recipients: resolved.recipients.map((recipient) => ({
       externalId: recipient.externalId,
       counterpartyId: recipient.counterpartyId,

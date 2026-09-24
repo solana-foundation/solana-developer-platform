@@ -944,7 +944,8 @@ export const createTransferBatchRequestSchema = createTransferBatchSchemaBase
       example: "prj_example",
     }),
     externalId: withOpenApi(createTransferBatchSchemaBase.shape.externalId, {
-      description: "Caller-provided batch correlation ID. Not used as an idempotency key.",
+      description:
+        "Caller-provided batch correlation ID. Not used as an idempotency key, but it is durable batch data: reusing an Idempotency-Key with a different externalId returns 409 instead of replaying the original batch.",
       example: "payroll_2026_06_30",
     }),
     sourceCustodyWalletId: withOpenApi(createTransferBatchSchemaBase.shape.sourceCustodyWalletId, {

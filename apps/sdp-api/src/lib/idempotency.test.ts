@@ -224,4 +224,72 @@ describe("buildTransferBatchFingerprint", () => {
       })
     );
   });
+
+  it("differs when the batch externalId changes", () => {
+    expect(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        externalId: "payroll_run_a",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    ).not.toBe(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        externalId: "payroll_run_b",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    );
+  });
+
+  it("replays the same batch externalId under the same key", () => {
+    expect(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        externalId: "payroll_run_a",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    ).toBe(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        externalId: "payroll_run_a",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    );
+  });
+
+  it("keeps an absent externalId off the fingerprint so legacy fingerprints still match", () => {
+    // Deploy compatibility: every stored fingerprint recorded before the
+    // batch externalId joined the fingerprint must keep matching byte-for-byte
+    // for requests that carry no externalId.
+    const withoutExternalId = buildTransferBatchFingerprint({
+      sourceCustodyWalletId: "cwlt_source_1",
+      sourceAddress: "Source111",
+      token: "SOL",
+      externalId: undefined,
+      recipients: [firstRecipient],
+      options: undefined,
+    });
+    expect(JSON.parse(withoutExternalId)).not.toHaveProperty("externalId");
+    expect(withoutExternalId).toBe(
+      buildTransferBatchFingerprint({
+        sourceCustodyWalletId: "cwlt_source_1",
+        sourceAddress: "Source111",
+        token: "SOL",
+        recipients: [firstRecipient],
+        options: undefined,
+      })
+    );
+  });
 });
