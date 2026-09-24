@@ -9,8 +9,8 @@ import {
   type PaymentTransferRow as TransferRow,
 } from "@/db/repositories/payments.repository";
 import { AppError } from "@/lib/errors";
-import { bvnkProviderReference } from "./handlers/ramps/bvnk";
 import { mapMoneygramTransferDetails } from "./mappers/moneygram";
+import { bvnkProviderReference } from "./ramps/providers/bvnk";
 
 /**
  * The provider-side payout reference mapped for a ramp transfer row. BVNK

@@ -32,11 +32,11 @@ import { createPostgresBvnkOnrampTransfersRepository } from "@/db/repositories/b
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import { internalError } from "@/lib/errors";
-import { buildBvnkOnrampPayout } from "@/routes/payments/handlers/ramps/bvnk";
+import { buildBvnkOnrampPayout } from "@/routes/payments/ramps/providers/bvnk";
 import {
   applyTerminalBvnkPayoutObservation,
   recordBvnkPayoutCreation,
-} from "@/routes/payments/handlers/ramps/bvnk-settlement";
+} from "@/routes/payments/ramps/providers/bvnk-settlement";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 

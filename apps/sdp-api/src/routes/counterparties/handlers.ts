@@ -45,19 +45,18 @@ import { resolveSdpEnvironment } from "@/lib/sdp-environment";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { rampRuntime } from "@/routes/payments/context";
 import {
-  advanceCounterpartyRequirements,
-  assertRampProviderAvailable,
-} from "@/routes/payments/handlers/ramps";
-import {
   type BvnkStoredStage,
   bvnkCustomerRequirementsFromMetadata,
   bvnkFundingWalletRequirements,
   bvnkStoredStage,
   presentBvnkStoredStage,
   refreshBvnkCustomerAccount,
-} from "@/routes/payments/handlers/ramps/bvnk";
-import { resolveMuralRequirements } from "@/routes/payments/handlers/ramps/mural";
-import type { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
+} from "@/routes/payments/ramps/providers/bvnk";
+import { resolveMuralRequirements } from "@/routes/payments/ramps/providers/mural";
+import {
+  advanceCounterpartyRequirements,
+  assertRampProviderAvailable,
+} from "@/routes/payments/ramps/shared";
 import {
   assertPaymentWalletExactAccess,
   resolveScope,
@@ -72,6 +71,10 @@ import {
   getCounterpartiesRepository,
   getCounterpartyAccountsRepository,
 } from "./context";
+import type {
+  SubmitCounterpartyRequirementsInput,
+  submitCounterpartyRequirementsSchema,
+} from "./schemas";
 import {
   counterpartyIdParamsSchema,
   counterpartyRequirementsQuerySchema,
@@ -95,8 +98,6 @@ function mapToCounterparty(row: CounterpartyRow): Counterparty {
     updatedAt: row.updated_at,
   };
 }
-
-type SubmitCounterpartyRequirementsInput = z.infer<typeof submitCounterpartyRequirementsSchema>;
 
 /**
  * Checks whether a Lightspark payout submission still needs account data.
