@@ -3,12 +3,12 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { z } from "zod";
 import {
   createRecurringPaymentSchema,
-  createSubscriptionSchema,
   PAYMENT_TOKEN_VALIDATION_MESSAGE,
   updateRecurringPaymentSchema,
   updateWalletPolicySchema,
   walletPolicyRuleSchema,
 } from "./schemas";
+import { createSubscriptionSchema } from "./subscriptions/schemas";
 import {
   createTransferBatchSchema,
   listTransferBatchesQuerySchema,
