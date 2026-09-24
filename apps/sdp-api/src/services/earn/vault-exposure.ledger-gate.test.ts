@@ -273,8 +273,10 @@ describe("vault exposure cap: the ledger write gate", () => {
     expect((refused[0] as PromiseRejectedResult).reason).toMatchObject({
       code: "VAULT_EXPOSURE_CAP",
       statusCode: 409,
-      details: { vaultAddress: VAULT, limit: "100", exposure: "60", projected: "120" },
+      details: { vaultAddress: VAULT },
     });
+    // Redacted (SOLA9-9): the refusal names the vault, never the figures.
+    expect((refused[0] as PromiseRejectedResult).reason.details).toEqual({ vaultAddress: VAULT });
 
     // The loser rolled its claim back with its row: one movement, one holding.
     expect(await ledgerRows()).toEqual([{ organization_id: ORG, amount_requested: "60" }]);
@@ -419,8 +421,10 @@ describe("vault exposure cap: the ledger write gate", () => {
       asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("11")))
     ).rejects.toMatchObject({
       code: "VAULT_EXPOSURE_CAP",
-      details: { exposure: "90", projected: "101" },
+      details: { vaultAddress: VAULT },
     });
+    // The cross-tenant sum is proven by the event, not by the response body.
+    expect(ledgerWriteEvents().at(-1)).toMatchObject({ exposure: "90", projected: "101" });
     // Landing exactly on the ceiling is admitted (strict comparison).
     await asTenant(ORG, () => ledger().createSignedVaultDepositIntent(intent("10")));
 

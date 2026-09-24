@@ -38,7 +38,7 @@ import { earnClusterFor } from "./execution-registry";
  * 1. **Admission** (`assertVaultExposureWithinCap`), the LAST step of the single
  *    money-in predicate (`assertVaultDepositAdmissible`), before anything is
  *    built or signed. Reads the ledger fresh. This is the refusal a caller
- *    hears early and the figure the preview reports.
+ *    hears early and the verdict the preview reports.
  * 2. **Ledger write** (`ledgerVaultExposureGate`), inside the transaction that
  *    records the deposit's `requested` row, under the ledger's per-vault
  *    transaction advisory lock (`earnVaultDepositWriteLockKey`). Two deposits
@@ -62,6 +62,13 @@ import { earnClusterFor } from "./execution-registry";
  * - **Fail closed on the inputs, in every mode.** An exposure read that
  *   throws refuses the deposit with a 503, shadow mode included. Same posture
  *   as a database outage today.
+ * - **Figures stay internal.** The aggregate is EVERY tenant's holdings, read
+ *   under the system identity, and the preview and external-wallet build
+ *   routes are keyless. So the 409's `details` carry only `vaultAddress` and
+ *   the preview's blocking issue is a fixed sentence: `exposure`, `projected`
+ *   and `limit` go to the evaluated event and nowhere else (SOLA9-9). A
+ *   response that named them handed any anonymous caller SDP's total position
+ *   in the vault.
  *
  * Units: the vault's DEPOSIT-TOKEN units throughout (no price oracle; every V1
  * vault is a dollar stablecoin). The catalogue TVL is USD, so the share bound
@@ -73,6 +80,15 @@ import { earnClusterFor } from "./execution-registry";
 
 /** The `blockingIssues` code the deposit preview reports for this cap. */
 export const VAULT_EXPOSURE_CAP_ISSUE_CODE = "VAULT_EXPOSURE_CAP";
+
+/**
+ * The one sentence a refused caller reads, on the 409 and on the preview's
+ * blocking issue alike. Fixed on purpose: no `projected`, `exposure` or
+ * `limit`, see "Figures stay internal" above.
+ */
+export const VAULT_EXPOSURE_CAP_MESSAGE =
+  "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
+  "The vault is exit-only for new money until other positions leave; existing positions are unaffected.";
 
 /** The structured event every evaluation emits, blocked or not. */
 export const EARN_VOLUME_CAP_EVALUATED_EVENT = "sdp_api_earn_volume_cap_evaluated";
@@ -409,16 +425,12 @@ export function checkVaultExposure(
  */
 function admitOrRefuse(verdict: VaultExposureVerdict, amount: string): VaultExposureVerdict {
   if (verdict.evaluation.wouldBlock && verdict.enforced) {
-    throw vaultExposureCapExceeded(
-      "This deposit would take SDP's total holdings in the vault past its exposure cap. " +
-        "The vault is exit-only for new money until other positions leave; existing positions are unaffected.",
-      {
-        vaultAddress: verdict.key.vaultAddress,
-        limit: verdict.evaluation.limit,
-        exposure: verdict.evaluation.exposure,
-        projected: verdict.evaluation.projected,
-      }
-    );
+    // Only the vault the caller already named. The figures behind the verdict
+    // are the cross-tenant aggregate; they are on the evaluated event, not in
+    // a body an anonymous caller can read (SOLA9-9).
+    throw vaultExposureCapExceeded(VAULT_EXPOSURE_CAP_MESSAGE, {
+      vaultAddress: verdict.key.vaultAddress,
+    });
   }
   reserveVaultExposure(verdict.key, amount);
   return verdict;
@@ -517,16 +529,12 @@ export function ledgerVaultExposureGate(
 /**
  * The preview's `blockingIssues` entry for a blocking verdict, or null. Only
  * an ENFORCED block is reported: in shadow mode the deposit would succeed, and
- * a preview must never claim otherwise.
+ * a preview must never claim otherwise. The message is the fixed sentence,
+ * never the verdict's figures (SOLA9-9).
  */
 export function vaultExposureBlockingIssue(
   verdict: VaultExposureVerdict
 ): EarnVaultDepositQuoteIssue | null {
   if (!(verdict.evaluation.wouldBlock && verdict.enforced)) return null;
-  return {
-    code: VAULT_EXPOSURE_CAP_ISSUE_CODE,
-    message:
-      `This deposit would take SDP's total holdings in the vault to ${verdict.evaluation.projected}, ` +
-      `past its exposure cap of ${verdict.evaluation.limit}. The vault is exit-only for new money right now.`,
-  };
+  return { code: VAULT_EXPOSURE_CAP_ISSUE_CODE, message: VAULT_EXPOSURE_CAP_MESSAGE };
 }
