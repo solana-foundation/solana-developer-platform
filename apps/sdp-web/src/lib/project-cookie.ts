@@ -7,6 +7,14 @@ export function workspaceScope(userId: string, orgId: string, projectId: string)
 }
 export const PROJECT_HEADER_NAME = "x-project-id";
 
+/**
+ * Header carrying the sealed render scope (see `lib/render-scope`) from a
+ * dashboard form to the BFF routes that must stay bound to the project the
+ * page was rendered with. Isomorphic: the workspace sends the name, the BFF
+ * route reads the value.
+ */
+export const RENDER_SCOPE_HEADER_NAME = "x-sdp-render-scope";
+
 export const PROJECT_COOKIE_OPTIONS = {
   path: "/",
   maxAge: 31_536_000,

@@ -67,6 +67,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { RENDER_SCOPE_HEADER_NAME } from "@/lib/project-cookie";
 import { useZodForm } from "@/lib/use-zod-form";
 import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
@@ -198,12 +199,19 @@ function CreateRequestModal({
   wallets,
   tokens,
   counterparties,
+  renderScope,
   onClose,
   onCreated,
 }: {
   wallets: PaymentsDashboardWallet[];
   tokens: PaymentRequestTokenOption[];
   counterparties: Counterparty[];
+  /**
+   * Sealed scope naming the project this page rendered with. Sent back on the
+   * create call so the BFF can refuse it when the shared project cookie has
+   * moved (APE-706).
+   */
+  renderScope: string | null;
   onClose: () => void;
   /**
    * Receives the created request so its details can be shown without a round trip,
@@ -263,6 +271,7 @@ function CreateRequestModal({
     setSubmitting(true);
     const res = await dashboardFetch<{ data: PaymentRequest }>("/api/dashboard/payments/requests", {
       method: "POST",
+      headers: renderScope ? { [RENDER_SCOPE_HEADER_NAME]: renderScope } : undefined,
       body: {
         walletId: result.data.wallet,
         token: result.data.token,
@@ -470,6 +479,8 @@ interface PaymentRequestsWorkspaceProps {
   apiKeys: DashboardPlaygroundApiKeyOption[];
   wallets: PaymentsDashboardWallet[];
   counterparties: Counterparty[];
+  /** Sealed scope for the project this page rendered with (`lib/render-scope`). */
+  renderScope: string | null;
 }
 
 export function PaymentRequestsWorkspace({
@@ -480,6 +491,7 @@ export function PaymentRequestsWorkspace({
   apiKeys,
   wallets,
   counterparties,
+  renderScope,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
@@ -787,6 +799,7 @@ export function PaymentRequestsWorkspace({
           wallets={wallets}
           tokens={tokens}
           counterparties={counterparties}
+          renderScope={renderScope}
           onClose={() => setCreateOpen(false)}
           onCreated={(request) => {
             // Swap the create form for the details view and let the table repopulate
