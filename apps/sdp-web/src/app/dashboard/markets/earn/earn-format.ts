@@ -66,13 +66,26 @@ export function formatProviderAmount(
   return symbol ? `${amount} ${symbol}` : amount;
 }
 
-export function formatUsd(
-  value: string | undefined,
-  locale: string,
-  maximumFractionDigits = 6
-): string {
-  const amount = formatProviderAmount(value, locale, undefined, maximumFractionDigits, 2);
-  return amount === "—" ? amount : `$${amount}`;
+/**
+ * A dollar figure, to the cent, everywhere in Earn: provider USD fields (TVL,
+ * fees, ceilings), dollar totals summed across USD-stable tokens and, through
+ * `formatTokenValue`, every USD-stable deposit-token amount. Truncates like the
+ * rest of this module so a balance never rounds UP; a value above zero but
+ * under a cent renders "<$0.01" instead of the "$0.00" truncation would print,
+ * so a real fee or balance never reads as nothing.
+ */
+export function formatUsd(value: string | undefined, locale: string): string {
+  if (value === undefined || !isIntlDecimalLiteral(value)) return "—";
+  if (isBelowOneCent(value)) return `<$${formatDecimalString("0.01", locale, 2, 2) ?? "0.01"}`;
+  const amount = formatDecimalString(value, locale, 2, 2);
+  return amount === undefined ? "—" : `$${amount}`;
+}
+
+/** Above zero but under one cent: exactly what a two-decimal truncation prints as zero. */
+function isBelowOneCent(value: string): boolean {
+  const [whole = "", fraction = ""] = value.split(".");
+  if (/[1-9]/.test(whole) || /[1-9]/.test(fraction.slice(0, 2))) return false;
+  return /[1-9]/.test(fraction.slice(2));
 }
 
 export function tokenSymbol(mint: string): string {
@@ -101,6 +114,28 @@ export function formatTokenQuantity(
   symbol: string
 ): string {
   return formatProviderAmount(value, locale, symbol, 6);
+}
+
+/**
+ * A deposit-token amount for display: a position's `tokenValue`, a wallet's
+ * balance in the deposit token, a withdrawal ceiling or quote. Every Earn
+ * deposit token is a USD stablecoin (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so a
+ * USD-stable mint renders as dollars at par, to the cent. The `isUsdStable`
+ * guard is what keeps that honest: any other mint renders as a token quantity
+ * with its symbol rather than a wrong `$`, and an unresolved mint renders the
+ * bare amount rather than guessing a unit. Par, not a price feed: a depeg is
+ * not reflected, the same approximation the treasury deployed total and the
+ * API's exposure caps make.
+ */
+export function formatTokenValue(
+  value: string | undefined,
+  tokenMint: string | undefined,
+  locale: string
+): string {
+  if (tokenMint === undefined) return formatProviderAmount(value, locale);
+  return WELL_KNOWN_TOKEN_BY_MINT.get(tokenMint)?.isUsdStable
+    ? formatUsd(value, locale)
+    : formatTokenQuantity(value, locale, tokenSymbol(tokenMint));
 }
 
 /** Turn a provider duration into one short, human unit for product copy. */

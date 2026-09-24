@@ -601,6 +601,16 @@ distinguish every six-decimal value once balances exceed 2^53. So:
   `compareDecimalAmounts`) rather than restating that arithmetic.
 - `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
   which formats it exactly — no `Number` round trip, no manual grouping.
+- Dollars are `formatUsd`: two decimals, truncated, `<$0.01` for a non-zero
+  sub-cent value, never a third decimal. A deposit-token amount (a position's
+  `tokenValue`, a wallet balance in the deposit token, a withdrawal ceiling or
+  quote) goes through `formatTokenValue(value, mint, locale)`, which renders a
+  USD-stable mint as dollars at par and anything else as a token quantity with
+  its symbol. Every Earn deposit token is a USD stablecoin
+  (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so today that is always dollars; the
+  `isUsdStable` guard is what keeps a future non-stable vault from lying. Do
+  not call `formatProviderAmount` or `formatTokenQuantity` on a deposit-token
+  amount directly.
 - `sumDecimalStrings` (`earn-market-presentation.tsx`) adds at the widest scale
   in `BigInt` and formats back.
 - The one deliberate `Number` is `formatProviderApy`, on a RATE (`0.062`) rather

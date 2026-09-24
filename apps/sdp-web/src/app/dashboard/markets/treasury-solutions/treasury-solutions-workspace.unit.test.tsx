@@ -920,7 +920,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing legacy program row");
-    expect(legacyRow.textContent).toContain("900.50 USD");
+    expect(legacyRow.textContent).toContain("$900.50");
   });
 
   it("shows an automatically updating deposit status beside the affected position", async () => {
@@ -1161,7 +1161,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     const projectedBalance = document.querySelector('[data-earn-vault-balance="projected"]');
     expect(projectedBalance?.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
-      "135.25"
+      "$135.25"
     );
     expect(projectedBalance?.className).toContain("animate-pulse");
     expect(projectedBalance?.textContent).toContain(
@@ -1174,7 +1174,7 @@ describe("TreasurySolutionsWorkspace", () => {
     // up carries the old shares: the projection stays, nothing is dropped.
     mocks.positionsReadStartedAt = Date.now() + 1_000;
     rerenderWorkspace(view);
-    expect(projectedBalanceText(livePositionRow())).toBe("135.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$135.25");
 
     // A read that started BEFORE the commit was seen but already contains the
     // deposit (Veda's redeemable value, a hair under baseline + amount): the
@@ -1186,8 +1186,8 @@ describe("TreasurySolutionsWorkspace", () => {
     await waitFor(() =>
       expect(document.querySelector('[data-earn-vault-balance="projected"]')).toBeNull()
     );
-    expect(within(livePositionRow()).getByText("135.249985")).toBeTruthy();
-    expect(screen.queryByText("145.249985")).toBeNull();
+    expect(within(livePositionRow()).getByText("$135.24")).toBeTruthy();
+    expect(screen.queryByText("$145.24")).toBeNull();
   });
 
   it("keeps the second deposit projected over a read that contains only the first", async () => {
@@ -1223,7 +1223,7 @@ describe("TreasurySolutionsWorkspace", () => {
       submit("earn_vault_movement_between_2", "5");
     });
     act(() => confirm("earn_vault_movement_between_1"));
-    expect(projectedBalanceText(livePositionRow())).toBe("135.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$135.25");
 
     // A read issued after the first commit lands containing the first deposit.
     mocks.positionsReadStartedAt = Date.now() + 1_000;
@@ -1232,13 +1232,13 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.livePositionTokenValue = "135.25";
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
-    expect(within(livePositionRow()).getByText("135.25")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("$135.25")).toBeTruthy();
 
     // The second commit is seen after that read started, so its amount stacks
     // on the read's value rather than on a baseline that predates the first.
     vi.setSystemTime(new Date("2026-09-24T12:00:03.000Z"));
     act(() => confirm("earn_vault_movement_between_2"));
-    expect(projectedBalanceText(livePositionRow())).toBe("140.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$140.25");
 
     mocks.positionsReadStartedAt = Date.now() + 1_000;
     mocks.positionsReadLandedAt = Date.now() + 1_500;
@@ -1246,7 +1246,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.livePositionTokenValue = "140.25";
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
-    expect(within(livePositionRow()).getByText("140.25")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("$140.25")).toBeTruthy();
   });
 
   it("reconciles a deposit then a withdrawal in one session against fresh reads", async () => {
@@ -1281,7 +1281,7 @@ describe("TreasurySolutionsWorkspace", () => {
         status: "confirmed",
       });
     });
-    expect(projectedBalanceText(livePositionRow())).toBe("135.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$135.25");
 
     mocks.livePositionTokenValue = "135.2499";
     mocks.livePositionShares = "129.5";
@@ -1289,7 +1289,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
-    expect(within(livePositionRow()).getByText("135.2499")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("$135.24")).toBeTruthy();
 
     vi.setSystemTime(new Date("2026-09-24T12:00:05.000Z"));
     await user.click(within(livePositionRow()).getByRole("button", { name: "Withdraw" }));
@@ -1314,7 +1314,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
     // The exit projects from the reconciled live value, not from the
     // deposit's arithmetic.
-    expect(projectedBalanceText(livePositionRow())).toBe("129.2499");
+    expect(projectedBalanceText(livePositionRow())).toBe("$129.24");
 
     mocks.livePositionTokenValue = "129.2499";
     mocks.livePositionShares = "123.5";
@@ -1322,7 +1322,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadLandedAt = Date.now() + 2;
     rerenderWorkspace(view);
     expect(projectedBalanceText(livePositionRow())).toBeUndefined();
-    expect(within(livePositionRow()).getByText("129.2499")).toBeTruthy();
+    expect(within(livePositionRow()).getByText("$129.24")).toBeTruthy();
   });
 
   it("stacks a later deposit on committed movements only", async () => {
@@ -1358,10 +1358,10 @@ describe("TreasurySolutionsWorkspace", () => {
     // The second deposit was submitted while the first was still in flight, so
     // its baseline is the live balance alone.
     act(() => confirm("earn_vault_movement_stack_2"));
-    expect(projectedBalanceText(livePositionRow())).toBe("130.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$130.25");
 
     act(() => confirm("earn_vault_movement_stack_1"));
-    expect(projectedBalanceText(livePositionRow())).toBe("140.25");
+    expect(projectedBalanceText(livePositionRow())).toBe("$140.25");
   });
 
   it("keeps a first deposit synced from pending row through provider reconciliation", async () => {
@@ -1400,7 +1400,7 @@ describe("TreasurySolutionsWorkspace", () => {
         name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
       })
     ).toBeTruthy();
-    expect(within(pendingRow).getByText("0")).toBeTruthy();
+    expect(within(pendingRow).getByText("$0.00")).toBeTruthy();
 
     act(() => {
       mocks.vaultDepositModal?.onMovementUpdated?.({
@@ -1415,7 +1415,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(
       within(pendingRow).getByRole("button", { name: "Active: This position is active." })
     ).toBeTruthy();
-    const projectedBalance = within(pendingRow).getByText("10");
+    const projectedBalance = within(pendingRow).getByText("$10.00");
     const projectedBalanceContainer = projectedBalance.closest("[data-earn-vault-balance]");
     expect(projectedBalanceContainer?.getAttribute("data-earn-vault-balance")).toBe("projected");
     expect(projectedBalanceContainer?.className).toContain("animate-pulse");
@@ -1433,7 +1433,7 @@ describe("TreasurySolutionsWorkspace", () => {
       .map((element) => element.closest("tr"))
       .filter((row) => row && within(row).queryByRole("button", { name: "Withdraw" }));
     expect(reconciledRows).toHaveLength(1);
-    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("10")).toBeTruthy();
+    expect(within(reconciledRows[0] as HTMLTableRowElement).getByText("$10.00")).toBeTruthy();
   });
 
   it("combines concurrent confirmed movements without dropping either projection", async () => {
@@ -1484,7 +1484,7 @@ describe("TreasurySolutionsWorkspace", () => {
       document
         .querySelector('[data-earn-vault-balance="projected"]')
         ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("135.25");
+    ).toBe("$135.25");
     expect(
       screen.getByRole("button", {
         name: "Pending: A deposit or withdrawal is still settling. Follow the flow for detailed progress.",
@@ -1505,7 +1505,7 @@ describe("TreasurySolutionsWorkspace", () => {
       document
         .querySelector('[data-earn-vault-balance="projected"]')
         ?.querySelector("[data-earn-vault-balance-value]")?.textContent
-    ).toBe("140.25");
+    ).toBe("$140.25");
     const positionRow = screen
       .getAllByText("Steakhouse USDC")
       .map((element) => element.closest("tr"))
@@ -1650,7 +1650,7 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
-    const projectedBalance = within(positionRow).getByText("119.25");
+    const projectedBalance = within(positionRow).getByText("$119.25");
     expect(projectedBalance.closest("[data-earn-vault-balance]")?.className).toContain(
       "animate-pulse"
     );
@@ -2208,9 +2208,15 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getAllByText("$2,500.00").length).toBeGreaterThan(0);
     expect(screen.queryByText("0.0%")).toBeNull();
     expect(screen.queryByText("100.0%")).toBeNull();
-    // The wallet's deployed line refuses a partial total for the same reason.
+    // The wallet's deployed line refuses a partial total for the same reason:
+    // the one readable value appears only as that position's own balance,
+    // never as a wallet or summary total.
     expect(screen.getAllByText("Live value unavailable").length).toBeGreaterThan(0);
-    expect(screen.queryByText("$5.25")).toBeNull();
+    const readableValues = screen.getAllByText("$5.25");
+    expect(readableValues.length).toBeGreaterThan(0);
+    expect(readableValues.every((el) => el.closest("[data-earn-vault-balance]") !== null)).toBe(
+      true
+    );
   });
 
   it("opens the vault exit modal from a position row", async () => {
