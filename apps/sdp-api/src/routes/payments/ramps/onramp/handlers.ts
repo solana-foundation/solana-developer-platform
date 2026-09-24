@@ -34,7 +34,6 @@ import {
 import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
 import { lightsparkProviderCustomerId } from "../providers/lightspark";
 import { muralOnrampQuote, resolveMuralOnrampAccount } from "../providers/mural";
-import { stripeOnrampQuote } from "../providers/stripe";
 import {
   buildProviderDetails,
   type CreateOnrampQuoteBody,
@@ -323,12 +322,12 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "stripe": {
-      quote = await stripeOnrampQuote(c, {
-        counterparty,
-        destinationWalletAddress,
+      quote = await RAMP_PROVIDER_CLIENTS.stripe.createOnrampQuote(rampRuntime(c), {
         assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
+        destinationWalletAddress,
+        externalCustomerId: counterparty.id,
         customerIpAddress: getClientIp(c) ?? undefined,
       });
       break;

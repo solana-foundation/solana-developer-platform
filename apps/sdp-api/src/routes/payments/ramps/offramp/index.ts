@@ -15,8 +15,6 @@ import { createOfframpQuoteSchema, estimateOfframpSchema } from "./schemas";
 const offramp = new Hono<{ Bindings: Env }>();
 
 offramp.get("/currency", requirePermissions("payments:read"), listOfframpCurrencies);
-// Estimates fan out one live call per provider on the corridor and quotes
-// create provider-side records, so both carry fail-closed metered quotas.
 offramp.post(
   "/estimate",
   requirePermissions("payments:read"),
