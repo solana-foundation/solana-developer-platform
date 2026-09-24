@@ -2,8 +2,7 @@ import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
-import { AppError } from "@/lib/errors";
-import { resolveIdentityBoundIdempotencyReplay } from "@/lib/idempotency";
+import { AppError, conflict } from "@/lib/errors";
 import {
   type AppContext,
   getPaymentsRepository,
@@ -63,9 +62,24 @@ export function mapRecipientRow(row: PaymentTransferRecipientRow) {
  * Looks up an existing batch for an Idempotency-Key, verifying the stored
  * payload fingerprint matches before treating the request as a replay.
  *
+ * Fingerprints recorded before the batch `externalId` joined the fingerprint
+ * (SOLA9-418) are reference-blind: a batch that carried a reference at
+ * creation stores one that no longer matches its own identical retry. For
+ * those rows the persisted `external_id` is the reference the key was claimed
+ * with, so a request whose reference-blind fingerprint matches the stored one
+ * replays only when it names that same reference — a changed or newly added
+ * reference is a different request and conflicts.
+ *
  * @param repository - Transfer-batches repository.
+ * @param organizationId - Tenant scope of the key lookup.
+ * @param projectId - Tenant scope of the key lookup.
  * @param idempotencyKey - Idempotency-Key header value.
  * @param fingerprint - Fingerprint of the current request payload.
+ * @param sourceCustodyWalletId - Exact wallet the key must be bound to.
+ * @param legacyFingerprint - The same payload fingerprint computed the
+ *   pre-SOLA9-418 way, with the batch `externalId` omitted entirely.
+ * @param externalId - The request's top-level batch external reference
+ *   (null when the request carries none).
  * @returns The original batch row, or null when no replay applies.
  */
 export async function resolveTransferBatchIdempotencyReplay(
@@ -74,13 +88,34 @@ export async function resolveTransferBatchIdempotencyReplay(
   projectId: string,
   idempotencyKey: string,
   fingerprint: string,
-  sourceCustodyWalletId: string
+  sourceCustodyWalletId: string,
+  legacyFingerprint: string,
+  externalId: string | null
 ): Promise<PaymentTransferBatchRow | null> {
-  return resolveIdentityBoundIdempotencyReplay(
-    () => repository.findTransferBatchByIdempotency({ organizationId, projectId, idempotencyKey }),
-    fingerprint,
-    (row) => row.source_custody_wallet_id === sourceCustodyWalletId
-  );
+  const existing = await repository.findTransferBatchByIdempotency({
+    organizationId,
+    projectId,
+    idempotencyKey,
+  });
+  if (!existing || existing.idempotency_fingerprint === null) {
+    return null;
+  }
+  if (existing.source_custody_wallet_id !== sourceCustodyWalletId) {
+    throw conflict("Idempotency key already used with different request payload");
+  }
+  const stored = existing.idempotency_fingerprint;
+  if (stored === fingerprint) {
+    return existing;
+  }
+  // The exact match failed only because the request carries the batch
+  // externalId while the stored fingerprint predates it: the reference-blind
+  // payload is identical, so the persisted reference decides replay versus
+  // conflict. (When the request carries no externalId, `fingerprint` IS the
+  // reference-blind shape and the exact match above already decided.)
+  if (stored === legacyFingerprint && existing.external_id === externalId) {
+    return existing;
+  }
+  throw conflict("Idempotency key already used with different request payload");
 }
 
 /**

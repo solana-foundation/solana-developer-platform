@@ -153,7 +153,10 @@ export interface TransferBatchFingerprintInput {
    * replaying the original batch under the new reference. Leave it undefined
    * when the request has none — an undefined field is dropped by
    * `normalizeForFingerprint`, so fingerprints recorded before this field
-   * existed keep matching byte-for-byte for externalId-less requests.
+   * existed keep matching byte-for-byte for externalId-less requests. Replays
+   * of batches recorded before the change resolve through that legacy
+   * reference-blind shape plus the row's persisted reference — see
+   * `resolveTransferBatchIdempotencyReplay`.
    */
   externalId?: string;
   recipients: TransferBatchFingerprintRecipientInput[];

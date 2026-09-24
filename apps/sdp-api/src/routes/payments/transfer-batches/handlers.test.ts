@@ -2037,6 +2037,129 @@ describe("payment transfer batches", () => {
     expect(count).toEqual({ count: 1 });
   });
 
+  it("replays a batch whose stored fingerprint predates the batch externalId", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValue(sourceSigner);
+
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValue(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_legacy_fingerprint_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TEST_API_KEY.raw}`,
+      "Idempotency-Key": "batch-legacy-fingerprint-key",
+    };
+    const bodyWithExternalId = (externalId: string) =>
+      JSON.stringify({
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        externalId,
+        token: "SOL",
+        recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+        options: { preflight: false },
+      });
+
+    const first = await app.request(
+      "/v1/payments/transfer-batches",
+      { method: "POST", headers, body: bodyWithExternalId("payroll_run_a") },
+      env
+    );
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as {
+      data: { batch: { id: string; externalId: string | null } };
+    };
+    const batchId = firstBody.data.batch.id;
+
+    // Simulate a batch created before the externalId joined the fingerprint:
+    // its stored fingerprint is reference-blind even though the request and
+    // the persisted row carried a reference.
+    const stored = await getDb(env)
+      .prepare("SELECT idempotency_fingerprint FROM payment_transfer_batches WHERE id = ?")
+      .bind(batchId)
+      .first<{ idempotency_fingerprint: string | null }>();
+    if (!stored?.idempotency_fingerprint) throw new Error("missing idempotency fingerprint");
+    const parsed = JSON.parse(stored.idempotency_fingerprint) as Record<string, unknown>;
+    if (!("externalId" in parsed)) throw new Error("stored fingerprint is missing externalId");
+    const { externalId: _externalId, ...legacyShape } = parsed;
+    await getDb(env)
+      .prepare("UPDATE payment_transfer_batches SET idempotency_fingerprint = ? WHERE id = ?")
+      .bind(JSON.stringify(legacyShape), batchId)
+      .run();
+
+    const identicalRetry = await app.request(
+      "/v1/payments/transfer-batches",
+      { method: "POST", headers, body: bodyWithExternalId("payroll_run_a") },
+      env
+    );
+    expect(identicalRetry.status).toBe(200);
+    const retryBody = (await identicalRetry.json()) as {
+      data: { batch: { id: string; externalId: string | null } };
+    };
+    expect(retryBody.data.batch.id).toBe(batchId);
+    expect(retryBody.data.batch.externalId).toBe("payroll_run_a");
+
+    // The persisted reference is what the key was claimed with, so a changed
+    // reference under the same key still conflicts despite the legacy shape.
+    const changedReference = await app.request(
+      "/v1/payments/transfer-batches",
+      { method: "POST", headers, body: bodyWithExternalId("payroll_run_b") },
+      env
+    );
+    expect(changedReference.status).toBe(409);
+    const conflictBody = (await changedReference.json()) as { error: { code: string } };
+    expect(conflictBody.error.code).toBe("CONFLICT");
+
+    // A key whose original request carried no reference cannot adopt one on
+    // retry either: the reference-blind shape alone never grants a replay.
+    const referencelessHeaders = {
+      ...headers,
+      "Idempotency-Key": "batch-legacy-fingerprint-add-key",
+    };
+    const withoutReference = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: referencelessHeaders,
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(withoutReference.status).toBe(200);
+    const addedReference = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: referencelessHeaders,
+        body: bodyWithExternalId("payroll_run_c"),
+      },
+      env
+    );
+    expect(addedReference.status).toBe(409);
+
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(createOrgSignerForCustodyWalletMock).toHaveBeenCalledTimes(2);
+
+    const count = await getDb(env)
+      .prepare(
+        `SELECT COUNT(*)::int AS count
+           FROM payment_transfer_batches
+          WHERE organization_id = ? AND project_id = ?`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .first<{ count: number }>();
+    expect(count).toEqual({ count: 2 });
+  });
+
   it("returns the original batch when a concurrent insert loses the idempotency race", async () => {
     const sourceSigner = await generateKeyPairSigner();
     await updateSeededWalletPublicKey(sourceSigner.address);
