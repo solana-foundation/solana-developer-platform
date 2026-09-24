@@ -896,7 +896,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/mint/prepare",
-            "description": "Builds an unsigned mint transaction for client-side signing.",
+            "description": "Builds an unsigned mint transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee and the rent for a new destination token account; SDP does not sponsor prepared transactions.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"mint\": {\n    \"destination\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Payout\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",
@@ -944,7 +944,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}/burn/prepare",
-            "description": "Builds an unsigned burn transaction for client-side signing.",
+            "description": "Builds an unsigned burn transaction for client-side signing. The authority wallet is the fee payer: it signs the transaction and pays the network fee; SDP does not sponsor prepared transactions.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"burn\": {\n    \"source\": \"So11111111111111111111111111111111111111112\",\n    \"amount\": \"1000\",\n    \"memo\": \"Correction\"\n  },\n  \"options\": {\n    \"priorityFee\": \"low\",\n    \"simulate\": true\n  }\n}",

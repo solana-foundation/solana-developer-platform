@@ -157,7 +157,8 @@ describe("Token2022Service burn", () => {
     );
     const bytes = Kit.getBase64Encoder().encode(prepared.serializedTx);
     const transaction = Kit.getTransactionDecoder().decode(bytes);
-    expect(transaction.signatures).toEqual({ [authority.address]: null, [sponsor]: null });
+    expect(transaction.signatures).toEqual({ [authority.address]: null });
+    expect(feePayment.getFeePayer).not.toHaveBeenCalled();
     expect(prepared).toMatchObject(lifetime);
     expect(prepared.simulation).toEqual(simulate ? simulation : undefined);
     expect(RpcModule.simulateTransaction).toHaveBeenCalledTimes(simulate ? 1 : 0);
