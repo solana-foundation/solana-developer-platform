@@ -725,8 +725,20 @@ export async function createFundedPrivyWallet(input: {
   const wallet = await signingService.createWallet(TEST_ORG.id, undefined, {
     provider: "privy",
     label: input.label,
-    setDefault: input.setDefault,
   });
+
+  if (input.setDefault) {
+    const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+    if (!config) {
+      throw new Error("Integration precondition failed: privy signer configuration not found.");
+    }
+    await getDb(env)
+      .prepare(
+        "UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+      .bind(wallet.walletId, config.id)
+      .run();
+  }
 
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);
