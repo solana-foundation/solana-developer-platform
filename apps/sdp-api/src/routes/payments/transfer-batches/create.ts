@@ -1,10 +1,12 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import type { PolicyCandidate } from "@sdp/types";
+import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type {
   PaymentTransferBatchRow,
   PaymentTransferRecipientRow,
 } from "@/db/repositories/payment-transfer-batches.repository";
+import { generatePaymentTransferBatchId } from "@/db/repositories/payment-transfer-batches.repository";
 import { createPostgresPaymentTransferBatchesRepository } from "@/db/repositories/payment-transfer-batches.repository.postgres";
 import { AppError, badRequest, internalError } from "@/lib/errors";
 import { buildTransferBatchFingerprint } from "@/lib/idempotency";
@@ -12,6 +14,8 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { AuditService } from "@/services/audit.service";
+import { recordTransferBatchAuditOutcome } from "@/services/payments/transfer-batch-audit";
 import {
   approvedWalletOperationId,
   assertApprovedWalletOperationCustodyWallet,
@@ -20,7 +24,12 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import * as solanaServices from "@/services/solana";
-import { type AppContext, getFeePayment, getPaymentTransferBatchesRepository } from "../context";
+import {
+  type AppContext,
+  getFeePayment,
+  getPaymentsRepository,
+  getPaymentTransferBatchesRepository,
+} from "../context";
 import { admitExactPaymentWallet, assertPaymentWalletExactAccess } from "../wallets";
 import { applyRecipientRowUpdates, executeChunk, updateRecipientRows } from "./execute";
 import { resolveBatchRequest } from "./resolve";
@@ -294,6 +303,29 @@ export async function createTransferBatch(c: AppContext) {
         : body.options.maxRecipientsPerTransaction,
   });
 
+  // The tamper-evident ledger admits the batch before any of it is durable or
+  // signed. Chunks confirm asynchronously, so the outcome is appended by
+  // whichever writer settles the batch to a terminal status (see
+  // recordTransferBatchAuditOutcome); the intent id travels on the batch row.
+  const batchId = generatePaymentTransferBatchId();
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "transfer",
+    resourceType: "payment_transfer_batch",
+    resourceId: batchId,
+    metadata: {
+      custodyWalletId: resolved.sourceWallet.id,
+      walletId: resolved.sourceWallet.walletId,
+      sourceAddress: resolved.sourceAddress,
+      // Named tokenMint: a bare "token" key is scrubbed as a credential by
+      // the audit redaction policy, and a mint address is not a secret.
+      tokenMint: resolved.tokenContext.token,
+      totalAmount: resolved.totalAmount,
+      recipientCount: resolved.recipients.length,
+      transactionCount: chunks.length,
+    },
+  });
+
   const batchRepository = getPaymentTransferBatchesRepository(c);
   let batch: PaymentTransferBatchRow;
   let recipientRows: PaymentTransferRecipientRow[];
@@ -301,6 +333,8 @@ export async function createTransferBatch(c: AppContext) {
     const created = await runApprovedWalletOperationEffectTransaction(c, (db) =>
       createPostgresPaymentTransferBatchesRepository(db).createTransferBatchWithRecipients({
         batch: {
+          id: batchId,
+          auditIntentId: auditIntent.id,
           organizationId: resolved.scope.auth.organizationId,
           projectId: resolved.projectId,
           externalId: body.externalId === undefined ? null : body.externalId,
@@ -333,6 +367,18 @@ export async function createTransferBatch(c: AppContext) {
     batch = created.batch;
     recipientRows = created.recipients;
   } catch (error) {
+    // Nothing was persisted or signed under this intent. A unique violation
+    // here is a concurrent request with the same Idempotency-Key winning the
+    // insert; this request replays that batch rather than creating its own.
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: {
+        batchStatus: null,
+        error: isPostgresUniqueViolation(error)
+          ? "Superseded by a concurrent request with the same Idempotency-Key"
+          : "Transfer batch was not created",
+      },
+    });
     if (idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const replay = await resolveTransferBatchIdempotencyReplay(
         batchRepository,
@@ -396,19 +442,24 @@ export async function createTransferBatch(c: AppContext) {
     }
   }
 
-  const finalBatch = await batchRepository.recomputeTransferBatchStatus({
+  const finalTransition = await batchRepository.recomputeTransferBatchStatus({
     batchId: batch.id,
     organizationId: resolved.scope.auth.organizationId,
     projectId: resolved.projectId,
   });
+  await recordTransferBatchAuditOutcome({
+    env: c.env,
+    transition: finalTransition,
+    batches: batchRepository,
+    payments: getPaymentsRepository(c),
+  });
+  const finalBatch = finalTransition.batch;
 
-  return success(
+  const response = await buildTransferBatchResponse(
     c,
-    await buildTransferBatchResponse(
-      c,
-      finalBatch,
-      resolved.scope.auth.organizationId,
-      resolved.projectId
-    )
+    finalBatch,
+    resolved.scope.auth.organizationId,
+    resolved.projectId
   );
+  return success(c, response);
 }
