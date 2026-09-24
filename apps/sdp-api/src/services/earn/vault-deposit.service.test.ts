@@ -915,8 +915,16 @@ describe("depositIntoVault — signed persistence boundary", () => {
   // rejection (not merely "something threw") keeps a mock-wiring accident from
   // satisfying this test.
   it.each([
-    ["build throws", () => buildVaultDeposit.mockRejectedValue(new Error("build failed")), "build failed"],
-    ["simulation throws", () => simulateVaultPlan.mockRejectedValue(new Error("RPC failed")), "RPC failed"],
+    [
+      "build throws",
+      () => buildVaultDeposit.mockRejectedValue(new Error("build failed")),
+      "build failed",
+    ],
+    [
+      "simulation throws",
+      () => simulateVaultPlan.mockRejectedValue(new Error("RPC failed")),
+      "RPC failed",
+    ],
     [
       "simulation rejects",
       () => simulateVaultPlan.mockResolvedValue({ ok: false, error: "program error", logs: [] }),
@@ -932,7 +940,11 @@ describe("depositIntoVault — signed persistence boundary", () => {
       () => createOrgSignerForCustodyWallet.mockResolvedValue({ address: VAULT_A }),
       "Resolved signing wallet does not match the deposit wallet",
     ],
-    ["signing throws", () => signVaultPlan.mockRejectedValue(new Error("sign failed")), "sign failed"],
+    [
+      "signing throws",
+      () => signVaultPlan.mockRejectedValue(new Error("sign failed")),
+      "sign failed",
+    ],
   ])("does not invent a movement or holding when %s", async (_name, arrange, expectedRejection) => {
     arrange();
 
