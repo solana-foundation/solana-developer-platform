@@ -321,6 +321,84 @@ test("flags a client.post example that uses a declared relative-path variable", 
   ]);
 });
 
+test("tracks a URL declaration that a comment prefixes inside its chunk", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfer-batches"]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          "```typescript",
+          "// Build the batch endpoint",
+          'const url = "https://api.solana.com/v1/payments/transfer-batches";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "introduction.mdx", line: 5, endpoint: "/v1/payments/transfer-batches" },
+  ]);
+});
+
+test("reassignment replaces a variable's stale target before the request is checked", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfers"]),
+    files: [
+      {
+        path: "reassigned.mdx",
+        source: [
+          "```typescript",
+          'let url = "https://api.solana.com/v1/payments/transfers";',
+          "",
+          'url = "https://api.solana.com/v1/payments/transfers/tr_123";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});
+
+test("checks a POST through a reassigned variable against its new endpoint", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set([
+      "/v1/issuance/tokens/{tokenId}/freeze",
+      "/v1/payments/transfers",
+    ]),
+    files: [
+      {
+        path: "reassigned.mdx",
+        source: [
+          "```typescript",
+          'let url = "https://api.solana.com/v1/issuance/tokens/tok_abc123/freeze";',
+          "",
+          'url = "https://api.solana.com/v1/payments/transfers";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "reassigned.mdx", line: 6, endpoint: "/v1/payments/transfers" },
+  ]);
+});
+
 test("accepts a variable-target POST that shows the fence and ignores variable-target GETs", () => {
   const violations = findMissingIdempotencyKeyExamples({
     idempotencyPostPaths: new Set(["/v1/payments/transfers"]),

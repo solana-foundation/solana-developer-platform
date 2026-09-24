@@ -29,11 +29,14 @@ const IDEMPOTENCY_HEADER = /(?:Idempotency-Key|idempotencyKey)["']?\s*[:=,]/i;
 const REQUEST_START =
   /^(?:curl\b|await\b|(?:const|let|var)\b|fetch\s*\(|[\w$][\w$\s]*=\s*(?:await\s+)?(?:fetch\s*\(|[\w$.]*\.(?:post|request)\s*\(|[\w$][\w$.]*\.newBuilder)|[\w$.]*\.(?:post|request)\s*\()/;
 const COMMENT_LINE = /^\s*(?:#|\/\/)/;
-// Request targets stored in a variable first, for example
-// `const url = "https://api.solana.com/v1/payments/transfer-batches";`. The
-// value must be a plain quoted string (absolute URL or relative path).
-const URL_VARIABLE_DECLARATION =
-  /^\s*(?:const|let|var)\s+([\w$]+)\s*=\s*(["'`])([^'"`]*)\2;?\s*(?:\/\/.*)?$/;
+// Request targets assigned to a variable, whether declared
+// (`const url = "https://api.solana.com/v1/payments/transfer-batches";`) or
+// reassigned before the request call (`url = "/v1/payments/transfers";`). The
+// value must be a plain quoted string (absolute URL or relative path). Matched
+// per line so a comment can prefix the declaration inside a shared chunk and a
+// reassignment replaces the target the request call resolves to.
+const URL_VARIABLE_ASSIGNMENT =
+  /^\s*(?:(?:const|let|var)\s+)?([\w$]+)\s*=\s*(["'`])([^'"`]*)\2;?\s*(?:\/\/.*)?$/;
 // A request call whose first argument is a bare identifier, for example
 // `fetch(url, { ... })` or `client.post(url, { ... })`.
 const REQUEST_CALL_TARGET = /\b(?:fetch|post|request)\s*\(\s*([\w$]+)/g;
@@ -192,17 +195,19 @@ export function splitBlockIntoRequests(content) {
  * endpoints and reports the ones missing the Idempotency-Key header.
  */
 function checkBlock({ file, block, idempotencyPostPaths, report }) {
-  // Request targets can be declared in a variable before the request call
+  // Request targets can be assigned to a variable before the request call
   // (`const url = "..."; await fetch(url, { method: "POST" })`), which splits
-  // the URL and the POST across two chunks. Track the declared targets per
-  // block so the request chunk is still checked against the endpoint it posts
-  // to.
+  // the URL and the POST across two chunks. Track the assignments per block,
+  // line by line, so the request chunk is still checked against the endpoint
+  // it posts to and a reassignment resolves to the new target instead of a
+  // stale one.
   const urlVariables = new Map();
   for (const request of splitBlockIntoRequests(block.content)) {
-    const declaration = request.content.match(URL_VARIABLE_DECLARATION);
-    if (declaration) {
-      const target = requestTargetPath(declaration[3]);
-      if (target) urlVariables.set(declaration[1], target);
+    for (const line of request.content.split("\n")) {
+      const assignment = line.match(URL_VARIABLE_ASSIGNMENT);
+      if (!assignment) continue;
+      const target = requestTargetPath(assignment[3]);
+      if (target) urlVariables.set(assignment[1], target);
     }
     if (!POST_HINT.test(request.content)) continue;
     if (IDEMPOTENCY_HEADER.test(request.content)) continue;
