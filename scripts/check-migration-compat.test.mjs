@@ -26,9 +26,11 @@ test("contractions are flagged per ALTER TABLE action", () => {
       "ALTER TABLE a ALTER COLUMN e TYPE BIGINT;\n" +
       "ALTER TABLE a ALTER f SET NOT NULL;\n" +
       "ALTER TABLE a RENAME COLUMN g TO h;\n" +
-      'ALTER TABLE IF EXISTS "a" DROP i;'
+      'ALTER TABLE IF EXISTS "a" DROP i;\n' +
+      'ALTER TABLE "public"."accounts" DROP COLUMN old;\n' +
+      "ALTER TABLE ONLY public.accounts ADD COLUMN j TEXT NOT NULL;"
   );
-  assert.equal(found.length, 6);
+  assert.equal(found.length, 8);
   assert.match(found[1], /adds a NOT NULL column without a DEFAULT/);
 });
 

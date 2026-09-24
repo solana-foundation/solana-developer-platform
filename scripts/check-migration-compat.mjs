@@ -6,8 +6,11 @@ import { splitSqlStatements } from "../apps/sdp-api/scripts/lib/run-postgres-mig
 export const MIGRATIONS_DIR = "apps/sdp-api/src/db/migrations/";
 const SQL_DIR = `${MIGRATIONS_DIR}postgres/`;
 const BREAKING_DIRECTIVE = /^--\s*sdp:migration-compat:\s*breaking\s*$/m;
-const ALTER_TABLE_PREFIX =
-  /^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:"[^"]+"|\S+)\s*\*?\s*/i;
+const SQL_NAME = String.raw`(?:"[^"]+"|[^\s".(]+)`;
+const ALTER_TABLE_PREFIX = new RegExp(
+  String.raw`^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${SQL_NAME}(?:\.${SQL_NAME})*\s*\*?\s*`,
+  "i"
+);
 
 const matches = (pattern) => (text) => pattern.test(text);
 

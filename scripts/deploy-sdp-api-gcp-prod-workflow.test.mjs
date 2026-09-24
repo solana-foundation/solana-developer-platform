@@ -244,9 +244,22 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
     approval,
     / {2}deploy:\n[\s\S]*?needs: approve\n[\s\S]*?uses: \.\/\.github\/workflows\/deploy-sdp-api-gcp-prod\.yml\n\s+with:\n\s+image_sha: \$\{\{ inputs\.image_sha \}\}\n\s+approved_schema: true/
   );
+  assert.match(approval, /env:\n\s+IMAGE_SHA: \$\{\{ inputs\.image_sha \}\}/);
+  assert.doesNotMatch(approval, /run: [^\n]*\$\{\{ inputs\./);
+  assert.match(approval, /\[\[ ! "\$\{IMAGE_SHA\}" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
   const approve = approval.indexOf("  approve:");
   const deploy = approval.indexOf("  deploy:");
   assert.ok(approve !== -1 && approve < deploy);
+
+  assert.match(
+    workflow,
+    /- name: Refuse an approved deploy that is behind prod\n\s+if: \$\{\{ inputs\.approved_schema \}\}/
+  );
+  assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" origin\/main/);
+  assert.match(workflow, /git merge-base --is-ancestor "\$\{applied\}" "\$\{DEPLOY_IMAGE_SHA\}"/);
+  const refuse = workflow.indexOf("- name: Refuse an approved deploy that is behind prod");
+  const promote = workflow.indexOf("- name: Verify and promote merge image");
+  assert.ok(refuse !== -1 && refuse < promote);
 });
 
 test("the orchestrator sends every continuous merge to prod", () => {
@@ -275,8 +288,13 @@ test("the orchestrator sends every continuous merge to prod", () => {
   );
   assert.match(
     orchestrator,
-    /needs\.deploy-api-prod\.outputs\.pending_migrations == 'true' && 'stage \(prod held: pending migrations, approval run dispatched\)'/
+    /notify-end:\n\s+needs: \[changes, deploy-api-stage, deploy-api-prod, request-schema-approval\]/
   );
+  assert.match(
+    orchestrator,
+    /needs\.request-schema-approval\.result == 'success' && 'stage \(prod held: pending migrations, approval run dispatched\)' \|\|\n\s+needs\.deploy-api-prod\.outputs\.pending_migrations == 'true' && 'stage \(prod held: pending migrations, approval dispatch failed\)'/
+  );
+  assert.match(orchestrator, /needs\.request-schema-approval\.result == 'failure'\) && 'FAILED'/);
 });
 
 test("merge mode skips the internal smoke gate but requires the caller's", () => {

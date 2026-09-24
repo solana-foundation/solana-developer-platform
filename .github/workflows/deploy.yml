@@ -128,7 +128,7 @@ jobs:
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
 
   notify-end:
-    needs: [changes, deploy-api-stage, deploy-api-prod]
+    needs: [changes, deploy-api-stage, deploy-api-prod, request-schema-approval]
     if: always() && needs.deploy-api-stage.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -150,11 +150,12 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.deploy-api-prod.outputs.pending_migrations == 'true' && 'stage (prod held: pending migrations, approval run dispatched)' ||
+            ${{ needs.request-schema-approval.result == 'success' && 'stage (prod held: pending migrations, approval run dispatched)' ||
+                needs.deploy-api-prod.outputs.pending_migrations == 'true' && 'stage (prod held: pending migrations, approval dispatch failed)' ||
                 needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
                 'stage' }}
           OUTCOME: >-
-            ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
+            ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure' || needs.request-schema-approval.result == 'failure') && 'FAILED' ||
                 (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
                 'SUCCESS' }}
           ACTOR: ${{ github.actor }}

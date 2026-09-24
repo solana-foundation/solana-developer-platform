@@ -25,7 +25,15 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Record the approved commit
-        run: echo "Approved prod deploy with migrations for ${{ inputs.image_sha }}" >> "${GITHUB_STEP_SUMMARY}"
+        env:
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "image_sha must be a lowercase 40-character Git SHA." >&2
+            exit 1
+          fi
+          echo "Approved prod deploy with migrations for ${IMAGE_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
   deploy:
     name: sdp-api + worker + cron — prod

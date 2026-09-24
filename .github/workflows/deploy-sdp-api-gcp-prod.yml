@@ -210,6 +210,23 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
+      - name: Refuse an approved deploy that is behind prod
+        if: ${{ inputs.approved_schema }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" origin/main; then
+            echo "${DEPLOY_IMAGE_SHA} is not on main." >&2
+            exit 1
+          fi
+          applied="$(gcloud run jobs describe "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null \
+            && ! git merge-base --is-ancestor "${applied}" "${DEPLOY_IMAGE_SHA}"; then
+            echo "Prod already applied ${applied}, which ${DEPLOY_IMAGE_SHA} does not include. Approve the newest held run instead." >&2
+            exit 1
+          fi
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
