@@ -1004,6 +1004,32 @@ describe("Earn strategy reads — shipped V1 curation", () => {
     }
   });
 
+  it("serves the restored Sentora PYUSD vault and still hides Ethena PYUSD Prime", async () => {
+    // Pinned by ADDRESS on purpose (PR #2027, 2026-09-24). The tests above read
+    // their cases from the shipped config, so a curation edit that re-hid
+    // Sentora or un-hid Ethena would move them along with it and fail neither.
+    curation.bypassCuratedVaults = false;
+    await seedAuth();
+    const sentora = await seedStrategy({
+      providerReference: "A2wsxhA7pF4B2UKVfXocb6TAAP9ipfPJam6oMKgDE5BK",
+      hostCluster: "mainnet-beta",
+    });
+    const ethena = await seedStrategy({
+      providerReference: "4TwKA9JXEGeLEpAPLoarhSQoQwoiu12dkDCjSuVvHQUf",
+      hostCluster: "mainnet-beta",
+    });
+
+    const list = await getEarn("/v1/earn/strategies?cluster=mainnet-beta");
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      data: { strategies: Array<{ id: string }>; total: number };
+    };
+    expect(body.data.strategies.map((s) => s.id)).toEqual([sentora.id]);
+    expect(body.data.total).toBe(1);
+    expect((await getEarn(`/v1/earn/strategies/${sentora.id}`)).status).toBe(200);
+    expect((await getEarn(`/v1/earn/strategies/${ethena.id}`)).status).toBe(404);
+  });
+
   it("publishes the Kamino deposit floor required by production builds", async () => {
     curation.bypassCuratedVaults = true;
     await seedAuth();
