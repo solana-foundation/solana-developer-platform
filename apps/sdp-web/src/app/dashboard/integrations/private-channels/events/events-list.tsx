@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { loadProjectEventsAction } from "./actions";
+import { type LoadEventsResult, loadProjectEventsAction } from "./actions";
 import { EventDetail } from "./event-detail";
 import {
   EVENT_FAMILY_BADGE,
@@ -38,6 +38,12 @@ import { type EventNames, labelFor } from "./event-names";
 import { type PrivateChannelEventSummary, summarizePrivateChannelEvent } from "./event-summary";
 
 interface Props {
+  /**
+   * The page's immutable project scope. Follow-up loads re-bind to it instead
+   * of the shared selection cookie, and responses carrying another project's
+   * rows are dropped, so a mounted feed can never mix projects.
+   */
+  projectId: string;
   initialEvents: PrivateChannelEventDto[];
   initialHasMore: boolean;
   initialNextCursor: string | null;
@@ -47,6 +53,16 @@ interface Props {
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 type EventFamilyFilter = "all" | PrivateChannelEventFamily;
+
+/** Keep all feed UI state in the same scope-guarded update. */
+interface FeedState {
+  scope: { projectId: string };
+  events: PrivateChannelEventDto[];
+  hasMore: boolean;
+  nextCursor: string | null;
+  selectedFamily: EventFamilyFilter;
+  selectedEvent: PrivateChannelEventDto | null;
+}
 
 const FAMILY_FILTERS = [
   "all",
@@ -177,26 +193,99 @@ function formatRowSummary(
   return t("DashboardPrivateChannels.events.noAdditionalDetails");
 }
 
+function EventFamilySelect({
+  value,
+  disabled,
+  isFiltering,
+  onValueChange,
+}: {
+  value: EventFamilyFilter;
+  disabled: boolean;
+  isFiltering: boolean;
+  onValueChange: (value: string | null) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <span className="text-sm font-medium text-primary">
+        {t("DashboardPrivateChannels.events.filterLabel")}
+      </span>
+      <Select
+        ariaLabel={t("DashboardPrivateChannels.events.filterLabel")}
+        className="w-full max-w-full sm:w-64"
+        disabled={disabled}
+        onValueChange={onValueChange}
+        trailing={isFiltering ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : null}
+        value={value}
+      >
+        {FAMILY_FILTERS.map((family) => (
+          <SelectItem key={family} value={family}>
+            {family === "all"
+              ? t("DashboardPrivateChannels.events.filterAll")
+              : eventFamilyLabel(t, family)}
+          </SelectItem>
+        ))}
+      </Select>
+    </div>
+  );
+}
+
 export function EventsList({
+  projectId,
   initialEvents,
   initialHasMore,
   initialNextCursor,
   canViewRawPayload,
   names = {},
 }: Props) {
-  const [events, setEvents] = useState(initialEvents);
-  const [hasMore, setHasMore] = useState(initialHasMore);
-  const [nextCursor, setNextCursor] = useState(initialNextCursor);
-  const [selectedFamily, setSelectedFamily] = useState<EventFamilyFilter>("all");
-  const [selectedEvent, setSelectedEvent] = useState<PrivateChannelEventDto | null>(null);
+  const [feed, setFeed] = useState<FeedState>(() => ({
+    scope: { projectId },
+    events: initialEvents,
+    hasMore: initialHasMore,
+    nextCursor: initialNextCursor,
+    selectedFamily: "all",
+    selectedEvent: null,
+  }));
+  const { selectedFamily, selectedEvent } = feed;
   const [isLoadingMore, startLoadMore] = useTransition();
   const [isFiltering, startFiltering] = useTransition();
   const t = useTranslations();
   const locale = useLocale();
   const isBusy = isLoadingMore || isFiltering;
 
+  // The page scope is the feed's identity: when it changes, rows, cursor, and
+  // selection reset to the new scope's initial data instead of surviving.
+  if (feed.scope.projectId !== projectId) {
+    setFeed({
+      // A new identity also rejects stale responses after an A -> B -> A switch.
+      scope: { projectId },
+      events: initialEvents,
+      hasMore: initialHasMore,
+      nextCursor: initialNextCursor,
+      selectedFamily: "all",
+      selectedEvent: null,
+    });
+  }
+
+  function setSelectedEvent(event: PrivateChannelEventDto | null) {
+    setFeed((prev) => ({ ...prev, selectedEvent: event }));
+  }
+
   function familyParam(family: EventFamilyFilter): { family?: PrivateChannelEventFamily } {
     return family === "all" ? {} : { family };
+  }
+
+  /**
+   * The response only feeds the mounted project: a page whose rows name
+   * another project is dropped whole (never partially applied), the same way
+   * a failed load is.
+   */
+  function responseInScope(
+    result: LoadEventsResult,
+    scope: string
+  ): (LoadEventsResult & { ok: true }) | null {
+    if (!result.ok) return null;
+    return result.data.events.every((event) => event.projectId === scope) ? result : null;
   }
 
   function changeFamily(value: string | null) {
@@ -204,39 +293,67 @@ export function EventsList({
     if (!nextFamily || nextFamily === selectedFamily || isBusy) return;
 
     const previousFamily = selectedFamily;
-    setSelectedFamily(nextFamily);
+    setFeed((prev) => ({ ...prev, selectedFamily: nextFamily }));
     startFiltering(async () => {
       const result = await loadProjectEventsAction({
+        projectId,
         limit: 50,
         ...familyParam(nextFamily),
       });
-      if (!result.ok) {
-        setSelectedFamily(previousFamily);
+      const page = responseInScope(result, projectId);
+      if (!page) {
+        // Revert only if this scope's attempt is still the one in flight: a
+        // response that resolves after the project switched must not change
+        // the new scope's filter (its rows and cursor never reloaded either).
+        setFeed((prev) =>
+          prev.scope === feed.scope && prev.selectedFamily === nextFamily
+            ? { ...prev, selectedFamily: previousFamily }
+            : prev
+        );
         toast.error(t("DashboardPrivateChannels.events.loadErrorToast"));
         return;
       }
-      setEvents(result.data.events);
-      setHasMore(result.data.hasMore);
-      setNextCursor(result.data.nextCursor);
-      setSelectedEvent(null);
+      // Functional so a response that resolves after the scope moved on is
+      // dropped rather than written into the new scope's feed.
+      setFeed((prev) =>
+        prev.scope === feed.scope
+          ? {
+              ...prev,
+              events: page.data.events,
+              hasMore: page.data.hasMore,
+              nextCursor: page.data.nextCursor,
+              selectedEvent: null,
+            }
+          : prev
+      );
     });
   }
 
   function loadMore() {
-    if (!nextCursor || isBusy) return;
+    const cursor = feed.nextCursor;
+    if (!cursor || isBusy) return;
     startLoadMore(async () => {
       const result = await loadProjectEventsAction({
-        before: nextCursor,
+        projectId,
+        before: cursor,
         limit: 50,
         ...familyParam(selectedFamily),
       });
-      if (!result.ok) {
+      const page = responseInScope(result, projectId);
+      if (!page) {
         toast.error(t("DashboardPrivateChannels.events.loadErrorToast"));
         return;
       }
-      setEvents((prev) => [...prev, ...result.data.events]);
-      setHasMore(result.data.hasMore);
-      setNextCursor(result.data.nextCursor);
+      setFeed((prev) =>
+        prev.scope === feed.scope
+          ? {
+              ...prev,
+              events: [...prev.events, ...page.data.events],
+              hasMore: page.data.hasMore,
+              nextCursor: page.data.nextCursor,
+            }
+          : prev
+      );
     });
   }
 
@@ -245,7 +362,7 @@ export function EventsList({
   // Derived once so the stacked and tabular layouts can never drift apart.
   const rows = useMemo(
     () =>
-      events.map((event) => {
+      feed.events.map((event) => {
         const summary = summarizePrivateChannelEvent(event);
         return {
           event,
@@ -255,44 +372,21 @@ export function EventsList({
           channelLabel: labelFor(names, event.channelId) ?? null,
         };
       }),
-    [events, locale, names, t]
+    [feed.events, locale, names, t]
   );
 
   return (
     <div className="flex min-w-0 flex-col gap-4" aria-busy={isBusy}>
       {canViewRawPayload ? (
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-          <span className="text-sm font-medium text-primary">
-            {t("DashboardPrivateChannels.events.filterLabel")}
-          </span>
-          <Select
-            ariaLabel={t("DashboardPrivateChannels.events.filterLabel")}
-            className="w-full max-w-full sm:w-64"
-            disabled={isBusy}
-            onValueChange={changeFamily}
-            trailing={
-              isFiltering ? <Loader2Icon aria-hidden className="size-4 animate-spin" /> : null
-            }
-            value={selectedFamily}
-          >
-            <SelectItem value="all">{t("DashboardPrivateChannels.events.filterAll")}</SelectItem>
-            <SelectItem value={PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE}>
-              {eventFamilyLabel(t, PRIVATE_CHANNEL_EVENT_FAMILIES.LIFECYCLE)}
-            </SelectItem>
-            <SelectItem value={PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER}>
-              {eventFamilyLabel(t, PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER)}
-            </SelectItem>
-            <SelectItem value={PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER}>
-              {eventFamilyLabel(t, PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER)}
-            </SelectItem>
-            <SelectItem value={PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR}>
-              {eventFamilyLabel(t, PRIVATE_CHANNEL_EVENT_FAMILIES.ERROR)}
-            </SelectItem>
-          </Select>
-        </div>
+        <EventFamilySelect
+          value={selectedFamily}
+          disabled={isBusy}
+          isFiltering={isFiltering}
+          onValueChange={changeFamily}
+        />
       ) : null}
 
-      {events.length === 0 ? (
+      {feed.events.length === 0 ? (
         <p className="text-secondary text-sm">
           {selectedFamily === "all"
             ? t("DashboardPrivateChannels.events.empty")
@@ -412,7 +506,7 @@ export function EventsList({
         </>
       )}
 
-      {events.length > 0 && hasMore ? (
+      {feed.events.length > 0 && feed.hasMore ? (
         <div className="flex justify-center">
           <Button type="button" variant="secondary" onClick={loadMore} disabled={isBusy}>
             {isLoadingMore ? <Loader2Icon className="animate-spin" /> : null}

@@ -315,13 +315,20 @@ describe("MosaicService.createToken — Kora sponsorship", () => {
     it("prepareCreateToken respects options.feePayer even when Kora is configured", async () => {
       // A prepared transaction is submitted by the client, who cannot sign as
       // Kora — so the fee payer must stay options.feePayer, not the sponsor.
-      vi.spyOn(Kit, "compileTransaction").mockReturnValue({ __sentinel: "compiled" } as never);
-      vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+      const compileSpy = vi
+        .spyOn(Kit, "compileTransaction")
+        .mockReturnValue({ __sentinel: "compiled" } as never);
+      const wireSpy = vi
+        .spyOn(Kit, "getBase64EncodedWireTransaction")
+        .mockReturnValue("base64-tx" as never);
 
       const result = await service.prepareCreateToken(srfc37Options());
 
       expect(fee.getFeePayer).not.toHaveBeenCalled();
       expect(stablecoinBuilderCall(builderSpy.mock.calls[0]).feePayer).toBe(signer);
+      // The serialized bytes the client signs are the base64 wire encoding OF
+      // the compiled transaction, not an unrelated value that happens to pass.
+      expect(wireSpy).toHaveBeenCalledWith(compileSpy.mock.results[0]?.value);
       expect(result.serializedTx).toBe("base64-tx");
     });
   });

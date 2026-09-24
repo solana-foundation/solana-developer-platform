@@ -612,7 +612,14 @@ transaction signed by the organization custody wallet or external owner.
     Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
     `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
     default) it only emits `sdp_api_earn_volume_cap_evaluated` with
-    `would_block`. An unreadable exposure is a 503 in BOTH modes. A readable
+    `would_block`. The 409's `details` carry only `vaultAddress` and its
+    message is a fixed sentence: `exposure`, `projected` and `limit` are the
+    cross-tenant aggregate and go to the evaluated event ONLY, because the
+    preview and external-wallet build routes are keyless and a body that
+    named them told any anonymous caller SDP's total position in the vault
+    (SOLA9-9; `earn.vault-exposure-cap.test.ts` pins the redaction on an
+    anonymous build and preview). An unreadable exposure is a 503 in BOTH
+    modes. A readable
     TVL of 0 is NOT unreadable: it drives the share bound to 0, so at flag
     flip (PRO-1937) expect `would_block` storms on explicitly zero-TVL rows —
     expected strictness, not a bug. A vault whose metrics have not landed at
@@ -789,9 +796,10 @@ transaction signed by the organization custody wallet or external owner.
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
   An ENFORCED cap block is appended to `blockingIssues` as
   `{ code: "VAULT_EXPOSURE_CAP" }` after the provider's own, so a partner's
-  existing handler covers both; in shadow mode the preview deliberately
-  reports nothing (the deposit would land, and a preview that says otherwise
-  is a lie) and only the evaluated event records `would_block`.
+  existing handler covers both; its `message` is the fixed sentence with no
+  figures (SOLA9-9, see the deposit gate above); in shadow mode the preview
+  deliberately reports nothing (the deposit would land, and a preview that
+  says otherwise is a lie) and only the evaluated event records `would_block`.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
   gate `resolveVaultSponsorship` applies at execution). The withdrawal preview

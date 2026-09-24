@@ -99,6 +99,11 @@ stays a small enough fraction of any vault that its customers can always leave.
   lock. Anonymous builds deliberately persist nothing and have no SDP submit,
   so they receive only the early decision and are outside the durable ledger
   exposure figure. Both halves emit the evaluated event with a `stage`.
+  The figures themselves (`exposure`, `projected`, `limit`) appear ONLY on
+  that event: the 409's `details` carry just `vaultAddress` and the preview's
+  `blockingIssues` message is a fixed sentence, because the aggregate is every
+  tenant's holdings and the preview and external-wallet build routes are
+  keyless (SOLA9-9).
 - Config lives beside `CURATED_VAULTS` in `curation.ts`, keyed by vault
   address, and inherits the CODEOWNERS gate from PRO-1869. A missing entry
   means the platform default applies; `null` means uncapped (explicit, so a
