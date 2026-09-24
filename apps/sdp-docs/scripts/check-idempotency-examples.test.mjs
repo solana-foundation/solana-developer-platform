@@ -399,6 +399,31 @@ test("checks a POST through a reassigned variable against its new endpoint", () 
   ]);
 });
 
+test("checks a request against the target assigned before its call, not a later reassignment", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfer-batches"]),
+    files: [
+      {
+        path: "introduction.mdx",
+        source: [
+          "```typescript",
+          'const url = "https://api.solana.com/v1/payments/transfer-batches";',
+          "",
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          'url = "https://api.solana.com/v1/issuance/tokens";',
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "introduction.mdx", line: 4, endpoint: "/v1/payments/transfer-batches" },
+  ]);
+});
+
 test("accepts a variable-target POST that shows the fence and ignores variable-target GETs", () => {
   const violations = findMissingIdempotencyKeyExamples({
     idempotencyPostPaths: new Set(["/v1/payments/transfers"]),

@@ -37,6 +37,10 @@ const COMMENT_LINE = /^\s*(?:#|\/\/)/;
 // reassignment replaces the target the request call resolves to.
 const URL_VARIABLE_ASSIGNMENT =
   /^\s*(?:(?:const|let|var)\s+)?([\w$]+)\s*=\s*(["'`])([^'"`]*)\2;?\s*(?:\/\/.*)?$/;
+// The line a chunk's request call starts on. A variable target must be
+// resolved as of this line: an assignment after the call belongs to a later
+// operation and must not change the endpoint this request is checked against.
+const REQUEST_CALL_LINE = /\b(?:fetch|post|request)\s*\(|\bcurl\b|-X\s+POST\b|newBuilder/i;
 // A request call whose first argument is a bare identifier, for example
 // `fetch(url, { ... })` or `client.post(url, { ... })`.
 const REQUEST_CALL_TARGET = /\b(?:fetch|post|request)\s*\(\s*([\w$]+)/g;
@@ -194,35 +198,49 @@ export function splitBlockIntoRequests(content) {
  * Checks every request of one fenced block against the idempotency-consuming
  * endpoints and reports the ones missing the Idempotency-Key header.
  */
+function applyUrlAssignments(lines, urlVariables) {
+  for (const line of lines) {
+    const assignment = line.match(URL_VARIABLE_ASSIGNMENT);
+    if (!assignment) continue;
+    const target = requestTargetPath(assignment[3]);
+    if (target) urlVariables.set(assignment[1], target);
+  }
+}
+
+function checkRequest({ file, block, request, idempotencyPostPaths, urlVariables, report }) {
+  if (!POST_HINT.test(request.content)) return;
+  if (IDEMPOTENCY_HEADER.test(request.content)) return;
+  const pathnames = exampleRequestPaths(request);
+  for (const match of request.content.matchAll(REQUEST_CALL_TARGET)) {
+    const declared = urlVariables.get(match[1]);
+    if (declared) pathnames.push(declared);
+  }
+  for (const pathname of pathnames) {
+    for (const template of idempotencyPostPaths) {
+      if (!examplePathMatchesTemplate(pathname, template)) continue;
+      report(file, block.line + 1 + request.line, template);
+      break;
+    }
+  }
+}
+
 function checkBlock({ file, block, idempotencyPostPaths, report }) {
   // Request targets can be assigned to a variable before the request call
   // (`const url = "..."; await fetch(url, { method: "POST" })`), which splits
   // the URL and the POST across two chunks. Track the assignments per block,
   // line by line, so the request chunk is still checked against the endpoint
   // it posts to and a reassignment resolves to the new target instead of a
-  // stale one.
+  // stale one. The request is checked at the line its call starts on: an
+  // assignment after the call belongs to a later operation and must not
+  // change the endpoint this request is checked against.
   const urlVariables = new Map();
   for (const request of splitBlockIntoRequests(block.content)) {
-    for (const line of request.content.split("\n")) {
-      const assignment = line.match(URL_VARIABLE_ASSIGNMENT);
-      if (!assignment) continue;
-      const target = requestTargetPath(assignment[3]);
-      if (target) urlVariables.set(assignment[1], target);
-    }
-    if (!POST_HINT.test(request.content)) continue;
-    if (IDEMPOTENCY_HEADER.test(request.content)) continue;
-    const pathnames = exampleRequestPaths(request);
-    for (const match of request.content.matchAll(REQUEST_CALL_TARGET)) {
-      const declared = urlVariables.get(match[1]);
-      if (declared) pathnames.push(declared);
-    }
-    for (const pathname of pathnames) {
-      for (const template of idempotencyPostPaths) {
-        if (!examplePathMatchesTemplate(pathname, template)) continue;
-        report(file, block.line + 1 + request.line, template);
-        break;
-      }
-    }
+    const lines = request.content.split("\n");
+    let callLineIndex = lines.findIndex((line) => REQUEST_CALL_LINE.test(line));
+    if (callLineIndex === -1) callLineIndex = lines.length;
+    applyUrlAssignments(lines.slice(0, callLineIndex), urlVariables);
+    checkRequest({ file, block, request, idempotencyPostPaths, urlVariables, report });
+    applyUrlAssignments(lines.slice(callLineIndex), urlVariables);
   }
 }
 
