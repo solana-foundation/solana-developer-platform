@@ -17,37 +17,24 @@ import {
   createOfframpQuote,
   createOnrampQuote,
   createRecurringPayment,
-  createSubscription,
-  createSubscriptionPlan,
   estimateOfframp,
   estimateOnramp,
   extractOfframpQuotePolicyCandidate,
   extractOnrampQuotePolicyCandidate,
   getRecurringPayment,
-  getSubscription,
-  getSubscriptionPlan,
   getWalletBalances,
   getWalletPolicy,
   getWalletPolicyEvaluation,
   listOfframpCurrencies,
   listOnrampCurrencies,
   listRecurringPayments,
-  listSubscriptionCollectionAttempts,
-  listSubscriptionPlans,
-  listSubscriptions,
   listWalletControlProfileRevisions,
   listWalletPolicyEvaluations,
-  prepareCancelSubscription,
-  prepareCreateSubscriptionPlan,
-  prepareResumeSubscription,
-  prepareSubscriptionAuthorization,
-  prepareSubscriptionCollection,
   recordCoinbaseRampEvent,
   recordMoneygramRampEvent,
   resumeRecurringPayment,
   simulateSandboxTransfer,
   updateRecurringPayment,
-  updateSubscriptionPlan,
   updateWalletPolicy,
 } from "./handlers";
 import paymentRequests from "./payment-requests";
@@ -60,21 +47,16 @@ import {
   createOfframpQuoteSchema,
   createOnrampQuoteSchema,
   createRecurringPaymentSchema,
-  createSubscriptionPlanSchema,
-  createSubscriptionSchema,
   estimateOfframpSchema,
   estimateOnrampSchema,
   moneygramRampEventSchema,
-  prepareSubscriptionAuthorizationSchema,
-  prepareSubscriptionCollectionSchema,
-  prepareSubscriptionLifecycleSchema,
-  prepareSubscriptionPlanCreateSchema,
   resumeRecurringPaymentSchema,
   simulateSandboxTransferSchema,
   updateRecurringPaymentSchema,
-  updateSubscriptionPlanSchema,
   updateWalletPolicySchema,
 } from "./schemas";
+import subscriptionPlans from "./subscription-plans";
+import subscriptions from "./subscriptions";
 import transferBatches from "./transfer-batches";
 import transfers from "./transfers";
 
@@ -116,12 +98,6 @@ payments.put(
   updateWalletPolicy
 );
 payments.post(
-  "/subscription-plans",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(createSubscriptionPlanSchema),
-  createSubscriptionPlan
-);
-payments.post(
   "/recurring-payments",
   requirePermissions("payments:write", "wallets:read", "counterparties:read"),
   validateBody(createRecurringPaymentSchema),
@@ -159,68 +135,11 @@ payments.post(
   resumeRecurringPayment
 );
 payments.get("/recurring-payments/:id", requirePermissions("payments:read"), getRecurringPayment);
-payments.get("/subscription-plans", requirePermissions("payments:read"), listSubscriptionPlans);
-payments.post(
-  "/subscription-plans/:planId/prepare-create",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(prepareSubscriptionPlanCreateSchema),
-  prepareCreateSubscriptionPlan
-);
-payments.get(
-  "/subscription-plans/:planId",
-  requirePermissions("payments:read"),
-  getSubscriptionPlan
-);
-payments.patch(
-  "/subscription-plans/:planId",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(updateSubscriptionPlanSchema),
-  updateSubscriptionPlan
-);
-payments.post(
-  "/subscriptions",
-  requirePermissions("payments:write", "counterparties:read"),
-  validateBody(createSubscriptionSchema),
-  createSubscription
-);
-payments.get("/subscriptions", requirePermissions("payments:read"), listSubscriptions);
-payments.post(
-  "/subscriptions/:subscriptionId/prepare-authorization",
-  requirePermissions("payments:write", "counterparties:read"),
-  validateBody(prepareSubscriptionAuthorizationSchema),
-  prepareSubscriptionAuthorization
-);
-payments.post(
-  "/subscriptions/:subscriptionId/prepare-cancel",
-  requirePermissions("payments:write"),
-  validateBody(prepareSubscriptionLifecycleSchema),
-  prepareCancelSubscription
-);
-payments.post(
-  "/subscriptions/:subscriptionId/prepare-resume",
-  requirePermissions("payments:write"),
-  validateBody(prepareSubscriptionLifecycleSchema),
-  prepareResumeSubscription
-);
-payments.post(
-  "/subscriptions/:subscriptionId/prepare-collection",
-  requirePermissions("payments:write", "wallets:read"),
-  validateBody(prepareSubscriptionCollectionSchema),
-  prepareSubscriptionCollection
-);
-payments.get(
-  "/subscriptions/:subscriptionId",
-  requirePermissions("payments:read"),
-  getSubscription
-);
-payments.get(
-  "/subscriptions/:subscriptionId/collection-attempts",
-  requirePermissions("payments:read"),
-  listSubscriptionCollectionAttempts
-);
 payments.route("/transfers", transfers);
 payments.route("/transfer-batches", transferBatches);
 payments.route("/requests", paymentRequests);
+payments.route("/subscription-plans", subscriptionPlans);
+payments.route("/subscriptions", subscriptions);
 payments.get("/ramps/onramp/currency", requirePermissions("payments:read"), listOnrampCurrencies);
 payments.get("/ramps/offramp/currency", requirePermissions("payments:read"), listOfframpCurrencies);
 // Estimates fan out one live call per provider on the corridor and quotes

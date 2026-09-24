@@ -1,39 +1,21 @@
-import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   ListPaymentSubscriptionCollectionAttemptsResponse,
-  ListPaymentSubscriptionPlansResponse,
   ListPaymentSubscriptionsResponse,
   PaymentSubscription,
-  PaymentSubscriptionPlan,
-  PaymentSubscriptionPlanResponse,
   PaymentSubscriptionResponse,
-  PreparedPaymentSubscriptionTransaction,
   PreparePaymentSubscriptionAuthorizationResponse,
   PreparePaymentSubscriptionCollectionResponse,
   PreparePaymentSubscriptionLifecycleResponse,
-  PreparePaymentSubscriptionPlanResponse,
 } from "@sdp/types";
-import type { Address, Instruction } from "@solana/kit";
-import {
-  appendTransactionMessageInstructions,
-  compileTransaction,
-  createNoopSigner,
-  createTransactionMessage,
-  getBase64EncodedWireTransaction,
-  pipe,
-  setTransactionMessageFeePayer,
-  setTransactionMessageLifetimeUsingBlockhash,
-} from "@solana/kit";
+import type { Address } from "@solana/kit";
+import { createNoopSigner } from "@solana/kit";
 import {
   fetchMaybeSubscriptionDelegation,
-  findPlanPda,
   findSubscriptionAuthorityPda,
   findSubscriptionDelegationPda,
   getCancelSubscriptionOverlayInstructionAsync,
-  getCreatePlanOverlayInstructionAsync,
   getInitSubscriptionAuthorityOverlayInstructionAsync,
   getResumeSubscriptionOverlayInstructionAsync,
   getSubscribeOverlayInstructionAsync,
@@ -51,12 +33,7 @@ import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/e
 import { created, success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
-import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
-import {
-  normalizePaymentToken,
-  parseI64String,
-  parseU64String,
-} from "@/services/payment-operation.service";
+import { parseI64String, parseU64String } from "@/services/payment-operation.service";
 import {
   type AppContext,
   getPaymentSubscriptionsRepository,
@@ -64,44 +41,21 @@ import {
 } from "../context";
 import { mapCollectionAttemptRow } from "../mappers";
 import {
-  type createSubscriptionPlanSchema,
+  assertSubscriptionTokenMint,
+  buildPreparedSubscriptionTransaction,
+  derivePlanAddresses,
+  resolvePlanRuntime,
+  resolvePlanWriteWallet,
+} from "../shared/subscriptions";
+import {
   type createSubscriptionSchema,
   listSubscriptionCollectionAttemptsQuerySchema,
-  listSubscriptionPlansQuerySchema,
   listSubscriptionsQuerySchema,
   type prepareSubscriptionAuthorizationSchema,
   type prepareSubscriptionCollectionSchema,
   type prepareSubscriptionLifecycleSchema,
-  type prepareSubscriptionPlanCreateSchema,
   subscriptionIdParamsSchema,
-  subscriptionPlanIdParamsSchema,
-  type updateSubscriptionPlanSchema,
-} from "../schemas";
-import { resolveMintDecimals, resolveMintTokenProgram, SOL_MINT } from "../token-accounts";
-import { resolveScope, resolveWallet } from "../wallets";
-
-function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
-  return {
-    id: row.id,
-    organizationId: row.organization_id,
-    projectId: row.project_id,
-    ownerWalletId: row.owner_wallet_id,
-    ownerAddress: row.owner_address,
-    token: row.token,
-    amount: row.amount,
-    periodHours: row.period_hours,
-    programPlanId: row.program_plan_id,
-    planPda: row.plan_pda,
-    destinationAddress: row.destination_address,
-    pullerWalletId: row.puller_wallet_id,
-    pullerAddress: row.puller_address,
-    metadataUri: row.metadata_uri,
-    status: row.status,
-    createdBy: row.created_by,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
+} from "./schemas";
 
 function mapSubscription(row: PaymentSubscriptionRow): PaymentSubscription {
   return {
@@ -126,14 +80,6 @@ function mapSubscription(row: PaymentSubscriptionRow): PaymentSubscription {
   };
 }
 
-function assertSubscriptionTokenMint(token: string): Address {
-  if (token === "SOL" || token === SOL_MINT) {
-    throw badRequest("Subscription plans require an SPL token mint");
-  }
-
-  return assertValidAddress(token, "token");
-}
-
 async function getExpectedSubscriptionExpiresAtTs(
   c: AppContext,
   subscriptionPda: Address
@@ -147,83 +93,6 @@ async function getExpectedSubscriptionExpiresAtTs(
     throw new AppError("CONFLICT", "Subscription was not found on-chain");
   }
   return onChainSubscription.data.expiresAtTs;
-}
-
-async function buildPreparedSubscriptionTransaction(
-  c: AppContext,
-  instructions: Instruction[],
-  requiredSigners: Address[],
-  feePayerOverride?: Address
-): Promise<PreparedPaymentSubscriptionTransaction> {
-  const rpc = solanaRpc.createRpc(c.env);
-  const { blockhash, lastValidBlockHeight } = await solanaRpc.getRecentBlockhash(rpc, "confirmed");
-  const feePayer = feePayerOverride ?? (await getSponsoredFeePayer(c));
-
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    (m) => setTransactionMessageFeePayer(feePayer, m),
-    (m) => setTransactionMessageLifetimeUsingBlockhash({ blockhash, lastValidBlockHeight }, m),
-    (m) => appendTransactionMessageInstructions(instructions, m)
-  );
-  const compiled = compileTransaction(message);
-  const signers = new Set<string>([...requiredSigners.map(String), String(feePayer)]);
-
-  return {
-    serialized: getBase64EncodedWireTransaction(compiled),
-    blockhash: blockhash as string,
-    lastValidBlockHeight: lastValidBlockHeight.toString(),
-    requiredSigners: Array.from(signers),
-  };
-}
-
-async function resolvePlanRuntime(
-  c: AppContext,
-  plan: PaymentSubscriptionPlanRow,
-  amount: string = plan.amount
-): Promise<{ amountBaseUnits: bigint; mint: Address; tokenProgram: Address }> {
-  const mint = assertSubscriptionTokenMint(plan.token);
-  const rpc = solanaRpc.createRpc(c.env);
-  const [tokenProgram, decimals] = await Promise.all([
-    resolveMintTokenProgram(rpc, mint),
-    resolveMintDecimals(rpc, mint),
-  ]);
-  const amountBaseUnits = parseDecimalAmount(amount, decimals);
-
-  if (amountBaseUnits <= 0n) {
-    throw badRequest("Subscription amount must be greater than zero");
-  }
-
-  return { amountBaseUnits, mint, tokenProgram };
-}
-
-async function derivePlanAddresses(
-  plan: PaymentSubscriptionPlanRow
-): Promise<{ owner: Address; planId: bigint; planPda: Address }> {
-  const owner = assertValidAddress(plan.owner_address, "ownerAddress");
-  const planId = parseU64String(plan.program_plan_id, "programPlanId");
-  const [planPda] = await findPlanPda({ owner, planId });
-
-  return { owner, planId, planPda };
-}
-
-async function persistPlanPda(
-  c: AppContext,
-  plan: PaymentSubscriptionPlanRow,
-  planPda: Address
-): Promise<PaymentSubscriptionPlanRow> {
-  if (plan.plan_pda === planPda) {
-    return plan;
-  }
-
-  const updated = await getPaymentSubscriptionsRepository(c).updatePlan({
-    planId: plan.id,
-    organizationId: plan.organization_id,
-    projectId: plan.project_id,
-    planPda,
-    updatedAt: new Date().toISOString(),
-  });
-
-  return updated ?? plan;
 }
 
 async function persistSubscriptionAuthorizationAddresses(
@@ -311,262 +180,6 @@ async function requireActiveCounterparty(c: AppContext, counterpartyId: string):
     throw badRequest("Counterparty must be active before creating a subscription");
   }
 }
-
-async function resolvePlanWriteWallet(
-  c: AppContext,
-  plan: PaymentSubscriptionPlanRow,
-  walletId = plan.owner_wallet_id
-) {
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, walletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  return wallet;
-}
-
-async function resolvePullerWalletAddress(
-  c: AppContext,
-  pullerWalletId: string | null | undefined
-): Promise<{
-  pullerWalletId: string | null | undefined;
-  pullerAddress: string | null | undefined;
-}> {
-  if (pullerWalletId === undefined) {
-    return { pullerWalletId: undefined, pullerAddress: undefined };
-  }
-  if (pullerWalletId === null) {
-    return { pullerWalletId: null, pullerAddress: null };
-  }
-
-  const scope = await resolveScope(c);
-  const wallet = resolveWallet(scope.wallets, pullerWalletId);
-  assertApiKeyWalletAccess(scope.auth, wallet.walletId, ["payments:write"]);
-  return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
-}
-
-export const createSubscriptionPlan = async (
-  c: ValidatedBodyContext<typeof createSubscriptionPlanSchema>
-) => {
-  const projectId = requireProjectId(c);
-  const body = c.req.valid("json");
-
-  const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, body.ownerWalletId);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
-
-  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
-  const now = new Date().toISOString();
-  const id = `psp_${crypto.randomUUID()}`;
-  const createdBy = await resolveCreatorUserId(c);
-  const repo = getPaymentSubscriptionsRepository(c);
-
-  const plan = await repo.createPlan({
-    id,
-    organizationId: scope.auth.organizationId,
-    projectId,
-    ownerWalletId: ownerWallet.walletId,
-    ownerAddress: ownerWallet.publicKey,
-    token: normalizePaymentToken(body.token, c.env),
-    amount: body.amount,
-    periodHours: body.periodHours,
-    programPlanId: body.programPlanId ?? generateProgramPlanId(),
-    planPda: body.planPda ?? null,
-    destinationAddress: body.destinationAddress ?? null,
-    pullerWalletId: puller.pullerWalletId ?? null,
-    pullerAddress: puller.pullerAddress ?? null,
-    metadataUri: body.metadataUri ?? null,
-    status: body.status,
-    createdBy,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  if (!plan) {
-    throw new AppError("CONFLICT", "Subscription plan already exists");
-  }
-
-  const response: PaymentSubscriptionPlanResponse = { subscriptionPlan: mapPlan(plan) };
-  return created(c, response);
-};
-
-export const listSubscriptionPlans = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const parsed = listSubscriptionPlansQuerySchema.safeParse(c.req.query());
-
-  if (!parsed.success) {
-    throw badRequestQuery({ errors: z.treeifyError(parsed.error) });
-  }
-
-  const { page, pageSize, status } = parsed.data;
-  const repo = getPaymentSubscriptionsRepository(c);
-  const { rows, total } = await repo.listPlans({
-    organizationId: auth.organizationId,
-    projectId,
-    status,
-    limit: pageSize,
-    offset: (page - 1) * pageSize,
-  });
-
-  const response: ListPaymentSubscriptionPlansResponse = {
-    subscriptionPlans: rows.map(mapPlan),
-    total,
-    page,
-    pageSize,
-  };
-
-  return success(c, response);
-};
-
-export const getSubscriptionPlan = async (c: AppContext) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = subscriptionPlanIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const plan = await repo.getPlanById({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-
-  const response: PaymentSubscriptionPlanResponse = { subscriptionPlan: mapPlan(plan) };
-  return success(c, response);
-};
-
-export const prepareCreateSubscriptionPlan = async (
-  c: ValidatedBodyContext<typeof prepareSubscriptionPlanCreateSchema>
-) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = subscriptionPlanIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const body = c.req.valid("json");
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const plan = await repo.getPlanById({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!plan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-  if (plan.status === "archived") {
-    throw badRequest("Cannot prepare an archived subscription plan");
-  }
-
-  const scope = await resolveScope(c);
-  const ownerWallet = resolveWallet(scope.wallets, plan.owner_wallet_id);
-  assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
-
-  const { owner, planId, planPda } = await derivePlanAddresses(plan);
-  if (ownerWallet.publicKey !== owner) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "Subscription plan owner wallet does not match owner address"
-    );
-  }
-
-  const destinations = (
-    body.destinations ?? (plan.destination_address ? [plan.destination_address] : [])
-  ).map((value) => assertValidAddress(value, "destinations entry"));
-  if (destinations.length === 0) {
-    throw new AppError(
-      "BAD_REQUEST",
-      "At least one destination address is required to create an on-chain subscription plan"
-    );
-  }
-
-  const pullers = (
-    body.pullers ?? (plan.puller_address ? [plan.puller_address] : [plan.owner_address])
-  ).map((value) => assertValidAddress(value, "pullers entry"));
-  const { amountBaseUnits, mint, tokenProgram } = await resolvePlanRuntime(c, plan);
-  const endTs = body.endTs ? parseU64String(body.endTs, "endTs") : 0n;
-  const metadataUri = body.metadataUri ?? plan.metadata_uri ?? "";
-
-  const instruction = await getCreatePlanOverlayInstructionAsync({
-    amount: amountBaseUnits,
-    destinations,
-    endTs,
-    metadataUri,
-    mint,
-    owner: createNoopSigner(owner),
-    periodHours: BigInt(plan.period_hours),
-    planId,
-    pullers,
-    tokenProgram,
-  });
-  const updatedPlan = await persistPlanPda(c, plan, planPda);
-  const preparedTransaction = await buildPreparedSubscriptionTransaction(c, [instruction], [owner]);
-  const response: PreparePaymentSubscriptionPlanResponse = {
-    subscriptionPlan: mapPlan(updatedPlan),
-    planPda,
-    preparedTransaction,
-  };
-
-  return success(c, response);
-};
-
-export const updateSubscriptionPlan = async (
-  c: ValidatedBodyContext<typeof updateSubscriptionPlanSchema>
-) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = subscriptionPlanIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
-  }
-
-  const body = c.req.valid("json");
-
-  const repo = getPaymentSubscriptionsRepository(c);
-  const existingPlan = await repo.getPlanById({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!existingPlan) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-
-  await resolvePlanWriteWallet(c, existingPlan);
-
-  const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
-  const updated = await repo.updatePlan({
-    planId: params.data.planId,
-    organizationId: auth.organizationId,
-    projectId,
-    planPda: body.planPda,
-    destinationAddress: body.destinationAddress,
-    pullerWalletId: puller.pullerWalletId,
-    pullerAddress: puller.pullerAddress,
-    metadataUri: body.metadataUri,
-    status: body.status,
-    updatedAt: new Date().toISOString(),
-  });
-
-  if (!updated) {
-    throw new AppError("NOT_FOUND", "Subscription plan not found");
-  }
-
-  const response: PaymentSubscriptionPlanResponse = { subscriptionPlan: mapPlan(updated) };
-  return success(c, response);
-};
 
 export const createSubscription = async (
   c: ValidatedBodyContext<typeof createSubscriptionSchema>
