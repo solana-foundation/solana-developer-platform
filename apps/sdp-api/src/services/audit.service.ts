@@ -107,6 +107,7 @@ export type ResourceType =
   | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
+  | "payment_transfer_batch"
   | "audit_ledger";
 
 export interface AuditLogEntry {

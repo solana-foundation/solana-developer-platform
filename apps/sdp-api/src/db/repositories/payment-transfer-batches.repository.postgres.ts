@@ -28,6 +28,8 @@ import {
   deriveTransferBatchStatus,
   generatePaymentTransferBatchId,
   generatePaymentTransferRecipientId,
+  isTerminalTransferBatchStatus,
+  type TransferBatchStatusTransition,
 } from "./payment-transfer-batches.repository";
 
 function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransferBatchRow {
@@ -49,6 +51,8 @@ function mapPaymentTransferBatchRow(row: Record<string, unknown>): PaymentTransf
     initiated_by_key_id: (row.initiated_by_key_id as string | null | undefined) ?? null,
     idempotency_key: (row.idempotency_key as string | null | undefined) ?? null,
     idempotency_fingerprint: (row.idempotency_fingerprint as string | null | undefined) ?? null,
+    audit_intent_id: (row.audit_intent_id as string | null | undefined) ?? null,
+    audit_outcome_recorded_at: (row.audit_outcome_recorded_at as string | null | undefined) ?? null,
     created_at: row.created_at as string,
     updated_at: row.updated_at as string,
   };
@@ -166,7 +170,7 @@ async function insertTransferBatch(
   db: DatabaseExecutor,
   input: CreatePaymentTransferBatchInput
 ): Promise<PaymentTransferBatchRow> {
-  const batchId = generatePaymentTransferBatchId();
+  const batchId = input.id ?? generatePaymentTransferBatchId();
   const row = await db
     .prepare(
       `INSERT INTO payment_transfer_batches (
@@ -186,8 +190,9 @@ async function insertTransferBatch(
          error,
          initiated_by_key_id,
          idempotency_key,
-         idempotency_fingerprint
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?)
+         idempotency_fingerprint,
+         audit_intent_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?::jsonb, '{}'::jsonb), ?, ?, ?, ?, ?)
        RETURNING *`
     )
     .bind(
@@ -207,7 +212,8 @@ async function insertTransferBatch(
       input.error ?? null,
       input.initiatedByKeyId ?? null,
       input.idempotencyKey ?? null,
-      input.idempotencyFingerprint ?? null
+      input.idempotencyFingerprint ?? null,
+      input.auditIntentId ?? null
     )
     .first<Record<string, unknown>>();
 
@@ -800,7 +806,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           .all<{ id: string }>();
 
         if (claimed.results.length === 0) {
-          return;
+          return null;
         }
 
         const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
@@ -829,7 +835,7 @@ export function createPostgresPaymentTransferBatchesRepository(
           throw internalError("Transfer batch recipients not found for settlement");
         }
 
-        await recomputeBatchStatusInTransaction(tx, {
+        return recomputeBatchStatusInTransaction(tx, {
           batchId: recipients.results[0].batch_id,
           organizationId: input.organizationId,
           projectId: input.projectId,
@@ -839,6 +845,37 @@ export function createPostgresPaymentTransferBatchesRepository(
 
     async recomputeTransferBatchStatus(input: RecomputeTransferBatchStatusInput) {
       return db.transaction((tx) => recomputeBatchStatusInTransaction(tx, input));
+    },
+
+    async listTransferBatchesAwaitingAuditOutcome(input) {
+      const rows = await db
+        .prepare(
+          `SELECT *
+             FROM payment_transfer_batches
+            WHERE audit_intent_id IS NOT NULL
+              AND audit_outcome_recorded_at IS NULL
+              AND status IN ('confirmed', 'failed', 'partially_failed')
+              AND updated_at < ?
+            ORDER BY updated_at ASC
+            LIMIT ?`
+        )
+        .bind(input.updatedBefore, input.limit)
+        .all<Record<string, unknown>>();
+      return rows.results.map(mapPaymentTransferBatchRow);
+    },
+
+    async markTransferBatchAuditOutcomeRecorded(input) {
+      await db
+        .prepare(
+          `UPDATE payment_transfer_batches
+              SET audit_outcome_recorded_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+              AND audit_outcome_recorded_at IS NULL`
+        )
+        .bind(input.batchId, input.organizationId, input.projectId)
+        .run();
     },
   };
 }
@@ -851,15 +888,15 @@ export function createPostgresPaymentTransferBatchesRepository(
  *
  * @param tx - Transaction executor the recompute runs in.
  * @param input.batchId - Batch to recompute.
- * @returns The batch row after the recompute.
+ * @returns The batch row after the recompute, and whether this write made it terminal.
  */
 async function recomputeBatchStatusInTransaction(
   tx: DatabaseExecutor,
   input: RecomputeTransferBatchStatusInput
-): Promise<PaymentTransferBatchRow> {
+): Promise<TransferBatchStatusTransition> {
   const locked = await tx
     .prepare(
-      `SELECT id
+      `SELECT id, status
          FROM payment_transfer_batches
         WHERE id = ?
           AND organization_id = ?
@@ -867,7 +904,7 @@ async function recomputeBatchStatusInTransaction(
           FOR UPDATE`
     )
     .bind(input.batchId, input.organizationId, input.projectId)
-    .first<{ id: string }>();
+    .first<{ id: string; status: PaymentTransferBatchRow["status"] }>();
   if (!locked) {
     throw internalError("Transfer batch not found for settlement");
   }
@@ -907,5 +944,10 @@ async function recomputeBatchStatusInTransaction(
     throw internalError("Transfer batch not found for settlement");
   }
 
-  return mapPaymentTransferBatchRow(updated);
+  const batch = mapPaymentTransferBatchRow(updated);
+  return {
+    batch,
+    becameTerminal:
+      !isTerminalTransferBatchStatus(locked.status) && isTerminalTransferBatchStatus(batch.status),
+  };
 }

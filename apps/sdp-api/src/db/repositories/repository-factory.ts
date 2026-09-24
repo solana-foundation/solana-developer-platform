@@ -145,7 +145,7 @@ export function createPaymentTransferBatchesRepository(
     createPostgresPaymentTransferBatchesRepository(getDb(env)),
     scope,
     "PaymentTransferBatchesRepository",
-    ["settleTransferBatch"]
+    ["settleTransferBatch", "listTransferBatchesAwaitingAuditOutcome"]
   );
 }
 

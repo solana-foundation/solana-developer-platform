@@ -4,6 +4,7 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import {
   type CachedApiKey,
   type PolicyRule,
+  SOL_MINT,
   SPL_TOKEN_PROGRAMS,
   WELL_KNOWN_TOKENS,
 } from "@sdp/types";
@@ -30,6 +31,7 @@ import { AppError } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
+import { AuditService } from "@/services/audit.service";
 import { SigningService } from "@/services/domain/signing.service";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { recoverApprovedWalletOperations } from "@/services/policy/approved-operation-replay";
@@ -477,6 +479,37 @@ async function seedCryptoWalletCounterpartyAccount(params: {
   return id;
 }
 
+async function readBatchAudit(batchId: string): Promise<{
+  intent: { resource_id: string; metadata: string } | null;
+  outcome: { status: string; metadata: string } | null;
+  outcomeCount: number;
+}> {
+  const intent = await getDb(env)
+    .prepare(
+      `SELECT resource_id, metadata FROM audit_logs
+        WHERE action = 'maintenance' AND resource_type = 'audit_ledger'
+          AND metadata::jsonb -> 'target' ->> 'resourceType' = 'payment_transfer_batch'
+          AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+    )
+    .bind(batchId)
+    .first<{ resource_id: string; metadata: string }>();
+  const outcome = await getDb(env)
+    .prepare(
+      `SELECT status, metadata FROM audit_logs
+        WHERE action = 'transfer' AND resource_type = 'payment_transfer_batch' AND resource_id = ?`
+    )
+    .bind(batchId)
+    .first<{ status: string; metadata: string }>();
+  const outcomes = await getDb(env)
+    .prepare(
+      `SELECT count(*)::int AS count FROM audit_logs
+        WHERE action = 'transfer' AND resource_type = 'payment_transfer_batch' AND resource_id = ?`
+    )
+    .bind(batchId)
+    .first<{ count: number }>();
+  return { intent, outcome, outcomeCount: outcomes?.count ?? 0 };
+}
+
 async function seedBatchApproverSession(): Promise<Record<string, string>> {
   const approverUserId = "usr_batch_payment_approver";
   const sessionId = "sess_batch_payment_approver";
@@ -753,6 +786,23 @@ describe("payment transfer batches", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
     expect(confirmTransactionMock).not.toHaveBeenCalled();
 
+    const audit = await readBatchAudit(body.data.batch.id);
+    const intentTarget = (
+      JSON.parse(audit.intent?.metadata ?? "{}") as {
+        target?: { action?: string; metadata?: Record<string, unknown> };
+      }
+    ).target;
+    expect(intentTarget?.action).toBe("transfer");
+    expect(intentTarget?.metadata).toMatchObject({
+      custodyWalletId: TEST_CUSTODY_WALLET_ID,
+      tokenMint: SOL_MINT,
+      totalAmount: "0.3",
+      recipientCount: 2,
+      transactionCount: 2,
+    });
+    // Chunks are still processing, so the chain verdict is not known yet.
+    expect(audit.outcome).toBeNull();
+
     const batchRow = await getDb(env)
       .prepare(
         `SELECT status, total_amount, recipient_count, transaction_count
@@ -833,6 +883,31 @@ describe("payment transfer batches", () => {
       "confirmed",
       "failed",
     ]);
+
+    const settledAudit = await readBatchAudit(body.data.batch.id);
+    expect(settledAudit.outcomeCount).toBe(1);
+    expect(settledAudit.outcome?.status).toBe("failure");
+    const outcomeMetadata = JSON.parse(settledAudit.outcome?.metadata ?? "{}") as {
+      auditPhase?: string;
+      auditIntentId?: string;
+      batchStatus?: string;
+      transfers?: Array<{ transferId: string; signature: string | null; status: string }>;
+    };
+    expect(outcomeMetadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: settledAudit.intent?.resource_id,
+      batchStatus: "partially_failed",
+    });
+    expect(outcomeMetadata.transfers?.map((transfer) => transfer.status).sort()).toEqual([
+      "confirmed",
+      "failed",
+    ]);
+    expect(outcomeMetadata.transfers?.map((transfer) => transfer.signature).sort()).toEqual(
+      body.data.transfers.map((transfer) => transfer.signature).sort()
+    );
+
+    await trackPendingTransfers(env);
+    expect((await readBatchAudit(body.data.batch.id)).outcomeCount).toBe(1);
 
     const detailRes = await app.request(
       `/v1/payments/transfer-batches/${body.data.batch.id}`,
@@ -1270,7 +1345,7 @@ describe("payment transfer batches", () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       data: {
-        batch: { status: string };
+        batch: { id: string; status: string };
         recipients: Array<{ status: string }>;
         transfers: Array<{ status: string; signature: string | null }>;
       };
@@ -1279,6 +1354,141 @@ describe("payment transfer batches", () => {
     expect(body.data.recipients).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers).toMatchObject([{ status: "failed" }]);
     expect(body.data.transfers[0]?.signature).toBeTruthy();
+    const audit = await readBatchAudit(body.data.batch.id);
+    expect(audit.intent).toBeTruthy();
+    expect(audit.outcomeCount).toBe(1);
+    expect(audit.outcome?.status).toBe("failure");
+    expect(JSON.parse(audit.outcome?.metadata ?? "{}")).toMatchObject({
+      auditPhase: "outcome",
+      batchStatus: "failed",
+    });
+  });
+
+  it("creates nothing and signs nothing when audit-ledger admission is refused", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValue(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+    const beginSpy = vi
+      .spyOn(AuditService.prototype, "beginCritical")
+      .mockRejectedValueOnce(new Error("audit ledger unavailable"));
+
+    const counterpartyId = await seedCounterparty("batch_audit_refused_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    try {
+      const response = await app.request(
+        "/v1/payments/transfer-batches",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            token: "SOL",
+            recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+            options: { preflight: false },
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBeGreaterThanOrEqual(500);
+      expect(signAndSendMock).not.toHaveBeenCalled();
+      expect(sendTransactionMock).not.toHaveBeenCalled();
+      const batches = await getDb(env)
+        .prepare("SELECT count(*)::int AS count FROM payment_transfer_batches")
+        .first<{ count: number }>();
+      expect(batches?.count).toBe(0);
+      const transfers = await getDb(env)
+        .prepare(
+          "SELECT count(*)::int AS count FROM payment_transfers WHERE type = 'transfer_batch'"
+        )
+        .first<{ count: number }>();
+      expect(transfers?.count).toBe(0);
+    } finally {
+      beginSpy.mockRestore();
+    }
+  });
+
+  it("re-appends a batch audit outcome that did not land when the batch settled", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    await updateSeededWalletPublicKey(sourceSigner.address);
+    createOrgSignerForCustodyWalletMock.mockResolvedValueOnce(sourceSigner);
+    const signAndSendMock = vi.fn().mockResolvedValueOnce(FIRST_SIGNATURE);
+    createFeePaymentAdapterMock.mockReturnValueOnce(ownedSubmissionAdapter(signAndSendMock));
+
+    const counterpartyId = await seedCounterparty("batch_audit_sweep_counterparty");
+    const counterpartyAccountId = await seedCryptoWalletCounterpartyAccount({
+      counterpartyId,
+      walletAddress: TEST_SOLANA_ADDRESSES.wallet2,
+    });
+    const response = await app.request(
+      "/v1/payments/transfer-batches",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          token: "SOL",
+          recipients: [{ counterpartyId, counterpartyAccountId, amount: "0.1" }],
+          options: { preflight: false },
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { batch: { id: string } } };
+    const batchId = body.data.batch.id;
+
+    const outcomeSpy = vi
+      .spyOn(AuditService.prototype, "completeCriticalSystem")
+      .mockResolvedValueOnce(false);
+    getSignatureStatusesMock.mockResolvedValueOnce([
+      { slot: 104n, confirmations: 1n, confirmationStatus: "confirmed", err: null },
+    ]);
+    try {
+      await trackPendingTransfers(env);
+    } finally {
+      outcomeSpy.mockRestore();
+    }
+
+    const readStamp = () =>
+      getDb(env)
+        .prepare(
+          "SELECT status, audit_outcome_recorded_at FROM payment_transfer_batches WHERE id = ?"
+        )
+        .bind(batchId)
+        .first<{ status: string; audit_outcome_recorded_at: string | null }>();
+    expect(await readStamp()).toMatchObject({
+      status: "confirmed",
+      audit_outcome_recorded_at: null,
+    });
+    expect((await readBatchAudit(batchId)).outcomeCount).toBe(0);
+
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_transfer_batches SET updated_at = '2020-01-01T00:00:00.000Z' WHERE id = ?"
+      )
+      .bind(batchId)
+      .run();
+    await trackPendingTransfers(env);
+
+    const audit = await readBatchAudit(batchId);
+    expect(audit.outcomeCount).toBe(1);
+    expect(audit.outcome?.status).toBe("success");
+    expect((await readStamp())?.audit_outcome_recorded_at).toBeTruthy();
+
+    await trackPendingTransfers(env);
+    expect((await readBatchAudit(batchId)).outcomeCount).toBe(1);
   });
 
   it("dry-runs a transfer batch with zero writes", async () => {
@@ -2219,13 +2429,19 @@ describe("payment transfer batches", () => {
       await trackPendingTransfers(env);
       const settledBatch = await getDb(env)
         .prepare(
-          `SELECT status
+          `SELECT id, status
            FROM payment_transfer_batches
           ORDER BY created_at DESC
           LIMIT 1`
         )
-        .first<{ status: string }>();
+        .first<{ id: string; status: string }>();
       expect(settledBatch?.status).toBe("confirmed");
+      const audit = await readBatchAudit(settledBatch?.id ?? "");
+      expect(audit.outcomeCount).toBe(1);
+      expect(audit.outcome?.status).toBe("success");
+      expect(JSON.parse(audit.outcome?.metadata ?? "{}")).toMatchObject({
+        batchStatus: "confirmed",
+      });
     }
   );
 
@@ -2963,7 +3179,7 @@ describe("payment transfer batches", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
         data: {
-          batch: { status: string };
+          batch: { id: string; status: string };
           recipients: Array<{ status: string }>;
           transfers: Array<{ status: string }>;
         };
@@ -2972,6 +3188,11 @@ describe("payment transfer batches", () => {
       expect(body.data.batch.status).toBe("confirmed");
       expect(body.data.recipients).toMatchObject([{ status: "confirmed" }]);
       expect(body.data.transfers).toMatchObject([{ status: "confirmed" }]);
+      // Reconciliation and the request's own recompute both see the terminal
+      // batch; only the write that made it terminal appends the outcome.
+      const audit = await readBatchAudit(body.data.batch.id);
+      expect(audit.outcomeCount).toBe(1);
+      expect(audit.outcome?.status).toBe("success");
     } finally {
       batchesSpy.mockRestore();
     }

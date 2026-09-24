@@ -35,6 +35,10 @@ import type {
 import { internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { logEvent } from "@/runtime/money-path-events";
+import {
+  appendTransferBatchAuditOutcome,
+  recordTransferBatchAuditOutcome,
+} from "@/services/payments/transfer-batch-audit";
 import type { Env } from "@/types/env";
 
 // Allow 5 minutes before treating a signature-less "processing" transfer as stuck.
@@ -110,7 +114,8 @@ async function updateTerminalTransfer(
     if (transfer.project_id === null) {
       throw internalError("Transfer batch transfer is missing a project");
     }
-    await createSystemPaymentTransferBatchesRepository(env).settleTransferBatch({
+    const batches = createSystemPaymentTransferBatchesRepository(env);
+    const transition = await batches.settleTransferBatch({
       transferId: transfer.id,
       organizationId: transfer.organization_id,
       projectId: transfer.project_id,
@@ -119,6 +124,7 @@ async function updateTerminalTransfer(
       slot: input.slot === undefined ? null : input.slot,
       updatedAt: input.updatedAt,
     });
+    await recordTransferBatchAuditOutcome({ env, transition, batches, payments: repo });
     return;
   }
   await repo.updateTransfer({ ...input, expectedStatus: "processing" });
@@ -204,6 +210,47 @@ export async function trackPendingTransfers(env: Env): Promise<void> {
   await recoverStuckProcessingTransfers(env, repo, now, nowIso);
   await syncProcessingTransfersOnChain(env, repo, nowIso);
   await finalizeConfirmedTransfers(env, repo, now, nowIso);
+  await appendMissingTransferBatchAuditOutcomes(env, repo, now);
+}
+
+const BATCH_AUDIT_OUTCOME_GRACE_MS = 60_000;
+const BATCH_AUDIT_OUTCOME_SWEEP_LIMIT = 50;
+
+/**
+ * Appends the audit-ledger outcome for terminal batches whose outcome was never
+ * stamped as recorded: the writer that made the batch terminal crashed before
+ * appending it, its ledger write failed, or the batch settled under a release
+ * that did not append outcomes. The grace window leaves the in-flight writer
+ * its own append. Rows are not claimed: the ledger refuses writes inside an
+ * outer transaction, so a row lock cannot span the append. A duplicate outcome
+ * for one intent therefore needs overlapping ticks or a crash between the
+ * ledger write and its stamp, and is harmless to ledger verification. Best
+ * effort: a failure is logged and never blocks the rest of the tick.
+ *
+ * @param env - Runtime environment for repository and ledger construction.
+ * @param repo - System payments repository.
+ * @param now - Tick time.
+ */
+async function appendMissingTransferBatchAuditOutcomes(
+  env: Env,
+  repo: PaymentsRepository,
+  now: Date
+): Promise<void> {
+  try {
+    const batches = createSystemPaymentTransferBatchesRepository(env);
+    const pending = await batches.listTransferBatchesAwaitingAuditOutcome({
+      updatedBefore: new Date(now.getTime() - BATCH_AUDIT_OUTCOME_GRACE_MS).toISOString(),
+      limit: BATCH_AUDIT_OUTCOME_SWEEP_LIMIT,
+    });
+    for (const batch of pending) {
+      await appendTransferBatchAuditOutcome({ env, batch, batches, payments: repo });
+    }
+  } catch (error) {
+    getLogger().error(
+      { event: "transfer_batch_audit_outcome_sweep_failed", error },
+      "Transfer batch audit outcome sweep failed; it retries next tick"
+    );
+  }
 }
 
 /**

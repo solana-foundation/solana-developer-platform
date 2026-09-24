@@ -14,6 +14,7 @@ import { internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { logEvent } from "@/runtime/money-path-events";
 import { createTransferSignedSubmissionStore } from "@/services/payments/signed-submission";
+import { recordTransferBatchAuditOutcome } from "@/services/payments/transfer-batch-audit";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import {
   isDefiniteSubmissionError,
@@ -191,8 +192,9 @@ export async function executeChunk(params: {
   applyRecipientRowUpdates(params.recipientsByIndex, linkedTransfer.linked);
   const transfer = linkedTransfer.created;
 
-  const failChunk = (error: unknown) =>
-    createPostgresPaymentTransferBatchesRepository(getDb(c.env)).settleTransferBatch({
+  const failChunk = async (error: unknown) => {
+    const batches = createPostgresPaymentTransferBatchesRepository(getDb(c.env));
+    const transition = await batches.settleTransferBatch({
       transferId: transfer.id,
       organizationId: resolved.scope.auth.organizationId,
       projectId: resolved.projectId,
@@ -201,6 +203,13 @@ export async function executeChunk(params: {
       slot: null,
       updatedAt: new Date().toISOString(),
     });
+    await recordTransferBatchAuditOutcome({
+      env: c.env,
+      transition,
+      batches,
+      payments: getPaymentsRepository(c),
+    });
+  };
 
   if (params.preflight) {
     try {

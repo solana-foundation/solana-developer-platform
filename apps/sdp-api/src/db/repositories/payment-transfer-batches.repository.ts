@@ -34,6 +34,26 @@ export function deriveTransferBatchStatus(
   return settled === 0 ? "failed" : "partially_failed";
 }
 
+const TERMINAL_TRANSFER_BATCH_STATUSES: readonly PaymentTransferBatchStatus[] = [
+  "confirmed",
+  "failed",
+  "partially_failed",
+];
+
+export function isTerminalTransferBatchStatus(status: PaymentTransferBatchStatus): boolean {
+  return TERMINAL_TRANSFER_BATCH_STATUSES.includes(status);
+}
+
+/**
+ * A batch status write, with whether this write is the one that moved the
+ * batch into a terminal status. Writes are serialized on the batch row lock,
+ * so exactly one writer observes the transition.
+ */
+export interface TransferBatchStatusTransition {
+  batch: PaymentTransferBatchRow;
+  becameTerminal: boolean;
+}
+
 export function generatePaymentTransferBatchId(): string {
   return `xbatch_${crypto.randomUUID()}`;
 }
@@ -60,6 +80,8 @@ export interface PaymentTransferBatchRow {
   initiated_by_key_id: string | null;
   idempotency_key: string | null;
   idempotency_fingerprint: string | null;
+  audit_intent_id: string | null;
+  audit_outcome_recorded_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +104,7 @@ export interface PaymentTransferRecipientRow {
 }
 
 export interface CreatePaymentTransferBatchInput {
+  id?: string;
   organizationId: string;
   projectId: string;
   externalId?: string | null;
@@ -98,6 +121,7 @@ export interface CreatePaymentTransferBatchInput {
   initiatedByKeyId?: string | null;
   idempotencyKey?: string | null;
   idempotencyFingerprint?: string | null;
+  auditIntentId?: string | null;
 }
 
 export interface UpsertPaymentTransferBatchInput extends CreatePaymentTransferBatchInput {
@@ -299,7 +323,9 @@ export interface PaymentTransferBatchesRepository {
    * @param input.transferStatus - Terminal status the transfer reached.
    * @param input.error - Failure detail applied to failed recipients.
    */
-  settleTransferBatch(input: SettlePaymentTransferBatchInput): Promise<void>;
+  settleTransferBatch(
+    input: SettlePaymentTransferBatchInput
+  ): Promise<TransferBatchStatusTransition | null>;
   /**
    * Recomputes and writes a batch's status from its recipient rows under the
    * batch row lock. The only sanctioned way to write a batch status after
@@ -307,9 +333,30 @@ export interface PaymentTransferBatchesRepository {
    * this protocol so none can overwrite a terminal status from a stale read.
    *
    * @param input.batchId - Batch to recompute.
-   * @returns The batch row after the recompute.
+   * @returns The batch row after the recompute, and whether this write made it terminal.
    */
   recomputeTransferBatchStatus(
     input: RecomputeTransferBatchStatusInput
-  ): Promise<PaymentTransferBatchRow>;
+  ): Promise<TransferBatchStatusTransition>;
+  /**
+   * Terminal batches whose audit-ledger outcome has not been stamped as
+   * durable, oldest first. System-only: spans every tenant.
+   *
+   * @param input.updatedBefore - Only batches last written before this instant.
+   * @param input.limit - Maximum rows to return.
+   */
+  listTransferBatchesAwaitingAuditOutcome(input: {
+    updatedBefore: string;
+    limit: number;
+  }): Promise<PaymentTransferBatchRow[]>;
+  /**
+   * Stamps a batch's audit-ledger outcome as durable.
+   *
+   * @param input.batchId - Batch whose outcome was appended.
+   */
+  markTransferBatchAuditOutcomeRecorded(input: {
+    batchId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<void>;
 }
