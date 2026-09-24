@@ -145,17 +145,35 @@ function safeHost(rawUrl: string): string {
   }
 }
 
-function getRequestedSuites(): Set<string> | null {
-  const raw = (env as { SDP_INTEGRATION_SUITE?: string }).SDP_INTEGRATION_SUITE;
+export const KNOWN_INTEGRATION_SUITES: readonly string[] = ["kora", "spc", "dvp"];
+
+/**
+ * Exported for tests. Returns null when the raw value is unset/blank (scope is
+ * then inferred from configured env), and rejects unrecognized suite names so
+ * a typo like `korra` cannot silently shrink the run to "nothing in scope" and
+ * skip every test.
+ */
+export function parseRequestedSuites(raw: string | undefined): Set<string> | null {
   if (!raw || raw.trim() === "") {
     return null;
   }
-  return new Set(
+  const suites = new Set(
     raw
       .split(",")
       .map((suite) => suite.trim().toLowerCase())
       .filter(Boolean)
   );
+  const unknown = [...suites].filter((suite) => !KNOWN_INTEGRATION_SUITES.includes(suite));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Integration preflight: unrecognized SDP_INTEGRATION_SUITE value(s): ${unknown.join(", ")}. Known suites: ${KNOWN_INTEGRATION_SUITES.join(", ")}.`
+    );
+  }
+  return suites;
+}
+
+function getRequestedSuites(): Set<string> | null {
+  return parseRequestedSuites((env as { SDP_INTEGRATION_SUITE?: string }).SDP_INTEGRATION_SUITE);
 }
 
 async function preflightKoraSuite(): Promise<void> {
