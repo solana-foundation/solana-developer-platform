@@ -857,10 +857,16 @@ async function walkReleaseHistory(
         return { stoppedAt: "end", deepest };
       }
       for (const info of infos) {
+        // Slots are not unique — several transactions can share one, and the
+        // listing's order within a slot is only consistent with itself. Only
+        // entries at a STRICTLY older slot are provably inside the parsed
+        // prefix; same-slot entries are always listed and matched by
+        // signature, so an unparsed same-slot sibling of the frontier is
+        // never skipped.
         if (
           cursor &&
           (info.signature === cursor.signature ||
-            (info.slot !== null && BigInt(info.slot) <= BigInt(cursor.slot)))
+            (info.slot !== null && BigInt(info.slot) < BigInt(cursor.slot)))
         ) {
           return { stoppedAt: "cursor", deepest };
         }

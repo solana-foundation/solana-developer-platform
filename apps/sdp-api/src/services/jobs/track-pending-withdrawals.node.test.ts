@@ -1212,6 +1212,33 @@ describe("trackPendingWithdrawals", () => {
     });
   });
 
+  it("lists and parses an unparsed same-slot sibling of the persisted cursor", async () => {
+    // Several transactions can share a slot. A cursor at one of them must not
+    // stop the walk at its same-slot sibling above the frontier: that
+    // sibling was never parsed, and a release inside it would be skipped.
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "c60", slot: "60" },
+      sweep: null,
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    getSignaturesForAddress.mockResolvedValueOnce([
+      // Newest first: an unparsed same-slot sibling of the frontier, then the
+      // frontier itself, then (unseen) older history.
+      { signature: "sib60", err: null, slot: 60n, blockTime: null },
+      { signature: "c60", err: null, slot: 60n, blockTime: null },
+    ]);
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // The sibling was listed and parsed (the walk stopped at the cursor
+    // signature, not at the shared slot).
+    expect(getTransaction).toHaveBeenCalledWith(expect.anything(), "sib60");
+    expect(getTransaction).not.toHaveBeenCalledWith(expect.anything(), "c60");
+  });
+
   it("ignores a sweep position at or behind the parsed frontier", async () => {
     // A stale sweep (clear that lost a race) must not send the walk listing
     // already-consumed history.
