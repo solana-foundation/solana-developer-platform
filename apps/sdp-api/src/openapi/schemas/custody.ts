@@ -302,11 +302,13 @@ export const custodyWalletAggregateResponseSchema = z
     aggregate: z
       .object({
         walletCount: z.number().int().nonnegative().openapi({
-          description: "Number of wallets included in the aggregate.",
+          description:
+            "Number of unique on-chain wallet addresses included in the aggregate. Active custody records that share one address are counted once.",
           example: 3,
         }),
         balances: z.array(custodyWalletTokenBalanceSchema).openapi({
-          description: "Aggregated tracked token balances across the included wallets.",
+          description:
+            "Aggregated tracked token balances, with each unique on-chain wallet address counted once.",
         }),
       })
       .openapi({ description: "Aggregated wallet balance summary." }),

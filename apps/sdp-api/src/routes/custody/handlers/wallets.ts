@@ -689,24 +689,32 @@ export const getWalletAggregate = async (c: AppContext) => {
     walletCount: wallets.length,
   });
 
-  const walletBalances = wallets.map((wallet) => {
+  // Active custody records can share one on-chain address (for example an
+  // organization-level config and a project-level config pointing at the same
+  // key). The balance read fans one observed balance out to every matching
+  // record, so the aggregate sums each address once instead of once per record.
+  const balancesByAddress = new Map<string, CustodyWalletTokenBalance[]>();
+  for (const wallet of wallets) {
     const balances = balancesByWalletId.get(wallet.id);
     if (balances === undefined) {
       throw serviceUnavailable("Wallet balances are temporarily unavailable. Try again.");
     }
-    return balances;
-  });
+    if (!balancesByAddress.has(wallet.publicKey)) {
+      balancesByAddress.set(wallet.publicKey, balances);
+    }
+  }
+
   const aggregateStartedAt = performance.now();
   const aggregatedBalances = await attachUsdValuesToBalances(
     c.env,
-    aggregateTrackedWalletBalances(walletBalances)
+    aggregateTrackedWalletBalances([...balancesByAddress.values()])
   );
   logWalletStep("aggregate_wallets", "attach_usd_values", aggregateStartedAt, {
     balanceCount: aggregatedBalances.length,
   });
 
   const aggregate = {
-    walletCount: wallets.length,
+    walletCount: balancesByAddress.size,
     balances: aggregatedBalances,
   };
 
