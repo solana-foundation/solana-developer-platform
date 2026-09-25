@@ -418,6 +418,25 @@ function selectedTokenIsHeldFor(
   );
 }
 
+/**
+ * The currency a funding-wallet switch binds next: the current one only
+ * survives if the target wallet can hold it; otherwise the selection is
+ * cleared (or restored to the payment's own persisted token when returning
+ * to its wallet, which that wallet holds regardless of the balances feed)
+ * and Save stays blocked until an explicit currency choice is made.
+ */
+function rebindTokenForWallet(
+  nextAssets: { value: string }[],
+  currentToken: string,
+  payment: Pick<PaymentRecurringPayment, "token" | "sourceCustodyWalletId">,
+  nextWalletId: string
+): string {
+  if (selectedTokenIsHeldFor(nextAssets, currentToken, payment, nextWalletId)) {
+    return currentToken;
+  }
+  return nextWalletId === payment.sourceCustodyWalletId ? payment.token : "";
+}
+
 /* react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing orchestration: the detail workspace keeps the editor modal, wallet/currency re-binding and lifecycle actions in one component */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
@@ -904,14 +923,10 @@ export function RecurringPaymentDetailWorkspace({
               value={selectedCustodyWalletId}
               onChange={(value) => {
                 setSelectedCustodyWalletId(value);
-                // A wallet switch never re-binds the currency behind the
-                // user's back: if the replacement wallet does not hold the
-                // current token, the selection is cleared and saving stays
-                // blocked until an explicit currency choice is made.
                 const nextWallet = liveWallets.find((entry) => entry.id === value) ?? null;
                 const nextAssets = recurringPaymentAssetOptions(nextWallet, {}, t);
                 setSelectedToken((current) =>
-                  nextAssets.some((asset) => asset.value === current) ? current : ""
+                  rebindTokenForWallet(nextAssets, current, recurringPayment, value)
                 );
                 setPaymentValidationError(null);
               }}
