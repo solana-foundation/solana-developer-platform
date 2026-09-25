@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: ""
+      approved_schema:
+        description: "Set by apply-prod-migrations.yml after release-production approval: deploy image_sha and run its pending migrations"
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       image_sha:
@@ -26,6 +31,7 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   packages: read
@@ -99,6 +105,7 @@ jobs:
        (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
+      (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true') &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (inputs.image_sha != ''))
     runs-on: ubuntu-latest
@@ -112,7 +119,7 @@ jobs:
       JOB: sdp-prod-api-public-cron
       WORKER_SERVICE: sdp-prod-worker
       MIGRATE_JOB: sdp-prod-api-public-migrate
-      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && github.event_name != 'workflow_dispatch')) && 'true' || 'false' }}
+      BUILD_IMAGE: ${{ (inputs.release_sha != '' || (inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema))) && 'true' || 'false' }}
     steps:
       - name: Validate deploy image SHA
         env:
@@ -129,7 +136,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.release_sha != '' && inputs.release_sha || github.sha }}
+          ref: ${{ inputs.release_sha != '' && inputs.release_sha || (inputs.approved_schema && inputs.image_sha) || github.sha }}
 
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@4819d808ab99e5cde19a0637a16536a4038fad73 # v4.0.1
@@ -144,28 +151,6 @@ jobs:
           RELEASE_SHA: ${{ inputs.release_sha }}
         run: .github/scripts/verify-release-identity.sh "${RELEASE_TAG}" "${RELEASE_SHA}"
 
-      # deploy.yml evaluates this same gate before calling the prod job and
-      # skips the job when held; this is the fail-closed backstop for any other
-      # caller. It runs before GCP auth and image promotion so a held merge
-      # costs seconds and leaves nothing behind in prod Artifact Registry.
-      - name: Gate merge deploys on pending migrations
-        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
-        run: |
-          set -euo pipefail
-          gate_status=0
-          verdict="$(.github/scripts/prod-merge-gate.sh)" || gate_status=$?
-          case "${gate_status}" in
-            0) echo "${verdict}" ;;
-            2)
-              echo "::error::Prod merge deploy held: ${verdict}. Schema changes deploy through a release (migrations stay human-reviewed and human-run); cut the release to ship them, after which merge deploys resume."
-              exit 1
-              ;;
-            *)
-              echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
-              exit 1
-              ;;
-          esac
-
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -174,6 +159,92 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Read the schema position prod last applied
+        run: |
+          set -euo pipefail
+          applied="$(gcloud run jobs describe "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
+            echo "APPLIED_SCHEMA_SHA=${applied}" >> "${GITHUB_ENV}"
+          else
+            echo "APPLIED_SCHEMA_SHA=" >> "${GITHUB_ENV}"
+            echo "::warning::sdp_schema_sha on ${MIGRATE_JOB} is unset or unknown (${applied:-unset}); schema ordering is not checked for this deploy."
+          fi
+
+      - name: Refuse an approved deploy that was re-run or self-approved
+        if: ${{ inputs.approved_schema }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ "${RUN_ATTEMPT}" != "1" ]]; then
+            echo "Approved deploys cannot be re-run; dispatch a fresh approval run for ${DEPLOY_IMAGE_SHA}." >&2
+            exit 1
+          fi
+          approvers="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/approvals" \
+            --jq '[.[] | select(.state == "approved") | .user.login] | unique | .[]')"
+          if [[ -z "${approvers}" ]]; then
+            echo "No recorded release-production approval on run ${RUN_ID}." >&2
+            exit 1
+          fi
+          since="${APPLIED_SCHEMA_SHA:-$(git describe --tags --abbrev=0 --match 'v*' origin/main)}"
+          authors="$(
+            for commit in $(git log --format=%H "${since}..${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres); do
+              gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" \
+                --jq '[.author.login // "unlinked", .committer.login // "unlinked"] | .[]'
+            done | grep -vx 'web-flow' | sort -u
+          )"
+          if grep -qx 'unlinked' <<<"${authors}"; then
+            echo "A pending migration commit has no GitHub-linked author, so self-approval cannot be ruled out. Link the author's email or re-commit before approving." >&2
+            exit 1
+          fi
+          for approver in ${approvers}; do
+            if grep -qx "${approver}" <<<"${authors}"; then
+              echo "${approver} authored a pending migration and approved it; a different foundation member must approve." >&2
+              exit 1
+            fi
+          done
+
+      - name: Refuse a deploy that is behind prod
+        if: ${{ env.BUILD_IMAGE == 'true' }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" origin/main; then
+            echo "${DEPLOY_IMAGE_SHA} is not on main." >&2
+            exit 1
+          fi
+          floor="${APPLIED_SCHEMA_SHA:-$(git describe --tags --abbrev=0 --match 'v*' origin/main)}"
+          if ! git merge-base --is-ancestor "${floor}" "${DEPLOY_IMAGE_SHA}"; then
+            echo "Prod is at least at ${floor}, which ${DEPLOY_IMAGE_SHA} does not include. Deploy a newer commit instead." >&2
+            exit 1
+          fi
+
+      - name: Refuse a non-migrating deploy that carries unapplied migrations
+        if: ${{ inputs.release_sha != '' || (github.event_name == 'workflow_dispatch' && !inputs.approved_schema) }}
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLIED_SCHEMA_SHA}" ]]; then
+            if [[ -n "${RELEASE_SHA}" ]]; then
+              echo "Prod schema position is unknown, so this release cannot prove its migrations were applied. Seed sdp_schema_sha on ${MIGRATE_JOB} (docs/ops/release-operations.md) and rerun." >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          if git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
+            exit 0
+          fi
+          pending="$(git diff --name-only "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+          if [[ -n "${pending}" ]]; then
+            printf '%s carries migration changes prod has not applied:\n%s\nMigrations reach prod only through "Apply pending migrations to prod"; approve the held run for this commit first.\n' \
+              "${DEPLOY_IMAGE_SHA}" "${pending}" >&2
+            exit 1
+          fi
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -247,7 +318,7 @@ jobs:
       # this exact commit and promote the SAME digest — merge deploys ship the
       # identical trust chain as releases, never a rebuild.
       - name: Verify and promote merge image
-        if: ${{ inputs.image_sha != '' && github.event_name != 'workflow_dispatch' }}
+        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
         timeout-minutes: 45
         run: |
           set -euo pipefail
@@ -318,7 +389,7 @@ jobs:
       # signed promotion fails here by design; break-glass is documented in the
       # HOO-991 design note.
       - name: Verify rollback image signature
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.approved_schema }}
         run: |
           set -euo pipefail
           # Modern cosign stores signatures as OCI referrer bundles, which
@@ -341,13 +412,15 @@ jobs:
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
-        if: ${{ inputs.release_sha != '' }}
+        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --image "${IMAGE}"
           gcloud run jobs execute "${MIGRATE_JOB}" \
             --region "${REGION}" --project "${PROJECT_ID}" --wait
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" --update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"
 
       - name: Capture rollback state
         run: |

@@ -281,6 +281,20 @@ as part of the automated deployment. The job is updated to the intended image
 and must succeed before the service rollout proceeds. A manual production image
 redeploy intentionally does not update or execute the migration job.
 
+A merge to `main` migrates stage first. When `main` carries migrations that
+production has not applied (tracked by the `sdp_schema_sha` label on the prod
+migrate job), the production merge deploy is held and, once stage is green,
+the run dispatches `Apply pending migrations to prod`. That workflow lists the
+pending migrations, waits in the `release-production` environment for a
+reviewer who confirms the change has baked on stage, then deploys that commit
+with its migrations. The approver may not have authored a pending migration,
+the commit needs a green stage deploy, and an approved run cannot be re-run.
+Migration-free merges deploy production without a stop. Because a rollback only moves traffic and never reverses the
+schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
+image cannot run against. A migration that must break compatibility declares
+`-- sdp:migration-compat: breaking` and ships in a PR that touches nothing
+outside the migrations directory.
+
 Do not run a deployed migration directly from a laptop with Doppler credentials.
 For an exceptional manual operation, use the named Cloud Run migration job and
 the environment's GCP deployment identity under the release operations runbook.
@@ -305,15 +319,16 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 
 The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
 
-- Relevant pushes to `main` deploy to the dev service.
-- A merged `chore(main): release X.Y.Z` release commit deploys to production.
+- Relevant pushes to `main` deploy stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`.
+- A merged `chore(main): release X.Y.Z` release commit deploys the tagged image to production.
 - Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
-Automated dev deployments and push-triggered production releases update and
-execute the migration job before deploying the API. Production then verifies a
-no-traffic candidate revision before promoting the service and reconciliation
-cron job to the same immutable image. Manual production redeploys leave the
-migration job unchanged. Runtime environment variables and secret references
+Stage deploys and merge deploys to production update and execute the migration
+job before deploying the API. Production then verifies a no-traffic candidate
+revision before promoting the service and reconciliation cron job to the same
+immutable image. Releases and manual production redeploys leave the migration
+job unchanged and refuse an image that adds migrations production has not
+applied. Runtime environment variables and secret references
 are managed on the GCP resources rather than written by the image deployment.
 The reconciliation rollout's required Sentry observation and legacy-monitor
 retirement are documented in
