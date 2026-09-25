@@ -7,6 +7,7 @@ import { SOL_MINT } from "@/routes/payments/token-accounts";
 import {
   clearWalletBalanceCache,
   readWalletBalances,
+  WALLET_BALANCE_READ_CONCURRENCY,
   type WalletBalanceTarget,
 } from "./wallet-balances";
 
@@ -135,17 +136,36 @@ describe("readWalletBalances", () => {
     const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
     await flush();
 
-    expect(balanceReads).toHaveLength(101);
-    for (const read of balanceReads) {
-      if (read.address === ownerAddress(57)) {
-        read.reject(new Error("rpc unavailable"));
-      } else {
-        read.resolve({ value: 7n });
+    // The reads run under a concurrency bound, so only the first wave starts
+    // before any answer arrives, however many wallets are uncached.
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Answer every wave as it starts: wallet 57's SOL read fails, every other
+    // read succeeds, until all 101 wallets have been read.
+    const answered = new Set<object>();
+    for (;;) {
+      await flush();
+      const nextBalanceReads = balanceReads.filter((read) => !answered.has(read));
+      const nextTokenReads = tokenReads.filter((read) => !answered.has(read));
+      if (nextBalanceReads.length === 0 && nextTokenReads.length === 0) {
+        break;
+      }
+      for (const read of nextBalanceReads) {
+        answered.add(read);
+        if (read.address === ownerAddress(57)) {
+          read.reject(new Error("rpc unavailable"));
+        } else {
+          read.resolve({ value: 7n });
+        }
+      }
+      for (const read of nextTokenReads) {
+        answered.add(read);
+        read.resolve({ value: [] });
       }
     }
-    answerTokenReadsEmpty(tokenReads);
 
     const balances = await result;
+    expect(balanceReads).toHaveLength(101);
     expect(balances.size).toBe(100);
     expect(balances.has("cwlt_57")).toBe(false);
   });
@@ -345,8 +365,9 @@ describe("wallet balance attribution", () => {
     expect(solAmount(second, "wallet-a")).toBe("1000000000");
     expect(solAmount(second, "wallet-b")).toBe("2000000000");
     // No positional batch was issued, so a permuted answer cannot enter the
-    // cache under any wallet's key.
+    // cache under any wallet's key. The counts are exact: a duplicate read for
+    // either address would still pass a set-based assertion.
     expect(multipleAccountsCalls).toBe(0);
-    expect(new Set(getBalanceCalls)).toEqual(new Set([WALLET_A, WALLET_B]));
+    expect(getBalanceCalls.slice().sort()).toEqual([WALLET_A, WALLET_B].sort());
   });
 });

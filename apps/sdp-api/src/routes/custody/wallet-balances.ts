@@ -7,7 +7,9 @@
  * only be matched back to wallets by position, and a permuted same-length batch
  * would attribute one wallet's SOL to another and cache it under its key — and
  * each wallet's token programs are read side by side. A read already running
- * for a wallet is joined rather than repeated.
+ * for a wallet is joined rather than repeated, and the reads run under a
+ * concurrency bound, so a cold cache never turns a large wallet set into an
+ * unbounded burst of requests against the RPC provider.
  *
  * A wallet whose read failed is left out of the answer and not cached. Reporting
  * it as zero would be a guess, and caching that guess would keep showing it after
@@ -18,10 +20,17 @@ import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import type { CustodyWalletTokenBalance } from "@sdp/types";
 import { type Address, isAddress } from "@solana/kit";
+import { mapSettledWithConcurrency } from "@/lib/concurrency";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { getLogger } from "@/runtime/logger";
 
 const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
+
+/**
+ * The most wallets with a balance read in flight at once: a cold cache for a
+ * whole project must not burst the RPC provider with a request per wallet.
+ */
+export const WALLET_BALANCE_READ_CONCURRENCY = 8;
 
 export interface WalletBalanceTarget {
   id: string;
@@ -172,22 +181,51 @@ export async function readWalletBalances(
   // One address-bound SOL read per wallet; a failed read fails only its own
   // wallet. Each call names one address, so its answer is bound to that wallet
   // alone and a malicious or broken RPC cannot shuffle balances across wallets.
+  // Every unread wallet's read is registered before any of them starts, so a
+  // caller asking while reads are still queued joins them instead of starting
+  // a duplicate; the gate holds its RPC traffic back until the bounded mapping
+  // below opens a concurrency slot for it.
+  const openReadGates = new Map<string, () => void>();
+  const unreadReads = new Map<string, WalletBalanceRead>();
   for (const [cacheKey, { wallet, walletAddress }] of unread) {
-    const read: WalletBalanceRead = readWalletBalance(
-      rpc,
-      wallet,
-      walletAddress,
-      cacheKey,
-      solanaRpc.getBalanceLamports(rpc, walletAddress),
-      requestId
-    ).finally(() => {
-      if (walletBalanceReads.get(cacheKey) === read) {
-        walletBalanceReads.delete(cacheKey);
-      }
+    let openReadGate!: () => void;
+    const readGate = new Promise<void>((open) => {
+      openReadGate = open;
     });
+    openReadGates.set(cacheKey, openReadGate);
+    const read: WalletBalanceRead = readGate
+      .then(() =>
+        readWalletBalance(
+          rpc,
+          wallet,
+          walletAddress,
+          cacheKey,
+          solanaRpc.getBalanceLamports(rpc, walletAddress),
+          requestId
+        )
+      )
+      .finally(() => {
+        if (walletBalanceReads.get(cacheKey) === read) {
+          walletBalanceReads.delete(cacheKey);
+        }
+      });
     walletBalanceReads.set(cacheKey, read);
+    unreadReads.set(cacheKey, read);
     readsByKey.set(cacheKey, read);
   }
+
+  // At most WALLET_BALANCE_READ_CONCURRENCY wallets have their read (one SOL
+  // balance plus the two token-program reads) in flight at once, so the burst
+  // never scales with the wallet count. The mapping is settled: a rejected
+  // read still fails only its own wallet.
+  await mapSettledWithConcurrency(
+    [...unreadReads],
+    WALLET_BALANCE_READ_CONCURRENCY,
+    async ([cacheKey, read]) => {
+      openReadGates.get(cacheKey)?.();
+      await read;
+    }
+  );
 
   const balancesByKey = new Map<string, CustodyWalletTokenBalance[] | null>();
   await Promise.all(
