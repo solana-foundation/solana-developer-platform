@@ -424,7 +424,13 @@ export function findRemovedViewColumns(baseSql, headSql) {
       findings.push(`drops the repeatable view ${view}`);
       continue;
     }
-    if ([...columns, ...current].some((column) => column.endsWith("*"))) continue;
+    if (columns.join(",") === (after.get(view) ?? []).join(",")) continue;
+    if ([...columns, ...current].some((column) => column.endsWith("*"))) {
+      findings.push(
+        `cannot verify the output columns of view ${view} through a wildcard projection`
+      );
+      continue;
+    }
     for (const column of columns) {
       if (!current.has(column)) findings.push(`removes column ${column} from view ${view}`);
     }

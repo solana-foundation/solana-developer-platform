@@ -279,8 +279,12 @@ test("repeatable views: removed output columns are contractions", () => {
     "drops the repeatable view unified_transactions",
   ]);
   const wildcard = base.replace(/SELECT[\s\S]*?FROM unified u/, "SELECT u.* FROM unified u");
-  assert.deepEqual(findRemovedViewColumns(base, wildcard), []);
-  assert.deepEqual(findRemovedViewColumns(wildcard, head), []);
+  const unverifiable = [
+    "cannot verify the output columns of view unified_transactions through a wildcard projection",
+  ];
+  assert.deepEqual(findRemovedViewColumns(base, wildcard), unverifiable);
+  assert.deepEqual(findRemovedViewColumns(wildcard, head), unverifiable);
+  assert.deepEqual(findRemovedViewColumns(wildcard, wildcard.replace("u.id", "u.id")), []);
 
   const file = "apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql";
   assert.equal(
