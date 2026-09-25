@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import type { UnifiedTransaction } from "@sdp/types";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SWRConfig } from "swr";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { TransactionDetailWorkspace } from "./transaction-detail-workspace";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
@@ -15,6 +16,12 @@ vi.mock("@/lib/dashboard-url-state", () => ({
   replaceDashboardSearchParams: vi.fn(),
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
+
+const router = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => router,
+  usePathname: () => "/dashboard/payments/transactions/xfr_pay",
+}));
 
 const ISSUED_TOKENS: Record<string, PaymentsIssuedTokenSymbol> = {
   Mint111: { id: "tok_1", mintAddress: "Mint111", symbol: "ACME", imageUrl: null },
@@ -72,7 +79,22 @@ function renderResults(result: TransactionsPageResult, filters: TransactionFilte
   );
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  router.push.mockClear();
+});
+
+function renderDetail(transaction: UnifiedTransaction) {
+  return render(
+    <I18nProvider locale="en" messages={getMessages("en")}>
+      <TransactionDetailWorkspace
+        transaction={transaction}
+        transfer={null}
+        issuedTokensByMint={ISSUED_TOKENS}
+      />
+    </I18nProvider>
+  );
+}
 
 describe("TransactionsResults", () => {
   it("renders payments states in their own words and other modules by ledger status", () => {
@@ -96,26 +118,28 @@ describe("TransactionsResults", () => {
     expect(screen.getByText("Treasury")).toBeDefined();
   });
 
-  it("opens the detail modal with the contact link and no self-link for payments", () => {
-    renderResults(
-      { transactions: [PAYMENT], nextCursor: null },
-      { module: "payments", cursors: [] }
-    );
+  it("opens a transaction's page from its row, by click or Enter", () => {
+    renderResults({ transactions: [PAYMENT, DVP_LEG], nextCursor: null }, { cursors: [] });
 
-    act(() => {
-      fireEvent.click(screen.getByText("Pay"));
-    });
-    expect(screen.getByText("Transaction details")).toBeDefined();
-    expect(screen.queryByText("View in Payments")).toBeNull();
-    expect(screen.getByText("sig_pay")).toBeDefined();
-    expect(screen.getAllByText("Acme Treasury").at(-1)?.closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/payments/counterparty/cpty_test"
+    fireEvent.click(screen.getByText("Pay"));
+    expect(router.push).toHaveBeenLastCalledWith("/dashboard/payments/transactions/xfr_pay");
+
+    const dvpRow = screen.getByText("Fund leg").closest("tr") as HTMLElement;
+    fireEvent.keyDown(dvpRow, { key: "Enter" });
+    expect(router.push).toHaveBeenLastCalledWith(
+      "/dashboard/payments/transactions/dvp_trade%3Afund%3Aa"
     );
   });
 
-  it("keeps the link to a transaction's distinct module detail", () => {
-    renderResults({ transactions: [DVP_LEG], nextCursor: null }, { cursors: [] });
-    fireEvent.click(screen.getByText("Fund leg"));
+  it("gives a payment's page its explorer link and another module's page the way to it", () => {
+    renderDetail(PAYMENT);
+    expect(screen.getByText("View on explorer").closest("a")?.getAttribute("href")).toContain(
+      "/tx/sig_pay"
+    );
+    expect(screen.queryByText("View in Payments")).toBeNull();
+    cleanup();
+
+    renderDetail(DVP_LEG);
     expect(
       screen.getByText("View in Delivery vs Payments").closest("a")?.getAttribute("href")
     ).toBe("/dashboard/markets/dvp/dvp_trade");

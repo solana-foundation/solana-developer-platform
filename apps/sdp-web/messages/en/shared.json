@@ -291,7 +291,8 @@
     "privacy": "Privacy",
     "contactList": "Contact list",
     "contacts": "Contacts",
-    "contact": "Contact"
+    "contact": "Contact",
+    "transaction": "Transaction"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

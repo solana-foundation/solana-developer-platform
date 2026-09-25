@@ -105,3 +105,32 @@ export async function fetchPaymentRequestDirectory(
     total: first.total,
   };
 }
+
+export type PaymentRequestDetailResult =
+  | { status: "found"; request: PaymentRequest }
+  | { status: "not_found" }
+  | { status: "error"; error: string | undefined };
+
+/**
+ * One payment request by id. The API reads requests only as a list, so this pages through it
+ * newest first, as far as the Requests list itself reads ({@link PAYMENT_REQUESTS_CAP}), and
+ * stops at the match; a request just created is on the first page.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param requestId - The request's id.
+ * @returns The request, `not_found`, or the load error; never throws.
+ */
+export async function fetchPaymentRequestDetail(
+  request: SdpApiClient["request"],
+  requestId: string
+): Promise<PaymentRequestDetailResult> {
+  const pages = Math.ceil(PAYMENT_REQUESTS_CAP / PAYMENT_REQUESTS_PAGE_SIZE);
+  for (let page = 1; page <= pages; page += 1) {
+    const result = await fetchPaymentRequests(request, { page });
+    if (!result.ok) return { status: "error", error: result.error };
+    const match = result.data.find((candidate) => candidate.id === requestId);
+    if (match) return { status: "found", request: match };
+    if (page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) break;
+  }
+  return { status: "not_found" };
+}

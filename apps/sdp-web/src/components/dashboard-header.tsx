@@ -21,7 +21,11 @@ import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { PAYMENT_REQUEST_NEW_HREF, PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
+import {
+  PAYMENT_REQUEST_NEW_HREF,
+  PAYMENT_REQUESTS_HREF,
+  PAYMENT_TRANSACTIONS_HREF,
+} from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -972,6 +976,26 @@ function getRefreshPaymentsPageConfig(
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
       backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
+    };
+  }
+  if (pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
+    // A request's page reads in the page column, the way back over its title.
+    return {
+      title: t("DashboardPayments.requests.paymentRequest"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
+    };
+  }
+  if (pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)) {
+    // The page titles itself with what moved and between whom; "Transaction" holds the place
+    // until it does.
+    return {
+      title: t("Shared.dashboardShell.transaction"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: PAYMENT_TRANSACTIONS_HREF,
+        label: t("Shared.dashboardShell.transactions"),
+      },
     };
   }
   if (pathname === "/dashboard/payments/recurring") {

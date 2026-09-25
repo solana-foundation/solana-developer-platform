@@ -430,6 +430,51 @@ export function CounterpartyDetailSkeleton() {
   );
 }
 
+/**
+ * A record page (a transaction, a payment request) while it loads: the state band, the amount,
+ * and two columns of rows, in the page's 32px rhythm.
+ */
+export function RecordPageSkeleton({
+  layout,
+}: {
+  layout: "payment-transaction-detail" | "payment-request-detail";
+}) {
+  return (
+    <DashboardWorkspaceOverviewPanel data-loading-layout={layout} aria-busy="true">
+      <div className="flex flex-col gap-8">
+        <SkeletonBlock className="h-16 w-full rounded-[var(--corner-card)]" />
+        <div className="flex flex-col gap-2">
+          <SkeletonBlock className="h-4 w-16" />
+          <SkeletonBlock className="h-10 w-56" />
+        </div>
+        <div className="grid gap-x-12 @2xl:grid-cols-2" data-loading-detail-rows>
+          {RECORD_COLUMN_IDS.map((column) => (
+            <div key={column}>
+              {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
+                <div
+                  key={id}
+                  className="flex h-10 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
+                >
+                  <SkeletonBlock className="h-4 w-20" />
+                  <SkeletonBlock className="h-4 w-28" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function PaymentTransactionDetailSkeleton() {
+  return <RecordPageSkeleton layout="payment-transaction-detail" />;
+}
+
+export function PaymentRequestDetailSkeleton() {
+  return <RecordPageSkeleton layout="payment-request-detail" />;
+}
+
 export function RecurringPaymentsPageSkeleton() {
   return <ListPageSkeleton layout="recurring-payments" />;
 }

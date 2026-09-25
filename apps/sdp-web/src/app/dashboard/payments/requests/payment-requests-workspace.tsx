@@ -5,11 +5,11 @@ import {
   type Counterparty,
   type PaymentRequest,
   type PaymentRequestStatus,
-  type PaymentsDashboardWallet,
 } from "@sdp/types";
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
@@ -17,9 +17,8 @@ import { Button } from "@/components/ui/button";
 import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
-import { Modal } from "@/components/ui/modal";
 import { SearchInput } from "@/components/ui/search-input";
-import { StatusText, type StatusTone } from "@/components/ui/status-text";
+import { StatusText } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -29,49 +28,23 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { PAYMENT_REQUEST_NEW_HREF, PAYMENT_REQUEST_OPEN_PARAM } from "@/lib/payments-routes";
+import { PAYMENT_REQUEST_NEW_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
   type PaymentRequestsLocalErrorCode,
 } from "./payment-requests-page.data";
 
-const STATUS_TRANSLATION_KEYS = {
-  awaiting_payment: "DashboardPayments.requests.awaitingPayment",
-  paid: "DashboardPayments.requests.paid",
-  canceled: "DashboardPayments.requests.canceled",
-  expired: "DashboardPayments.requests.expired",
-} as const satisfies Record<PaymentRequestStatus, MessageKey>;
-
-const REQUEST_STATUS_TONE = {
-  paid: "positive",
-  awaiting_payment: "attention",
-  canceled: "neutral",
-  expired: "neutral",
-} as const satisfies Record<PaymentRequestStatus, StatusTone>;
-
 function StatusBadge({ status }: { status: PaymentRequestStatus }) {
   const t = useTranslations();
   return (
     <StatusText tone={REQUEST_STATUS_TONE[status]} className="text-body">
-      {t(STATUS_TRANSLATION_KEYS[status])}
+      {t(REQUEST_STATUS_TRANSLATION_KEYS[status])}
     </StatusText>
-  );
-}
-
-function DetailRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-3">
-      <span className="shrink-0 text-sm text-secondary">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
-        {children}
-      </span>
-    </div>
   );
 }
 
@@ -79,13 +52,12 @@ interface PaymentRequestsWorkspaceProps {
   initialPaymentRequests: PaymentRequest[];
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
-  wallets: PaymentsDashboardWallet[];
   counterparties: Counterparty[];
   /** The project's full request count; more than the rows given when the load was capped. */
   total?: number;
 }
 
-const REQUEST_STATUSES = Object.keys(STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
+const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
 
 /** Says when the load cap left older requests out, so search and filters are known to miss them. */
 function DirectoryCapNotice({ count, total }: { count: number; total: number }) {
@@ -190,99 +162,6 @@ function PaymentRequestsTable({
   );
 }
 
-/** One request in full: its amount, its link to copy, and where it came from and goes. */
-function PaymentRequestDetailsModal({
-  request,
-  payLink,
-  fromLabel,
-  walletName,
-  tokenSymbol,
-  onClose,
-}: {
-  request: PaymentRequest;
-  payLink: string;
-  fromLabel: string;
-  walletName: string | null | undefined;
-  tokenSymbol: string | undefined;
-  onClose: () => void;
-}) {
-  const t = useTranslations();
-  const tokenLabel = tokenSymbol ? tokenSymbol : shortenAddress(request.token);
-  return (
-    <Modal
-      isOpen
-      ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
-      onClose={onClose}
-      size="lg"
-    >
-      <div className="space-y-5 p-6">
-        <div className="flex items-start justify-between gap-4 pr-8">
-          <div className="space-y-1">
-            <h2 className="text-xl font-medium tracking-tight text-primary">
-              {t("DashboardPayments.requests.paymentRequest")}
-            </h2>
-            <p className="text-sm text-secondary">{formatTimestamp(request.createdAt, t)}</p>
-          </div>
-          <StatusBadge status={request.status} />
-        </div>
-
-        <div className="rounded-2xl bg-fill-subtle p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-secondary">
-            {t("DashboardPayments.requests.amountRequested")}
-          </p>
-          <p className="truncate text-xl font-semibold tracking-tight text-primary">
-            {formatDisplayAmount(request.amount, tokenLabel)}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
-          <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
-            {payLink}
-          </span>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            iconLeft={<CopyIcon />}
-            onClick={() => {
-              void navigator.clipboard.writeText(payLink);
-              toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
-            }}
-          >
-            {t("DashboardPayments.requests.copy")}
-          </Button>
-        </div>
-
-        <div className="rounded-2xl border border-border-default px-4">
-          <div className="divide-y divide-border-default">
-            <DetailRow label={t("DashboardPayments.requests.from")}>{fromLabel}</DetailRow>
-            <DetailRow label={t("DashboardPayments.requests.to")}>
-              {walletName ? (
-                <span className="block font-medium text-primary">{walletName}</span>
-              ) : null}
-              <span className="block font-mono text-xs font-normal text-secondary">
-                {request.destinationAddress}
-              </span>
-            </DetailRow>
-            <DetailRow label={t("DashboardPayments.requests.token")}>{tokenLabel}</DetailRow>
-            <DetailRow label={t("DashboardPayments.requests.reference")}>
-              {shortenAddress(request.reference)}
-            </DetailRow>
-            <DetailRow label={t("DashboardPayments.requests.expires")}>
-              {request.expiresAt
-                ? formatTimestamp(request.expiresAt, t)
-                : t("DashboardPayments.requests.noExpiry")}
-            </DetailRow>
-            <DetailRow label={t("DashboardPayments.recurring.created")}>
-              {formatTimestamp(request.createdAt, t)}
-            </DetailRow>
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 /**
  * The Requests list. The API has no search, so the page loads the newest requests up to a cap
  * and search, the status filter and paging all run over those here. When the cap cut the list
@@ -292,41 +171,22 @@ export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
   initialLocalErrorCode,
-  wallets,
   counterparties,
   total = initialPaymentRequests.length,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const { searchParams, replaceSearchParams } = useDashboardUrlState();
   const tokens = useMemo(
     () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
     [sdpEnvironment]
   );
-  const [selected, setSelected] = useState<PaymentRequest | null>(null);
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<PaymentRequestStatus | undefined>();
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
   const requests = initialPaymentRequests;
-  const openRequestedId = searchParams.get(PAYMENT_REQUEST_OPEN_PARAM);
-
-  // The new-request page lands here with ?request=<id>: open that request once, then drop the
-  // param so a refresh or the back button does not reopen it.
-  useEffect(() => {
-    if (!openRequestedId) return;
-    const requested = requests.find((request) => request.id === openRequestedId);
-    if (requested) setSelected(requested);
-    replaceSearchParams({ [PAYMENT_REQUEST_OPEN_PARAM]: null });
-  }, [openRequestedId, requests, replaceSearchParams]);
-
-  const payLink = selected ? `${window.location.origin}/pay/${selected.publicToken}` : null;
-
-  const walletNameById = useMemo(
-    () => new Map(wallets.map((wallet) => [wallet.walletId, wallet.label])),
-    [wallets]
-  );
   const tokenSymbolByMint = useMemo(
     () => new Map(tokens.map((token) => [token.mintAddress, token.symbol])),
     [tokens]
@@ -374,112 +234,99 @@ export function PaymentRequestsWorkspace({
   };
 
   return (
-    <>
-      <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
-        {initialError || initialLocalErrorCode ? (
-          <p className="text-body text-error">
-            {initialError ?? t("DashboardPayments.requests.loadFailed")}
-          </p>
-        ) : requests.length === 0 ? (
-          <ListEmptyState
-            hidesPageAction
-            message={t("DashboardPayments.requests.emptyTitle")}
-            description={t("DashboardPayments.requests.emptyDescription")}
-            action={
-              <Button asChild size="sm">
-                <Link href={PAYMENT_REQUEST_NEW_HREF}>
-                  {t("DashboardPayments.requests.newRequest")}
-                </Link>
-              </Button>
-            }
-          />
-        ) : (
-          <>
-            <ListToolbar
-              filters={
-                <FilterMenu
-                  label={t("Shared.SharedComponents.filter")}
-                  searchPlaceholder={t("Shared.SharedComponents.filterBy")}
-                  sections={[
-                    {
-                      id: "status",
-                      label: t("DashboardPayments.status"),
-                      value:
-                        statusFilter === undefined
-                          ? undefined
-                          : t(STATUS_TRANSLATION_KEYS[statusFilter]),
-                      content: (
-                        <FilterMenuOptions
-                          value={statusFilter}
-                          anyLabel={t("Shared.SharedComponents.any")}
-                          options={REQUEST_STATUSES.map((status) => ({
-                            value: status,
-                            label: t(STATUS_TRANSLATION_KEYS[status]),
-                          }))}
-                          onChange={(value) => {
-                            setStatusFilter(REQUEST_STATUSES.find((status) => status === value));
-                            setPage(1);
-                          }}
-                        />
-                      ),
-                    },
-                  ]}
-                />
-              }
-            >
-              <RowsPerPageSelect
-                value={pageSize}
-                onChange={(size) => {
-                  setPageSize(size);
-                  setPage(1);
-                }}
-              />
-              <SearchInput
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  setPage(1);
-                }}
-                clear={{
-                  label: t("DashboardPayments.requests.clearSearch"),
-                  onClear: () => setQuery(""),
-                }}
-                placeholder={t("DashboardPayments.requests.searchPlaceholder")}
-                className="min-w-0 flex-1 sm:w-56 sm:flex-none"
-              />
-            </ListToolbar>
-            <DirectoryCapNotice count={requests.length} total={total} />
-            {rows.length === 0 ? (
-              <p className="py-12 text-center text-body text-tertiary">
-                {t("DashboardPayments.requests.noMatches")}
-              </p>
-            ) : (
-              <PaymentRequestsTable
-                rows={rows}
-                locale={locale}
-                amountLabel={amountLabel}
-                fromLabel={fromLabel}
-                onSelect={setSelected}
-                onCopyLink={copyLink}
-              />
-            )}
-            {filtered.length > pageSize ? (
-              <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
-            ) : null}
-          </>
-        )}
-      </DashboardWorkspaceOverviewPanel>
-
-      {selected && payLink ? (
-        <PaymentRequestDetailsModal
-          request={selected}
-          payLink={payLink}
-          fromLabel={fromLabel(selected.counterpartyId)}
-          walletName={walletNameById.get(selected.walletId)}
-          tokenSymbol={tokenSymbolByMint.get(selected.token)}
-          onClose={() => setSelected(null)}
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+      {initialError || initialLocalErrorCode ? (
+        <p className="text-body text-error">
+          {initialError ?? t("DashboardPayments.requests.loadFailed")}
+        </p>
+      ) : requests.length === 0 ? (
+        <ListEmptyState
+          hidesPageAction
+          message={t("DashboardPayments.requests.emptyTitle")}
+          description={t("DashboardPayments.requests.emptyDescription")}
+          action={
+            <Button asChild size="sm">
+              <Link href={PAYMENT_REQUEST_NEW_HREF}>
+                {t("DashboardPayments.requests.newRequest")}
+              </Link>
+            </Button>
+          }
         />
-      ) : null}
-    </>
+      ) : (
+        <>
+          <ListToolbar
+            filters={
+              <FilterMenu
+                label={t("Shared.SharedComponents.filter")}
+                searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+                sections={[
+                  {
+                    id: "status",
+                    label: t("DashboardPayments.status"),
+                    value:
+                      statusFilter === undefined
+                        ? undefined
+                        : t(REQUEST_STATUS_TRANSLATION_KEYS[statusFilter]),
+                    content: (
+                      <FilterMenuOptions
+                        value={statusFilter}
+                        anyLabel={t("Shared.SharedComponents.any")}
+                        options={REQUEST_STATUSES.map((status) => ({
+                          value: status,
+                          label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
+                        }))}
+                        onChange={(value) => {
+                          setStatusFilter(REQUEST_STATUSES.find((status) => status === value));
+                          setPage(1);
+                        }}
+                      />
+                    ),
+                  },
+                ]}
+              />
+            }
+          >
+            <RowsPerPageSelect
+              value={pageSize}
+              onChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+            />
+            <SearchInput
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(1);
+              }}
+              clear={{
+                label: t("DashboardPayments.requests.clearSearch"),
+                onClear: () => setQuery(""),
+              }}
+              placeholder={t("DashboardPayments.requests.searchPlaceholder")}
+              className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+            />
+          </ListToolbar>
+          <DirectoryCapNotice count={requests.length} total={total} />
+          {rows.length === 0 ? (
+            <p className="py-12 text-center text-body text-tertiary">
+              {t("DashboardPayments.requests.noMatches")}
+            </p>
+          ) : (
+            <PaymentRequestsTable
+              rows={rows}
+              locale={locale}
+              amountLabel={amountLabel}
+              fromLabel={fromLabel}
+              onSelect={(request) => router.push(paymentRequestHref(request.id))}
+              onCopyLink={copyLink}
+            />
+          )}
+          {filtered.length > pageSize ? (
+            <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
+          ) : null}
+        </>
+      )}
+    </DashboardWorkspaceOverviewPanel>
   );
 }

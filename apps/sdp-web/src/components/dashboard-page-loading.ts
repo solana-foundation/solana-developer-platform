@@ -35,9 +35,11 @@ import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
   PaymentRequestCreateSkeleton,
+  PaymentRequestDetailSkeleton,
   PaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton,
   PaymentsTransactionsPageSkeleton,
+  PaymentTransactionDetailSkeleton,
   RecurringPaymentCreateSkeleton,
   RecurringPaymentDetailSkeleton,
   RecurringPaymentsPageSkeleton,
@@ -114,6 +116,8 @@ export function resolvePageLoadingComponent(
       return DvpTradeDetailSkeleton;
     case "payments-transactions":
       return PaymentsTransactionsPageSkeleton;
+    case "payment-transaction-detail":
+      return PaymentTransactionDetailSkeleton;
     case "payments-pay":
       return PaymentsPayPageSkeleton;
     case "payments-deposit":
@@ -122,6 +126,8 @@ export function resolvePageLoadingComponent(
       return PaymentRequestsLoading;
     case "payment-request-create":
       return PaymentRequestCreateSkeleton;
+    case "payment-request-detail":
+      return PaymentRequestDetailSkeleton;
     case "counterparty-directory":
       return CounterpartyDirectoryLoading;
     case "counterparty-create":

@@ -117,7 +117,7 @@ describe("New request page", () => {
       },
     ]);
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/pay/tok_1`);
-    expect(router.push).toHaveBeenCalledWith("/dashboard/payments/requests?request=preq_1");
+    expect(router.push).toHaveBeenCalledWith("/dashboard/payments/requests/preq_1");
   });
 
   it("keeps create off for an amount the API would refuse", async () => {
