@@ -118,7 +118,7 @@ describe("ApiPlaygroundShell response identity isolation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("discards an in-flight response that resolves after the API-key identity changes", async () => {
+  it("discards an in-flight response that resolves after the identity leaves and returns", async () => {
     storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
     let resolveResponse: (response: Response) => void = () => {};
     const fetchMock = vi.fn().mockImplementation(
@@ -141,6 +141,15 @@ describe("ApiPlaygroundShell response identity isolation", () => {
     view.rerender(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    // Round trip back to the producing identity before the stale response
+    // resolves: the epoch guard is what discards it here, so a future change
+    // that compares only key IDs must not let the old response surface.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
       </I18nProvider>
     );
 
