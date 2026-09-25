@@ -565,7 +565,6 @@
       "reclaimRefusedEmpty": "L'escrow de cette jambe est déjà vide.",
       "reclaimRefusedSignerChanged": "Le Wallet de cette partie ne signe plus pour elle, rien n'a donc été envoyé.",
       "reclaimRefusedTransferHook": "La récupération ne prend pas encore en charge les Tokens dotés d'un transfer hook. Rien n'a été envoyé.",
-      "createPending": "L'opération existe, mais sa transaction de création n'a pas encore été confirmée. Appuyez à nouveau sur Créer pour la vérifier ; elle ne sera pas créée en double.",
       "createUnconfirmed": "L'opération a peut-être été créée, mais SDP n'a pas pu lire la réponse. Appuyez à nouveau sur Créer pour l'ouvrir ; elle ne sera pas créée en double.",
       "settleTooEarly": "Cette opération peut être réglée à partir de {when}.",
       "statusFundedTooEarly": "Financé",

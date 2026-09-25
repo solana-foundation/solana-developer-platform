@@ -1100,7 +1100,6 @@
       "reclaimRefusedEmpty": "Escrow của phần này đã trống.",
       "reclaimRefusedSignerChanged": "Wallet của bên này không còn ký cho nó nữa, nên không có gì được gửi đi.",
       "reclaimRefusedTransferHook": "Reclaim chưa hỗ trợ Token có Transfer Hook. Không có gì được gửi đi.",
-      "createPending": "Giao dịch đã tồn tại, nhưng giao dịch tạo chưa được xác nhận. Bấm Create lần nữa để kiểm tra; sẽ không tạo thêm giao dịch thứ hai.",
       "createUnconfirmed": "Giao dịch có thể đã được tạo, nhưng SDP không đọc được phản hồi. Bấm Create lần nữa để mở giao dịch; sẽ không tạo thêm giao dịch thứ hai.",
       "settleTooEarly": "Giao dịch này có thể thanh toán từ {when}.",
       "statusFundedTooEarly": "Đã nạp",

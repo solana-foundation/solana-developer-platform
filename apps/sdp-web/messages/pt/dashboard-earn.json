@@ -558,7 +558,6 @@
       "reclaimRefusedEmpty": "O escrow desta perna já está vazio.",
       "reclaimRefusedSignerChanged": "A Wallet deste lado não assina mais por ele, então nada foi enviado.",
       "reclaimRefusedTransferHook": "O Reclaim ainda não suporta Tokens com transfer hook. Nada foi enviado.",
-      "createPending": "O trade existe, mas a transação de criação ainda não foi confirmada. Pressione Criar novamente para verificá-lo; ele não criará um segundo.",
       "createUnconfirmed": "O trade pode ter sido criado, mas a SDP não conseguiu ler a resposta. Pressione Criar novamente para abri-lo; ele não criará um segundo.",
       "settleTooEarly": "Este trade pode ser liquidado a partir de {when}.",
       "statusFundedTooEarly": "Com funding",
