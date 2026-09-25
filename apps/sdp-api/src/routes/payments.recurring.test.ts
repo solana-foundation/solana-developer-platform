@@ -757,6 +757,293 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("seals an audit intent and outcome for each activation broadcast", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    // One intent/outcome pair per irreversible broadcast: the plan creation
+    // and the subscription delegation. The setup broadcast (ATA + authority
+    // init) is skipped in this fixture because the mocked authority exists
+    // and the source token account resolves.
+    // Intent rows are filed against the audit ledger itself (`audit_ledger` /
+    // `aint_*`) with the real target nested in metadata, while outcome rows
+    // inherit the target's action/resourceType/resourceId — the same
+    // convention as every other critical-intent writer.
+    const events = await getDb(env)
+      .prepare(
+        `SELECT action, resource_type, resource_id, user_id, api_key_id,
+                request_id, status, metadata
+           FROM audit_logs
+          WHERE organization_id = ?
+            AND (metadata::jsonb ->> 'auditPhase' IN ('intent', 'outcome')
+                 OR (metadata::jsonb ->> 'auditPhase') IS NULL
+                    AND resource_type = 'payment_recurring_payment'
+                    AND resource_id = ?
+                   )
+          ORDER BY ledger_sequence ASC`
+      )
+      .bind(TEST_ORG.id, activated.id)
+      .all<{
+        action: string;
+        resource_type: string;
+        resource_id: string;
+        user_id: string | null;
+        api_key_id: string | null;
+        request_id: string | null;
+        status: string;
+        metadata: string;
+      }>();
+    expect(events.results).toHaveLength(4);
+
+    const parsed = events.results.map((event) => ({
+      ...event,
+      metadata: JSON.parse(event.metadata) as Record<string, unknown>,
+    }));
+    for (const event of parsed) {
+      expect(event.status).toBe("success");
+      expect(event.api_key_id).toBe(TEST_API_KEY.id);
+      expect(event.user_id).toBeNull();
+      expect(event.request_id).toMatch(/^req_/);
+    }
+
+    const [planIntent, planOutcome, subscribeIntent, subscribeOutcome] = parsed;
+    // Intent rows: system admission for the target broadcast, filed on the
+    // ledger with the request's actor and correlation ID.
+    expect(planIntent.resource_id).toMatch(/^aint_/);
+    expect(planIntent.metadata.auditPhase).toBe("intent");
+    expect(planIntent.metadata.target).toMatchObject({
+      action: "submit",
+      resourceType: "payment_recurring_payment",
+      resourceId: activated.id,
+      metadata: {
+        recurringPaymentId: activated.id,
+        recurringPaymentOperation: "create_plan",
+      },
+    });
+    expect(planOutcome.metadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: planIntent.resource_id,
+      recurringPaymentOperation: "create_plan",
+      signature: activated.planCreationSignature,
+      planId: activated.planId,
+    });
+    expect(planOutcome.metadata.planPda).toBe(activated.planPda);
+
+    expect(subscribeIntent.resource_id).toMatch(/^aint_/);
+    expect(subscribeIntent.metadata.auditPhase).toBe("intent");
+    expect(subscribeIntent.metadata.target).toMatchObject({
+      action: "submit",
+      resourceType: "payment_recurring_payment",
+      resourceId: activated.id,
+      metadata: {
+        recurringPaymentId: activated.id,
+        recurringPaymentOperation: "subscribe",
+      },
+    });
+    expect(subscribeOutcome.metadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: subscribeIntent.resource_id,
+      recurringPaymentOperation: "subscribe",
+      signature: activated.authorizationSignature,
+      planPda: activated.planPda,
+      subscriptionPda: activated.subscriptionPda,
+    });
+  });
+
+  it("leaves an unresolved intent when a confirmed-broadcast fails on-chain", async () => {
+    // The sealed ledger must not record a failed lifecycle broadcast as
+    // successful: the plan broadcast's on-chain confirmation fails
+    // definitively, so the outcome is sealed as a failure and the activation
+    // request fails, never persisting an active payment.
+    confirmTransactionMock.mockRejectedValueOnce(
+      new AppError("SOLANA_RPC_ERROR", "Transaction failed on-chain")
+    );
+    const created = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activateRes = await app.request(
+      `/v1/payments/recurring-payments/${created.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(activateRes.status).toBe(502);
+    const events = await getDb(env)
+      .prepare(
+        `SELECT status, metadata
+           FROM audit_logs
+          WHERE organization_id = ?
+            AND (resource_id = ? OR metadata::jsonb -> 'target' ->> 'resourceId' = ?)`
+      )
+      .bind(TEST_ORG.id, created.id, created.id)
+      .all<{ status: string; metadata: string }>();
+    const parsed = events.results.map((event) => {
+      const meta = JSON.parse(event.metadata) as {
+        auditPhase?: string;
+        recurringPaymentOperation?: string;
+        target?: { metadata?: { recurringPaymentOperation?: string } };
+      };
+      return {
+        status: event.status,
+        phase: meta.auditPhase ?? "intent",
+        operation:
+          meta.recurringPaymentOperation ?? meta.target?.metadata?.recurringPaymentOperation,
+      };
+    });
+    // The admitted plan intent is all the ledger holds: a failure outcome
+    // (the definitive on-chain failure) and, crucially, no success outcome —
+    // and no subscribe broadcast was ever admitted.
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({
+      status: "success",
+      phase: "intent",
+      operation: "create_plan",
+    });
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ? ORDER BY created_at DESC LIMIT 1`
+      )
+      .bind(created.id)
+      .first<{ status: string }>();
+    expect(attempt).toEqual({ status: "failed" });
+  });
+
+  it.each([
+    {
+      broadcast: "CreatePlan",
+      stage: "create_plan",
+      ambiguousSignature: testSignature(1),
+      stored: { plan_creation_signature: testSignature(1), authorization_signature: null },
+    },
+    {
+      broadcast: "Subscribe",
+      stage: "authorize_subscription",
+      ambiguousSignature: testSignature(2),
+      stored: {
+        plan_creation_signature: testSignature(1),
+        authorization_signature: testSignature(2),
+      },
+    },
+  ])(
+    "keeps the $broadcast signature through an ambiguous confirmation so recovery never re-broadcasts",
+    async ({ stage, ambiguousSignature, stored }) => {
+      const signAndSendMock = recurringExecution.signAndSendMock();
+      confirmTransactionMock.mockImplementation(async (_rpc, confirmedSignature) => {
+        if (confirmedSignature === ambiguousSignature) {
+          throw new AppError("SOLANA_RPC_ERROR", "Transaction confirmation timed out");
+        }
+        return {
+          signature: confirmedSignature,
+          slot: 100n,
+          confirmationStatus: "confirmed",
+          err: null,
+        };
+      });
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const activatePath = `/v1/payments/recurring-payments/${created.id}/activate`;
+
+      const failedRes = await app.request(
+        activatePath,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(failedRes.status).toBe(502);
+      const payment = await getDb(env)
+        .prepare(
+          `SELECT status, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(created.id)
+        .first<Record<string, string | null>>();
+      expect(payment).toEqual({ status: "pending_activation", ...stored });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payment_activation_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(created.id)
+        .first<Record<string, string | null>>();
+      expect(attempt).toEqual({ status: "failed", stage, ...stored });
+
+      const retryRes = await app.request(
+        activatePath,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(retryRes.status).toBe(200);
+      expect((await parseRecurringResponse(retryRes)).data.recurringPayment).toMatchObject({
+        status: "active",
+        planCreationSignature: testSignature(1),
+        authorizationSignature: testSignature(2),
+      });
+      // CreatePlan and Subscribe each reached the chain exactly once.
+      expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("confirms each fresh activation broadcast exactly once", async () => {
+    await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    expect(confirmTransactionMock.mock.calls.map(([, confirmed]) => confirmed)).toEqual([
+      testSignature(1),
+      testSignature(2),
+    ]);
+  });
+
+  it("seals setup, cancel, and failure audit outcomes for lifecycle broadcasts", async () => {
+    // Setup broadcast: force the setup path by making the source token
+    // account lookup miss so the ATA-create broadcast is admitted and sealed.
+    // Cancel: the resume fixture (a cancel then a resume) seals one
+    // cancel_subscription pair. The failure path is covered by the
+    // unresolved-intent test above.
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    // Activation consumed the per-test Once signatures; the cancel broadcast
+    // gets its own persistent signature.
+    recurringExecution
+      .signAndSendMock()
+      .mockResolvedValue(
+        signature(
+          "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+        )
+      );
+
+    const cancelResponse = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancelResponse.status).toBe(200);
+
+    const operations = await getDb(env)
+      .prepare(
+        `SELECT metadata
+           FROM audit_logs
+          WHERE organization_id = ?
+            AND resource_type = 'payment_recurring_payment'
+            AND resource_id = ?
+            AND status = 'success'`
+      )
+      .bind(TEST_ORG.id, activated.id)
+      .all<{ metadata: string }>();
+    const sealed = operations.results
+      .map(
+        (row) =>
+          JSON.parse(row.metadata) as { auditPhase?: string; recurringPaymentOperation?: string }
+      )
+      .filter((meta) => meta.auditPhase === "outcome")
+      .map((meta) => meta.recurringPaymentOperation);
+    // The activation's plan and subscribe outcomes, plus the cancel's own.
+    expect(sealed).toEqual(["create_plan", "subscribe", "cancel_subscription"]);
+  });
+
   it("repairs a finalized activation attempt on replay", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
@@ -1879,6 +2166,44 @@ describe("Payments routes — recurring", () => {
         stage: "finalize",
         signature: submittedSignature,
       });
+    }
+  );
+
+  it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
+    "confirms a fresh recurring payment %s broadcast exactly once",
+    async (operation) => {
+      const lifecycleSignature = signature(
+        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+      );
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      recurringExecution.signAndSendMock().mockResolvedValue(lifecycleSignature);
+      if (operation === "resume") {
+        const cancelResponse = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}/cancel`,
+          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+          env
+        );
+        expect(cancelResponse.status).toBe(200);
+      }
+      // A second check of the already-confirmed signature would time out.
+      confirmTransactionMock.mockClear();
+      confirmTransactionMock
+        .mockResolvedValueOnce({
+          signature: lifecycleSignature,
+          slot: 101n,
+          confirmationStatus: "confirmed",
+          err: null,
+        })
+        .mockRejectedValue(new AppError("SOLANA_RPC_ERROR", "Transaction confirmation timed out"));
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/${operation}`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(confirmTransactionMock).toHaveBeenCalledOnce();
     }
   );
 

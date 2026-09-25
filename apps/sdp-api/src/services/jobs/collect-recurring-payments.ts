@@ -21,6 +21,7 @@ import {
   journalAutomatedCollectionFailure,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
+import type { RecurringPaymentAuditActor } from "@/services/payments/recurring-payments/lifecycle-audit";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -157,6 +158,20 @@ async function recoverLifecycleRow(
     if (!sourceWallet) {
       return "failed";
     }
+    // The worker drives any new broadcast, so the audit actor is the system
+    // operator, never the payment's original creator — a recovery run long
+    // after that user left must not be attributed to them. The creator stays
+    // recorded through the durable `createdBy` attribution on the payment,
+    // plan, and subscription rows, not as the actor of the worker's effect.
+    // A per-row durable correlation ID lets the sealed ledger's
+    // unresolved-intent evidence be reconciled against the exact recovery
+    // pass that retried it.
+    const auditActor: RecurringPaymentAuditActor = {
+      organizationId: row.organization_id,
+      userId: null,
+      apiKeyId: null,
+      requestId: `cron_recurring_recovery_${row.id}_${crypto.randomUUID()}`,
+    };
     if (isActivatingRecurringPaymentStatus(row.status)) {
       await activateRecurringPayment({
         env,
@@ -165,6 +180,7 @@ async function recoverLifecycleRow(
         sourceWallet,
         recurringPayment: row,
         createdBy: row.created_by,
+        auditActor,
       });
       return "ok";
     }
@@ -176,6 +192,7 @@ async function recoverLifecycleRow(
         projectId: row.project_id,
         sourceWallet,
         recurringPayment: row,
+        auditActor,
       });
       return "ok";
     }
@@ -186,6 +203,7 @@ async function recoverLifecycleRow(
         projectId: row.project_id,
         sourceWallet,
         recurringPayment: row,
+        auditActor,
       });
       return "ok";
     }

@@ -47,6 +47,12 @@ import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.servi
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  beginRecurringPaymentAudit,
+  completeRecurringPaymentAudit,
+  concludeRecurringPaymentAuditOnError,
+  type RecurringPaymentAuditActor,
+} from "./lifecycle-audit";
+import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
@@ -456,12 +462,8 @@ async function fetchConfirmedActivationPlan(input: {
   planCreationSignature: Signature;
   createdPlanThisRun: boolean;
 }) {
+  // A plan created this run was already confirmed right after its broadcast.
   if (input.createdPlanThisRun) {
-    await confirmSubscriptionSignature(
-      input.env,
-      input.planCreationSignature,
-      "Recurring payment activation failed on-chain"
-    );
     return subscriptionsProgram.fetchMaybePlan(input.rpc, input.planPda, {
       commitment: "confirmed",
     });
@@ -491,12 +493,8 @@ async function fetchConfirmedSubscriptionDelegation(input: {
   authorizationSignature: Signature;
   authorizedThisRun: boolean;
 }) {
+  // A delegation authorized this run was already confirmed right after its broadcast.
   if (input.authorizedThisRun) {
-    await confirmSubscriptionSignature(
-      input.env,
-      input.authorizationSignature,
-      "Recurring payment activation failed on-chain"
-    );
     return subscriptionsProgram.fetchMaybeSubscriptionDelegation(input.rpc, input.subscriptionPda, {
       commitment: "confirmed",
     });
@@ -527,6 +525,8 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
+  recurringPaymentId: string;
+  auditActor: RecurringPaymentAuditActor;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
@@ -563,18 +563,34 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
-  const initSignature = await sendSubscriptionInstructions({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: input.sourceWallet,
-    sourceSigner: input.sourceSigner,
-    instructions: [
-      ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
-    ],
-    feePayer: input.feePayer,
-  });
+  // Fail-closed: the setup broadcast creates the source ATA and/or the
+  // subscription authority, so it is admitted into the sealed ledger first.
+  // The intent is begun only after the instructions are built, so a builder
+  // throw cannot strand an intent that no broadcast will ever resolve.
+  const setupIntent = await beginRecurringPaymentAudit(
+    input.env,
+    input.auditActor,
+    "activation_setup",
+    input.recurringPaymentId
+  );
+  let initSignature: Signature;
+  try {
+    initSignature = await sendSubscriptionInstructions({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+      sourceSigner: input.sourceSigner,
+      instructions: [
+        ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
+        ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      ],
+      feePayer: input.feePayer,
+    });
+  } catch (error) {
+    await concludeRecurringPaymentAuditOnError(input.env, setupIntent, error);
+    throw error;
+  }
   await input.recurringRepo.updateActivationAttempt({
     attemptId: input.attempt.id,
     organizationId: input.organizationId,
@@ -582,11 +598,25 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     metadata: { authorizationSetupSignature: initSignature },
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment activation failed on-chain"
-  );
+  // Seal success only after definitive confirmation: the broadcast can still
+  // fail on-chain, and the sealed ledger must not record a failed setup as a
+  // successful outcome. A definitive on-chain failure closes the intent as a
+  // failure; an ambiguous outcome (RPC trouble, timeout) leaves it unresolved
+  // for reconciliation, the designed operator-paging signal.
+  try {
+    await confirmSubscriptionSignature(
+      input.env,
+      initSignature,
+      "Recurring payment activation failed on-chain"
+    );
+  } catch (error) {
+    await concludeRecurringPaymentAuditOnError(input.env, setupIntent, error);
+    throw error;
+  }
+  await completeRecurringPaymentAudit(input.env, setupIntent, {
+    signature: initSignature,
+    metadata: { subscriptionAuthorityAddress: input.subscriptionAuthorityAddress },
+  });
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -610,6 +640,8 @@ export async function activateRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
+  /** Sealed-ledger attribution; cron callers pass their own correlation ID. */
+  auditActor: RecurringPaymentAuditActor;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -762,14 +794,30 @@ export async function activateRecurringPayment(input: {
           tokenProgram,
         }
       );
-      planCreationSignature = await sendSubscriptionInstructions({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [createPlanInstruction],
-      });
+      // Fail-closed: CreatePlan puts the plan on-chain, so the sealed ledger
+      // admits the broadcast before any bytes reach the chain.
+      const planIntent = await beginRecurringPaymentAudit(
+        input.env,
+        input.auditActor,
+        "create_plan",
+        claimed.id,
+        { planPda }
+      );
+      try {
+        planCreationSignature = await sendSubscriptionInstructions({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [createPlanInstruction],
+        });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, planIntent, error);
+        throw error;
+      }
+      // Persist before confirming: when confirmation is ambiguous, recovery
+      // confirms this stored signature instead of re-broadcasting CreatePlan.
       const signatureUpdatedAt = new Date().toISOString();
       await getDb(input.env).transaction(async (tx) => {
         const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -792,6 +840,25 @@ export async function activateRecurringPayment(input: {
             updatedAt: signatureUpdatedAt,
           })
         );
+      });
+      // Seal success only after definitive confirmation: the broadcast can
+      // still fail on-chain, and the sealed ledger must not record a failed
+      // CreatePlan as a successful outcome. A definitive on-chain failure
+      // closes the intent as a failure; an ambiguous outcome (RPC trouble,
+      // timeout) leaves it unresolved for reconciliation.
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          planCreationSignature,
+          "Recurring payment activation failed on-chain"
+        );
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, planIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, planIntent, {
+        signature: planCreationSignature,
+        metadata: { planPda, planId: plan.id },
       });
       createdPlanThisRun = true;
     }
@@ -892,6 +959,8 @@ export async function activateRecurringPayment(input: {
         attempt,
         organizationId: input.organizationId,
         projectId: input.projectId,
+        recurringPaymentId: claimed.id,
+        auditActor: input.auditActor,
         rpc,
         sourceWallet: input.sourceWallet,
         sourceSigner,
@@ -918,15 +987,35 @@ export async function activateRecurringPayment(input: {
         subscriber: sourceSigner,
         tokenMint: mint,
       });
-      authorizationSignature = await sendSubscriptionInstructions({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [subscribeInstruction],
-        feePayer,
-      });
+      // Fail-closed: Subscribe delegates collection authority on-chain, the
+      // irreversible effect that activates the recurring payment.
+      const subscribeIntent = await beginRecurringPaymentAudit(
+        input.env,
+        input.auditActor,
+        "subscribe",
+        claimed.id,
+        {
+          planPda,
+          subscriptionPda,
+          subscriptionAuthorityAddress,
+        }
+      );
+      try {
+        authorizationSignature = await sendSubscriptionInstructions({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [subscribeInstruction],
+          feePayer,
+        });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, subscribeIntent, error);
+        throw error;
+      }
+      // Persist before confirming: when confirmation is ambiguous, recovery
+      // confirms this stored signature instead of re-broadcasting Subscribe.
       const signatureUpdatedAt = new Date().toISOString();
       await getDb(input.env).transaction(async (tx) => {
         const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -949,6 +1038,25 @@ export async function activateRecurringPayment(input: {
             updatedAt: signatureUpdatedAt,
           })
         );
+      });
+      // Seal success only after definitive confirmation: the broadcast can
+      // still fail on-chain, and the sealed ledger must not record a failed
+      // Subscribe as a successful outcome. A definitive on-chain failure
+      // closes the intent as a failure; an ambiguous outcome (RPC trouble,
+      // timeout) leaves it unresolved for reconciliation.
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          authorizationSignature,
+          "Recurring payment activation failed on-chain"
+        );
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, subscribeIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, subscribeIntent, {
+        signature: authorizationSignature,
+        metadata: { planPda, subscriptionPda, subscriptionAuthorityAddress },
       });
       authorizedThisRun = true;
     }

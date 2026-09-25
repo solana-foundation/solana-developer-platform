@@ -20,6 +20,7 @@ import {
   resumeRecurringPayment as resumeRecurringPaymentRecord,
   updateRecurringPayment as updateRecurringPaymentRecord,
 } from "@/services/payments/recurring-payments";
+import type { RecurringPaymentAuditActor } from "@/services/payments/recurring-payments/lifecycle-audit";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
 import { type AppContext, getPaymentRecurringPaymentsRepository } from "../context";
 import { mapCollectionAttemptRow, mapTransferRow } from "../mappers";
@@ -86,6 +87,24 @@ function assertPinnedRecurringPayment(
   if (recurringPayment.source_custody_wallet_id === null) {
     throw new AppError("CONFLICT", "Recurring payment source wallet is unresolved");
   }
+}
+
+/**
+ * Sealed-ledger attribution for a recurring-payment lifecycle broadcast: the
+ * normalized auth context names the exact principal that drove the effect,
+ * and the durable X-Request-ID lets a retried request be correlated against
+ * the intent its earlier attempt left behind.
+ */
+function recurringPaymentAuditActor(
+  auth: ReturnType<typeof getAuth>,
+  requestId: string
+): RecurringPaymentAuditActor {
+  return {
+    organizationId: auth.organizationId,
+    userId: auth.userId,
+    apiKeyId: auth.apiKeyId,
+    requestId,
+  };
 }
 
 export const createRecurringPayment = async (
@@ -220,6 +239,7 @@ export const activateRecurringPayment = async (
     sourceWallet,
     recurringPayment,
     createdBy: await resolveCreatorUserId(c),
+    auditActor: recurringPaymentAuditActor(auth, c.get("requestId")),
   });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(activated),
@@ -265,6 +285,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
+          auditActor: recurringPaymentAuditActor(auth, c.get("requestId")),
         })
       : await resumeRecurringPaymentRecord({
           env: c.env,
@@ -272,6 +293,7 @@ async function mutateRecurringPaymentLifecycle(c: AppContext, operation: "cancel
           projectId,
           sourceWallet,
           recurringPayment,
+          auditActor: recurringPaymentAuditActor(auth, c.get("requestId")),
         });
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(updated),
