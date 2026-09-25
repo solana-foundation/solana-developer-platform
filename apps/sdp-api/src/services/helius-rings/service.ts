@@ -27,7 +27,7 @@ import {
   RUNTIME_HEALTH_COMPONENTS,
 } from "@sdp/helius-rings";
 import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
-import type { ApprovalRequestStatus, WalletOperationActor } from "@sdp/types";
+import type { ApprovalRequestStatus, SdpEnvironment, WalletOperationActor } from "@sdp/types";
 import { asTransactionalClient, getDb, SessionLockUnavailableError } from "@/db";
 import {
   createHeliusRingsAssetRepository,
@@ -84,6 +84,12 @@ import { assertRingsSignedTransactionMatches, signRingsOuterTransaction } from "
 export interface HeliusRingsTenant {
   organizationId: string;
   projectId: string;
+  /**
+   * The selected project's environment. Rings is devnet-only while sandbox and
+   * production projects share the process, so admission is decided per
+   * project, and the constructor refuses anything but sandbox.
+   */
+  environment: SdpEnvironment;
 }
 
 export interface HeliusRingsActor {
@@ -228,6 +234,13 @@ export class HeliusRingsService {
     // mainnet is a deliberate migration, not a config flip.
     if ((env.SOLANA_NETWORK ?? "devnet") !== "devnet") {
       throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is devnet-only");
+    }
+    // The other half of the network fence: a production project shares this
+    // devnet-configured process, and must never enter the Rings workflow or
+    // leave devnet rows attributed to it. Route middleware rejects the same
+    // request earlier with a 403; this guard covers callers that bypass it.
+    if (tenant.environment !== "sandbox") {
+      throw new AppError("SERVICE_UNAVAILABLE", "Helius Rings is limited to sandbox projects");
     }
     this.projectRings = dependencies.projectRings ?? createHeliusRingsProjectRingRepository(env);
     // The bring-up hook persists a ring's lookup table the moment it lands, so

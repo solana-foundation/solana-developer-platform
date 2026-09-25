@@ -3,6 +3,7 @@ import { AppError } from "@/lib/errors";
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireSandboxProject } from "@/middleware/sandbox-project";
 import type { Env } from "@/types/env";
 import {
   createRingsProjectRing,
@@ -38,6 +39,11 @@ async function requireHeliusRingsFeature(c: Context<{ Bindings: Env }>, next: Ne
 heliusRings.use("*", requireHeliusRingsFeature);
 heliusRings.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 heliusRings.use("*", projectContextMiddleware());
+// Rings is devnet-only while sandbox and production projects share this
+// process, so the selected project's environment — not just the deployment's
+// SOLANA_NETWORK — decides admission. The fence runs before every handler, so
+// no Rings durable row can be written for a project it rejects.
+heliusRings.use("*", requireSandboxProject());
 
 heliusRings.get("/health", requirePermissions("payments:read"), getRingsHealth);
 heliusRings.get("/setup-status", requirePermissions("payments:read"), getRingsSetup);

@@ -16,6 +16,7 @@
  * Ships dormant: early-returns unless the feature flag is on.
  */
 
+import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
@@ -23,7 +24,11 @@ import {
 } from "@/db/repositories";
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
+import {
+  createHeliusRingsService,
+  type HeliusRingsService,
+  type HeliusRingsTenant,
+} from "@/services/helius-rings";
 import {
   type RingsSignatureOutcome,
   readRingsBlockHeight,
@@ -88,7 +93,13 @@ async function chainForbidsFailure(
 
 type OperationRepository = ReturnType<typeof createHeliusRingsOperationRepository>;
 type Logger = ReturnType<typeof getLogger>;
-type ServiceFor = (tenant: { organizationId: string; projectId: string }) => HeliusRingsService;
+type ServiceFor = (tenant: HeliusRingsTenant) => HeliusRingsService;
+/** The per-operation service a pass drives. */
+type OperationService = (operation: HeliusRingsOperationRow) => HeliusRingsService;
+/** Builds a pass's per-operation service from that pass's candidate rows. */
+type ServiceForBatch = (
+  operations: readonly HeliusRingsOperationRow[]
+) => Promise<OperationService>;
 
 export interface PollRingsIndexingDependencies {
   /** Test seam: service per tenant; production builds the real one. */
@@ -114,11 +125,19 @@ export async function pollRingsIndexing(
 
   const createService: ServiceFor =
     dependencies.createService ?? ((tenant) => createHeliusRingsService(env, tenant));
-  const serviceFor = (operation: HeliusRingsOperationRow) =>
-    createService({
-      organizationId: operation.organization_id,
-      projectId: operation.project_id,
-    });
+  // The sweep's list queries return sandbox-project rows only — the only
+  // tenant the Rings service may be built for — so each pass's candidates are
+  // exactly the projects whose environments it has to resolve: one bounded
+  // read per pass, never the whole projects table.
+  const serviceForBatch: ServiceForBatch = async (operations) => {
+    const environments = await loadProjectEnvironments(env, operations);
+    return (operation: HeliusRingsOperationRow) =>
+      createService({
+        organizationId: operation.organization_id,
+        projectId: operation.project_id,
+        environment: requireResolvableEnvironment(environments, operation.project_id),
+      });
+  };
 
   const repository = createHeliusRingsOperationRepository(env);
   const logger = getLogger();
@@ -135,21 +154,60 @@ export async function pollRingsIndexing(
   if (blockHeight === null) {
     logger.warn({}, "rings expiry pass skipped: block height unavailable");
   } else {
-    await escalateExpiredSubmissions(repository, serviceFor, logger, blockHeight, {
+    await escalateExpiredSubmissions(repository, serviceForBatch, logger, blockHeight, {
       env,
       readSignatureStatus,
     });
-    await escalateExpiredSignedFailures(repository, serviceFor, logger, blockHeight);
+    await escalateExpiredSignedFailures(repository, serviceForBatch, logger, blockHeight);
   }
 
-  await completeIndexedFailures(repository, serviceFor, logger);
+  await completeIndexedFailures(repository, serviceForBatch, logger);
   const sweepNow = dependencies.now?.() ?? (await readDatabaseNow(env));
-  await advanceInFlight(repository, serviceFor, logger, sweepNow, { env, readSignatureStatus });
+  await advanceInFlight(repository, serviceForBatch, logger, sweepNow, {
+    env,
+    readSignatureStatus,
+  });
 }
 
 async function readDatabaseNow(env: Env): Promise<Date> {
   const row = await getDb(env).queryOne<{ now: string }>("SELECT sdp_iso_now() AS now");
   return new Date(row?.now ?? Date.now());
+}
+
+/**
+ * The environments of exactly the projects these candidates belong to.
+ *
+ * Resolving the batch's own projects — never the whole table — keeps the
+ * per-tick read proportional to the sweep's budget rather than the tenant
+ * count. The Rings service refuses to build for anything but a sandbox
+ * project, so the sweep can neither advance nor fail a row whose project it
+ * cannot place in an environment — production rows left by the pre-fence
+ * admission are reported by the passes' per-operation logging and never
+ * touched again.
+ */
+async function loadProjectEnvironments(
+  env: Env,
+  operations: readonly HeliusRingsOperationRow[]
+): Promise<Map<string, SdpEnvironment>> {
+  const projectIds = [...new Set(operations.map((operation) => operation.project_id))];
+  if (projectIds.length === 0) return new Map();
+  const rows = await getDb(env).queryMany<{ id: string; environment: SdpEnvironment }>(
+    "SELECT id, environment FROM projects WHERE id = ANY(?)",
+    [projectIds]
+  );
+  return new Map(rows.map((row) => [row.id, row.environment]));
+}
+
+/** Fails closed: a project with no resolvable environment cannot be swept. */
+function requireResolvableEnvironment(
+  environments: Map<string, SdpEnvironment>,
+  projectId: string
+): SdpEnvironment {
+  const environment = environments.get(projectId);
+  if (environment === undefined) {
+    throw new Error(`project ${projectId} has no resolvable environment`);
+  }
+  return environment;
 }
 
 /** What the two passes that can give up on a signature need to consult the chain. */
@@ -174,12 +232,13 @@ interface ChainCheck {
  */
 async function escalateExpiredSubmissions(
   repository: OperationRepository,
-  serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
+  serviceForBatch: ServiceForBatch,
   logger: Logger,
   blockHeight: string,
   chain: ChainCheck
 ): Promise<void> {
   const expired = await repository.listExpiredSubmissions({ blockHeight, limit: MAX_PER_RUN });
+  const serviceFor = await serviceForBatch(expired);
 
   for (const operation of expired) {
     try {
@@ -212,11 +271,12 @@ async function escalateExpiredSubmissions(
  */
 async function escalateExpiredSignedFailures(
   repository: OperationRepository,
-  serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
+  serviceForBatch: ServiceForBatch,
   logger: Logger,
   blockHeight: string
 ): Promise<void> {
   const expired = await repository.listExpiredSignedFailures({ blockHeight, limit: MAX_PER_RUN });
+  const serviceFor = await serviceForBatch(expired);
   for (const operation of expired) {
     try {
       await serviceFor(operation).escalateToManualReconciliation(operation.id);
@@ -239,10 +299,11 @@ async function escalateExpiredSignedFailures(
  */
 async function completeIndexedFailures(
   repository: OperationRepository,
-  serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
+  serviceForBatch: ServiceForBatch,
   logger: Logger
 ): Promise<void> {
   const signedFailures = await repository.listSignedFailures({ limit: MAX_PER_RUN });
+  const serviceFor = await serviceForBatch(signedFailures);
 
   for (const operation of signedFailures) {
     try {
@@ -263,7 +324,7 @@ async function completeIndexedFailures(
  */
 async function advanceInFlight(
   repository: OperationRepository,
-  serviceFor: (operation: HeliusRingsOperationRow) => HeliusRingsService,
+  serviceForBatch: ServiceForBatch,
   logger: Logger,
   now: Date,
   chain: ChainCheck
@@ -275,6 +336,7 @@ async function advanceInFlight(
     staleBefore: new Date(now.getTime() + 1).toISOString(),
     limit: MAX_PER_RUN,
   });
+  const serviceFor = await serviceForBatch(inFlight);
   const timeoutCutoff = now.getTime() - RINGS_INDEXING_TIMEOUT_MS;
   const graceCutoff = now.getTime() - RINGS_UNSIGNED_GRACE_MS;
 

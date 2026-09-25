@@ -20,10 +20,7 @@ import type { Env } from "@/types/env";
 /** Hono request context bound to the app `Env`. */
 export type AppContext = Context<{ Bindings: Env }>;
 
-export function getHeliusRingsService(
-  c: AppContext,
-  tenant: { organizationId: string; projectId: string }
-) {
+export function getHeliusRingsService(c: AppContext, tenant: HeliusRingsTenant) {
   return createHeliusRingsService(c.env, tenant);
 }
 

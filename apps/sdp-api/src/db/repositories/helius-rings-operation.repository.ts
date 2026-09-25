@@ -229,7 +229,10 @@ export interface HeliusRingsOperationRepository {
   ): Promise<HeliusRingsOperationRow | null>;
   /**
    * Submitted operations whose signed bytes can no longer land, for the sweep
-   * that escalates them to `manual_reconciliation_required`.
+   * that escalates them to `manual_reconciliation_required`. Only rows whose
+   * project is a sandbox project are returned: the sweep may act on no other
+   * tenant, and ineligible rows must not consume the batch limit ahead of
+   * eligible ones.
    */
   listExpiredSubmissions(
     input: HeliusRingsExpiredSubmissionsInput
@@ -271,7 +274,10 @@ export interface HeliusRingsOperationRepository {
   ): Promise<HeliusRingsOperationRow | null>;
   /** Signed failures, for the pass that completes the ones Photon now holds. */
   listSignedFailures(input: { limit?: number }): Promise<HeliusRingsOperationRow[]>;
-  /** Signed failures whose blockhash has expired and that still name a resolvable code. */
+  /**
+   * Signed failures whose blockhash has expired and that still name a resolvable code.
+   * Like every sweep feed, only rows whose project is a sandbox project.
+   */
   listExpiredSignedFailures(
     input: HeliusRingsExpiredSubmissionsInput
   ): Promise<HeliusRingsOperationRow[]>;
@@ -289,7 +295,12 @@ export interface HeliusRingsOperationRepository {
    * A ready-to-sign failure loses if signed bytes won the row lock first.
    */
   failOperation(input: FailHeliusRingsOperationInput): Promise<HeliusRingsOperationRow | null>;
-  /** Resume sweep feed: non-terminal operations, oldest touched first. */
+  /**
+   * Resume sweep feed: non-terminal operations, oldest touched first. Only
+   * rows whose project is a sandbox project: the sweep may act on no other
+   * tenant, and ineligible rows must not consume the batch limit ahead of
+   * eligible ones.
+   */
   listInFlightOperations(
     input: ListHeliusRingsInFlightOperationsInput
   ): Promise<HeliusRingsOperationRow[]>;

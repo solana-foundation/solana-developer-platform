@@ -4,6 +4,7 @@ import { badRequest, badRequestParams } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import { rpcAdminAuthMiddleware } from "@/middleware/credential-admin-auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
+import { requireSandboxProject } from "@/middleware/sandbox-project";
 import {
   createRingsConnection,
   deactivateRingsConnection,
@@ -26,6 +27,9 @@ const connectionParamsSchema = z.strictObject({ connectionId: z.string().trim().
 const routes = new Hono<{ Bindings: Env }>();
 routes.use("*", rpcAdminAuthMiddleware());
 routes.use("*", projectContextMiddleware());
+// Connection setup writes durable Rings rows, so it is fenced by the same
+// project-environment check as the rest of the devnet-only workflow.
+routes.use("*", requireSandboxProject());
 
 routes.get("/connections", async (c) => success(c, await listRingsConnections(c)));
 

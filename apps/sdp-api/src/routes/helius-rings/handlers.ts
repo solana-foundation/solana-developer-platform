@@ -9,6 +9,7 @@ import {
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { requireProjectEnvironment } from "@/lib/sdp-environment";
 import { resolveScope, resolveWallet } from "@/routes/payments/wallets";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
@@ -42,7 +43,12 @@ function tenantOf(c: AppContext) {
   const auth = getAuth(c);
   return {
     auth,
-    tenant: { organizationId: auth.organizationId, projectId: requireProjectId(c) },
+    tenant: {
+      organizationId: auth.organizationId,
+      projectId: requireProjectId(c),
+      // The sandbox fence ran before any handler; the service re-checks it.
+      environment: requireProjectEnvironment(c),
+    },
   };
 }
 

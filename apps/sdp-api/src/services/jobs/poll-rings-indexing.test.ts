@@ -16,7 +16,7 @@ import {
   createHeliusRingsWalletRepository,
 } from "@/db/repositories";
 import { createCredentialSecretStore } from "@/services/credential-secret-store";
-import { createHeliusRingsService } from "@/services/helius-rings";
+import { createHeliusRingsService, type HeliusRingsTenant } from "@/services/helius-rings";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import {
@@ -37,7 +37,11 @@ import {
 const TEST_PROJECT_ID = "prj_hr_job_test";
 const TEST_CONNECTION_ID = "hrconn_hr_job_test";
 const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
-const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+const tenant = {
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT_ID,
+  environment: "sandbox",
+} as const;
 
 const allowPolicy = async () =>
   ({
@@ -105,6 +109,73 @@ function serviceWith(gateway: InMemoryRingsGateway) {
       (await signOuterTransaction(unsignedTxBase64)).signedTxBase64,
     submitOuterTransaction: async () => OUTER_TX.signature,
   });
+}
+
+/**
+ * A production-attributed row left by the pre-fence admission (APE-691): the
+ * wallet and connection exist, the row is the oldest thing in the table, and
+ * the fence refuses to build a service for its project. Inserted directly
+ * because no live path can create it any more.
+ */
+async function seedLegacyProductionOperation(): Promise<string> {
+  const productionProjectId = `${TEST_PROJECT_ID}_production`;
+  const db = getDb(env);
+
+  const credentialId = "pcred_hr_job_production";
+  const connectionId = "hrconn_hr_job_production";
+  const credential = await new ProviderCredentialStore(db).insertCredential({
+    id: credentialId,
+    organizationId: TEST_ORG.id,
+    projectId: productionProjectId,
+    provider: "helius_rings",
+    label: "Job production",
+    scope: "project",
+    source: "stored",
+    stored: { storageBackend: "encrypted_db", encryptedSecretPayload: "opaque-production" },
+    displayMetadata: {},
+    version: 1,
+    rotatedFromId: null,
+    idempotencyKey: connectionId,
+    idempotencyFingerprint: connectionId,
+    createdBy: TEST_USER.id,
+  });
+  await db.execute("UPDATE provider_credentials SET status = 'active' WHERE id = ?", [
+    credentialId,
+  ]);
+  await new HeliusRingsConnectionStore(db).insert({
+    id: connectionId,
+    organizationId: TEST_ORG.id,
+    projectId: productionProjectId,
+    name: "Job production",
+    providerCredentialId: credentialId,
+    providerCredentialScopeKey: credential.scope_key,
+    allowInsecureHttp: false,
+    displayMetadata: {},
+    makeDefault: false,
+    createdBy: TEST_USER.id,
+  });
+
+  const wallets = createHeliusRingsWalletRepository(env);
+  const wallet = await wallets.createWallet({
+    organizationId: TEST_ORG.id,
+    projectId: productionProjectId,
+    sdpWalletId: "wal_hr_job_production",
+    name: "Legacy production",
+    materialTag: "simulated",
+  });
+  if (!wallet) throw new Error("production wallet fixture was not created");
+
+  const id = "hro_hr_job_production_legacy";
+  await db
+    .prepare(
+      `INSERT INTO helius_rings_operations
+         (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state,
+          intent_key, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'shield', 'indexing', ?, '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`
+    )
+    .bind(id, TEST_ORG.id, productionProjectId, connectionId, wallet.id, "sha256:hr-job-legacy")
+    .run();
+  return id;
 }
 
 describe("pollRingsIndexing", () => {
@@ -251,6 +322,52 @@ describe("pollRingsIndexing", () => {
       id: operation.id,
     });
     expect(row?.state).toBe("completed");
+  });
+
+  it("sweeps sandbox rows past a legacy production row the fence refuses", async () => {
+    const legacyId = await seedLegacyProductionOperation();
+    const gateway = ringsGateway({ indexingDelayMs: 0 });
+    const operation = await serviceWith(gateway).prepareOperation(
+      {
+        walletId,
+        opType: "shield",
+        asset: { mint: "So11111111111111111111111111111111111111112", amountRaw: "1000" },
+        clientNonce: "job-prod-legacy",
+      },
+      { apiKeyId: null, actor: null, custodyWalletId: null }
+    );
+    expect(operation.state).toBe("indexing");
+    gateway.recordSubmission(OUTER_TX.signature);
+
+    // The fence at service construction is what makes a production row inert;
+    // record every tenant the sweep actually tries to build a service for.
+    const builtTenants: HeliusRingsTenant[] = [];
+    await pollRingsIndexing(jobEnv, {
+      createService: (tenant) => {
+        builtTenants.push(tenant);
+        return serviceWith(gateway);
+      },
+      readBlockHeight: NO_HEIGHT,
+    });
+
+    const row = await createHeliusRingsOperationRepository(env).getOperationById({
+      ...tenant,
+      id: operation.id,
+    });
+    // The legacy row is the oldest in the table, and the newer sandbox row
+    // behind it is still swept — an ineligible row must not hold the batch.
+    expect(row?.state).toBe("completed");
+
+    const legacy = await getDb(env)
+      .prepare("SELECT state FROM helius_rings_operations WHERE id = ?")
+      .bind(legacyId)
+      .first<{ state: string }>();
+    // Inert, never advanced and never failed: reconciliation cannot judge a
+    // row whose project it cannot place in an environment.
+    expect(legacy?.state).toBe("indexing");
+
+    // And the sweep never even attempted to build a service for its project.
+    expect(builtTenants.map((built) => built.projectId)).toEqual([TEST_PROJECT_ID]);
   });
 
   it("times out an operation stuck in indexing past the budget", async () => {

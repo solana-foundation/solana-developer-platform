@@ -56,7 +56,11 @@ import {
 
 const TEST_PROJECT_ID = "prj_hrs_service_test";
 const TEST_CONNECTION_ID = "hrconn_hrs_service_test";
-const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+const tenant = {
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT_ID,
+  environment: "sandbox",
+} as const;
 
 let walletId: string;
 
@@ -343,6 +347,12 @@ describe("HeliusRingsService", () => {
       expect(() =>
         createHeliusRingsService({ ...env, SOLANA_NETWORK: "mainnet-beta" }, tenant)
       ).toThrow(AppError);
+    });
+
+    it("refuses to construct for a production project on a devnet process", () => {
+      expect(() => createHeliusRingsService(env, { ...tenant, environment: "production" })).toThrow(
+        "Helius Rings is limited to sandbox projects"
+      );
     });
   });
 
