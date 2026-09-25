@@ -210,6 +210,62 @@ describe("ramp quote idempotent retry (APE-689)", () => {
     });
   });
 
+  it("fails a keyed reservation whose finalization conflicts, and lets its retry converge", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({ externalId: "ape689_finalize_conflict" });
+    // The second attempt's provider session id collides with the first
+    // operation's while its amounts differ, so binding the reference fails
+    // closed AFTER the provider session was created — the finalization path.
+    const sharedSession = "mg_ape689_session_finalize";
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(moneygramSessionResponse(sharedSession))
+      .mockResolvedValueOnce(moneygramSessionResponse(sharedSession))
+      .mockResolvedValueOnce(moneygramSessionResponse("mg_ape689_session_finalize_retry"));
+
+    const first = await postQuote({ counterpartyId, idempotencyKey: "ape689-op-key-4" });
+    expect(first.status).toBe(200);
+
+    // Same session id under a different key + amount: the finalization must
+    // fail the new reservation instead of stranding it pending with no stored
+    // response (which would 409 every retry until the abandonment window
+    // passed and then re-drive the provider for the same key).
+    const conflicted = await postQuote({
+      counterpartyId,
+      fiatAmount: "30",
+      idempotencyKey: "ape689-op-key-5",
+    });
+    expect(conflicted.status).toBe(409);
+    const rowsAfterConflict = await transferRows(counterpartyId);
+    expect(rowsAfterConflict.results).toHaveLength(2);
+    expect(rowsAfterConflict.results[1]).toMatchObject({
+      status: "failed",
+      provider_reference: null,
+      idempotency_key: "ape689-op-key-5",
+    });
+
+    // The explicit retry under the same key claims the failed row in place
+    // and converges: one more provider session, still one row per key.
+    const retry = await postQuote({
+      counterpartyId,
+      fiatAmount: "30",
+      idempotencyKey: "ape689-op-key-5",
+    });
+    expect(retry.status).toBe(200);
+    const retryBody = (await retry.json()) as QuoteResponseBody;
+    expect(retryBody.data.quote.sessionId).toBe("mg_ape689_session_finalize_retry");
+
+    expect(providerFetch).toHaveBeenCalledTimes(3);
+    const rows = await transferRows(counterpartyId);
+    expect(rows.results).toHaveLength(2);
+    expect(rows.results[1]).toMatchObject({
+      id: retryBody.data.transferId,
+      provider_reference: "mg_ape689_session_finalize_retry",
+      status: "pending",
+      idempotency_key: "ape689-op-key-5",
+    });
+  });
+
   it("keeps unkeyed quote requests as fresh operations (public API compatibility)", async () => {
     await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
     const counterpartyId = await seedCounterparty({ externalId: "ape689_unkeyed_compat" });
