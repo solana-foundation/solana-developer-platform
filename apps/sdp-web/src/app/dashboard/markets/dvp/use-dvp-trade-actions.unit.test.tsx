@@ -11,6 +11,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EnglishTestI18n } from "../test-i18n";
 import { useDvpTradeActions } from "./use-dvp-trade-actions";
 
@@ -45,6 +46,8 @@ function respond(status: number, body: unknown = status < 300 ? BROADCAST : {}) 
 describe("useDvpTradeActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
   });
   afterEach(() => {
     global.fetch = originalFetch;
@@ -395,8 +398,10 @@ describe("useDvpTradeActions", () => {
   });
 
   // A request the proxy or network retries must be answered with the first
-  // result, so each press of fund or reclaim carries its own key.
-  it("sends a fresh Idempotency-Key with each fund and reclaim, and none with settle", async () => {
+  // result, so each press of fund or reclaim carries its own key, and every
+  // settle or cancel carries one at all — the API signs a second close for a
+  // keyless close instead of replaying the first.
+  it("sends a fresh Idempotency-Key with each fund and reclaim, and a close key with settle and cancel", async () => {
     const fetchMock = respond(200);
     global.fetch = fetchMock as never;
     const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
@@ -412,13 +417,155 @@ describe("useDvpTradeActions", () => {
         await result.current.act("reclaim", { side: "a", walletId: "cwlt_shown_a", symbol: "USDC" })
     );
     await act(async () => await result.current.act("settle"));
+    await act(async () => await result.current.act("cancel"));
 
     const keys = fetchMock.mock.calls.map(
       ([, init]) => (init as { headers?: Record<string, string> }).headers?.["Idempotency-Key"]
     );
     expect(keys[0]).toMatch(/^dvp-fund-[0-9a-f]{32}$/);
     expect(keys[1]).toMatch(/^dvp-reclaim-[0-9a-f]{32}$/);
-    expect(keys[2]).toBeUndefined();
+    expect(keys[2]).toMatch(/^dvp-close-[0-9a-f]{32}$/);
+    expect(keys[3]).toMatch(/^dvp-close-[0-9a-f]{32}$/);
+  });
+
+  describe("settle and cancel idempotency keys", () => {
+    function keyOf(call: unknown[]): string | undefined {
+      const [, init] = call as [string, { headers?: Record<string, string> }];
+      return init.headers?.["Idempotency-Key"];
+    }
+
+    // The close API records the transaction under the caller's key and replays
+    // it on retry. A key that changes between presses of the same operation
+    // turns the retry into a second signed close.
+    it("reuses one key when a settle is retried after a transport failure", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("socket hang up"))
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => BROADCAST,
+        });
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act("settle"));
+      await act(async () => await result.current.act("settle"));
+
+      const first = keyOf(fetchMock.mock.calls[0] ?? []);
+      const retry = keyOf(fetchMock.mock.calls[1] ?? []);
+      expect(first).toMatch(/^dvp-close-[0-9a-f]{32}$/);
+      expect(retry).toBe(first);
+    });
+
+    it("reuses one key when a cancel is retried after an unreadable answer", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => {
+            throw new SyntaxError("Unexpected token <");
+          },
+        })
+        .mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => BROADCAST,
+        });
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act("cancel"));
+      await act(async () => await result.current.act("cancel"));
+
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
+
+    // A 4xx is an answer: nothing was sent, so the next press is a new
+    // operation and must not inherit the refused key.
+    it("mints a fresh key after a close refusal", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue({
+          ok: false,
+          status: 409,
+          json: async () => {
+            return {
+              error: {
+                message: "DvP trade dvp_1: a cancel is in flight",
+                details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
+              },
+            };
+          },
+        })
+        .mockResolvedValue({ ok: true, status: 200, json: async () => BROADCAST });
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act("settle"));
+      await act(async () => await result.current.act("settle"));
+
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).toMatch(/^dvp-close-[0-9a-f]{32}$/);
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).not.toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
+
+    // A readable 2xx is an answer too: the close is on its row, and the next
+    // press of the same button is a new operation, not a replay of this one.
+    it("mints a fresh key after a readable success", async () => {
+      const fetchMock = respond(200);
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act("settle"));
+      await act(async () => await result.current.act("settle"));
+
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).not.toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
+
+    // A settle an approval holds must not lapse into a second approval request:
+    // the key stays pinned past the TTL while the approval is alive.
+    it("pins the key past the TTL while a settle waits for approval", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = respond(202, {
+          error: { code: "SIGNING_PENDING", details: { approvalRequestId: "appr_1" } },
+        });
+        global.fetch = fetchMock as never;
+        const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+          wrapper: withI18n,
+        });
+
+        await act(async () => await result.current.act("settle"));
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await act(async () => await result.current.act("settle"));
+
+        expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // Another trade is another operation: its settle mints its own key.
+    it("keys a settle per trade", async () => {
+      const fetchMock = respond(200);
+      global.fetch = fetchMock as never;
+      const first = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), { wrapper: withI18n });
+      const second = renderHook(() => useDvpTradeActions("dvp_2", "devnet"), { wrapper: withI18n });
+
+      await act(async () => await first.result.current.act("settle"));
+      await act(async () => await second.result.current.act("settle"));
+
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).not.toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
   });
 
   it("reclaims the named leg through its own endpoint", async () => {

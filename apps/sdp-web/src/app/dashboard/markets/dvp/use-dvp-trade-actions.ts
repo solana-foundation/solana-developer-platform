@@ -11,6 +11,11 @@
  * whoever holds it, on whichever org's trade. Each press of either carries its
  * own Idempotency-Key, so a request the proxy or network retries is answered
  * with the first result instead of moving the leg twice.
+ *
+ * Settling and cancelling close the trade, so their key is one per logical
+ * operation rather than one per press, persisted across retries in
+ * `dvp-idempotency-key.ts`: the API records the close transaction under it and
+ * a retry replays that signature instead of signing a second close (SOLA9-146).
  */
 
 import {
@@ -29,7 +34,11 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
-import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
+import {
+  dvpCloseIdempotencyKeyStore,
+  dvpCloseRequestFingerprint,
+  freshDvpIdempotencyKey,
+} from "./dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
@@ -171,15 +180,21 @@ function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
 }
 
 /**
- * Fund and reclaim name the leg they move and carry their own Idempotency-Key;
- * settle and cancel carry neither.
+ * Fund and reclaim name the leg they move and carry a fresh key per press;
+ * settle and cancel carry the persisted key of their one logical operation,
+ * which the caller claims before the request and releases once the API has
+ * answered for it.
  */
 function requestInit(
   action: DvpTradeActionName,
-  leg: { side: DvpTradeSide; walletId: string } | null
+  leg: { side: DvpTradeSide; walletId: string } | null,
+  close: { key: string } | null
 ): RequestInit {
   if (leg === null) {
-    return { method: "POST" };
+    return {
+      method: "POST",
+      headers: close === null ? undefined : { [IDEMPOTENCY_KEY_HEADER]: close.key },
+    };
   }
   return {
     method: "POST",
@@ -211,6 +226,46 @@ function successOf(
     : null;
 }
 
+/**
+ * The key of the logical settle or cancel this press starts, claimed from the
+ * persisted store so every retry of the operation re-sends it, together with
+ * the fingerprint it answers to — or null for the leg actions, whose keys are
+ * minted fresh per press.
+ */
+function claimCloseKey(
+  cluster: SolanaCluster,
+  tradeId: string,
+  action: DvpTradeActionName,
+  leg: { side: DvpTradeSide; walletId: string } | null
+): { fingerprint: string; key: string } | null {
+  if (leg !== null || (action !== "settle" && action !== "cancel")) {
+    return null;
+  }
+  const fingerprint = dvpCloseRequestFingerprint({ cluster, tradeId, action });
+  return { fingerprint, key: dvpCloseIdempotencyKeyStore.claim(fingerprint) };
+}
+
+/**
+ * What the answer does to a close's key, one word per kind of answer: an
+ * approval hold pins it past its TTL, a definitive answer retires it, and
+ * anything ambiguous — a transport failure, a 5xx, a 2xx nobody could read —
+ * keeps it, because the retry of this operation must replay the close the
+ * first request sent (SOLA9-146). Leg actions have no key.
+ */
+function applyCloseKeyOutcome(
+  close: { fingerprint: string } | null,
+  outcome: "held" | "answered" | "refused" | "kept"
+): void {
+  if (close === null || outcome === "kept") {
+    return;
+  }
+  if (outcome === "held") {
+    dvpCloseIdempotencyKeyStore.hold(close.fingerprint);
+    return;
+  }
+  dvpCloseIdempotencyKeyStore.release(close.fingerprint);
+}
+
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
   const router = useRouter();
   const t = useTranslations();
@@ -240,6 +295,12 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     const key = pendingKey(call);
     const leg = call.length === 1 ? null : call[1];
     setPending((current) => new Set(current).add(key));
+    // One stable key per logical close (SOLA9-146): claimed before the request
+    // and re-sent by every retry of it. The API records the close transaction
+    // under this key before broadcast, so a retry asks the chain what that
+    // transaction did instead of signing a second close against an escrow a
+    // late deposit may have refilled.
+    const closeKey = claimCloseKey(cluster, tradeId, action, leg);
     try {
       // An absent ID would ask the API to choose a different wallet by address.
       if (
@@ -251,13 +312,14 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       }
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
-        requestInit(action, leg)
+        requestInit(action, leg, closeKey)
       );
       // Held by policy. 202 is an ok status, so this has to come before the
       // success read: nothing moved, and the trade page shows the action as
       // still available until an approver decides.
       const heldMessage = HELD_MESSAGE[action];
       if (response.status === 202 && heldMessage !== undefined) {
+        applyCloseKeyOutcome(closeKey, "held");
         toast.info(t(heldMessage), {
           ...DVP_TOAST_POSITION,
           description: t("DashboardMarkets.dvp.approvalPendingDescription"),
@@ -268,6 +330,11 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // Either way the body can fail to be JSON at all, such as a proxy's error
       // page. It reads as null, and each schema below treats null as not matching.
       if (!response.ok) {
+        // A 4xx is an answer: nothing was recorded that a retry would need the
+        // key to find (a close that broadcast and failed on chain provably
+        // moved nothing, and the API's own row keeps its record). A 5xx might
+        // have recorded and broadcast — the key stays so the retry replays.
+        applyCloseKeyOutcome(closeKey, response.status < 500 ? "refused" : "kept");
         const symbol = leg === null ? null : leg.symbol;
         const failure: unknown = await response.json().catch(() => null);
         toast.error(refusalMessage(failure, response.status, symbol), DVP_TOAST_POSITION);
@@ -283,6 +350,9 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
         router.refresh();
         return;
       }
+      // The API answered for this close; the next press of the button is a new
+      // operation, not a replay of it.
+      applyCloseKeyOutcome(closeKey, "answered");
       // The single biggest source of "did anything happen?": these used to
       // succeed and then say nothing, leaving the page to catch up on the
       // reconciler's next sweep. A refresh is not an answer. A close that went

@@ -521,14 +521,26 @@ export function createFloorMemo(storageKey: string): FloorMemo {
 }
 
 /** One per money flow, each under its own versioned `sessionStorage` key. */
-export function createIdempotencyKeyStore(storeKey: string): IdempotencyKeyStore {
+export function createIdempotencyKeyStore(
+  storeKey: string,
+  options?: {
+    /**
+     * How a fresh key is minted. Defaults to `crypto.randomUUID`, which exists
+     * only in a secure context; a flow that must also work on a dashboard
+     * reached over plain http on a LAN address supplies its own mint.
+     */
+    mint?: () => string;
+  }
+): IdempotencyKeyStore {
+  const mint = options?.mint ?? (() => crypto.randomUUID());
+
   /** One read decides reuse and produces the key, so the two can never disagree. */
   function claimReporting(fingerprint: string): { key: string; wasReused: boolean } {
     const entries = readEntries(storeKey, IDEMPOTENCY_TTL_MS);
     const existing = entries.find((entry) => entry.id === fingerprint);
     if (existing) return { key: existing.value, wasReused: true };
 
-    const key = crypto.randomUUID();
+    const key = mint();
     writeEntries(storeKey, [
       ...entries.filter((entry) => entry.id !== fingerprint),
       { id: fingerprint, value: key, createdAt: Date.now() },
