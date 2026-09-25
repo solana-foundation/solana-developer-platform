@@ -434,6 +434,17 @@ describe("readVaultPositions", () => {
     ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
   });
 
+  it("refuses when an address-less entry follows the executable ATA", async () => {
+    // Matching the executable ATA is not a license to trust the rest of the
+    // answer: an entry the RPC cannot name is an account this read cannot
+    // identify, whether it appears before or after the ATA.
+    stubTokenAccounts([{ pubkey: await ownerUsdyAta(), amount: "1000000" }, "1000000"]);
+    const client = makeClient({});
+    await expect(
+      client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+    ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
+  });
+
   it("fails closed on a sandbox request: devnet has no deployment", async () => {
     const client = makeClient({});
     await expect(

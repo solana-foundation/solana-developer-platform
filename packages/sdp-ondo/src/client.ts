@@ -645,6 +645,11 @@ export class OndoVaultDirectClient
     // never `uiAmount`, which is lossy above 2^53 base units.
     const executableAccount = await ownerAssociatedTokenAccount(owner, mint);
     const accounts = await this.tokenAccounts(runtime, owner, mint);
+    // Every address in the answer is validated before any balance is read: an
+    // entry the RPC cannot name is an account this read cannot identify, and
+    // an early return on the executable ATA would let such an entry hide
+    // behind it. Fail closed on the whole response, not just the entries
+    // reached before the ATA matched.
     for (const entry of accounts) {
       if (typeof entry.pubkey !== "string" || entry.pubkey.length === 0) {
         throw new SdpOndoError(
@@ -653,6 +658,8 @@ export class OndoVaultDirectClient
             "balance from a read that cannot name its accounts."
         );
       }
+    }
+    for (const entry of accounts) {
       if (entry.pubkey !== executableAccount) continue;
       const raw = entry.account?.data?.parsed?.info?.tokenAmount?.amount;
       if (typeof raw !== "string" || !/^\d+$/.test(raw)) {

@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import type { EarnRuntimeContext } from "@sdp/earn/types";
 import { OndoVaultDirectClient } from "@sdp/ondo";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
 import { address } from "@solana/kit";
@@ -225,11 +226,20 @@ describe("SOLA9-452: Ondo position read is the executable ATA balance", () => {
     });
     const swap = plan.instructions.find((instruction) => instruction.programAddress === JUPITER);
     expect(swap?.accounts[1]?.address).toBe(String(sourceAta));
-    expect(plan.accepted).toEqual({ shares: "1", minAmountOut: "0.9" });
-    // The admitted swap's encoded ExactIn input is exactly the advertised
-    // withdrawable amount, and that amount is fully funded by the one source
-    // account the admission contract allows the route to spend.
-    expect(ATA_ATOMS).toBe(EXIT_ATOMS);
-    expect(ATA_ATOMS).toBeLessThan(ATA_ATOMS + NON_ATA_ATOMS);
+    const accepted = plan.accepted;
+    const acceptedShares = accepted?.shares;
+    if (!acceptedShares) throw new Error("the withdrawal plan reported no accepted share amount");
+    expect(accepted).toEqual({ shares: "1", minAmountOut: "0.9" });
+    // The admitted swap's encoded ExactIn input is decoded from the returned
+    // instruction itself: ROUTE_V2 puts the input right after the 8-byte
+    // Anchor discriminator, the same decode `validateSwapInstruction` runs.
+    const data = Buffer.from(swap?.data ?? "", "base64");
+    const encodedInputAtoms = data.readBigUInt64LE(8);
+    // It equals the advertised withdrawal amount...
+    expect(encodedInputAtoms).toBe(parseDecimalAmount(acceptedShares, 6));
+    // ...which is exactly the position the read reported (the 1 USDY ATA),
+    // never the 3.5 USDY owner-wide aggregate.
+    expect(encodedInputAtoms).toBe(ATA_ATOMS);
+    expect(encodedInputAtoms).toBeLessThan(ATA_ATOMS + NON_ATA_ATOMS);
   });
 });
