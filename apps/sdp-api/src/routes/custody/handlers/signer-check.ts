@@ -195,6 +195,18 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
     // identifiers included — into this HTTP body. The global handler keeps the
     // detail on the scrubbed server-side telemetry path only.
     if (error instanceof FeePaymentError) {
+      // A structured provider refusal can only come from the fee-payer ADDRESS
+      // lookup: signer-check never submits a transaction, so the shared
+      // SIGNING_REJECTED copy ("check the transaction and sponsorship policy")
+      // would send callers to fix a request that is not at fault. Answer with
+      // a fixed sponsor-side copy instead; the provider's diagnostics stay on
+      // the scrubbed telemetry path.
+      if (error.code === "PROVIDER_REJECTED") {
+        throw new AppError(
+          "PROVIDER_UNAVAILABLE",
+          "The fee sponsor refused the fee payer address lookup. Verify the sponsor configuration."
+        );
+      }
       throw error;
     }
 

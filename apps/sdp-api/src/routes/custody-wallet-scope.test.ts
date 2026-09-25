@@ -1946,11 +1946,14 @@ describe("Custody wallet scope routes", () => {
       expect(body.error.message).not.toContain("alice.customer@example.com");
       expect(body.error.message).not.toContain("wlt-owner-007");
       expect(body.error.message).not.toContain("RPC Error -32001");
-      expect(response.status).toBe(422);
+      // A structured refusal of the fee-payer LOOKUP is a sponsor-side failure:
+      // signer-check submits nothing, so it must not answer the caller-directed
+      // 422 SIGNING_REJECTED copy ("check the transaction ...").
+      expect(response.status).toBe(503);
       expect(body.error).toEqual({
-        code: "SIGNING_REJECTED",
+        code: "PROVIDER_UNAVAILABLE",
         message:
-          "The transaction fee sponsor rejected this transaction. Retrying will not help; check the transaction and sponsorship policy.",
+          "The fee sponsor refused the fee payer address lookup. Verify the sponsor configuration.",
       });
       expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
     });
