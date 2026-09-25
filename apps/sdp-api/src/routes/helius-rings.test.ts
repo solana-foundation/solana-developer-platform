@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { clearHeliusDasCachesForTests } from "@/services/helius-das.service";
+import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
@@ -790,6 +792,91 @@ describe("Helius Rings routes", () => {
         expectedShieldedAddress: SHIELDED_ADDRESS,
       });
       expect((await readWallet())?.sync_cursor).toBe(observed.observedAt);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      clearHeliusDasCachesForTests();
+      clearJupiterPriceCacheForTests();
+    });
+
+    it("prices known scales and leaves a mint of unknown scale unpriced", async () => {
+      await markProvisioned();
+      // A clean sync holding one allowlisted mint and one mint the allowlist
+      // never knew: the SDK reports the latter with `decimals: null`, since
+      // guessing a scale would misstate the amount's magnitude.
+      gatewayOverride.current = {
+        syncPhoton: async () => ({
+          balances: [
+            {
+              mint: USDC_MINT,
+              symbol: "USDC",
+              decimals: 6,
+              amountRaw: "1000000",
+              ringProgramId: null,
+              noteCount: 1,
+            },
+            {
+              mint: OTHER_MINT,
+              symbol: "UNKNOWN",
+              decimals: null,
+              amountRaw: "1000000",
+              ringProgramId: null,
+              noteCount: 1,
+            },
+          ],
+          history: [],
+          report: {
+            storedNotes: 2,
+            unparsedTransactions: 0,
+            undecryptableCandidates: 0,
+            unknownAssetIds: 0,
+            unknownAssetFields: 0,
+            degraded: false,
+          },
+          indexedOperationSignatures: [],
+          observedAt: "2026-09-01T00:00:00.000Z",
+        }),
+      } as unknown as RingsGatewayPort;
+
+      // The pricing path answers, and answers for the unknown mint too: a live
+      // price can exist for a mint whose decimal scale we never learned. The
+      // balance must still not be valued — with the scale unknown, the raw
+      // amount cannot be converted, and pricing it reads base units as whole
+      // tokens.
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        json: async () => ({ [OTHER_MINT]: { usdPrice: 2.5 } }),
+      } as Response);
+
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          balances: Array<{
+            mint: string;
+            decimals: number | null;
+            usdPrice?: number;
+            usdValue?: number;
+          }>;
+          totalUsd: number | null;
+          degraded: boolean;
+        };
+      };
+
+      expect(body.data.degraded).toBe(false);
+      const unknown = body.data.balances.find((balance) => balance.mint === OTHER_MINT);
+      expect(unknown).toMatchObject({ decimals: null });
+      expect(unknown?.usdPrice).toBeUndefined();
+      expect(unknown?.usdValue).toBeUndefined();
+
+      const usdc = body.data.balances.find((balance) => balance.mint === USDC_MINT);
+      expect(usdc?.usdPrice).toBe(1);
+      expect(usdc?.usdValue).toBe(1);
+
+      // Only priced balances reach the total: the unknown-scale holding is
+      // visible in `balances` but valued at nothing rather than a multiple.
+      expect(body.data.totalUsd).toBe(1);
     });
 
     it("404s an unknown wallet", async () => {
