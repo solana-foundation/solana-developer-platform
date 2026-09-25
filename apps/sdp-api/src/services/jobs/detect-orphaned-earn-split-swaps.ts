@@ -30,11 +30,17 @@ import type { Env } from "@/types/env";
  *
  * The judgement, in order, per open advisory:
  *
- * 1. The partner is demonstrably still working -> pending. Either a follow-up
- *    deposit movement is in flight (`requested`/`submitted`), or an unconsumed
- *    follow-up BUILD exists within the window: a build proves they are past the
- *    swap, and the movement only exists once they submit, which can take a
- *    human second signature and minutes.
+ * 1. The partner is demonstrably still working -> pending. Either the intended
+ *    follow-up deposit movement is in flight (`requested`/`submitted` — the
+ *    advisory's own provider and vault, exactly the swap floor), or an
+ *    unconsumed follow-up BUILD for the same provider and vault, exactly the
+ *    swap floor as well, exists within the window: a build proves they are
+ *    past the swap, and the movement only exists once they submit, which can
+ *    take a human second signature and minutes. A same-token deposit for a
+ *    sibling vault is not this advisory's leg and never short-circuits the
+ *    judgement (SOLA9-485): it falls through to the balance, where a committed
+ *    one is the ambiguity signal below and an in-flight one leaves the wallet's
+ *    rise visible.
  * 2. The swap's blockhash still live, or the advisory younger than the grace
  *    period -> pending. Past its last valid block height the swap either landed
  *    or never will, which is when a balance means something.
@@ -68,8 +74,11 @@ import type { Env } from "@/types/env";
  *    The paging orphan signal stays reserved for what the detector can prove.
  *    Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
- *    never broadcast, or the owner moved the tokens themselves) and a partial
- *    rise is indeterminate and stays open for the next visit.
+ *    never broadcast, or the owner moved the tokens themselves) unless a
+ *    same-token deposit is still in flight — the balance can already reflect
+ *    its landing before the ledger row is observed committed, so the advisory
+ *    waits — and a partial rise is indeterminate and stays open for the next
+ *    visit.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -207,9 +216,25 @@ async function judgeAdvisory(
 
   const deposits = await ledger.listExternalWalletDepositsSince(scope);
 
-  // 1. The partner is demonstrably still working: a deposit in flight, or a
-  //    recent unconsumed follow-up build.
-  if (deposits.some((row) => IN_FLIGHT_STATUSES.has(row.status))) {
+  // The follow-up this advisory waits for is sized to exactly the swap floor
+  // into exactly this provider's vault (step 3), so only that identity may
+  // short-circuit the judgement. A same-token deposit for a sibling vault is
+  // not this advisory's leg (SOLA9-485): it falls through to expiry/grace and
+  // the balance, where its committed form surfaces as ambiguous and an
+  // in-flight one cannot hide the wallet's rise.
+  const floor = BigInt(advisory.swap_min_out_atoms);
+
+  // 1. The partner is demonstrably still working: the intended follow-up
+  //    deposit in flight, or a recent unconsumed follow-up build for the same
+  //    provider and vault, sized to exactly the swap floor.
+  const intendedFollowUpInFlight = deposits.some(
+    (row) =>
+      IN_FLIGHT_STATUSES.has(row.status) &&
+      row.provider === advisory.provider &&
+      row.vault_address === advisory.vault_address &&
+      depositAtoms(row.amount_requested, advisory) === floor
+  );
+  if (intendedFollowUpInFlight) {
     stats.followUpPending += 1;
     await advisories.recordObservation({
       advisoryId: advisory.id,
@@ -219,7 +244,13 @@ async function judgeAdvisory(
     });
     return;
   }
-  const followUpBuildAt = await advisories.findFollowUpBuildAt(scope);
+  const followUpBuildAt = await advisories.findFollowUpBuildAt({
+    ...scope,
+    provider: advisory.provider,
+    vaultAddress: advisory.vault_address,
+    swapMinOutAtoms: advisory.swap_min_out_atoms,
+    depositTokenDecimals: advisory.deposit_token_decimals,
+  });
   if (followUpBuildAt !== null && nowMs - Date.parse(followUpBuildAt) < FOLLOW_UP_WINDOW_MS) {
     stats.followUpPending += 1;
     await advisories.recordObservation({
@@ -245,7 +276,6 @@ async function judgeAdvisory(
   // 3. The intended follow-up: same vault, exactly the floor, chain-committed.
   //    Definitive whatever else the wallet holds, so it is judged before the
   //    balance read (and spares the RPC call).
-  const floor = BigInt(advisory.swap_min_out_atoms);
   const committed = deposits.filter((row) => OBSERVED_STATUSES.has(row.status));
   const exactFollowUps = committed.filter(
     (row) =>
@@ -372,6 +402,14 @@ async function judgeAdvisory(
   }
 
   if (delta <= 0n) {
+    if (deposits.some((row) => IN_FLIGHT_STATUSES.has(row.status))) {
+      // A same-token deposit is still in flight, and the balance can already
+      // reflect its landing before the ledger row is observed committed. A
+      // no-rise reading now is not evidence the swap never broadcast: keep the
+      // advisory open for the next visit rather than close it unfunded.
+      stats.pending += 1;
+      return;
+    }
     stats.unfunded += 1;
     await advisories.resolve({
       advisoryId: advisory.id,

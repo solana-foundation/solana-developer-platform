@@ -108,7 +108,10 @@ async function advisoryRow(id: string) {
 }
 
 /** A follow-up deposit BUILD for the owner (what the partner requests after the swap). */
-async function seedFollowUpBuild(ageMs = 0): Promise<string> {
+async function seedFollowUpBuild(
+  ageMs = 0,
+  shape: { vaultAddress?: string; amount?: string } = {}
+): Promise<string> {
   const id = `earn_external_wallet_transaction_${crypto.randomUUID()}`;
   await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
     id,
@@ -118,12 +121,12 @@ async function seedFollowUpBuild(ageMs = 0): Promise<string> {
     provider: "kamino",
     direction: "deposit",
     ownerAddress: OWNER,
-    vaultAddress: VAULT,
+    vaultAddress: shape.vaultAddress ?? VAULT,
     tokenMint: USDC,
     shareMint: SHARE_MINT,
     label: "USDC Vault",
     denomination: USDC,
-    amountRequested: "24.8",
+    amountRequested: shape.amount ?? "24.8",
     createsShareAccount: false,
     unsignedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
     lastValidBlockHeight: "100",
@@ -385,6 +388,90 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
     expect(readOwnerMintBalance).not.toHaveBeenCalled();
     expect(tick().payload).toMatchObject({ follow_up_pending: 1, orphaned: 0 });
+  });
+
+  it("does not let an in-flight sibling-vault deposit suppress the orphan judgement", async () => {
+    // SOLA9-485: a same-token `requested` deposit for a SIBLING vault is not
+    // this advisory's follow-up leg. It must not return follow_up_pending
+    // before expiry/grace or the balance read: an expired advisory with the
+    // swapped funds still in the wallet stays visible to operators.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("requested", {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(readOwnerMintBalance).toHaveBeenCalled();
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(1);
+    expect(eventsNamed("sdp_api_earn_split_swap_ambiguous")).toHaveLength(0);
+    expect(tick().payload).toMatchObject({ follow_up_pending: 0, orphaned: 1, ambiguous: 0 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("treats only the exact-floor own-vault deposit as the in-flight follow-up", async () => {
+    // The follow-up is sized to exactly the floor into exactly this vault, so
+    // an own-vault deposit for any other amount is not the intended leg either:
+    // it must not hold the orphan judgement any more than a sibling can.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("requested", { amount: "1" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(readOwnerMintBalance).toHaveBeenCalled();
+    expect(tick().payload).toMatchObject({ follow_up_pending: 0, orphaned: 1 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("does not let a sibling-vault follow-up BUILD hold the orphan judgement", async () => {
+    // The build leg of the still-working branch binds to the same identity:
+    // an unconsumed build for a sibling vault does not prove this advisory's
+    // partner is mid-follow-up.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpBuild(5 * MINUTE, {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(readOwnerMintBalance).toHaveBeenCalled();
+    expect(tick().payload).toMatchObject({ follow_up_pending: 0, orphaned: 1 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("does not let a non-floor own-vault follow-up BUILD hold the orphan judgement", async () => {
+    // The build leg binds to the floor as well as the vault: the follow-up is
+    // sized to exactly the swap floor (the movement check requires it too), so
+    // a build for this vault at any other amount is a different deposit and
+    // must not delay the orphan signal for a build window.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpBuild(5 * MINUTE, { amount: "30" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(readOwnerMintBalance).toHaveBeenCalled();
+    expect(tick().payload).toMatchObject({ follow_up_pending: 0, orphaned: 1 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("keeps an advisory open while a same-token deposit is in flight and the balance shows no rise", async () => {
+    // The balance can already reflect a just-landed deposit before the ledger
+    // row is observed committed, so a no-rise reading while one is in flight is
+    // not evidence the swap never broadcast: wait, never close unfunded.
+    await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("requested", {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ pending: 1, unfunded: 0 });
+    expect(readOwnerMintBalance).toHaveBeenCalled();
   });
 
   it("treats a recent follow-up BUILD as the partner still working", async () => {
