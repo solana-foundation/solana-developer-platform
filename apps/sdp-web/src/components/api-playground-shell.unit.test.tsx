@@ -163,6 +163,80 @@ describe("ApiPlaygroundShell response identity isolation", () => {
     expect(view.container.textContent).not.toContain("200 OK");
   });
 
+  it("discards a response that resolves after switching away and back to the same key", async () => {
+    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
+    const deferred: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          deferred.push(resolve);
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Round trip through another identity before the first response resolves:
+    // the epoch guard must discard it even though the visible identity is
+    // back to key-a.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    await act(async () => {
+      deferred[0]?.(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "1000 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+
+    expect(view.container.textContent).not.toContain('"project": "project-a"');
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+    expect(view.container.textContent).not.toContain("200 OK");
+
+    // A request issued under the restored identity still works and renders.
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await act(async () => {
+      deferred[1]?.(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "42 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+
+    expect(view.container.textContent).toContain('"balance": "42 SOL"');
+    expect(view.container.textContent).toContain("200 OK");
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+  });
+
   it("executes subsequent requests with the new key identity after a change", async () => {
     storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
     storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
