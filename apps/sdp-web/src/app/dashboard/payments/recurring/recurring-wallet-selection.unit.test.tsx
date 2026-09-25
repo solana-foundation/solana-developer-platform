@@ -344,12 +344,22 @@ describe("Recurring payment funding-wallet token integrity", () => {
     const user = userEvent.setup();
     await openEditorAndSelectWallet(user, /Wallet B/);
 
+    // The wallet switch alone cannot save a currency behind the user's back:
+    // the stale token is cleared (the picker falls back to its placeholder)
+    // and Save is refused until an explicit choice is made.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(writes).toEqual([]));
+    expect(screen.getByRole("button", { name: "Currency" }).textContent).toContain(
+      "Select a currency."
+    );
+
     // The currency picker must reflect the replacement wallet's inventory: the
-    // retained token from wallet A is no longer on offer.
+    // retained token from wallet A is no longer on offer, and the persisted
+    // token must be picked explicitly.
     await user.click(screen.getByRole("button", { name: "Currency" }));
     expect(screen.getByRole("button", { name: /USDT/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /USDC/ })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Currency" }));
+    await user.click(screen.getByRole("button", { name: /USDT/ }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(writes).toHaveLength(1));
@@ -422,5 +432,33 @@ describe("Recurring payment funding-wallet token integrity", () => {
 
     expect(screen.getByText("Select a currency.")).toBeTruthy();
     await waitFor(() => expect(writes).toEqual([]));
+  });
+
+  it("saves an amount-only edit when the held token account has a zero balance", async () => {
+    // The balances feed omits zero-balance token accounts, but the stored pair
+    // stays valid (fund-later): an edit that leaves the wallet/token pair
+    // unchanged must not be blocked by the balance-derived currency options.
+    const zeroBalance = { ...walletA, balances: [] };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?")) {
+        return Response.json({ data: { wallets: [zeroBalance] } });
+      }
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+      }
+      return Response.json({ data: { recurringPayment: payment } });
+    });
+    renderDetailWorkspace([zeroBalance]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.clear(screen.getByLabelText("Amount"));
+    await user.type(screen.getByLabelText("Amount"), "5");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toEqual({ amount: "5" });
   });
 });

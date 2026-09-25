@@ -400,6 +400,25 @@ function RecurringPaymentLifecycleBand({
   return null;
 }
 
+/**
+ * Whether the selected currency may be persisted for the selected funding
+ * wallet. The balances feed omits zero-balance token accounts, but the API
+ * still accepts them (fund-later): the payment's own unchanged pair stays
+ * valid even when its token is missing from the balance-derived options.
+ */
+function selectedTokenIsHeldFor(
+  assetOptions: { value: string }[],
+  selectedToken: string,
+  payment: Pick<PaymentRecurringPayment, "token" | "sourceCustodyWalletId">,
+  selectedCustodyWalletId: string
+): boolean {
+  return (
+    assetOptions.some((asset) => asset.value === selectedToken) ||
+    (selectedToken === payment.token && selectedCustodyWalletId === payment.sourceCustodyWalletId)
+  );
+}
+
+/* react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing orchestration: the detail workspace keeps the editor modal, wallet/currency re-binding and lifecycle actions in one component */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
@@ -447,7 +466,12 @@ export function RecurringPaymentDetailWorkspace({
   // Currency options follow the mutable funding-wallet selection, so a
   // replacement wallet never leaves the previous wallet's token selected.
   const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? null, {}, t);
-  const selectedTokenIsHeld = assetOptions.some((asset) => asset.value === selectedToken);
+  const selectedTokenIsHeld = selectedTokenIsHeldFor(
+    assetOptions,
+    selectedToken,
+    recurringPayment,
+    selectedCustodyWalletId
+  );
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -880,15 +904,14 @@ export function RecurringPaymentDetailWorkspace({
               value={selectedCustodyWalletId}
               onChange={(value) => {
                 setSelectedCustodyWalletId(value);
-                // A wallet change re-binds the currency to the replacement
-                // wallet's inventory: keep the token only if the new wallet
-                // holds it too, otherwise fall back to its first asset.
+                // A wallet switch never re-binds the currency behind the
+                // user's back: if the replacement wallet does not hold the
+                // current token, the selection is cleared and saving stays
+                // blocked until an explicit currency choice is made.
                 const nextWallet = liveWallets.find((entry) => entry.id === value) ?? null;
                 const nextAssets = recurringPaymentAssetOptions(nextWallet, {}, t);
                 setSelectedToken((current) =>
-                  nextAssets.some((asset) => asset.value === current)
-                    ? current
-                    : (nextAssets[0]?.value ?? "")
+                  nextAssets.some((asset) => asset.value === current) ? current : ""
                 );
                 setPaymentValidationError(null);
               }}
