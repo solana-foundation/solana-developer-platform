@@ -1422,6 +1422,12 @@ export class TokenService {
    * record stands for `POST /supply/refresh` to reconcile. Returning false is
    * the caller's signal to keep the retained-reservation posture.
    *
+   * Like every other cache write, the subtraction advances
+   * `total_supply_updated_at`: a settled burn whose bookkeeping has not run
+   * yet compares its admission timestamp against this one, and a release that
+   * moved the cache without moving the stamp could leave the burn to
+   * subtract a supply change that already absorbed it.
+   *
    * @returns whether the reservation was released and the row cleared.
    */
   async releaseUnbroadcastMintReservation(input: {
@@ -1459,10 +1465,11 @@ export class TokenService {
                  COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
                  0
                )::text,
+               total_supply_updated_at = ?,
                updated_at = ?
            WHERE id = ?${tenant.clause}`
         )
-        .bind(input.deltaBaseUnits, now, input.tokenId, ...tenant.values)
+        .bind(input.deltaBaseUnits, now, now, input.tokenId, ...tenant.values)
         .run();
       return released === 1;
     });

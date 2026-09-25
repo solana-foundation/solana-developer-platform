@@ -546,6 +546,79 @@ describe("TokenService", () => {
       ).resolves.toBe("1000000000");
     });
 
+    it("advances the supply stamp on release so a settled burn is not subtracted twice", async () => {
+      // A settled burn's bookkeeping skips when the cache changed since the burn
+      // was admitted — the refresh that brought the cache down already absorbed
+      // the burn. The release is a cache change too, so it must move the same
+      // stamp: a refresh that had to hold the cache above the chain total for
+      // this in-flight mint left the stamp on the burn's baseline, and a release
+      // that lowered the cache without moving it would let the burn subtract a
+      // supply change that already includes it — understating supply and
+      // admitting mints past the cap.
+      const tokenId = "tok_cap_release_burn_stamp";
+      const transactionId = "ttx_cap_release_burn_stamp";
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", "2000000000");
+      await tokenService.reserveMintSupply(tokenId, "600000000");
+      // The stamp the burn reads when it is admitted: the one the reservation set.
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, serialized_tx, operation_params,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, 'mint', 'pending', NULL, ?, ?, ?)`
+        )
+        .bind(
+          `txn_${tokenId}_pending_executed_0`,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "600" }),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+
+      // The chain snapshot observes the settled burn, but the in-flight mint
+      // holds the cache above it — and the stamp on the burn's baseline.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1500000000");
+
+      await expect(
+        tokenService.releaseUnbroadcastMintReservation({
+          transactionId: `txn_${tokenId}_pending_executed_0`,
+          tokenId,
+          deltaBaseUnits: "600000000",
+        })
+      ).resolves.toBe(true);
+
+      // The cache came down to the chain total, and the stamp moved off the
+      // burn's baseline with it.
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+      expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
+
+      // So the settled burn's bookkeeping leaves the already-absorbed burn alone.
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+    });
+
     it("refuses to release a reservation whose row already left the unsent state", async () => {
       // The guard in the reverse direction: a row that is no longer the unsigned,
       // unsent mint the execute path leaves behind may have settled — releasing

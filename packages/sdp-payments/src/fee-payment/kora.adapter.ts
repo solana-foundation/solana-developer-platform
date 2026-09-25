@@ -177,6 +177,13 @@ export class KoraAdapter implements FeePaymentPort {
     //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
     //    HTTP gateway errors that resolve on the next attempt.
     const maxRetries = 2;
+    // A retryable failure — a timeout, a dropped connection, a gateway error —
+    // is an ambiguous verdict: that attempt may have reached Kora and the
+    // transaction may already be live on-chain. Once one has happened, a later
+    // attempt's structured refusal no longer proves Kora signed and sent
+    // nothing (the retry of a landed submission answers "already processed",
+    // which maps to a refusal code), so the outcome must stay ambiguous.
+    let ambiguousAttempt = false;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
@@ -196,11 +203,23 @@ export class KoraAdapter implements FeePaymentPort {
         return signature;
       } catch (error) {
         if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
+          ambiguousAttempt = true;
           await sleep((attempt + 1) * 500);
           continue;
         }
 
-        throw this.wrapError(error, "Failed to sign and send transaction");
+        const wrapped = this.wrapError(error, "Failed to sign and send transaction");
+        if (
+          ambiguousAttempt &&
+          (wrapped.code === "PROVIDER_REJECTED" || wrapped.code === "SIGNING_FAILED")
+        ) {
+          // Downgrade the refusal to the ambiguity the earlier attempt earned:
+          // callers hold the reservation (and the sponsorship budget) for
+          // reconciliation instead of releasing headroom a live submission
+          // may still consume.
+          throw new FeePaymentError(wrapped.message, "NETWORK_ERROR", wrapped.cause);
+        }
+        throw wrapped;
       }
     }
 
