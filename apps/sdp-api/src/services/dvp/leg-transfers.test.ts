@@ -47,6 +47,12 @@ const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /** 2026-09-10T00:00:00Z, when the trade row was created. */
 const CREATED_AT_SECONDS = 1_789_000_000;
+/**
+ * The instant this sweep runs at, half past the audit hour: as far from
+ * either boundary of the audit's hour block as an instant gets, so a test
+ * that stamps a scan with it and reads at it cannot straddle a boundary.
+ */
+const NOW = Date.parse("2026-09-15T00:30:00.000Z");
 const LEG: DvpLegEscrow = {
   tradeId: "dvp_ledger",
   side: "a",
@@ -394,11 +400,13 @@ describe("syncDvpLegTransfers", () => {
         side: "a",
         cursor: { signature: sig(5), slot: "5" },
         cursorSlotComplete: true,
-        // Scanned this sweep, so the proof is fresh and the audit does not
-        // fall due: the read bounds itself at the cursor.
-        scannedAt: new Date().toISOString(),
+        // Scanned this sweep, at half past the audit hour: the proof is fresh
+        // and the audit does not fall due, so the read bounds itself at the
+        // cursor.
+        scannedAt: new Date(NOW).toISOString(),
       },
-      { remaining: 10 }
+      { remaining: 10 },
+      NOW
     );
 
     expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
@@ -479,8 +487,10 @@ describe("syncDvpLegTransfers", () => {
       { before: null, until: null },
       { before: sig(2_001), until: null },
       { before: sig(2_001), until: null },
-      // The fourth read is the fallback, bounded at the saved cursor.
+      // The fourth read is the fallback, bounded at the saved cursor; the
+      // fifth is the probe of the region below it.
       { before: null, until: sig(7) },
+      { before: sig(7), until: null },
     ]);
     // The fallback records what is new behind the cursor and saves the
     // position, so the leg keeps moving instead of stalling.
@@ -491,6 +501,91 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(8), slot: "8" },
         cursorSlotComplete: false,
         scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // The region below the cursor is where a node's omission sits, and the
+  // probe of it is the one read a walk from the top cannot reach once the
+  // history exceeds the scan cap: the node serves what it omitted there once
+  // its index catches up, and the walk bounded at the cursor alone never
+  // lists it again.
+  it("probes below the saved cursor for a movement the node omitted", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? [] : page.before === sig(7) ? history([6]) : []
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The probe found the omitted movement behind the cursor and recorded it.
+    expect(rows.has(sig(6))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(6), slot: "6" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // A probe that cannot reach the floor has not seen the whole of what the
+  // node holds, so the scan does not settle: the leg stays due and the next
+  // sweep asks again.
+  it("leaves the leg due when the region below the cursor also exceeds the scan cap", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(history([8]))
+      .mockResolvedValue(fullPage);
+    served.set(sig(8), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The newer region is still recorded, but the read was not complete.
+    expect(rows.has(sig(8))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: null,
       },
     ]);
   });
@@ -859,11 +954,12 @@ describe("syncDvpLegTransfers", () => {
           side: "a",
           cursor: { signature: sig(1), slot: "420" },
           cursorSlotComplete: true,
-          // Scanned this sweep, so the audit does not fall due and the read
-          // bounds itself at the cursor.
-          scannedAt: new Date().toISOString(),
+          // Scanned this sweep, at half past the audit hour: the audit does
+          // not fall due, so the read bounds itself at the cursor.
+          scannedAt: new Date(NOW).toISOString(),
         },
-        { remaining: 10 }
+        { remaining: 10 },
+        NOW
       );
 
       expect(saved).toEqual([
@@ -894,9 +990,10 @@ describe("syncDvpLegTransfers", () => {
           side: "a",
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
-          scannedAt: new Date(Date.now() - 2 * HISTORY_AUDIT_MS).toISOString(),
+          scannedAt: new Date(NOW - 2 * HISTORY_AUDIT_MS).toISOString(),
         },
-        { remaining: 10 }
+        { remaining: 10 },
+        NOW
       );
 
       expect(readTransaction).not.toHaveBeenCalled();

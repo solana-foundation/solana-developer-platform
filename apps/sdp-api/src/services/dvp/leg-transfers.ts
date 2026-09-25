@@ -355,16 +355,18 @@ function historyFloor(leg: DvpLegEscrow): bigint {
  * oldest of a truncated read would leave a gap behind it no later read fills.
  * `floorReached` says whether the listing ran past that creation: the read
  * then saw depth below every slot it lists, which is proof no later read has
- * to see again.
+ * to see again. `from` starts the walk below a signature instead of at the
+ * top, which is how a bounded read reaches the region its bound excludes.
  */
 async function readHistorySince(
   reader: DvpEscrowHistoryReader,
   leg: DvpLegEscrow,
-  until: Signature | null
+  until: Signature | null,
+  from: Signature | null = null
 ): Promise<{ entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null> {
   const floor = historyFloor(leg);
   const newestFirst: DvpEscrowHistoryEntry[] = [];
-  let before: Signature | null = null;
+  let before: Signature | null = from;
   for (let page = 0; page < HISTORY_PAGE_CAP; page += 1) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each page starts where the previous one ended.
     const entries = await reader.listSignatures(leg.escrow, { before, until });
@@ -382,6 +384,46 @@ async function readHistorySince(
     before = oldest.signature;
   }
   return null;
+}
+
+/**
+ * Reads a leg's escrow history on from a saved cursor after the walk from the
+ * top ran past the scan cap: the signatures newer than the cursor, and the
+ * region below it as well, because that is where the node's omission sits —
+ * an omitted movement is served there once the node's index catches up, and a
+ * walk bounded at the cursor alone would never list it. Null when even the
+ * newer region exceeds the cap. `whole` says whether the region below the
+ * cursor was read to the floor; a probe that the cap cut off has not seen
+ * everything the node holds, so the sweep must not settle on it.
+ *
+ * @param reader - The chain.
+ * @param leg - The escrow to read.
+ * @param cursor - The saved read position to read on from.
+ */
+async function readOnPastCap(
+  reader: DvpEscrowHistoryReader,
+  leg: DvpLegEscrow,
+  cursor: { signature: Signature; slot: string }
+): Promise<{
+  read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean };
+  whole: boolean;
+} | null> {
+  const newer = await readHistorySince(reader, leg, cursor.signature);
+  if (newer === null) {
+    return null;
+  }
+  const older = await readHistorySince(reader, leg, null, cursor.signature);
+  if (older === null) {
+    return { read: newer, whole: false };
+  }
+  // Newest first, so the region below the cursor follows the region above it.
+  return {
+    read: {
+      entries: [...newer.entries, ...older.entries],
+      floorReached: newer.floorReached || older.floorReached,
+    },
+    whole: true,
+  };
 }
 
 type EntryStep = "resolved" | "stop";
@@ -550,6 +592,9 @@ async function removeDroppedTransfers(
  * @param leg - The escrow to read.
  * @param scan - Where this leg's last read stopped, or null for a first read.
  * @param budget - Transactions the sweep may still read; decremented here.
+ * @param now - The instant this sweep runs at, which stamps the scan and
+ *   paces the audit; defaults to the clock. The sweep passes its own so every
+ *   leg in it agrees on the time.
  * @returns How many transfers were recorded.
  */
 export async function syncDvpLegTransfers(
@@ -557,7 +602,8 @@ export async function syncDvpLegTransfers(
   transfers: DvpLegTransferRepository,
   leg: DvpLegEscrow,
   scan: DvpLegTransferScan | null,
-  budget: DvpLegTransferBudget
+  budget: DvpLegTransferBudget,
+  now: number = Date.now()
 ): Promise<number> {
   // A cursor is a safe `until` only when the read that reached it saw the
   // listing continue below its slot. A page that stops inside the cursor's own
@@ -574,23 +620,32 @@ export async function syncDvpLegTransfers(
   const auditDue =
     scan?.cursorSlotComplete === true &&
     scannedAt !== null &&
-    Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) <
-      Math.floor(Date.now() / HISTORY_AUDIT_MS);
+    Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) < Math.floor(now / HISTORY_AUDIT_MS);
   const since = scan?.cursorSlotComplete === true && !auditDue ? (stored?.signature ?? null) : null;
+  // Whether the sweep saw the leg's whole history. The fallback below reads
+  // what it can of a history the cap cut off, and a probe that could not reach
+  // the floor leaves this false, so the leg stays due and asks again.
+  let wholeHistory = true;
   let read = await readHistorySince(reader, leg, since);
   if (read === null && stored !== null && since === null) {
     // The walk from the top ran past the scan cap. Resolving the oldest of a
     // truncated read would leave a gap behind it, but giving up here stalls
     // the leg on a read it can never finish — an unproven cursor un-bounds
     // every later sweep too. The saved cursor is the bound this leg read
-    // behind before the watermark existed, so the sweep reads on from there
-    // and stays due: the watermark keeps the next sweep asking for the whole
-    // history, and the audit keeps that ask alive for a proven one.
+    // behind before the watermark existed, so the sweep reads on from there.
+    // The watermark keeps the next sweep asking for the whole history, and
+    // the audit keeps that ask alive for a proven one.
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
       "dvp transfers: escrow history from the top exceeds the scan cap; reading on from the saved cursor"
     );
-    read = await readHistorySince(reader, leg, stored.signature);
+    const fallback = await readOnPastCap(reader, leg, stored);
+    if (fallback === null) {
+      read = null;
+    } else {
+      read = fallback.read;
+      wholeHistory = fallback.whole;
+    }
   }
   if (read === null) {
     getLogger().warn(
@@ -612,7 +667,7 @@ export async function syncDvpLegTransfers(
   // only ever saved over a slot the listing continued below.
   let cursorSlotComplete = scan?.cursorSlotComplete ?? false;
   let finalizedSoFar = true;
-  let complete = true;
+  let complete = wholeHistory;
   let recorded = 0;
   for (const entry of [...newestFirst].reverse()) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
@@ -654,7 +709,7 @@ export async function syncDvpLegTransfers(
     side: leg.side,
     cursor,
     cursorSlotComplete: cursor === null ? false : cursorSlotComplete,
-    scannedAt: settled ? new Date().toISOString() : null,
+    scannedAt: settled ? new Date(now).toISOString() : null,
   });
   return recorded;
 }
