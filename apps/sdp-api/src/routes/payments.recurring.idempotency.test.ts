@@ -118,6 +118,44 @@ describe("Payments routes — recurring payment create idempotency", () => {
     );
   });
 
+  it("answers a concurrent same-key race with one schedule and one live policy record", async () => {
+    const body = await createBody();
+
+    // Two identical creates race on one key: both pass the pre-create replay
+    // lookup before either inserts, so the partial unique index — not the
+    // lookup — picks the winner.
+    const [firstResponse, secondResponse] = await Promise.all([
+      postCreate(body, "recurring-key-race"),
+      postCreate(body, "recurring-key-race"),
+    ]);
+    expect(firstResponse.status).toBeLessThan(400);
+    expect(secondResponse.status).toBeLessThan(400);
+    expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 201]);
+
+    const first = (await parseRecurringResponse(firstResponse)).data.recurringPayment;
+    const second = (await parseRecurringResponse(secondResponse)).data.recurringPayment;
+    expect(second.id).toBe(first.id);
+    expect(await countRows()).toBe(1);
+
+    // Both racers ran policy enforcement, so both recorded a wallet
+    // operation. The loser's insert fails the unique index, and its policy
+    // records are retired to `canceled` — the status velocity sums exclude —
+    // so one create leaves one live audit trail instead of an `evaluated`
+    // duplicate that counts twice.
+    const { rows: operations } = await getDb(env)
+      .prepare(
+        `SELECT status, COUNT(*)::int AS count FROM wallet_operations
+         WHERE organization_id = ? AND project_id = ? AND operation_type = 'recurring_payment_create'
+         GROUP BY status ORDER BY status`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .all<{ status: string; count: number }>();
+    expect(operations).toEqual([
+      { status: "canceled", count: 1 },
+      { status: "evaluated", count: 1 },
+    ]);
+  });
+
   it("rejects the same Idempotency-Key with a different body", async () => {
     const body = await createBody();
 
