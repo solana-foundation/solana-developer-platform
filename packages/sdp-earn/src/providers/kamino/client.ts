@@ -5,6 +5,7 @@ import {
 } from "@sdp/types";
 import { providerUnavailable } from "../../errors";
 import { providerFetchJson } from "../../fetch";
+import { resolveCatalogueRpcUrl } from "../../solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnLiveMetricsProvider,
@@ -447,8 +448,9 @@ export function distillKaminoVault(
  * Two facts shape everything else here (measured 2026-08-14):
  *
  * - **No API credential.** The REST shelf is public — there is no
- *   `KAMINO_API_KEY` anywhere. The one `ctx.env` read is `SOLANA_RPC_URL`, on
- *   the devnet path, and a blank one fails closed with
+ *   `KAMINO_API_KEY` anywhere. The one `ctx.env` read is the devnet RPC
+ *   resolution (`resolveCatalogueRpcUrl(ctx.env, "devnet")`), and a
+ *   configuration that serves no devnet endpoint fails closed with
  *   PROVIDER_NOT_CONFIGURED rather than silently emptying the shelf.
  * - **Two clusters, two SOURCES.** `ctx.environment` selects between them:
  *   production reads the mainnet REST shelf (`hostCluster: "mainnet-beta"`),
@@ -610,8 +612,18 @@ export class KaminoEarnClient extends StubEarnClient implements EarnLiveMetricsP
    *   non-production (see `getStrategyMetrics`).
    */
   async _listDevnetStrategies(ctx: EarnRuntimeContext): Promise<ProviderStrategySnapshot[]> {
-    const rpcUrl = ctx.env.SOLANA_RPC_URL ?? "";
-    const vaults = await listKaminoDevnetVaults(rpcUrl);
+    // The catalogue sync walks BOTH clusters in one process, so the RPC is
+    // resolved PER CLUSTER: a dual-cluster deployment runs the process
+    // endpoint (`SOLANA_RPC_URL`) on mainnet while this devnet read must reach
+    // `SOLANA_DEVNET_RPC_URL`. Reading the process endpoint directly failed the
+    // genesis proof as PROVIDER_NOT_CONFIGURED — a steady-state skip for the
+    // sync, which then never converged the devnet sub-shelf and left
+    // previously active devnet rows `fundable` and deposit-admissible
+    // (SOLA9-133). `resolveCatalogueRpcUrl` falls back to the process endpoint
+    // when no override exists, so single-cluster deployments are unchanged,
+    // and `listKaminoDevnetVaults` still proves whatever URL comes back by
+    // genesis hash before reading a single vault.
+    const vaults = await listKaminoDevnetVaults(resolveCatalogueRpcUrl(ctx.env, "devnet"));
 
     return (
       vaults

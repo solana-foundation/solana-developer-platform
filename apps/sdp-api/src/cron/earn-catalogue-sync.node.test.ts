@@ -529,6 +529,71 @@ describe("runEarnCatalogueSyncIfDue", () => {
     expect(mocks.deprecateUnlistedStrategies.mock.calls.every(isMirrorConvergence)).toBe(true);
   });
 
+  describe("the devnet stale-row policy (SOLA9-133)", () => {
+    const seededDevnetRows = [
+      {
+        provider_reference: "kamino-allez-usdc",
+        host_cluster: "devnet",
+        status: "active",
+        current_apy: "0.04",
+        tvl_usd: 1_000_000,
+      },
+      {
+        provider_reference: "kamino-steakhouse-usdc",
+        host_cluster: "devnet",
+        status: "active",
+        current_apy: "0.03",
+        tvl_usd: 500_000,
+      },
+    ];
+
+    it("deprecates a seeded active devnet row the provider no longer lists", async () => {
+      // The devnet read succeeds this pass — the per-cluster override is
+      // honoured (proven at the client level), so this is a TRUTHFUL shelf,
+      // not a steady-state absence. The stale row must leave the fundable set
+      // explicitly, scoped to the devnet sub-shelf.
+      mocks.listStrategyFigures.mockResolvedValue(seededDevnetRows);
+      installProviders({
+        kamino: makeProvider(
+          "kamino",
+          vi.fn(async () => [makeSnapshot("kamino-allez-usdc", "devnet")])
+        ),
+      });
+
+      await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("synced");
+
+      expect(mocks.deprecateUnlistedStrategies).toHaveBeenCalledWith({
+        provider: "kamino",
+        environment: "sandbox",
+        hostCluster: "devnet",
+        listedProviderReferences: ["kamino-allez-usdc"],
+      });
+    });
+
+    it("never delists the seeded devnet shelf off a steady-state own-read skip", async () => {
+      // The preserved half of the policy: PROVIDER_NOT_CONFIGURED stays a
+      // reliable no-shelf answer, so a bad RPC response must not mass-delist
+      // active rows. The seeded devnet rows keep their last state until a pass
+      // can prove the shelf truthfully.
+      mocks.listStrategyFigures.mockResolvedValue(seededDevnetRows);
+      installProviders({
+        kamino: makeProvider(
+          "kamino",
+          vi.fn(async () => {
+            throw new SdpEarnError("PROVIDER_NOT_CONFIGURED");
+          })
+        ),
+      });
+
+      await expect(runEarnCatalogueSyncIfDue(env)).resolves.toBe("synced");
+
+      const devnetDelists = mocks.deprecateUnlistedStrategies.mock.calls.filter(
+        (call) => (call[0] as { hostCluster?: string }).hostCluster === "devnet"
+      );
+      expect(devnetDelists).toEqual([]);
+    });
+  });
+
   it("keeps a deprecation failure inside the provider's pass", async () => {
     // Same degradation contract as upsert: the catalogue stays stale for an
     // hour, the tick still counts as run, and the slot is not released.
