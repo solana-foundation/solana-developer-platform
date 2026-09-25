@@ -326,4 +326,81 @@ describe("PaymentRecurringPaymentsRepository (postgres)", () => {
       })
     ).toEqual(before);
   });
+
+  it("fences lifecycle finalization on the expected prior due identity", async () => {
+    const { account, counterparty } = await seedCounterpartyAccount();
+    const createdAt = "2026-06-29T12:00:00.000Z";
+    const created = await repo.createRecurringPayment({
+      id: "recpay_repo_lifecycle_due_fence",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+      sourceWalletId: TEST_PROVIDER_WALLET_ID,
+      sourceAddress: TEST_SOURCE_ADDRESS,
+      counterpartyId: counterparty.id,
+      counterpartyAccountId: account.id,
+      destinationAddress: "Destination111111111111111111111111111111",
+      token: "USDC",
+      amount: "10.00",
+      periodHours: 24,
+      firstCollectionAt: null,
+      metadataUri: null,
+      createdBy: TEST_USER.id,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    expect(created).not.toBeNull();
+    if (created === null) throw new Error("Failed to create recurring payment");
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO payment_subscription_plans (
+           id, organization_id, project_id, owner_wallet_id, owner_address,
+           token, amount, period_hours, program_plan_id, status
+         ) VALUES ('psp_lifecycle_due_fence', ?, ?, 'wallet_sender', ?, 'USDC', '10.00', 24, '9007199254740991', 'active')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID, TEST_SOURCE_ADDRESS)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO payment_subscriptions (
+           id, organization_id, project_id, plan_id, counterparty_id,
+           subscriber_address, status
+         ) VALUES ('psub_lifecycle_due_fence', ?, ?, 'psp_lifecycle_due_fence', ?, 'Subscriber111111111111111111111111111111111', 'canceled')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID, counterparty.id)
+      .run();
+    await db
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'resuming', subscription_id = 'psub_lifecycle_due_fence', next_collection_due_at = ? WHERE id = ?"
+      )
+      .bind("2026-06-28T12:00:00.000Z", created.id)
+      .run();
+
+    const fenced = await repo.updateRecurringPaymentLifecycle({
+      recurringPaymentId: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      status: "active",
+      expectedStatus: "resuming",
+      nextCollectionDueAt: "2026-06-30T12:00:00.000Z",
+      expectedNextCollectionDueAt: "2026-06-27T12:00:00.000Z",
+      updatedAt: "2026-06-29T12:01:00.000Z",
+    });
+    expect(fenced).toBeNull();
+
+    const updated = await repo.updateRecurringPaymentLifecycle({
+      recurringPaymentId: created.id,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      status: "active",
+      expectedStatus: "resuming",
+      nextCollectionDueAt: "2026-06-30T12:00:00.000Z",
+      expectedNextCollectionDueAt: "2026-06-28T12:00:00.000Z",
+      updatedAt: "2026-06-29T12:01:00.000Z",
+    });
+    expect(updated).not.toBeNull();
+    expect(updated?.status).toBe("active");
+    expect(updated?.next_collection_due_at).toBe("2026-06-30T12:00:00.000Z");
+  });
 });
