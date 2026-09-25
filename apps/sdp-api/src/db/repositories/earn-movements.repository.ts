@@ -446,7 +446,9 @@ export interface EarnMovementsRepository {
    * not discharge an advisory, and a still-`requested` one is in flight, not
    * observed. Matches on the deposit token rather than the vault on purpose: a
    * partner may legitimately deposit the swapped tokens into a sibling
-   * strategy of the same token, and the funds reached a vault either way.
+   * strategy of the same token, so a committed sibling is the ambiguity signal
+   * and a covering resolution, while the detector binds the still-working
+   * short-circuit itself to the advisory's provider and vault (SOLA9-485).
    */
   listExternalWalletDepositsSince(params: {
     organizationId: string;

@@ -102,12 +102,15 @@ export interface EarnSplitSwapAdvisoriesRepository {
     observedAtoms?: string | null;
   }): Promise<EarnSplitSwapAdvisoryRow | null>;
   /**
-   * Newest UNCONSUMED follow-up BUILD for the advisory's owner and deposit
-   * token created after the advisory, or null. An unconsumed build proves the
-   * partner is alive and past the swap while the movement does not exist yet
-   * (it appears only at submit). A consumed build is deliberately excluded:
-   * its movement's STATUS is the evidence then, and a failed one must not keep
-   * the advisory pending.
+   * Newest UNCONSUMED follow-up BUILD for the advisory's owner, deposit token,
+   * provider and vault created after the advisory, or null. An unconsumed
+   * build proves the partner is alive and past the swap while the movement
+   * does not exist yet (it appears only at submit). A consumed build is
+   * deliberately excluded: its movement's STATUS is the evidence then, and a
+   * failed one must not keep the advisory pending. Bound to the advisory's
+   * provider and vault so only a build for the intended leg can hold the
+   * judgement (SOLA9-485); a sibling-vault build is not this advisory's
+   * still-working evidence.
    */
   findFollowUpBuildAt(params: {
     organizationId: string;
@@ -116,6 +119,8 @@ export interface EarnSplitSwapAdvisoriesRepository {
     ownerAddress: string;
     depositTokenMint: string;
     createdAfter: string;
+    provider: string;
+    vaultAddress: string;
   }): Promise<string | null>;
 }
 
@@ -275,6 +280,8 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
               AND project_id IS NOT DISTINCT FROM ?
               AND environment = ?
               AND owner_address = ?
+              AND provider = ?
+              AND vault_address = ?
               AND direction = 'deposit'
               AND token_mint = ?
               AND movement_id IS NULL
@@ -287,6 +294,8 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
           params.projectId,
           params.environment,
           params.ownerAddress,
+          params.provider,
+          params.vaultAddress,
           params.depositTokenMint,
           params.createdAfter
         )
