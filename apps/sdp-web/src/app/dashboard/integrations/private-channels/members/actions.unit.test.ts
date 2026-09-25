@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createProjectBoundSdpApiClient: vi.fn(),
   getSelectedProjectId: vi.fn(),
   createPrivateChannelPrincipal: vi.fn(),
+  fetchPrivateChannelPrincipals: vi.fn(),
   verifyPrivateChannelWallet: vi.fn(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock("@/lib/private-channels", () => ({
   addPrincipalChannelMembership: vi.fn(),
   createPrivateChannelPrincipal: mocks.createPrivateChannelPrincipal,
   disablePrivateChannelPrincipal: vi.fn(),
+  fetchPrivateChannelPrincipals: mocks.fetchPrivateChannelPrincipals,
   removePrincipalChannelMembership: vi.fn(),
   verifyPrivateChannelWallet: mocks.verifyPrivateChannelWallet,
 }));
@@ -62,6 +64,7 @@ describe("createAndVerifyPrincipalAction project binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createProjectBoundSdpApiClient.mockResolvedValue(boundClient);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([]);
   });
 
   it("binds both writes to the rendered project through one guarded client", async () => {
@@ -144,7 +147,10 @@ describe("createAndVerifyPrincipalAction project binding", () => {
       projectId: RENDERED_PROJECT,
     });
 
-    expect(result).toMatchObject({ ok: false, message: "DashboardPrivateChannels.verifiedWallets.walletRequired" });
+    expect(result).toMatchObject({
+      ok: false,
+      message: "DashboardPrivateChannels.verifiedWallets.walletRequired",
+    });
     expect(mocks.getSelectedProjectId).not.toHaveBeenCalled();
     expect(mocks.createProjectBoundSdpApiClient).not.toHaveBeenCalled();
   });
@@ -228,6 +234,82 @@ describe("createAndVerifyPrincipalAction project binding", () => {
     expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
     expect(mocks.verifyPrivateChannelWallet).toHaveBeenCalledWith(boundClient, "wallet_1", {
       principalId: "pcp_existing",
+    });
+  });
+
+  it("resumes the same-named principal when a lost response means the retry carries no id", async () => {
+    // The previous attempt created the principal but its response never
+    // reached the wizard, so the retry re-enters without a principalId. The
+    // principal created by that attempt must be resumed, not duplicated.
+    mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
+      { ...principal, id: "pcp_lost", name: "Mia", createdAt: "2026-09-24T00:00:00.000Z" },
+      { ...principal, id: "pcp_other", name: "Other", createdAt: "2026-09-24T01:00:00.000Z" },
+    ]);
+    mocks.verifyPrivateChannelWallet.mockResolvedValue(verifiedWallet);
+
+    await expect(
+      createAndVerifyPrincipalAction({
+        name: "Mia",
+        walletId: "wallet_1",
+        projectId: RENDERED_PROJECT,
+      })
+    ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
+
+    expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
+    expect(mocks.verifyPrivateChannelWallet).toHaveBeenCalledWith(boundClient, "wallet_1", {
+      principalId: "pcp_lost",
+    });
+  });
+
+  it("resumes the newest active same-named principal and skips disabled ones", async () => {
+    mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
+      { ...principal, id: "pcp_old", name: "Mia", createdAt: "2026-09-23T00:00:00.000Z" },
+      {
+        ...principal,
+        id: "pcp_disabled",
+        name: "Mia",
+        status: "disabled",
+        createdAt: "2026-09-24T02:00:00.000Z",
+      },
+      { ...principal, id: "pcp_newest", name: "Mia", createdAt: "2026-09-24T00:00:00.000Z" },
+    ]);
+    mocks.verifyPrivateChannelWallet.mockResolvedValue(verifiedWallet);
+
+    await expect(
+      createAndVerifyPrincipalAction({
+        name: "Mia",
+        walletId: "wallet_1",
+        projectId: RENDERED_PROJECT,
+      })
+    ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
+
+    expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
+    expect(mocks.verifyPrivateChannelWallet).toHaveBeenCalledWith(boundClient, "wallet_1", {
+      principalId: "pcp_newest",
+    });
+  });
+
+  it("creates a new principal when no same-named one exists", async () => {
+    mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
+      { ...principal, id: "pcp_other", name: "Other" },
+    ]);
+    mocks.createPrivateChannelPrincipal.mockResolvedValue({ principal });
+    mocks.verifyPrivateChannelWallet.mockResolvedValue(verifiedWallet);
+
+    await expect(
+      createAndVerifyPrincipalAction({
+        name: "Mia",
+        walletId: "wallet_1",
+        projectId: RENDERED_PROJECT,
+      })
+    ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
+
+    expect(mocks.createPrivateChannelPrincipal).toHaveBeenCalledWith(boundClient, { name: "Mia" });
+    expect(mocks.verifyPrivateChannelWallet).toHaveBeenCalledWith(boundClient, "wallet_1", {
+      principalId: "pcp_1",
     });
   });
 });

@@ -2,15 +2,16 @@
 
 import type { PrivateChannelVerifiedWalletDto } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import {
   addPrincipalChannelMembership,
   createPrivateChannelPrincipal,
   disablePrivateChannelPrincipal,
+  fetchPrivateChannelPrincipals,
   removePrincipalChannelMembership,
   verifyPrivateChannelWallet,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
-import { getTranslations } from "@/i18n/server";
 import { bindRenderedProjectClient } from "../private-channels-project-client";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
@@ -29,7 +30,10 @@ export type CreateAndVerifyPrincipalResult =
  * window to reject the verification after the principal was already created,
  * stranding it unverified once the wizard reloads. On a verification failure
  * after creation the created id is returned so a retry re-runs only the
- * verification instead of creating a duplicate principal.
+ * verification instead of creating a duplicate principal. If a response is
+ * lost outright (the wizard never learns the id), a retry that carries no id
+ * resumes the newest active principal with the submitted name instead of
+ * creating a second one.
  */
 export async function createAndVerifyPrincipalAction(input: {
   name: string;
@@ -47,13 +51,23 @@ export async function createAndVerifyPrincipalAction(input: {
     if (!bound.ok) {
       return bound;
     }
+    const name = input.name.trim();
     let principalId = input.principalId;
     if (!principalId) {
-      const { principal } = await createPrivateChannelPrincipal(bound.client, {
-        name: input.name,
-      });
-      principalId = principal.id;
-      revalidatePath(PRINCIPALS_PATH);
+      // A previous attempt whose response was lost never delivered the created
+      // id, so a retry re-enters without one. The wizard submits the same
+      // trimmed name on every attempt; resuming the newest active principal
+      // with that name keeps a lost response from duplicating it.
+      const existing = (await fetchPrivateChannelPrincipals(bound.client))
+        .filter((candidate) => candidate.status === "active" && candidate.name === name)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (existing) {
+        principalId = existing.id;
+      } else {
+        const { principal } = await createPrivateChannelPrincipal(bound.client, { name });
+        principalId = principal.id;
+        revalidatePath(PRINCIPALS_PATH);
+      }
     }
     try {
       const wallet = await verifyPrivateChannelWallet(bound.client, input.walletId, {
