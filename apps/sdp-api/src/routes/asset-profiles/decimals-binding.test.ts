@@ -313,23 +313,27 @@ describe("asset profile public chain.decimals binding across token edits", () =>
     });
     await locked;
 
+    let profileEdit: Promise<Response> | undefined;
+    let tokenEdit: Promise<Response> | undefined;
     try {
-      const profileEdit = app.request(
-        `/v1/issuance/asset-profiles/${profileId}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-          },
-          body: JSON.stringify({
-            issuanceMetadata: {
-              asset: { name: "Editable Scale USD" },
-              chain: { decimals: 18 },
+      profileEdit = Promise.resolve(
+        app.request(
+          `/v1/issuance/asset-profiles/${profileId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
             },
-          }),
-        },
-        env
+            body: JSON.stringify({
+              issuanceMetadata: {
+                asset: { name: "Editable Scale USD" },
+                chain: { decimals: 18 },
+              },
+            }),
+          },
+          env
+        )
       );
 
       // The requests still have to cross the async middleware before reaching
@@ -355,7 +359,7 @@ describe("asset profile public chain.decimals binding across token edits", () =>
       }
       expect(contended).toBe(true);
 
-      const tokenEdit = patchToken(tokenId, { decimals: 9 });
+      tokenEdit = Promise.resolve(patchToken(tokenId, { decimals: 9 }));
       releaseTokenRow();
 
       const [profileResponse, tokenResponse] = await Promise.all([
@@ -371,6 +375,16 @@ describe("asset profile public chain.decimals binding across token edits", () =>
       // hangs instead of reporting the failure. Idempotent on the success
       // path, where the lock is released before the awaits above.
       releaseTokenRow();
+      // Settle the started work too, so nothing dangles into pool teardown and
+      // a late rejection cannot mask the original failure.
+      const started: Promise<unknown>[] = [holdTokenRow];
+      if (profileEdit) {
+        started.push(profileEdit);
+      }
+      if (tokenEdit) {
+        started.push(tokenEdit);
+      }
+      await Promise.allSettled(started);
     }
     await holdTokenRow;
 
