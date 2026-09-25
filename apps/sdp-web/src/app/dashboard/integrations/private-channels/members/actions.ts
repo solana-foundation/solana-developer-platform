@@ -31,9 +31,13 @@ export type CreateAndVerifyPrincipalResult =
  * stranding it unverified once the wizard reloads. On a verification failure
  * after creation the created id is returned so a retry re-runs only the
  * verification instead of creating a duplicate principal. If a response is
- * lost outright (the wizard never learns the id), a retry that carries no id
- * resumes the newest active principal with the submitted name instead of
- * creating a second one.
+ * lost outright (the wizard never learns the id), a retry attests the lost
+ * response with `isRetry` and carries no id; the action then resumes the
+ * newest active principal with the submitted name instead of creating a
+ * second one. A fresh submission never adopts an existing principal: a
+ * same-named active principal is reported as a name conflict, because
+ * adopting it would attach the submitted wallet — and its verifications —
+ * to channel memberships it was never meant to join.
  */
 export async function createAndVerifyPrincipalAction(input: {
   name: string;
@@ -41,6 +45,8 @@ export async function createAndVerifyPrincipalAction(input: {
   projectId: string;
   /** Retry path: the id of a principal this wizard already created. */
   principalId?: string;
+  /** Retry path: the previous attempt's response was lost, so no id is known. */
+  isRetry?: boolean;
 }): Promise<CreateAndVerifyPrincipalResult> {
   const t = await getTranslations();
   if (!input.walletId) {
@@ -54,14 +60,25 @@ export async function createAndVerifyPrincipalAction(input: {
     const name = input.name.trim();
     let principalId = input.principalId;
     if (!principalId) {
-      // A previous attempt whose response was lost never delivered the created
-      // id, so a retry re-enters without one. The wizard submits the same
-      // trimmed name on every attempt; resuming the newest active principal
-      // with that name keeps a lost response from duplicating it.
       const existing = (await fetchPrivateChannelPrincipals(bound.client))
         .filter((candidate) => candidate.status === "active" && candidate.name === name)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      if (existing && !input.isRetry) {
+        // The wizard attests a lost response with isRetry; without it this is
+        // a new submission, and a same-named principal must be reported as a
+        // conflict rather than silently adopted: verification would join the
+        // submitted wallet to the existing principal's channel memberships.
+        return {
+          ok: false,
+          message: t("DashboardPrivateChannels.members.principalNameTaken"),
+        };
+      }
       if (existing) {
+        // A previous attempt whose response was lost never delivered the
+        // created id, so an attested retry re-enters without one. The wizard
+        // submits the same trimmed name on every attempt; resuming the newest
+        // active principal with that name keeps a lost response from
+        // duplicating it.
         principalId = existing.id;
       } else {
         const { principal } = await createPrivateChannelPrincipal(bound.client, { name });

@@ -237,10 +237,11 @@ describe("createAndVerifyPrincipalAction project binding", () => {
     });
   });
 
-  it("resumes the same-named principal when a lost response means the retry carries no id", async () => {
+  it("resumes the same-named principal when an attested retry carries no id", async () => {
     // The previous attempt created the principal but its response never
-    // reached the wizard, so the retry re-enters without a principalId. The
-    // principal created by that attempt must be resumed, not duplicated.
+    // reached the wizard, so the retry re-enters without a principalId and
+    // attests the lost response. The principal created by that attempt must
+    // be resumed, not duplicated and not reported as a conflict.
     mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
     mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
       { ...principal, id: "pcp_lost", name: "Mia", createdAt: "2026-09-24T00:00:00.000Z" },
@@ -253,6 +254,7 @@ describe("createAndVerifyPrincipalAction project binding", () => {
         name: "Mia",
         walletId: "wallet_1",
         projectId: RENDERED_PROJECT,
+        isRetry: true,
       })
     ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
 
@@ -282,6 +284,7 @@ describe("createAndVerifyPrincipalAction project binding", () => {
         name: "Mia",
         walletId: "wallet_1",
         projectId: RENDERED_PROJECT,
+        isRetry: true,
       })
     ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
 
@@ -291,7 +294,33 @@ describe("createAndVerifyPrincipalAction project binding", () => {
     });
   });
 
-  it("creates a new principal when no same-named one exists", async () => {
+  it("reports a name conflict on a fresh submission that matches an active principal", async () => {
+    // A fresh submission (no attested lost response) must never adopt an
+    // existing principal: verification would attach the submitted wallet to
+    // the existing principal's channel memberships.
+    mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
+      { ...principal, id: "pcp_taken", name: "Mia" },
+    ]);
+
+    await expect(
+      createAndVerifyPrincipalAction({
+        name: "Mia",
+        walletId: "wallet_1",
+        projectId: RENDERED_PROJECT,
+      })
+    ).resolves.toEqual({
+      ok: false,
+      message: "DashboardPrivateChannels.members.principalNameTaken",
+    });
+
+    expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
+    expect(mocks.verifyPrivateChannelWallet).not.toHaveBeenCalled();
+  });
+
+  it("creates a new principal when an attested retry matches no same-named one", async () => {
+    // The lost response never reached the server either, so nothing was
+    // created and the retry creates the principal.
     mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
     mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
       { ...principal, id: "pcp_other", name: "Other" },
@@ -304,6 +333,7 @@ describe("createAndVerifyPrincipalAction project binding", () => {
         name: "Mia",
         walletId: "wallet_1",
         projectId: RENDERED_PROJECT,
+        isRetry: true,
       })
     ).resolves.toEqual({ ok: true, wallet: verifiedWallet });
 

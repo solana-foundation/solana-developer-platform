@@ -43,6 +43,11 @@ export function PrincipalCreatePage({
   const [name, setName] = useState("");
   const [walletId, setWalletId] = useState("");
   const [createdPrincipalId, setCreatedPrincipalId] = useState<string | null>(null);
+  // Set when a submit ends without any response at all: the server may have
+  // created the principal, but the wizard never learned its id. The next
+  // submit attests the lost response so the action can resume the same-named
+  // principal instead of reporting a duplicate-name conflict.
+  const [responseLost, setResponseLost] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
@@ -50,16 +55,28 @@ export function PrincipalCreatePage({
     if (trimmedName.length < 2 || !walletId) return;
 
     startTransition(async () => {
-      // One guarded server action: the stale-selection check runs before the
-      // principal is created and both writes bind to the rendered project, so
-      // a sibling tab that moves the shared cookie can no longer reject the
-      // verification after the principal was already created.
-      const result = await createAndVerifyPrincipalAction({
-        name: trimmedName,
-        walletId,
-        projectId,
-        principalId: createdPrincipalId ?? undefined,
-      });
+      let result: Awaited<ReturnType<typeof createAndVerifyPrincipalAction>>;
+      try {
+        // One guarded server action: the stale-selection check runs before the
+        // principal is created and both writes bind to the rendered project, so
+        // a sibling tab that moves the shared cookie can no longer reject the
+        // verification after the principal was already created.
+        result = await createAndVerifyPrincipalAction({
+          name: trimmedName,
+          walletId,
+          projectId,
+          principalId: createdPrincipalId ?? undefined,
+          isRetry: responseLost || undefined,
+        });
+        setResponseLost(false);
+      } catch {
+        // The response was lost outright (network failure, timeout), so the
+        // outcome — including any created principal id — never arrived. The
+        // name stays locked so a retry resumes the same submission.
+        setResponseLost(true);
+        toast.error(t("DashboardPrivateChannels.members.submitInterrupted"));
+        return;
+      }
       if (!result.ok) {
         if (result.principalId) {
           // The principal exists but is unverified; a retry re-runs only the
@@ -77,6 +94,10 @@ export function PrincipalCreatePage({
       router.refresh();
     });
   };
+
+  // An id-carrying retry or a lost-response retry re-runs the same submission,
+  // so the wizard shows the retry affordance and keeps the name locked.
+  const resuming = createdPrincipalId !== null || responseLost;
 
   const steps = [
     {
@@ -109,10 +130,10 @@ export function PrincipalCreatePage({
             iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
           >
             {pending
-              ? createdPrincipalId
+              ? resuming
                 ? t("DashboardPrivateChannels.members.verifyingWallet")
                 : t("DashboardPrivateChannels.members.creating")
-              : createdPrincipalId
+              : resuming
                 ? t("DashboardPrivateChannels.members.retryWallet")
                 : t("DashboardPrivateChannels.members.create")}
           </Button>
@@ -130,7 +151,7 @@ export function PrincipalCreatePage({
             iconLeft={<IdCardIcon />}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            disabled={pending || createdPrincipalId !== null}
+            disabled={pending || resuming}
             maxLength={64}
             placeholder={t("DashboardPrivateChannels.members.principalNamePlaceholder")}
           />

@@ -209,6 +209,8 @@
       "verifyingWallet": "Verifying wallet…",
       "retryWallet": "Retry verification",
       "create": "Create identity",
+      "principalNameTaken": "An identity with this name already exists. Choose a different name.",
+      "submitInterrupted": "The connection was interrupted before the result arrived. Retry to finish creating this identity.",
       "createSuccess": "Identity “{name}” created.",
       "createSuccessWithWallet": "Identity “{name}” created and wallet verified.",
       "disableAria": "Disable Private Channels identity",
