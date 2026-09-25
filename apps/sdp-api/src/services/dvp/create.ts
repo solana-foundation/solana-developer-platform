@@ -288,9 +288,23 @@ async function assertNamedDestinationsUsable(
 export async function createDvpTrade(
   env: Env,
   auditContext: Context<{ Bindings: Env }>,
-  input: CreateDvpTradeInput
+  requested: CreateDvpTradeInput
 ): Promise<DvpTradeRow> {
   const repository = createDvpTradeRepository(env);
+
+  // Canonicalize the correlation reference ONCE, here at the service boundary:
+  // the on-chain refString is a fixed 64-byte zero-padded field with no
+  // presence bit, so omitted, null and "" are the SAME absent reference on
+  // chain. The fingerprint, the stored row and the create instruction must all
+  // see one spelling, or a keyed retry that flips between them fingerprints as
+  // different terms — the 409 pushes the caller to a fresh key, and a fresh key
+  // mints a second live trade at a second PDA (SOLA9-584). A non-empty
+  // reference is preserved verbatim as correlation metadata.
+  const input: CreateDvpTradeInput = {
+    ...requested,
+    refString:
+      requested.refString === null || requested.refString === "" ? null : requested.refString,
+  };
 
   // Resolve BOTH parties first: the fingerprint hashes the resolved addresses.
   const [resolvedA, resolvedB] = await resolveParties(env, {

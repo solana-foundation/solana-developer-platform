@@ -89,7 +89,13 @@ const dvpTradeTermsFields = {
   userASettlementDestination: dvpAddressSchema.nullish(),
   userBSettlementDestination: dvpAddressSchema.nullish(),
 
-  /** Opaque client reference, at most 64 bytes; a correlation hint, never an identity. */
+  /**
+   * Opaque client reference, at most 64 bytes; a correlation hint, never an
+   * identity. Omitted, null and "" all mean the same absent reference — the
+   * on-chain field is a fixed 64-byte zero-padded buffer with no presence bit —
+   * and the create service canonicalizes them to null before fingerprinting,
+   * persisting or building the instruction.
+   */
   refString: z.string().max(64).nullish(),
 } as const;
 

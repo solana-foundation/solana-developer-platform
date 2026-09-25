@@ -612,6 +612,69 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
+  // The on-chain refString is a fixed 64-byte zero-padded field with no
+  // presence bit, so omitted, null and "" are ONE absent reference on chain —
+  // the program stores the same bytes for both. A keyed retry that spells the
+  // absent reference differently must therefore replay the original trade:
+  // fingerprinting the spellings apart refuses the replay (409) and pushes the
+  // caller toward a fresh key, which mints a second live trade at a second PDA.
+  it("replays a keyed retry that spells the absent reference differently (null vs empty)", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-absent-ref" };
+
+    const omittedFirst = await createDvpTrade(env, auditContext, { ...input, refString: null });
+    const retriedAsEmpty = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    expect(retriedAsEmpty.id).toBe(omittedFirst.id);
+    expect(retriedAsEmpty.swapDvp).toBe(omittedFirst.swapDvp);
+    // The canonical absent value is persisted, not the empty spelling.
+    expect(retriedAsEmpty.refString).toBeNull();
+
+    const emptyFirst = await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-absent-ref-reverse",
+      refString: "",
+    });
+    const retriedAsOmitted = await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-absent-ref-reverse",
+      refString: null,
+    });
+    expect(retriedAsOmitted.id).toBe(emptyFirst.id);
+    expect(retriedAsOmitted.refString).toBeNull();
+
+    // Two requests, two trades, one broadcast each — no second live trade.
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+    await expect(rowsInDb()).resolves.toHaveLength(2);
+  });
+
+  // A NON-empty reference is real correlation metadata: changing it is a
+  // different request and must keep refusing the key rather than replaying.
+  it("still refuses a keyed retry that swaps the absent reference for a non-empty one", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-named-ref" };
+
+    await createDvpTrade(env, auditContext, { ...input, refString: null });
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: "ref-1" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-named-ref-reverse",
+      refString: "ref-1",
+    });
+    await expect(
+      createDvpTrade(env, auditContext, {
+        ...input,
+        idempotencyKey: "key-named-ref-reverse",
+        refString: null,
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    // Both originals stand, neither retry minted a second trade.
+    expect(await rowsInDb()).toHaveLength(2);
+  });
+
   // A create that definitively never landed leaves its logical request unmade,
   // so the key it claimed has nothing to answer for. Replaying it hands back a
   // dead trade instead — and for a caller whose key is DERIVED from the payload,
