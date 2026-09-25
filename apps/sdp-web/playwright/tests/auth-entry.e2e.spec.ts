@@ -63,10 +63,10 @@ test.describe("public auth entry e2e", () => {
     expect(clerkColors.input).not.toBe("");
     expect(clerkColors.background).not.toBe(clerkColors.input);
 
-    const githubButton = page.getByRole("button", { name: "Continue with GitHub" });
-    const googleButton = page.getByRole("button", { name: "Continue with Google" });
-    await expect(githubButton).not.toHaveCSS("filter", "none");
-    await expect(googleButton).toHaveCSS("filter", "none");
+    const githubIcon = page.locator(".cl-socialButtonsProviderIcon__github");
+    const googleIcon = page.locator(".cl-socialButtonsProviderIcon__google");
+    await expect(githubIcon).not.toHaveCSS("filter", "none");
+    await expect(googleIcon).toHaveCSS("filter", "none");
     expect(themeScriptErrors).toEqual([]);
   });
 
