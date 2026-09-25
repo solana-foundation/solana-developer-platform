@@ -371,13 +371,16 @@ export function useRampWizard<TId extends string>(
     return bound.key;
   };
   const runQuoteCreation = async (providerAccountId: string | null) => {
-    const payload = buildQuotePayload(providerAccountId);
-    if (payload === null) {
-      setQuoteCreationError(null);
-      return;
-    }
     setQuoteCreationRetrying(true);
     try {
+      // Built inside the try: a payload builder that throws (e.g. a
+      // requirements refetch dropped the selected payout account's country)
+      // must surface through quoteCreationError, not escape the retry.
+      const payload = buildQuotePayload(providerAccountId);
+      if (payload === null) {
+        setQuoteCreationError(null);
+        return;
+      }
       await createQuoteForCurrentSelection(providerAccountId, quoteOperationKey(payload));
       setQuoteCreationError(null);
     } catch (error) {

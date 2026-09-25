@@ -23,6 +23,7 @@ import { success } from "@/lib/response";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -364,15 +365,27 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           // persistRampQuoteTransfer, so the verbatim quote response must be
           // recorded here — a retry replays the original funding instructions
           // instead of conflicting with an in-progress reservation forever.
-          const stored = await getPaymentsRepository(c).updateTransfer({
-            transferId: pendingTransfer.id,
-            organizationId: scope.auth.organizationId,
-            projectId,
-            providerData: rampQuoteResponseProviderData(quote),
-            updatedAt: new Date().toISOString(),
-          });
-          if (!stored) {
-            throw internalError("Failed to record BVNK on-ramp quote response");
+          // Best-effort: BVNK has already issued funding instructions and
+          // moved the transfer to awaiting_payment, so a storage failure must
+          // NOT fail the quote or mark the transfer failed — the customer can
+          // still fund, and the row remains recoverable (the abandoned
+          // reservation rule re-issues under the same transfer id).
+          try {
+            await getPaymentsRepository(c).updateTransfer({
+              transferId: pendingTransfer.id,
+              organizationId: scope.auth.organizationId,
+              projectId,
+              providerData: rampQuoteResponseProviderData(quote),
+              updatedAt: new Date().toISOString(),
+            });
+          } catch (error) {
+            getLogger().error(
+              {
+                transfer_id: pendingTransfer.id,
+                error: error instanceof Error ? error.message : String(error),
+              },
+              "[bvnk onramp] failed to store keyed quote response for replay"
+            );
           }
         }
         break;
