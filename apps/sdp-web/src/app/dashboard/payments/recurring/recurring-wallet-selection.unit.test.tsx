@@ -386,4 +386,81 @@ describe("Recurring Payment exact source selection", () => {
       expect(within(editor).queryByText(/WOOF/)).toBeNull();
     });
   });
+
+  it("offers only recurring-eligible currencies and keeps the one picked", async () => {
+    // Neither well-known nor issued in this project, so never eligible.
+    const unknownMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYC";
+    const pausedIssuedMint = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+    const activeIssuedMint = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+    const balance = (token: string, mint: string) => ({
+      token,
+      mint,
+      amount: "5",
+      uiAmount: "5",
+      decimals: 6,
+    });
+    const replacement = {
+      ...source,
+      id: "cwlt_replacement",
+      label: "Replacement",
+      balances: [
+        balance("WOOF", unknownMint),
+        balance("HALT", pausedIssuedMint),
+        balance("LIVE", activeIssuedMint),
+        balance("USDC", MINT),
+      ],
+    };
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).includes("/wallets?"))
+        return Response.json({ data: { wallets: [source, replacement] } });
+      return Response.json({
+        data: { wallets: [source, replacement], recurringPayment: recurring },
+      });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source, replacement]}
+        issuedTokensByMint={{
+          [pausedIssuedMint]: {
+            id: "tok_halt",
+            mintAddress: pausedIssuedMint,
+            symbol: "HALT",
+            imageUrl: null,
+            status: "paused",
+          },
+          [activeIssuedMint]: {
+            id: "tok_live",
+            mintAddress: activeIssuedMint,
+            symbol: "LIVE",
+            imageUrl: null,
+            status: "active",
+          },
+        }}
+        counterpartyAccounts={[]}
+        counterpartyLabel="Receiver"
+        amountLabel="1 USDC"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    const editor = screen.getByRole("dialog", { name: "Edit payment" });
+    await user.click(within(editor).getByRole("button", { name: "Funding wallet" }));
+    await user.click(screen.getByRole("button", { name: /Replacement/ }));
+    await user.click(within(editor).getByRole("button", { name: "Currency" }));
+
+    expect(screen.getByRole("button", { name: /USDC/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /WOOF/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /HALT/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /LIVE/ }));
+    await waitFor(() => {
+      expect(within(editor).getByText(/LIVE/)).toBeTruthy();
+      expect(within(editor).queryByText(/USDC/)).toBeNull();
+    });
+  });
 });

@@ -4065,7 +4065,7 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
+    await expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
   });
 
   it("rejects a source change with an explicit token the new wallet cannot hold", async () => {
@@ -4090,7 +4090,7 @@ describe("Payments routes — recurring", () => {
       env
     );
 
-    expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
+    await expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
   });
 
   it("succeeds an amount-only update without token-account chain reads", async () => {
