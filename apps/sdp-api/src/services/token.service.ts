@@ -1545,6 +1545,12 @@ export class TokenService {
       // A chain reconciliation after this burn was admitted already includes
       // the settled burn. Subtracting again would undercount supply and create
       // false mint headroom, so in that case only consume the retry marker.
+      // The comparison is deliberately one-sided: a stamp move the burn
+      // predated (the burn settled after the last reading) skips a decrement
+      // the cache still owes, and the record runs high until the next refresh
+      // past the in-flight window — accepted, because the reverse guess would
+      // subtract twice and run the record low, admitting mints past the cap.
+      // See the stamp discussion on `setSupplyFromBaseUnits`.
       if (!supplyChangedSinceAdmission) {
         const tokenMutation = this.tenantMutationScope();
         const updatedToken = await tx
@@ -2185,6 +2191,18 @@ export class TokenService {
    * chain total matching the cache can be a settled burn cancelled out by an
    * off-platform mint, which the reading absorbed all the same. Settled-burn
    * bookkeeping reads that off `total_supply_updated_at`.
+   *
+   * The stamp is one wall-clock figure and cannot say whether a given burn
+   * settled before the reading or after it. When the order goes the wrong way
+   * — a burn admitted before a reading but settled after it, on a figure the
+   * reading took effect on — the bookkeeping skips a decrement the cache still
+   * owes and the record runs high until the next refresh past the in-flight
+   * window. That is the accepted side of the trade: the opposite order (a
+   * settled burn inside a reading the stamp refuses to acknowledge) would make
+   * the bookkeeping subtract twice and run the record low, admitting mints
+   * past the cap — a hole that does not heal on its own. Telling the two
+   * orders apart needs the chain slot each side observed, which the record
+   * does not carry.
    */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
