@@ -11,12 +11,12 @@ import type {
 } from "@/components/api-playground-shell";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
-import { Input } from "@/components/ui/input";
 import { StatusText } from "@/components/ui/status-text";
 import { useTranslations } from "@/i18n/provider";
 import { HighlightedCode } from "@/lib/shiki-code";
 
 type RequestView = "form" | "raw" | "code";
+type ResponseView = "body" | "headers";
 
 const REQUEST_VIEWS = [
   { value: "form", labelKey: "Shared.SharedComponents.playgroundForm" },
@@ -24,14 +24,20 @@ const REQUEST_VIEWS = [
   { value: "code", labelKey: "Shared.SharedComponents.code" },
 ] as const;
 
+const RESPONSE_VIEWS = [
+  { value: "body", labelKey: "Shared.SharedComponents.playgroundBody" },
+  { value: "headers", labelKey: "Shared.SharedComponents.playgroundHeaders" },
+] as const;
+
 // The same indicator fix the header tabs carry: the design-system indicator reads its geometry
 // from these variables.
 const TAB_LIST_CLASS =
-  "gap-6 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
+  "gap-6.5 [&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)]";
 
-// The design's playground fields: 36px underline controls with 14px values.
-const SELECT_CLASS =
-  "h-9 w-full cursor-pointer appearance-none border-0 border-b border-border-default bg-transparent pr-8 text-body text-primary outline-none transition-colors hover:border-border-strong focus:border-border-strong";
+// The design's playground fields: 36px underline controls with 14px values, tracked -0.01em
+// like the deck's other controls.
+const FIELD_CLASS =
+  "h-9 w-full border-0 border-b border-border-default bg-transparent pr-8 pl-0.5 text-body tracking-[-0.01em] text-primary outline-none transition-colors placeholder:text-tertiary hover:border-border-strong focus:border-border-strong";
 
 function subscribeToNothing() {
   return () => {};
@@ -123,7 +129,7 @@ function PlaygroundField({
           id={id}
           value={value}
           onChange={(event) => onChange(event.currentTarget.value)}
-          className={SELECT_CLASS}
+          className={`${FIELD_CLASS} cursor-pointer appearance-none`}
         >
           <option value="">{field.placeholder ?? t("Shared.SharedComponents.selectValue")}</option>
           {(field.options ?? []).map((option) => (
@@ -134,7 +140,7 @@ function PlaygroundField({
         </select>
         <ChevronDown
           aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 right-1 size-4 -translate-y-1/2 text-secondary"
+          className="pointer-events-none absolute top-1/2 right-0.5 size-4 -translate-y-1/2 text-secondary"
         />
       </div>
     );
@@ -152,31 +158,31 @@ function PlaygroundField({
     );
   } else {
     control = (
-      <Input
-        id={id}
-        size="md"
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        placeholder={field.placeholder}
-        iconRight={
-          value ? (
-            <button
-              type="button"
-              onClick={() => onChange("")}
-              aria-label={t("Shared.SharedComponents.clearField", { field: field.label })}
-              className="pointer-events-auto flex size-5 items-center justify-center rounded-sm text-tertiary hover:text-primary"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          ) : undefined
-        }
-      />
+      <div className="relative">
+        <input
+          id={id}
+          value={value}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          placeholder={field.placeholder}
+          className={FIELD_CLASS}
+        />
+        {value ? (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            aria-label={t("Shared.SharedComponents.clearField", { field: field.label })}
+            className="absolute top-1/2 right-0 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-tertiary hover:text-primary"
+          >
+            <X className="size-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
     );
   }
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="text-meta text-secondary">
+      <label htmlFor={id} className="block text-meta text-secondary">
         {field.label}
         {field.required ? <span className="text-tertiary"> *</span> : null}
       </label>
@@ -190,11 +196,11 @@ function RunShortcut() {
   const apple = useApplePlatform();
   const keys = apple ? ["⌘", "↵"] : ["Ctrl", "↵"];
   return (
-    <span aria-hidden="true" className="ml-1 flex items-center gap-1">
+    <span aria-hidden="true" className="ml-2.5 flex items-center gap-1">
       {keys.map((key) => (
         <kbd
           key={key}
-          className="flex h-6 min-w-6 items-center justify-center rounded-[6px] border border-on-primary/30 px-1 font-sans text-meta text-on-primary/80"
+          className="flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-on-primary/30 px-1 font-sans text-meta text-on-primary/80"
         >
           {key}
         </kbd>
@@ -215,9 +221,15 @@ function CodeBody({ content, language }: { content: string; language: "javascrip
   );
 }
 
-function PlainCode({ content }: { content: string }) {
+function PlainCode({
+  content,
+  className = "text-primary",
+}: {
+  content: string;
+  className?: string;
+}) {
   return (
-    <pre className="overflow-x-auto font-mono text-meta leading-5 whitespace-pre text-primary">
+    <pre className={`overflow-x-auto font-mono text-meta leading-5 whitespace-pre ${className}`}>
       {content}
     </pre>
   );
@@ -361,6 +373,90 @@ function ExecutionStatus({ execution }: { execution: ApiPlaygroundExecution }) {
   );
 }
 
+/** The response's headers as `name: value` lines, or why there are none to show. */
+function ResponseHeaders({
+  headers,
+  hasRun,
+}: {
+  headers: Record<string, string> | null;
+  hasRun: boolean;
+}) {
+  const t = useTranslations();
+  const entries = hasRun && headers ? Object.entries(headers) : [];
+  if (entries.length === 0) {
+    return (
+      <p className="text-body text-tertiary">
+        {hasRun
+          ? t("Shared.SharedComponents.noResponseHeaders")
+          : t("Shared.SharedComponents.headersAfterRun")}
+      </p>
+    );
+  }
+  return <PlainCode content={entries.map(([name, value]) => `${name}: ${value}`).join("\n")} />;
+}
+
+/** The endpoint picker and Run, on one 60px line. */
+function EndpointLine({
+  endpoints,
+  activeEndpoint,
+  onEndpointChange,
+  execution,
+  runDisabled,
+  onRun,
+}: Pick<
+  ApiPlaygroundRefreshLayoutProps,
+  "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun"
+> & { runDisabled: boolean }) {
+  const t = useTranslations();
+  return (
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+      {/* 60px tall: two lines of 18/24 and 13/16 inside 9px and the rule. */}
+      <div className="relative flex min-w-0 items-center gap-3 rounded-control border border-border-default px-3 py-[9px] transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
+        <span className="min-w-9 shrink-0 font-mono text-meta text-tertiary">
+          {activeEndpoint.method}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-subheading text-primary">
+            {activeEndpoint.title}
+          </span>
+          <span className="block truncate font-mono text-meta text-secondary">
+            {activeEndpoint.path.split("?", 1)[0]}
+          </span>
+        </span>
+        <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+        <select
+          aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
+          className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+          value={activeEndpoint.id}
+          onChange={(event) => onEndpointChange(event.currentTarget.value)}
+        >
+          <ApiPlaygroundEndpointOptions endpoints={endpoints} />
+        </select>
+      </div>
+      {/* The design's Run sits a pixel inside the picker's rule, top and bottom. */}
+      <Button
+        type="button"
+        onClick={onRun}
+        disabled={runDisabled}
+        aria-keyshortcuts="Meta+Enter Control+Enter"
+        className="!h-[58px] !gap-0 self-center rounded-control !px-5"
+      >
+        <span className="flex items-center whitespace-nowrap">
+          <span className="flex items-center gap-1.5">
+            {execution.state === "running" ? (
+              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Play className="size-4" aria-hidden="true" />
+            )}
+            {t("Shared.SharedComponents.runRequest")}
+          </span>
+          <RunShortcut />
+        </span>
+      </Button>
+    </div>
+  );
+}
+
 export interface ApiPlaygroundRefreshLayoutProps {
   endpoints: ApiPlaygroundEndpointConfig[];
   activeEndpoint: ApiPlaygroundEndpointConfig;
@@ -379,6 +475,8 @@ export interface ApiPlaygroundRefreshLayoutProps {
   exampleBody: string;
   execution: ApiPlaygroundExecution;
   responseBody: string;
+  /** The last run's response headers; null until a request has come back. */
+  responseHeaders: Record<string, string> | null;
   onRun: () => void;
   onReset: () => void;
   onCopy: (text: string, action: "code" | "ai") => void;
@@ -387,8 +485,8 @@ export interface ApiPlaygroundRefreshLayoutProps {
 
 /**
  * The playground as a refresh surface lays it out: the endpoint and Run on one line, the key
- * and host under it, then the request (form, raw HTTP or code) beside the response. ⌘↵ or
- * Ctrl+↵ runs the request from anywhere on the page.
+ * and host under it, then the request (form, raw HTTP or code) beside the response (body or
+ * headers). ⌘↵ or Ctrl+↵ runs the request from anywhere on the page.
  */
 export function ApiPlaygroundRefreshLayout({
   endpoints,
@@ -408,6 +506,7 @@ export function ApiPlaygroundRefreshLayout({
   exampleBody,
   execution,
   responseBody,
+  responseHeaders,
   onRun,
   onReset,
   onCopy,
@@ -415,58 +514,23 @@ export function ApiPlaygroundRefreshLayout({
 }: ApiPlaygroundRefreshLayoutProps) {
   const t = useTranslations();
   const [view, setView] = useState<RequestView>("form");
+  const [responseView, setResponseView] = useState<ResponseView>("body");
   const runDisabled = execution.state === "running" || requiresApiKey;
   useRunShortcut(onRun, runDisabled);
   const hasRun = execution.state === "done" || execution.state === "error";
 
   return (
     <div className="w-full pb-12">
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        {/* 60px tall: two lines of 18/24 and 13/16 inside 9px and the rule. */}
-        <div className="relative flex min-w-0 items-center gap-5 rounded-control border border-border-default px-5 py-[9px] transition-colors hover:border-border-strong has-[select:focus-visible]:border-border-strong has-[select:focus-visible]:ring-2 has-[select:focus-visible]:ring-border-default">
-          <span className="w-12 shrink-0 font-mono text-meta text-tertiary">
-            {activeEndpoint.method}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-subheading text-primary">
-              {activeEndpoint.title}
-            </span>
-            <span className="block truncate font-mono text-meta text-secondary">
-              {activeEndpoint.path.split("?", 1)[0]}
-            </span>
-          </span>
-          <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
-          <select
-            aria-label={t("Shared.SharedComponents.selectApiEndpoint")}
-            className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-            value={activeEndpoint.id}
-            onChange={(event) => onEndpointChange(event.currentTarget.value)}
-          >
-            <ApiPlaygroundEndpointOptions endpoints={endpoints} />
-          </select>
-        </div>
-        <Button
-          type="button"
-          onClick={onRun}
-          disabled={runDisabled}
-          aria-keyshortcuts="Meta+Enter Control+Enter"
-          className="!h-auto min-h-control-lg self-stretch rounded-control px-6"
-          iconLeft={
-            execution.state === "running" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Play className="size-4" aria-hidden="true" />
-            )
-          }
-        >
-          <span className="flex items-center gap-3 whitespace-nowrap">
-            {t("Shared.SharedComponents.runRequest")}
-            <RunShortcut />
-          </span>
-        </Button>
-      </div>
+      <EndpointLine
+        endpoints={endpoints}
+        activeEndpoint={activeEndpoint}
+        onEndpointChange={onEndpointChange}
+        execution={execution}
+        runDisabled={runDisabled}
+        onRun={onRun}
+      />
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-body text-secondary">
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
         {apiKeySelector ? (
           <>
             <span>{t("Shared.SharedComponents.apiKeyLabel")}</span>
@@ -475,8 +539,12 @@ export function ApiPlaygroundRefreshLayout({
         ) : null}
         {apiHost ? (
           <>
-            {apiKeySelector ? <span aria-hidden="true">·</span> : null}
-            <span className="font-mono text-primary">{apiHost}</span>
+            {apiKeySelector ? (
+              <span aria-hidden="true" className="text-tertiary">
+                ·
+              </span>
+            ) : null}
+            <span className="font-mono">{apiHost}</span>
           </>
         ) : null}
       </div>
@@ -499,14 +567,14 @@ export function ApiPlaygroundRefreshLayout({
         </div>
       ) : null}
 
-      {/* The design's rhythm: 24px to the rule, 48px under it to the two 14px medium section
-          names, 32px to the view tabs, 32px more to the fields. */}
-      <div className="mt-6 grid border-t border-border-default lg:grid-cols-2">
+      {/* The design's rhythm: 28px to the rule, 40px under it to the two 36px section rows (the
+          divider between the halves starts there, not at the rule), 24px to the view tabs. */}
+      <div className="mt-7 grid border-t border-border-default pt-10 lg:grid-cols-2">
         <section
           aria-labelledby="api-playground-request"
-          className="min-w-0 pt-12 lg:border-r lg:border-border-default lg:pr-12"
+          className="min-w-0 pb-10 lg:border-r lg:border-border-default lg:pr-10 lg:pb-0"
         >
-          <div className="flex items-baseline justify-between gap-4">
+          <div className="flex h-9 items-center justify-between gap-4">
             <h2 id="api-playground-request" className="text-body font-medium text-primary">
               {t("Shared.SharedComponents.request")}
             </h2>
@@ -516,7 +584,7 @@ export function ApiPlaygroundRefreshLayout({
                 setView("form");
                 onReset();
               }}
-              className="text-body text-secondary hover:text-primary"
+              className="h-9 rounded-control px-2 text-body text-secondary transition-colors hover:bg-fill-subtle hover:text-primary"
             >
               {t("Shared.SharedComponents.reset")}
             </button>
@@ -525,7 +593,7 @@ export function ApiPlaygroundRefreshLayout({
             bordered={false}
             value={view}
             onValueChange={(value) => setView(value as RequestView)}
-            className="mt-8"
+            className="mt-6"
           >
             <TabList className={TAB_LIST_CLASS}>
               {REQUEST_VIEWS.map((entry) => (
@@ -536,7 +604,7 @@ export function ApiPlaygroundRefreshLayout({
             </TabList>
           </Tabs>
 
-          <div className="mt-8">
+          <div className="mt-10">
             {view === "form" ? (
               <RequestForm
                 endpoint={activeEndpoint}
@@ -569,22 +637,45 @@ export function ApiPlaygroundRefreshLayout({
 
         <section
           aria-labelledby="api-playground-response"
-          className="min-w-0 border-t border-border-default pt-12 lg:border-t-0 lg:pl-12"
+          className="min-w-0 border-t border-border-default pt-10 lg:border-t-0 lg:pt-0 lg:pl-10"
         >
-          <div className="flex items-baseline justify-between gap-4">
+          <div className="flex h-9 items-center justify-between gap-4">
             <h2 id="api-playground-response" className="text-body font-medium text-primary">
               {hasRun
                 ? t("Shared.SharedComponents.response")
                 : t("Shared.SharedComponents.exampleResponse")}
             </h2>
-            <p aria-live="polite" className="text-body">
+            <p aria-live="polite" className="pr-1 text-meta">
               <ExecutionStatus execution={execution} />
             </p>
           </div>
-          {/* The body starts level with the request's view tabs; the design's Body / Headers
-              tabs wait on the proxy passing response headers through. */}
-          <div className="mt-8">
-            <CodeBody content={hasRun ? responseBody : exampleBody} language="json" />
+          <Tabs
+            bordered={false}
+            value={responseView}
+            onValueChange={(value) => setResponseView(value as ResponseView)}
+            className="mt-6"
+          >
+            <TabList className={TAB_LIST_CLASS}>
+              {RESPONSE_VIEWS.map((entry) => (
+                <Tab key={entry.value} value={entry.value}>
+                  {t(entry.labelKey)}
+                </Tab>
+              ))}
+            </TabList>
+          </Tabs>
+          <div className="mt-4">
+            {responseView === "body" ? (
+              hasRun ? (
+                <CodeBody content={responseBody} language="json" />
+              ) : (
+                // The example reads as a placeholder: one quiet tone, no highlighting.
+                <div data-testid="api-playground-code">
+                  <PlainCode content={exampleBody} className="text-tertiary" />
+                </div>
+              )
+            ) : (
+              <ResponseHeaders headers={responseHeaders} hasRun={hasRun} />
+            )}
           </div>
         </section>
       </div>

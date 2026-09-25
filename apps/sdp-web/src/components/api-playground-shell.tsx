@@ -72,6 +72,8 @@ interface ExecutionResult {
   durationMs: number;
   authMode: "api_key" | "session";
   body: unknown;
+  /** The response headers the proxy passes through (an allowlist, secret redacted). */
+  headers: Record<string, string>;
 }
 
 interface ApiPlaygroundShellProps {
@@ -468,6 +470,7 @@ async function executePlaygroundRequest({
       status?: number;
       statusText?: string;
       body?: unknown;
+      headers?: Record<string, string>;
     };
 
     if (!proxyResponse.ok || envelope.status === undefined || envelope.statusText === undefined) {
@@ -482,6 +485,7 @@ async function executePlaygroundRequest({
       durationMs: Date.now() - startedAt,
       authMode: "api_key",
       body: envelope.body ?? {},
+      headers: envelope.headers ?? {},
     });
   } catch {
     onExecutionError(t("Shared.SharedComponents.requestExecutionFailed"));
@@ -751,6 +755,7 @@ export function ApiPlaygroundShell({
         exampleBody={exampleBody}
         execution={getRefreshExecution(isExecuting, executionResult, executeError, t)}
         responseBody={responseBody}
+        responseHeaders={executionResult?.headers ?? null}
         onRun={handleExecute}
         onReset={handleReset}
         onCopy={(text, action) => void copyText(text, action)}
