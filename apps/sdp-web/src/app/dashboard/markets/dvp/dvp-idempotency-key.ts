@@ -29,6 +29,15 @@ export function freshDvpIdempotencyKey(prefix: string): string {
  * movements get: `sessionStorage` so it survives a reload mid-flight, memory
  * when storage is refused, and an approval hold that outlives the default TTL.
  * The mint is the `getRandomValues` one above, for the plain-http deployments.
+ *
+ * A close key never rides the default TTL at all: `use-dvp-trade-actions`
+ * pins every key it claims (`hold`), because a close whose answer never
+ * reached the dashboard — a transport failure, a 5xx, an unreadable or
+ * unconfirmed answer, a 409 while a close can still land — may still land
+ * after any expiry, and a lapsed key there signs a second close against an
+ * escrow a late deposit may have refilled. Only the API's own definitive
+ * answer lifts the pin, via `applyCloseKeyOutcome`; worst case the retry gets
+ * a replay of the first close's signature.
  */
 export const dvpCloseIdempotencyKeyStore = createIdempotencyKeyStore(
   "sdp:dvp:close:idempotency:v1",

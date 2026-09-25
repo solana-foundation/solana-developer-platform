@@ -486,22 +486,76 @@ describe("useDvpTradeActions", () => {
       expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
     });
 
-    // A 4xx is an answer: nothing was sent, so the next press is a new
-    // operation and must not inherit the refused key.
-    it("mints a fresh key after a close refusal", async () => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValue({
+    // A 409 never retires the key. With `closeInProgress` the trade's close
+    // lock is held by a close that can still land; without a reason it is the
+    // key's own request still running, whose recorded transaction may land
+    // too. The retry must carry the same key so the API answers from the first
+    // close's record instead of signing a second one.
+    it("reuses the key when a close is refused while one is still in progress", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            message: "DvP trade dvp_1: a cancel is in flight",
+            details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
+          },
+        }),
+      });
+      global.fetch = fetchMock as never;
+      const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+        wrapper: withI18n,
+      });
+
+      await act(async () => await result.current.act("settle"));
+      await act(async () => await result.current.act("settle"));
+
+      expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
+
+    it("reuses the key past the TTL while the key's own request is still running", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = vi.fn().mockResolvedValue({
           ok: false,
           status: 409,
-          json: async () => {
-            return {
-              error: {
-                message: "DvP trade dvp_1: a cancel is in flight",
-                details: { reason: DVP_CLOSE_REFUSAL.closeInProgress },
-              },
-            };
-          },
+          json: async () => ({
+            error: {
+              message:
+                "A request with this Idempotency-Key is still being processed; retry shortly",
+            },
+          }),
+        });
+        global.fetch = fetchMock as never;
+        const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+          wrapper: withI18n,
+        });
+
+        await act(async () => await result.current.act("settle"));
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await act(async () => await result.current.act("settle"));
+
+        expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A refusal that proves nothing was recorded under the key — a leg still
+    // moving, a close the chain refused — retires it: the next press is a new
+    // operation, not a replay of one that never went out.
+    it.each([
+      [DVP_CLOSE_REFUSAL.legMoving, 409],
+      [DVP_CLOSE_REFUSAL.closeFailedOnChain, 400],
+    ] as const)("mints a fresh key after a %s refusal", async (reason, status) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status,
+          json: async () => ({
+            error: { message: "DvP trade dvp_1: refused", details: { reason } } as unknown,
+          }),
         })
         .mockResolvedValue({ ok: true, status: 200, json: async () => BROADCAST });
       global.fetch = fetchMock as never;
@@ -512,8 +566,36 @@ describe("useDvpTradeActions", () => {
       await act(async () => await result.current.act("settle"));
       await act(async () => await result.current.act("settle"));
 
-      expect(keyOf(fetchMock.mock.calls[1] ?? [])).toMatch(/^dvp-close-[0-9a-f]{32}$/);
       expect(keyOf(fetchMock.mock.calls[1] ?? [])).not.toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+    });
+
+    // A broadcast the request could not confirm can still land, so its key
+    // outlives the store's TTL: the retry must ask the chain what happened
+    // instead of signing a second close.
+    it("keeps the key past the TTL when the close is sent but unconfirmed", async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            json: async () => ({ ...BROADCAST, data: { ...BROADCAST.data, confirmed: false } }),
+          })
+          .mockResolvedValue({ ok: true, status: 200, json: async () => BROADCAST });
+        global.fetch = fetchMock as never;
+        const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+          wrapper: withI18n,
+        });
+
+        await act(async () => await result.current.act("settle"));
+        vi.setSystemTime(Date.now() + 16 * 60_000);
+        await act(async () => await result.current.act("settle"));
+
+        expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     // A readable 2xx is an answer too: the close is on its row, and the next
