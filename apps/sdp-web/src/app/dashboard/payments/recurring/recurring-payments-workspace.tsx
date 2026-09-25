@@ -5,7 +5,6 @@ import {
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
 } from "@sdp/types";
-import { PlusIcon, RepeatIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
@@ -214,15 +213,12 @@ export function RecurringPaymentsWorkspace({
     return (
       <DashboardWorkspaceOverviewPanel className="flex flex-col">
         <ListEmptyState
-          icon={<RepeatIcon className="size-5" aria-hidden="true" />}
-          message={t("DashboardPayments.recurring.noPayments")}
-          description={t("DashboardPayments.recurring.paymentsAppearHere")}
+          hidesPageAction
+          message={t("DashboardPayments.recurring.emptyTitle")}
+          description={t("DashboardPayments.recurring.emptyDescription")}
           action={
             <Button asChild size="sm">
-              <Link href={CREATE_HREF}>
-                <PlusIcon className="size-4" aria-hidden="true" />
-                {t("DashboardPayments.recurring.newSchedule")}
-              </Link>
+              <Link href={CREATE_HREF}>{t("DashboardPayments.recurring.newSchedule")}</Link>
             </Button>
           }
         />

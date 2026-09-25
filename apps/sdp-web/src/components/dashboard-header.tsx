@@ -229,8 +229,10 @@ export function StackedDashboardTopBar({
           </h1>
         </div>
       )}
+      {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
+          section is the `page` group and the state carries the attribute. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:ml-1">
+        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:ml-1">
           {action}
         </div>
       ) : null}

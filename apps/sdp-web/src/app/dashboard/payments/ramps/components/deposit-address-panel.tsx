@@ -5,7 +5,7 @@ import {
   type PaymentsDashboardWallet,
   type PaymentTransferSummary,
 } from "@sdp/types";
-import { ChevronDownIcon, CopyIcon, InfoIcon, PlayIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, InfoIcon, PlayIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import QRCode from "qrcode";
@@ -21,6 +21,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { StatusText } from "@/components/ui/status-text";
 import {
   Table,
@@ -169,10 +170,23 @@ export function DepositAddressPanel({
     return <div className="h-56 animate-pulse rounded-card bg-fill-subtle" />;
   }
   if (!wallet) {
+    if (liveWalletsError) {
+      return <p className="text-body text-secondary">{liveWalletsError}</p>;
+    }
+    // Nothing to receive into yet: the design's empty state, with the way to a first wallet.
     return (
-      <p className="text-body text-secondary">
-        {liveWalletsError ?? t("DashboardPayments.depositAddress.noWallets")}
-      </p>
+      <ListEmptyState
+        message={t("DashboardPayments.depositAddress.noWalletTitle")}
+        description={t("DashboardPayments.depositAddress.noWalletDescription")}
+        action={
+          <Button asChild>
+            <Link href="/dashboard/wallets/setup">
+              <PlusIcon className="size-4" aria-hidden="true" />
+              {t("DashboardPayments.depositAddress.createWallet")}
+            </Link>
+          </Button>
+        }
+      />
     );
   }
 

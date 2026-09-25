@@ -691,11 +691,12 @@
       "searchPlaceholder": "Search name, id, address",
       "clearSearch": "Clear contact search",
       "noMatches": "No contacts match these filters.",
-      "noContacts": "No contacts yet",
-      "noContactsDescription": "Add the people and businesses you pay or get paid by.",
+      "noContacts": "You haven't added a contact yet",
+      "noContactsDescription": "Contacts are the people and businesses you pay or get paid by. A payment or request is addressed to one.",
       "directoryCapped": "Showing the first {count} of {total} contacts. Search and filters cover these.",
       "addressesCapped": "Addresses were loaded for the first {count} of {total} saved accounts. A contact past that shows no address here; open it to see its addresses.",
-      "addressNotLoaded": "Not loaded"
+      "addressNotLoaded": "Not loaded",
+      "addContact": "Add a contact"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -762,7 +763,6 @@
       "viewRecurring": "View schedules",
       "viewRequests": "View payment requests",
       "viewAllBatches": "View all batches",
-      "noBatches": "No batches yet",
       "batchFallbackName": "Batch {id}",
       "summaryUnavailable": "Counts are temporarily unavailable.",
       "summary": {
@@ -782,7 +782,12 @@
           "one": "provider",
           "other": "providers"
         }
-      }
+      },
+      "noTransfersTitle": "You haven't sent a payment yet",
+      "noTransfersDescription": "Payments appear here once one settles. Anything still in flight shows in Transactions first.",
+      "noBatchesTitle": "You haven't sent a batch yet",
+      "noBatchesDescription": "A batch pays many contacts in one go. Batches appear here once one is sent.",
+      "openTransactions": "Open Transactions"
     },
     "totalSdpBalance": "Total SDP balance",
     "aggregatedAcrossWallets": "Aggregated across {count} {walletLabel}.",
@@ -794,7 +799,6 @@
     "viewAllTransactions": "View all transactions",
     "refreshing": "Refreshing...",
     "refresh": "Refresh",
-    "noTransactions": "No transactions found yet.",
     "status": "Status",
     "transfer": "Transfer",
     "asset": "Asset",
@@ -944,8 +948,6 @@
       "detailTo": "To",
       "frequency": "Frequency",
       "unableToLoad": "Unable to load schedules",
-      "noPayments": "No schedules yet.",
-      "paymentsAppearHere": "Schedules you create will appear here.",
       "interval": "Interval",
       "nextPayment": "Next payment",
       "counterpartyUnavailable": "Counterparty unavailable",
@@ -1072,7 +1074,9 @@
       "runsUntilStopped": "Runs until it is paused or canceled",
       "ifRunFails": "If a run fails",
       "staysActive": "The schedule stays active",
-      "failedRunDetail": "Retried automatically; you can also retry it from the schedule page"
+      "failedRunDetail": "Retried automatically; you can also retry it from the schedule page",
+      "emptyTitle": "You haven't created a schedule yet",
+      "emptyDescription": "A schedule sends the same payment on a repeating date. Payroll is the usual reason."
     },
     "transactions": {
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",
@@ -1271,8 +1275,6 @@
       "paymentRequests": "Payment requests",
       "paymentRequestsDescription": "Shareable links that request a fixed payment.",
       "create": "Create",
-      "noPaymentRequests": "No payment requests yet",
-      "noPaymentRequestsDescription": "Create a payment link to request a fixed payment.",
       "from": "From",
       "to": "To",
       "paymentRequestDetails": "Payment request details",
@@ -1292,7 +1294,10 @@
       "searchPlaceholder": "Search requests",
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
-      "directoryCapped": "Showing the newest {count} of {total} requests. Search and filters cover these."
+      "directoryCapped": "Showing the newest {count} of {total} requests. Search and filters cover these.",
+      "emptyTitle": "You haven't created a request yet",
+      "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
+      "newRequest": "New request"
     },
     "depositMethod": {
       "address": "Solana address",
@@ -1339,10 +1344,16 @@
       "sendPrivately": "Send privately",
       "noPrivateChannel": "No private channel is connected for this project, so nothing can be sent privately yet.",
       "privateChannelConnected": "Private sends go member to member through your private channel, not from this form.",
-      "openPrivateChannels": "Open Private Channels"
+      "openPrivateChannels": "Open Private Channels",
+      "nobodyToPayTitle": "There is nobody to pay yet",
+      "nobodyToPayNeither": "A payment needs a contact with an address and a wallet with a balance. This project has neither.",
+      "nobodyToPayNoContact": "A payment needs a contact with an address. This project has none yet.",
+      "nothingToPayWithTitle": "There is nothing to pay with yet",
+      "nothingToPayWithDescription": "A payment needs a wallet with a balance. Deposit first, then come back.",
+      "addContact": "Add a contact",
+      "depositFirst": "Deposit first"
     },
     "depositAddress": {
-      "noWallets": "This project has no wallet to deposit into yet.",
       "chooseWallet": "Choose the wallet to deposit into",
       "networkDevnet": "Solana Devnet",
       "networkMainnet": "Solana Mainnet",
@@ -1362,7 +1373,10 @@
       "recentTitle": "Recent deposits to this wallet",
       "openInTransactions": "Open in Transactions",
       "recentUnavailable": "Recent deposits are temporarily unavailable.",
-      "noDeposits": "No deposits to this wallet yet."
+      "noDeposits": "No deposits to this wallet yet.",
+      "noWalletTitle": "No wallet to receive into",
+      "noWalletDescription": "An address belongs to a wallet, and this project has none yet.",
+      "createWallet": "Create a wallet"
     },
     "depositTimeline": {
       "label": "Deposit progress",

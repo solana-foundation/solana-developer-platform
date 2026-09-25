@@ -71,7 +71,7 @@ test.describe
         page.locator("main").getByRole("heading", { name: "Schedules" }).first()
       ).toBeVisible();
       await expect(
-        page.getByText("No schedules yet.").or(page.locator("tbody tr").first())
+        page.getByText("You haven't created a schedule yet").or(page.locator("tbody tr").first())
       ).toBeVisible({ timeout: 120_000 });
 
       await page.getByRole("link", { name: "New", exact: true }).click();

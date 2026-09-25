@@ -19,6 +19,11 @@ interface WizardFrameProps {
   maxWidthClassName?: string;
   /** Refresh surfaces only: omit the step header, for a single-page form such as a settings page. */
   hideProgress?: boolean;
+  /**
+   * Refresh surfaces only: let the content fill the column's height (a `flex-1` child then
+   * centres in it), for a state that stands alone in the frame.
+   */
+  fillHeight?: boolean;
   progressLabel: string;
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
@@ -46,6 +51,7 @@ export function WizardFrame({
   header,
   maxWidthClassName = "max-w-3xl",
   hideProgress = false,
+  fillHeight = false,
   progressLabel,
   summary,
   summaryTrigger,
@@ -143,7 +149,9 @@ export function WizardFrame({
           className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6"
           data-wizard-scroll-region
         >
-          <div className="mx-auto w-full max-w-flow">
+          <div
+            className={cn("mx-auto w-full max-w-flow", fillHeight && "flex min-h-full flex-col")}
+          >
             <div
               className={cn("mb-12 flex items-start gap-3", hideProgress && "hidden")}
               data-wizard-stepper

@@ -1,7 +1,7 @@
 "use client";
 
 import type { Counterparty, CounterpartyAccountSummary } from "@sdp/types";
-import { MoreHorizontalIcon, PlusIcon, Trash2Icon, UserIcon, UsersIcon } from "lucide-react";
+import { MoreHorizontalIcon, Trash2Icon, UserIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import {
@@ -65,22 +66,19 @@ interface CounterpartyWorkspaceProps {
 function EmptyDirectory() {
   const t = useTranslations();
   return (
-    <DashboardWorkspaceOverviewPanel className="flex flex-col items-center justify-center gap-4 py-20 text-center">
-      <UsersIcon className="size-8 text-tertiary" strokeWidth={1.5} aria-hidden="true" />
-      <div className="space-y-1">
-        <p className="text-body font-medium text-primary">
-          {t("DashboardPayments.counterparty.noContacts")}
-        </p>
-        <p className="text-body text-secondary">
-          {t("DashboardPayments.counterparty.noContactsDescription")}
-        </p>
-      </div>
-      <Button asChild size="sm">
-        <Link href="/dashboard/payments/counterparty/create">
-          <PlusIcon className="size-4" aria-hidden="true" />
-          {t("DashboardPayments.counterparty.add")}
-        </Link>
-      </Button>
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <ListEmptyState
+        hidesPageAction
+        message={t("DashboardPayments.counterparty.noContacts")}
+        description={t("DashboardPayments.counterparty.noContactsDescription")}
+        action={
+          <Button asChild size="sm">
+            <Link href="/dashboard/payments/counterparty/create">
+              {t("DashboardPayments.counterparty.addContact")}
+            </Link>
+          </Button>
+        }
+      />
     </DashboardWorkspaceOverviewPanel>
   );
 }

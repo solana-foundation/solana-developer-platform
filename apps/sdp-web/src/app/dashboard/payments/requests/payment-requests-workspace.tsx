@@ -14,7 +14,6 @@ import {
   CoinsIcon,
   CopyIcon,
   PlusIcon,
-  ReceiptTextIcon,
   UserIcon,
   WalletIcon,
 } from "lucide-react";
@@ -37,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { Modal } from "@/components/ui/modal";
 import { SearchInput } from "@/components/ui/search-input";
@@ -559,25 +559,16 @@ export function PaymentRequestsWorkspace({
             {initialError ?? t("DashboardPayments.requests.loadFailed")}
           </p>
         ) : requests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
-            <ReceiptTextIcon className="size-8 text-tertiary" strokeWidth={1.5} aria-hidden />
-            <div className="space-y-1">
-              <p className="text-body font-medium text-primary">
-                {t("DashboardPayments.requests.noPaymentRequests")}
-              </p>
-              <p className="text-body text-secondary">
-                {t("DashboardPayments.requests.noPaymentRequestsDescription")}
-              </p>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              iconLeft={<PlusIcon />}
-              onClick={() => setCreateOpen(true)}
-            >
-              {t("DashboardPayments.requests.new")}
-            </Button>
-          </div>
+          <ListEmptyState
+            hidesPageAction
+            message={t("DashboardPayments.requests.emptyTitle")}
+            description={t("DashboardPayments.requests.emptyDescription")}
+            action={
+              <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
+                {t("DashboardPayments.requests.newRequest")}
+              </Button>
+            }
+          />
         ) : (
           <>
             <ListToolbar

@@ -7,6 +7,7 @@ import {
   OnchainSendStepContent,
   type PrivateSendStatus,
 } from "./components/onchain-send-step-content";
+import { hasFundedWallet, PayEmptyState, payEmptyReason } from "./components/pay-empty-state";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import {
   getOnchainSendSteps,
@@ -63,6 +64,7 @@ export function OnchainSendRail({
   wallets,
   walletsError,
   issuedTokenSymbolsByMint,
+  counterpartiesResult,
   counterpartyId,
   counterpartyName,
   methodLabel,
@@ -81,6 +83,16 @@ export function OnchainSendRail({
     counterpartyId,
     onExit,
   });
+  // Pay with nobody to pay, or nothing to pay with, is the empty state rather than a form that
+  // cannot be completed. Only where the flow picks its own contact, only before it has moved
+  // on, and only once the live wallets (with balances) are in, so a loading pass never shows it.
+  const emptyReason =
+    contact && wizard.stepIndex === 0 && !wizard.walletsLoading && wizard.liveWalletsError === null
+      ? payEmptyReason(counterpartiesResult.data.length > 0, hasFundedWallet(wizard.liveWallets))
+      : null;
+  if (emptyReason !== null) {
+    return <PayEmptyState reason={emptyReason} onExit={onCancel ?? onExit} />;
+  }
   // The review step shows the outcome once sent; the progress names that moment as its own
   // step, so a finished payment reads "Step 3 of 3".
   const sentStep = {

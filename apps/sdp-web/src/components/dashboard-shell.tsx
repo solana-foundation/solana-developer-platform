@@ -733,10 +733,12 @@ export function DashboardShell({
             </div>
           ) : null}
 
-          {/* The refresh page is flat: no card, no radius; the sidebar's rule separates it. */}
+          {/* The refresh page is flat: no card, no radius; the sidebar's rule separates it. The
+              `page` group lets the header react to the content (an empty state hiding the
+              header's action). */}
           <section
             className={cn(
-              "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
+              "group/page relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
               // The locked layout clears the phone's bottom bar; a refresh route has none, so it
               // keeps only the home indicator's inset.
               shouldLockViewportScroll

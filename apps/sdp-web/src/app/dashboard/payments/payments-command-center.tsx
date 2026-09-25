@@ -11,6 +11,7 @@ import { TokenMark } from "@/components/token-mark";
 import { ActionTile } from "@/components/ui/action-tile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import { getEnabledRampProviders } from "@/flags/ramps";
 import type { MessageKey } from "@/i18n/messages";
@@ -340,16 +341,29 @@ function ActivityList({
   viewAll,
 }: {
   rows: readonly Parameters<typeof ActivityRow>[0][] | null;
-  empty: string;
+  /** The design's empty state: what would show here, and the one way on from it. */
+  empty: { title: string; description: string; actionLabel: string };
   unavailable: string;
   viewAll: { href: string; label: string };
 }) {
+  if (rows !== null && rows.length === 0) {
+    return (
+      <ListEmptyState
+        className="refresh:py-12"
+        message={empty.title}
+        description={empty.description}
+        action={
+          <Button asChild variant="outline">
+            <Link href={viewAll.href}>{empty.actionLabel}</Link>
+          </Button>
+        }
+      />
+    );
+  }
   return (
     <>
       {rows === null ? (
         <p className="py-8 text-body text-tertiary">{unavailable}</p>
-      ) : rows.length === 0 ? (
-        <p className="py-8 text-body text-tertiary">{empty}</p>
       ) : (
         <ul className="-mx-2 divide-y divide-border-subtle">
           {rows.map((row) => (
@@ -505,7 +519,11 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                 ? (transfers.data ?? []).map((transfer) => transferRow(transfer, context))
                 : null
             }
-            empty={t("DashboardPayments.noTransactions")}
+            empty={{
+              title: t("DashboardPayments.commandCenter.noTransfersTitle"),
+              description: t("DashboardPayments.commandCenter.noTransfersDescription"),
+              actionLabel: t("DashboardPayments.commandCenter.openTransactions"),
+            }}
             unavailable={unavailable}
             viewAll={{
               href: PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.transfers,
@@ -522,7 +540,11 @@ async function Activity({ apiClientPromise }: { apiClientPromise: ApiClientPromi
                   )
                 : null
             }
-            empty={t("DashboardPayments.commandCenter.noBatches")}
+            empty={{
+              title: t("DashboardPayments.commandCenter.noBatchesTitle"),
+              description: t("DashboardPayments.commandCenter.noBatchesDescription"),
+              actionLabel: t("DashboardPayments.commandCenter.openTransactions"),
+            }}
             unavailable={unavailable}
             viewAll={{
               href: PAYMENT_COMMAND_ACTIVITY_DESTINATIONS.batches,
