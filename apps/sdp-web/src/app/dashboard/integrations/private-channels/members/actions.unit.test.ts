@@ -41,6 +41,9 @@ import { createAndVerifyPrincipalAction } from "./actions";
 const RENDERED_PROJECT = "project_rendered";
 const MOVED_PROJECT = "project_cookie_moved";
 
+const minutesAgo = (minutes: number): string =>
+  new Date(Date.now() - minutes * 60_000).toISOString();
+
 const principal: PrivateChannelPrincipalDto = {
   id: "pcp_1",
   name: "Mia",
@@ -244,8 +247,8 @@ describe("createAndVerifyPrincipalAction project binding", () => {
     // be resumed, not duplicated and not reported as a conflict.
     mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
     mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
-      { ...principal, id: "pcp_lost", name: "Mia", createdAt: "2026-09-24T00:00:00.000Z" },
-      { ...principal, id: "pcp_other", name: "Other", createdAt: "2026-09-24T01:00:00.000Z" },
+      { ...principal, id: "pcp_lost", name: "Mia", createdAt: minutesAgo(1) },
+      { ...principal, id: "pcp_other", name: "Other", createdAt: minutesAgo(2) },
     ]);
     mocks.verifyPrivateChannelWallet.mockResolvedValue(verifiedWallet);
 
@@ -267,15 +270,15 @@ describe("createAndVerifyPrincipalAction project binding", () => {
   it("resumes the newest active same-named principal and skips disabled ones", async () => {
     mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
     mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
-      { ...principal, id: "pcp_old", name: "Mia", createdAt: "2026-09-23T00:00:00.000Z" },
+      { ...principal, id: "pcp_old", name: "Mia", createdAt: minutesAgo(5) },
       {
         ...principal,
         id: "pcp_disabled",
         name: "Mia",
         status: "disabled",
-        createdAt: "2026-09-24T02:00:00.000Z",
+        createdAt: minutesAgo(2),
       },
-      { ...principal, id: "pcp_newest", name: "Mia", createdAt: "2026-09-24T00:00:00.000Z" },
+      { ...principal, id: "pcp_newest", name: "Mia", createdAt: minutesAgo(1) },
     ]);
     mocks.verifyPrivateChannelWallet.mockResolvedValue(verifiedWallet);
 
@@ -292,6 +295,56 @@ describe("createAndVerifyPrincipalAction project binding", () => {
     expect(mocks.verifyPrivateChannelWallet).toHaveBeenCalledWith(boundClient, "wallet_1", {
       principalId: "pcp_newest",
     });
+  });
+
+  it("never adopts a same-named principal the first attempt cannot have created", async () => {
+    // A retry flag attests a lost response but cannot establish which
+    // principal the first attempt created. Adoption is only safe for a
+    // principal holding nothing: recent, wallet-less, membership-less, and
+    // not the project default. An established principal — already verified,
+    // already in channels, or older than the resume window — must stay a
+    // name conflict, or verification would attach the submitted wallet to
+    // channel memberships it was never meant to join.
+    mocks.getSelectedProjectId.mockResolvedValue(RENDERED_PROJECT);
+    mocks.fetchPrivateChannelPrincipals.mockResolvedValue([
+      {
+        ...principal,
+        id: "pcp_verified",
+        name: "Mia",
+        verifiedWalletCount: 2,
+        createdAt: minutesAgo(1),
+      },
+      {
+        ...principal,
+        id: "pcp_member",
+        name: "Mia",
+        channels: [{ id: "pc_1", name: "General", isDefault: false }],
+        createdAt: minutesAgo(2),
+      },
+      {
+        ...principal,
+        id: "pcp_default",
+        name: "Mia",
+        isDefault: true,
+        createdAt: minutesAgo(3),
+      },
+      { ...principal, id: "pcp_stale", name: "Mia", createdAt: minutesAgo(120) },
+    ]);
+
+    await expect(
+      createAndVerifyPrincipalAction({
+        name: "Mia",
+        walletId: "wallet_1",
+        projectId: RENDERED_PROJECT,
+        isRetry: true,
+      })
+    ).resolves.toEqual({
+      ok: false,
+      message: "DashboardPrivateChannels.members.principalNameTaken",
+    });
+
+    expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
+    expect(mocks.verifyPrivateChannelWallet).not.toHaveBeenCalled();
   });
 
   it("reports a name conflict on a fresh submission that matches an active principal", async () => {
