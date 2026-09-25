@@ -281,12 +281,13 @@ export async function depositIntoVault(
   // the provider finished the order, and a twin released in between would
   // double-broadcast it.
   if (!input.allowConcurrentDuplicateIntent) {
-    const openClaims = await ledger.findOpenVaultDepositIntentClaims({
+    const rankedClaim = await ledger.findOpenVaultDepositIntentClaim({
       organizationId: input.organizationId,
       projectId: input.projectId,
       depositIntentFingerprint: intentFingerprint,
+      requestedMinSharesOut: input.minSharesOut ?? null,
     });
-    const openClaim = resolveDepositIntentReplayClaim(openClaims, input.minSharesOut);
+    const openClaim = resolveDepositIntentReplayClaim(rankedClaim, input.minSharesOut);
     if (openClaim) {
       return replayResult(ledger, input, openClaim);
     }
