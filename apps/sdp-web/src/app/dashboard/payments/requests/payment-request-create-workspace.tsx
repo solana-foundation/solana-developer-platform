@@ -24,7 +24,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
-import { PAYMENT_REQUEST_OPEN_PARAM, PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
+import { PAYMENT_REQUESTS_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
@@ -249,11 +249,7 @@ export function PaymentRequestCreateWorkspace({
         ? t("DashboardPayments.requests.linkOnClipboard")
         : t("DashboardPayments.requests.copyLinkFromRequest"),
     });
-    router.push(
-      created?.id
-        ? `${PAYMENT_REQUESTS_HREF}?${new URLSearchParams({ [PAYMENT_REQUEST_OPEN_PARAM]: created.id })}`
-        : PAYMENT_REQUESTS_HREF
-    );
+    router.push(created?.id ? paymentRequestHref(created.id) : PAYMENT_REQUESTS_HREF);
   }
 
   if (!walletsError && wallets.length === 0) {

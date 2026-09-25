@@ -21,6 +21,7 @@ vi.mock("@/lib/dashboard-fetch", () => ({
   }),
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 function renderWorkspace(filters: TransactionFilters) {
   return render(

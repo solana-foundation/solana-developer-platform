@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
@@ -22,7 +23,13 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
 
-  const filters = parseTransactionFilters(await searchParams);
+  const params = await searchParams;
+  const openId = params[PAYMENT_TRANSACTION_OPEN_PARAM];
+  if (typeof openId === "string" && openId !== "") {
+    // The ledger's old deep link to one transaction; it has its own page now.
+    redirect(transactionHref(openId));
+  }
+  const filters = parseTransactionFilters(params);
   const trace = createTimedTrace("dashboard.payments.transactions.page");
   const apiClient = await trace.step("create_sdp_api_client", () =>
     createSdpApiClient(trace.childContext("dashboard.payments.transactions.api"))

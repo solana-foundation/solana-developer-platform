@@ -58,10 +58,12 @@ export type DashboardLoadingRoute =
   | "dvp-trade-create"
   | "dvp-trade-detail"
   | "payments-transactions"
+  | "payment-transaction-detail"
   | "payments-pay"
   | "payments-deposit"
   | "payment-requests"
   | "payment-request-create"
+  | "payment-request-detail"
   | "counterparty-directory"
   | "counterparty-create"
   | "counterparty-detail"
@@ -166,6 +168,10 @@ export function resolveDashboardLoadingRoute(rawPathname: string): DashboardLoad
   if (pathname === "/dashboard/payments/deposit") return "payments-deposit";
   if (pathname === "/dashboard/payments/requests") return "payment-requests";
   if (pathname === "/dashboard/payments/requests/new") return "payment-request-create";
+  if (/^\/dashboard\/payments\/requests\/[^/]+$/.test(pathname)) return "payment-request-detail";
+  if (/^\/dashboard\/payments\/transactions\/[^/]+$/.test(pathname)) {
+    return "payment-transaction-detail";
+  }
   if (pathname === "/dashboard/payments/counterparty") return "counterparty-directory";
   if (pathname === "/dashboard/payments/counterparty/create") return "counterparty-create";
   if (/^\/dashboard\/payments\/counterparty\/[^/]+$/.test(pathname)) {
