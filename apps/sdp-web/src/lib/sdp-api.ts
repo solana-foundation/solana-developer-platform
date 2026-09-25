@@ -5,7 +5,11 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { resolveProjectFromList } from "./dashboard-project-selection";
-import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
+import {
+  PROJECT_COOKIE_NAME,
+  PROJECT_HEADER_NAME,
+  PROJECT_SCOPE_ECHO_HEADER,
+} from "./project-cookie";
 import {
   createTimedTrace,
   logRouteResult,
@@ -508,6 +512,11 @@ export async function proxyToSdpApi({
         "Content-Type": response.headers.get("Content-Type") ?? "application/json",
         // Per-org financial state: never storable by browsers or intermediaries.
         "Cache-Control": "private, no-store",
+        // Which project this answer is scoped to: an empty list body names no
+        // rows, so the echo is the client's only proof that an empty batch
+        // really answered for the project it asked for — a proxy build that
+        // predates the echo (or the binding) stays silent instead.
+        [PROJECT_SCOPE_ECHO_HEADER]: projectId,
         "X-SDP-Trace-ID": trace.traceId,
         "Server-Timing": trace.serverTiming(),
       },

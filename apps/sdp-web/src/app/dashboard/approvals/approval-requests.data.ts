@@ -4,7 +4,7 @@ import {
   type WalletApprovalRequestSummary,
   type WalletOperationFamily,
 } from "@sdp/types";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
+import { PROJECT_HEADER_NAME, PROJECT_SCOPE_ECHO_HEADER } from "@/lib/project-cookie";
 
 export const APPROVAL_INBOX_PAGE_SIZE = 25;
 
@@ -65,6 +65,16 @@ export function approvalRequestsInProjectScope(
 }
 
 /**
+ * One refresh batch, plus the proxy's account of which project it answered
+ * for (`x-sdp-project-id`, or null when the proxy does not say — a build
+ * that predates the echo or the explicit binding).
+ */
+export interface ApprovalRequestBatch {
+  requests: WalletApprovalRequestSummary[];
+  scope: string | null;
+}
+
+/**
  * Validates a refresh's pending and recent batches against the inbox's
  * project binding and returns the rows to apply.
  *
@@ -74,30 +84,47 @@ export function approvalRequestsInProjectScope(
  * A pair carrying rows must name the mounted project in every row of both
  * batches.
  *
+ * Rows prove their own project, but an empty batch proves nothing on its own:
+ * during a rolling deploy an older proxy can still answer the shared
+ * selection cookie, so an empty batch may repaint a bound inbox only when the
+ * response's `x-sdp-project-id` echo names the mounted project. An echoless
+ * empty answer establishes nothing — the mounted rows stand — and an echo
+ * naming another project is an answer that left the mounted scope outright.
+ *
  * Without the binding the batches are scoped by the shared selection cookie,
  * which a sibling tab can switch at any moment; an empty pair then establishes
  * nothing about which project answered, so it returns `null` and the caller
  * keeps the mounted rows instead of erasing them.
  *
- * @throws When a batch with rows answers for another project; the caller
- * treats the whole refresh as failed rather than partially applying it.
+ * @throws When a batch answers for another project, by row or by echo; the
+ * caller treats the whole refresh as failed rather than partially applying it.
  */
 export function scopedApprovalBatch(
-  pendingRequests: WalletApprovalRequestSummary[],
-  recentRequests: WalletApprovalRequestSummary[],
+  pending: ApprovalRequestBatch,
+  recent: ApprovalRequestBatch,
   projectId: string | null
 ): WalletApprovalRequestSummary[] | null {
+  if (projectId === null) {
+    if (pending.requests.length === 0 && recent.requests.length === 0) return null;
+    return mergeApprovalRequests(pending.requests, recent.requests);
+  }
   if (
-    projectId !== null &&
-    (!approvalRequestsInProjectScope(pendingRequests, projectId) ||
-      !approvalRequestsInProjectScope(recentRequests, projectId))
+    !approvalRequestsInProjectScope(pending.requests, projectId) ||
+    !approvalRequestsInProjectScope(recent.requests, projectId)
   ) {
     throw new Error("Approval reload left the mounted project");
   }
-  if (projectId === null && pendingRequests.length === 0 && recentRequests.length === 0) {
-    return null;
+  let established = true;
+  for (const batch of [pending, recent]) {
+    if (batch.requests.length > 0) continue;
+    if (batch.scope === null) {
+      established = false;
+    } else if (batch.scope !== projectId) {
+      throw new Error("Approval reload left the mounted project");
+    }
   }
-  return mergeApprovalRequests(pendingRequests, recentRequests);
+  if (!established) return null;
+  return mergeApprovalRequests(pending.requests, recent.requests);
 }
 
 /**
@@ -106,9 +133,9 @@ export function scopedApprovalBatch(
  * scope instead of resolving the shared selection cookie, which a sibling tab
  * can change at any moment.
  *
- * @returns The scope-checked merged rows, or `null` when an unbound batch
- * pair establishes nothing (see `scopedApprovalBatch`).
- * @throws When a fetch fails, a batch carries another project's rows, or the
+ * @returns The scope-checked merged rows, or `null` when the batch pair
+ * establishes nothing (see `scopedApprovalBatch`).
+ * @throws When a fetch fails, a batch answers for another project, or the
  * response body is not a readable approval-request list.
  */
 export async function fetchApprovalRequests(
@@ -137,7 +164,11 @@ export async function fetchApprovalRequests(
   // Defense in depth for the explicit binding: a batch answered for another
   // project — an older proxy deploy still resolving the shared cookie, say —
   // must not repaint this inbox.
-  return scopedApprovalBatch(pendingRequests, recentRequests, projectId);
+  return scopedApprovalBatch(
+    { requests: pendingRequests, scope: pendingResponse.headers.get(PROJECT_SCOPE_ECHO_HEADER) },
+    { requests: recentRequests, scope: recentResponse.headers.get(PROJECT_SCOPE_ECHO_HEADER) },
+    projectId
+  );
 }
 
 function localDateBoundary(value: string, endOfDay: boolean): number | null {

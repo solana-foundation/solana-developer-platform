@@ -325,6 +325,9 @@ describe("createRequestScopedSdpApiClients", () => {
       });
 
       expect(response.status).toBe(200);
+      // The echo names the project the answer is bound to, so a client can
+      // prove an empty batch really answered for the project it asked for.
+      expect(response.headers.get("x-sdp-project-id")).toBe("project_test");
       const headers = headersOf(callsTo(fetchMock, "/v1/wallets/approval-requests")[0]);
       expect(headers.get("x-project-id")).toBe("project_test");
       expect(headers.get("Authorization")).toBe("Bearer token_test");

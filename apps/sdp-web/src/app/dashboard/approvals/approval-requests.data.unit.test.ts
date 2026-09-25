@@ -234,38 +234,73 @@ describe("approvalRequestsInProjectScope", () => {
 
 describe("scopedApprovalBatch", () => {
   const inScope = [approvalRequest("a", "pending")];
-
-  it("merges a pair whose rows all carry the bound project", () => {
-    expect(scopedApprovalBatch(inScope, inScope, "project-1")).toEqual(inScope);
+  const bound = (requests: WalletApprovalRequestSummary[], scope: string | null) => ({
+    requests,
+    scope,
   });
 
-  it("applies a bound empty pair so stale rows clear", () => {
-    expect(scopedApprovalBatch([], [], "project-1")).toEqual([]);
+  it("merges a pair whose rows all carry the bound project", () => {
+    expect(
+      scopedApprovalBatch(bound(inScope, "project-1"), bound(inScope, "project-1"), "project-1")
+    ).toEqual(inScope);
+  });
+
+  it("applies a bound empty pair the proxy's echo proves, so stale rows clear", () => {
+    expect(
+      scopedApprovalBatch(bound([], "project-1"), bound([], "project-1"), "project-1")
+    ).toEqual([]);
+  });
+
+  it("keeps the mounted rows when an older proxy answers empty without the echo", () => {
+    // A proxy build that predates the echo (or the binding) resolves the
+    // shared selection cookie: an empty pair it returns may be a sibling
+    // tab's empty project, so it proves nothing about the mounted one.
+    expect(scopedApprovalBatch(bound([], null), bound([], null), "project-1")).toBeNull();
+    expect(scopedApprovalBatch(bound([], "project-1"), bound([], null), "project-1")).toBeNull();
+    expect(scopedApprovalBatch(bound([], null), bound([], "project-1"), "project-1")).toBeNull();
+  });
+
+  it("throws when an empty batch's echo names another project", () => {
+    expect(() =>
+      scopedApprovalBatch(bound([], "project-2"), bound([], "project-1"), "project-1")
+    ).toThrow("Approval reload left the mounted project");
   });
 
   it("skips the repaint when an unbound pair of batches is empty", () => {
-    expect(scopedApprovalBatch([], [], null)).toBeNull();
+    expect(scopedApprovalBatch(bound([], null), bound([], null), null)).toBeNull();
   });
 
   it("skips the scope check when the inbox has no project binding", () => {
-    expect(scopedApprovalBatch(inScope, [], null)).toEqual(inScope);
+    expect(scopedApprovalBatch(bound(inScope, null), bound([], null), null)).toEqual(inScope);
   });
 
   it("throws when a batch with rows answers for another project", () => {
     const foreign = [approvalRequest("a", "pending", { projectId: "project-2" })];
-    expect(() => scopedApprovalBatch(foreign, [], "project-1")).toThrow(
-      "Approval reload left the mounted project"
-    );
-    expect(() => scopedApprovalBatch([], foreign, "project-1")).toThrow(
-      "Approval reload left the mounted project"
-    );
-    expect(() => scopedApprovalBatch([], [], "project-1")).not.toThrow();
+    expect(() =>
+      scopedApprovalBatch(bound(foreign, "project-2"), bound([], "project-1"), "project-1")
+    ).toThrow("Approval reload left the mounted project");
+    expect(() =>
+      scopedApprovalBatch(bound([], "project-1"), bound(foreign, "project-2"), "project-1")
+    ).toThrow("Approval reload left the mounted project");
   });
 
   it("applies an empty pending batch alongside in-scope rows", () => {
     // A project with approval history but nothing pending: the pending query
-    // legitimately answers empty while the recent query returns rows.
-    expect(scopedApprovalBatch([], inScope, "project-1")).toEqual(inScope);
-    expect(scopedApprovalBatch(inScope, [], "project-1")).toEqual(inScope);
+    // legitimately answers empty while the recent query returns rows. Rows
+    // prove their own project, and the empty batch is proven by its echo.
+    expect(
+      scopedApprovalBatch(bound([], "project-1"), bound(inScope, "project-1"), "project-1")
+    ).toEqual(inScope);
+    expect(
+      scopedApprovalBatch(bound(inScope, "project-1"), bound([], "project-1"), "project-1")
+    ).toEqual(inScope);
+  });
+
+  it("keeps the mounted rows when the proven half of the pair is missing", () => {
+    // Rows prove the recent batch, but the echoless empty pending answer may
+    // be another project's, so the pair establishes nothing as a whole.
+    expect(
+      scopedApprovalBatch(bound([], null), bound(inScope, "project-1"), "project-1")
+    ).toBeNull();
   });
 });

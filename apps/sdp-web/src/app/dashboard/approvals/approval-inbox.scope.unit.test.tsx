@@ -11,10 +11,14 @@ import { ApprovalInbox } from "./approval-inbox";
  * Regression coverage for the inbox's project-scoped refresh edges:
  *
  * 1. A bound empty refresh applies: the request named the mounted project
- *    explicitly, so two empty batches mean the project genuinely has no
- *    requests — stale rows must clear, and the refresh must not read as a
- *    load failure.
- * 2. A project switch re-binds the inbox to the new scope's page props, so a
+ *    explicitly and the proxy's `x-sdp-project-id` echo proves the empty
+ *    answer is bound to it, so two empty batches mean the project genuinely
+ *    has no requests — stale rows must clear, and the refresh must not read
+ *    as a load failure.
+ * 2. An echoless empty pair (an older proxy build still resolving the shared
+ *    selection cookie) establishes nothing: the mounted rows stand instead of
+ *    being erased, without reading as a load failure.
+ * 3. A project switch re-binds the inbox to the new scope's page props, so a
  *    new project whose initial load failed shows the error panel instead of
  *    an empty inbox hiding the failure.
  */
@@ -67,8 +71,11 @@ function approvalRequest(projectId: string): WalletApprovalRequestSummary {
   };
 }
 
-function emptyBatchResponse() {
-  return Response.json({ data: { approvalRequests: [] } }, { status: 200 });
+function emptyBatchResponse(scope?: string) {
+  return Response.json(
+    { data: { approvalRequests: [] } },
+    { status: 200, headers: scope ? { "x-sdp-project-id": scope } : undefined }
+  );
 }
 
 function renderInbox(props: Partial<Parameters<typeof ApprovalInbox>[0]> = {}) {
@@ -100,10 +107,11 @@ describe("ApprovalInbox project-scoped refreshes", () => {
 
   it("clears the mounted rows when a bound refresh answers an emptied project", async () => {
     // Fresh Response per call: a body can only be read once, and the pending
-    // and recent fetches run in parallel.
+    // and recent fetches run in parallel. The echo names the mounted project,
+    // so the current proxy build proves the empty answer is bound to it.
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse())
+      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse("project-a"))
     );
 
     renderInbox();
@@ -123,12 +131,13 @@ describe("ApprovalInbox project-scoped refreshes", () => {
   it("applies a refresh whose pending batch is empty but whose recent batch has rows", async () => {
     // A project with approval history but nothing pending: the pending query
     // legitimately answers empty while the recent query returns rows, so the
-    // pair is in scope and must apply rather than fail the refresh.
+    // pair is in scope and must apply rather than fail the refresh. The
+    // empty half carries the proxy's echo; the rows prove the other half.
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockImplementation(async (input) => {
         const url = String(input instanceof Request ? input.url : input);
-        if (url.includes("status=pending")) return emptyBatchResponse();
+        if (url.includes("status=pending")) return emptyBatchResponse("project-a");
         return Response.json({
           data: { approvalRequests: [{ ...approvalRequest("project-a"), id: "apr_new" }] },
         });
@@ -151,8 +160,9 @@ describe("ApprovalInbox project-scoped refreshes", () => {
   });
 
   it("stays on the empty state without a load error when the project has no requests", async () => {
-    // Fresh Response per call: a body can only be read once, and the pending
-    // and recent fetches run in parallel.
+    // An echoless empty pair (an older proxy build) establishes nothing, so
+    // the refresh neither repaints nor reads as a failure: an empty inbox
+    // simply stays empty.
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse())
@@ -167,6 +177,28 @@ describe("ApprovalInbox project-scoped refreshes", () => {
 
     expect(screen.queryByText("Unable to load approval requests")).toBeNull();
     expect(screen.getByText("No requests are waiting for approval")).toBeTruthy();
+  });
+
+  it("keeps the mounted rows when an older proxy answers empty without the echo", async () => {
+    // A rolling deploy: an older proxy build still resolves the shared
+    // selection cookie, and a sibling tab has switched it to an empty
+    // project. The echoless empty pair proves nothing about the mounted
+    // project, so its rows must stand — not be erased by the empty answer —
+    // and the refresh must not read as a failure either.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse())
+    );
+
+    renderInbox();
+    expect(screen.getAllByText("Treasury").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getAllByText("Treasury").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Unable to load approval requests")).toBeNull();
   });
 
   it("shows the new project's load error when a switch lands on a failed page load", async () => {
