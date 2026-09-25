@@ -2067,6 +2067,9 @@ describe("Payments routes — recurring", () => {
       recurringPaymentId: activated.id,
       subscriptionId: activated.subscriptionId,
       dueAt,
+      // Seed a consistently elapsed period so the due cycle is not behind its
+      // own authorization boundary (APE-775 anchoring).
+      currentPeriodStartAt: new Date(new Date(dueAt).getTime() - 24 * 60 * 60 * 1000).toISOString(),
     });
     const [expectedDestinationAta] = await findAssociatedTokenPda({
       owner: address(TEST_SOLANA_ADDRESSES.wallet2),
@@ -3137,6 +3140,11 @@ describe("Payments routes — recurring", () => {
         recurringPaymentId: activated.id,
         subscriptionId: activated.subscriptionId,
         dueAt,
+        // Seed a consistently elapsed period so the due cycle is not behind
+        // its own authorization boundary (APE-775 anchoring).
+        currentPeriodStartAt: new Date(
+          new Date(dueAt).getTime() - 24 * 60 * 60 * 1000
+        ).toISOString(),
       });
       await seedRecurringCollectionJournal({
         stage: "submitted",

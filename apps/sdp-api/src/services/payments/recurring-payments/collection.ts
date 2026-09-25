@@ -816,7 +816,22 @@ async function finalizeRecurringPaymentCollection(input: {
 }> {
   const finalizedAt = new Date().toISOString();
   const dueAt = input.proof.dueAt;
-  const nextDueAt = nextRecurringPaymentCollectionDueAt(dueAt, input.recurringPayment.period_hours);
+  // APE-775 (SOLA9-535): advance the local schedule from the authoritative
+  // authorization-period boundary, one full period forward. A due time that
+  // drifted behind the boundary (rows activated before the activation fix)
+  // must not pull the period start backward or schedule the next collection
+  // before the current period ends.
+  const periodHours = input.recurringPayment.period_hours;
+  const currentPeriodStartAt = input.subscription.current_period_start_at;
+  const currentPeriodStartMs = currentPeriodStartAt
+    ? new Date(currentPeriodStartAt).getTime()
+    : Number.NaN;
+  const authoritativePeriodStartAt =
+    Number.isFinite(currentPeriodStartMs) &&
+    currentPeriodStartMs + periodHours * 60 * 60 * 1000 > new Date(dueAt).getTime()
+      ? new Date(currentPeriodStartMs + periodHours * 60 * 60 * 1000).toISOString()
+      : dueAt;
+  const nextDueAt = nextRecurringPaymentCollectionDueAt(authoritativePeriodStartAt, periodHours);
 
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -871,7 +886,7 @@ async function finalizeRecurringPaymentCollection(input: {
         subscriptionId: input.subscription.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        currentPeriodStartAt: dueAt,
+        currentPeriodStartAt: authoritativePeriodStartAt,
         nextCollectionDueAt: nextDueAt,
         expectedNextCollectionDueAt: dueAt,
         expectedStatus: "active",

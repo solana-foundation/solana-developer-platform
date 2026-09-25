@@ -2,7 +2,7 @@ import {
   decideRecurringPaymentActivationTransition,
   generateProgramPlanId,
   getRecurringPaymentOperationStaleBefore,
-  nextRecurringPaymentCollectionDueAt,
+  resolveRecurringPaymentCollectionSchedule,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
@@ -966,26 +966,28 @@ export async function activateRecurringPayment(input: {
     }
 
     const activatedAt = new Date().toISOString();
-    const scheduleRequest =
-      claimed.first_collection_at === null
-        ? ({ kind: "next_period" } as const)
-        : ({ kind: "requested", dueAt: claimed.first_collection_at } as const);
-    let nextCollectionDueAt: string;
-    switch (scheduleRequest.kind) {
-      case "next_period":
-        nextCollectionDueAt = nextRecurringPaymentCollectionDueAt(
-          activatedAt,
-          claimed.period_hours
-        );
-        break;
-      case "requested":
-        nextCollectionDueAt = scheduleRequest.dueAt;
-        break;
-      default: {
-        const exhaustive: never = scheduleRequest;
-        throw internalError(`Unsupported recurring payment schedule: ${exhaustive}`);
-      }
+    // APE-775 (SOLA9-535): activation starts the authorization period now, so
+    // a requested first collection that has already elapsed (or falls inside
+    // the first period) must never persist as the active due time. Resolve it
+    // against the actual period start and clamp it to the first eligible
+    // collection; future requests beyond the first period stay honored.
+    const resolution = resolveRecurringPaymentCollectionSchedule({
+      request:
+        claimed.first_collection_at === null
+          ? { kind: "next_period" }
+          : {
+              kind: "requested",
+              dueAt: claimed.first_collection_at,
+              clampToMinimum: true,
+            },
+      periodStartAt: activatedAt,
+      periodHours: claimed.period_hours,
+    });
+    if (resolution.kind !== "scheduled") {
+      // Unreachable while clamping is enabled; keeps the resolution exhaustive.
+      throw internalError("Failed to resolve the recurring payment collection schedule");
     }
+    const nextCollectionDueAt = resolution.nextCollectionDueAt;
 
     const finalized = await getDb(input.env).transaction(async (tx) => {
       const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);

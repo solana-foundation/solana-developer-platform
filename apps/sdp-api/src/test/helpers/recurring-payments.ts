@@ -171,16 +171,25 @@ export async function setRecurringCollectionDue(options: {
   recurringPaymentId: string;
   subscriptionId: string;
   dueAt: string;
+  currentPeriodStartAt?: string;
 }): Promise<void> {
   const db = getDb(env);
-  await db.batch([
+  const statements = [
     db
       .prepare("UPDATE payment_recurring_payments SET next_collection_due_at = ? WHERE id = ?")
       .bind(options.dueAt, options.recurringPaymentId),
     db
       .prepare("UPDATE payment_subscriptions SET next_collection_due_at = ? WHERE id = ?")
       .bind(options.dueAt, options.subscriptionId),
-  ]);
+  ];
+  if (options.currentPeriodStartAt !== undefined) {
+    statements.push(
+      db
+        .prepare("UPDATE payment_subscriptions SET current_period_start_at = ? WHERE id = ?")
+        .bind(options.currentPeriodStartAt, options.subscriptionId)
+    );
+  }
+  await db.batch(statements);
 }
 
 type DurableCollectionJournal =
