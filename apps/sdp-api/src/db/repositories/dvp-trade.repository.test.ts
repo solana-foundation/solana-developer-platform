@@ -18,6 +18,7 @@ import type {
   DvpTradeListFilters,
   DvpTradeRepository,
 } from "./dvp-trade.repository";
+import { DvpSettlementWalletInactiveError } from "./dvp-trade.repository";
 import { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_dvp_repo_test";
@@ -188,6 +189,102 @@ describe("DvpTradeRepository (postgres)", () => {
       nameA: "Acme Treasury Debt",
       nameB: "USD Coin",
     });
+  });
+
+  // The other half of the deactivation race. The store's conditional UPDATE
+  // can only see trades that already exist, so a deactivation commits clean,
+  // and then the create's INSERT lands a trade bound to an authority that can
+  // no longer sign. The claim re-checks the wallet's status and mapping inside
+  // the INSERT, so this ordering inserts nothing and throws instead. The
+  // wallet is deactivated FIRST here: with the wallet still active, the same
+  // call must insert normally, which every other test in this file exercises.
+  it("refuses a claim when its settlement wallet was deactivated before the insert", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
+         VALUES (?, ?, 'local', 'x', 'active')
+         ON CONFLICT (id) DO UPDATE SET status = 'active'`
+      )
+      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, 'w1', ?, 'active')
+         ON CONFLICT (id) DO UPDATE SET status = 'active'`
+      )
+      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_A_PUBKEY)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT (project_id) DO UPDATE SET custody_wallet_id = EXCLUDED.custody_wallet_id`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, CUSTODY_WALLET_ID)
+      .run();
+
+    // Liveness holds while the wallet is active: the claim inserts normally.
+    await expect(
+      repo.claimWithKeyRelease(null, tradeInsert(), { custodyWalletId: CUSTODY_WALLET_ID })
+    ).resolves.toMatchObject({ status: "creating" });
+
+    await db.prepare("DELETE FROM dvp_trades").run();
+    await db.execute("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?", [
+      CUSTODY_WALLET_ID,
+    ]);
+
+    // Deactivation won the ordering: the claim must refuse, leaving no row.
+    await expect(
+      repo.claimWithKeyRelease(null, tradeInsert({ id: "dvp_race_loser" }), {
+        custodyWalletId: CUSTODY_WALLET_ID,
+      })
+    ).rejects.toBeInstanceOf(DvpSettlementWalletInactiveError);
+    await expect(repo.getById(scope, "dvp_race_loser")).resolves.toBeNull();
+
+    // The mapping row references the wallet with ON DELETE RESTRICT; drop it
+    // so the suite's shared cleanup can clear custody_wallets.
+    await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [TEST_PROJECT_ID]);
+  });
+
+  it("refuses a claim whose wallet was unmapped before the insert", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO custody_configs (id, organization_id, provider, config_encrypted, status)
+         VALUES (?, ?, 'local', 'x', 'active')
+         ON CONFLICT (id) DO UPDATE SET status = 'active'`
+      )
+      .bind(CUSTODY_CONFIG_ID, TEST_ORG.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, 'w1', ?, 'active')
+         ON CONFLICT (id) DO UPDATE SET status = 'active'`
+      )
+      .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_A_PUBKEY)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+         VALUES (?, ?, ?)
+         ON CONFLICT (project_id) DO UPDATE SET custody_wallet_id = EXCLUDED.custody_wallet_id`
+      )
+      .bind(TEST_PROJECT_ID, TEST_ORG.id, CUSTODY_WALLET_ID)
+      .run();
+    // Still active, but no longer the project's mapped authority: a wallet
+    // that cannot settle the project's trades must not record new ones.
+    await db.execute("DELETE FROM dvp_settlement_wallets WHERE project_id = ?", [TEST_PROJECT_ID]);
+
+    await expect(
+      repo.claimWithKeyRelease(null, tradeInsert(), { custodyWalletId: CUSTODY_WALLET_ID })
+    ).rejects.toBeInstanceOf(DvpSettlementWalletInactiveError);
+
+    // The mapping row references the wallet with ON DELETE RESTRICT; drop it
+    // so the suite's shared cleanup can clear custody_wallets. (Deleted above
+    // to simulate the unmapping, so nothing is left over either way.)
   });
 
   it("attaches a create signature exactly once", async () => {

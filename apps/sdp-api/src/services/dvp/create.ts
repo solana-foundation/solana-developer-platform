@@ -47,6 +47,7 @@ import { getDb } from "@/db";
 import {
   createCounterpartyAccountsRepository,
   createDvpTradeRepository,
+  DvpSettlementWalletInactiveError,
   type DvpTradeRow,
 } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
@@ -135,11 +136,19 @@ async function insertOrReplay(
   failedRowId: string | null,
   idempotencyKey: string | null,
   fingerprint: string | null,
-  row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
+  row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0],
+  settlement: { custodyWalletId: string }
 ): Promise<DvpTradeRow> {
   try {
-    return await repository.claimWithKeyRelease(failedRowId, row);
+    return await repository.claimWithKeyRelease(failedRowId, row, settlement);
   } catch (error) {
+    // The claim is conditional on the settlement wallet still being active; a
+    // deactivation that committed between the create's read and this insert
+    // lands here. Nothing was recorded, and the project's authority (or its
+    // replacement) resolves on retry, so this is a conflict, not a fault.
+    if (error instanceof DvpSettlementWalletInactiveError) {
+      throw conflict("DvP settlement wallet is no longer active; retry to use the current one");
+    }
     if (!idempotencyKey) {
       throw error;
     }
@@ -462,7 +471,12 @@ export async function createDvpTrade(
       idempotencyFingerprint: fingerprint,
       createSignature: null,
       createLastValidBlockHeight: null,
-    }
+    },
+    // The create resolved this wallet a moment ago; the insert re-checks its
+    // liveness in the same statement, so a deactivation that committed in
+    // between refuses the claim instead of leaving a trade bound to a
+    // settlement authority that can no longer sign.
+    { custodyWalletId: settlement.custodyWalletId }
   );
 
   if (recorded.id !== id) {

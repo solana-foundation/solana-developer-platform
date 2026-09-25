@@ -195,17 +195,64 @@ export interface DvpTradeRepositoryContext {
   db: RepositoryDbClient;
 }
 
+/**
+ * Thrown by `createIfSettlementActive` when the settlement wallet a create
+ * resolved was deactivated (or unmapped) before the trade's claim landed.
+ *
+ * The insert is conditional, so nothing was recorded; the caller surfaces this
+ * as a 409 and the retried create resolves a fresh authority.
+ */
+export class DvpSettlementWalletInactiveError extends Error {
+  constructor(custodyWalletId: string) {
+    super(
+      `DvP settlement wallet ${custodyWalletId} is no longer active; the trade was not created. Retry to resolve the project's current settlement authority.`
+    );
+    this.name = "DvpSettlementWalletInactiveError";
+  }
+}
+
+/**
+ * The settlement wallet a create resolved, re-checked for liveness by the
+ * claim's INSERT.
+ *
+ * A deactivation commits between the create's read of the settlement wallet
+ * and the claim's insert; without re-checking liveness in the same statement,
+ * the insert would record a trade bound to an authority that can no longer
+ * sign (the deactivation's own guard cannot see the trade yet, because it
+ * does not exist). The claim's INSERT re-reads both the wallet's status and
+ * its mapping in `dvp_settlement_wallets`, so a deactivation that committed
+ * first makes the insert refuse.
+ */
+export interface DvpSettlementLiveness {
+  /** `custody_wallets.id` of the wallet the create resolved. */
+  custodyWalletId: string;
+}
+
 export interface DvpTradeRepository {
   /** Writes the row at `creating`, before the create transaction is broadcast. */
   create(row: DvpTradeInsert): Promise<DvpTradeRow>;
   /**
-   * Atomically releases a failed attempt's key and inserts its replacement claim.
+   * Atomically releases a failed attempt's key (when one is named) and inserts
+   * the replacement claim, gated on the settlement wallet still being active.
    *
-   * @param failedRowId - Failed attempt to release, or null for a first claim.
+   * The wallet's deactivation is a conditional UPDATE that refuses only when
+   * an open trade already references it; a trade inserted a moment later is
+   * invisible to that check. Re-checking liveness inside the INSERT closes
+   * that ordering: if the wallet went inactive first, this throws
+   * {@link DvpSettlementWalletInactiveError} and nothing is recorded. The
+   * mapping is read through `dvp_settlement_wallets` so the check applies
+   * exactly while the wallet is still the project's mapped authority.
+   *
+   * @param failedRowId - Failed attempt whose idempotency key is released, or null for a first claim.
    * @param row - The replacement claim to insert.
+   * @param settlement - The settlement wallet the create resolved, re-checked for liveness inside the insert.
    * @returns The newly inserted claim.
    */
-  claimWithKeyRelease(failedRowId: string | null, row: DvpTradeInsert): Promise<DvpTradeRow>;
+  claimWithKeyRelease(
+    failedRowId: string | null,
+    row: DvpTradeInsert,
+    settlement: DvpSettlementLiveness
+  ): Promise<DvpTradeRow>;
   /**
    * Attaches the sponsored signature to a still-live create claim.
    *
