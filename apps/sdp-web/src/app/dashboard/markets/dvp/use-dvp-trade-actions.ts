@@ -11,6 +11,11 @@
  * whoever holds it, on whichever org's trade. Each press of either carries its
  * own Idempotency-Key, so a request the proxy or network retries is answered
  * with the first result instead of moving the leg twice.
+ *
+ * Settling and cancelling close the trade, so their key is one per logical
+ * operation rather than one per press, persisted across retries in
+ * `dvp-idempotency-key.ts`: the API records the close transaction under it and
+ * a retry replays that signature instead of signing a second close (SOLA9-146).
  */
 
 import {
@@ -29,7 +34,11 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import { DVP_TOAST_POSITION, dvpToastAction } from "./dvp-action-toast";
-import { freshDvpIdempotencyKey } from "./dvp-idempotency-key";
+import {
+  dvpCloseIdempotencyKeyStore,
+  dvpCloseRequestFingerprint,
+  freshDvpIdempotencyKey,
+} from "./dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "./dvp-trade";
 
 export type DvpTradeActionName = "settle" | "cancel" | "fund" | "reclaim";
@@ -171,15 +180,21 @@ function pendingKey(call: DvpTradeActionCall): DvpPendingAction {
 }
 
 /**
- * Fund and reclaim name the leg they move and carry their own Idempotency-Key;
- * settle and cancel carry neither.
+ * Fund and reclaim name the leg they move and carry a fresh key per press;
+ * settle and cancel carry the persisted key of their one logical operation,
+ * which the caller claims before the request and releases once the API has
+ * answered for it.
  */
 function requestInit(
   action: DvpTradeActionName,
-  leg: { side: DvpTradeSide; walletId: string } | null
+  leg: { side: DvpTradeSide; walletId: string } | null,
+  close: { key: string } | null
 ): RequestInit {
   if (leg === null) {
-    return { method: "POST" };
+    return {
+      method: "POST",
+      headers: close === null ? undefined : { [IDEMPOTENCY_KEY_HEADER]: close.key },
+    };
   }
   return {
     method: "POST",
@@ -196,19 +211,98 @@ function requestInit(
 function successOf(
   action: DvpTradeActionName,
   body: unknown
-): { signature: string; message: MessageKey } | null {
+): { signature: string; confirmed: boolean; message: MessageKey } | null {
   if (action === "settle" || action === "cancel") {
     const close = closeEnvelopeSchema.safeParse(body);
     if (!close.success) {
       return null;
     }
     const { signature, confirmed } = close.data.data;
-    return { signature, message: confirmed ? DONE_MESSAGE[action] : SENT_MESSAGE[action] };
+    return {
+      signature,
+      confirmed,
+      message: confirmed ? DONE_MESSAGE[action] : SENT_MESSAGE[action],
+    };
   }
   const broadcast = broadcastEnvelopeSchema.safeParse(body);
   return broadcast.success
-    ? { signature: broadcast.data.data.signature, message: DONE_MESSAGE[action] }
+    ? {
+        signature: broadcast.data.data.signature,
+        confirmed: true,
+        message: DONE_MESSAGE[action],
+      }
     : null;
+}
+
+/**
+ * The key of the logical settle or cancel this press starts, claimed from the
+ * persisted store so every retry of the operation re-sends it, together with
+ * the fingerprint it answers to — or null for the leg actions, whose keys are
+ * minted fresh per press.
+ *
+ * The claim pins the key for the life of the tab, before anything is sent: a
+ * close whose answer never reached the dashboard can still land, so no expiry
+ * may retire its key silently. Only `applyCloseKeyOutcome` lifts the pin, on
+ * an answer that proves the close resolved.
+ */
+function claimCloseKey(
+  cluster: SolanaCluster,
+  tradeId: string,
+  action: DvpTradeActionName,
+  leg: { side: DvpTradeSide; walletId: string } | null
+): { fingerprint: string; key: string } | null {
+  if (leg !== null || (action !== "settle" && action !== "cancel")) {
+    return null;
+  }
+  const fingerprint = dvpCloseRequestFingerprint({ cluster, tradeId, action });
+  const key = dvpCloseIdempotencyKeyStore.claim(fingerprint);
+  dvpCloseIdempotencyKeyStore.hold(fingerprint);
+  return { fingerprint, key };
+}
+
+/**
+ * What the answer does to a close's key. The key is pinned from the moment it
+ * is claimed, so only an answer that proves the close resolved lifts the pin:
+ * a readable 2xx that says `confirmed: true`, or a refusal that provably
+ * recorded nothing (`closeRefusalOutcome`). Anything ambiguous — a 202
+ * approval hold, a transport failure, a 5xx, a 408 or 429, an unreadable
+ * answer, an unconfirmed broadcast, a 409 while a close can still land —
+ * leaves the pin alone, because the retry of this operation must replay the
+ * close the first request sent (SOLA9-146). Leg actions have no key.
+ */
+function applyCloseKeyOutcome(
+  close: { fingerprint: string } | null,
+  outcome: "answered" | "refused" | "kept"
+): void {
+  if (close !== null && outcome !== "kept") {
+    dvpCloseIdempotencyKeyStore.release(close.fingerprint);
+  }
+}
+
+/**
+ * Whether a refusal lifts the close key's pin. A refusal that proves nothing
+ * was recorded under the key — every pre-flight 4xx: a trade already closed, a
+ * settlement window gone, a leg still moving, a close the chain refused —
+ * lifts it, and the next press is a new operation. A 409 does not: with
+ * `closeInProgress` the trade's close lock is held by a close that can still
+ * land, and without a reason it is the key's OWN request still running, whose
+ * recorded transaction may land too. A 408 or 429 does not either: a gateway
+ * timing out downstream, or shedding load after forwarding, leaves it unknown
+ * whether the API already recorded the close. A 5xx might have recorded and
+ * broadcast.
+ */
+function closeRefusalOutcome(status: number, body: unknown): "refused" | "kept" {
+  if (status === 408 || status === 429 || status >= 500) {
+    return "kept";
+  }
+  if (status !== 409) {
+    return "refused";
+  }
+  const envelope = dvpErrorEnvelopeSchema.safeParse(body);
+  const reason = closeRefusalReasonSchema.safeParse(
+    envelope.success ? envelope.data.error.details?.reason : undefined
+  );
+  return reason.success && reason.data === DVP_CLOSE_REFUSAL.legMoving ? "refused" : "kept";
 }
 
 export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): DvpTradeActions {
@@ -240,6 +334,12 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
     const key = pendingKey(call);
     const leg = call.length === 1 ? null : call[1];
     setPending((current) => new Set(current).add(key));
+    // One stable key per logical close (SOLA9-146): claimed before the request
+    // and re-sent by every retry of it. The API records the close transaction
+    // under this key before broadcast, so a retry asks the chain what that
+    // transaction did instead of signing a second close against an escrow a
+    // late deposit may have refilled.
+    const closeKey = claimCloseKey(cluster, tradeId, action, leg);
     try {
       // An absent ID would ask the API to choose a different wallet by address.
       if (
@@ -251,13 +351,16 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       }
       const response = await fetch(
         `/api/dashboard/markets/dvp/trades/${encodeURIComponent(tradeId)}/${action}`,
-        requestInit(action, leg)
+        requestInit(action, leg, closeKey)
       );
       // Held by policy. 202 is an ok status, so this has to come before the
       // success read: nothing moved, and the trade page shows the action as
       // still available until an approver decides.
       const heldMessage = HELD_MESSAGE[action];
       if (response.status === 202 && heldMessage !== undefined) {
+        // The key stays pinned: when the approval executes, it executes the
+        // request recorded under it.
+        applyCloseKeyOutcome(closeKey, "kept");
         toast.info(t(heldMessage), {
           ...DVP_TOAST_POSITION,
           description: t("DashboardMarkets.dvp.approvalPendingDescription"),
@@ -268,8 +371,9 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       // Either way the body can fail to be JSON at all, such as a proxy's error
       // page. It reads as null, and each schema below treats null as not matching.
       if (!response.ok) {
-        const symbol = leg === null ? null : leg.symbol;
         const failure: unknown = await response.json().catch(() => null);
+        applyCloseKeyOutcome(closeKey, closeRefusalOutcome(response.status, failure));
+        const symbol = leg === null ? null : leg.symbol;
         toast.error(refusalMessage(failure, response.status, symbol), DVP_TOAST_POSITION);
         return;
       }
@@ -279,10 +383,17 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       const body: unknown = await response.json().catch(() => null);
       const success = successOf(action, body);
       if (success === null) {
+        // The key stays pinned: an answer nobody could read may have recorded
+        // and broadcast the close.
+        applyCloseKeyOutcome(closeKey, "kept");
         toast.error(t("DashboardMarkets.dvp.actionUnconfirmed"), DVP_TOAST_POSITION);
         router.refresh();
         return;
       }
+      // The API answered for this close only once the close itself confirmed:
+      // an unconfirmed broadcast keeps its key, because what it sent can still
+      // land, and the retry must ask the chain what did.
+      applyCloseKeyOutcome(closeKey, success.confirmed ? "answered" : "kept");
       // The single biggest source of "did anything happen?": these used to
       // succeed and then say nothing, leaving the page to catch up on the
       // reconciler's next sweep. A refresh is not an answer. A close that went
@@ -293,6 +404,9 @@ export function useDvpTradeActions(tradeId: string, cluster: SolanaCluster): Dvp
       });
       router.refresh();
     } catch (caught) {
+      // No answer at all is the ambiguity the pin exists for: the request may
+      // still be recorded and its close land.
+      applyCloseKeyOutcome(closeKey, "kept");
       const message = caught instanceof Error ? caught.message : "Request failed.";
       toast.error(message, DVP_TOAST_POSITION);
     } finally {
