@@ -322,6 +322,22 @@ export class HeliusRingsService {
     if (!wallet) {
       throw new AppError("INTERNAL_ERROR", "rings wallet reservation returned no row");
     }
+    // The first non-null custody binding is immutable: the identity registered
+    // on chain was derived from that custody wallet's key, so it cannot move.
+    // A retry whose request resolves a different custody row — the provider
+    // retired the original and reissued its id — would otherwise provision a
+    // mixed identity (B-derived owner and shielded addresses under A's
+    // binding), so fail closed and leave the reservation exactly as it was.
+    if (
+      input.custodyWalletId != null &&
+      wallet.custody_wallet_id != null &&
+      wallet.custody_wallet_id !== input.custodyWalletId
+    ) {
+      throw new HeliusRingsError(
+        "conflict",
+        `this rings wallet is already bound to custody wallet ${wallet.custody_wallet_id}; resolve that custody row instead of provisioning from a reissued provider id`
+      );
+    }
     if (wallet.status !== "pending") {
       return mapHeliusRingsWalletRow(wallet);
     }
