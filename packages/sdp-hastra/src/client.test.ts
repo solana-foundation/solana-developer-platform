@@ -657,11 +657,13 @@ describe("Hastra par redemption", () => {
     expect(plan.instructions[3]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
     expect(plan.instructions[3]?.accounts[1]?.address).toBe(ata(OWNER, USDC));
     expect(plan.instructions[3]?.accounts[2]?.address).toBe(OWNER);
-    // Absent-at-build creates are NON-idempotent, so the landed create either
-    // charges the recorded funder or fails the request — a build-time claim
-    // can never survive an account someone else created in between.
-    expect(plan.instructions[2]?.data).toBe(Buffer.from([0]).toString("base64"));
-    expect(plan.instructions[3]?.data).toBe(Buffer.from([0]).toString("base64"));
+    // Creates stay idempotent even for absent-at-build accounts: an account
+    // someone else creates before the request lands must turn the create into
+    // a no-op that charges nothing, not abort a wanted redemption. Exactness
+    // of the recorded claim is the API's job — it verifies the LANDED request
+    // transaction before the claim becomes a refund source.
+    expect(plan.instructions[2]?.data).toBe(Buffer.from([1]).toString("base64"));
+    expect(plan.instructions[3]?.data).toBe(Buffer.from([1]).toString("base64"));
   });
 
   it("omits output-ATA attribution when both persistent output accounts already exist", async () => {

@@ -2257,12 +2257,15 @@ export class HastraVaultDirectClient
         // The two output accounts outlive this transaction and an operator
         // settles later, so the plan records per-account rent truth — the
         // durable source a queued fulfillment's refund can cite instead of
-        // guessing from fee_payer. An account absent at this read gets a
-        // NON-idempotent create: the landed create then either charges the
-        // rentPayer exactly as claimed or fails this request transaction, so
-        // an account someone else creates in between can never leave a funder
-        // claim the chain never charged. An account already present keeps its
-        // idempotent no-op create and the plan claims nothing for it.
+        // guessing from fee_payer. Both creates stay IDEMPOTENT: an account
+        // someone else creates between this read and the request landing
+        // turns the create into a no-op that charges nothing instead of
+        // aborting a redemption whose payout is still wanted. The claim is
+        // therefore the builder's observation, and it only becomes a refund
+        // source after the API verifies the LANDED request transaction
+        // actually created the claimed accounts (the reconciliation drops a
+        // claim whose creates charged nothing). An account already present
+        // keeps its no-op create and the plan claims nothing for it.
         const createdOutputAtas: EarnVaultCreatedOutputAta[] = [];
         if (userWyldsAccount === null) {
           createdOutputAtas.push({
@@ -2284,9 +2287,9 @@ export class HastraVaultDirectClient
           instructions: [
             computeUnitLimitInstruction(HASTRA_NATIVE_COMPUTE_UNIT_LIMIT),
             ...(prefund ? [prefund] : []),
-            createAssociatedTokenInstruction(rentPayer, owner, wylds, userWyldsAccount !== null),
+            createAssociatedTokenInstruction(rentPayer, owner, wylds),
             // Completion is operator-signed, so prepare the user's canonical USDC destination now.
-            createAssociatedTokenInstruction(rentPayer, owner, usdc, userUsdcAccount !== null),
+            createAssociatedTokenInstruction(rentPayer, owner, usdc),
             ...transientWylds.setupInstructions,
             stakeRedeemInstruction({
               config,

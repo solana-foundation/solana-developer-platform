@@ -1242,6 +1242,45 @@ describe("Earn queued withdrawal repository", () => {
     ).rejects.toThrow(/output_rent_funder_shape_check/);
   });
 
+  it("drops an unpaid output-ATA rent claim and never touches an unclaimed row", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const claimed = await createRequest({
+      mechanism: "operator_redemption",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+    });
+    await repository.dropUnpaidOutputAccountsRentClaim({
+      withdrawalRequestId: claimed.request.id,
+      organizationId: ORG,
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: claimed.request.id,
+      })
+    ).resolves.toMatchObject({ creates_output_accounts: false, output_accounts_rent_funder: null });
+
+    const unclaimed = await createRequest();
+    await repository.dropUnpaidOutputAccountsRentClaim({
+      withdrawalRequestId: unclaimed.request.id,
+      organizationId: ORG,
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: unclaimed.request.id,
+      })
+    ).resolves.toMatchObject({ creates_output_accounts: false, output_accounts_rent_funder: null });
+  });
+
   it("returns the winner to concurrent identical cancellation submissions", async () => {
     const created = await createRequest();
     await repository.advanceRequest({

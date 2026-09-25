@@ -144,6 +144,7 @@ function fakeLedger(current: EarnVaultWithdrawalRequestRow) {
     advanceAction: vi.fn().mockResolvedValue(null),
     advanceRequest: vi.fn().mockResolvedValue(null),
     failActionAndRecoverRequest: vi.fn().mockResolvedValue(null),
+    dropUnpaidOutputAccountsRentClaim: vi.fn().mockResolvedValue(undefined),
   } as unknown as EarnVaultWithdrawalRequestsRepository;
 }
 
@@ -151,6 +152,33 @@ const emptyRpc = {
   getTransaction: vi.fn(),
   getSignaturesForAddress: vi.fn(),
 };
+
+const PAYER = "CVfQueueRentPayer11111111111111111111111111";
+
+/** A terminal solver-queue fulfillment whose identity matches `request({ nonce: "7" })`. */
+function fulfilledClosing() {
+  return {
+    signature: "solver-fulfillment-signature",
+    event: {
+      kind: "withdrawalFulfilled",
+      requestAddress: REQUEST_ADDRESS,
+      owner: OWNER,
+      nonce: "7",
+      assetMint: TOKEN_MINT,
+      sharesBurned: "10",
+      assetsPaid: "9.8",
+      fulfilledAt: "1700000200",
+    } as never,
+  };
+}
+
+/** An RPC whose getTransaction resolves the given json transaction (or null). */
+function transactionRpc(transaction: Record<string, unknown> | null) {
+  return {
+    getTransaction: vi.fn(() => ({ send: vi.fn().mockResolvedValue(transaction) })),
+    getSignaturesForAddress: vi.fn(),
+  };
+}
 
 describe("queued withdrawal reconciliation", () => {
   beforeEach(() => {
@@ -731,10 +759,121 @@ describe("queued withdrawal reconciliation", () => {
     ).toThrow(/foreign identity/i);
   });
 
+  it("retires an output-rent claim the landed request transaction charged nothing for", async () => {
+    const current = request({
+      mechanism: "operator_redemption",
+      intermediate_mint: INTERMEDIATE_MINT,
+      creates_output_accounts: true,
+      output_accounts_rent_funder: PAYER,
+      custody_wallet_id: null,
+      owner_address: OWNER,
+      nonce: "7",
+      status: "pending",
+    });
+    const ledger = fakeLedger(current);
+    // Both claimed output accounts already existed when the request landed:
+    // someone else created them between build and landing, so the idempotent
+    // creates charged the recorded funder nothing.
+    const rpc = transactionRpc({
+      meta: {
+        err: null,
+        preTokenBalances: [
+          { mint: INTERMEDIATE_MINT, owner: OWNER },
+          { mint: TOKEN_MINT, owner: OWNER },
+        ],
+        postTokenBalances: [
+          { mint: INTERMEDIATE_MINT, owner: OWNER },
+          { mint: TOKEN_MINT, owner: OWNER },
+        ],
+      },
+    });
+    await projectClosingEvent(ledger, rpc, current, fulfilledClosing());
+    expect(ledger.dropUnpaidOutputAccountsRentClaim).toHaveBeenCalledWith({
+      withdrawalRequestId: current.id,
+      organizationId: current.organization_id,
+    });
+    expect(ledger.advanceRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ toStatus: "fulfilled" })
+    );
+  });
+
+  it("keeps an output-rent claim the landed request transaction partially honored", async () => {
+    const current = request({
+      mechanism: "operator_redemption",
+      intermediate_mint: INTERMEDIATE_MINT,
+      creates_output_accounts: true,
+      output_accounts_rent_funder: PAYER,
+      custody_wallet_id: null,
+      owner_address: OWNER,
+      nonce: "7",
+      status: "pending",
+    });
+    const ledger = fakeLedger(current);
+    // The wYLDS output account was created by the landed request transaction
+    // (absent from preTokenBalances, present after it) and its create charged
+    // the recorded funder; the row keeps naming that funder for the refund.
+    const rpc = transactionRpc({
+      meta: {
+        err: null,
+        preTokenBalances: [{ mint: TOKEN_MINT, owner: OWNER }],
+        postTokenBalances: [
+          { mint: INTERMEDIATE_MINT, owner: OWNER },
+          { mint: TOKEN_MINT, owner: OWNER },
+        ],
+      },
+    });
+    await projectClosingEvent(ledger, rpc, current, fulfilledClosing());
+    expect(ledger.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+  });
+
+  it("keeps an output-rent claim when the request transaction is unreadable or failed", async () => {
+    const current = request({
+      mechanism: "operator_redemption",
+      intermediate_mint: INTERMEDIATE_MINT,
+      creates_output_accounts: true,
+      output_accounts_rent_funder: PAYER,
+      custody_wallet_id: null,
+      owner_address: OWNER,
+      nonce: "7",
+      status: "pending",
+    });
+    const missing = fakeLedger(current);
+    await projectClosingEvent(missing, transactionRpc(null), current, fulfilledClosing());
+    expect(missing.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+
+    const failed = fakeLedger(current);
+    await projectClosingEvent(
+      failed,
+      transactionRpc({ meta: { err: "AccountNotFound" } }),
+      current,
+      fulfilledClosing()
+    );
+    expect(failed.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+  });
+
+  it("leaves requests without an output-rent claim or owner address untouched", async () => {
+    const unclaimed = request({ status: "pending", nonce: "7" });
+    const unclaimedLedger = fakeLedger(unclaimed);
+    await projectClosingEvent(unclaimedLedger, transactionRpc(null), unclaimed, fulfilledClosing());
+    expect(unclaimedLedger.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+
+    const custody = request({
+      mechanism: "operator_redemption",
+      intermediate_mint: INTERMEDIATE_MINT,
+      creates_output_accounts: true,
+      output_accounts_rent_funder: PAYER,
+      nonce: "7",
+      status: "pending",
+    });
+    const custodyLedger = fakeLedger(custody);
+    await projectClosingEvent(custodyLedger, transactionRpc(null), custody, fulfilledClosing());
+    expect(custodyLedger.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+  });
+
   it("persists authoritative fulfillment and cancellation timestamps from lifecycle events", async () => {
     const current = request({ status: "cancelling", nonce: "7" });
     const ledger = fakeLedger(current);
-    await projectClosingEvent(ledger, current, {
+    await projectClosingEvent(ledger, emptyRpc, current, {
       signature: "solver-fulfillment-signature",
       event: {
         kind: "withdrawalFulfilled",
@@ -756,7 +895,7 @@ describe("queued withdrawal reconciliation", () => {
       })
     );
 
-    await projectClosingEvent(ledger, current, {
+    await projectClosingEvent(ledger, emptyRpc, current, {
       signature: "cancel-signature",
       event: {
         kind: "withdrawalCancelled",

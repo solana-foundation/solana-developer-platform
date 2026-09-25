@@ -55,7 +55,10 @@ export interface EarnVaultWithdrawalRequestRow {
    * NULL keeps the historical meaning — nothing was created, or the owner
    * funded its own accounts. The pair is the durable refund source for the
    * output accounts' own rent; it never feeds the movement's share-account
-   * refund claim, which a queued redemption has no part in.
+   * refund claim, which a queued redemption has no part in. The creates are
+   * idempotent, so the claim is the builder's build-time observation until
+   * reconciliation settles it from the landed request transaction and retires
+   * it when the creates charged the recorded funder nothing.
    */
   creates_output_accounts: boolean;
   output_accounts_rent_funder: string | null;
@@ -373,6 +376,19 @@ export interface EarnVaultWithdrawalRequestsRepository {
     error: string;
     /** Earliest time this failed request may be claimed again. */
     retryAt: string;
+  }): Promise<void>;
+  /**
+   * Drop the request's output-ATA rent claim when the LANDED request
+   * transaction proves it charged nothing (SOLA9-228 exactness): the creates
+   * are idempotent, so an output account someone else created between build
+   * and landing charged the recorded funder nothing and the claim must not
+   * survive as a refund source. One-directional on purpose — an observation
+   * can only retire a claim, never invent or strengthen one — and a no-op
+   * for rows without a claim.
+   */
+  dropUnpaidOutputAccountsRentClaim(input: {
+    withdrawalRequestId: string;
+    organizationId: string;
   }): Promise<void>;
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
   claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
@@ -1479,6 +1495,19 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             WHERE id = ?`
         )
         .bind(input.error.slice(0, 500), input.retryAt, input.retryAt, input.withdrawalRequestId)
+        .run();
+    },
+
+    async dropUnpaidOutputAccountsRentClaim(input) {
+      await db
+        .prepare(
+          `UPDATE earn_vault_withdrawal_requests
+              SET creates_output_accounts = FALSE,
+                  output_accounts_rent_funder = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ? AND creates_output_accounts`
+        )
+        .bind(input.withdrawalRequestId, input.organizationId)
         .run();
     },
 

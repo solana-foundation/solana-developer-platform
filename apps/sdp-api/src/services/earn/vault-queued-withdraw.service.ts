@@ -208,10 +208,13 @@ function asyncMechanism(terms: AsyncWithdrawalTermsInput): EarnVaultWithdrawalMe
  * The funder is the normalized rentPayer the caller passed into the build (the
  * same address the provider embedded in the creates), NULL when the owner paid
  * or nothing was created — the same recording rule the direct external-wallet
- * builds apply to `share_ata_rent_funder`. The claim is exact because the
- * provider emits a NON-idempotent create for an account absent at build: the
- * landed create either charges the recorded funder or fails the request, and
- * only landed requests are promoted onto the durable rows.
+ * builds apply to `share_ata_rent_funder`. The creates stay idempotent, so
+ * this claim is the builder's observation, not the landed truth: an account
+ * someone else creates between build and landing charges nothing. The
+ * reconciliation settles the claim from the LANDED request transaction's
+ * token balances and retires it when the creates charged the recorded funder
+ * nothing, so a claim that survives to drive a refund cites rent the chain
+ * actually moved.
  */
 function outputRentAttribution(
   plan: NormalizedAsyncWithdrawalPlan,
