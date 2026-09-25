@@ -415,7 +415,7 @@ export function CounterpartyWorkspace({
           {t("DashboardPayments.counterparty.noMatches")}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto refresh:-mx-3">
           <Table className="min-w-[760px] rounded-none border-0" data-counterparty-directory-table>
             <TableHeader>
               <TableRow>

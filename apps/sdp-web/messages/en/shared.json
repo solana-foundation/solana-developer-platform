@@ -289,7 +289,8 @@
     "backToHome": "Back to Home",
     "privacy": "Privacy",
     "contactList": "Contact list",
-    "contacts": "Contacts"
+    "contacts": "Contacts",
+    "contact": "Contact"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",

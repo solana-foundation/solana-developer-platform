@@ -118,7 +118,11 @@ function ListToolbarSkeleton() {
 function ListTableSkeleton({ variant }: { variant: ListSkeletonVariant }) {
   const columns = LIST_SKELETON_COLUMNS[variant];
   return (
-    <div className="overflow-x-auto" data-loading-table data-loading-table-variant={variant}>
+    <div
+      className="overflow-x-auto refresh:-mx-3"
+      data-loading-table
+      data-loading-table-variant={variant}
+    >
       <Table className="min-w-[760px] rounded-none border-0">
         <TableHeader>
           <TableRow>
@@ -351,50 +355,51 @@ export function CounterpartyCreateSkeleton() {
   );
 }
 
+/** One block of the contact page loading: its heading, then a few table rows under a header. */
+function ContactBlockSkeleton({ rows }: { rows: number }) {
+  return (
+    <section className="flex flex-col gap-4 pt-4 md:pt-10">
+      <SkeletonBlock className="h-6 w-36" />
+      <div className="flex flex-col">
+        <div className="flex h-[30px] items-center gap-8 border-b border-border-default">
+          <SkeletonBlock className="h-3 w-14" />
+          <SkeletonBlock className="h-3 w-20" />
+          <SkeletonBlock className="h-3 w-16" />
+        </div>
+        {TABLE_ROW_IDS.slice(0, rows).map((id) => (
+          <div key={id} className="flex h-11 items-center gap-8 border-b border-border-subtle">
+            <SkeletonBlock className="h-4 w-28" />
+            <SkeletonBlock className="h-4 w-32" />
+            <SkeletonBlock className="h-4 w-20" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** The contact page loading: the record's two columns, then the addresses and payments blocks. */
 export function CounterpartyDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel data-loading-layout="counterparty-detail" aria-busy="true">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <SkeletonBlock className="h-9 w-64 max-w-full" />
-            <SkeletonBlock className="h-4 w-40" />
-          </div>
-          <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
-        </div>
-        <div className="flex gap-6 border-b border-border-default pb-3">
-          <SkeletonBlock className="h-5 w-16" />
-          <SkeletonBlock className="h-5 w-24" />
-        </div>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <section className="space-y-3">
-            <SkeletonBlock className="h-8 w-28" />
-            <div className="rounded-lg border border-border-default bg-surface-raised px-5">
-              <DetailRowsSkeleton count={6} />
-            </div>
-          </section>
-          <section className="space-y-3">
-            <SkeletonBlock className="h-8 w-52" />
-            <div className="space-y-4 rounded-lg border border-border-default bg-surface-raised p-5">
-              {DETAIL_ROW_IDS.slice(0, 5).map((id) => (
-                <div key={id} className="flex items-center gap-3">
-                  <SkeletonBlock className="size-8 shrink-0 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <SkeletonBlock className="h-3 w-24" />
-                    <SkeletonBlock className="h-4 w-40 max-w-full" />
-                  </div>
+      <div className="flex flex-col gap-6">
+        <div className="grid gap-x-6 md:grid-cols-2" data-loading-detail-rows>
+          {["record-left", "record-right"].map((column) => (
+            <div key={column}>
+              {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
+                <div
+                  key={id}
+                  className="flex h-10 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
+                >
+                  <SkeletonBlock className="h-4 w-20" />
+                  <SkeletonBlock className="h-4 w-28" />
                 </div>
               ))}
             </div>
-          </section>
+          ))}
         </div>
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <SkeletonBlock className="h-8 w-48" />
-            <SkeletonBlock className="h-9 w-40 rounded-[10px]" />
-          </div>
-          <SkeletonBlock className="h-24 w-full rounded-lg" />
-        </section>
+        <ContactBlockSkeleton rows={1} />
+        <ContactBlockSkeleton rows={3} />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

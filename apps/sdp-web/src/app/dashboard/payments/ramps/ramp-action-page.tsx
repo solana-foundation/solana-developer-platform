@@ -7,7 +7,7 @@ import type {
   RampProviderId,
 } from "@sdp/types";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useMemo, useState } from "react";
 import useSWR, { preload } from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
@@ -72,7 +72,11 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   const router = useRouter();
   const tab = useDashboardTab();
 
-  const [counterpartyId, setCounterpartyId] = useState("");
+  const searchParams = useSearchParams();
+  // A contact's page opens Pay with that contact already picked.
+  const [counterpartyId, setCounterpartyId] = useState(
+    () => searchParams.get("counterpartyId") ?? ""
+  );
   // Pay's fiat hand-off; a deposit's method comes from its tab.
   const [payByBank, setPayByBank] = useState(false);
   const exitToPayments = () => router.push("/dashboard/payments");

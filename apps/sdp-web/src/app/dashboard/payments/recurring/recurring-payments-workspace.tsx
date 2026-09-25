@@ -278,7 +278,7 @@ export function RecurringPaymentsWorkspace({
           {t("DashboardPayments.recurring.noMatches")}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto refresh:-mx-3">
           <Table className="min-w-[760px] rounded-none border-0" data-recurring-payments-table>
             <TableHeader>
               <TableRow>

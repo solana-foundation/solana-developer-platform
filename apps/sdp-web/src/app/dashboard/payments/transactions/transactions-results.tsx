@@ -192,7 +192,7 @@ export function TransactionsResults({
   }
   return (
     <section className="flex min-w-0 flex-1 flex-col" aria-busy={pending}>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto refresh:-mx-3">
         <Table className="min-w-[760px] rounded-none border-0">
           <TableHeader>
             <TableRow>

@@ -5,7 +5,7 @@ import { enUS, fr } from "date-fns/locale";
 import { CalendarIcon, ChevronDownIcon, ClockIcon } from "lucide-react";
 import { useState } from "react";
 import type { DateRange } from "react-day-picker";
-import { useThemeScopeAttributes } from "@/components/theme-scope";
+import { useThemeScope, useThemeScopeAttributes } from "@/components/theme-scope";
 import { Calendar } from "@/components/ui/calendar";
 import { triggerSizeClassName } from "@/components/ui/select";
 import { TimeField } from "@/components/ui/time-field";
@@ -46,6 +46,11 @@ interface PickerProps extends DatePickerProps {
 
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+
+// A refresh calendar keeps its own size (36px days on the scope's inner control corner, 12px
+// inset) instead of stretching to the field, whose width can be a whole form column.
+const REFRESH_CALENDAR_CLASSNAME =
+  "refresh:w-fit refresh:p-3 refresh:[--cell-radius:var(--corner-control-inner)] refresh:[--cell-size:36px]";
 
 const POPUP_CLASSNAME =
   "rounded-[var(--select-popup-radius)] border border-[var(--select-popup-border)] bg-[var(--select-popup-bg)] shadow-[var(--select-popup-shadow)] outline-none";
@@ -177,11 +182,13 @@ function PickerTrigger({
       className={cn(
         "group/date-picker flex w-full cursor-pointer items-center gap-2 text-left outline-none",
         "bg-fill-subtle text-sm focus-visible:ring-2 focus-visible:ring-[var(--input-focus-ring)] data-[popup-open]:shadow-[0_0_0_2px_var(--input-focus-ring)]",
+        // Refresh surfaces draw it as the other fields do: an underline control, no icon.
+        "refresh:border-b refresh:border-border-default refresh:bg-transparent refresh:text-field refresh:transition-colors refresh:hover:border-border-strong refresh:focus-visible:border-primary refresh:focus-visible:ring-0 refresh:data-[popup-open]:border-primary refresh:data-[popup-open]:shadow-none",
         triggerSizeClassName(size),
         className
       )}
     >
-      <Icon aria-hidden="true" className="size-5 shrink-0 text-secondary" />
+      <Icon aria-hidden="true" className="size-5 shrink-0 text-secondary refresh:hidden" />
       <span className={cn("min-w-0 flex-1 truncate", hasValue ? "text-primary" : "text-tertiary")}>
         {label}
       </span>
@@ -190,6 +197,56 @@ function PickerTrigger({
         className="size-4 shrink-0 text-secondary transition-transform group-data-[popup-open]/date-picker:rotate-180"
       />
     </Popover.Trigger>
+  );
+}
+
+/**
+ * The refresh popup's footer: the time on its own line when the field takes one, then Clear and
+ * Done on one row (Done only matters once there is a time to confirm).
+ */
+function RefreshPickerFooter({
+  includeTime,
+  time,
+  onTimeChange,
+  hasDate,
+  hasValue,
+  onClear,
+  onDone,
+}: {
+  includeTime: boolean;
+  time: string;
+  onTimeChange: (time: string) => void;
+  hasDate: boolean;
+  hasValue: boolean;
+  onClear: () => void;
+  onDone: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="border-t border-border-default">
+      {includeTime ? (
+        <div className="flex items-center justify-between gap-4 px-3 pt-3">
+          <span className="text-meta text-secondary">{t("Shared.SharedComponents.time")}</span>
+          <TimeField
+            value={time}
+            onChange={onTimeChange}
+            ariaLabel={t("Shared.SharedComponents.time")}
+            disabled={!hasDate}
+            className="w-40"
+          />
+        </div>
+      ) : null}
+      <div className="flex items-center justify-between gap-2 p-3">
+        <Button type="button" variant="ghost" size="sm" disabled={!hasValue} onClick={onClear}>
+          {t("Shared.SharedComponents.clear")}
+        </Button>
+        {includeTime ? (
+          <Button type="button" size="sm" onClick={onDone} disabled={!hasDate}>
+            {t("Shared.SharedComponents.done")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -205,6 +262,7 @@ function Picker({
   const locale = useLocale();
   const t = useTranslations();
   const themeScopeAttributes = useThemeScopeAttributes();
+  const refresh = useThemeScope() === "refresh";
   const [open, setOpen] = useState(false);
   const selectedDate = parseDateValue(value);
   const currentYear = new Date().getFullYear();
@@ -251,7 +309,9 @@ function Picker({
             align="start"
             sideOffset={4}
           >
-            <Popover.Popup className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit")}>
+            <Popover.Popup
+              className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit refresh:w-fit")}
+            >
               <Calendar
                 mode="single"
                 locale={pickerLocale(locale)}
@@ -262,9 +322,22 @@ function Picker({
                 startMonth={disablePast ? new Date() : new Date(currentYear - 100, 0)}
                 endMonth={new Date(currentYear + 10, 11)}
                 disabled={disablePast ? { before: new Date() } : undefined}
-                className="w-full"
+                className={cn("w-full", REFRESH_CALENDAR_CLASSNAME)}
               />
-              {includeTime ? (
+              {refresh ? (
+                <RefreshPickerFooter
+                  includeTime={includeTime}
+                  time={timeValue(value)}
+                  onTimeChange={(nextTime) => {
+                    if (selectedDate) onChange(`${formatDateValue(selectedDate)}T${nextTime}`);
+                  }}
+                  hasDate={Boolean(selectedDate)}
+                  hasValue={Boolean(value)}
+                  onClear={() => onChange("")}
+                  onDone={() => setOpen(false)}
+                />
+              ) : null}
+              {!refresh && includeTime ? (
                 <div className="flex items-end gap-2 border-t border-border-default p-2">
                   <div className="min-w-0 flex-1">
                     <span className="mb-1.5 block text-xs font-medium text-secondary">
@@ -289,18 +362,20 @@ function Picker({
                   </Button>
                 </div>
               ) : null}
-              <div className="border-t border-border-default p-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full"
-                  disabled={!value}
-                  onClick={() => onChange("")}
-                >
-                  {t("Shared.SharedComponents.clear")}
-                </Button>
-              </div>
+              {refresh ? null : (
+                <div className="border-t border-border-default p-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full"
+                    disabled={!value}
+                    onClick={() => onChange("")}
+                  >
+                    {t("Shared.SharedComponents.clear")}
+                  </Button>
+                </div>
+              )}
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>
@@ -390,7 +465,9 @@ export function DateRangePicker({
             align="start"
             sideOffset={4}
           >
-            <Popover.Popup className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit")}>
+            <Popover.Popup
+              className={cn(POPUP_CLASSNAME, "w-[var(--anchor-width)] min-w-fit refresh:w-fit")}
+            >
               <Calendar
                 mode="range"
                 locale={pickerLocale(locale)}
@@ -402,7 +479,7 @@ export function DateRangePicker({
                 showOutsideDays={false}
                 disabled={disableFuture ? { after: new Date() } : undefined}
                 endMonth={disableFuture ? new Date() : undefined}
-                className="w-full"
+                className={cn("w-full", REFRESH_CALENDAR_CLASSNAME)}
               />
               <div data-slot="date-range-actions" className="border-t border-border-default p-2">
                 <Button

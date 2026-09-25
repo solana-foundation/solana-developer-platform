@@ -137,7 +137,7 @@
   --table-row-bg-hover-solid: var(--surface-raised);
   --table-border: var(--border-xl);
   --table-radius: 0px;
-  --table-cell-padding-x-edge: 0px;
+  --table-cell-padding-x-edge: 12px;
 
   --select-popup-radius: var(--corner-card);
   --select-item-radius: var(--corner-control-inner);
@@ -149,6 +149,13 @@
    regular. Scoped to labels that head a design-system input. */
 [data-sdp-theme="refresh"] div:has(+ .group\/input) > label {
   font-weight: 400;
+}
+
+/* A refresh table's edge cells take 12px, so a hovered row's tint has an inset; the table's
+   wrapper reaches the same 12px past the column (`refresh:-mx-3`), so its text still lines up
+   with the title. A table inside a card stays inside it, on the card's 16px inset. */
+[data-sdp-theme="refresh"] [data-slot="card"] {
+  --table-cell-padding-x-edge: 16px;
 }
 
 /* The refresh sidebar scrolls without a track eating its width: a thin bar, invisible until the

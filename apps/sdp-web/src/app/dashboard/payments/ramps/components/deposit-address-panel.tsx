@@ -309,7 +309,7 @@ function RecentDeposits({
     );
   } else {
     body = (
-      <Table className="rounded-none border-0">
+      <Table className="rounded-none border-0 refresh:-mx-3">
         <TableHeader>
           <TableRow>
             <TableHead>{t("DashboardPayments.status")}</TableHead>

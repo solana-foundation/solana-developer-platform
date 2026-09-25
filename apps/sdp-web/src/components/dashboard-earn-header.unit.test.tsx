@@ -128,7 +128,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/issuance/create", "Shared.dashboardShell.newAsset"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
     ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newCounterparty"],
-    ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.manageCounterparty"],
+    ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.contact"],
     ["/dashboard/payments", "Shared.dashboardShell.payments"],
     ["/dashboard/payments/transactions", "Shared.dashboardShell.transactions"],
     ["/dashboard/payments/requests", "Shared.dashboardShell.requests"],

@@ -206,8 +206,9 @@ function countLabel(t: Translate, key: string, count: number | null): string {
 
 /**
  * The one-line census under the balance: contacts, open requests, active schedules and
- * enabled providers. Each count links to where it is managed; a count that failed to load
- * reads "—" rather than a misleading zero.
+ * enabled providers. Each count links to where it is managed; a core count that failed to load
+ * reads "—" rather than a misleading zero, and providers drop out when their availability
+ * can't be read at all.
  */
 async function PaymentsSummaryLine({
   apiClientPromise,
@@ -256,11 +257,15 @@ async function PaymentsSummaryLine({
       href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.schedules,
       count: recurring.ok ? recurring.data.total : null,
     },
-    {
-      key: "providers",
-      href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.providers,
-      count: providerCount,
-    },
+    ...(providerCount === null
+      ? []
+      : [
+          {
+            key: "providers",
+            href: PAYMENT_COMMAND_SUMMARY_DESTINATIONS.providers,
+            count: providerCount,
+          },
+        ]),
   ];
   return (
     <section

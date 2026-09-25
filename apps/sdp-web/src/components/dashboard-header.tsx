@@ -55,7 +55,8 @@ type DashboardPageConfig = {
 export type DashboardHeaderActionConfig = {
   label: string;
   href: string;
-  icon: "plus" | "download";
+  /** Left out for a plain label, as a contact page's Pay is. */
+  icon?: "plus" | "download";
   variant: "primary" | "outline";
   /** Appends the page's current query string, so an export follows the list's filters. */
   withCurrentQuery?: boolean;
@@ -78,11 +79,11 @@ export function DashboardHeaderAction({
   action: DashboardHeaderActionConfig;
   search: string;
 }) {
-  const Icon = action.icon === "plus" ? PlusIcon : DownloadIcon;
+  const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
   const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
   const content = (
     <>
-      <Icon className="size-4" aria-hidden="true" />
+      {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
       {action.label}
     </>
   );
@@ -116,6 +117,8 @@ type DashboardTopBarProps = {
    * title's row. "base" keeps the bottom bar's layout.
    */
   layout?: "base" | "refresh";
+  /** Page-level controls beside the language picker (Payments puts its demo switch here). */
+  utilities?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -335,14 +338,23 @@ export function DashboardTopBar({
   action,
   above,
   layout = "base",
+  utilities,
 }: DashboardTopBarProps) {
+  const utilityContent = utilities ? (
+    <span className="flex items-center gap-2">
+      {utilities}
+      {TRAILING_CONTENT}
+    </span>
+  ) : (
+    TRAILING_CONTENT
+  );
   const trailingContent = action ? (
     <>
       {action}
-      {TRAILING_CONTENT}
+      {utilityContent}
     </>
   ) : (
-    TRAILING_CONTENT
+    utilityContent
   );
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
@@ -358,7 +370,7 @@ export function DashboardTopBar({
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
         action={action}
-        trailingContent={TRAILING_CONTENT}
+        trailingContent={utilityContent}
       />
     );
   }
@@ -592,12 +604,20 @@ function getCounterpartyRoutePageConfig(
     };
   }
   if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    // A detail page reads in the page column; at full width it would lose the shell's gutter.
+    // The page titles itself with the contact's name; "Contact" holds the place until it does.
+    const counterpartyId = pathname.split("/")[4] ?? "";
     return {
-      title: t("Shared.dashboardShell.manageCounterparty"),
-      contentWidthClass: "max-w-none",
+      title: t("Shared.dashboardShell.contact"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/counterparty",
         label: t("Shared.dashboardShell.contactList"),
+      },
+      headerAction: {
+        label: t("Shared.dashboardShell.pay"),
+        href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
+        variant: "primary",
       },
     };
   }
@@ -1071,7 +1091,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
       title: t("Shared.dashboardShell.recurringPayment"),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/recurring",
         label: t("Shared.dashboardShell.backToRecurringPayments"),

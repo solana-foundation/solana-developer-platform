@@ -1,33 +1,21 @@
 "use client";
 
-import type {
-  MoneygramTransferDetails,
-  PaymentTransferSummary,
-  PaymentTransferType,
-  RampProviderId,
-} from "@sdp/types";
-import {
-  ArrowRightIcon,
-  BanknoteArrowDownIcon,
-  BanknoteArrowUpIcon,
-  ExternalLinkIcon,
-  ReceiptTextIcon,
-} from "lucide-react";
+import type { MoneygramTransferDetails, PaymentTransferSummary, RampProviderId } from "@sdp/types";
+import { ArrowRightIcon, ExternalLinkIcon } from "lucide-react";
 import Image from "next/image";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { MemoJsonView } from "@/app/dashboard/payments/wizard-summary-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { Modal } from "@/components/ui/modal";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { getRampProviderLabel, RAMP_PROVIDER_LOGOS } from "@/lib/ramps";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
-import { formatRelativeTime, toTitleCase } from "../../activity-format-utils";
+import { toTitleCase } from "../../activity-format-utils";
 import {
   formatDisplayAmount,
   formatPaymentTransferType,
@@ -63,106 +51,6 @@ function TransferProviderCell({ provider }: { provider: RampProviderId | undefin
       />
       <span className="text-sm text-primary">{getRampProviderLabel(provider)}</span>
     </div>
-  );
-}
-
-function TransferTableRow({
-  transfer,
-  onSelect,
-}: {
-  transfer: PaymentTransferSummary;
-  onSelect: (transfer: PaymentTransferSummary) => void;
-}) {
-  const t = useTranslations();
-  const isInbound = isInboundTransfer(transfer);
-  const walletAddress = isInbound ? transfer.destination : transfer.source;
-  const flow = resolveTransferFlow(transfer);
-
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: a table row can't be a <button>; role+key handler is the accessible compromise
-    <tr
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(transfer)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onSelect(transfer);
-        }
-      }}
-      className="cursor-pointer border-b border-border-default transition-colors last:border-b-0 hover:bg-fill-subtle"
-    >
-      <td className="whitespace-nowrap px-4 py-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-fill-strong text-secondary [&_svg]:size-4">
-            {isInbound ? <BanknoteArrowDownIcon /> : <BanknoteArrowUpIcon />}
-          </span>
-          <span className="text-sm font-medium text-primary">
-            {formatPaymentTransferType(transfer.type, t)}
-          </span>
-        </div>
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        <TransferProviderCell provider={transfer.provider} />
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        {walletAddress ? (
-          <span className="font-mono text-xs text-secondary" title={walletAddress}>
-            {shortenAddress(walletAddress)}
-          </span>
-        ) : (
-          <span className="text-sm text-tertiary">—</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right">
-        {flow.send || flow.receive ? (
-          <span className="inline-flex items-center justify-end gap-1.5 text-sm">
-            {flow.send ? <span className="text-secondary">{flow.send}</span> : null}
-            {flow.send && flow.receive ? (
-              <ArrowRightIcon className="size-3.5 text-tertiary" />
-            ) : null}
-            {flow.receive ? <span className="font-medium text-primary">{flow.receive}</span> : null}
-          </span>
-        ) : (
-          <span className="text-sm text-tertiary">—</span>
-        )}
-      </td>
-      <td className="whitespace-nowrap px-4 py-3">
-        <TransferStatusBadge status={transfer.status} />
-      </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right text-xs text-tertiary">
-        {transfer.createdAt ? (
-          <span title={formatTimestamp(transfer.createdAt, t)}>
-            {formatRelativeTime(transfer.createdAt)}
-          </span>
-        ) : null}
-      </td>
-    </tr>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary text-on-primary"
-          : "border-border-default bg-surface-raised text-secondary hover:text-primary"
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -374,7 +262,11 @@ function TransferDetailRows({
   );
 }
 
-function TransferDetailModal({
+/**
+ * One transfer with a contact, opened from the contact page's Payments table: what went each
+ * way, who was on each side, and the provider's references.
+ */
+export function TransferDetailModal({
   transfer,
   counterpartyName,
   onClose,
@@ -465,156 +357,5 @@ function TransferDetailModal({
         </div>
       </Modal>
     </Modal>
-  );
-}
-
-const TRANSFER_TABLE_COLUMNS = [
-  { key: "transferType", align: "left", width: "12%" },
-  { key: "transferProvider", align: "left", width: "16%" },
-  { key: "transferWallet", align: "left", width: "15%" },
-  { key: "transferAmount", align: "right", width: "28%" },
-  { key: "transferStatus", align: "left", width: "13%" },
-  { key: "transferDate", align: "right", width: "16%" },
-] as const satisfies readonly { key: string; align: "left" | "right"; width: string }[];
-
-/**
- * Filterable table of the counterparty's transfers with a per-row detail modal.
- *
- * @param props.transfers - Transfers already scoped to this counterparty.
- * @param props.counterpartyName - Display name shown as the fiat-side party in the detail modal.
- * @returns The transactions section.
- */
-export function CounterpartyTransactions({
-  transfers,
-  counterpartyName,
-}: {
-  transfers: PaymentTransferSummary[];
-  counterpartyName: string;
-}) {
-  const t = useTranslations();
-  const [typeFilter, setTypeFilter] = useState<PaymentTransferType | null>(null);
-  const [providerFilter, setProviderFilter] = useState<RampProviderId | null>(null);
-  const [selectedTransfer, setSelectedTransfer] = useState<PaymentTransferSummary | null>(null);
-
-  const availableTypes = useMemo(
-    () => [...new Set(transfers.flatMap((transfer) => (transfer.type ? [transfer.type] : [])))],
-    [transfers]
-  );
-  const availableProviders = useMemo(
-    () => [
-      ...new Set(transfers.flatMap((transfer) => (transfer.provider ? [transfer.provider] : []))),
-    ],
-    [transfers]
-  );
-  const filteredTransfers = useMemo(
-    () =>
-      transfers.filter(
-        (transfer) =>
-          (typeFilter === null || transfer.type === typeFilter) &&
-          (providerFilter === null || transfer.provider === providerFilter)
-      ),
-    [transfers, typeFilter, providerFilter]
-  );
-
-  if (transfers.length === 0) {
-    return (
-      <ListEmptyState
-        className="min-h-0 rounded-lg border border-dashed border-border-strong py-10"
-        icon={<ReceiptTextIcon className="size-5" />}
-        message={t("DashboardPayments.counterparty.noTransactions")}
-      />
-    );
-  }
-
-  return (
-    <section className="space-y-3">
-      {availableTypes.length > 1 || availableProviders.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2">
-          {availableTypes.length > 1 ? (
-            <>
-              <FilterChip active={typeFilter === null} onClick={() => setTypeFilter(null)}>
-                {t("DashboardPayments.counterparty.allTypes")}
-              </FilterChip>
-              {availableTypes.map((type) => (
-                <FilterChip
-                  key={type}
-                  active={typeFilter === type}
-                  onClick={() => setTypeFilter(type)}
-                >
-                  {formatPaymentTransferType(type, t)}
-                </FilterChip>
-              ))}
-            </>
-          ) : null}
-          {availableProviders.length > 1 ? (
-            <>
-              <span className="mx-1 h-4 w-px bg-fill-strong" />
-              <FilterChip active={providerFilter === null} onClick={() => setProviderFilter(null)}>
-                {t("DashboardPayments.counterparty.allProviders")}
-              </FilterChip>
-              {availableProviders.map((provider) => (
-                <FilterChip
-                  key={provider}
-                  active={providerFilter === provider}
-                  onClick={() => setProviderFilter(provider)}
-                >
-                  {getRampProviderLabel(provider)}
-                </FilterChip>
-              ))}
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-lg border border-border-default bg-surface-raised">
-        <table className="w-full min-w-[48rem] table-fixed border-collapse">
-          <thead>
-            <tr className="border-b border-border-default">
-              {TRANSFER_TABLE_COLUMNS.map((column) => (
-                <th
-                  key={column.key}
-                  style={{ width: column.width }}
-                  className={cn(
-                    "px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-secondary",
-                    column.align === "right" ? "text-right" : "text-left"
-                  )}
-                >
-                  {t(`DashboardPayments.counterparty.${column.key}`)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filteredTransfers.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={TRANSFER_TABLE_COLUMNS.length}
-                  className="px-4 py-8 text-center text-sm text-tertiary"
-                >
-                  {t("DashboardPayments.counterparty.noFilteredTransactions")}
-                </td>
-              </tr>
-            ) : (
-              filteredTransfers.map((transfer) => (
-                <TransferTableRow
-                  key={transfer.id}
-                  transfer={transfer}
-                  onSelect={setSelectedTransfer}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {selectedTransfer !== null ? (
-        <TransferDetailModal
-          key={selectedTransfer.id}
-          transfer={selectedTransfer}
-          counterpartyName={counterpartyName}
-          onClose={() => setSelectedTransfer(null)}
-        />
-      ) : null}
-    </section>
   );
 }
