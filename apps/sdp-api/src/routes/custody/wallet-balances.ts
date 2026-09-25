@@ -27,10 +27,40 @@ import { getLogger } from "@/runtime/logger";
 const WALLET_BALANCE_CACHE_TTL_MS = 10_000;
 
 /**
- * The most wallets with a balance read in flight at once: a cold cache for a
- * whole project must not burst the RPC provider with a request per wallet.
+ * The most wallets with a balance read in flight at once, when
+ * WALLET_BALANCE_READ_CONCURRENCY is unset: a cold cache for a whole project
+ * must not burst the RPC provider with a request per wallet.
  */
-export const WALLET_BALANCE_READ_CONCURRENCY = 8;
+const DEFAULT_WALLET_BALANCE_READ_CONCURRENCY = 8;
+
+/**
+ * Resolves the read fan-out bound from the environment.
+ *
+ * Cold-read latency scales with the wave count, not the request count — a
+ * cold cache for N wallets needs ceil(N / bound) waves — so a deployment
+ * whose provider has headroom can raise this to cut those reads down,
+ * while the burst-rejection risk a higher bound carries stays a deliberate
+ * deployment choice rather than a code default.
+ *
+ * @param raw - The raw env value, or undefined when unset.
+ * @returns The bound: at most this many wallets have a read in flight at once.
+ */
+export function parseWalletBalanceReadConcurrency(raw: string | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_WALLET_BALANCE_READ_CONCURRENCY;
+  }
+  // `Number()` rejects trailing garbage by returning NaN ("8abc" -> NaN),
+  // unlike `Number.parseInt` which would silently truncate to 8.
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid WALLET_BALANCE_READ_CONCURRENCY: ${JSON.stringify(raw)}`);
+  }
+  return parsed;
+}
+
+export const WALLET_BALANCE_READ_CONCURRENCY = parseWalletBalanceReadConcurrency(
+  process.env.WALLET_BALANCE_READ_CONCURRENCY
+);
 
 export interface WalletBalanceTarget {
   id: string;

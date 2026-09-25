@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { SOL_MINT } from "@/routes/payments/token-accounts";
 import {
   clearWalletBalanceCache,
+  parseWalletBalanceReadConcurrency,
   readWalletBalances,
   WALLET_BALANCE_READ_CONCURRENCY,
   type WalletBalanceTarget,
@@ -274,6 +275,25 @@ describe("readWalletBalances", () => {
  * call, so each answer is bound to the only address it could have been asked
  * about and no positional batch is issued at all.
  */
+describe("parseWalletBalanceReadConcurrency", () => {
+  it("defaults to the burst floor when unset", () => {
+    expect(parseWalletBalanceReadConcurrency(undefined)).toBe(8);
+  });
+
+  it("accepts a positive integer override", () => {
+    expect(parseWalletBalanceReadConcurrency("32")).toBe(32);
+    expect(parseWalletBalanceReadConcurrency("1")).toBe(1);
+  });
+
+  it("refuses values that are not positive integers", () => {
+    for (const raw of ["0", "-4", "2.5", "8abc", "", "  "]) {
+      expect(() => parseWalletBalanceReadConcurrency(raw)).toThrow(
+        /WALLET_BALANCE_READ_CONCURRENCY/
+      );
+    }
+  });
+});
+
 describe("wallet balance attribution", () => {
   const WALLET_A = address("11111111111111111111111111111111");
   const WALLET_B = address("So11111111111111111111111111111111111111112");
