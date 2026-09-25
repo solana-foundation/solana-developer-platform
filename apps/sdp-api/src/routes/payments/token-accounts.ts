@@ -1,6 +1,6 @@
 import { type createRpc, getAccountInfo } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import {
   type Address,
@@ -15,6 +15,7 @@ import {
   getTransferCheckedInstruction,
 } from "@solana-program/token-2022";
 import { badRequest } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 
 export { SOL_MINT } from "@/services/payment-operation.service";
 
@@ -68,18 +69,63 @@ export async function resolveMintDecimals(
   return decimals;
 }
 
+function isValidSplDecimals(decimals: number): boolean {
+  return typeof decimals === "number" && Number.isInteger(decimals) && decimals >= 0;
+}
+
 function parseTokenAmountInfo(info: JsonParsedTokenAccount): {
   mint: Address;
   amount: bigint;
   decimals: number;
-  uiAmount: string;
 } {
   return {
     mint: info.mint,
     amount: BigInt(info.tokenAmount.amount),
     decimals: info.tokenAmount.decimals,
-    uiAmount: info.tokenAmount.uiAmountString,
   };
+}
+
+interface SplAccountRead {
+  address: Address;
+  amount: bigint;
+  decimals: number;
+}
+
+/**
+ * Settles one mint's decimals conflict the way the mint itself would. The
+ * mint's own decimals are the scale its raw units are denominated in, so
+ * accounts that match the mint are accepted and the rest are rejected; if the
+ * mint's decimals cannot be resolved, no account has a confirmed scale and the
+ * whole read fails rather than returning a successful balance read that
+ * silently omits the mint's holdings.
+ */
+async function acceptReadsOnMintScale(
+  rpc: ReturnType<typeof createRpc>,
+  mint: string,
+  reads: SplAccountRead[]
+): Promise<SplAccountRead[]> {
+  let mintDecimals: number;
+  try {
+    mintDecimals = await resolveMintDecimals(rpc, address(mint));
+  } catch (error) {
+    throw new Error(
+      `getSplTokenBalances: could not settle the conflicting scales of ${reads.length} accounts for mint ${mint} against the mint's own decimals`,
+      { cause: error }
+    );
+  }
+
+  const accepted: SplAccountRead[] = [];
+  for (const read of reads) {
+    if (read.decimals === mintDecimals) {
+      accepted.push(read);
+      continue;
+    }
+    getLogger().warn(
+      { tokenAccount: read.address, mint, decimals: read.decimals, mintDecimals },
+      "getSplTokenBalances: rejected a same-mint token account with inconsistent decimals"
+    );
+  }
+  return accepted;
 }
 
 export async function getSplTokenBalances(
@@ -89,7 +135,6 @@ export async function getSplTokenBalances(
 ): Promise<
   Array<{ token: string; mint: string; amount: string; uiAmount: string; decimals: number }>
 > {
-  const balancesByMint = new Map<string, { amount: bigint; decimals: number; uiAmount: string }>();
   // One read per token program, independent of each other, so neither waits.
   const responses = await Promise.all(
     SPL_TOKEN_PROGRAM_IDS.map((programId) =>
@@ -103,6 +148,10 @@ export async function getSplTokenBalances(
     )
   );
 
+  // Raw base units are the source of truth; the UI amount is recomputed from
+  // the summed amount below. An account whose decimals are invalid is on an
+  // incompatible scale, so its raw units are rejected rather than summed.
+  const readsByMint = new Map<string, SplAccountRead[]>();
   for (const response of responses) {
     for (const account of response.value) {
       const parsed = parseTokenAmountInfo(account.account.data.parsed.info);
@@ -110,29 +159,50 @@ export async function getSplTokenBalances(
         continue;
       }
 
-      const existing = balancesByMint.get(parsed.mint);
-      if (existing) {
-        existing.amount += parsed.amount;
+      if (!isValidSplDecimals(parsed.decimals)) {
+        getLogger().warn(
+          { tokenAccount: account.pubkey, mint: parsed.mint, decimals: parsed.decimals },
+          "getSplTokenBalances: rejected a token account with invalid decimals"
+        );
         continue;
       }
 
-      balancesByMint.set(parsed.mint, {
-        amount: parsed.amount,
-        decimals: parsed.decimals,
-        uiAmount: parsed.uiAmount,
-      });
+      const sameMint = readsByMint.get(parsed.mint) ?? [];
+      sameMint.push({ address: account.pubkey, amount: parsed.amount, decimals: parsed.decimals });
+      readsByMint.set(parsed.mint, sameMint);
     }
   }
 
-  return Array.from(balancesByMint.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([mint, balance]) => ({
+  const balances: Array<{
+    token: string;
+    mint: string;
+    amount: string;
+    uiAmount: string;
+    decimals: number;
+  }> = [];
+  for (const [mint, mintReads] of readsByMint) {
+    // Which account the RPC returned first must not decide the aggregation:
+    // a mint whose accounts disagree on decimals is settled against the mint,
+    // not against the account that happened to come back first.
+    let accepted = mintReads;
+    if (new Set(mintReads.map((read) => read.decimals)).size > 1) {
+      accepted = await acceptReadsOnMintScale(rpc, mint, mintReads);
+      if (accepted.length === 0) {
+        continue;
+      }
+    }
+
+    const amount = accepted.reduce((total, read) => total + read.amount, 0n);
+    balances.push({
       token: resolveTokenLabel(mint, options?.tokenLabelsByMint),
       mint,
-      amount: balance.amount.toString(),
-      uiAmount: balance.uiAmount,
-      decimals: balance.decimals,
-    }));
+      amount: amount.toString(),
+      uiAmount: formatDecimalAmount(amount, accepted[0].decimals),
+      decimals: accepted[0].decimals,
+    });
+  }
+
+  return balances.sort((a, b) => a.mint.localeCompare(b.mint));
 }
 
 export async function getSplTokenAccountAddresses(
