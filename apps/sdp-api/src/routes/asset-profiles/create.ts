@@ -145,6 +145,7 @@ export const createTokenWithAssetProfile = async (
 
   const db = getDb(c.env);
   const tenantScope = getRequestTenantScope(c);
+  const auditService = new AuditService(db);
   // The middleware already validated the shape; an absent header keeps the
   // legacy keyless behavior where every request is a new draft.
   const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
@@ -165,11 +166,17 @@ export const createTokenWithAssetProfile = async (
   if (idempotencyKey) {
     const replayTokenId = await resolveIssuanceCreateReplay(db, replayParams);
     if (replayTokenId) {
-      return created(c, await requireReplayPair(c, replayTokenId));
+      return created(
+        c,
+        await requireReplayPair(c, replayTokenId, {
+          auditService,
+          assetCategory,
+          assetType,
+        })
+      );
     }
   }
 
-  const auditService = new AuditService(db);
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let creationCommitted = false;
 
@@ -255,14 +262,14 @@ export const createTokenWithAssetProfile = async (
         template: resolved.template,
       },
     });
-    await auditService.log(c, {
+    await completeProfileCreationAudit(c, auditService, {
       organizationId: orgId,
       userId: auth.userId ?? undefined,
       apiKeyId: auth.apiKeyId ?? undefined,
-      action: "create",
-      resourceType: "asset_profile",
-      resourceId: assetProfile.id,
-      metadata: { tokenId: token.id, assetCategory, assetType },
+      profileId: assetProfile.id,
+      tokenId: token.id,
+      assetCategory,
+      assetType,
     });
 
     return created(c, { token: toPublicToken(token), assetProfile });
@@ -281,7 +288,14 @@ export const createTokenWithAssetProfile = async (
         // committed record replays (or 409s on a different payload).
         const replayTokenId = await resolveIssuanceCreateReplay(db, replayParams);
         if (replayTokenId) {
-          return created(c, await requireReplayPair(c, replayTokenId));
+          return created(
+            c,
+            await requireReplayPair(c, replayTokenId, {
+              auditService,
+              assetCategory,
+              assetType,
+            })
+          );
         }
       }
     }
@@ -289,15 +303,71 @@ export const createTokenWithAssetProfile = async (
   }
 };
 
+interface ReplayAuditContext {
+  auditService: AuditService;
+  assetCategory: z.infer<typeof assetCategorySchema>;
+  assetType: z.infer<typeof assetTypeSchema>;
+}
+
+/**
+ * Write the asset-profile creation audit event for a committed pair unless
+ * the ledger already carries it. The event follows the committed
+ * transaction, so an audit-ledger outage at that moment returns 500 for a
+ * creation that did commit — and because the committed idempotency record
+ * makes every retry a replay, this repair on the replay path is the only
+ * remaining chance to write the missing event.
+ */
+async function completeProfileCreationAudit(
+  c: ValidatedBodyContext<typeof createTokenWithAssetProfileSchema>,
+  auditService: AuditService,
+  entry: {
+    organizationId: string;
+    userId?: string;
+    apiKeyId?: string;
+    profileId: string;
+    tokenId: string;
+    assetCategory: z.infer<typeof assetCategorySchema>;
+    assetType: z.infer<typeof assetTypeSchema>;
+  }
+) {
+  const alreadyWritten = await auditService.hasEvent({
+    organizationId: entry.organizationId,
+    action: "create",
+    resourceType: "asset_profile",
+    resourceId: entry.profileId,
+  });
+  if (alreadyWritten) {
+    return;
+  }
+  await auditService.log(c, {
+    organizationId: entry.organizationId,
+    userId: entry.userId,
+    apiKeyId: entry.apiKeyId,
+    action: "create",
+    resourceType: "asset_profile",
+    resourceId: entry.profileId,
+    metadata: {
+      tokenId: entry.tokenId,
+      assetCategory: entry.assetCategory,
+      assetType: entry.assetType,
+    },
+  });
+}
+
 /**
  * Rebuild a replayed creation response from the committed rows under the
- * caller's tenant scope. The idempotency record is cascade-deleted with its
- * token, so a missing token here is a broken record; an archived profile
- * reads as its current state (the same GET /by-token behavior).
+ * caller's tenant scope, and re-attempt the profile audit event a prior
+ * attempt may have lost after committing. The idempotency record is
+ * cascade-deleted with its token, and the profile row is only ever created
+ * alongside it, so a missing row here is a broken record. The profile is
+ * read regardless of its current status: a replay must return the recorded
+ * pair even after it was archived (GET /by-token keeps surfacing only
+ * active profiles).
  */
 async function requireReplayPair(
   c: ValidatedBodyContext<typeof createTokenWithAssetProfileSchema>,
-  tokenId: string
+  tokenId: string,
+  creation: ReplayAuditContext
 ) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
@@ -311,7 +381,7 @@ async function requireReplayPair(
   }
   const profileRow = await createPostgresAssetProfilesRepository(
     getDb(c.env)
-  ).getActiveAssetProfileByTokenId({
+  ).getAssetProfileByTokenId({
     tokenId,
     organizationId: auth.organizationId,
     projectId,
@@ -319,5 +389,15 @@ async function requireReplayPair(
   if (!profileRow) {
     throw notFound("Asset profile");
   }
-  return { token: toPublicToken(token), assetProfile: mapToAssetProfile(profileRow) };
+  const assetProfile = mapToAssetProfile(profileRow);
+  await completeProfileCreationAudit(c, creation.auditService, {
+    organizationId: auth.organizationId,
+    userId: auth.userId ?? undefined,
+    apiKeyId: auth.apiKeyId ?? undefined,
+    profileId: assetProfile.id,
+    tokenId: token.id,
+    assetCategory: creation.assetCategory,
+    assetType: creation.assetType,
+  });
+  return { token: toPublicToken(token), assetProfile };
 }

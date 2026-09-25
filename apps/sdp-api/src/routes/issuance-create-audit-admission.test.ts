@@ -68,6 +68,11 @@ const createAuditCount = (tokenId: string) =>
     "SELECT COUNT(*)::int AS count FROM audit_logs WHERE resource_type = 'token' AND action = 'create' AND status = 'success' AND resource_id = ?",
     tokenId
   );
+const profileAuditCount = (profileId: string) =>
+  countRows(
+    "SELECT COUNT(*)::int AS count FROM audit_logs WHERE resource_type = 'asset_profile' AND action = 'create' AND status = 'success' AND resource_id = ?",
+    profileId
+  );
 
 describe("issuance creation: audit admission before effect + idempotent replay", () => {
   let apiKeyHash: string;
@@ -314,6 +319,88 @@ describe("issuance creation: audit admission before effect + idempotent replay",
       );
       expect(mismatch.status).toBe(409);
       expect(await tokenCount(TOKEN_BODY.name)).toBe(1);
+    });
+
+    it("replays the recorded pair from an archived profile instead of returning 404", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-archive-replay"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+      const profileId = firstBody.data.assetProfile.id;
+
+      const archived = await app.request(
+        `/v1/issuance/asset-profiles/${profileId}`,
+        { method: "DELETE", headers: headers() },
+        env
+      );
+      expect(archived.status).toBe(204);
+
+      const retry = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-archive-replay"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(retry.status).toBe(201);
+      const retryBody = await retry.json();
+      expect(retryBody.data.token.id).toBe(firstBody.data.token.id);
+      expect(retryBody.data.assetProfile.id).toBe(profileId);
+      // The replay returns the recorded profile in its current state.
+      expect(retryBody.data.assetProfile.status).toBe("archived");
+      expect(await tokenCount(TOKEN_BODY.name)).toBe(1);
+      expect(await profileCount(TOKEN_BODY.name)).toBe(1);
+    });
+
+    it("retries the profile audit write when a replay follows a lost post-commit audit", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-repair"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+      expect(await profileAuditCount(firstBody.data.assetProfile.id)).toBe(1);
+
+      // Simulate the ledger losing the post-commit writes: row mutation is
+      // forbidden by the append-only trigger, so reset the disposable test
+      // ledger and its checkpoint the way seedTestDatabase does. The pair and
+      // its idempotency record live on — the state a 500-after-commit leaves.
+      const db = getDb(env);
+      await db.prepare("TRUNCATE TABLE audit_logs, audit_ledger_anchors RESTART IDENTITY").run();
+      await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+      const retry = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-repair"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(retry.status).toBe(201);
+      const retryBody = await retry.json();
+      expect(retryBody.data.token.id).toBe(firstBody.data.token.id);
+      expect(retryBody.data.assetProfile.id).toBe(firstBody.data.assetProfile.id);
+      // The replay re-attempted the profile audit write instead of
+      // returning the saved pair with its creation event still missing.
+      expect(await profileAuditCount(firstBody.data.assetProfile.id)).toBe(1);
+      expect(await tokenCount(TOKEN_BODY.name)).toBe(1);
+      expect(await profileCount(TOKEN_BODY.name)).toBe(1);
     });
   });
 });

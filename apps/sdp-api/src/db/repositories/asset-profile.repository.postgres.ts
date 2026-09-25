@@ -189,6 +189,21 @@ export function createPostgresAssetProfilesRepository(db: AppDb): AssetProfilesR
       return row ? mapAssetProfileRow(row) : null;
     },
 
+    async getAssetProfileByTokenId(params) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM asset_profiles
+             WHERE token_id = ?
+               AND organization_id = ?
+               AND project_id = ?
+             ORDER BY created_at ASC, id ASC
+             LIMIT 1`
+        )
+        .bind(params.tokenId, params.organizationId, params.projectId)
+        .first<Record<string, unknown>>();
+      return row ? mapAssetProfileRow(row) : null;
+    },
+
     async getPublicMetadataByTokenId(tokenId: string) {
       // token_id is the PK of issued_tokens (globally unique) and the partial
       // unique index guarantees at most one active profile per token, so this

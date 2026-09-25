@@ -576,6 +576,33 @@ export class AuditService {
   }
 
   /**
+   * Whether the ledger already carries an event for an exact (organization,
+   * action, resource type, resource id) tuple. Repair paths for post-commit
+   * audit failures use this to keep a replayed write idempotent: re-attempt
+   * the write only when the event is missing, never once it landed.
+   */
+  async hasEvent(options: {
+    organizationId: string;
+    action: AuditAction;
+    resourceType: ResourceType;
+    resourceId: string;
+  }): Promise<boolean> {
+    const row = await this.db
+      .prepare(
+        `SELECT 1 AS present
+           FROM audit_logs
+          WHERE organization_id = ?
+            AND action = ?
+            AND resource_type = ?
+            AND resource_id = ?
+          LIMIT 1`
+      )
+      .bind(options.organizationId, options.action, options.resourceType, options.resourceId)
+      .first<{ present: number }>();
+    return row !== null;
+  }
+
+  /**
    * Read the durable outcome for a resource whose ordinary state write may
    * have failed after an irreversible effect. Callers use this immutable
    * evidence to repair idempotent replays without repeating the effect.
