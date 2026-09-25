@@ -1,6 +1,6 @@
 import type * as feePaymentAdapters from "@sdp/payments/fee-payment";
 import { FeePaymentError } from "@sdp/payments/fee-payment";
-import type * as solanaRpc from "@sdp/rpc/solana";
+import * as solanaRpc from "@sdp/rpc/solana";
 import {
   generateKeyPairSigner,
   getSignatureFromTransaction,
@@ -13,6 +13,7 @@ import { getDb } from "@/db";
 import { createPostgresPaymentsRepository } from "@/db/repositories/payments.repository.postgres";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { rootLogger } from "@/runtime/logger";
+import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
@@ -28,12 +29,15 @@ import {
   updateSeededWalletPublicKey,
 } from "@/test/helpers/payments-routes";
 import {
+  countTransferRows,
   listTransferRows,
   postTransfer,
   readTransferResponse,
   readTransferRow,
 } from "@/test/helpers/payments-transfers";
 import { fullySignTestTransaction, TEST_MOCK_FEE_PAYER } from "@/test/helpers/sponsor-signing";
+
+const getSignatureStatusesMock = vi.spyOn(solanaRpc, "getSignatureStatuses");
 
 describe("Payments routes — signed submission", () => {
   installPaymentsRouteTestHooks();
@@ -153,6 +157,168 @@ describe("Payments routes — signed submission", () => {
 
       const row = await readTransferRow(json.data.transfer.id);
       expect(row).toMatchObject({ status: "finalized", slot: 200 });
+    });
+
+    it("returns the reconciled chain verdict when confirmation fails after reconciliation", async () => {
+      const source = await generateKeyPairSigner();
+      const sponsor = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(source.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(source);
+
+      const signAsFeePayer = vi.fn(async (sourceSignedBytes: Uint8Array) => {
+        const sourceSigned = getTransactionDecoder().decode(sourceSignedBytes);
+        const fullySigned = await partiallySignTransaction([sponsor.keyPair], sourceSigned);
+        return new Uint8Array(getTransactionEncoder().encode(fullySigned));
+      });
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: sponsor.address,
+        }),
+        signAsFeePayer,
+        signAndSend: vi.fn().mockRejectedValue(new Error("legacy signAndSend was used")),
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      // The reconciler observes the finalized transaction while the route is
+      // still waiting for its own confirmation, which then fails with a
+      // non-definitive transport error.
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        { slot: 200n, confirmations: null, confirmationStatus: "finalized", err: null },
+      ]);
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        const row = (await listTransferRows()).find(
+          (candidate) => candidate.signature === signature
+        );
+        if (!row) throw new Error("submitted transfer not found");
+
+        await trackPendingTransfers(env);
+        expect((await readTransferRow(row.id)).status).toBe("finalized");
+        throw new Error("confirmation transport failed after reconciliation");
+      });
+
+      const request = {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL" as const,
+        amount: "0.001",
+      };
+      const idempotencyKey = "reconciled-confirmation-key";
+
+      const first = await postTransfer(request, { idempotencyKey });
+      expect(first.status).toBe(200);
+      const firstBody = await readTransferResponse(first);
+      // The response must carry the authoritative chain verdict — never the
+      // cached processing row that reconciliation already replaced.
+      expect(firstBody.data.transfer).toMatchObject({ status: "finalized", slot: 200 });
+      expect(await readTransferRow(firstBody.data.transfer.id)).toMatchObject({
+        status: "finalized",
+        slot: 200,
+      });
+
+      // The idempotency fence still answers the same key with the same transfer.
+      const replay = await postTransfer(request, { idempotencyKey });
+      expect(replay.status).toBe(200);
+      const replayBody = await readTransferResponse(replay);
+      expect(replayBody.data.transfer.id).toBe(firstBody.data.transfer.id);
+      expect(await countTransferRows()).toBe(1);
+      expect(sendTransactionMock).toHaveBeenCalledOnce();
+
+      // The audit outcome completes from the authoritative verdict.
+      const outcome = await getDb(env)
+        .prepare(
+          `SELECT metadata, status FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(firstBody.data.transfer.id)
+        .first<{ metadata: string; status: string }>();
+      expect(outcome?.status).toBe("success");
+      expect(JSON.parse(outcome?.metadata ?? "{}")).toMatchObject({
+        auditPhase: "outcome",
+        slot: "200",
+      });
+    });
+
+    it("surfaces the mapped error when reconciliation already recorded an on-chain failure", async () => {
+      const source = await generateKeyPairSigner();
+      const sponsor = await generateKeyPairSigner();
+      await updateSeededWalletPublicKey(source.address);
+      createOrgSignerForCustodyWalletMock.mockResolvedValue(source);
+
+      createFeePaymentAdapterMock.mockReturnValue({
+        providerId: "mock",
+        getFeePayer: vi.fn().mockResolvedValue(sponsor.address),
+        getSponsorshipConfiguration: vi.fn().mockResolvedValue({
+          ...TEST_SPONSORSHIP_PROVIDER_CONFIG,
+          signerAddress: sponsor.address,
+        }),
+        signAsFeePayer: vi.fn(async (sourceSignedBytes: Uint8Array) => {
+          const sourceSigned = getTransactionDecoder().decode(sourceSignedBytes);
+          const fullySigned = await partiallySignTransaction([sponsor.keyPair], sourceSigned);
+          return new Uint8Array(getTransactionEncoder().encode(fullySigned));
+        }),
+        signAndSend: vi.fn().mockRejectedValue(new Error("legacy signAndSend was used")),
+      } as ReturnType<typeof feePaymentAdapters.createFeePaymentAdapter>);
+
+      getSignatureStatusesMock.mockResolvedValueOnce([
+        {
+          slot: 200n,
+          confirmations: null,
+          confirmationStatus: "finalized",
+          err: { InstructionError: [0, { Custom: 1 }] },
+        },
+      ]);
+      confirmTransactionMock.mockImplementationOnce(async (_rpc, signature) => {
+        const row = (await listTransferRows()).find(
+          (candidate) => candidate.signature === signature
+        );
+        if (!row) throw new Error("submitted transfer not found");
+
+        await trackPendingTransfers(env);
+        expect((await readTransferRow(row.id)).status).toBe("failed");
+        throw new Error("confirmation transport failed after on-chain failure");
+      });
+
+      const res = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL" as const,
+          amount: "0.001",
+        },
+        {}
+      );
+
+      // The failed chain verdict is an error, not a stale-looking success.
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(await countTransferRows()).toBe(1);
+      const failedRow = (await listTransferRows())[0];
+      expect(failedRow).toMatchObject({ status: "failed", slot: 200 });
+
+      // The response reports the authoritative on-chain failure, never the
+      // transport error that raced reconciliation.
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+      expect(body.error.message).toContain("InstructionError");
+      expect(body.error.message).not.toContain("confirmation transport failed");
+
+      // The audit intent closes with its failure outcome, carrying the
+      // verdict's reason, signature, and slot.
+      const outcome = await getDb(env)
+        .prepare(
+          `SELECT metadata, status FROM audit_logs
+           WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
+        )
+        .bind(failedRow.id)
+        .first<{ metadata: string; status: string }>();
+      expect(outcome?.status).toBe("failure");
+      expect(JSON.parse(outcome?.metadata ?? "{}")).toMatchObject({
+        auditPhase: "outcome",
+        error: failedRow.error,
+        signature: failedRow.signature,
+        slot: "200",
+      });
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {
