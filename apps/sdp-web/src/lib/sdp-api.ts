@@ -414,11 +414,12 @@ export async function createOrgSdpApiClient(traceContext?: TraceContext): Promis
 export function proxyFailure(
   trace: ReturnType<typeof createTimedTrace>,
   status: number,
-  message: string
+  message: string,
+  details?: { reason: string }
 ): NextResponse {
   logRouteResult(trace, status, { error: message });
   return NextResponse.json(
-    { error: { message } },
+    { error: { message, ...(details ? { details } : {}) } },
     {
       status,
       headers: {

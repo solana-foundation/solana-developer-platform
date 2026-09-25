@@ -155,3 +155,20 @@ export const DVP_CLOSE_REFUSAL = {
   closeFailedOnChain: "dvp_close_failed_on_chain",
 } as const;
 export type DvpCloseRefusalReason = (typeof DVP_CLOSE_REFUSAL)[keyof typeof DVP_CLOSE_REFUSAL];
+
+/**
+ * Why the dashboard's create proxy refused to forward a keyed create, sent as
+ * `error.details.reason` before the request reaches the API.
+ *
+ * The message carries the details for logs; the create form names the problem
+ * in its own words from this code instead of relaying that message.
+ */
+export const DVP_CREATE_REFUSAL = {
+  /** The create presented no reviewed project at all. */
+  reviewedProjectRequired: "dvp_create_reviewed_project_required",
+  /** The selected project moved after the form was reviewed. */
+  reviewedProjectMismatch: "dvp_create_reviewed_project_mismatch",
+  /** No project was selected in the dashboard at submit time. */
+  selectedProjectRequired: "dvp_create_selected_project_required",
+} as const;
+export type DvpCreateRefusalReason = (typeof DVP_CREATE_REFUSAL)[keyof typeof DVP_CREATE_REFUSAL];

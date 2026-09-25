@@ -18,6 +18,25 @@ import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
+/**
+ * The live workspace selection, as `useOptionalDashboardWorkspace` reports it.
+ * Undefined unless a test says otherwise, which is exactly what renders outside
+ * the dashboard provider.
+ */
+const workspaceMock = vi.hoisted(() => ({
+  selectedProjectId: undefined as string | null | undefined,
+  selectProject: vi.fn(),
+}));
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () =>
+    workspaceMock.selectedProjectId === undefined
+      ? undefined
+      : {
+          selectedProjectId: workspaceMock.selectedProjectId,
+          selectProject: workspaceMock.selectProject,
+        },
+}));
+
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const PARTY_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 /** Somewhere neither party funds from, so re-seeding cannot produce it by accident. */
@@ -56,13 +75,19 @@ const context: DvpCreateContext = {
   ],
 };
 
+const REVIEWED_PROJECT = "project_a";
+
 function renderForm(
   overrides: Partial<DvpCreateContext> = {},
   cluster: "devnet" | "mainnet-beta" = "devnet"
 ) {
   return render(
     <EnglishTestI18n>
-      <DvpCreateWorkspace cluster={cluster} context={{ ...context, ...overrides }} />
+      <DvpCreateWorkspace
+        cluster={cluster}
+        context={{ ...context, ...overrides }}
+        reviewedProjectId={REVIEWED_PROJECT}
+      />
     </EnglishTestI18n>
   );
 }
@@ -179,6 +204,7 @@ async function advanceToReview() {
  * that answer. Unless a test says otherwise, the mint comes back eligible.
  */
 beforeEach(() => {
+  workspaceMock.selectedProjectId = undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
@@ -458,5 +484,51 @@ describe("DvpCreateWorkspace", () => {
     searchParty(/delivering the asset/i, SELLER_ROW, PARTY_A);
 
     expect(sellerPayoutInput().value).toBe(PARTY_A);
+  });
+
+  // APE-693. The terms were reviewed under the reviewed project; once the
+  // shared selection moves to a sibling, this form is a review of nothing and
+  // its submit would be refused anyway. The wizard is replaced so the only way
+  // forward is re-rendering under the current project and answering again.
+  it("invalidates the whole wizard when the selection leaves the reviewed project", () => {
+    workspaceMock.selectedProjectId = "project_b";
+    renderForm();
+
+    expect(screen.getByText(/selected project changed/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /review under the current project/i })).toBeTruthy();
+    // No wizard stage remains to submit from.
+    expect(screen.queryByRole("button", { name: /create trade/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /continue/i })).toBeNull();
+  });
+
+  // APE-693. The provider holds its selection from the mount, so it can be the
+  // stale side of the mismatch (a switch in another tab never reaches it). The
+  // recovery must therefore synchronize the selection to the project the page
+  // was just rendered for — a re-render alone would compare the same stale pair
+  // forever.
+  it("recovers by selecting the reviewed project, the one the page rendered under", () => {
+    workspaceMock.selectedProjectId = "project_b";
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /review under the current project/i }));
+
+    expect(workspaceMock.selectProject).toHaveBeenCalledWith(REVIEWED_PROJECT);
+  });
+
+  it("keeps the wizard mounted while the selection still matches the reviewed project", () => {
+    workspaceMock.selectedProjectId = REVIEWED_PROJECT;
+    renderForm();
+
+    expect(screen.queryByText(/selected project changed/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeTruthy();
+  });
+
+  // Outside the dashboard provider there is no live selection to compare
+  // against; the server-rendered binding still guards the submit.
+  it("does not invalidate when no live selection is known", () => {
+    renderForm();
+
+    expect(screen.queryByText(/selected project changed/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /continue/i })).toBeTruthy();
   });
 });

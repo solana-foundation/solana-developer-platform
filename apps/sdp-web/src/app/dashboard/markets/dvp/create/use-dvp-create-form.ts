@@ -161,7 +161,11 @@ function resolveWalletBalance(
   );
 }
 
-export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateContext): DvpCreateForm {
+export function useDvpCreateForm(
+  cluster: SolanaCluster,
+  context: DvpCreateContext,
+  reviewedProjectId: string
+): DvpCreateForm {
   const cashOptions = useMemo(() => cashOptionsFor(cluster), [cluster]);
   const assetOptions = useMemo(
     () => assetOptionsFor(cluster, context.tokens),
@@ -170,7 +174,7 @@ export function useDvpCreateForm(cluster: SolanaCluster, context: DvpCreateConte
   // Both legs start unselected — the trade's whole point is choosing them.
   const asset = useDvpLeg(assetOptions, false);
   const cash = useDvpLeg(cashOptions, false);
-  const { error, submit: send, submitting } = useDvpCreateSubmit(cluster);
+  const { error, submit: send, submitting } = useDvpCreateSubmit(cluster, reviewedProjectId);
 
   const { values, setField } = useZodForm(createFormSchema, {
     partyA: { mode: "wallet", walletId: "" },

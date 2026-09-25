@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
 import { WizardFrame } from "@/components/wizard-frame";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import type { DvpCreateContext } from "./dvp-create.data";
@@ -79,16 +80,52 @@ function WizardFooter({
   );
 }
 
+/**
+ * The form's terms were reviewed under one project; this is gone the moment the
+ * shared selection moves to another one.
+ *
+ * Every wallet, token and counterparty the wizard shows was loaded for the
+ * reviewed project, and the submit is bound to it server-side (APE-693), so a
+ * form that keeps rendering after a switch would be a review of nothing. When
+ * the live selection leaves the reviewed project the wizard is replaced: the
+ * only way forward is re-rendering the page under the current project and
+ * answering it again.
+ */
+function ProjectChangedNotice({ onReview }: { onReview: () => void }) {
+  const t = useTranslations();
+
+  return (
+    <Callout variant="warning">
+      <div className="flex flex-col gap-3">
+        <p>{t("DashboardMarkets.dvp.projectChangedBody")}</p>
+        <div>
+          <Button onClick={onReview} type="button" variant="secondary">
+            {t("DashboardMarkets.dvp.projectChangedAction")}
+          </Button>
+        </div>
+      </div>
+    </Callout>
+  );
+}
+
 export function DvpCreateWorkspace({
   cluster,
   context,
+  reviewedProjectId,
 }: {
   cluster: SolanaCluster;
   context: DvpCreateContext;
+  /** The project the server rendered this form's context for. */
+  reviewedProjectId: string;
 }) {
   const t = useTranslations();
   const router = useRouter();
-  const form = useDvpCreateForm(cluster, context);
+  const workspace = useOptionalDashboardWorkspace();
+  const liveProjectId = workspace?.selectedProjectId ?? null;
+  // Unknown (no provider, or the selection not loaded yet) never counts as a
+  // change: only a KNOWN different project invalidates.
+  const projectChanged = liveProjectId !== null && liveProjectId !== reviewedProjectId;
+  const form = useDvpCreateForm(cluster, context, reviewedProjectId);
   const steps = useWizardSteps();
   const [step, setStep] = useState(0);
 
@@ -115,6 +152,18 @@ export function DvpCreateWorkspace({
       onLastStep={step === last}
     />
   );
+
+  if (projectChanged && workspace) {
+    // The recovery synchronizes the selection with the project the page was
+    // just rendered for: the provider holds its state from the mount (a switch
+    // in another tab never reaches it), so a mere re-render would compare the
+    // same stale pair forever. Going through `selectProject` updates the
+    // provider, rewrites the cookie to the same value the server read, and
+    // remounts this workspace (keyed by the reviewed project) with a fresh
+    // draft under the current one. The notice only shows for a known live
+    // selection, so the workspace is always mounted here.
+    return <ProjectChangedNotice onReview={() => workspace.selectProject(reviewedProjectId)} />;
+  }
 
   return (
     <WizardFrame

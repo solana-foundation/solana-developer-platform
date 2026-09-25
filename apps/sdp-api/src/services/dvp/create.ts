@@ -59,7 +59,11 @@ import {
   submitSponsoredTransaction,
 } from "@/services/sponsorship-submission";
 import type { Env } from "@/types/env";
-import { dvpCreateFingerprint, type ResolvedParty } from "./fingerprint";
+import {
+  dvpCreateFingerprint,
+  dvpCreateLegacyFingerprint,
+  type ResolvedParty,
+} from "./fingerprint";
 import { describeDvpDestinationProblem, findDvpDestinationProblem } from "./inspect-destination";
 import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
@@ -115,9 +119,23 @@ export type CreateDvpTradeInput = {
  *
  * A key is a claim, not a proof; the fingerprint is compared precisely so a
  * wallet-scoped caller never receives escrows outside its scope.
+ *
+ * The comparison accepts the current fingerprint OR the legacy one rows stored
+ * before the project entered the hash (APE-693) carry: the lookup is already
+ * project-scoped, so a legacy match still proves the retry arrived under the
+ * stored row's own project. Without the legacy acceptance, the first retry of
+ * a keyed trade created before that change would 409 — and a retry with a
+ * fresh key would create a second escrow.
  */
-function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTradeRow {
-  if (trade.idempotencyFingerprint !== fingerprint) {
+function assertOwnReplay(
+  trade: DvpTradeRow,
+  fingerprint: string | null,
+  legacyFingerprint: string | null
+): DvpTradeRow {
+  if (
+    trade.idempotencyFingerprint !== fingerprint &&
+    trade.idempotencyFingerprint !== legacyFingerprint
+  ) {
     throw conflict("Idempotency key already used with different request payload");
   }
   return trade;
@@ -135,6 +153,7 @@ async function insertOrReplay(
   failedRowId: string | null,
   idempotencyKey: string | null,
   fingerprint: string | null,
+  legacyFingerprint: string | null,
   row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
 ): Promise<DvpTradeRow> {
   try {
@@ -147,7 +166,7 @@ async function insertOrReplay(
     if (!winner) {
       throw error;
     }
-    return assertOwnReplay(winner, fingerprint);
+    return assertOwnReplay(winner, fingerprint, legacyFingerprint);
   }
 }
 
@@ -308,6 +327,11 @@ export async function createDvpTrade(
   const fingerprint = input.idempotencyKey
     ? dvpCreateFingerprint({ input, resolvedA, resolvedB })
     : null;
+  // The format rows stored before the project entered the hash (APE-693)
+  // carry, accepted alongside the current one by the replay comparison.
+  const legacyFingerprint = input.idempotencyKey
+    ? dvpCreateLegacyFingerprint({ input, resolvedA, resolvedB })
+    : null;
   let failedRowId: string | null = null;
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
@@ -315,7 +339,7 @@ export async function createDvpTrade(
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
       } else {
-        return assertOwnReplay(replayed, fingerprint);
+        return assertOwnReplay(replayed, fingerprint, legacyFingerprint);
       }
     }
   }
@@ -428,6 +452,7 @@ export async function createDvpTrade(
     failedRowId,
     input.idempotencyKey,
     fingerprint,
+    legacyFingerprint,
     {
       id,
       organizationId: input.organizationId,

@@ -29,6 +29,8 @@ const T22 = SPL_TOKEN_PROGRAMS["token-2022"];
 const WALLET_A = "cwlt_a";
 const ADDRESS_A = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 const ADDRESS_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
+/** The project every submit in this file is reviewed under, unless said otherwise. */
+const REVIEWED_PROJECT = "project_a";
 
 function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
   return {
@@ -54,6 +56,7 @@ function request(overrides: Partial<DvpCreateRequest> = {}): DvpCreateRequest {
 /** Submits once and reports the request that went out. */
 async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
   idempotencyKey: string;
+  reviewedProject: string;
   body: Record<string, unknown>;
 }> {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -63,7 +66,9 @@ async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
   });
   vi.stubGlobal("fetch", fetchMock);
 
-  const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+  const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+    wrapper: withI18n,
+  });
   await act(async () => {
     await result.current.submit(request(overrides));
   });
@@ -71,6 +76,7 @@ async function requestFor(overrides: Partial<DvpCreateRequest> = {}): Promise<{
   const call = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string>; body?: string };
   return {
     idempotencyKey: call.headers?.["Idempotency-Key"] ?? "",
+    reviewedProject: call.headers?.["x-sdp-reviewed-project-id"] ?? "",
     body: call.body ? (JSON.parse(call.body) as Record<string, unknown>) : {},
   };
 }
@@ -103,6 +109,14 @@ describe("useDvpCreateSubmit wire shape", () => {
 
     expect(body).not.toHaveProperty("userASettlementDestination");
     expect(body).not.toHaveProperty("userBSettlementDestination");
+  });
+
+  // APE-693. The reviewed project rides with the submit so the route can refuse
+  // to forward a trade whose terms were reviewed under a different one.
+  it("presents the project the submit was reviewed under", async () => {
+    const { reviewedProject } = await requestFor();
+
+    expect(reviewedProject).toBe(REVIEWED_PROJECT);
   });
 });
 
@@ -156,7 +170,9 @@ describe("useDvpCreateSubmit idempotency key", () => {
   ])("reuses the key after %s, so the retry replays", async (_label, mockFetch) => {
     const fetchMock = mockFetch();
     vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
     await act(async () => {
       await result.current.submit(request());
     });
@@ -174,7 +190,9 @@ describe("useDvpCreateSubmit idempotency key", () => {
       json: async () => ({ data: { trade: { id: "dvp_1", createSignature: "sig_create" } } }),
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
     await act(async () => {
       await result.current.submit(request());
     });
@@ -182,6 +200,37 @@ describe("useDvpCreateSubmit idempotency key", () => {
       await result.current.submit(request());
     });
 
+    expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
+  });
+
+  // APE-693. A key drawn for one project must never be presented under a
+  // sibling: the create would replay (or mint) under the wrong project's
+  // custody and sponsorship. A changed project mints a fresh key.
+  it("mints a fresh key when the reviewed project changes, and presents the new one", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { message: "boom" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook(
+      ({ project }) => useDvpCreateSubmit("devnet", project),
+      { initialProps: { project: "project_a" }, wrapper: withI18n }
+    );
+    // Fails, so the key is kept for project_a.
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    rerender({ project: "project_b" });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    const headersOf = (call: number): Record<string, string> =>
+      (fetchMock.mock.calls[call]?.[1] as { headers?: Record<string, string> } | undefined)
+        ?.headers ?? {};
+    expect(headersOf(0)["x-sdp-reviewed-project-id"]).toBe("project_a");
+    expect(headersOf(1)["x-sdp-reviewed-project-id"]).toBe("project_b");
     expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
   });
 });
@@ -202,7 +251,9 @@ describe("useDvpCreateSubmit confirmation", () => {
         },
       })
     );
-    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
     await act(async () => {
       await result.current.submit(request());
     });
@@ -220,12 +271,91 @@ describe("useDvpCreateSubmit confirmation", () => {
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => "<html>" })
     );
-    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
     await act(async () => {
       await result.current.submit(request());
     });
 
     expect(result.current.error).toBe("Request failed (502).");
+  });
+
+  // A refusal the proxy names carries a code so the form can say it in the
+  // reader's language; relaying the message would show English to everyone.
+  it("names a project-changed refusal in the catalog's own words", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            message: "The selected project changed since this trade was reviewed.",
+            details: { reason: "dvp_create_reviewed_project_mismatch" },
+          },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The selected project changed since this trade was reviewed, so it can't be submitted. Review it under the current project and create it again."
+    );
+  });
+
+  // The no-selection refusal is named by the proxy too, so it is also said in
+  // the reader's language rather than relayed.
+  it("names a no-project-selected refusal in the catalog's own words", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: {
+            message: "Selected project required",
+            details: { reason: "dvp_create_selected_project_required" },
+          },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "No project is selected right now, so this trade can't be submitted. Choose a project and create it again."
+    );
+  });
+
+  // A refusal without a known code is relayed as sent — the codes are only for
+  // refusals this form can name.
+  it("relays an unnamed refusal's own message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: "Selected project required" } }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe("Selected project required");
   });
 
   // The create is SDP's own broadcast, so the toast reporting it links it.
