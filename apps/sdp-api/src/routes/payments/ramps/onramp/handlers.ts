@@ -359,6 +359,22 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           fiatCurrency: input.fiatCurrency,
         });
         quote = bvnkResult.quote;
+        if (idempotencyKey) {
+          // Keyed replay support: the pre-created path skips
+          // persistRampQuoteTransfer, so the verbatim quote response must be
+          // recorded here — a retry replays the original funding instructions
+          // instead of conflicting with an in-progress reservation forever.
+          const stored = await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            providerData: rampQuoteResponseProviderData(quote),
+            updatedAt: new Date().toISOString(),
+          });
+          if (!stored) {
+            throw internalError("Failed to record BVNK on-ramp quote response");
+          }
+        }
         break;
       }
       case "mural": {
@@ -424,26 +440,41 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
     throw error;
   }
 
-  const transferId = precreatedTransferId
-    ? precreatedTransferId
-    : await persistRampQuoteTransfer(c, {
-        transferId: operationTransferId,
-        scope,
-        projectId,
-        counterparty,
-        quote,
-        direction: "onramp",
-        wallet: destinationWallet,
-        walletAddress: destinationWalletAddress,
-        assetRail: input.assetRail,
-        cryptoAmount: null,
-        fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-        fiatAmount: input.fiatAmount,
-        rampsMemo: input.rampsMemo,
-        providerData: transferProviderData,
-        reservedRow,
-        idempotencyKey,
-      });
+  let transferId: string;
+  try {
+    transferId = precreatedTransferId
+      ? precreatedTransferId
+      : await persistRampQuoteTransfer(c, {
+          transferId: operationTransferId,
+          scope,
+          projectId,
+          counterparty,
+          quote,
+          direction: "onramp",
+          wallet: destinationWallet,
+          walletAddress: destinationWalletAddress,
+          assetRail: input.assetRail,
+          cryptoAmount: null,
+          fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+          fiatAmount: input.fiatAmount,
+          rampsMemo: input.rampsMemo,
+          providerData: transferProviderData,
+          reservedRow,
+          idempotencyKey,
+        });
+  } catch (error) {
+    // A provider session finalization could not persist must not strand the
+    // reservation as a pending row with no stored response: mark it failed so
+    // the client's retry resets it in place instead of conflicting until the
+    // abandonment window passes and then minting a second session.
+    await failReservedRampQuoteTransfer(c, {
+      reservedRow,
+      organizationId: scope.auth.organizationId,
+      projectId,
+      error,
+    });
+    throw error;
+  }
 
   return success(c, { quote, transferId });
 }

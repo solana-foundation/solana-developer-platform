@@ -555,6 +555,35 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async claimReusableRampQuoteReservation(input) {
+      assertScope(input);
+      const scope = buildTransferScopeWhere({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        includeAllOrganizationProjects: canAccessAllOrganizationProjects,
+        extraClauses: ["id = ?", "(status = 'failed' OR (status = 'pending' AND updated_at <= ?))"],
+        extraValues: [input.transferId, input.pendingUpdatedBefore],
+      });
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET status = 'pending',
+               provider_reference = NULL,
+               delivery_mode = NULL,
+               error = NULL,
+               updated_at = ?
+           WHERE ${scope.where}
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(input.updatedAt, ...scope.values)
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async updateTransferStatusGuarded(input) {
       assertScope(input);
       const scope = buildTransferScopeWhere({

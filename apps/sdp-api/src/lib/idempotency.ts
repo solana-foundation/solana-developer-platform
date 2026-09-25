@@ -80,6 +80,16 @@ export function isAbandonedReservation(row: { status: string; updated_at: string
   );
 }
 
+/**
+ * The ISO timestamp a `pending` reservation's `updated_at` must be older than
+ * to count as abandoned, computed from the same window
+ * {@link isAbandonedReservation} reads — so a guarded claim evaluated in SQL
+ * and a JS read of the same row can never disagree about abandonness.
+ */
+export function abandonedReservationCutoff(now: number = Date.now()): string {
+  return new Date(now - ABANDONED_RESERVATION_AFTER_MS).toISOString();
+}
+
 export async function resolveIdentityBoundIdempotencyReplay<
   Row extends { idempotency_fingerprint: string | null },
 >(

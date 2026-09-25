@@ -72,7 +72,7 @@ import {
   rampQuoteCryptoDepositProviderData,
   rampQuoteExpiryProviderData,
 } from "./quote-binding";
-import { rampQuoteResponseProviderData } from "./quote-idempotency";
+import { mergeRampQuoteProviderData, rampQuoteResponseProviderData } from "./quote-idempotency";
 
 type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
   counterparty: CounterpartyRow;
@@ -295,12 +295,12 @@ export async function persistRampQuoteTransfer(
         status: rampQuoteTransferStatus(input.quote),
         providerReference: input.quote.id,
         deliveryMode: input.quote.deliveryMode,
-        providerData: {
-          ...(input.providerData ?? {}),
-          ...rampQuoteExpiryProviderData(input.quote),
-          ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
-          ...(input.idempotencyKey ? rampQuoteResponseProviderData(input.quote) : {}),
-        },
+        providerData: mergeRampQuoteProviderData(
+          input.providerData ?? {},
+          rampQuoteExpiryProviderData(input.quote),
+          rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
+          ...(input.idempotencyKey ? [rampQuoteResponseProviderData(input.quote)] : [])
+        ),
         updatedAt: new Date().toISOString(),
       });
       if (!finalized) {

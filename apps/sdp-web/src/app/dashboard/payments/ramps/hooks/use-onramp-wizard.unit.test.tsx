@@ -312,3 +312,136 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     expect(transferStatusCalls()).toBe(callsBefore);
   });
 });
+
+describe("useOnrampWizard — quote idempotency key binding", () => {
+  function quoteCallKeys(): (string | null)[] {
+    return fetchMock.mock.calls
+      .filter(
+        ([input, init]) =>
+          String(input) === "/api/dashboard/payments/ramps/onramp/quote" &&
+          (init?.method ?? "GET") === "POST"
+      )
+      .map(([, init]) => new Headers(init?.headers).get("Idempotency-Key"));
+  }
+
+  it("retries an unchanged selection under the same key and an edited selection under a fresh key", async () => {
+    let quoteShouldFail = true;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
+        return quoteShouldFail
+          ? Promise.resolve(Response.json({ error: { message: "provider down" } }, { status: 500 }))
+          : Promise.resolve(
+              Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+            );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        return Promise.resolve(Response.json({ data: REQUIREMENTS_READY }));
+      }
+      if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
+        return Promise.resolve(Response.json({ data: { transfer: currentTransfer } }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("bvnk"));
+    act(() => rendered.result.current.setField("amount", "100"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+    expect(quoteCallKeys()).toHaveLength(1);
+    const firstKey = quoteCallKeys()[0];
+    expect(firstKey).not.toBeNull();
+
+    // An unchanged retry replays under the SAME key: the API can answer with
+    // the first operation instead of minting a second provider session.
+    quoteShouldFail = false;
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(quoteCallKeys()).toHaveLength(2);
+    expect(quoteCallKeys()[1]).toBe(firstKey);
+  });
+
+  it("mints a fresh key when the selection changed after a failed attempt", async () => {
+    let quoteShouldFail = true;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/dashboard/payments/ramps/onramp/quote" && method === "POST") {
+        return quoteShouldFail
+          ? Promise.resolve(Response.json({ error: { message: "provider down" } }, { status: 500 }))
+          : Promise.resolve(
+              Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+            );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        return Promise.resolve(Response.json({ data: REQUIREMENTS_READY }));
+      }
+      if (url.startsWith(`/api/dashboard/payments/transfers/${TRANSFER_ID}`)) {
+        return Promise.resolve(Response.json({ data: { transfer: currentTransfer } }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("bvnk"));
+    act(() => rendered.result.current.setField("amount", "100"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+    const firstKey = quoteCallKeys()[0];
+    expect(firstKey).not.toBeNull();
+
+    // Step back, edit the amount, and return: the retry payload no longer
+    // matches the one the key was minted for, so it must carry a FRESH key —
+    // the old key would fingerprint-conflict against the failed attempt.
+    act(() => {
+      rendered.result.current.handleSecondary();
+    });
+    act(() => rendered.result.current.setField("amount", "250"));
+    await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+    quoteShouldFail = false;
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+    expect(quoteCallKeys()).toHaveLength(2);
+    expect(quoteCallKeys()[1]).not.toBe(firstKey);
+  });
+});

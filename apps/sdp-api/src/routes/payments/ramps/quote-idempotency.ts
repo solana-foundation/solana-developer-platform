@@ -4,6 +4,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { conflict, internalError } from "@/lib/errors";
 import {
+  abandonedReservationCutoff,
   isAbandonedReservation,
   normalizeForFingerprint,
   resolveIdentityBoundIdempotencyReplay,
@@ -93,6 +94,39 @@ export function readStoredRampQuoteResponse(row: PaymentTransferRow): PaymentRam
 /** Provider-data fragment carrying the stored quote response for keyed quotes. */
 export function rampQuoteResponseProviderData(quote: PaymentRampQuote): Record<string, unknown> {
   return { rampQuote: { response: quote } };
+}
+
+/**
+ * Merges provider-data fragments into one `provider_data` payload, combining
+ * sibling `rampQuote` fragments instead of letting a shallow spread drop the
+ * earlier ones: the expiry fragment (`rampQuote.expiresAt`) and the stored
+ * replay response (`rampQuote.response`) share the same top-level key, and a
+ * last-writer-wins spread would silently discard the expiry a keyed quote
+ * must keep for its binding-expiry checks.
+ */
+export function mergeRampQuoteProviderData(
+  ...fragments: ReadonlyArray<Record<string, unknown>>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  let rampQuote: Record<string, unknown> | null = null;
+  for (const fragment of fragments) {
+    for (const [key, value] of Object.entries(fragment)) {
+      if (
+        key === "rampQuote" &&
+        value !== null &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+      ) {
+        rampQuote = { ...(rampQuote ?? {}), ...(value as Record<string, unknown>) };
+      } else {
+        merged[key] = value;
+      }
+    }
+  }
+  if (rampQuote !== null) {
+    merged.rampQuote = rampQuote;
+  }
+  return merged;
 }
 
 /**
@@ -267,18 +301,20 @@ async function resolveKeyedRampQuoteReservationConflict(
     return { row: null, replay: { quote: stored, transferId: existing.id } };
   }
   if (existing.status === "failed" || isAbandonedReservation(existing)) {
-    const reused = await repository.updateTransfer({
+    // The reset is a guarded claim, not a blind update: the row is reusable
+    // only while it is STILL failed, or STILL pending-and-abandoned. Two
+    // concurrent retries race here; exactly one claim matches, and the loser
+    // gets null rather than a second claim on the same key — claiming and
+    // then both driving the provider would mint two sessions for one key.
+    const reused = await repository.claimReusableRampQuoteReservation({
       transferId: existing.id,
       organizationId: input.organizationId,
       projectId: input.projectId,
-      status: "pending",
-      providerReference: null,
-      deliveryMode: null,
-      error: null,
+      pendingUpdatedBefore: abandonedReservationCutoff(),
       updatedAt: new Date().toISOString(),
     });
     if (!reused) {
-      throw internalError("Failed to reuse ramp quote transfer record");
+      throw conflict("An identical ramp quote operation is already in progress; retry shortly.");
     }
     return { row: reused, replay: null };
   }

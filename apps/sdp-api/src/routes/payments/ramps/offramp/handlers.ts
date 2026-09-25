@@ -475,27 +475,37 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   }
 
   let transferId: string;
-  if (precreatedTransferId) {
-    transferId = precreatedTransferId;
-  } else {
-    transferId = await persistRampQuoteTransfer(c, {
-      transferId: operationTransferId,
-      scope,
-      projectId,
-      counterparty,
-      quote,
-      direction: "offramp",
-      wallet: sourceWallet,
-      walletAddress: sourceWalletAddress,
-      assetRail: input.assetRail,
-      cryptoAmount: input.cryptoAmount,
-      fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-      fiatAmount: null,
-      rampsMemo: input.rampsMemo,
-      providerData: transferProviderData,
+  try {
+    transferId = precreatedTransferId
+      ? precreatedTransferId
+      : await persistRampQuoteTransfer(c, {
+          transferId: operationTransferId,
+          scope,
+          projectId,
+          counterparty,
+          quote,
+          direction: "offramp",
+          wallet: sourceWallet,
+          walletAddress: sourceWalletAddress,
+          assetRail: input.assetRail,
+          cryptoAmount: input.cryptoAmount,
+          fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+          fiatAmount: null,
+          rampsMemo: input.rampsMemo,
+          providerData: transferProviderData,
+          reservedRow,
+          idempotencyKey,
+        });
+  } catch (error) {
+    // See the on-ramp handler: a finalization failure must fail the keyed
+    // reservation, not strand it pending with no stored response.
+    await failReservedRampQuoteTransfer(c, {
       reservedRow,
-      idempotencyKey,
+      organizationId: scope.auth.organizationId,
+      projectId,
+      error,
     });
+    throw error;
   }
 
   return success(c, { quote, transferId });
