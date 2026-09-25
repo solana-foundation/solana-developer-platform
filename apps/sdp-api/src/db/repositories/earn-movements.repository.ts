@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type {
   EarnExecutionModel,
   EarnMovementDirection,
@@ -79,6 +80,40 @@ export function assertMovementIsOwnReplay(
     movement.idempotency_fingerprint !== request.idempotencyFingerprint
   ) {
     throw conflict("Idempotency key already used with different request payload");
+  }
+}
+
+/**
+ * The floor rule for a CROSS-KEY intent replay, and the sibling of
+ * `assertMovementIsOwnReplay`: exported so every site that answers a
+ * different-key twin with the claimed movement enforces the same one, because
+ * a per-site re-implementation is how that earlier rule kept getting lost.
+ *
+ * The intent claim deliberately ignores `minSharesOut` (quote-derived, moves
+ * with the rate), so a twin can arrive demanding a STRICTER floor than the
+ * signed transaction it would be answered with. Silently replaying then would
+ * tell a caller demanding floor Y that floor X < Y is in force. This rule
+ * refuses that answer: a stricter twin gets a conflict naming both floors —
+ * nothing is signed or broadcast either way, so the double-deposit protection
+ * the claim exists for stays intact — while an equal-or-looser request keeps
+ * its replay (the claimed transaction enforces AT LEAST what was asked).
+ */
+export function assertDepositIntentFloorHonored(
+  claimed: Pick<EarnMovementRow, "min_shares_out">,
+  requestedMinSharesOut: string | null | undefined
+): void {
+  if (requestedMinSharesOut === undefined || requestedMinSharesOut === null) {
+    return;
+  }
+  const claimedFloor = claimed.min_shares_out;
+  if (claimedFloor === null || compareDecimalAmounts(claimedFloor, requestedMinSharesOut) < 0) {
+    throw conflict(
+      `An identical deposit is already in flight enforcing a lower share floor (${
+        claimedFloor ?? "none"
+      }) than requested (${requestedMinSharesOut}). The open deposit cannot be upgraded to the ` +
+        "stricter floor; wait for it to settle and submit the deposit again, or resend with the " +
+        "floor the open deposit enforces."
+    );
   }
 }
 
@@ -324,6 +359,10 @@ export interface EarnMovementsRepository {
    * future authenticated provider reconciler that can finally close these rows
    * (see `vaultSettlementFilter`) closes their claims with it — one completion
    * fact, moved once, for the settled surface and this claim together.
+   *
+   * A twin the caller has flagged DELIBERATE
+   * (`allowConcurrentDuplicateIntent`) never reaches this read: the caller
+   * decides to start a second movement, and the exposure cap still bounds it.
    */
   findOpenVaultDepositIntentClaim(params: {
     organizationId: string;
@@ -722,6 +761,14 @@ export interface CreateSignedVaultDepositIntentInput
    * second sign/record/broadcast path. See `buildEarnVaultDepositIntentFingerprint`.
    */
   depositIntentFingerprint: string;
+  /**
+   * The caller's DELIBERATE duplicate (`allowConcurrentDuplicateIntent`):
+   * skips the cross-key claim check in this transaction so a second movement
+   * for an unchanged intent can be recorded while a prior one is open. The
+   * exposure gate below still runs — the deliberate deposit is bounded by the
+   * cap like any other — and the same-key anchor is untouched.
+   */
+  allowConcurrentDuplicateIntent?: boolean;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -1237,7 +1284,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // release point: for a provider-order deposit it coexists with an order
       // the provider has not completed, and a cross-key twin released there
       // would start a second sign/record/broadcast path for money already
-      // committed.
+      // committed. The floor rule for the replay this row answers is
+      // `assertDepositIntentFloorHonored`, enforced by every caller.
       const settlement = vaultSettlementFilter("deposit", false);
       const row = await db
         .prepare(
@@ -2167,14 +2215,22 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         // (organization AND exact project bound); the claim row's own
         // idempotency fingerprint legitimately differs — it was minted with a
         // different quote-derived floor — which is the whole reason this
-        // separate fingerprint exists.
-        const claimTwin = await findOpenDepositIntentClaim(transaction, input);
-        if (claimTwin) {
-          return {
-            position: await requireMovementPosition(transaction, claimTwin),
-            movement: claimTwin,
-            replayed: true,
-          };
+        // separate fingerprint exists. The floor rule still applies to the
+        // replay: a twin demanding a STRICTER floor than the claimed movement
+        // enforces is refused here under the lock, never answered silently.
+        // A DELIBERATE duplicate (caller-flagged) skips the claim entirely —
+        // including this floor refusal — and records a second movement, with
+        // the exposure gate below still bounding it.
+        if (!input.allowConcurrentDuplicateIntent) {
+          const claimTwin = await findOpenDepositIntentClaim(transaction, input);
+          if (claimTwin) {
+            assertDepositIntentFloorHonored(claimTwin, input.acceptedMinSharesOut);
+            return {
+              position: await requireMovementPosition(transaction, claimTwin),
+              movement: claimTwin,
+              replayed: true,
+            };
+          }
         }
 
         // Platform admission, decided on committed rows under the vault lock,
@@ -2814,7 +2870,8 @@ async function findVaultMovementByRequest(
  * keeps two different keys from recording two movements for one unchanged
  * intent. Same terminality rule as the interface's claim read: the settled
  * boundary, never chain finality (a provider order can still be pending
- * there).
+ * there). Callers enforce the replay's floor rule
+ * (`assertDepositIntentFloorHonored`) and the deliberate-duplicate flag.
  */
 async function findOpenDepositIntentClaim(
   db: AppDb,

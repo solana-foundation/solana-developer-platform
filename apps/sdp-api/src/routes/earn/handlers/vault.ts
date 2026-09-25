@@ -267,6 +267,7 @@ export async function createEarnVaultDeposit(
         amount: parsedData.amount,
         requestId,
         minSharesOut: parsedData.minSharesOut,
+        allowConcurrentDuplicateIntent: parsedData.allowConcurrentDuplicateIntent,
         ...(resolved.swap === null ? {} : { swap: resolved.swap }),
         userId: auth.userId ?? null,
         apiKeyId: auth.apiKeyId ?? null,

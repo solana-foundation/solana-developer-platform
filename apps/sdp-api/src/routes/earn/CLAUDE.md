@@ -608,7 +608,17 @@ transaction signed by the organization custody wallet or external owner.
     unchanged intent while a prior movement is still non-terminal is answered
     with THAT movement (`replayed: true`) at the service preflight and again
     under the per-vault ledger lock for the concurrent race — no second
-    build/sign/record/broadcast. The claim releases only on terminality (the
+    build/sign/record/broadcast. Because the claim ignores the floor, a twin
+    demanding a STRICTER floor than the claimed transaction enforces is
+    refused instead (`assertDepositIntentFloorHonored`, both claim sites): a
+    replay may never silently enforce less than the request asked for, and
+    nothing is signed either way, so the double-deposit protection holds. The
+    claimed movement's own floor is disclosed on every deposit response
+    (`minSharesOut`). A genuinely deliberate second deposit of the same amount
+    is expressed with `allowConcurrentDuplicateIntent` (fresh key required —
+    the same-key anchor still applies): the claim is skipped for that request
+    and a fresh movement is recorded and broadcast, bounded by the exposure
+    cap like any other. The claim releases only on terminality (the
     same settled predicate the `?settled=` list filter uses), so a `failed`
     attempt frees the intent and a settled one makes the next same-amount
     deposit a genuinely new movement. The claimed row's own idempotency

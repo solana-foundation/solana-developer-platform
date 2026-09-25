@@ -384,7 +384,13 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("claims the same intent across keys even when a re-quoted floor differs", async () => {
+  /**
+   * The claim deliberately ignores the quote-derived floor, so a re-quoted
+   * twin can arrive with a DIFFERENT floor than the movement it would be
+   * answered with. Looser is a replay: the claimed transaction enforces AT
+   * LEAST what the twin asked, and the response discloses that floor.
+   */
+  it("claims the same intent across keys when the re-quoted floor is looser", async () => {
     buildVaultDeposit.mockImplementation(async (_runtime, args) =>
       plan({
         accepted: {
@@ -405,11 +411,109 @@ describe("depositIntoVault — idempotency", () => {
 
     const first = await depositIntoVault(
       env,
-      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "1" })
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "2" })
     );
     const second = await depositIntoVault(
       env,
-      depositInput({ requestId: "22222222-2222-4222-8222-222222222222", minSharesOut: "2" })
+      depositInput({ requestId: "22222222-2222-4222-8222-222222222222", minSharesOut: "1" })
+    );
+
+    expect(second).toMatchObject({ replayed: true });
+    expect(second.movement.id).toBe(first.movement.id);
+    // The floor the signed transaction ACTUALLY enforces, not the one the
+    // replaying request arrived with.
+    expect(second.movement.min_shares_out).toBe("2");
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * ...and stricter is NOT a replay: answering a twin that demands floor "2"
+   * with a transaction enforcing floor "1" would silently give it worse terms
+   * than it accepted. Nothing is signed or broadcast either way, so the
+   * double-deposit protection the claim exists for holds — the caller is
+   * refused until the open movement settles.
+   */
+  it("refuses a different-key twin demanding a stricter floor than the claimed movement enforces", async () => {
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({
+        accepted: {
+          amount: args.amount,
+          ...(args.minSharesOut ? { minSharesOut: args.minSharesOut } : {}),
+        },
+      })
+    );
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_stricter_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "1" })
+    );
+    await expect(
+      depositIntoVault(
+        env,
+        depositInput({ requestId: "22222222-2222-4222-8222-222222222222", minSharesOut: "2" })
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(signVaultPlan).toHaveBeenCalledTimes(1);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(first.movement.min_shares_out).toBe("1");
+  });
+
+  /**
+   * The wire cannot separate a deliberate second identical deposit from the
+   * two-tab twin, so the claim answers both with the open movement — unless
+   * the caller says this one is deliberate. `allowConcurrentDuplicateIntent`
+   * is that separator (fresh key still required; the same-key anchor is
+   * untouched): a fresh movement is recorded and broadcast while the prior
+   * one is open, with the exposure cap still bounding it.
+   */
+  it("records a fresh movement when a different key declares a deliberate concurrent duplicate", async () => {
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_deliberate_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    const second = await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        allowConcurrentDuplicateIntent: true,
+      })
+    );
+
+    expect(second).toMatchObject({ replayed: false });
+    expect(second.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  /** The deliberate-duplicate flag never weakens the same-key anchor. */
+  it("still replays the same key even when it carries the deliberate-duplicate flag", async () => {
+    const first = await depositIntoVault(env, depositInput());
+    const second = await depositIntoVault(
+      env,
+      depositInput({ allowConcurrentDuplicateIntent: true })
     );
 
     expect(second).toMatchObject({ replayed: true });
@@ -497,6 +601,30 @@ describe("depositIntoVault — idempotency", () => {
     expect(finalizedTwin.movement.id).toBe(first.movement.id);
     expect(await tableCount("earn_movements")).toBe(1);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+
+    // The ACCIDENTAL twin is protected, but a DELIBERATE second deposit is
+    // still expressible: flagged, it starts a fresh movement even though the
+    // first order has not reached a settlement fact the ledger can record.
+    // That is the caller's own choice to make, bounded by the exposure cap —
+    // while the unflagged claim keeps rescuing automatic retries for as long
+    // as the provider order is unresolved.
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([2]),
+      signature: "sig_provider_order_deliberate",
+      lastValidBlockHeight: "12345",
+    });
+    const deliberate = await depositIntoVault(
+      env,
+      depositInput({
+        provider: "wisdomtree",
+        requestId: "44444444-4444-4444-8444-444444444444",
+        allowConcurrentDuplicateIntent: true,
+      })
+    );
+    expect(deliberate).toMatchObject({ replayed: false });
+    expect(deliberate.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
   it("binds independent request keys for distinct intents into distinct on-chain memo instructions", async () => {

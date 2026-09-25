@@ -6,6 +6,7 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
+  assertDepositIntentFloorHonored,
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
@@ -76,6 +77,21 @@ export interface VaultDepositInput {
   apiKeyId?: string | null;
   /** Slippage floor, decimal string. */
   minSharesOut?: string;
+  /**
+   * Deliberately start a SECOND deposit for an intent that is already open
+   * (same wallet, vault, amount, and swap funding) instead of being answered
+   * with the open movement. The cross-key intent claim exists to rescue
+   * ACCIDENTAL twins — the browser mints its idempotency key per tab, so the
+   * same unchanged intent arrives under two keys — and no request field can
+   * separate that twin from a deliberate re-deposit. This flag is that
+   * separator: set it only on a deliberate re-deposit, never on an automatic
+   * retry, and a fresh movement is recorded and broadcast even while the
+   * prior one is open (the exposure cap still bounds it, and the same-key
+   * idempotency anchor above is untouched). Unset, a twin is answered with
+   * the open movement — refused outright when it demands a stricter floor
+   * than the claimed transaction enforces.
+   */
+  allowConcurrentDuplicateIntent?: boolean;
   /** Fund the deposit by swapping another stablecoin first (Jupiter). */
   swap?: {
     /** Validated by the route: a supported swap-source mint on this cluster. */
@@ -240,24 +256,37 @@ export async function depositIntoVault(
   // claimed row's idempotency fingerprint legitimately differs from this
   // request's, because it was minted with a different quote-derived floor.
   //
+  // The quote-derived floor cuts both ways: a twin that arrives demanding a
+  // STRICTER floor than the claimed transaction enforces is NOT answered as a
+  // replay — `assertDepositIntentFloorHonored` refuses it, so a caller never
+  // silently receives a movement enforcing less than it asked for (the equal
+  // or looser case still replays; the response discloses the floor in force).
+  //
   // A DELIBERATE second identical deposit (same wallet, vault, and amount) is
   // indistinguishable from the two-tab twin on the wire — no request field
   // separates them without re-opening the hole this claim closes — so while
   // the prior movement is open it is answered as a replay, and the response
-  // discloses the floor the signed transaction actually enforces. That window
-  // is the prior movement's own lifetime: the claim releases on terminality —
-  // the same settled boundary the `?settled=` list filter uses — after which
-  // the same intent deposits again freely. For a provider-order deposit that
-  // boundary outlives Solana finality on purpose: finality proves the payment
-  // leg cannot be rolled back, not that the provider finished the order, and
-  // a twin released in between would double-broadcast it.
-  const openClaim = await ledger.findOpenVaultDepositIntentClaim({
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    depositIntentFingerprint: intentFingerprint,
-  });
-  if (openClaim) {
-    return replayResult(ledger, input, openClaim);
+  // discloses the floor the signed transaction actually enforces. The wire
+  // separator is `allowConcurrentDuplicateIntent`: a caller that sets it
+  // asserts this is a deliberate re-deposit, the claim is skipped, and a
+  // fresh movement is recorded and broadcast (the exposure cap still bounds
+  // it). That window is otherwise the prior movement's own lifetime: the
+  // claim releases on terminality — the same settled boundary the `?settled=`
+  // list filter uses — after which the same intent deposits again freely. For
+  // a provider-order deposit that boundary outlives Solana finality on
+  // purpose: finality proves the payment leg cannot be rolled back, not that
+  // the provider finished the order, and a twin released in between would
+  // double-broadcast it.
+  if (!input.allowConcurrentDuplicateIntent) {
+    const openClaim = await ledger.findOpenVaultDepositIntentClaim({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      depositIntentFingerprint: intentFingerprint,
+    });
+    if (openClaim) {
+      assertDepositIntentFloorHonored(openClaim, input.minSharesOut);
+      return replayResult(ledger, input, openClaim);
+    }
   }
 
   // Replays above are pure durable reads: they must keep working during an RPC
@@ -445,6 +474,7 @@ export async function depositIntoVault(
           requestId: input.requestId,
           idempotencyFingerprint: fingerprint,
           depositIntentFingerprint: intentFingerprint,
+          allowConcurrentDuplicateIntent: input.allowConcurrentDuplicateIntent,
           createdBy: input.userId ?? null,
           initiatedByKeyId: input.apiKeyId ?? null,
           // Only the builder, which read the chain, knows whether this deposit
