@@ -1422,11 +1422,13 @@ export class TokenService {
    * record stands for `POST /supply/refresh` to reconcile. Returning false is
    * the caller's signal to keep the retained-reservation posture.
    *
-   * Like every other cache write, the subtraction advances
-   * `total_supply_updated_at`: a settled burn whose bookkeeping has not run
-   * yet compares its admission timestamp against this one, and a release that
-   * moved the cache without moving the stamp could leave the burn to
-   * subtract a supply change that already absorbed it.
+   * The subtraction deliberately does not advance `total_supply_updated_at`.
+   * That stamp is the settled-burn bookkeeping's signal that a chain reading
+   * has happened — a refresh re-observes the chain, so a burn admitted before
+   * it is already inside the figure it read. A release is not a chain reading:
+   * advancing the stamp here would let a burn whose bookkeeping follows the
+   * release mistake it for the reconciliation that absorbed it, skip its own
+   * decrement, and leave the cache high until a separate supply refresh.
    *
    * @returns whether the reservation was released and the row cleared.
    */
@@ -1465,11 +1467,10 @@ export class TokenService {
                  COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
                  0
                )::text,
-               total_supply_updated_at = ?,
                updated_at = ?
            WHERE id = ?${tenant.clause}`
         )
-        .bind(input.deltaBaseUnits, now, now, input.tokenId, ...tenant.values)
+        .bind(input.deltaBaseUnits, now, input.tokenId, ...tenant.values)
         .run();
       return released === 1;
     });
@@ -2217,10 +2218,7 @@ export class TokenService {
          )
          UPDATE issued_tokens
          SET total_supply_cached = resolved.supply::text,
-             total_supply_updated_at = CASE
-               WHEN resolved.supply = ?::numeric THEN ?
-               ELSE issued_tokens.total_supply_updated_at
-             END,
+             total_supply_updated_at = ?,
              updated_at = ?
          FROM resolved
          WHERE issued_tokens.id = ?${tenantWrite.clause}
@@ -2233,7 +2231,6 @@ export class TokenService {
         supplyBaseUnits,
         tokenId,
         ...tenantRead.values,
-        supplyBaseUnits,
         now,
         now,
         tokenId,
@@ -2250,9 +2247,10 @@ export class TokenService {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    // Held above the reading, so the figure on screen is SDP's own count and its
-    // "as of" stamp stays where it was — the next refresh past the window is what
-    // finishes the reconciliation.
+    // Held above the reading, so the figure on screen is SDP's own count — the
+    // stamp still moves, because a reading was taken: settled-burn bookkeeping
+    // trusts it to mean a refresh re-observed the chain, and the next refresh
+    // past the window is what finishes the reconciliation.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {
