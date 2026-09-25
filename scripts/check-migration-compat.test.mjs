@@ -149,7 +149,17 @@ test("statements inside DO blocks are checked", () => {
     ["drops a table"]
   );
   assert.deepEqual(
-    reasons("DO $$\nBEGIN\n  CREATE TABLE t (id TEXT);\nEND $$;\nDELETE FROM t WHERE id IS NULL;"),
+    findBreakingStatements(
+      "CREATE TABLE scratch (id TEXT);\n" +
+        "DO $$\nBEGIN\n  IF EXISTS (SELECT 1 FROM scratch) THEN\n    DELETE FROM scratch;\n    DROP TABLE scratch;\n  END IF;\nEND $$;\n" +
+        "DO $$\nBEGIN\n  CREATE TABLE t (id TEXT);\n  IF true THEN\n    DROP TABLE t;\n  END IF;\nEND $$;"
+    ),
+    []
+  );
+  assert.deepEqual(
+    reasons(
+      "DO $$\nBEGIN\n  IF true THEN\n    CREATE TABLE t (id TEXT);\n  END IF;\nEND $$;\nDELETE FROM t WHERE id IS NULL;"
+    ),
     ["rewrites rows"]
   );
 });

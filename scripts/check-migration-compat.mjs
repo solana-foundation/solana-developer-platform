@@ -145,9 +145,11 @@ function innerStatements(statement, index) {
   return inner.map(({ text, branch }, k) => [
     text,
     index + (k + 1) / (inner.length + 1),
-    `${index}:${branch}`,
+    { block: index, branch },
   ]);
 }
+
+const TOP = { block: "top", branch: 0 };
 
 function collectAdditions(statements) {
   const created = new Set();
@@ -157,13 +159,13 @@ function collectAdditions(statements) {
     if (!newColumns.has(table)) newColumns.set(table, new Set());
     newColumns.get(table).add(column);
   };
-  const visit = (statement, index, scope = "top") => {
+  const visit = (statement, index, scope = TOP) => {
     const create = statement.match(CREATE);
     if (create) {
       const name = normalize(create[3]);
       created.add(name);
       if (create[1].toUpperCase() === "TABLE" && !create[2] && !newTables.has(name)) {
-        newTables.set(name, { index, scope });
+        newTables.set(name, { index, ...scope });
       }
       return;
     }
@@ -192,7 +194,8 @@ function collectAdditions(statements) {
 
 function tableIsNew(context, table, index, scope) {
   const entry = context.newTables.get(table);
-  return entry !== undefined && entry.scope === scope && entry.index < index;
+  if (entry === undefined || entry.index >= index) return false;
+  return entry.branch === 0 || (entry.block === scope.block && entry.branch === scope.branch);
 }
 
 function alterActionFindings(action, table, replacesConstraint, newTable, context) {
@@ -223,7 +226,7 @@ function alterActionFindings(action, table, replacesConstraint, newTable, contex
   return null;
 }
 
-function statementFindings(statement, index, context, scope = "top") {
+function statementFindings(statement, index, context, scope = TOP) {
   const findings = [];
   const { ctes, main } = unwrapCte(statement);
   for (const cte of ctes) findings.push(...statementFindings(cte.trim(), index, context, scope));
