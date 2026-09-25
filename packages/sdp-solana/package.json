@@ -14,6 +14,11 @@
       "import": "./src/address.ts",
       "default": "./src/address.ts"
     },
+    "./associated-token": {
+      "types": "./src/associated-token.ts",
+      "import": "./src/associated-token.ts",
+      "default": "./src/associated-token.ts"
+    },
     "./amount": {
       "types": "./src/amount.ts",
       "import": "./src/amount.ts",
