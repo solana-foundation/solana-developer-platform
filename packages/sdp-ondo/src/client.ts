@@ -145,10 +145,21 @@ interface RpcTokenAccountsResponse {
   value?: {
     account?: {
       data?: {
-        parsed?: { info?: { tokenAmount?: { amount?: string } } };
+        parsed?: { info?: { state?: string; tokenAmount?: { amount?: string } } };
       };
     };
   }[];
+}
+
+/**
+ * One parsed SPL token account, as far as spendability is concerned. The
+ * token program refuses every transfer out of a `frozen` account, so a
+ * frozen balance can never be a swap source — the same test the exit path
+ * runs into on-chain.
+ */
+interface OndoTokenAccount {
+  amount: bigint;
+  frozen: boolean;
 }
 
 export class OndoVaultDirectClient
@@ -511,6 +522,10 @@ export class OndoVaultDirectClient
    * strings — never `uiAmount`, which is a JSON number and lossy above 2^53
    * base units (the same rule the Kamino read follows).
    *
+   * `shares` is the whole holding, frozen accounts included; `withdrawableShares`
+   * counts only transferable accounts, because the token program rejects every
+   * transfer out of a frozen account and the exit swap spends from them.
+   *
    * An empty reference list means the configured shelf, which for Ondo is the
    * single USDY instrument. The valuation is allowed to fail INDEPENDENTLY of
    * the balance read: a quote outage makes the VALUE unknown, not the HOLDING.
@@ -533,7 +548,13 @@ export class OndoVaultDirectClient
         for (const reference of references) {
           assertActive();
           this.assertKnownReference(config, reference);
-          const atoms = await this.readOwnerTokenBalance(runtime, input.owner, reference);
+          const accounts = await this.readOwnerTokenAccounts(runtime, input.owner, reference);
+          let atoms = 0n;
+          let withdrawableAtoms = 0n;
+          for (const account of accounts) {
+            atoms += account.amount;
+            if (!account.frozen) withdrawableAtoms += account.amount;
+          }
           if (readAllHoldings && atoms === 0n) continue;
           const shares = formatDecimalAmount(atoms, TOKEN_DECIMALS);
 
@@ -560,8 +581,12 @@ export class OndoVaultDirectClient
             owner: input.owner,
             cluster: runtime.cluster,
             shares,
-            // No lock: the whole balance is exitable on the open market.
-            withdrawableShares: shares,
+            // The market has no lock, but the token program does: a frozen
+            // USDY account refuses every transfer out, so an exit swap
+            // spending from it fails on-chain. Only balances held in
+            // transferable accounts are immediately exitable; a frozen
+            // account stays visible in `shares` and reports zero here.
+            withdrawableShares: formatDecimalAmount(withdrawableAtoms, TOKEN_DECIMALS),
             ...(tokenValue === undefined ? {} : { tokenValue }),
             tokenMint: config.depositMint,
             shareMint: config.deployment.usdyMint,
@@ -581,15 +606,25 @@ export class OndoVaultDirectClient
     return accounts.length > 0;
   }
 
-  private async readOwnerTokenBalance(
+  /**
+   * Per-account balances with their parsed SPL state. Frozen balances stay
+   * in the result so the holding stays visible, but are flagged so
+   * `withdrawableShares` counts transferable accounts only.
+   *
+   * Fail-closed on an incomplete parse, same rule as the raw-balance check
+   * below: an account whose parsed state is absent or unrecognized is not
+   * provably transferable, and the reader refuses to report a partial
+   * position rather than guessing spendability.
+   */
+  private async readOwnerTokenAccounts(
     runtime: OndoRuntime,
     owner: string,
     mint: string
-  ): Promise<bigint> {
+  ): Promise<OndoTokenAccount[]> {
     const accounts = await this.tokenAccounts(runtime, owner, mint);
-    let total = 0n;
-    for (const entry of accounts) {
-      const raw = entry.account?.data?.parsed?.info?.tokenAmount?.amount;
+    return accounts.map((entry) => {
+      const info = entry.account?.data?.parsed?.info;
+      const raw = info?.tokenAmount?.amount;
       if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
         throw new SdpOndoError(
           "POSITION_UNREADABLE",
@@ -597,9 +632,19 @@ export class OndoVaultDirectClient
             "partial position."
         );
       }
-      total += BigInt(raw);
-    }
-    return total;
+      // The SPL AccountState enum, as jsonParsed spells it. Anything else —
+      // including a missing state — fails the read instead of assuming the
+      // account can move.
+      const state = info?.state;
+      if (state !== "initialized" && state !== "frozen" && state !== "uninitialized") {
+        throw new SdpOndoError(
+          "POSITION_UNREADABLE",
+          `A token account for ${mint} returned no parsed SPL account state; refusing to ` +
+            "report spendability for a partial position."
+        );
+      }
+      return { amount: BigInt(raw), frozen: state === "frozen" };
+    });
   }
 
   private async tokenAccounts(

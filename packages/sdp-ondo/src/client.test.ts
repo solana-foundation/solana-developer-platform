@@ -48,7 +48,13 @@ function makeClient(port: Partial<OndoSwapPort>) {
   );
 }
 
-function stubTokenAccounts(amounts: string[]) {
+/**
+ * Mirrors the real jsonParsed wire shape: `getTokenAccountsByOwner` always
+ * reports the SPL account state (`initialized` | `frozen` | `uninitialized`)
+ * alongside the exact raw balance. A string entry means an initialized
+ * account, the common case.
+ */
+function stubTokenAccounts(entries: (string | { amount: string; state: string })[]) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -56,9 +62,13 @@ function stubTokenAccounts(amounts: string[]) {
         jsonrpc: "2.0",
         id: 1,
         result: {
-          value: amounts.map((amount) => ({
-            account: { data: { parsed: { info: { tokenAmount: { amount } } } } },
-          })),
+          value: entries.map((entry) => {
+            const amount = typeof entry === "string" ? entry : entry.amount;
+            const state = typeof entry === "string" ? "initialized" : entry.state;
+            return {
+              account: { data: { parsed: { info: { state, tokenAmount: { amount } } } } },
+            };
+          }),
         },
       })
     )
@@ -288,6 +298,82 @@ describe("readVaultPositions", () => {
         shareMint: USDY,
       },
     ]);
+  });
+
+  it("keeps a nonzero frozen USDY account in holdings without claiming it is withdrawable", async () => {
+    // Regression fixture for SOLA9-375: the exact wire shape of a frozen
+    // mainnet USDY account (28,503,622 shares, parsed state "frozen").
+    stubTokenAccounts([{ amount: "28503622000000", state: "frozen" }]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "28503622", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    // The holding stays the truth: frozen tokens remain the owner's balance
+    // and are still valued, but the token program will reject any transfer
+    // out of a frozen account, so nothing there is immediately exitable.
+    expect(positions[0]?.shares).toBe("28503622");
+    expect(positions[0]?.withdrawableShares).toBe("0");
+    expect(positions[0]?.tokenValue).toBe("28503622");
+  });
+
+  it("reports an initialized account as fully withdrawable", async () => {
+    stubTokenAccounts([{ amount: "12000000", state: "initialized" }]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "12", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("12");
+    expect(positions[0]?.withdrawableShares).toBe("12");
+  });
+
+  it("counts only transferable accounts toward withdrawableShares", async () => {
+    stubTokenAccounts([
+      { amount: "28503622000000", state: "frozen" },
+      { amount: "5000000", state: "initialized" },
+    ]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "28508622", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("28503627");
+    expect(positions[0]?.withdrawableShares).toBe("5");
+  });
+
+  it("fails closed when the RPC omits the parsed SPL account state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          jsonrpc: "2.0",
+          id: 1,
+          result: {
+            value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: "12" } } } } } }],
+          },
+        })
+      )
+    );
+    const client = makeClient({});
+    await expect(
+      client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+    ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
   });
 
   it("keeps the holding when the valuation fails", async () => {
