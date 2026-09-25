@@ -350,6 +350,76 @@ async function seedPendingRecurringPayment(): Promise<SeededPendingRecurringPaym
   return body.data.recurringPayment;
 }
 
+/** A second custody wallet whose USDC associated token account does not exist. */
+async function seedReplacementCustodyWallet(): Promise<{
+  custodyWalletId: string;
+  mockMissingAta: () => void;
+}> {
+  const sourceSigner = await generateKeyPairSigner();
+  const replacementCustodyWalletId = `cwlt_recurring_replacement_${crypto.randomUUID()}`;
+  const replacementCustodyConfigId = `cust_cfg_recurring_replacement_${crypto.randomUUID()}`;
+  await getDb(env).batch([
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_configs
+           (id, organization_id, project_id, provider, config_encrypted,
+            encryption_version, status)
+         VALUES (?, ?, ?, 'local', 'test-config',
+                 'sdp-custody-encryption-v1', 'active')`
+      )
+      .bind(replacementCustodyConfigId, TEST_ORG.id, TEST_PROJECT.id),
+    getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        replacementCustodyWalletId,
+        replacementCustodyConfigId,
+        TEST_WALLET_ID,
+        sourceSigner.address
+      ),
+  ]);
+  const [replacementAta] = await findAssociatedTokenPda({
+    owner: address(sourceSigner.address),
+    tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+    mint: address(DEVNET_USDC_MINT),
+  });
+  return {
+    custodyWalletId: replacementCustodyWalletId,
+    // The replacement wallet's USDC associated token account does not exist,
+    // so any PATCH pairing it with USDC must fail closed instead of
+    // persisting the mismatched wallet/token pair.
+    mockMissingAta: () => {
+      getAccountInfoMock.mockImplementation(async (_rpc, account) => {
+        if (account === replacementAta) return null;
+        return {
+          lamports: 4200000000n,
+          owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>;
+      });
+    },
+  };
+}
+
+/** Asserts a wallet/token mismatch PATCH failed closed without executing anything. */
+async function expectReplacementTokenMismatch(
+  response: Response,
+  recurringPaymentId: string,
+  before: Awaited<ReturnType<typeof recurringExecutionSnapshot>>,
+  executionCalls: ReturnType<typeof recurringExecutionCallCounts>
+): Promise<void> {
+  expect(response.status).toBe(400);
+  const responseBody = errorResponseSchema.parse(await response.json());
+  expect(responseBody.error.message).toBe(
+    "Recurring payment token is not held by the requested source wallet"
+  );
+  expect(recurringExecutionSnapshot(recurringPaymentId)).toEqual(before);
+  const afterCalls = recurringExecutionCallCounts();
+  expect({ ...afterCalls, accountInfo: 0 }).toEqual({ ...executionCalls, accountInfo: 0 });
+}
+
 const unboundWalletCases: Array<{
   route: string;
   expectedStatus: number;
@@ -3978,64 +4048,68 @@ describe("Payments routes — recurring", () => {
   });
 
   it("rejects a source change that retains a token the new wallet cannot hold", async () => {
-    const sourceSigner = await generateKeyPairSigner();
-    const replacementCustodyWalletId = "cwlt_recurring_token_mismatch";
-    await getDb(env).batch([
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_configs
-             (id, organization_id, project_id, provider, config_encrypted,
-              encryption_version, status)
-           VALUES ('cust_cfg_recurring_token_mismatch', ?, ?, 'local', 'test-config',
-                   'sdp-custody-encryption-v1', 'active')`
-        )
-        .bind(TEST_ORG.id, TEST_PROJECT.id),
-      getDb(env)
-        .prepare(
-          `INSERT INTO custody_wallets
-             (id, custody_config_id, wallet_id, public_key, status)
-           VALUES (?, 'cust_cfg_recurring_token_mismatch', ?, ?, 'active')`
-        )
-        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
-    ]);
+    const { custodyWalletId, mockMissingAta } = await seedReplacementCustodyWallet();
     const payment = await seedPendingRecurringPayment();
     const before = await recurringExecutionSnapshot(payment.id);
     const executionCalls = recurringExecutionCallCounts();
-
-    // The replacement wallet's USDC associated token account does not exist,
-    // so a sparse PATCH that keeps the payment's token must fail closed
-    // instead of persisting the mismatched wallet/token pair.
-    const [replacementAta] = await findAssociatedTokenPda({
-      owner: address(sourceSigner.address),
-      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-      mint: address(DEVNET_USDC_MINT),
-    });
-    getAccountInfoMock.mockImplementation(async (_rpc, account) => {
-      if (account === replacementAta) return null;
-      return {
-        lamports: 4200000000n,
-        owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>;
-    });
+    mockMissingAta();
 
     const response = await app.request(
       `/v1/payments/recurring-payments/${payment.id}`,
       {
         method: "PATCH",
         headers: RECURRING_HEADERS,
-        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+        // Sparse PATCH: the token is retained, the wallet is not.
+        body: JSON.stringify({ sourceCustodyWalletId: custodyWalletId }),
       },
       env
     );
 
-    expect(response.status).toBe(400);
-    const responseBody = errorResponseSchema.parse(await response.json());
-    expect(responseBody.error.message).toBe(
-      "Recurring payment token is not held by the requested source wallet"
+    expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
+  });
+
+  it("rejects a source change with an explicit token the new wallet cannot hold", async () => {
+    const { custodyWalletId, mockMissingAta } = await seedReplacementCustodyWallet();
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+    const executionCalls = recurringExecutionCallCounts();
+    mockMissingAta();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        // The explicit token is mint-eligible, but the replacement wallet
+        // cannot hold it: the pair must still be validated together.
+        body: JSON.stringify({
+          sourceCustodyWalletId: custodyWalletId,
+          token: DEVNET_USDC_MINT,
+        }),
+      },
+      env
     );
-    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
-    // The token validation only reads mint/ATA account info; nothing else runs.
-    const afterCalls = recurringExecutionCallCounts();
-    expect({ ...afterCalls, accountInfo: 0 }).toEqual({ ...executionCalls, accountInfo: 0 });
+
+    expectReplacementTokenMismatch(response, payment.id, before, executionCalls);
+  });
+
+  it("succeeds an amount-only update without token-account chain reads", async () => {
+    const payment = await seedPendingRecurringPayment();
+    // Wallet and token are unchanged, so the (wallet, token) pair check must
+    // not run and its account-info reads must not happen at all.
+    const accountInfoCalls = getAccountInfoMock.mock.calls.length;
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ amount: "26.00" }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(getAccountInfoMock.mock.calls.length).toBe(accountInfoCalls);
   });
 });

@@ -27,7 +27,10 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () => null,
 }));
 
-const MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+// Devnet USDC: the mocked dashboard runs in the sandbox environment, and the
+// recurring mint rule only allows USD stablecoins deployed on the active
+// cluster (or tokens issued in the project).
+const MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 const source: PaymentsDashboardWallet = {
   id: "cwlt_source",
   walletId: "privy_shared",
@@ -313,12 +316,74 @@ describe("Recurring Payment exact source selection", () => {
     expect(within(editor).getByText(/USDC/)).toBeTruthy();
     await user.click(within(editor).getByRole("button", { name: "Funding wallet" }));
     await user.click(screen.getByRole("button", { name: /Replacement/ }));
-    // The stale USDC mint is not in the replacement wallet's inventory, so the
-    // currency selection falls back to that wallet's first asset and the save
-    // payload can no longer pair the new wallet with the old token.
+    // The stale USDC mint is not in the replacement wallet's inventory, and
+    // WOOF is not recurring-eligible, so nothing eligible is selected: the
+    // currency clears instead of pairing the new wallet with an ineligible or
+    // stale mint.
     await waitFor(() => {
       expect(within(editor).queryByText(/USDC/)).toBeNull();
-      expect(within(editor).getByText(/WOOF/)).toBeTruthy();
+      expect(within(editor).queryByText(/WOOF/)).toBeNull();
+    });
+  });
+
+  it("skips an ineligible first balance when falling back after a wallet switch", async () => {
+    // A valid non-SOL mint that is neither a well-known token nor issued in
+    // this project, so it is not eligible for recurring payments.
+    const ineligibleMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYC";
+    const eligibleDevnetMint = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+    const replacement = {
+      ...source,
+      id: "cwlt_replacement",
+      label: "Replacement",
+      balances: [
+        {
+          token: "WOOF",
+          mint: ineligibleMint,
+          amount: "5",
+          uiAmount: "5",
+          decimals: 6,
+        },
+        {
+          token: "USDC",
+          mint: eligibleDevnetMint,
+          amount: "7",
+          uiAmount: "7",
+          decimals: 6,
+        },
+      ],
+    };
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).includes("/wallets?"))
+        return Response.json({ data: { wallets: [source, replacement] } });
+      return Response.json({
+        data: { wallets: [source, replacement], recurringPayment: recurring },
+      });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source, replacement]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[]}
+        counterpartyLabel="Receiver"
+        amountLabel="1 USDC"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    const editor = screen.getByRole("dialog", { name: "Edit payment" });
+    await user.click(within(editor).getByRole("button", { name: "Funding wallet" }));
+    await user.click(screen.getByRole("button", { name: /Replacement/ }));
+    // The fallback must not select WOOF, which sits first in the wallet's
+    // balances but is not recurring-eligible; it skips to the eligible USDC.
+    await waitFor(() => {
+      expect(within(editor).getByText(/USDC/)).toBeTruthy();
+      expect(within(editor).queryByText(/WOOF/)).toBeNull();
     });
   });
 });

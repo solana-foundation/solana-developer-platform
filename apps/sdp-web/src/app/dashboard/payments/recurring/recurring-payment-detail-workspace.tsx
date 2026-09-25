@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
   type CounterpartyAccount,
   doesRecurringPaymentStatusRequireReactivation,
   isPendingActivationRecurringPaymentStatus,
@@ -8,7 +9,9 @@ import {
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
   type PaymentSubscriptionCollectionAttempt,
+  type SdpEnvironment,
   type UpdatePaymentRecurringPaymentRequest,
+  WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
 import {
   AlertCircleIcon,
@@ -31,7 +34,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -118,6 +121,26 @@ function actionFailureTitle(action: RecurringPaymentAction, t: Translate): strin
     case "resume":
       return t("DashboardPayments.recurring.resumeFailed");
   }
+}
+
+/**
+ * Mirrors the API's recurring-payment mint rule (`assertRecurringPaymentTokenMint`):
+ * only well-known USD stablecoins on the active cluster or tokens issued in this
+ * project are eligible, so an ineligible fallback cannot be submitted.
+ */
+export function eligibleRecurringPaymentAssets(
+  options: ComboboxOption[],
+  issuedTokenSymbolsByMint: Record<string, string>,
+  sdpEnvironment: SdpEnvironment
+): ComboboxOption[] {
+  const cluster = CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment];
+  return options.filter((asset) => {
+    if (issuedTokenSymbolsByMint[asset.value]?.trim()) {
+      return true;
+    }
+    const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(asset.value);
+    return wellKnown?.isUsdStable === true && wellKnown.clusters.includes(cluster);
+  });
 }
 
 function ActionBand({
@@ -416,6 +439,7 @@ export function RecurringPaymentDetailWorkspace({
   const router = useRouter();
   const workspace = useDashboardWorkspace();
   const custodyEnabled = workspace.flags.custody;
+  const sdpEnvironment = workspace.sdpEnvironment;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -526,20 +550,25 @@ export function RecurringPaymentDetailWorkspace({
   };
 
   // A funding-wallet switch can drop the retained token from the new wallet's
-  // inventory; fall back to its first asset instead of submitting a stale
-  // mint the new wallet cannot fund.
+  // inventory; fall back to its first recurring-eligible asset instead of
+  // submitting a stale or ineligible mint the payment cannot fund.
   useEffect(() => {
     if (!editingPayment) {
       return;
     }
-    const nextToken = assetOptions.some((asset) => asset.value === selectedToken)
+    const eligibleOptions = eligibleRecurringPaymentAssets(
+      assetOptions,
+      issuedTokenSymbolsByMint,
+      sdpEnvironment
+    );
+    const nextToken = eligibleOptions.some((asset) => asset.value === selectedToken)
       ? selectedToken
-      : (assetOptions[0]?.value ?? "");
+      : (eligibleOptions[0]?.value ?? "");
     if (nextToken === selectedToken) {
       return;
     }
     setSelectedToken(nextToken);
-  }, [assetOptions, selectedToken, editingPayment]);
+  }, [assetOptions, selectedToken, editingPayment, issuedTokenSymbolsByMint, sdpEnvironment]);
 
   const closePaymentEditor = () => {
     setPaymentValidationError(null);
