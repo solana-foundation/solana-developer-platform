@@ -31,6 +31,7 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   packages: read
@@ -104,6 +105,7 @@ jobs:
        (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
+      (!inputs.approved_schema || vars.CONTINUOUS_PROD_DEPLOY == 'true') &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
        (inputs.image_sha != ''))
     runs-on: ubuntu-latest
@@ -170,6 +172,38 @@ jobs:
             echo "APPLIED_SCHEMA_SHA=" >> "${GITHUB_ENV}"
             echo "::warning::sdp_schema_sha on ${MIGRATE_JOB} is unset or unknown (${applied:-unset}); schema ordering is not checked for this deploy."
           fi
+
+      - name: Refuse an approved deploy that was re-run or self-approved
+        if: ${{ inputs.approved_schema }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [[ "${RUN_ATTEMPT}" != "1" ]]; then
+            echo "Approved deploys cannot be re-run; dispatch a fresh approval run for ${DEPLOY_IMAGE_SHA}." >&2
+            exit 1
+          fi
+          approvers="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/approvals" \
+            --jq '[.[] | select(.state == "approved") | .user.login] | unique | .[]')"
+          if [[ -z "${approvers}" ]]; then
+            echo "No recorded release-production approval on run ${RUN_ID}." >&2
+            exit 1
+          fi
+          since="${APPLIED_SCHEMA_SHA:-$(git describe --tags --abbrev=0 --match 'v*' origin/main)}"
+          authors="$(
+            for commit in $(git log --format=%H "${since}..${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres); do
+              gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" \
+                --jq '[.author.login // empty, .committer.login // empty] | .[]'
+            done | grep -vx 'web-flow' | sort -u
+          )"
+          for approver in ${approvers}; do
+            if grep -qx "${approver}" <<<"${authors}"; then
+              echo "${approver} authored a pending migration and approved it; a different foundation member must approve." >&2
+              exit 1
+            fi
+          done
 
       - name: Refuse a deploy that is behind prod
         if: ${{ env.BUILD_IMAGE == 'true' }}

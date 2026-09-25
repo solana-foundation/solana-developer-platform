@@ -179,6 +179,7 @@ jobs:
   deploy-api-production:
     needs: publish-release
     permissions:
+      actions: read
       contents: read
       id-token: write
       packages: read

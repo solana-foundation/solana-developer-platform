@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { checkMigrationChange, findBreakingStatements } from "./check-migration-compat.mjs";
+import {
+  checkMigrationChange,
+  findBreakingStatements,
+  findRemovedViewColumns,
+} from "./check-migration-compat.mjs";
 
 const SQL = "apps/sdp-api/src/db/migrations/postgres/0102_example.sql";
 const POSTGRES = new URL("../apps/sdp-api/src/db/migrations/postgres/", import.meta.url);
@@ -199,6 +203,99 @@ test("files outside the postgres directory and deleted files are ignored", () =>
     []
   );
   assert.deepEqual(check("DROP TABLE a;", ["apps/sdp-api/src/db/migrations/notes.sql"]), []);
+});
+
+test("IF NOT EXISTS additions do not launder later removals", () => {
+  assert.deepEqual(
+    reasons(
+      "ALTER TABLE a ADD COLUMN IF NOT EXISTS email TEXT;\n" +
+        "ALTER TABLE a DROP COLUMN email;\n" +
+        "CREATE UNIQUE INDEX IF NOT EXISTS existing_uq ON a (x);\n" +
+        "DROP INDEX existing_uq;\n" +
+        "DROP TABLE scratch, users;\n" +
+        "DROP INDEX IF EXISTS replaced_idx;\n" +
+        "CREATE INDEX IF NOT EXISTS replaced_idx ON a (y);"
+    ),
+    ["drops a column", "drops a index", "drops a table", "drops a table"]
+  );
+  assert.deepEqual(
+    findBreakingStatements(
+      "ALTER TABLE a ADD COLUMN IF NOT EXISTS next_check_at TEXT;\nUPDATE a SET next_check_at = updated_at;"
+    ),
+    []
+  );
+});
+
+test("defaults, new constraints, and dynamic SQL", () => {
+  assert.deepEqual(
+    reasons(
+      "ALTER TABLE a ADD COLUMN c TEXT NOT NULL DEFAULT 'x';\n" +
+        "ALTER TABLE a ALTER COLUMN c DROP DEFAULT;\n" +
+        "ALTER TABLE a ALTER COLUMN existing DROP DEFAULT;\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_uq UNIQUE (existing_col);\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_fk FOREIGN KEY (existing_col) REFERENCES b (id);\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_ex EXCLUDE USING gist (r WITH &&);\n" +
+        "DO $$\nBEGIN\n  EXECUTE format('ALTER TABLE %I DROP COLUMN old', 'a');\nEND $$;"
+    ),
+    [
+      "removes a default the previous image relies on",
+      "removes a default the previous image relies on",
+      "adds a unique constraint over existing columns",
+      "adds a foreign key over existing columns",
+      "adds an exclusion constraint on an existing table",
+      "runs dynamic SQL that cannot be checked",
+    ]
+  );
+  assert.deepEqual(
+    findBreakingStatements(
+      "ALTER TABLE a ADD COLUMN nullable TEXT DEFAULT 'x';\n" +
+        "ALTER TABLE a ALTER COLUMN nullable DROP DEFAULT;\n" +
+        "ALTER TABLE a ADD COLUMN ref_id TEXT;\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_ref_fk FOREIGN KEY (ref_id) REFERENCES b (id);\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_ref_uq UNIQUE (ref_id);\n" +
+        "ALTER TABLE a ADD CONSTRAINT a_check CHECK (x > 0);\n" +
+        "CREATE TABLE n (id TEXT PRIMARY KEY, v TEXT);\n" +
+        "ALTER TABLE n ADD CONSTRAINT n_uq UNIQUE (v);\n" +
+        "CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();"
+    ),
+    []
+  );
+});
+
+test("repeatable views: removed output columns are contractions", () => {
+  const base =
+    "DROP VIEW IF EXISTS unified_transactions;\n" +
+    "CREATE VIEW unified_transactions WITH (security_invoker = true) AS\nSELECT\n  u.id,\n  u.kind,\n  cw.label AS custody_wallet_label,\n  COALESCE(u.status, 'x') AS status\nFROM unified u\nLEFT JOIN custody_wallets cw ON cw.id = u.custody_wallet_id;";
+  const head = base.replace("  u.kind,\n", "").replace("custody_wallet_label", "wallet_label");
+  assert.deepEqual(findRemovedViewColumns(base, head), [
+    "removes column kind from view unified_transactions",
+    "removes column custody_wallet_label from view unified_transactions",
+  ]);
+  assert.deepEqual(
+    findRemovedViewColumns(base, `${base}\nCREATE VIEW other AS SELECT 1 AS one;`),
+    []
+  );
+  assert.deepEqual(findRemovedViewColumns(base, ""), [
+    "drops the repeatable view unified_transactions",
+  ]);
+
+  const file = "apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql";
+  assert.equal(
+    checkMigrationChange(
+      [file],
+      () => head,
+      () => base
+    ).length,
+    1
+  );
+  assert.deepEqual(
+    checkMigrationChange(
+      [file],
+      () => base,
+      () => base
+    ),
+    []
+  );
 });
 
 test("existing migrations: a same-file backfill passes and a data repair is flagged", () => {

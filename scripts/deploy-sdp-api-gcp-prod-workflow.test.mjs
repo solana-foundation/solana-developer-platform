@@ -285,8 +285,42 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   assert.match(approval, /git merge-base --is-ancestor "\$\{IMAGE_SHA\}" origin\/main/);
   assert.match(approval, /git merge-base --is-ancestor "\$\{applied\}" "\$\{IMAGE_SHA\}"/);
   const onMain = approval.indexOf("- name: Require a commit on main");
+  const stageGreen = approval.indexOf("- name: Require a green stage deploy for the commit");
   const gcpAuth = approval.indexOf("- name: Authenticate to GCP");
-  assert.ok(onMain !== -1 && onMain < gcpAuth);
+  assert.ok(onMain !== -1 && onMain < stageGreen && stageGreen < gcpAuth);
+  assert.match(
+    approval,
+    /actions\/workflows\/deploy\.yml\/runs\?head_sha=\$\{IMAGE_SHA\}&event=push/
+  );
+  assert.match(
+    approval,
+    /select\(\.name \| startswith\("sdp-api \+ worker \+ cron — stage \+ smoke"\)\)\] \| length > 0 and all\(\.conclusion == "success"\)/
+  );
+  assert.match(approval, /^permissions:\n\s+actions: read\n/m);
+  assert.match(
+    approval,
+    / {2}approve:\n\s+name: Schema approval\n\s+needs: pending\n\s+if: vars\.CONTINUOUS_PROD_DEPLOY == 'true'\n/
+  );
+
+  assert.match(
+    workflow,
+    /- name: Refuse an approved deploy that was re-run or self-approved\n\s+if: \$\{\{ inputs\.approved_schema \}\}/
+  );
+  assert.match(workflow, /if \[\[ "\$\{RUN_ATTEMPT\}" != "1" \]\]; then/);
+  assert.match(workflow, /actions\/runs\/\$\{RUN_ID\}\/approvals/);
+  assert.match(
+    workflow,
+    /git log --format=%H "\$\{since\}\.\.\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
+  );
+  assert.match(
+    workflow,
+    /\(!inputs\.approved_schema \|\| vars\.CONTINUOUS_PROD_DEPLOY == 'true'\) &&/
+  );
+  const selfApproval = workflow.indexOf(
+    "- name: Refuse an approved deploy that was re-run or self-approved"
+  );
+  const behind = workflow.indexOf("- name: Refuse a deploy that is behind prod");
+  assert.ok(selfApproval !== -1 && selfApproval < behind);
   assert.match(
     approval,
     /git diff --name-only "\$\{applied\}\.\.\$\{IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/

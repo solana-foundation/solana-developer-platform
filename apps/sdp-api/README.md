@@ -287,7 +287,9 @@ migrate job), the production merge deploy is held and, once stage is green,
 the run dispatches `Apply pending migrations to prod`. That workflow lists the
 pending migrations, waits in the `release-production` environment for a
 reviewer who confirms the change has baked on stage, then deploys that commit
-with its migrations. Migration-free merges deploy production without a stop. Because a rollback only moves traffic and never reverses the
+with its migrations. The approver may not have authored a pending migration,
+the commit needs a green stage deploy, and an approved run cannot be re-run.
+Migration-free merges deploy production without a stop. Because a rollback only moves traffic and never reverses the
 schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing

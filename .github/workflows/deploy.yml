@@ -257,6 +257,7 @@ jobs:
       vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
       !startsWith(github.event.head_commit.message, 'chore(main): release')
     permissions:
+      actions: read
       contents: read
       id-token: write
       packages: read

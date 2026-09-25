@@ -10,6 +10,7 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: read
   id-token: write
   packages: read
@@ -49,6 +50,24 @@ jobs:
             exit 1
           fi
 
+      - name: Require a green stage deploy for the commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${IMAGE_SHA}&event=push&per_page=10" \
+            --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.run_number) | last | .id // empty')"
+          if [[ -z "${run_id}" ]]; then
+            echo "No completed SDP Deploy run found for ${IMAGE_SHA}; stage has not deployed it." >&2
+            exit 1
+          fi
+          stage_green="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.name | startswith("sdp-api + worker + cron — stage + smoke"))] | length > 0 and all(.conclusion == "success")')"
+          if [[ "${stage_green}" != "true" ]]; then
+            echo "Stage deploy or smoke did not succeed for ${IMAGE_SHA} (SDP Deploy run ${run_id}); fix stage before approving prod." >&2
+            exit 1
+          fi
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -83,6 +102,7 @@ jobs:
   approve:
     name: Schema approval
     needs: pending
+    if: vars.CONTINUOUS_PROD_DEPLOY == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: release-production
@@ -99,6 +119,7 @@ jobs:
     name: sdp-api + worker + cron — prod
     needs: approve
     permissions:
+      actions: read
       contents: read
       id-token: write
       packages: read
