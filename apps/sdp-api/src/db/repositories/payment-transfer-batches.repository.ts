@@ -295,6 +295,13 @@ export interface PaymentTransferBatchesRepository {
    * same batch are serialized on the batch row lock so the recompute never
    * reads a sibling's uncommitted recipient statuses.
    *
+   * Refuses to settle when the chunk transfer's exact custody wallet does not
+   * match the linked batch's source custody wallet (either side unresolved
+   * while the other is pinned counts as a mismatch; both unresolved is the
+   * legacy ambiguous shape and still settles): the transaction rolls back and
+   * every row stays processing, so reconciliation can never commit terminal
+   * attribution the batch detail read rejects as CONFLICT.
+   *
    * @param input.transferId - Chunk transfer that reached a terminal status.
    * @param input.transferStatus - Terminal status the transfer reached.
    * @param input.error - Failure detail applied to failed recipients.
