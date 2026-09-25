@@ -18,7 +18,8 @@ export type RingsBalanceState =
  * wallet's id and rotates that address, so keying the read on both means a
  * re-keyed wallet is re-read for its new identity: the in-flight read for the
  * old one is cancelled — its result can never render — and the old balance
- * leaves the screen while the replacement is read.
+ * leaves the screen (before the first render with the new identity commits)
+ * while the replacement is read.
  */
 export function useRingsBalance(
   walletId: string | null,
@@ -27,6 +28,22 @@ export function useRingsBalance(
 ): { state: RingsBalanceState; refresh: () => void } {
   const [manualTick, setManualTick] = useState(0);
   const [state, setState] = useState<RingsBalanceState>({ name: "loading" });
+  // The identity pair the displayed state belongs to. The effect below clears
+  // the state when the pair changes, but effects run after commit — the first
+  // render with the new pair would still paint the old wallet's observation.
+  // Adjusting during render (React's adjusting-state pattern) discards it in
+  // the same pass, so an abandoned identity's balance never renders at all.
+  const [statePair, setStatePair] = useState<{
+    walletId: string | null;
+    identity: string | null | undefined;
+  }>({
+    walletId,
+    identity,
+  });
+  if (statePair.walletId !== walletId || statePair.identity !== identity) {
+    setStatePair({ walletId, identity });
+    setState({ name: "loading" });
+  }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick and manualTick are trigger-only deps — a change re-runs the sync but the values aren't read inside.
   useEffect(() => {
