@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -16,6 +16,76 @@ import {
   parseRecurringResponse,
   RECURRING_HEADERS,
 } from "@/test/helpers/recurring-payments";
+
+/**
+ * Deterministic interleaving control for the concurrent-retry race test.
+ *
+ * A bare Promise.all leaves the interleaving to the scheduler: whether the
+ * second request still passes the pre-create replay lookup before the first
+ * insert commits decides whether a loser exists to observe at all — the race
+ * test would fail on a legal sequential interleaving despite correct
+ * idempotency behavior. The gate holds the first armed insert until the test
+ * releases it, so both requests deterministically run policy enforcement and
+ * the partial unique index — not the lookup — picks the winner.
+ */
+const raceGate = vi.hoisted(() => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+  return {
+    armed: false,
+    insertCalls: 0,
+    lookupCalls: 0,
+    firstInsertReached: deferred(),
+    releaseFirstInsert: deferred(),
+    reset() {
+      this.armed = false;
+      this.insertCalls = 0;
+      this.lookupCalls = 0;
+      this.firstInsertReached = deferred();
+      this.releaseFirstInsert = deferred();
+    },
+  };
+});
+
+// A transparent wrapper around the real recurring-payments repository: every
+// other factory passes through untouched, and the recurring repository only
+// gains the race-gate hooks the concurrent-retry test arms.
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createPaymentRecurringPaymentsRepository: (
+      ...args: Parameters<typeof actual.createPaymentRecurringPaymentsRepository>
+    ) => {
+      const repository = actual.createPaymentRecurringPaymentsRepository(...args);
+      return {
+        ...repository,
+        findRecurringPaymentByIdempotency: (
+          ...args: Parameters<typeof repository.findRecurringPaymentByIdempotency>
+        ) => {
+          raceGate.lookupCalls += 1;
+          return repository.findRecurringPaymentByIdempotency(...args);
+        },
+        createRecurringPayment: async (
+          ...args: Parameters<typeof repository.createRecurringPayment>
+        ) => {
+          raceGate.insertCalls += 1;
+          if (!raceGate.armed || raceGate.insertCalls !== 1) {
+            return repository.createRecurringPayment(...args);
+          }
+          // The first racer is suspended at its insert with its policy
+          // records already written; tell the test and hold until released.
+          raceGate.firstInsertReached.resolve();
+          await raceGate.releaseFirstInsert.promise;
+          return repository.createRecurringPayment(...args);
+        },
+      };
+    },
+  };
+});
 
 /**
  * Regression tests for SOLA9-147 (APE-713): recurring-payment creation was
@@ -121,39 +191,60 @@ describe("Payments routes — recurring payment create idempotency", () => {
   it("answers a concurrent same-key race with one schedule and one live policy record", async () => {
     const body = await createBody();
 
-    // Two identical creates race on one key: both pass the pre-create replay
-    // lookup before either inserts, so the partial unique index — not the
-    // lookup — picks the winner.
-    const [firstResponse, secondResponse] = await Promise.all([
-      postCreate(body, "recurring-key-race"),
-      postCreate(body, "recurring-key-race"),
-    ]);
-    expect(firstResponse.status).toBeLessThan(400);
-    expect(secondResponse.status).toBeLessThan(400);
-    expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 201]);
+    raceGate.reset();
+    raceGate.armed = true;
+    try {
+      // Start the first racer and hold it at its insert, so both requests
+      // pass the pre-create replay lookup before either insert commits and
+      // the partial unique index — not the lookup — picks the winner.
+      const firstResponsePromise = postCreate(body, "recurring-key-race");
+      await raceGate.firstInsertReached.promise;
 
-    const first = (await parseRecurringResponse(firstResponse)).data.recurringPayment;
-    const second = (await parseRecurringResponse(secondResponse)).data.recurringPayment;
-    expect(second.id).toBe(first.id);
-    expect(await countRows()).toBe(1);
+      // Only now start the second racer: its replay lookup cannot see a row
+      // (the first insert is still held), so it is guaranteed to run policy
+      // enforcement and race the insert for real.
+      const secondResponsePromise = postCreate(body, "recurring-key-race");
+      const secondResponse = await secondResponsePromise;
 
-    // Both racers ran policy enforcement, so both recorded a wallet
-    // operation. The loser's insert fails the unique index, and its policy
-    // records are retired to `canceled` — the status velocity sums exclude —
-    // so one create leaves one live audit trail instead of an `evaluated`
-    // duplicate that counts twice.
-    const { rows: operations } = await getDb(env)
-      .prepare(
-        `SELECT status, COUNT(*)::int AS count FROM wallet_operations
-         WHERE organization_id = ? AND project_id = ? AND operation_type = 'recurring_payment_create'
-         GROUP BY status ORDER BY status`
-      )
-      .bind(TEST_ORG.id, TEST_PROJECT.id)
-      .all<{ status: string; count: number }>();
-    expect(operations).toEqual([
-      { status: "canceled", count: 1 },
-      { status: "evaluated", count: 1 },
-    ]);
+      // The winner is fully committed before the loser's insert runs, so the
+      // loser's INSERT deterministically fails the partial unique index.
+      raceGate.releaseFirstInsert.resolve();
+      const firstResponse = await firstResponsePromise;
+
+      expect(secondResponse.status).toBe(201);
+      expect(firstResponse.status).toBe(200);
+
+      const first = (await parseRecurringResponse(firstResponse)).data.recurringPayment;
+      const second = (await parseRecurringResponse(secondResponse)).data.recurringPayment;
+      expect(second.id).toBe(first.id);
+      expect(await countRows()).toBe(1);
+
+      // The loser's race took exactly the designed path: three replay
+      // lookups (one pre-create per request, one after the unique violation)
+      // and two inserts (one held and lost, one committed and won).
+      expect(raceGate.lookupCalls).toBe(3);
+      expect(raceGate.insertCalls).toBe(2);
+
+      // Both racers ran policy enforcement, so both recorded a wallet
+      // operation. The loser's insert fails the unique index, and its policy
+      // records are retired to `canceled` — the status velocity sums
+      // exclude — so one create leaves one live audit trail instead of an
+      // `evaluated` duplicate that counts twice.
+      const { rows: operations } = await getDb(env)
+        .prepare(
+          `SELECT status, COUNT(*)::int AS count FROM wallet_operations
+           WHERE organization_id = ? AND project_id = ? AND operation_type = 'recurring_payment_create'
+           GROUP BY status ORDER BY status`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id)
+        .all<{ status: string; count: number }>();
+      expect(operations).toEqual([
+        { status: "canceled", count: 1 },
+        { status: "evaluated", count: 1 },
+      ]);
+    } finally {
+      raceGate.armed = false;
+    }
   });
 
   it("rejects the same Idempotency-Key with a different body", async () => {
