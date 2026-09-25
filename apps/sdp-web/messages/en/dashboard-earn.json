@@ -449,6 +449,8 @@
       "payoutDefaultToggle": "Pay proceeds to each side’s funding address",
       "payoutDefaultToggleHint": "Turn off to choose different payout addresses.",
       "payoutModeLabel": "How to name this payout destination",
+      "projectChangedAction": "Review under the current project",
+      "projectChangedBody": "The selected project changed while this form was open. Its wallets, tokens and terms belong to the project you reviewed them under, so this draft can't be submitted. Start again to review the trade under the current project.",
       "receivesAtA": "First party receives at",
       "receivesAtB": "Second party receives at",
       "refundedLabel": "Deposits returned",

@@ -15,6 +15,7 @@ import { z } from "zod";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
+import { REVIEWED_PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { DVP_TOAST_POSITION, dvpToastAction } from "../dvp-action-toast";
 import { freshDvpIdempotencyKey } from "../dvp-idempotency-key";
 import { dvpErrorEnvelopeSchema } from "../dvp-trade";
@@ -54,7 +55,10 @@ const createdEnvelopeSchema = z.object({
   }),
 });
 
-export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
+export function useDvpCreateSubmit(
+  cluster: SolanaCluster,
+  reviewedProjectId: string
+): DvpCreateSubmit {
   const router = useRouter();
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
@@ -65,17 +69,22 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   // left the first attempt broadcasting, and the retry has to replay it rather
   // than draw a second trade at a second address; a rejection stored nothing,
   // so the key is still free.
-  const idempotencyKey = useRef<string | null>(null);
+  //
+  // The key is minted FOR the reviewed project and never leaves it: the ref
+  // records which project the current key belongs to, and a changed project
+  // mints a new one, so a key drawn under project A can never be presented
+  // under sibling project B (APE-693).
+  const idempotencyKey = useRef<{ key: string; project: string } | null>(null);
   // Minted on first use rather than as the ref's initial value, which would draw
   // (and throw away) fresh random bytes on every render.
   function currentIdempotencyKey(): string {
     const existing = idempotencyKey.current;
-    if (existing !== null) {
-      return existing;
+    if (existing !== null && existing.project === reviewedProjectId) {
+      return existing.key;
     }
-    const minted = freshDvpIdempotencyKey("dvp-create");
+    const minted = { key: freshDvpIdempotencyKey("dvp-create"), project: reviewedProjectId };
     idempotencyKey.current = minted;
-    return minted;
+    return minted.key;
   }
 
   async function submit(request: DvpCreateRequest) {
@@ -87,6 +96,9 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         headers: {
           "Content-Type": "application/json",
           [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(),
+          // The project whose terms this submit reviewed. The route refuses to
+          // forward the create when the shared selection is no longer this.
+          [REVIEWED_PROJECT_HEADER_NAME]: reviewedProjectId,
         },
         body: JSON.stringify({
           partyA: request.parties.a.ref,

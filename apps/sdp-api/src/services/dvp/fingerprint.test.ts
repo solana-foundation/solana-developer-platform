@@ -131,4 +131,23 @@ describe("dvpCreateFingerprint", () => {
     expect(fp).not.toBe(fpAmount);
     expect(fp).not.toBe(fpMint);
   });
+
+  // APE-693. Custody, sponsorship and settlement all resolve under the project,
+  // so the same key and terms under a sibling project are a different request,
+  // never a replay of the first trade.
+  it("treats the project scope as material (same terms, sibling project)", () => {
+    const underA = baseInput({ address: ADDR_A }, { address: ADDR_B });
+    const underB = { ...baseInput({ address: ADDR_A }, { address: ADDR_B }), projectId: "prj_y" };
+    const fpA = dvpCreateFingerprint({
+      input: underA,
+      resolvedA: resolved(ADDR_A, null),
+      resolvedB: resolved(ADDR_B, null),
+    });
+    const fpB = dvpCreateFingerprint({
+      input: underB,
+      resolvedA: resolved(ADDR_A, null),
+      resolvedB: resolved(ADDR_B, null),
+    });
+    expect(fpA).not.toBe(fpB);
+  });
 });

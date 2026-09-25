@@ -1,13 +1,16 @@
 /**
  * The fingerprint of a keyed create request.
  *
- * A key is a claim, not a proof; the hash covers every field that defines the
- * trade — both party slots (reference kind, value AND resolved address),
- * mints, token programs, amounts, timestamps, destinations
+ * A key is a claim, not a proof; the hash covers the project scope and every
+ * field that defines the trade — both party slots (reference kind, value AND
+ * resolved address), mints, token programs, amounts, timestamps, destinations
  * and refString — so a reuse with different terms (or a wallet-scoped caller
- * replaying someone else's key) 409s instead of handing escrows back. Hashed
- * AS SENT, so a retry replays even after settlement-wallet rotation. No v1
- * compatibility: an old-keyed replay now mismatches by design.
+ * replaying someone else's key) 409s instead of handing escrows back. The
+ * project is material (APE-693): custody, sponsorship and settlement resolve
+ * under it, so the same key and terms presented under a sibling project are a
+ * different request, never a replay. Hashed AS SENT, so a retry replays even
+ * after settlement-wallet rotation. No v1 compatibility: an old-keyed replay
+ * now mismatches by design.
  */
 
 import { createHash } from "node:crypto";
@@ -60,6 +63,9 @@ export function dvpCreateFingerprint({
   // Explicit, not derived from object iteration (reordering must never
   // invalidate stored fingerprints); JSON encoding keeps null and "" distinct.
   const material = [
+    // The project scope comes first: it decides whose custody, sponsorship and
+    // settlement context the trade resolves under.
+    input.projectId,
     ...partySlotMaterial(input.partyA, resolvedA),
     ...partySlotMaterial(input.partyB, resolvedB),
     input.mintA,

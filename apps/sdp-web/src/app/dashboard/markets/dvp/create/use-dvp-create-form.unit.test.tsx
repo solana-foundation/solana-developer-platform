@@ -54,6 +54,8 @@ const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];
 const WALLET_ADDRESS = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
 const ASSET_MINT = "ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1";
+/** The project every form under test is reviewed under. */
+const REVIEWED_PROJECT = "project_a";
 
 const context: DvpCreateContext = {
   error: null,
@@ -86,7 +88,7 @@ function fillParties(result: ReturnType<typeof setup>["result"]) {
 }
 
 function setup(ctx: DvpCreateContext = context) {
-  return renderHook(() => useDvpCreateForm("devnet", ctx), { wrapper: withI18n });
+  return renderHook(() => useDvpCreateForm("devnet", ctx, REVIEWED_PROJECT), { wrapper: withI18n });
 }
 
 describe("useDvpCreateForm", () => {
@@ -258,7 +260,7 @@ describe("useDvpCreateForm", () => {
     };
 
     it("reports what the asset slot's wallet holds of the asset mint", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held), {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held, REVIEWED_PROJECT), {
         wrapper: withI18n,
       });
 
@@ -269,7 +271,7 @@ describe("useDvpCreateForm", () => {
     });
 
     it("reports zero, not unknown, when the wallet holds none of it", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", context), {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", context, REVIEWED_PROJECT), {
         wrapper: withI18n,
       });
 
@@ -283,7 +285,7 @@ describe("useDvpCreateForm", () => {
     // loaded is unknown, and reading it as zero would claim the wallet holds none.
     it("reports nothing, not zero, when balances were not loaded", () => {
       const unloaded = { ...context, wallets: [{ ...context.wallets[0], balances: null }] };
-      const { result } = renderHook(() => useDvpCreateForm("devnet", unloaded), {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", unloaded, REVIEWED_PROJECT), {
         wrapper: withI18n,
       });
 
@@ -297,7 +299,7 @@ describe("useDvpCreateForm", () => {
     // cash party has no wallet at all — showing a balance against the cash leg
     // would claim we hold what the other party owes.
     it("reports nothing for a leg whose slot names no wallet", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held), {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held, REVIEWED_PROJECT), {
         wrapper: withI18n,
       });
 
@@ -305,7 +307,7 @@ describe("useDvpCreateForm", () => {
     });
 
     it("follows the wallet named in the cash slot", () => {
-      const { result } = renderHook(() => useDvpCreateForm("devnet", held), {
+      const { result } = renderHook(() => useDvpCreateForm("devnet", held, REVIEWED_PROJECT), {
         wrapper: withI18n,
       });
 

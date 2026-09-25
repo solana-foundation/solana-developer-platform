@@ -7,6 +7,14 @@ export function workspaceScope(userId: string, orgId: string, projectId: string)
 }
 export const PROJECT_HEADER_NAME = "x-project-id";
 
+/**
+ * Presents the project a client intent was rendered (reviewed) under, so a
+ * submit-time route can refuse to forward it when the shared selection cookie
+ * has since moved to a sibling project (APE-693). Server-owned at the proxy:
+ * never forwarded upstream by `proxyToSdpApi`.
+ */
+export const REVIEWED_PROJECT_HEADER_NAME = "x-sdp-reviewed-project-id";
+
 export const PROJECT_COOKIE_OPTIONS = {
   path: "/",
   maxAge: 31_536_000,
