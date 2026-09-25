@@ -331,32 +331,33 @@ export function useRampWizard<TId extends string>(
   // rotates when the selection is edited after a failed attempt: the retained
   // key answers only for the payload it minted, and the API conflicts a keyed
   // replay whose fingerprint differs instead of quoting the edited request.
-  // Each operation also binds the provider account id its payload was built
-  // with, because that id reaches the wizard through different paths per
-  // attempt (see runQuoteCreation).
   const quoteOperationKeyRef = useRef<string | null>(null);
   const quoteOperationPayloadRef = useRef<string | null>(null);
-  const quoteOperationProviderAccountIdRef = useRef<string | null>(null);
-  const mintQuoteOperationKey = (
-    serializedPayload: string | null,
-    providerAccountId: string | null
-  ) => {
+  const mintQuoteOperationKey = (serializedPayload: string | null) => {
     const key = `ramp-quote-${crypto.randomUUID()}`;
     quoteOperationKeyRef.current = key;
     quoteOperationPayloadRef.current = serializedPayload;
-    quoteOperationProviderAccountIdRef.current = providerAccountId;
     return key;
   };
 
+  // Every quote attempt builds its payload against the corridor's
+  // provider-resolved payout account — the ready arm resolves it for explicit
+  // quote selection — never against the explicitly picked saved-account id:
+  // the two differ for a collected-payout flow (nothing is picked), and
+  // feeding the retry or re-quote a different source than the initial fire
+  // would change the payload without any user edit, so a keyed retry would
+  // mint a second quote operation instead of replaying the recorded one. With
+  // one account source for every attempt, a payload difference is always a
+  // real edit of the selection (amount, wallet, provider, memo, payout
+  // account re-resolved by a fresh advance).
+  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
+
   const refreshQuote = async () => {
     try {
-      const payload = currentQuotePayload(requirements.selectedProviderAccountId);
+      const payload = currentQuotePayload(resolvedProviderAccountId);
       await createQuoteForCurrentSelection(
-        requirements.selectedProviderAccountId,
-        mintQuoteOperationKey(
-          payload === null ? null : JSON.stringify(payload),
-          requirements.selectedProviderAccountId
-        )
+        resolvedProviderAccountId,
+        mintQuoteOperationKey(payload === null ? null : JSON.stringify(payload))
       );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
@@ -384,33 +385,9 @@ export function useRampWizard<TId extends string>(
       // attempt minted; an edited selection after a failed attempt is a NEW
       // operation and mints a fresh key, since the API rejects a keyed replay
       // whose fingerprint differs instead of quoting the edited request.
-      // "Unchanged" is decided against the payload the retained operation was
-      // minted for, rebuilt with the provider account id that operation used:
-      // the initial fire and the explicit retry receive that id through
-      // different paths — the readiness effect passes the provider-resolved
-      // account from the ready answer, while the retry passes the explicitly
-      // picked saved-account id, which is absent when the user collected
-      // payout details instead of picking an account. Comparing a retry
-      // payload built with the retry path's id would treat the unchanged
-      // selection as an edit, mint a fresh key, and create a second quote
-      // and transfer instead of replaying the recorded one.
-      const retainedKey = quoteOperationKeyRef.current;
-      const retainedProviderAccountId = quoteOperationProviderAccountIdRef.current;
-      const retainedSerialized = quoteOperationPayloadRef.current;
-      if (
-        retainedKey !== null &&
-        retainedProviderAccountId !== null &&
-        retainedSerialized !== null
-      ) {
-        const retainedPayload = currentQuotePayload(retainedProviderAccountId);
-        if (retainedPayload !== null && retainedSerialized === JSON.stringify(retainedPayload)) {
-          // Unchanged selection: repeat the retained operation verbatim so
-          // the API replays its recorded outcome.
-          await createQuoteForCurrentSelection(retainedProviderAccountId, retainedKey);
-          setQuoteCreationError(null);
-          return;
-        }
-      }
+      // Every attempt builds its payload against the same provider-resolved
+      // account (see resolvedProviderAccountId above), so the comparison
+      // below can only differ when the selection itself changed.
       const payload = currentQuotePayload(providerAccountId);
       if (payload !== null) {
         const serialized = JSON.stringify(payload);
@@ -421,7 +398,7 @@ export function useRampWizard<TId extends string>(
           quoteOperationKeyRef.current = null;
         }
         if (quoteOperationKeyRef.current === null) {
-          mintQuoteOperationKey(serialized, providerAccountId);
+          mintQuoteOperationKey(serialized);
         }
       }
       await createQuoteForCurrentSelection(providerAccountId, quoteOperationKeyRef.current);
@@ -432,7 +409,7 @@ export function useRampWizard<TId extends string>(
       setQuoteCreationRetrying(false);
     }
   };
-  const retryQuoteCreation = () => void runQuoteCreation(requirements.selectedProviderAccountId);
+  const retryQuoteCreation = () => void runQuoteCreation(resolvedProviderAccountId);
   const maybeCreateQuote = (providerAccountId: string | null) => {
     if (quoteCreationAttempted.current) {
       return;
@@ -447,7 +424,6 @@ export function useRampWizard<TId extends string>(
   // at most one quote per wizard instance. A genuine network side effect on data
   // arrival — not derived state — hence the effect.
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
-  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
   useEffect(() => {
     if (!isLastStep || onboardingStatus !== "ready") {
       return;

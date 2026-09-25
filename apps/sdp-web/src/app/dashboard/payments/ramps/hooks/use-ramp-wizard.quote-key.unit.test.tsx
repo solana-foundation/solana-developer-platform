@@ -455,4 +455,78 @@ describe("useRampWizard quote operation key — lightspark offramp collected pay
     expect(keys[1]).toBeTruthy();
     expect(keys[1]).not.toBe(keys[0]);
   });
+
+  it("mints a fresh operation key when the corridor re-resolves a different payout account", async () => {
+    let quotePostCalls = 0;
+    // The user steps back after a failed attempt and re-advances: the fresh
+    // ready answer resolves a DIFFERENT saved payout account for the same
+    // destination country, so the only payload difference is the account id.
+    let switched = false;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === OFFRAMP_ENDPOINT && method === "POST") {
+        quotePostCalls += 1;
+        if (quotePostCalls === 1) {
+          return Promise.reject(new TypeError("network response lost"));
+        }
+        return Promise.resolve(
+          Response.json({ data: { quote: LIGHTSPARK_QUOTE, transferId: TRANSFER_ID_OFFRAMP } })
+        );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        const answer = switched
+          ? { ...LIGHTSPARK_READY, providerAccountId: "cpa_us_secondary" }
+          : LIGHTSPARK_READY;
+        return Promise.resolve(Response.json({ data: answer }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOfframpWizard(OFFRAMP_PROPS), { wrapper });
+    await driveOfframpToQuote(rendered);
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    switched = true;
+    for (let step = 0; step < 2; step += 1) {
+      await act(async () => {
+        rendered.result.current.handleSecondary();
+      });
+    }
+    for (let step = 0; step < 2; step += 1) {
+      await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+    await waitFor(() => {
+      const onboarding = rendered.result.current.onboarding;
+      expect(
+        onboarding !== null && "providerAccountId" in onboarding
+          ? onboarding.providerAccountId
+          : null
+      ).toBe("cpa_us_secondary");
+    });
+
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID_OFFRAMP));
+
+    const posts = offrampQuotePosts();
+    expect(posts.length).toBe(2);
+    // The re-resolved payout account is a NEW quote operation: a fresh key
+    // quoting the account the corridor now resolves, never a replay of the
+    // previous account's recorded quote.
+    expect(posts[0].key).toBeTruthy();
+    expect(posts[1].key).not.toBe(posts[0].key);
+    expect(posts[1].body.providerAccountId).toBe("cpa_us_secondary");
+  });
 });
