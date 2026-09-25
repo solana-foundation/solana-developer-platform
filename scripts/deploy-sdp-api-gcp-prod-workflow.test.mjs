@@ -45,7 +45,7 @@ test("automatic production deploys are called from the protected main release fl
   assert.match(workflow, /\.github\/scripts\/verify-release-identity\.sh/);
 });
 
-test("release deploys verify and promote the signed image; manual redeploys skip migrations", () => {
+test("release deploys verify and promote the signed image; only merge and approved deploys migrate", () => {
   assert.doesNotMatch(workflow, /run_migrations:/);
   assert.doesNotMatch(workflow, /docker build/);
   assert.match(
@@ -54,7 +54,7 @@ test("release deploys verify and promote the signed image; manual redeploys skip
   );
   assert.match(
     workflow,
-    /- name: Run database migrations\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
+    /- name: Run database migrations\n\s+if: \$\{\{ inputs\.image_sha != '' && \(github\.event_name != 'workflow_dispatch' \|\| inputs\.approved_schema\) \}\}/
   );
   assert.match(workflow, /cosign verify "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
   assert.match(workflow, /cosign copy --force "\$\{SRC_BASE\}@\$\{SRC_DIGEST\}"/);
@@ -243,7 +243,7 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   );
   assert.match(
     workflow,
-    /- name: Refuse a migrating deploy that is behind prod\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
+    /- name: Refuse a deploy that is behind prod\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
   assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" origin\/main/);
   assert.match(
@@ -252,14 +252,18 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   );
   assert.match(
     workflow,
-    /- name: Refuse a redeploy that is ahead of the prod schema\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}/
+    /- name: Refuse a non-migrating deploy that carries unapplied migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \|\| \(github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema\) \}\}/
   );
   assert.match(
     workflow,
-    /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" "\$\{APPLIED_SCHEMA_SHA\}"/
+    /git diff --name-only --diff-filter=A "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
+  );
+  assert.match(
+    workflow,
+    /if \[\[ -n "\$\{RELEASE_SHA\}" \]\]; then\n\s+echo "Prod schema position is unknown/
   );
   const read = workflow.indexOf("- name: Read the schema position prod last applied");
-  const refuse = workflow.indexOf("- name: Refuse a migrating deploy that is behind prod");
+  const refuse = workflow.indexOf("- name: Refuse a deploy that is behind prod");
   const promoteRelease = workflow.indexOf("- name: Verify and promote release image");
   assert.ok(read !== -1 && read < refuse && refuse < promoteRelease);
 });

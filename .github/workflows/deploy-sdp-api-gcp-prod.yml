@@ -171,7 +171,7 @@ jobs:
             echo "::warning::sdp_schema_sha on ${MIGRATE_JOB} is unset or unknown (${applied:-unset}); schema ordering is not checked for this deploy."
           fi
 
-      - name: Refuse a migrating deploy that is behind prod
+      - name: Refuse a deploy that is behind prod
         if: ${{ env.BUILD_IMAGE == 'true' }}
         run: |
           set -euo pipefail
@@ -185,12 +185,23 @@ jobs:
             exit 1
           fi
 
-      - name: Refuse a redeploy that is ahead of the prod schema
-        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.approved_schema }}
+      - name: Refuse a non-migrating deploy that carries unapplied migrations
+        if: ${{ inputs.release_sha != '' || (github.event_name == 'workflow_dispatch' && !inputs.approved_schema) }}
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
-          if [[ -n "${APPLIED_SCHEMA_SHA}" ]] && ! git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
-            echo "${DEPLOY_IMAGE_SHA} may carry migrations prod has not applied (schema is at ${APPLIED_SCHEMA_SHA}). Deploy it through a release or the schema approval instead." >&2
+          if [[ -z "${APPLIED_SCHEMA_SHA}" ]]; then
+            if [[ -n "${RELEASE_SHA}" ]]; then
+              echo "Prod schema position is unknown, so this release cannot prove its migrations were applied. Seed sdp_schema_sha on ${MIGRATE_JOB} (docs/ops/release-operations.md) and rerun." >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          added="$(git diff --name-only --diff-filter=A "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+          if [[ -n "${added}" ]]; then
+            printf '%s carries migrations prod has not applied:\n%s\nMigrations reach prod only through "Apply pending migrations to prod"; approve the held run for this commit first.\n' \
+              "${DEPLOY_IMAGE_SHA}" "${added}" >&2
             exit 1
           fi
 
@@ -360,7 +371,7 @@ jobs:
           cosign verify "${ORIGIN_IMAGE}" "${verify_flags[@]}"
 
       - name: Run database migrations
-        if: ${{ env.BUILD_IMAGE == 'true' }}
+        if: ${{ inputs.image_sha != '' && (github.event_name != 'workflow_dispatch' || inputs.approved_schema) }}
         timeout-minutes: 15
         run: |
           gcloud run jobs update "${MIGRATE_JOB}" \

@@ -9,7 +9,7 @@
 | Relevant push to `main` | Stage | Builds a SHA-tagged image, runs migrations, updates the stage service, worker, and cron job, then runs the stage smoke |
 | Relevant push to `main` with repo variable `CONTINUOUS_PROD_DEPLOY=true` | Production API | After the stage smoke passes, runs migrations and promotes the signed per-merge image. When `main` carries migrations production has not applied yet, the merge deploy is held instead and dispatches `Apply pending migrations to prod`, which deploys that commit once a `release-production` reviewer approves it |
 | `chore(main): release X.Y.Z` commit on `main` | Release publication | Creates the `vX.Y.Z` tag, publishes the GitHub release, and triggers release-image/checksum workflows |
-| Release publication job on `main` | Production API | Verifies the published tag and SHA, builds version- and SHA-tagged images from that commit, runs migrations, updates the production service, and updates the production cron job |
+| Release publication job on `main` | Production API | Verifies the published tag and SHA, promotes the signed release image, and updates the production service, worker, and cron job. Runs no migrations: a release whose commit carries migrations production has not applied is refused until their approval run has deployed them |
 | Release publication job on `main` | Production web | Verifies the published tag and SHA, builds sdp-web from that commit, and deploys it to Vercel production |
 | Manual dev workflow dispatch | Dev | Rebuilds and deploys the selected workflow revision |
 | Manual production workflow dispatch from `main` | Production API | Resolves an existing 40-character Git SHA image tag and redeploys its immutable digest without running migrations |
@@ -142,7 +142,7 @@ The production deploy workflow:
 1. Authenticates to the production GCP project.
 2. Builds the API image and pushes both `X.Y.Z` and release-SHA tags.
 3. Resolves the SHA tag to an immutable image digest.
-4. Updates and executes `sdp-prod-api-public-migrate`.
+4. Refuses the release if its commit is behind the schema production last applied, or adds migrations production has not applied.
 5. Captures the current service traffic and cron image for rollback.
 6. Deploys a no-traffic candidate revision and verifies its immutable digest.
 7. Polls the candidate's `/health/ready` endpoint until Postgres and Redis are ready.
@@ -157,7 +157,7 @@ Do not treat the GitHub release publication as proof that the Cloud Run rollout 
 Check:
 
 1. The production GitHub Actions job completed successfully.
-2. The migration job execution succeeded.
+2. The `sdp_schema_sha` label on `sdp-prod-api-public-migrate` is at or ahead of the release commit's last migration.
 3. The candidate and canonical `/health/ready` checks passed for the deployed revision, including Postgres and Redis.
 4. The cron job references the same release image as the service.
 5. `https://api.solana.com/health` succeeds.
@@ -198,7 +198,7 @@ CI enforces this with `pnpm check:migration-compat`: a changed migration that dr
 
 Production records the commit it last migrated with as the `sdp_schema_sha` label on `sdp-prod-api-public-migrate`. A merge deploy whose commit carries migrations past that label is held: prod is untouched, Slack reports `prod held`, and once the stage smoke is green the run dispatches `Apply pending migrations to prod` for that commit. That workflow first lists the pending migrations and commits in its run summary, then waits in the `release-production` environment, so it never blocks stage deploys, releases, or manual redeploys while it waits. Approve once the change has baked on stage long enough to trust. A newer held merge replaces an older waiting approval, and an approval for a commit that is behind what prod already applied is refused, so one approval always deploys the latest held commit. Approvals are skipped while `CONTINUOUS_PROD_DEPLOY` is off.
 
-Every migrating deploy (release or approved merge) refuses a commit that is behind the recorded schema, and a manual redeploy refuses an image that is ahead of it. Keep `release-production` configured with required reviewers, `prevent_self_review`, and a `main` branch policy; the gate depends on it.
+Migrations reach production only through that approval flow (and through unheld merges, whose migrate step finds nothing pending). Releases and manual redeploys never run the migrate job; both refuse an image that adds migrations production has not applied, and every deploy refuses a commit behind the recorded schema. Keep `release-production` configured with required reviewers, `prevent_self_review`, and a `main` branch policy; the gate depends on it.
 
 Bootstrap: while the label is unset every merge is held. Seed it with the commit whose migrations production last ran (the latest release deploy):
 

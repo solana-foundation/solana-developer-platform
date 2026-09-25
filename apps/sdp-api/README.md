@@ -318,14 +318,15 @@ Full getting-started guides and tutorials: https://platform.solana.com/docs (or 
 The hosted API is built as a container and deployed to Cloud Run through GitHub Actions:
 
 - Relevant pushes to `main` deploy stage, then production when `CONTINUOUS_PROD_DEPLOY` is `true`.
-- A merged `chore(main): release X.Y.Z` release commit deploys to production.
+- A merged `chore(main): release X.Y.Z` release commit deploys the tagged image to production.
 - Manual production workflow dispatch can redeploy an existing Git SHA image without rebuilding it.
 
-Stage deploys, merge deploys to production, and push-triggered production
-releases update and execute the migration job before deploying the API. Production then verifies a
-no-traffic candidate revision before promoting the service and reconciliation
-cron job to the same immutable image. Manual production redeploys leave the
-migration job unchanged. Runtime environment variables and secret references
+Stage deploys and merge deploys to production update and execute the migration
+job before deploying the API. Production then verifies a no-traffic candidate
+revision before promoting the service and reconciliation cron job to the same
+immutable image. Releases and manual production redeploys leave the migration
+job unchanged and refuse an image that adds migrations production has not
+applied. Runtime environment variables and secret references
 are managed on the GCP resources rather than written by the image deployment.
 The reconciliation rollout's required Sentry observation and legacy-monitor
 retirement are documented in
