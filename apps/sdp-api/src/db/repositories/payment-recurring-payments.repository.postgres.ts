@@ -47,6 +47,7 @@ import type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
+import { RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY } from "./payment-recurring-payments.repository";
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
@@ -919,6 +920,34 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .first<Record<string, unknown>>();
 
       return row ? mapActivationAttemptRow(row) : null;
+    },
+
+    async hasUnresolvedActivationAuthorization(input: {
+      organizationId: string;
+      projectId: string;
+      recurringPaymentId: string;
+      staleBefore: string;
+    }) {
+      // Activation marks an attempt right before broadcasting the Subscribe
+      // authorization and clears the mark when the signature is journalled,
+      // so a marked attempt with no journaled signature proves a broadcast
+      // whose outcome cannot be resolved from the journal. Attempts older
+      // than the staleness window can no longer have a broadcast in flight.
+      const row = await db
+        .prepare(
+          `SELECT 1 AS matched
+             FROM payment_recurring_payment_activation_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND recurring_payment_id = ?
+              AND authorization_signature IS NULL
+              AND metadata->>'${RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY}' = 'true'
+              AND updated_at >= ?
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.recurringPaymentId, input.staleBefore)
+        .first<Record<string, unknown>>();
+      return row !== null;
     },
 
     async createLifecycleAttempt(input: CreatePaymentRecurringPaymentLifecycleAttemptInput) {

@@ -211,6 +211,7 @@ export type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
+export { RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY } from "./payment-recurring-payments.repository";
 export { createPostgresPaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository.postgres";
 export type {
   CreatePaymentSubscriptionCollectionAttemptInput,

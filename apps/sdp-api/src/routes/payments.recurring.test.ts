@@ -1,3 +1,4 @@
+import { RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS } from "@sdp/payments/recurring-payment-lifecycle";
 import type * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
@@ -15,6 +16,7 @@ import {
   generateKeyPairSigner,
   getCompiledTransactionMessageDecoder,
   getTransactionDecoder,
+  type Signature,
   signature,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
@@ -41,6 +43,7 @@ import {
   createOrgSignerForCustodyWalletMock,
   createOrgSignerMock,
   DEVNET_USDC_MINT,
+  fetchMaybeSubscriptionAuthorityMock,
   fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
@@ -1740,6 +1743,1019 @@ describe("Payments routes — recurring", () => {
       .bind(recurringPaymentId)
       .first<{ status: string }>();
     expect(dbRow?.status).toBe("canceled");
+  });
+
+  /**
+   * Forces the post-broadcast authorization journal write to fail during
+   * activation: the Subscribe transaction lands on chain, the journal
+   * transaction throws, and the recurring row is reset to pending_activation
+   * with its subscription records persisted (SOLA9-454).
+   */
+  async function activateWithFailingAuthorizationJournal(recurringPaymentId: string) {
+    const createRepository =
+      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+    const repositorySpy = vi
+      .spyOn(
+        paymentRecurringPaymentsRepositoryPostgres,
+        "createPostgresPaymentRecurringPaymentsRepository"
+      )
+      .mockImplementation((db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          updateRecurringPaymentActivation: vi.fn(async (input) => {
+            if (input.authorizationSignature !== undefined) {
+              throw new Error("authorization journal unavailable");
+            }
+            return repository.updateRecurringPaymentActivation(input);
+          }),
+        };
+      });
+
+    try {
+      return await app.request(
+        `/v1/payments/recurring-payments/${recurringPaymentId}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+    } finally {
+      repositorySpy.mockRestore();
+    }
+  }
+
+  async function expectPendingActivationAfterBroadcastFailure(recurringPaymentId: string) {
+    const beforeCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                rp.subscription_pda,
+                rp.authorization_signature,
+                ps.status AS subscription_status,
+                pp.status AS plan_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           JOIN payment_subscription_plans pp ON pp.id = rp.plan_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPaymentId)
+      .first<{
+        recurring_status: string;
+        subscription_pda: string | null;
+        authorization_signature: string | null;
+        subscription_status: string;
+        plan_status: string;
+      }>();
+    expect(beforeCancel).toMatchObject({
+      recurring_status: "pending_activation",
+      subscription_pda: expect.any(String),
+      authorization_signature: null,
+      subscription_status: "pending_authorization",
+      plan_status: "active",
+    });
+    return beforeCancel;
+  }
+
+  it("revokes the live delegation when a pending_activation cancel follows a post-broadcast activation journal failure", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    // The recurring execution hook already queues the plan (1) and Subscribe
+    // (2) broadcast signatures for activation; only the cancel needs stubbing.
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    const beforeCancel = await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+    const broadcastsBeforeCancel = signAndSendMock.mock.calls.length;
+    expect(broadcastsBeforeCancel).toBe(2);
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+
+    expect(signAndSendMock).toHaveBeenCalledTimes(broadcastsBeforeCancel + 1);
+    expect(confirmTransactionMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      cancelSignature,
+      expect.anything()
+    );
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        subscription_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_signature: string | null;
+      }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+      attempt_status: "confirmed",
+      attempt_stage: "finalize",
+      attempt_signature: cancelSignature,
+    });
+    expect(afterCancel?.recurring_status).not.toBe("pending_activation");
+    expect(beforeCancel?.subscription_pda).toBeTruthy();
+  });
+
+  it("keeps a pending_activation recurring payment recoverable when the unjournalled authorization is unresolved", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    // Make the subscription authority setup broadcast happen so the attempt
+    // journal carries a setup signature the broadcast marker must preserve.
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    // The harness queues two broadcast signatures (plan and Subscribe); the
+    // setup broadcast becomes the second, so queue a third for the Subscribe.
+    signAndSendMock.mockResolvedValueOnce(testSignature(3));
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // The journal-write failure left the attempt marked with the pending
+    // authorization broadcast and its setup signature preserved, but with no
+    // journaled signature, so the submitted Subscribe cannot be resolved from
+    // the journal. Even though the delegation read finds nothing, the cancel
+    // must not finalize locally: the authorization could still land and leave
+    // a live delegation behind.
+    const failedActivationAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, stage, authorization_signature, metadata
+           FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        status: string;
+        stage: string;
+        authorization_signature: string | null;
+        metadata: Record<string, unknown>;
+      }>();
+    expect(failedActivationAttempt).toMatchObject({
+      status: "failed",
+      stage: "authorize_subscription",
+      authorization_signature: null,
+      metadata: {
+        authorizationSetupSignature: expect.any(String),
+        authorizationBroadcastPending: true,
+      },
+    });
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(500);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "pending_activation",
+      subscription_status: "pending_authorization",
+    });
+  });
+
+  it("completes a pending_activation cancel locally when the journal shows no unjournalled authorization", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // Records whose activation journal carries no broadcast evidence (no
+    // attempt is marked with an authorization broadcast still pending) cannot
+    // have a Subscribe in flight, so the cancel still finalizes locally
+    // without an on-chain transaction.
+    await getDb(env)
+      .prepare(
+        "DELETE FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(recurringPayment.id)
+      .run();
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+    });
+  });
+
+  it("completes a pending_activation cancel locally when activation failed before broadcasting the authorization", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    // Fail activation while it marks the attempt for the authorization
+    // broadcast: the subscription records are already persisted, but no
+    // Subscribe was ever submitted, so nothing can be live on chain.
+    const createRepository =
+      paymentRecurringPaymentsRepositoryPostgres.createPostgresPaymentRecurringPaymentsRepository;
+    const repositorySpy = vi
+      .spyOn(
+        paymentRecurringPaymentsRepositoryPostgres,
+        "createPostgresPaymentRecurringPaymentsRepository"
+      )
+      .mockImplementation((db) => {
+        const repository = createRepository(db);
+        return {
+          ...repository,
+          updateActivationAttempt: vi.fn(async (input) => {
+            if (input.metadata !== undefined) {
+              throw new Error("authorization broadcast journal unavailable");
+            }
+            return repository.updateActivationAttempt(input);
+          }),
+        };
+      });
+
+    try {
+      const activationResponse = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(activationResponse.status).toBe(500);
+    } finally {
+      repositorySpy.mockRestore();
+    }
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(1);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+    });
+  });
+
+  it("completes a pending_activation cancel locally when the unjournalled authorization broadcast can no longer land", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // A submitted transaction can no longer land after its blockhash window
+    // closes, which the operation staleness window over-covers: a marked
+    // attempt older than that window cannot leave a delegation behind.
+    const staleUpdatedAt = new Date(
+      Date.now() - (RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS + 60 * 1000)
+    ).toISOString();
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payment_activation_attempts SET updated_at = ? WHERE recurring_payment_id = ?"
+      )
+      .bind(staleUpdatedAt, recurringPayment.id)
+      .run();
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+    });
+  });
+
+  it("keeps a pending_activation recurring payment recoverable when chain state is unknown during cancel", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    fetchMaybeSubscriptionDelegationMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    try {
+      const cancelRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(cancelRes.status).toBe(500);
+    } finally {
+      fetchMaybeSubscriptionDelegationMock.mockReset();
+    }
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPayment.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("pending_activation");
+
+    const attempts = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*) AS count FROM payment_recurring_payment_lifecycle_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(recurringPayment.id)
+      .first<{ count: number }>();
+    expect(attempts?.count).toBe(0);
+  });
+
+  it("keeps a pending_activation recurring payment recoverable when the on-chain cancellation fails", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(testSignature(3));
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature:
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
+          ReturnType<typeof solanaRpc.confirmTransaction>
+        >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+
+    try {
+      const cancelRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(cancelRes.status).toBe(400);
+    } finally {
+      confirmTransactionMock.mockReset();
+    }
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPayment.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("pending_activation");
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, stage, error
+           FROM payment_recurring_payment_lifecycle_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPayment.id)
+      .first<{ status: string; stage: string; error: string | null }>();
+    expect(attempt).toMatchObject({
+      status: "failed",
+      stage: "submit",
+      error: "Recurring payment cancellation failed on-chain",
+    });
+  });
+
+  it("recovers a stale pending_activation cancellation claim by revoking the live delegation", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    const staleUpdatedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare(
+        "UPDATE payment_recurring_payments SET status = 'canceling', updated_at = ? WHERE id = ?"
+      )
+      .bind(staleUpdatedAt, recurringPayment.id)
+      .run();
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+    });
+  });
+
+  /**
+   * Seeds the state Greptile flagged as "Cancellation can precede
+   * authorization": activation retained the Subscribe authorization signature
+   * on the recurring row before resetting to pending_activation, so a cancel
+   * that reads no delegation must still resolve the submitted authorization
+   * before finalizing locally.
+   */
+  async function retainAuthorizationSignature(recurringPaymentId: string): Promise<Signature> {
+    const authorizationSignature = testSignature(9);
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET authorization_signature = ? WHERE id = ?")
+      .bind(authorizationSignature, recurringPaymentId)
+      .run();
+    return authorizationSignature;
+  }
+
+  it("revokes the delegation when a retained authorization lands during a pending_activation cancel", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+    const authorizationSignature = await retainAuthorizationSignature(recurringPayment.id);
+
+    fetchMaybeSubscriptionDelegationMock
+      .mockResolvedValueOnce({
+        exists: false,
+        address: address(TEST_SOLANA_ADDRESSES.wallet3),
+      })
+      .mockResolvedValueOnce({
+        exists: true,
+        address: address(TEST_SOLANA_ADDRESSES.wallet3),
+        data: { expiresAtTs: 1_800_000_000n },
+      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      authorizationSignature,
+      expect.anything()
+    );
+    expect(confirmTransactionMock).toHaveBeenLastCalledWith(
+      expect.anything(),
+      cancelSignature,
+      expect.anything()
+    );
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        subscription_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_signature: string | null;
+      }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+      attempt_status: "confirmed",
+      attempt_stage: "finalize",
+      attempt_signature: cancelSignature,
+    });
+  });
+
+  it("completes a pending_activation cancel locally when the retained authorization failed on chain", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+    const authorizationSignature = await retainAuthorizationSignature(recurringPayment.id);
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature:
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
+          ReturnType<typeof solanaRpc.confirmTransaction>
+        >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(200);
+    const cancelBody = await parseRecurringResponse(cancelRes);
+    expect(cancelBody.data.recurringPayment).toMatchObject({
+      id: recurringPayment.id,
+      status: "canceled",
+    });
+    expect(confirmTransactionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      authorizationSignature,
+      expect.anything()
+    );
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+    });
+  });
+
+  it("keeps a pending_activation recurring payment recoverable when the retained authorization is unresolved", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+    await retainAuthorizationSignature(recurringPayment.id);
+
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+
+    try {
+      confirmTransactionMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+      const cancelRes = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(cancelRes.status).toBe(500);
+    } finally {
+      confirmTransactionMock.mockReset();
+    }
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const row = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(recurringPayment.id)
+      .first<{ status: string }>();
+    expect(row?.status).toBe("pending_activation");
+
+    const attempts = await getDb(env)
+      .prepare(
+        "SELECT COUNT(*) AS count FROM payment_recurring_payment_lifecycle_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(recurringPayment.id)
+      .first<{ count: number }>();
+    expect(attempts?.count).toBe(0);
+  });
+
+  it("closes a retained processing cancellation attempt when a pending_activation cancel finalizes locally", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // First cancel submits the on-chain cancellation but its confirmation
+    // outcome stays uncertain: the attempt keeps the signature and the claim
+    // returns to the recoverable pending_activation state.
+    confirmTransactionMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const firstCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(firstCancelRes.status).toBe(500);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const beforeRetry = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_signature: string | null;
+      }>();
+    expect(beforeRetry).toMatchObject({
+      recurring_status: "pending_activation",
+      attempt_status: "processing",
+      attempt_stage: "submit",
+      attempt_signature: cancelSignature,
+    });
+
+    // The submitted cancellation landed (the delegation is gone), so the retry
+    // finalizes locally and must close the retained processing attempt.
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+
+    const retryCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(retryCancelRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const afterRetry = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        subscription_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_signature: string | null;
+      }>();
+    expect(afterRetry).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+      attempt_status: "confirmed",
+      attempt_stage: "finalize",
+      attempt_signature: cancelSignature,
+    });
+  });
+
+  /**
+   * Seeds the state Greptile flagged as "Unconfirmed attempt marked
+   * confirmed": closing a retained processing cancellation attempt must not
+   * report `confirmed` unless its submitted transaction is verified on chain.
+   * A transaction that provably failed closes as failed even though the rows
+   * still finalize canceled (no delegation exists to revoke).
+   */
+  it("closes a retained processing cancellation attempt as failed when its transaction failed on chain", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // First cancel submits the on-chain cancellation but its confirmation
+    // outcome stays uncertain: the attempt keeps the signature and the claim
+    // returns to the recoverable pending_activation state.
+    confirmTransactionMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const firstCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(firstCancelRes.status).toBe(500);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    // The retry finds no delegation, but the retained cancellation
+    // transaction provably failed on chain, so the attempt must close as
+    // failed instead of confirmed.
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature:
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
+          ReturnType<typeof solanaRpc.confirmTransaction>
+        >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+
+    const retryCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(retryCancelRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const afterRetry = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.error AS attempt_error,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        subscription_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_error: string | null;
+        attempt_signature: string | null;
+      }>();
+    expect(afterRetry).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+      attempt_status: "failed",
+      attempt_stage: "submit",
+      attempt_error: "Recurring payment cancellation failed on-chain",
+      attempt_signature: cancelSignature,
+    });
   });
 
   it("resumes canceled recurring payments through SDP API routes", async () => {

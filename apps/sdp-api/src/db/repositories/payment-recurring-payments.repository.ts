@@ -383,6 +383,15 @@ export interface GetLatestPaymentRecurringPaymentActivationAttemptInput {
   statuses?: readonly PaymentRecurringPaymentAttemptStatus[];
 }
 
+/**
+ * Activation-attempt metadata flag set while a Subscribe authorization
+ * broadcast is in flight and its signature is not journalled yet, so the
+ * pending-activation cancel path can treat the authorization as unresolvable
+ * if the journal write fails (SOLA9-454).
+ */
+export const RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY =
+  "authorizationBroadcastPending";
+
 export interface PaymentRecurringWalletAuthorization {
   custodyWalletIds: string[];
   providerWalletIds: string[];
@@ -476,6 +485,13 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestActivationAttempt(
     input: GetLatestPaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  hasUnresolvedActivationAuthorization(input: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+    /** Attempts updated before this instant can no longer have a broadcast in flight. */
+    staleBefore: string;
+  }): Promise<boolean>;
   createLifecycleAttempt(
     input: CreatePaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;
