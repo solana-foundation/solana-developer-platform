@@ -243,6 +243,8 @@ export interface UpdatePaymentRecurringPaymentLifecycleInput {
   projectId: string;
   status: PaymentRecurringPaymentStatus;
   expectedStatus: PaymentRecurringPaymentStatus;
+  nextCollectionDueAt?: string | null;
+  expectedNextCollectionDueAt?: string | null;
   updatedAt: string;
 }
 

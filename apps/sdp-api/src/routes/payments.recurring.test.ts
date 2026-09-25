@@ -22,7 +22,10 @@ import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories";
+import {
+  createPostgresPaymentRecurringPaymentsRepository,
+  createPostgresPaymentSubscriptionsRepository,
+} from "@/db/repositories";
 import * as paymentRecurringPaymentsRepositoryPostgres from "@/db/repositories/payment-recurring-payments.repository.postgres";
 import * as paymentSubscriptionsRepositoryPostgres from "@/db/repositories/payment-subscriptions.repository.postgres";
 import * as paymentsRepositoryPostgres from "@/db/repositories/payments.repository.postgres";
@@ -1801,6 +1804,95 @@ describe("Payments routes — recurring", () => {
 
     expect(replayRes.status).toBe(200);
     expect(signAndSendMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not reactivate a stale due schedule when resuming a canceled recurring payment", async () => {
+    const resumeSignature = signature(
+      "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+    );
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(resumeSignature);
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    const staleDueAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: staleDueAt,
+    });
+
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(cancelRes.status).toBe(200);
+
+    const resumeStartedAt = Date.now();
+    const resumeRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}/resume`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(resumeRes.status).toBe(200);
+
+    const resumedSchedule = await getDb(env)
+      .prepare(
+        `SELECT rp.next_collection_due_at AS recurring_due_at,
+                s.next_collection_due_at AS subscription_due_at,
+                s.current_period_start_at AS subscription_period_start
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions s ON s.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(activated.id)
+      .first<{
+        recurring_due_at: string;
+        subscription_due_at: string;
+        subscription_period_start: string;
+      }>();
+
+    // Resume establishes a fresh billing period anchored at the resume time:
+    // the stale, already-due timestamp must be replaced in both rows by one
+    // full period after the resume, never reused as a collectible identity.
+    const periodMs = DEFAULT_RECURRING_FIXTURE.periodHours * 60 * 60 * 1000;
+    const freshDueTime = new Date(resumedSchedule?.recurring_due_at ?? "").getTime();
+    expect(freshDueTime).toBeGreaterThanOrEqual(resumeStartedAt + periodMs);
+    expect(freshDueTime).toBeLessThanOrEqual(Date.now() + periodMs);
+    expect(resumedSchedule?.subscription_due_at).toBe(resumedSchedule?.recurring_due_at);
+    expect(
+      new Date(resumedSchedule?.subscription_period_start ?? "").getTime()
+    ).toBeGreaterThanOrEqual(resumeStartedAt);
+
+    // The automated collector must not see the resumed payment as due.
+    const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(getDb(env));
+    const dueRows = await recurringRepo.listDueCollectionPayments({
+      dueBefore: new Date().toISOString(),
+      retryBefore: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      limit: 25,
+    });
+    expect(dueRows.map((row) => row.id)).not.toContain(activated.id);
+    expect((await collectDueRecurringPayments(env, new Date())).collected).toBe(0);
+
+    // The stale due identity never reaches the collection journal.
+    const staleAttempt = await getDb(env)
+      .prepare(
+        `SELECT 1 AS attempt
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, staleDueAt)
+      .first<{ attempt: number }>();
+    expect(staleAttempt).toBeNull();
+
+    // Once the fresh period elapses, automated collection works normally
+    // against the fresh identity.
+    await setRecurringCollectionDue({
+      recurringPaymentId: activated.id,
+      subscriptionId: activated.subscriptionId,
+      dueAt: new Date().toISOString(),
+    });
+    expect((await collectDueRecurringPayments(env, new Date())).collected).toBe(1);
   });
 
   it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(

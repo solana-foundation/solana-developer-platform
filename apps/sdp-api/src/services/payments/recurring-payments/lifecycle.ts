@@ -2,6 +2,7 @@ import {
   decideRecurringPaymentLifecycleTransition,
   getRecurringPaymentLifecycleStatuses,
   getRecurringPaymentOperationStaleBefore,
+  nextRecurringPaymentCollectionDueAt,
   type RecurringPaymentLifecycleOperation,
 } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -281,6 +282,21 @@ async function finalizeRecurringPaymentLifecycle(input: {
     input.operation
   );
   const subscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
+  // Resuming re-establishes the billing schedule anchored at the resume time,
+  // fenced to the canceled status and the prior due identity, so the canceled
+  // window never leaves a stale, already-due timestamp that the automated
+  // collector would treat as immediately collectible.
+  const resumeSchedule =
+    input.operation === "resume"
+      ? {
+          nextCollectionDueAt: nextRecurringPaymentCollectionDueAt(
+            finalizedAt,
+            input.recurringPayment.period_hours
+          ),
+          priorSubscriptionDueAt: input.subscription.next_collection_due_at,
+          priorRecurringDueAt: input.recurringPayment.next_collection_due_at,
+        }
+      : null;
 
   return getDb(input.env).transaction(async (tx) => {
     const recurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -293,6 +309,14 @@ async function finalizeRecurringPaymentLifecycle(input: {
       status: subscriptionStatus,
       cancelAt: input.operation === "cancel" ? finalizedAt : null,
       canceledAt: input.operation === "cancel" ? finalizedAt : null,
+      ...(resumeSchedule
+        ? {
+            currentPeriodStartAt: finalizedAt,
+            nextCollectionDueAt: resumeSchedule.nextCollectionDueAt,
+            expectedStatus: "canceled",
+            expectedNextCollectionDueAt: resumeSchedule.priorSubscriptionDueAt,
+          }
+        : {}),
       updatedAt: finalizedAt,
     });
     const updatedRecurringPayment = await recurringRepo.updateRecurringPaymentLifecycle({
@@ -301,6 +325,12 @@ async function finalizeRecurringPaymentLifecycle(input: {
       projectId: input.projectId,
       status: recurringStatus,
       expectedStatus: processingStatus,
+      ...(resumeSchedule
+        ? {
+            nextCollectionDueAt: resumeSchedule.nextCollectionDueAt,
+            expectedNextCollectionDueAt: resumeSchedule.priorRecurringDueAt,
+          }
+        : {}),
       updatedAt: finalizedAt,
     });
     const updatedAttempt = await recurringRepo.updateLifecycleAttempt({

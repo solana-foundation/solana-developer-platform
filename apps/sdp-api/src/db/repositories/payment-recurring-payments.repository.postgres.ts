@@ -788,20 +788,27 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         .prepare(
           `UPDATE payment_recurring_payments
               SET status = ?,
+                  next_collection_due_at =
+                    CASE WHEN ?::boolean THEN ? ELSE next_collection_due_at END,
                   updated_at = ?
             WHERE id = ?
               AND organization_id = ?
               AND project_id = ?
               AND status = ?
+              AND (?::boolean = false OR next_collection_due_at IS NOT DISTINCT FROM ?)
           RETURNING *`
         )
         .bind(
           input.status,
+          input.nextCollectionDueAt !== undefined,
+          input.nextCollectionDueAt ?? null,
           input.updatedAt,
           input.recurringPaymentId,
           input.organizationId,
           input.projectId,
-          input.expectedStatus
+          input.expectedStatus,
+          input.expectedNextCollectionDueAt !== undefined,
+          input.expectedNextCollectionDueAt ?? null
         )
         .first<Record<string, unknown>>();
 
