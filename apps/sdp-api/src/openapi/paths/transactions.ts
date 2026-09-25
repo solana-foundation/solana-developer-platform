@@ -1,6 +1,6 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-import { UNIFIED_TRANSACTION_MODULES, type UnifiedTransactionModule } from "@sdp/types";
 import { z } from "zod";
+import { publishedTransactionModules } from "@/routes/transactions/publication";
 import {
   unifiedTransactionsListResponseSchemaForModules,
   unifiedTransactionsQuerySchemaForModules,
@@ -19,27 +19,6 @@ export interface RegisterTransactionsPathsOptions {
    * full runtime enum.
    */
   publishEarn?: boolean;
-}
-
-/**
- * The published-module allowlist while Earn is held back. Deliberately an
- * explicit allowlist, not a runtime filter: a module added to
- * `UNIFIED_TRANSACTION_MODULES` stays out of the held-back public contract
- * until it is added here, which is the fail-closed direction for a
- * publication boundary. `publishEarn: true` (the internal document and the
- * publishable document after PRO-2038) bypasses the allowlist and publishes
- * the full runtime list.
- */
-const PUBLISHED_TRANSACTION_MODULES_WITHOUT_EARN = [
-  "payments",
-  "dvp",
-  "private_channels",
-  "issuance",
-  "rings",
-] as const satisfies readonly UnifiedTransactionModule[];
-
-function publishedTransactionModules(publishEarn: boolean) {
-  return publishEarn ? UNIFIED_TRANSACTION_MODULES : PUBLISHED_TRANSACTION_MODULES_WITHOUT_EARN;
 }
 
 export function registerTransactionsPaths(

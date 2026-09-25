@@ -1,6 +1,7 @@
 import { OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import { DEFAULT_SDP_API_URL } from "@sdp/types";
 import type { OpenAPIObject } from "openapi3-ts/oas30";
+import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/lib/earn-publication";
 
 import { registerAdminPaths } from "./paths/admin";
 import { registerApiKeyPaths } from "./paths/api-keys";
@@ -82,17 +83,11 @@ const OPENAPI_TAG = {
   ONBOARDING: { name: "Onboarding", description: "Clerk organization sync status." },
 } as const;
 
-/**
- * Whether the public OpenAPI document carries the Earn family. Everything
- * partner-facing derives from that document: api.solana.com/openapi.json and
- * Swagger UI, the generated API reference, the Postman collection, the
- * playground catalog and the AI discovery files. Held false until launch
- * (PRO-2038): Earn is feature-complete but not announced, so partners must not
- * discover it yet. The internal document and the runtime are unaffected.
- * Flipping this back is a PRO-1872 security sign-off PR (routes/earn/CLAUDE.md,
- * "Public OpenAPI promotion"); spec.test.ts pins both states.
- */
-export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
+// The single source of truth lives in lib/earn-publication.ts next to the
+// other publication gates; the runtime's unfiltered transaction default reads
+// it from there. Re-exported here so the document layer (and the AGENTS.md
+// contract naming this module) keeps one import path.
+export { EARN_PUBLIC_SURFACE_PUBLISHED };
 
 export type PublicOpenApiDocumentOptions = {
   /** Include the Earn family. Defaults to `EARN_PUBLIC_SURFACE_PUBLISHED`. */
