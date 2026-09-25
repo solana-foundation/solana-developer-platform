@@ -41,8 +41,9 @@ CREATE TABLE IF NOT EXISTS private_channel_release_scans (
     -- fully parsed (and matched against a complete unsettled batch). NULL until
     -- the first complete walk.
     cursor_signature TEXT CHECK (cursor_signature IS NULL OR cursor_signature <> ''),
-    -- The cursor's slot. The cursor only moves toward newer slots; equal slots
-    -- keep the stored row.
+    -- The cursor's slot. The cursor never moves to an older slot; within a
+    -- slot it advances only via the repository's compare-and-set on the
+    -- stored cursor signature.
     cursor_slot TEXT CHECK (cursor_slot IS NULL OR cursor_slot ~ '^[0-9]+$'),
     -- The deepest signature listed by a page-cap-truncated walk, or NULL when
     -- no backlog is pending (no capped walk yet, or the cursor consumed it).

@@ -5,10 +5,11 @@
  * Two positions are persisted per (instance, mint, escrow ATA):
  *
  * - `cursor` — the parsed frontier. Everything at or older than it has been
- *   fully parsed and matched against a complete unsettled batch. It advances
- *   only toward newer slots (history is consumed oldest-first) and never
- *   moves back, so an overlapping slower sweep cannot undo a faster one's
- *   progress.
+ *   fully parsed and matched against a complete unsettled batch. It never
+ *   moves back to an older slot, so an overlapping slower sweep cannot undo a
+ *   faster one's progress. It may advance within a slot (slots are not
+ *   unique), which the repository guards by compare-and-set: a same-slot
+ *   proposal is accepted only from the caller that read the stored cursor.
  * - `sweep` — the deepest signature listed by a walk that hit its page cap
  *   before reaching the cursor. A later tick resumes listing below it, so a
  *   backlog deeper than one tick's page cap is still eventually consumed. It
@@ -46,6 +47,15 @@ export interface AdvanceReleaseScanInput {
   /** The escrow ATA the position was derived from; a rotated escrow starts fresh. */
   vaultAta: string;
   cursor: PrivateChannelReleaseScanCursor;
+  /**
+   * The cursor signature the caller read before walking (null before the
+   * first frontier). The frontier may advance within a slot — slots are not
+   * unique — so a same-slot proposal is accepted only when the stored cursor
+   * is still exactly the one this caller walked from; a lagging poller
+   * proposing a same-slot position it listed BEFORE the stored cursor fails
+   * the compare-and-set and never regresses the frontier.
+   */
+  expectedCursorSignature: Signature | null;
 }
 
 export interface DeepenReleaseSweepInput {
@@ -73,10 +83,10 @@ export interface PrivateChannelReleaseScanRepository {
     vaultAta: string
   ): Promise<PrivateChannelReleaseScan | null>;
   /**
-   * Records where parsing stopped. The cursor only moves toward newer slots
-   * (the frontier advances as history is consumed); an older-slot proposal —
-   * e.g. from an overlapping slower sweep that parsed less — never undoes the
-   * stored position.
+   * Records where parsing stopped. The frontier never moves back to an older
+   * slot; within a slot it only advances from the cursor the caller actually
+   * read (`expectedCursorSignature`), so an overlapping slower poller that
+   * parsed less cannot undo a faster one's progress.
    */
   advanceScan(input: AdvanceReleaseScanInput): Promise<void>;
   /**
@@ -147,15 +157,18 @@ export function createPostgresPrivateChannelReleaseScanRepository(
              cursor_signature = EXCLUDED.cursor_signature,
              cursor_slot = EXCLUDED.cursor_slot,
              updated_at = sdp_iso_now()
-           WHERE private_channel_release_scans.cursor_slot IS NULL
-              OR EXCLUDED.cursor_slot::numeric > private_channel_release_scans.cursor_slot::numeric`
+           WHERE private_channel_release_scans.cursor_signature IS NULL
+              OR EXCLUDED.cursor_slot::numeric > private_channel_release_scans.cursor_slot::numeric
+              OR (EXCLUDED.cursor_slot::numeric = private_channel_release_scans.cursor_slot::numeric
+                  AND private_channel_release_scans.cursor_signature = ?)`
         )
         .bind(
           input.instanceId,
           input.mint,
           input.vaultAta,
           input.cursor.signature,
-          input.cursor.slot
+          input.cursor.slot,
+          input.expectedCursorSignature
         )
         .run();
     },

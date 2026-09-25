@@ -75,6 +75,7 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("sigShallow", "100"),
+      expectedCursorSignature: null,
     });
     expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
       cursor: { signature: "sigShallow", slot: "100" },
@@ -88,6 +89,7 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("sigDeep", "50"),
+      expectedCursorSignature: "sigShallow" as Signature,
     });
     expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
       signature: "sigShallow",
@@ -100,10 +102,62 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("sigNewer", "200"),
+      expectedCursorSignature: "sigShallow" as Signature,
     });
     expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
       signature: "sigNewer",
       slot: "200",
+    });
+  });
+
+  it("advances the frontier within a slot when anchored at the stored cursor", async () => {
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("sig300", "900"),
+      expectedCursorSignature: null,
+    });
+
+    // Slots are not unique: the frontier can legitimately land back inside
+    // the cursor's own slot (more successful same-slot entries than the
+    // per-tick parse budget). That advance must not be dropped, or the
+    // cursor freezes and releases above it in the slot are never consumed.
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("sig400", "900"),
+      expectedCursorSignature: "sig300" as Signature,
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
+      signature: "sig400",
+      slot: "900",
+    });
+  });
+
+  it("rejects a same-slot advance not anchored at the stored cursor", async () => {
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("sig300", "900"),
+      expectedCursorSignature: null,
+    });
+
+    // A lagging poller that read an earlier position proposes a same-slot
+    // frontier it listed BEFORE the stored cursor: the compare-and-set fails
+    // and the frontier does not regress within the slot.
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("sig100", "900"),
+      expectedCursorSignature: "sigStaleRead" as Signature,
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
+      signature: "sig300",
+      slot: "900",
     });
   });
 
@@ -124,6 +178,7 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("frontierSig", "20"),
+      expectedCursorSignature: null,
     });
     expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
       cursor: { signature: "frontierSig", slot: "20" },
@@ -175,6 +230,7 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("oldEscrowSig", "100"),
+      expectedCursorSignature: null,
     });
 
     const rotated = "VaultAta22222222222222222222222222222222222";
@@ -183,11 +239,12 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: rotated,
       cursor: cursor("newEscrowSig", "9000"),
+      expectedCursorSignature: null,
     });
 
     // The rotated escrow reads as unwalked until its first advance — history
-    // on the new ATA has not been parsed — and the old escrow's position never
-    // leaks across addresses.
+    // on the new ATA has not been walked yet — and the old escrow's position
+    // never leaks across addresses.
     expect(await repo.getScan(INSTANCE, MINT, rotated)).toEqual({
       cursor: { signature: "newEscrowSig", slot: "9000" },
       sweep: null,
@@ -204,6 +261,7 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("oldEscrowSig2", "150"),
+      expectedCursorSignature: "oldEscrowSig" as Signature,
     });
     expect((await repo.getScan(INSTANCE, MINT, rotated))?.cursor).toEqual({
       signature: "newEscrowSig",
@@ -217,12 +275,14 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       mint: MINT,
       vaultAta: VAULT,
       cursor: cursor("sigA", "10"),
+      expectedCursorSignature: null,
     });
     await repo.advanceScan({
       instanceId: INSTANCE,
       mint: "MintOther2222222222222222222222222222222222",
       vaultAta: VAULT,
       cursor: cursor("sigB", "20"),
+      expectedCursorSignature: null,
     });
     const firstScan = await repo.getScan(INSTANCE, MINT, VAULT);
     expect(firstScan?.cursor?.signature).toBe("sigA");

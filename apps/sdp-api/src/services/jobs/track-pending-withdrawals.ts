@@ -27,7 +27,8 @@
  *     otherwise evict a real release from every scan. Each (instance, mint)
  *     group persists where it has reached in `private_channel_release_scans`:
  *     a parsed frontier (the cursor — everything at or behind it was fully
- *     parsed and matched, and it only moves toward newer slots) and, when a
+ *     parsed and matched; it never moves to an older slot and advances within
+ *     a slot only from the cursor the tick read) and, when a
  *     walk hit the page cap before reaching the frontier, the deepest listed
  *     signature (the sweep — a later tick resumes listing below it instead of
  *     re-reading the same newest band forever). Progress therefore accumulates
@@ -592,6 +593,7 @@ async function reconcileReleaseGroup(
     releaseScanRepo,
     group,
     vaultAta,
+    cursor,
     rawSweep,
     walk,
     ordered,
@@ -699,12 +701,21 @@ async function settleWithdrawals(
  * was not truncated past this group's rows, and (c) unrelated groups filling
  * the global batch cannot hold this group's progress hostage. The count is
  * read per group and any failure holds the cursor.
+ *
+ * `startingCursor` is the cursor this tick read before walking. The frontier
+ * proposal is always listed after it (the walk stops at that cursor), so the
+ * repository accepts a same-slot advance — slots are not unique, and a
+ * frontier that lands inside the cursor's slot must still move, or releases
+ * above it in that slot could never be consumed — while a lagging poller's
+ * same-slot proposal, anchored at a position it read earlier, fails the
+ * compare-and-set and never regresses the frontier.
  */
 async function persistScanPositions(
   repo: PrivateChannelWithdrawalRepository,
   releaseScanRepo: PrivateChannelReleaseScanRepository,
   group: ReleaseGroup,
   vaultAta: Address,
+  startingCursor: PrivateChannelReleaseScanCursor | null,
   rawSweep: PrivateChannelReleaseScanCursor | null,
   walk: {
     complete: boolean;
@@ -773,6 +784,7 @@ async function persistScanPositions(
       mint: group.mint,
       vaultAta,
       cursor: frontier,
+      expectedCursorSignature: startingCursor?.signature ?? null,
     });
     // The frontier consumed the listed backlog — the sweep has nothing left
     // to resume and the next walk can target the frontier directly.

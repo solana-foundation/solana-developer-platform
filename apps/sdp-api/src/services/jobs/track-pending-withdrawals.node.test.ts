@@ -654,6 +654,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "relSig", slot: "7" },
+      expectedCursorSignature: null,
     });
   });
 
@@ -705,6 +706,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "relNew", slot: "60" },
+      expectedCursorSignature: "cursorSig",
     });
   });
 
@@ -802,6 +804,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "relSig", slot: "7" },
+      expectedCursorSignature: null,
     });
   });
 
@@ -908,6 +911,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "spam50", slot: (350 - 50).toString() },
+      expectedCursorSignature: null,
     });
   });
 
@@ -985,6 +989,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "recentSig", slot: "2" },
+      expectedCursorSignature: null,
     });
   });
 
@@ -1076,6 +1081,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "t20700", slot: "300" },
+      expectedCursorSignature: null,
     });
   });
 
@@ -1117,6 +1123,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "relNew", slot: "600" },
+      expectedCursorSignature: "cursorSig",
     });
     expect(releaseScanRepo.clearSweep).toHaveBeenCalledWith({
       instanceId: "inst-X",
@@ -1164,6 +1171,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "b150", slot: "150" },
+      expectedCursorSignature: "c50",
     });
     // The band is fully parsed and consumed, so the sweep clears and the next
     // tick lists the gap contiguously from the tip.
@@ -1209,6 +1217,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "tip450", slot: "450" },
+      expectedCursorSignature: "b150",
     });
   });
 
@@ -1239,6 +1248,45 @@ describe("trackPendingWithdrawals", () => {
     expect(getTransaction).not.toHaveBeenCalledWith(expect.anything(), "c60");
   });
 
+  it("advances the cursor within the persisted cursor's own slot", async () => {
+    // Slots are not unique. When the frontier lands back inside the cursor's
+    // slot (e.g. more successful same-slot entries than the per-tick parse
+    // budget), a slot-only monotonic guard would silently drop the advance
+    // and freeze the cursor at that signature forever — releases above it in
+    // the slot would never be consumed. The advance is anchored with a
+    // compare-and-set on the cursor this tick read instead.
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "sig300", slot: "900" },
+      sweep: null,
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    // Newest first: 100 same-slot entries above the frontier signature.
+    const history = Array.from({ length: 100 }, (_, i) => ({
+      signature: `sig${400 - i}`,
+      err: null,
+      slot: 900n,
+      blockTime: null,
+    }));
+    // The walk stops at the cursor's exact signature.
+    history.push({ signature: "sig300", err: null, slot: 900n, blockTime: null });
+    getSignaturesForAddress.mockResolvedValueOnce(history);
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // The frontier moved onto the newest same-slot entry (a slot it already
+    // occupied), anchored at the cursor it walked from.
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "sig400", slot: "900" },
+      expectedCursorSignature: "sig300",
+    });
+  });
+
   it("ignores a sweep position at or behind the parsed frontier", async () => {
     // A stale sweep (clear that lost a race) must not send the walk listing
     // already-consumed history.
@@ -1264,6 +1312,7 @@ describe("trackPendingWithdrawals", () => {
       mint: MINT,
       vaultAta: `ata:${ESCROW_INSTANCE}`,
       cursor: { signature: "relNew", slot: "600" },
+      expectedCursorSignature: "cursorSig",
     });
   });
 });
