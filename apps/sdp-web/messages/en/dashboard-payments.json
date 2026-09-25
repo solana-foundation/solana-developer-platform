@@ -1431,8 +1431,6 @@
       "arrivesHint": "A deposit lands once the Solana network confirms the transaction, usually within seconds.",
       "watching": "Watching for deposits",
       "watchingLast": "Watching for deposits · last {date}",
-      "simulate": "Simulate a deposit",
-      "simulated": "Requested 1 devnet SOL for this wallet. It shows up here once it lands.",
       "recentTitle": "Recent deposits to this wallet",
       "openInTransactions": "Open in Transactions",
       "recentUnavailable": "Recent deposits are temporarily unavailable.",
