@@ -67,15 +67,22 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   // rejection stored nothing, so the key is still free; and a replay of a
   // create still in flight is that same logical request, not a finished one.
   const idempotencyKey = useRef<string | null>(null);
+  // The exact body the current key was minted for, so a kept key stays bound to
+  // its own request: an unchanged retry replays the pending create, while
+  // edited terms are a new logical request. Sending edited terms under the old
+  // key would make the server refuse them as a payload conflict, dead-ending
+  // the retry the form just offered.
+  const keyRequestBody = useRef<string | null>(null);
   // Minted on first use rather than as the ref's initial value, which would draw
   // (and throw away) fresh random bytes on every render.
-  function currentIdempotencyKey(): string {
+  function currentIdempotencyKey(body: string): string {
     const existing = idempotencyKey.current;
-    if (existing !== null) {
+    if (existing !== null && keyRequestBody.current === body) {
       return existing;
     }
     const minted = freshDvpIdempotencyKey("dvp-create");
     idempotencyKey.current = minted;
+    keyRequestBody.current = body;
     return minted;
   }
 
@@ -83,39 +90,40 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
     setSubmitting(true);
     setError(null);
     try {
+      const body = JSON.stringify({
+        partyA: request.parties.a.ref,
+        partyB: request.parties.b.ref,
+        mintA: request.mintA,
+        mintB: request.mintB,
+        // A PASTED address is assumed Token-2022; if it is not, create
+        // refuses and names the mismatch rather than publishing an escrow
+        // derived under the wrong program, which is the failure the form
+        // cannot detect itself.
+        tokenProgramA: request.tokenProgramA ?? TOKEN_2022_PROGRAM,
+        tokenProgramB: request.tokenProgramB ?? TOKEN_2022_PROGRAM,
+        amountA: request.amountA,
+        amountB: request.amountB,
+        // Local wall clock, deliberately: the person picked a time off
+        // their own clock, so the deadline lands at that local moment.
+        expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
+        ...(request.refString ? { refString: request.refString } : {}),
+        // Omitted rather than sent empty. The API reads absent as "the
+        // party's own address"; an empty string would fail the address
+        // pattern and 400 an otherwise ordinary trade.
+        ...(request.userASettlementDestination
+          ? { userASettlementDestination: request.userASettlementDestination }
+          : {}),
+        ...(request.userBSettlementDestination
+          ? { userBSettlementDestination: request.userBSettlementDestination }
+          : {}),
+      });
       const response = await fetch("/api/dashboard/markets/dvp/trades", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(),
+          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(body),
         },
-        body: JSON.stringify({
-          partyA: request.parties.a.ref,
-          partyB: request.parties.b.ref,
-          mintA: request.mintA,
-          mintB: request.mintB,
-          // A PASTED address is assumed Token-2022; if it is not, create
-          // refuses and names the mismatch rather than publishing an escrow
-          // derived under the wrong program, which is the failure the form
-          // cannot detect itself.
-          tokenProgramA: request.tokenProgramA ?? TOKEN_2022_PROGRAM,
-          tokenProgramB: request.tokenProgramB ?? TOKEN_2022_PROGRAM,
-          amountA: request.amountA,
-          amountB: request.amountB,
-          // Local wall clock, deliberately: the person picked a time off
-          // their own clock, so the deadline lands at that local moment.
-          expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
-          ...(request.refString ? { refString: request.refString } : {}),
-          // Omitted rather than sent empty. The API reads absent as "the
-          // party's own address"; an empty string would fail the address
-          // pattern and 400 an otherwise ordinary trade.
-          ...(request.userASettlementDestination
-            ? { userASettlementDestination: request.userASettlementDestination }
-            : {}),
-          ...(request.userBSettlementDestination
-            ? { userBSettlementDestination: request.userBSettlementDestination }
-            : {}),
-        }),
+        body,
       });
 
       // Status before body. A non-2xx response carries an error envelope, not
@@ -153,6 +161,7 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
       }
       // The next submit mints a new key: a second trade on the same terms is a new request.
       idempotencyKey.current = null;
+      keyRequestBody.current = null;
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement

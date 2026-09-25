@@ -282,7 +282,47 @@ describe("useDvpCreateSubmit confirmation", () => {
     });
 
     expect(result.current.error).toBe(
-      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one."
+      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one. Changing the trade and creating again starts a new trade instead — the first one may still go through."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A kept key is bound to the request it was minted for. Edited terms are a
+  // new logical request: reusing the old key would make the server refuse the
+  // edited trade as a payload conflict, dead-ending the retry the form just
+  // offered. The edit must go out under a fresh key.
+  it("starts a new request with a fresh key when the trade was edited while a create was pending", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request({ amountA: "1500" }));
+    });
+
+    const keyOf = (call: number): string => {
+      const init = fetchMock.mock.calls[call][1] as { headers: Record<string, string> };
+      return init.headers["Idempotency-Key"];
+    };
+    expect(keyOf(1)).not.toBe(keyOf(0));
+    // The second body is the edit, sent whole — not the first attempt replayed.
+    const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body) as Record<
+      string,
+      unknown
+    >;
+    expect(secondBody.amountA).toBe("1500");
+    // And the new request itself can go pending without dead-ending either.
+    expect(result.current.error).toBe(
+      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one. Changing the trade and creating again starts a new trade instead — the first one may still go through."
     );
     expect(toast.success).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
