@@ -2365,6 +2365,65 @@ describe("Issuance Routes", () => {
       }
     });
 
+    it("repeats the residual ABL warning when a settled rotation is replayed", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_replay",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_replay",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockResolvedValue({ signature: "sig_abl_rotation_replay", slot: 890n });
+      const idempotencyKey = `idem_${crypto.randomUUID()}`;
+      const rotate = (key?: string) =>
+        app.request(
+          `/v1/issuance/tokens/${token.id}/authority`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              ...(key ? { "Idempotency-Key": key } : {}),
+            },
+            body: JSON.stringify({
+              signingCustodyWalletId: wallet.custodyWalletId,
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+              },
+            }),
+          },
+          env
+        );
+
+      try {
+        const first = await rotate(idempotencyKey);
+        expect(first.status, JSON.stringify(await first.clone().json())).toBe(200);
+        const firstBody = (await first.json()) as {
+          data: { transaction: { id: string }; warnings?: { code: string }[] };
+        };
+        expect(firstBody.data.warnings?.[0]?.code).toBe("RESIDUAL_ABL_LIST_AUTHORITY");
+
+        // A client that lost the first response retries with the same key:
+        // the settled replay must repeat the disclosure instead of returning
+        // the bare transaction record.
+        const replay = await rotate(idempotencyKey);
+        expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200);
+        const replayBody = (await replay.json()) as {
+          data: { transaction: { id: string }; warnings?: { code: string }[] };
+        };
+        expect(replayBody.data.transaction.id).toBe(firstBody.data.transaction.id);
+        expect(replayBody.data.warnings?.[0]?.code).toBe("RESIDUAL_ABL_LIST_AUTHORITY");
+      } finally {
+        updateAuthoritySpy.mockRestore();
+      }
+    });
+
     it("loads the approved authority signer before starting the external-effect fence", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_authority_signer_failure",
@@ -8218,6 +8277,178 @@ describe("Issuance Routes", () => {
           expect(res.status).toBe(409);
           const body = (await res.json()) as { error: { code: string; message: string } };
           expect(body.error.code).toBe("ABL_LIST_AUTHORITY_NOT_CONTROLLED");
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry).toBeNull();
+        } finally {
+          listConfigSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("mints to an existing on-chain member without binding the list authority", async () => {
+        await seedAblListAddress();
+
+        // Post-rotation on-chain state that could not be signed: the live list
+        // is administered by a wallet outside custody. An existing member needs
+        // no list write, so the membership read must come first and the mint
+        // must not depend on the list authority's custody binding at all.
+        const listConfigSpy = vi
+          .spyOn(MosaicSdk, "getListConfig")
+          .mockResolvedValue({ authority: TEST_SOLANA_ADDRESSES.wallet1 } as never);
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(true);
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+          // No list-authority lookup and no list write: the destination was
+          // already on-chain, so no list signer was ever required.
+          expect(listConfigSpy).not.toHaveBeenCalled();
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+
+          // The DB mirror is still ensured for the on-chain member.
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry?.id).toMatch(/^tal_/);
+
+          const body = (await res.json()) as { data: { transaction: { id: string } } };
+          const audit = await getDb(env)
+            .prepare(
+              `SELECT metadata FROM audit_logs
+               WHERE action = 'mint' AND resource_type = 'token_transaction'
+                 AND resource_id = ?
+               LIMIT 1`
+            )
+            .bind(body.data.transaction.id)
+            .first<{ metadata: string }>();
+          const meta = JSON.parse(audit?.metadata ?? "{}") as {
+            mode: string;
+            addedToAllowlist: boolean;
+          };
+          expect(meta.mode).toBe("execute");
+          expect(meta.addedToAllowlist).toBe(false);
+        } finally {
+          listConfigSpy.mockRestore();
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("refuses a mint whose list wallet policy denies the allowlist add", async () => {
+        await seedAblListAddress();
+
+        // Post-rotation state: the live list is administered by the retired
+        // deploy wallet, which custody still controls — but its wallet policy
+        // denies allowlist adds, the same policy the standalone allowlist
+        // route is judged on. The mint must not sign around that decision.
+        const retiredListAuthority = TEST_SOLANA_ADDRESSES.wallet1;
+        const listConfigSpy = vi
+          .spyOn(MosaicSdk, "getListConfig")
+          .mockResolvedValue({ authority: retiredListAuthority } as never);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
+               (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+             VALUES ('cwlt_issuance_list_policy_deny', 'cust_cfg_issuance_activity',
+                     'wal_issuance_list_policy_deny', ?, 'List authority', 'transfer', 'active')`
+          )
+          .bind(retiredListAuthority)
+          .run();
+        const policyResponse = await app.request(
+          `/v1/payments/wallets/wal_issuance_list_policy_deny/policies`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              defaultAction: "allow",
+              rules: [
+                {
+                  id: "deny-allowlist-add",
+                  kind: "operation_type",
+                  operationTypes: ["issuance_allowlist_add_execute"],
+                  action: "deny",
+                },
+              ],
+            }),
+          },
+          env
+        );
+        expect(policyResponse.status, JSON.stringify(await policyResponse.json())).toBe(200);
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(false);
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as {
+            error: { code: string; details: Record<string, unknown> };
+          };
+          expect(body.error.code).toBe("FORBIDDEN");
+          expect(body.error.details).toMatchObject({
+            list: ablList,
+            listAuthority: retiredListAuthority,
+            custodyWalletId: "cwlt_issuance_list_policy_deny",
+            policyDecision: "deny",
+          });
           expect(addToListSpy).not.toHaveBeenCalled();
           expect(mintToSpy).not.toHaveBeenCalled();
           const entry = await getDb(env)

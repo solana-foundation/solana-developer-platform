@@ -69,6 +69,7 @@ interface UpdateAuthorityReplayPolicyResolved {
   role: AuthorityRole;
   custodyWalletId: string;
   newAuthority: ReturnType<typeof assertValidAddress> | null;
+  ablListAddress: string | null;
   replay: TokenTransaction;
 }
 
@@ -221,11 +222,42 @@ async function resolveUpdateAuthorityReplayBeforeLiveChecks(
   return { transaction: recovered, providerWalletId: wallet.providerWalletId };
 }
 
+/**
+ * Reconstruct the residual-authority disclosure for a replayed rotation.
+ *
+ * A settled replay answers a client that lost the first execute response, so
+ * it must repeat the warnings that response carried — an operator retrying
+ * after a lost response still needs to know the retiring signer keeps
+ * administering the ABL list. The retiring signer is read from the replayed
+ * transaction's own params, so the disclosure matches what the rotation was
+ * executed with, and the live list authority is re-resolved exactly as the
+ * execute path resolves it. Best-effort like the execute path: a failed live
+ * read only omits the warning, it never blocks the replay. Pending replays
+ * disclose nothing — their rotation has not happened yet.
+ */
+async function replayResidualAblAuthorityWarnings(
+  env: Env,
+  resolved: Pick<
+    UpdateAuthorityReplayPolicyResolved,
+    "tokenId" | "role" | "ablListAddress" | "replay"
+  >
+): Promise<AuthorityUpdateWarning[]> {
+  if (!isSettledAuthorityTransaction(resolved.replay)) return [];
+  const currentAuthority = resolved.replay.params.currentAuthority;
+  if (typeof currentAuthority !== "string" || currentAuthority.length === 0) return [];
+  return resolveResidualAblAuthorityWarnings(
+    env,
+    { id: resolved.tokenId, ablListAddress: resolved.ablListAddress },
+    resolved.role,
+    currentAuthority
+  );
+}
+
 async function updateAuthorityReplayResponse(
   c: AppContext,
   resolved: Pick<
     UpdateAuthorityReplayPolicyResolved,
-    "tokenId" | "tokenService" | "role" | "newAuthority" | "replay"
+    "tokenId" | "tokenService" | "role" | "newAuthority" | "ablListAddress" | "replay"
   >
 ) {
   if (resolved.replay.status === "confirmed") {
@@ -236,7 +268,11 @@ async function updateAuthorityReplayResponse(
       resolved.newAuthority
     );
   }
-  return success(c, { transaction: toPublicTokenTransaction(resolved.replay) });
+  const warnings = await replayResidualAblAuthorityWarnings(c.env, resolved);
+  return success(c, {
+    transaction: toPublicTokenTransaction(resolved.replay),
+    ...(warnings.length > 0 ? { warnings } : {}),
+  });
 }
 
 /** Return a validated persisted authority update before admission or policy writes. */
@@ -427,6 +463,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
         role,
         custodyWalletId,
         newAuthority,
+        ablListAddress: token.ablListAddress ?? null,
         replay: replay.transaction,
       } satisfies UpdateAuthorityReplayPolicyResolved,
       rawPayload: {
@@ -594,6 +631,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       tokenService,
       role,
       newAuthority,
+      ablListAddress,
       replay: transaction,
     });
   }

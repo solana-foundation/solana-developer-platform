@@ -1,7 +1,7 @@
 import { deriveAblListAddress } from "@sdp/issuance/mosaic";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import type { Token, TokenTransaction } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
@@ -9,6 +9,7 @@ import { getDb } from "@/db";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -20,6 +21,7 @@ import {
   beginApprovedWalletOperationEffect,
   reserveMintSupplyAtApprovedEffectBoundary,
 } from "@/services/policy/approved-operation-replay";
+import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
 import type { TokenService } from "@/services/token.service";
 import { resolveMintOperationAmount } from "@/services/token-operation.service";
 import type { Env } from "@/types/env";
@@ -36,6 +38,7 @@ import {
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  type ResolvedIssuanceWallet,
   resolveAllowlistAuthority,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
@@ -92,6 +95,7 @@ interface MintExecutionPolicyResolved {
   tokenId: string;
   auth: ApiKeyContext;
   tokenService: TokenService;
+  token: Token;
   mintAddress: ReturnType<typeof assertValidAddress>;
   destination: ReturnType<typeof assertValidAddress>;
   mosaicAmount: MintOperationAmount["mosaicAmount"];
@@ -363,9 +367,12 @@ async function rollbackCreatedAllowlistEntry(
 async function resolveOnChainListMosaic(opts: {
   c: AppContext;
   auth: ApiKeyContext;
+  token: Token;
+  tokenService: TokenService;
   ablListAddress: string;
   mintAuthority: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
+  destination: ReturnType<typeof assertValidAddress>;
   mintMosaic: ReturnType<typeof createIssuanceMosaicService>;
 }): Promise<ReturnType<typeof createIssuanceMosaicService>> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
@@ -384,6 +391,19 @@ async function resolveOnChainListMosaic(opts: {
       auth: opts.auth,
       currentAuthority: listAuthority,
       requiredWalletPermissions: ["tokens:write"],
+    });
+    // A distinct list wallet is a distinct governed signer: judge it for the
+    // list mutation it is about to sign, exactly as the standalone allowlist
+    // routes judge it, before any signer is bound.
+    await assertListWalletMayAddToAllowlist({
+      c: opts.c,
+      auth: opts.auth,
+      token: opts.token,
+      tokenService: opts.tokenService,
+      list: listAddress,
+      listAuthority,
+      listWallet: listAuthorityWallet,
+      destination: opts.destination,
     });
     const listSigner = await createResolvedAuthoritySigner({
       env: opts.c.env,
@@ -406,6 +426,64 @@ async function resolveOnChainListMosaic(opts: {
 }
 
 /**
+ * Judge the list wallet for the allowlist add a governed mint is about to sign.
+ *
+ * The mint policy gate evaluates the mint-authority wallet only, so without
+ * this check a list wallet whose own policy denies or gates allowlist changes
+ * would sign the same mutation the standalone allowlist routes gate on it.
+ * The list wallet's policy is evaluated here without persisting a second
+ * wallet operation — the governed intent is the mint — and any non-allow
+ * decision fails the mint closed: an approval-gated list change belongs on
+ * the allowlist route, which owns the approval workflow, or on a policy
+ * adjustment for the wallet that controls the list.
+ */
+async function assertListWalletMayAddToAllowlist(opts: {
+  c: AppContext;
+  auth: ApiKeyContext;
+  token: Token;
+  tokenService: TokenService;
+  list: ReturnType<typeof assertValidAddress>;
+  listAuthority: string;
+  listWallet: ResolvedIssuanceWallet;
+  destination: ReturnType<typeof assertValidAddress>;
+}): Promise<void> {
+  const candidate = buildIssuancePolicyCandidate({
+    auth: opts.auth,
+    token: opts.token,
+    custodyWalletId: opts.listWallet.custodyWalletId,
+    walletId: opts.listWallet.providerWalletId,
+    operationType: "issuance_allowlist_add_execute",
+    amount: null,
+    destination: opts.destination,
+  });
+  const evaluation = await dryRunPolicyCandidate(
+    opts.c.env,
+    getRequestTenantScope(opts.c),
+    candidate,
+    []
+  );
+  if (evaluation.decision !== "allow") {
+    throw new AppError(
+      "FORBIDDEN",
+      "The wallet controlling this token's on-chain control list does not allow adding destinations by policy. Add the destination through the control-list endpoint or adjust the list wallet's policy.",
+      {
+        list: opts.list,
+        listAuthority: opts.listAuthority,
+        custodyWalletId: opts.listWallet.custodyWalletId,
+        policyDecision: evaluation.decision,
+        reason: evaluation.reason,
+      }
+    );
+  }
+  await admitIssuanceRuntimeExecution({
+    env: opts.c.env,
+    auth: opts.auth,
+    custodyWalletId: opts.listWallet.custodyWalletId,
+    tokenService: opts.tokenService,
+  });
+}
+
+/**
  * Sync a destination wallet to the on-chain ABL list.
  *
  * Uses the on-chain ABL list as the source of truth, since the DB mirror can
@@ -417,6 +495,11 @@ async function resolveOnChainListMosaic(opts: {
  *  2. Otherwise, run a DB-first / on-chain-second sync: insert the DB row,
  *     then write on-chain. If the on-chain write fails and we created the DB
  *     row, roll it back so the two layers stay in sync.
+ *
+ * The signer that performs the add is bound lazily via `resolveListMosaic`,
+ * after membership is known to be absent: an existing member needs no list
+ * write, so a stale or uncontrolled list authority must not block its mint.
+ * The read side (`mosaic`) is signer-independent.
  *
  * Returns `true` when the destination was absent from the on-chain list at the
  * start of the call and this call drove it onto the list with the DB mirror
@@ -430,6 +513,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
   c: AppContext;
   tokenService: TokenService;
   mosaic: ReturnType<typeof createIssuanceMosaicService>;
+  resolveListMosaic: () => Promise<ReturnType<typeof createIssuanceMosaicService>>;
   tokenId: string;
   ablListAddress: string;
   destinationRaw: string;
@@ -461,6 +545,8 @@ async function syncDestinationToOnChainAllowlist(opts: {
     return false;
   }
 
+  const listMosaic = await opts.resolveListMosaic();
+
   let createdEntryId: string | null = null;
   try {
     const entry = await opts.tokenService.addAllowlistEntryStrict(dbArgs);
@@ -477,7 +563,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
 
   try {
     await beginApprovedWalletOperationEffect(opts.c);
-    await opts.mosaic.addToList({
+    await listMosaic.addToList({
       list: listAddress,
       wallet: opts.destination,
     });
@@ -487,7 +573,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
     // transient RPC/confirmation error but the wallet is in fact on-chain).
     // If on-chain membership now holds, both layers are consistent — fall
     // through to the DB re-assert below.
-    if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+    if (await listMosaic.isWalletOnList(listAddress, opts.destination)) {
       // fall through
     } else if (createdEntryId) {
       await rollbackCreatedAllowlistEntry(opts.tokenService, createdEntryId, error);
@@ -818,6 +904,7 @@ export async function extractMintPolicyCandidate(
       tokenId,
       auth,
       tokenService,
+      token,
       mintAddress,
       destination,
       mosaicAmount,
@@ -859,6 +946,7 @@ export const executeMint = async (c: AppContext) => {
       tokenId,
       auth,
       tokenService,
+      token,
       mintAddress,
       destination,
       mosaicAmount,
@@ -943,33 +1031,37 @@ export const executeMint = async (c: AppContext) => {
     });
     const mintMosaic = createIssuanceMosaicService(c, signer, "sponsored");
     // The ABL list is its own authority domain — sign list mutations with the
-    // wallet that controls the live on-chain list, not the mint authority.
+    // wallet that controls the live on-chain list, not the mint authority. The
+    // list signer is bound lazily, after the membership read proves an add is
+    // actually needed, so an existing member never depends on the list
+    // authority's custody binding.
     const listAddress = ablListAddress
       ? assertValidAddress(ablListAddress, "ablListAddress")
       : null;
-    const listMosaic = listAddress
-      ? await resolveOnChainListMosaic({
+    addedToAllowlist = listAddress
+      ? await syncDestinationToOnChainAllowlist({
           c,
-          auth,
+          tokenService,
+          mosaic: mintMosaic,
+          resolveListMosaic: () =>
+            resolveOnChainListMosaic({
+              c,
+              auth,
+              token,
+              tokenService,
+              ablListAddress: listAddress,
+              mintAuthority: currentAuthority,
+              mintAddress,
+              destination,
+              mintMosaic,
+            }),
+          tokenId,
           ablListAddress: listAddress,
-          mintAuthority: currentAuthority,
-          mintAddress,
-          mintMosaic,
+          destinationRaw: input.mint.destination,
+          destination,
+          addedBy: auth.id,
         })
-      : null;
-    addedToAllowlist =
-      listAddress && listMosaic
-        ? await syncDestinationToOnChainAllowlist({
-            c,
-            tokenService,
-            mosaic: listMosaic,
-            tokenId,
-            ablListAddress: listAddress,
-            destinationRaw: input.mint.destination,
-            destination,
-            addedBy: auth.id,
-          })
-        : false;
+      : false;
 
     const result = await mintMosaic.mintTo(
       {

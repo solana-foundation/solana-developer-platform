@@ -2087,7 +2087,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 
 `type` can be `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
 
-On tokens gated by an on-chain allowlist or blocklist (ABL), the control list is its own authority domain: it is derived from the deploy-time mint signer, and the ABL program cannot reassign list authority. Rotating the mint authority leaves the list administered by the retiring signer — the prepare and execute responses disclose this with a `RESIDUAL_ABL_LIST_AUTHORITY` warning when it applies. Check which wallet currently controls the list with `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true`, and administer the list with the wallet that controls it.
+On tokens gated by an on-chain allowlist or blocklist (ABL), the control list is its own authority domain: it is derived from the deploy-time mint signer, and the ABL program cannot reassign list authority. Rotating the mint authority leaves the list administered by the retiring signer — the prepare and execute responses disclose this with a `RESIDUAL_ABL_LIST_AUTHORITY` warning when it applies. Check which wallet currently controls the list with `GET /v1/issuance/tokens/{tokenId}?includeAllowlistAuthority=true`, and administer the list with the wallet that controls it. A governed mint that syncs a new destination onto the list signs with that wallet and honors its wallet policy for list changes: if the policy denies or gates the add, the mint is refused, so add the destination through the control-list endpoint (which runs the list wallet's approval workflow) or adjust the list wallet's policy.
 
 </Tab>
 </Tabs>

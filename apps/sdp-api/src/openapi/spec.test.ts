@@ -575,6 +575,28 @@ describe("OpenAPI spec", () => {
     if (codes?.enum) expect(codes.enum).toContain("SIGNING_REJECTED");
   });
 
+  it("keeps the public error-code enum aligned with the conflicts the mint route returns", () => {
+    const doc = createPublicOpenApiDocument();
+    const operation = doc.paths?.["/v1/issuance/tokens/{tokenId}/mint"]?.post;
+    expect(operation?.responses?.["409"]).toBeDefined();
+
+    // The public error-code enum is the contract clients validate documented
+    // error responses against: a conflict code the mint route can return but
+    // the enum omits makes valid 409 responses fail client-side validation.
+    const error409 = getJsonSchema(operation?.responses?.["409"]);
+    const codeEnum = error409.properties?.error?.properties?.code?.enum;
+    expect(codeEnum).toBeDefined();
+    for (const code of [
+      "NOT_ON_TOKEN_ALLOWLIST",
+      "DESTINATION_REVOKED",
+      "ABL_LIST_AUTHORITY_NOT_CONTROLLED",
+      "ACCOUNT_FROZEN",
+      "MAX_SUPPLY_EXCEEDED",
+    ]) {
+      expect(codeEnum, code).toContain(code);
+    }
+  });
+
   it("documents exact-one wallet ownership and request-time runtime admission", () => {
     const doc = createOpenApiDocument();
     const createWallet = getWalletResponseSchema(
