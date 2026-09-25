@@ -12,6 +12,7 @@ import type {
   DvpTradeRow,
   DvpTradeScope,
 } from "./dvp-trade.repository";
+import { DvpSettlementWalletInactiveError } from "./dvp-trade.repository";
 
 const dvpTradeRowSchema = z.object({
   id: z.string(),
@@ -201,9 +202,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
    *
    * @param executor - Database executor owning the statement.
    * @param row - Claim to insert.
+   * @param settlementGate - When given, the INSERT also re-checks that this
+   *   settlement wallet is still active and still the project's mapped
+   *   authority in the same statement, refusing with
+   *   {@link DvpSettlementWalletInactiveError} when a deactivation committed
+   *   first. Null skips the gate entirely (same SQL shape, gate disabled by
+   *   a bound boolean) for the unconditional `create` path.
    * @returns The inserted claim.
    */
-  async function insert(executor: DatabaseExecutor, row: DvpTradeInsert): Promise<DvpTradeRow> {
+  async function insert(
+    executor: DatabaseExecutor,
+    row: DvpTradeInsert,
+    settlementGate: { custodyWalletId: string } | null = null
+  ): Promise<DvpTradeRow> {
     const inserted = await executor
       .prepare(
         `INSERT INTO dvp_trades (
@@ -216,7 +227,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               escrow_a, escrow_b, counterparty_account_id_a, counterparty_account_id_b,
               idempotency_key, idempotency_fingerprint,
               create_signature, create_last_valid_block_height
-            ) VALUES (
+            ) SELECT
               ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?,
               ?, ?,
@@ -226,6 +237,22 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               ?, ?, ?, ?,
               ?, ?,
               ?, ?
+            -- Liveness gate, active only when the caller passes a settlement
+            -- wallet. A deactivation that committed before this insert is
+            -- invisible to the deactivation's own guard (the trade does not
+            -- exist yet), so the claim re-checks the wallet's status and its
+            -- settlement mapping right here. The flag short-circuits the gate
+            -- OFF for the unconditional create path.
+            WHERE NOT ?::boolean
+            OR (
+              EXISTS (
+                SELECT 1 FROM custody_wallets
+                 WHERE id = ? AND status = 'active'
+              )
+              AND EXISTS (
+                SELECT 1 FROM dvp_settlement_wallets
+                 WHERE project_id = ? AND custody_wallet_id = ?
+              )
             )
             RETURNING ${SELECT_COLUMNS}`
       )
@@ -262,10 +289,20 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         row.idempotencyKey,
         row.idempotencyFingerprint,
         row.createSignature,
-        row.createLastValidBlockHeight
+        row.createLastValidBlockHeight,
+        // The gate flag and its three parameters exist in every variant of the
+        // statement, so they are always bound; `false` disables the gate for
+        // the unconditional `create` path.
+        settlementGate !== null,
+        settlementGate?.custodyWalletId ?? "",
+        row.projectId,
+        settlementGate?.custodyWalletId ?? ""
       )
       .first<Record<string, unknown>>();
     if (!inserted) {
+      if (settlementGate !== null) {
+        throw new DvpSettlementWalletInactiveError(settlementGate.custodyWalletId);
+      }
       throw new Error("DvP trade insert returned no row");
     }
     return mapDvpTradeRow(inserted);
@@ -276,7 +313,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return insert(db, row);
     },
 
-    async claimWithKeyRelease(failedRowId: string | null, row: DvpTradeInsert) {
+    async claimWithKeyRelease(failedRowId: string | null, row, settlement) {
       return db.transaction(async (executor) => {
         if (failedRowId !== null) {
           await executor
@@ -288,7 +325,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
             .bind(failedRowId)
             .run();
         }
-        return insert(executor, row);
+        return insert(executor, row, { custodyWalletId: settlement.custodyWalletId });
       });
     },
 

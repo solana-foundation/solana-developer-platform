@@ -735,6 +735,12 @@ export class CustodyConfigStore implements SigningConfigStore {
     // in a read-before-write pair: a guard checked first and applied second can
     // race a trade created in between, deactivating an authority that just
     // became load-bearing.
+    //
+    // The guard matches `dvp_trades.settlement_authority` (the on-chain
+    // address, a PDA seed) to the wallet's public key. Open trades under a
+    // REPLACEMENT authority must not block this wallet: an inactive authority
+    // is routinely replaced by a new mapped wallet while its old trades are
+    // still open, and those trades stay bound to the old address.
     const result = await this.db
       .prepare(
         `UPDATE custody_wallets
@@ -747,11 +753,9 @@ export class CustodyConfigStore implements SigningConfigStore {
          )
          AND (
            SELECT COUNT(*)
-             FROM dvp_settlement_wallets s
-             JOIN dvp_trades t
-               ON t.project_id = s.project_id
+             FROM dvp_trades t
+            WHERE t.settlement_authority = custody_wallets.public_key
               AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-            WHERE s.custody_wallet_id = custody_wallets.id
          ) = 0`
       )
       .bind(configId, walletId)
@@ -792,6 +796,9 @@ export class CustodyConfigStore implements SigningConfigStore {
     configId: string,
     walletId: string
   ): Promise<DeactivateWalletResult> {
+    // Same DvP scoping as `deactivateWallet`: the guard counts only trades
+    // whose recorded `settlement_authority` equals this wallet's public key,
+    // so open trades under a replacement authority never block this wallet.
     const result = await this.db
       .prepare(
         `UPDATE custody_wallets
@@ -809,11 +816,9 @@ export class CustodyConfigStore implements SigningConfigStore {
          ) > 1
          AND (
            SELECT COUNT(*)
-             FROM dvp_settlement_wallets s
-             JOIN dvp_trades t
-               ON t.project_id = s.project_id
+             FROM dvp_trades t
+            WHERE t.settlement_authority = custody_wallets.public_key
               AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-            WHERE s.custody_wallet_id = custody_wallets.id
          ) = 0`
       )
       .bind(configId, walletId, configId)
@@ -848,16 +853,20 @@ export class CustodyConfigStore implements SigningConfigStore {
    * True when the wallet is the settlement authority for at least one open DvP
    * trade. Used by the guarded deactivate paths to distinguish a
    * load-bearing authority from an ordinary last-wallet refusal.
+   *
+   * Matches on the wallet's public key, the same predicate the conditional
+   * UPDATE uses: the authority is recorded on a trade as an on-chain address,
+   * and only trades naming THIS address make the wallet load-bearing.
    */
   private async isOpenDvpSettlementAuthority(custodyWalletId: string): Promise<boolean> {
     const blocking = await this.db
       .prepare(
         `SELECT COUNT(*) AS open_trades
-           FROM dvp_settlement_wallets s
-           JOIN dvp_trades t
-             ON t.project_id = s.project_id
-            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-          WHERE s.custody_wallet_id = ?`
+           FROM dvp_trades t
+          WHERE t.settlement_authority = (
+                  SELECT public_key FROM custody_wallets WHERE id = ?
+                )
+            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')`
       )
       .bind(custodyWalletId)
       .first<{ open_trades: number | string }>();

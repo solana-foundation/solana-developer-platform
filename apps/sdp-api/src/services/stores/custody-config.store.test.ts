@@ -19,6 +19,7 @@ import { CustodyConfigStore } from "./custody-config.store";
 const PROJECT_ID = "prj_cust_deactivate";
 const CUSTODY_CONFIG_ID = "cust_cust_deactivate";
 const AUTHORITY_ADDRESS = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC";
+const REPLACEMENT_ADDRESS = "9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY";
 const OTHER_ADDRESS = "5vJRzKtcp4b3Ptw9c8s3s2LrCC1cvJUY4Y3xvJXfj3Zn";
 
 async function seedWallet(id: string, publicKey: string, purpose: string): Promise<void> {
@@ -31,7 +32,11 @@ async function seedWallet(id: string, publicKey: string, purpose: string): Promi
     .run();
 }
 
-async function seedOpenTrade(id: string, swapDvp: string): Promise<void> {
+async function seedOpenTrade(
+  id: string,
+  swapDvp: string,
+  settlementAuthority: string = AUTHORITY_ADDRESS
+): Promise<void> {
   await getDb(env)
     .prepare(
       `INSERT INTO dvp_trades (
@@ -57,8 +62,43 @@ async function seedOpenTrade(id: string, swapDvp: string): Promise<void> {
          'created'
        )`
     )
-    .bind(id, TEST_ORG.id, PROJECT_ID, swapDvp, AUTHORITY_ADDRESS, AUTHORITY_ADDRESS, OTHER_ADDRESS)
+    .bind(
+      id,
+      TEST_ORG.id,
+      PROJECT_ID,
+      swapDvp,
+      settlementAuthority,
+      AUTHORITY_ADDRESS,
+      OTHER_ADDRESS
+    )
     .run();
+}
+
+/**
+ * Seeds the replacement scenario: an INACTIVE old authority whose open trades
+ * still name its address, plus the NEW mapped replacement wallet. The mapping
+ * is the only thing the old guard joined through, which is why open trades
+ * under the dead authority used to block the replacement.
+ */
+async function seedReplacedAuthority(): Promise<void> {
+  await seedWallet("cwlt_old_authority", AUTHORITY_ADDRESS, "dvp_settlement_authority");
+  await seedWallet("cwlt_new_authority", REPLACEMENT_ADDRESS, "dvp_settlement_authority");
+  await seedWallet("cwlt_survivor", OTHER_ADDRESS, "transfer");
+  await getDb(env)
+    .prepare(
+      `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
+       VALUES (?, ?, 'cwlt_new_authority')`
+    )
+    .bind(PROJECT_ID, TEST_ORG.id)
+    .run();
+  await getDb(env)
+    .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = 'cwlt_old_authority'")
+    .run();
+  await seedOpenTrade(
+    "trade_old_authority",
+    "BXvugAaWDqgADmGTdwgdzVZUyJbagNM6w4hPrC4JQ1po",
+    AUTHORITY_ADDRESS
+  );
 }
 
 describe("CustodyConfigStore wallet deactivation guards", () => {
@@ -180,6 +220,30 @@ describe("CustodyConfigStore wallet deactivation guards", () => {
       ).resolves.toBe("deactivated");
     });
 
+    // The guard counts only trades whose recorded `settlement_authority` equals
+    // the wallet's public key. An inactive authority is replaced by a new mapped
+    // wallet while its old trades stay open; those trades are bound to the OLD
+    // address forever, so they must not block deactivating the replacement.
+    it("allows deactivating a replacement authority while the old authority's trades are open", async () => {
+      await seedReplacedAuthority();
+
+      await expect(
+        store.deactivateWalletIfNotLast(CUSTODY_CONFIG_ID, "provider_cwlt_new_authority")
+      ).resolves.toBe("deactivated");
+    });
+
+    it("still blocks a wallet whose address IS the open trade's recorded authority", async () => {
+      await seedReplacedAuthority();
+      // A second, ACTIVE wallet whose address matches the old open trade: the
+      // mapping points at the replacement, but this wallet's key is the
+      // authority on the trade, so it is the one that is load-bearing.
+      await seedWallet("cwlt_address_match", AUTHORITY_ADDRESS, "transfer");
+
+      await expect(
+        store.deactivateWalletIfNotLast(CUSTODY_CONFIG_ID, "provider_cwlt_address_match")
+      ).resolves.toBe("dvp_settlement_authority");
+    });
+
     it("reports wallet_not_found for an unknown wallet", async () => {
       await seedWallet("cwlt_survivor", OTHER_ADDRESS, "transfer");
 
@@ -249,6 +313,36 @@ describe("CustodyConfigStore wallet deactivation guards", () => {
         .bind("cwlt_ordinary")
         .first<{ status: string }>();
       expect(row?.status).toBe("inactive");
+    });
+
+    // Mirror of the `deactivateWalletIfNotLast` replacement test: open trades
+    // under the OLD authority bind its address, not the project, so they must
+    // not block the NEW mapped wallet through the mapping row.
+    it("allows deactivating a replacement authority while the old authority's trades are open", async () => {
+      await seedReplacedAuthority();
+
+      await store.deactivateWallet(CUSTODY_CONFIG_ID, "provider_cwlt_new_authority");
+
+      const row = await getDb(env)
+        .prepare("SELECT status FROM custody_wallets WHERE id = ?")
+        .bind("cwlt_new_authority")
+        .first<{ status: string }>();
+      expect(row?.status).toBe("inactive");
+    });
+
+    it("still blocks a wallet whose address IS the open trade's recorded authority", async () => {
+      await seedReplacedAuthority();
+      await seedWallet("cwlt_address_match", AUTHORITY_ADDRESS, "transfer");
+
+      await expect(
+        store.deactivateWallet(CUSTODY_CONFIG_ID, "provider_cwlt_address_match")
+      ).rejects.toThrow(/DvP settlement authority/);
+
+      const row = await getDb(env)
+        .prepare("SELECT status FROM custody_wallets WHERE id = ?")
+        .bind("cwlt_address_match")
+        .first<{ status: string }>();
+      expect(row?.status).toBe("active");
     });
 
     it("throws when the wallet does not exist", async () => {

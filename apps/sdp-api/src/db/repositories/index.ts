@@ -56,6 +56,7 @@ export type {
 export { createPostgresCounterpartyProviderAccountsRepository } from "./counterparty-provider-account.repository.postgres";
 export type {
   DvpCloseClaim,
+  DvpSettlementLiveness,
   DvpTradeInsert,
   DvpTradeRepository,
   DvpTradeRow,
@@ -63,6 +64,7 @@ export type {
   DvpTradeSide,
   DvpTradeStatus,
 } from "./dvp-trade.repository";
+export { DvpSettlementWalletInactiveError } from "./dvp-trade.repository";
 export { createPostgresDvpTradeRepository } from "./dvp-trade.repository.postgres";
 export type {
   DeprecateUnlistedEarnStrategiesInput,
