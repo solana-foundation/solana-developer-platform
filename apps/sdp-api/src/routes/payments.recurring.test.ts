@@ -1886,13 +1886,26 @@ describe("Payments routes — recurring", () => {
     expect(staleAttempt).toBeNull();
 
     // Once the fresh period elapses, automated collection works normally
-    // against the fresh identity.
-    await setRecurringCollectionDue({
-      recurringPaymentId: activated.id,
-      subscriptionId: activated.subscriptionId,
-      dueAt: new Date().toISOString(),
-    });
-    expect((await collectDueRecurringPayments(env, new Date())).collected).toBe(1);
+    // against the fresh identity: the test clock advances past the
+    // resume-established due timestamp without rewriting it, so the row is
+    // selected and collected under that exact identity.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(freshDueTime + 60 * 1000);
+      expect((await collectDueRecurringPayments(env, new Date())).collected).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const freshAttempt = await getDb(env)
+      .prepare(
+        `SELECT 1 AS attempt
+           FROM payment_subscription_collection_attempts
+          WHERE subscription_id = ? AND due_at = ?`
+      )
+      .bind(activated.subscriptionId, resumedSchedule?.recurring_due_at)
+      .first<{ attempt: number }>();
+    expect(freshAttempt).not.toBeNull();
   });
 
   it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
