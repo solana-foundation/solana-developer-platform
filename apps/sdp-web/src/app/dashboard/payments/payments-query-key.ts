@@ -15,7 +15,15 @@ export interface CounterpartyRequirementsParams {
 
 export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
-  actionWallets: () => "payments-action-wallets",
+  /**
+   * Wallet inventory is project-scoped state, so the cache identity carries the
+   * rendered workspace's project id: a sibling tab moving the shared selection
+   * cookie must not revalidate another project's wallets into this cache entry
+   * (SOLA9-618). Match entries with `isActionWalletsKey`.
+   */
+  actionWallets: ({ projectId }: { projectId: string }) =>
+    ["payments-action-wallets", projectId] as const,
+  isActionWalletsKey: (key: unknown) => Array.isArray(key) && key[0] === "payments-action-wallets",
   walletAddressQr: (address: string) => ["payments-wallet-address-qr", address] as const,
   createTransfer: () => "payments-create-transfer",
   transactions: ({ query }: { query: string }) => ["payments-transactions", query] as const,

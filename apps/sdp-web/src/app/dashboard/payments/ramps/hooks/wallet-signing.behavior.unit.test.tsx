@@ -108,7 +108,7 @@ describe("wallet selection during payments", () => {
 
     await act(() =>
       result.current.mutate(
-        paymentsQueryKeys.actionWallets(),
+        paymentsQueryKeys.actionWallets({ projectId: "proj_test" }),
         [{ ...source, isRuntimeExecutionAllowed: false }],
         false
       )
@@ -161,7 +161,7 @@ describe("wallet selection during payments", () => {
     expect(result.current.wizard.currentStepId).toBe("REVIEW");
     await act(() =>
       result.current.mutate(
-        paymentsQueryKeys.actionWallets(),
+        paymentsQueryKeys.actionWallets({ projectId: "proj_test" }),
         [
           { ...wallet, isRuntimeExecutionAllowed: false },
           { ...wallet, id: "cwlt_other" },
@@ -227,7 +227,7 @@ describe("wallet selection during payments", () => {
       const other = { ...wallet, id: "cwlt_other" };
       await act(() =>
         result.current.mutate(
-          paymentsQueryKeys.actionWallets(),
+          paymentsQueryKeys.actionWallets({ projectId: "proj_test" }),
           change === "removed" ? [other] : [{ ...wallet, isRuntimeExecutionAllowed: false }, other],
           false
         )
@@ -240,7 +240,11 @@ describe("wallet selection during payments", () => {
       await act(() => result.current.wizard.handlePrimary());
       expect(sent).toEqual([]);
       await act(() =>
-        result.current.mutate(paymentsQueryKeys.actionWallets(), [other, wallet], false)
+        result.current.mutate(
+          paymentsQueryKeys.actionWallets({ projectId: "proj_test" }),
+          [other, wallet],
+          false
+        )
       );
       expect(sent).toEqual([]);
       await act(() => result.current.wizard.handlePrimary());

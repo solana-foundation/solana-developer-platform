@@ -7,7 +7,6 @@ import { paymentsQueryKeys } from "./payments/payments-query-key";
 
 const plainKeys = [
   paymentsQueryKeys.actionCounterparties(),
-  paymentsQueryKeys.actionWallets(),
   paymentsQueryKeys.counterpartyFieldOptions(),
   custodyQueryKeys.policyDestinationAccounts(),
   issuanceQueryKeys.createTokenSignerWallets(),
@@ -19,6 +18,7 @@ const plainKeys = [
 ];
 
 const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
+  [paymentsQueryKeys.actionWallets({ projectId: "project_test" }), ["project_test"]],
   [paymentsQueryKeys.walletAddressQr("wallet-address"), ["wallet-address"]],
   [paymentsQueryKeys.onrampTransferStatus({ transferId: "tr_1" }), ["tr_1"]],
   [paymentsQueryKeys.offrampTransferStatus({ transferId: "tr_2" }), ["tr_2"]],
