@@ -194,9 +194,19 @@ Migrations must remain backward-compatible across the rollback window:
 - Separate destructive cleanup into a later change after rollback support expires.
 - Test the previous application image against the migrated schema when a change is high risk.
 
-CI enforces this with `pnpm check:migration-compat`: a changed migration that drops, renames, retypes, adds NOT NULL without a default, or rewrites rows fails the pull request. A deliberate contraction declares `-- sdp:migration-compat: breaking` at the top of the file and ships in a pull request that touches only the migrations directory, after the code that used the old shape is already in production.
+CI enforces this with `pnpm check:migration-compat`: a changed migration that drops an object, renames, retypes, adds NOT NULL without a default, or rewrites rows fails the pull request. Additions are free, and so is anything that only touches what the same file adds: backfilling a column it adds, deleting from a table it creates, dropping and re-adding a constraint. Statements inside `DO` blocks are checked too. A deliberate contraction declares `-- sdp:migration-compat: breaking` at the top of the file and ships in a pull request that touches only the migrations directory, after the code that used the old shape is already in production.
 
-A merge deploy whose commit carries migrations production has not applied is held: prod is untouched, Slack reports `prod held`, and the run dispatches the `Apply pending migrations to prod` workflow for that commit. That workflow waits in the `release-production` environment, so it never blocks stage deploys, releases, or manual redeploys while it waits. Stage has already run the same migration by then; approve once the stage smoke is green and the change has baked long enough to trust. A newer held merge replaces an older waiting approval, so one approval always deploys the latest held commit. Keep `release-production` configured with required reviewers; the gate depends on it.
+Production records the commit it last migrated with as the `sdp_schema_sha` label on `sdp-prod-api-public-migrate`. A merge deploy whose commit carries migrations past that label is held: prod is untouched, Slack reports `prod held`, and once the stage smoke is green the run dispatches `Apply pending migrations to prod` for that commit. That workflow first lists the pending migrations and commits in its run summary, then waits in the `release-production` environment, so it never blocks stage deploys, releases, or manual redeploys while it waits. Approve once the change has baked on stage long enough to trust. A newer held merge replaces an older waiting approval, and an approval for a commit that is behind what prod already applied is refused, so one approval always deploys the latest held commit. Approvals are skipped while `CONTINUOUS_PROD_DEPLOY` is off.
+
+Every migrating deploy (release or approved merge) refuses a commit that is behind the recorded schema, and a manual redeploy refuses an image that is ahead of it. Keep `release-production` configured with required reviewers, `prevent_self_review`, and a `main` branch policy; the gate depends on it.
+
+Bootstrap: while the label is unset every merge is held. Seed it with the commit whose migrations production last ran (the latest release deploy):
+
+```bash
+gcloud run jobs update sdp-prod-api-public-migrate \
+  --region us-central1 --project solana-developer-platform \
+  --update-labels sdp_schema_sha=$(git rev-parse v0.80.0)
+```
 
 ## One-time Cloudflare teardown
 

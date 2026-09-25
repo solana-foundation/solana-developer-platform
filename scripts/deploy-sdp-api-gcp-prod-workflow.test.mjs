@@ -195,39 +195,73 @@ test("merge deploys promote signed per-merge images and migrate before rollout",
   assert.doesNotMatch(workflow, /prod-merge-gate/);
 
   const migrate = workflow.indexOf("- name: Run database migrations");
-  const execute = workflow.indexOf('gcloud run jobs execute "${MIGRATE_JOB}"', migrate);
-  const label = workflow.indexOf('--update-labels "sdp_schema_sha=${DEPLOY_IMAGE_SHA}"', execute);
+  const execute = workflow.indexOf('gcloud run jobs execute "$' + "{MIGRATE_JOB}", migrate);
+  const label = workflow.indexOf(
+    '--update-labels "sdp_schema_sha=$' + "{DEPLOY_IMAGE_SHA}",
+    execute
+  );
   const capture = workflow.indexOf("- name: Capture rollback state", migrate);
   assert.ok(migrate !== -1 && migrate < execute);
   assert.ok(execute < label && label < capture);
 });
 
-test("pending migrations hold the merge deploy and surface it to the caller", () => {
-  assert.match(
-    workflow,
-    / {2}schema:\n\s+name: Check pending migrations against prod\n\s+if: >-\n\s+github\.repository == 'solana-foundation\/solana-developer-platform' &&\n\s+github\.event_name != 'workflow_dispatch' &&\n\s+inputs\.image_sha != '' &&\n\s+!inputs\.approved_schema/
+test("pending migrations are detected before the prod workflow is called", () => {
+  const orchestrator = fs.readFileSync(
+    path.resolve(here, "../.github/workflows/deploy.yml"),
+    "utf8"
   );
-  assert.match(workflow, /--format 'value\(metadata\.labels\.sdp_schema_sha\)'/);
   assert.match(
-    workflow,
+    orchestrator,
+    / {2}schema:\n\s+name: Check pending migrations against prod\n\s+needs: changes\n\s+if: needs\.changes\.outputs\.prod == 'true'\n[\s\S]*?environment: production\n/
+  );
+  assert.match(orchestrator, /--format 'value\(metadata\.labels\.sdp_schema_sha\)'/);
+  assert.match(
+    orchestrator,
     /git diff --name-only "\$\{applied\}\.\.HEAD" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
   );
-  assert.match(workflow, /pending="prod schema position unknown/);
-  assert.match(workflow, /needs: \[smoke, schema\]/);
+  assert.match(orchestrator, /pending="prod schema position unknown/);
   assert.match(
-    workflow,
-    /\(needs\.schema\.result == 'skipped' \|\|\n\s+\(needs\.schema\.result == 'success' && needs\.schema\.outputs\.pending != 'true'\)\) &&/
+    orchestrator,
+    / {2}deploy-api-prod:\n[\s\S]*?needs: \[changes, deploy-api-stage, schema\]\n\s+if: >-\n\s+needs\.changes\.outputs\.prod == 'true' &&\n\s+needs\.schema\.outputs\.pending == 'false' &&/
   );
+
+  assert.doesNotMatch(workflow, /\n {2}schema:\n/);
+  assert.doesNotMatch(workflow, /pending_migrations/);
+  assert.match(workflow, /name: Deploy production image\n\s+needs: smoke\n/);
   assert.match(workflow, /\n\s+environment: production\n/);
   assert.doesNotMatch(workflow, /environment: \$\{\{/);
   assert.match(
     workflow,
-    /outputs:\n\s+pending_migrations:\n\s+description:[^\n]*\n\s+value: \$\{\{ jobs\.schema\.outputs\.pending \}\}/
+    /ref: \$\{\{ inputs\.release_sha != '' && inputs\.release_sha \|\| \(inputs\.approved_schema && inputs\.image_sha\) \|\| github\.sha \}\}/
+  );
+});
+
+test("every migrating deploy is ordered against the schema prod last applied", () => {
+  assert.match(
+    workflow,
+    /- name: Read the schema position prod last applied\n\s+run: \|\n[\s\S]*?APPLIED_SCHEMA_SHA=\$\{applied\}/
   );
   assert.match(
     workflow,
-    /ref: \$\{\{ inputs\.release_sha != '' && inputs\.release_sha \|\| \(inputs\.approved_schema && inputs\.image_sha\) \|\| github\.sha \}\}/
+    /- name: Refuse a migrating deploy that is behind prod\n\s+if: \$\{\{ env\.BUILD_IMAGE == 'true' \}\}/
   );
+  assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" origin\/main/);
+  assert.match(
+    workflow,
+    /git merge-base --is-ancestor "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}"/
+  );
+  assert.match(
+    workflow,
+    /- name: Refuse a redeploy that is ahead of the prod schema\n\s+if: \$\{\{ github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema \}\}/
+  );
+  assert.match(
+    workflow,
+    /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" "\$\{APPLIED_SCHEMA_SHA\}"/
+  );
+  const read = workflow.indexOf("- name: Read the schema position prod last applied");
+  const refuse = workflow.indexOf("- name: Refuse a migrating deploy that is behind prod");
+  const promoteRelease = workflow.indexOf("- name: Verify and promote release image");
+  assert.ok(read !== -1 && read < refuse && refuse < promoteRelease);
 });
 
 test("the approval workflow waits outside the deploy concurrency groups", () => {
@@ -238,7 +272,21 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   assert.doesNotMatch(approval, /^concurrency:/m);
   assert.match(
     approval,
-    / {2}approve:\n[\s\S]*?environment: release-production\n\s+concurrency:\n\s+group: sdp-prod-schema-approval\n\s+cancel-in-progress: true/
+    /^run-name: "Apply pending migrations to prod — \$\{\{ inputs\.image_sha \}\}"$/m
+  );
+  assert.match(
+    approval,
+    / {2}pending:\n\s+name: List pending migrations\n\s+if: >-\n[\s\S]*?vars\.CONTINUOUS_PROD_DEPLOY == 'true'\n[\s\S]*?environment: production\n/
+  );
+  assert.match(approval, /git merge-base --is-ancestor "\$\{IMAGE_SHA\}" origin\/main/);
+  assert.match(approval, /git merge-base --is-ancestor "\$\{applied\}" "\$\{IMAGE_SHA\}"/);
+  assert.match(
+    approval,
+    /git diff --name-only "\$\{applied\}\.\.\$\{IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
+  );
+  assert.match(
+    approval,
+    / {2}approve:\n\s+name: Schema approval\n\s+needs: pending\n[\s\S]*?environment: release-production\n\s+concurrency:\n\s+group: sdp-prod-schema-approval\n\s+cancel-in-progress: true/
   );
   assert.match(
     approval,
@@ -247,19 +295,10 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   assert.match(approval, /env:\n\s+IMAGE_SHA: \$\{\{ inputs\.image_sha \}\}/);
   assert.doesNotMatch(approval, /run: [^\n]*\$\{\{ inputs\./);
   assert.match(approval, /\[\[ ! "\$\{IMAGE_SHA\}" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  const pending = approval.indexOf("  pending:");
   const approve = approval.indexOf("  approve:");
   const deploy = approval.indexOf("  deploy:");
-  assert.ok(approve !== -1 && approve < deploy);
-
-  assert.match(
-    workflow,
-    /- name: Refuse an approved deploy that is behind prod\n\s+if: \$\{\{ inputs\.approved_schema \}\}/
-  );
-  assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" origin\/main/);
-  assert.match(workflow, /git merge-base --is-ancestor "\$\{applied\}" "\$\{DEPLOY_IMAGE_SHA\}"/);
-  const refuse = workflow.indexOf("- name: Refuse an approved deploy that is behind prod");
-  const promote = workflow.indexOf("- name: Verify and promote merge image");
-  assert.ok(refuse !== -1 && refuse < promote);
+  assert.ok(pending !== -1 && pending < approve && approve < deploy);
 });
 
 test("the orchestrator sends every continuous merge to prod", () => {
@@ -280,7 +319,7 @@ test("the orchestrator sends every continuous merge to prod", () => {
   assert.match(prodJob, /vars\.CONTINUOUS_PROD_DEPLOY == 'true'/);
   assert.match(
     prodJob,
-    / {2}request-schema-approval:\n[\s\S]*?needs: deploy-api-prod\n\s+if: needs\.deploy-api-prod\.outputs\.pending_migrations == 'true'\n[\s\S]*?permissions:\n\s+actions: write/
+    / {2}request-schema-approval:\n[\s\S]*?needs: \[deploy-api-stage, schema\]\n\s+if: needs\.schema\.outputs\.pending == 'true' && needs\.deploy-api-stage\.result == 'success'\n[\s\S]*?permissions:\n\s+actions: write/
   );
   assert.match(
     prodJob,
@@ -288,13 +327,16 @@ test("the orchestrator sends every continuous merge to prod", () => {
   );
   assert.match(
     orchestrator,
-    /notify-end:\n\s+needs: \[changes, deploy-api-stage, deploy-api-prod, request-schema-approval\]/
+    /notify-end:\n\s+needs: \[changes, deploy-api-stage, schema, deploy-api-prod, request-schema-approval\]/
   );
   assert.match(
     orchestrator,
-    /needs\.request-schema-approval\.result == 'success' && 'stage \(prod held: pending migrations, approval run dispatched\)' \|\|\n\s+needs\.deploy-api-prod\.outputs\.pending_migrations == 'true' && 'stage \(prod held: pending migrations, approval dispatch failed\)'/
+    /needs\.request-schema-approval\.result == 'success' && 'stage \(prod held: pending migrations, approval run dispatched\)' \|\|\n\s+needs\.schema\.outputs\.pending == 'true' && 'stage \(prod held: pending migrations, approval not dispatched\)'/
   );
-  assert.match(orchestrator, /needs\.request-schema-approval\.result == 'failure'\) && 'FAILED'/);
+  assert.match(
+    orchestrator,
+    /needs\.schema\.result == 'failure' \|\| needs\.deploy-api-prod\.result == 'failure' \|\| needs\.request-schema-approval\.result == 'failure'\) && 'FAILED'/
+  );
 });
 
 test("merge mode skips the internal smoke gate but requires the caller's", () => {

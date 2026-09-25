@@ -1,4 +1,5 @@
 name: Apply pending migrations to prod
+run-name: "Apply pending migrations to prod — ${{ inputs.image_sha }}"
 
 on:
   workflow_dispatch:
@@ -14,9 +15,70 @@ permissions:
   packages: read
 
 jobs:
+  pending:
+    name: List pending migrations
+    if: >-
+      github.repository == 'solana-foundation/solana-developer-platform' &&
+      github.ref == 'refs/heads/main' &&
+      vars.CONTINUOUS_PROD_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Validate the commit
+        env:
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "image_sha must be a lowercase 40-character Git SHA." >&2
+            exit 1
+          fi
+          echo "IMAGE_SHA=${IMAGE_SHA}" >> "${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Show what approval would apply
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "${IMAGE_SHA}" origin/main; then
+            echo "${IMAGE_SHA} is not on main." >&2
+            exit 1
+          fi
+          applied="$(gcloud run jobs describe sdp-prod-api-public-migrate \
+            --region us-central1 --project solana-developer-platform \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
+            if ! git merge-base --is-ancestor "${applied}" "${IMAGE_SHA}"; then
+              echo "Prod already applied ${applied}, which ${IMAGE_SHA} does not include. Approve the newest held run instead." >&2
+              exit 1
+            fi
+            pending="$(git diff --name-only "${applied}..${IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+            commits="$(git log --oneline "${applied}..${IMAGE_SHA}")"
+          else
+            pending="prod schema position unknown (sdp_schema_sha=${applied:-unset}); approval seeds it"
+            commits="$(git log --oneline -1 "${IMAGE_SHA}")"
+          fi
+          {
+            printf 'Approving deploys %s to prod and runs these migrations:\n\n%s\n\nCommits since the schema prod last applied:\n\n%s\n' \
+              "${IMAGE_SHA}" "${pending:-none}" "${commits}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   approve:
     name: Schema approval
-    if: github.repository == 'solana-foundation/solana-developer-platform' && github.ref == 'refs/heads/main'
+    needs: pending
     runs-on: ubuntu-latest
     timeout-minutes: 2
     environment: release-production
@@ -27,13 +89,7 @@ jobs:
       - name: Record the approved commit
         env:
           IMAGE_SHA: ${{ inputs.image_sha }}
-        run: |
-          set -euo pipefail
-          if [[ ! "${IMAGE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "image_sha must be a lowercase 40-character Git SHA." >&2
-            exit 1
-          fi
-          echo "Approved prod deploy with migrations for ${IMAGE_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+        run: echo "Approved prod deploy with migrations for ${IMAGE_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
   deploy:
     name: sdp-api + worker + cron — prod

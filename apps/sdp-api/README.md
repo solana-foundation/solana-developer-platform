@@ -282,11 +282,12 @@ and must succeed before the service rollout proceeds. A manual production image
 redeploy intentionally does not update or execute the migration job.
 
 A merge to `main` migrates stage first. When `main` carries migrations that
-production has not applied, the production merge deploy is held and the run
-dispatches `Apply pending migrations to prod`, which waits in the
-`release-production` environment for a reviewer who confirms the change has
-baked on stage, then deploys that commit with its migrations. Migration-free
-merges deploy production without a stop. Because a rollback only moves traffic and never reverses the
+production has not applied (tracked by the `sdp_schema_sha` label on the prod
+migrate job), the production merge deploy is held and, once stage is green,
+the run dispatches `Apply pending migrations to prod`. That workflow lists the
+pending migrations, waits in the `release-production` environment for a
+reviewer who confirms the change has baked on stage, then deploys that commit
+with its migrations. Migration-free merges deploy production without a stop. Because a rollback only moves traffic and never reverses the
 schema, CI (`pnpm check:migration-compat`) rejects migrations the previous
 image cannot run against. A migration that must break compatibility declares
 `-- sdp:migration-compat: breaking` and ships in a PR that touches nothing

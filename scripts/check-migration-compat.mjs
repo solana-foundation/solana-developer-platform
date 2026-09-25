@@ -6,38 +6,48 @@ import { splitSqlStatements } from "../apps/sdp-api/scripts/lib/run-postgres-mig
 export const MIGRATIONS_DIR = "apps/sdp-api/src/db/migrations/";
 const SQL_DIR = `${MIGRATIONS_DIR}postgres/`;
 const BREAKING_DIRECTIVE = /^--\s*sdp:migration-compat:\s*breaking\s*$/m;
-const SQL_NAME = String.raw`(?:"[^"]+"|[^\s".(]+)`;
-const ALTER_TABLE_PREFIX = new RegExp(
-  String.raw`^ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?${SQL_NAME}(?:\.${SQL_NAME})*\s*\*?\s*`,
+const NAME = String.raw`(?:"[^"]+"|[^\s".(),;]+)(?:\.(?:"[^"]+"|[^\s".(),;]+))*`;
+const IF_EXISTS = String.raw`(?:IF\s+(?:NOT\s+)?EXISTS\s+)?`;
+const ALTER_TABLE = new RegExp(
+  String.raw`^ALTER\s+TABLE\s+${IF_EXISTS}(?:ONLY\s+)?(${NAME})\s*\*?\s*`,
   "i"
 );
+const CREATE = new RegExp(
+  String.raw`^CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+|TEMP(?:ORARY)?\s+|UNLOGGED\s+|MATERIALIZED\s+)*(\w+)\s+(?:CONCURRENTLY\s+)?${IF_EXISTS}(${NAME})`,
+  "i"
+);
+const DROP = new RegExp(
+  String.raw`^DROP\s+(?:MATERIALIZED\s+)?(\w+)\s+(?:CONCURRENTLY\s+)?${IF_EXISTS}(${NAME})`,
+  "i"
+);
+const ADD_COLUMN = new RegExp(String.raw`^ADD\s+(?:COLUMN\s+)?${IF_EXISTS}(${NAME})`, "i");
+const ADD_CONSTRAINT = new RegExp(String.raw`^ADD\s+CONSTRAINT\s+(${NAME})`, "i");
+const DROP_COLUMN = new RegExp(
+  String.raw`^DROP\s+(?:COLUMN\s+)?${IF_EXISTS}(?!CONSTRAINT\b)(${NAME})`,
+  "i"
+);
+const DROP_CONSTRAINT = new RegExp(String.raw`^DROP\s+CONSTRAINT\s+${IF_EXISTS}(${NAME})`, "i");
+const ALTER_COLUMN = new RegExp(String.raw`^ALTER\s+(?:COLUMN\s+)?(${NAME})\s+(.*)$`, "is");
+const UPDATE = new RegExp(
+  String.raw`^UPDATE\s+(?:ONLY\s+)?(${NAME})(?:\s+(?:AS\s+)?(?!SET\b)\w+)?\s+SET\s+(.*)$`,
+  "is"
+);
+const ROW_TARGET = new RegExp(
+  String.raw`^(?:DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?(?:\s+ONLY)?|MERGE\s+INTO|INSERT\s+INTO)\s+(?:ONLY\s+)?(${NAME})`,
+  "i"
+);
+const MAIN_VERB = /^(?:UPDATE|DELETE|INSERT|MERGE|TRUNCATE|SELECT|VALUES)\b/i;
+const PLPGSQL_PREFIX =
+  /^(?:DECLARE\b[\s\S]*?\bBEGIN\b|BEGIN\b|END\s+(?:IF|LOOP|CASE)\b|END\b|ELSE\b|ELSIF\b[\s\S]*?\bTHEN\b|IF\b[\s\S]*?\bTHEN\b|(?:FOR|FOREACH|WHILE)\b[\s\S]*?\bLOOP\b|LOOP\b|EXCEPTION\b|WHEN\b[\s\S]*?\bTHEN\b|PERFORM\b|RETURN\b)\s*/i;
 
-const matches = (pattern) => (text) => pattern.test(text);
+const normalize = (name) =>
+  name
+    .split(".")
+    .pop()
+    .replace(/^"(.*)"$/, "$1")
+    .toLowerCase();
 
-const STATEMENT_RULES = [
-  [matches(/^DROP\s+TABLE\b/i), "drops a table"],
-  [matches(/^(?:WITH\b[\s\S]*?\b)?(?:DELETE|TRUNCATE|UPDATE|MERGE)\b/i), "rewrites rows"],
-  [matches(/^(?:WITH\b[\s\S]*?\b)?INSERT\b[\s\S]*\bDO\s+UPDATE\b/i), "rewrites rows"],
-];
-
-const ALTER_ACTION_RULES = [
-  [matches(/^DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?(?!CONSTRAINT\b)\S/i), "drops a column"],
-  [matches(/^RENAME\b/i), "renames a table or column"],
-  [matches(/^ALTER\s+(?:COLUMN\s+)?\S+\s+(?:SET\s+DATA\s+)?TYPE\b/i), "changes a column type"],
-  [
-    matches(/^ALTER\s+(?:COLUMN\s+)?\S+\s+SET\s+NOT\s+NULL\b/i),
-    "makes an existing column NOT NULL",
-  ],
-  [
-    (action) =>
-      /^ADD\b/i.test(action) &&
-      /\bNOT\s+NULL\b/i.test(action) &&
-      !/\b(?:DEFAULT|GENERATED|PRIMARY\s+KEY)\b/i.test(action),
-    "adds a NOT NULL column without a DEFAULT",
-  ],
-];
-
-function splitTopLevel(text) {
+function splitTopLevel(text, separator = ",") {
   const parts = [];
   let depth = 0;
   let quote = null;
@@ -52,7 +62,7 @@ function splitTopLevel(text) {
       depth++;
     } else if (ch === ")") {
       depth--;
-    } else if (ch === "," && depth === 0) {
+    } else if (ch === separator && depth === 0) {
       parts.push(text.slice(start, i).trim());
       start = i + 1;
     }
@@ -61,22 +71,199 @@ function splitTopLevel(text) {
   return parts.filter(Boolean);
 }
 
-export function findBreakingStatements(sql) {
-  const findings = [];
-  for (const statement of splitSqlStatements(sql)) {
-    const summary = statement.replace(/\s+/g, " ").slice(0, 100);
-    const alter = statement.match(ALTER_TABLE_PREFIX);
-    if (alter) {
-      for (const action of splitTopLevel(statement.slice(alter[0].length))) {
-        const rule = ALTER_ACTION_RULES.find(([applies]) => applies(action));
-        if (rule) findings.push(`${rule[1]}: ${summary}`);
-      }
-      continue;
+function topLevelGroups(text) {
+  const groups = [];
+  let depth = 0;
+  let quote = null;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === "(") {
+      if (depth === 0) start = i + 1;
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+      if (depth === 0 && start !== -1) groups.push(text.slice(start, i));
     }
-    const rule = STATEMENT_RULES.find(([applies]) => applies(statement));
-    if (rule) findings.push(`${rule[1]}: ${summary}`);
+  }
+  return groups;
+}
+
+function unwrapCte(statement) {
+  if (!/^WITH\b/i.test(statement)) return { ctes: [], main: statement };
+  let depth = 0;
+  let quote = null;
+  for (let i = 4; i < statement.length; i++) {
+    const ch = statement[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth--;
+    } else if (depth === 0 && /\s/.test(statement[i - 1]) && MAIN_VERB.test(statement.slice(i))) {
+      return { ctes: topLevelGroups(statement.slice(0, i)), main: statement.slice(i) };
+    }
+  }
+  return { ctes: [], main: statement };
+}
+
+function dollarBody(statement) {
+  const open = statement.match(/\$[A-Za-z_]?[A-Za-z0-9_]*\$/);
+  if (!open) return null;
+  const start = open.index + open[0].length;
+  const end = statement.indexOf(open[0], start);
+  return end === -1 ? statement.slice(start) : statement.slice(start, end);
+}
+
+function plpgsqlStatements(body) {
+  const out = [];
+  for (const fragment of splitSqlStatements(body)) {
+    let current = fragment;
+    let previous;
+    do {
+      previous = current;
+      current = current.replace(PLPGSQL_PREFIX, "").trim();
+    } while (current && current !== previous);
+    if (current) out.push(current);
+  }
+  return out;
+}
+
+function collectAdditions(statements) {
+  const created = new Set();
+  const newTables = new Set();
+  const newColumns = new Map();
+  const reconstrained = new Set();
+  const addColumn = (table, column) => {
+    if (!newColumns.has(table)) newColumns.set(table, new Set());
+    newColumns.get(table).add(column);
+  };
+  const visit = (statement) => {
+    const create = statement.match(CREATE);
+    if (create) {
+      created.add(normalize(create[2]));
+      if (create[1].toUpperCase() === "TABLE") newTables.add(normalize(create[2]));
+      return;
+    }
+    const alter = statement.match(ALTER_TABLE);
+    if (alter) {
+      const table = normalize(alter[1]);
+      for (const action of splitTopLevel(statement.slice(alter[0].length))) {
+        const constraint = action.match(ADD_CONSTRAINT);
+        const column = !constraint && action.match(ADD_COLUMN);
+        if (constraint) {
+          created.add(normalize(constraint[1]));
+          reconstrained.add(table);
+        } else if (column) {
+          addColumn(table, normalize(column[1]));
+        }
+      }
+      return;
+    }
+    if (/^DO\b/i.test(statement)) {
+      for (const inner of plpgsqlStatements(dollarBody(statement) ?? "")) visit(inner);
+    }
+  };
+  statements.forEach(visit);
+  return { created, newTables, newColumns, reconstrained };
+}
+
+function alterActionFindings(action, table, context) {
+  const isNew = (column) => context.newColumns.get(table)?.has(column) ?? false;
+  const dropConstraint = action.match(DROP_CONSTRAINT);
+  if (dropConstraint) {
+    return context.created.has(normalize(dropConstraint[1])) || context.reconstrained.has(table)
+      ? null
+      : "drops a constraint";
+  }
+  const dropColumn = action.match(DROP_COLUMN);
+  if (dropColumn) return isNew(normalize(dropColumn[1])) ? null : "drops a column";
+  if (/^RENAME\b/i.test(action)) return "renames a table or column";
+  const alterColumn = action.match(ALTER_COLUMN);
+  if (alterColumn && !isNew(normalize(alterColumn[1]))) {
+    if (/^(?:SET\s+DATA\s+)?TYPE\b/i.test(alterColumn[2])) return "changes a column type";
+    if (/^SET\s+NOT\s+NULL\b/i.test(alterColumn[2])) return "makes an existing column NOT NULL";
+  }
+  if (
+    ADD_COLUMN.test(action) &&
+    !ADD_CONSTRAINT.test(action) &&
+    !context.newTables.has(table) &&
+    /\bNOT\s+NULL\b/i.test(action) &&
+    !/\b(?:DEFAULT|GENERATED|PRIMARY\s+KEY)\b/i.test(action)
+  ) {
+    return "adds a NOT NULL column without a DEFAULT";
+  }
+  return null;
+}
+
+function statementFindings(statement, context) {
+  const findings = [];
+  const { ctes, main } = unwrapCte(statement);
+  for (const cte of ctes) findings.push(...statementFindings(cte.trim(), context));
+
+  const alter = main.match(ALTER_TABLE);
+  if (alter) {
+    const table = normalize(alter[1]);
+    for (const action of splitTopLevel(main.slice(alter[0].length))) {
+      const finding = alterActionFindings(action, table, context);
+      if (finding) findings.push(finding);
+    }
+    return findings;
+  }
+
+  const drop = main.match(DROP);
+  if (drop) {
+    if (!context.created.has(normalize(drop[2]))) findings.push(`drops a ${drop[1].toLowerCase()}`);
+    return findings;
+  }
+
+  const update = main.match(UPDATE);
+  if (update) {
+    const table = normalize(update[1]);
+    const targets = splitTopLevel(update[2].split(/\b(?:FROM|WHERE|RETURNING)\b/i)[0]).map(
+      (assignment) => normalize(assignment.split("=")[0].trim())
+    );
+    const allowed = context.newColumns.get(table) ?? new Set();
+    if (
+      !context.newTables.has(table) &&
+      !targets.every((column) => column === "updated_at" || allowed.has(column))
+    ) {
+      findings.push("rewrites rows");
+    }
+    return findings;
+  }
+
+  const rowTarget = main.match(ROW_TARGET);
+  if (rowTarget) {
+    const isInsert = /^INSERT\b/i.test(main);
+    const rewrites = !isInsert || /\bDO\s+UPDATE\b/i.test(main);
+    if (rewrites && !context.newTables.has(normalize(rowTarget[1]))) findings.push("rewrites rows");
+    return findings;
+  }
+
+  if (/^DO\b/i.test(main)) {
+    for (const inner of plpgsqlStatements(dollarBody(main) ?? "")) {
+      findings.push(...statementFindings(inner, context));
+    }
   }
   return findings;
+}
+
+export function findBreakingStatements(sql) {
+  const statements = splitSqlStatements(sql);
+  const context = collectAdditions(statements);
+  return statements.flatMap((statement) =>
+    statementFindings(statement, context).map(
+      (finding) => `${finding}: ${statement.replace(/\s+/g, " ").slice(0, 100)}`
+    )
+  );
 }
 
 export function checkMigrationChange(changedFiles, readFile) {
@@ -93,8 +280,8 @@ export function checkMigrationChange(changedFiles, readFile) {
     if (!BREAKING_DIRECTIVE.test(sql)) {
       violations.push(
         `${file}: the previous image cannot run against this schema, so a traffic rollback would break:\n  ${findings.join("\n  ")}\n` +
-          "Expand first: add before use, stop using before drop. If this contraction is intended, " +
-          "add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory."
+          "Expand first: add before use, stop using before drop, backfill only columns this file adds. " +
+          "If this contraction is intended, add `-- sdp:migration-compat: breaking` and ship it in a PR that touches only the migrations directory."
       );
     } else if (outside.length > 0) {
       violations.push(

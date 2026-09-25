@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { checkMigrationChange, findBreakingStatements } from "./check-migration-compat.mjs";
 
 const SQL = "apps/sdp-api/src/db/migrations/postgres/0102_example.sql";
+const POSTGRES = new URL("../apps/sdp-api/src/db/migrations/postgres/", import.meta.url);
 const check = (sql, changed = [SQL]) => checkMigrationChange(changed, () => sql);
+const reasons = (sql) => findBreakingStatements(sql).map((finding) => finding.split(":")[0]);
 
 test("additive migrations pass", () => {
   const sql =
@@ -11,39 +14,109 @@ test("additive migrations pass", () => {
     "CREATE INDEX IF NOT EXISTS a_b ON a (b);\n" +
     "ALTER TABLE a ADD COLUMN c TEXT NOT NULL DEFAULT '', ADD COLUMN d NUMERIC(10,2);\n" +
     "ALTER TABLE a ADD COLUMN e BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL;\n" +
-    "ALTER TABLE a DROP CONSTRAINT a_old_check, ADD CONSTRAINT a_fk FOREIGN KEY (b) REFERENCES x (id);\n" +
+    "ALTER TABLE a ADD CONSTRAINT a_shape CHECK (b IS NULL OR c IS NOT NULL);\n" +
+    "ALTER TABLE a ADD CONSTRAINT a_fk FOREIGN KEY (b) REFERENCES x (id);\n" +
     "INSERT INTO a (b) VALUES ('x') ON CONFLICT DO NOTHING;\n" +
     "CREATE POLICY p ON a FOR UPDATE USING (true);\n" +
+    "CREATE TRIGGER t BEFORE UPDATE OR DELETE ON a FOR EACH STATEMENT EXECUTE FUNCTION f();\n" +
+    "COMMENT ON COLUMN a.b IS 'has -- dashes; and a semicolon';\n" +
     "-- DROP TABLE a;";
   assert.deepEqual(findBreakingStatements(sql), []);
   assert.deepEqual(check(sql, [SQL, "apps/sdp-api/src/routes/a.ts"]), []);
 });
 
-test("contractions are flagged per ALTER TABLE action", () => {
-  const found = findBreakingStatements(
-    "ALTER TABLE a DROP COLUMN b;\n" +
-      "ALTER TABLE a ADD COLUMN c TEXT NOT NULL, ADD COLUMN d TEXT NOT NULL DEFAULT 'x';\n" +
-      "ALTER TABLE a ALTER COLUMN e TYPE BIGINT;\n" +
-      "ALTER TABLE a ALTER f SET NOT NULL;\n" +
-      "ALTER TABLE a RENAME COLUMN g TO h;\n" +
-      'ALTER TABLE IF EXISTS "a" DROP i;\n' +
-      'ALTER TABLE "public"."accounts" DROP COLUMN old;\n' +
-      "ALTER TABLE ONLY public.accounts ADD COLUMN j TEXT NOT NULL;"
+test("backfills of columns and tables this file adds pass, rewrites of existing data do not", () => {
+  const backfill =
+    "ALTER TABLE a ADD COLUMN IF NOT EXISTS next_check_at TEXT;\n" +
+    "UPDATE a SET next_check_at = COALESCE(last_checked_at, updated_at), updated_at = now() WHERE status IN ('x', 'y') AND next_check_at IS NULL;\n" +
+    "CREATE TABLE b (id TEXT PRIMARY KEY, v TEXT NOT NULL);\n" +
+    "INSERT INTO b (id, v) SELECT id, v FROM a ON CONFLICT (id) DO UPDATE SET v = EXCLUDED.v;\n" +
+    "DELETE FROM b WHERE v = '';\n" +
+    "ALTER TABLE b ADD COLUMN w TEXT NOT NULL;";
+  assert.deepEqual(findBreakingStatements(backfill), []);
+
+  assert.deepEqual(
+    reasons(
+      "UPDATE counterparties cpa SET provider_status = 'x', updated_at = now() FROM projects prj WHERE prj.id = cpa.project_id;\n" +
+        "DELETE FROM a WHERE x = 1;\n" +
+        "WITH ranked AS (SELECT id FROM a) UPDATE a SET x = 2 WHERE id IN (SELECT id FROM ranked);\n" +
+        "WITH repaired AS (UPDATE a SET status = 'confirmed' WHERE status = 'finalized' RETURNING id) UPDATE p SET closed_at = NULL FROM repaired WHERE p.id = repaired.id;\n" +
+        "INSERT INTO a (id, x) VALUES (1, 2) ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x;\n" +
+        "TRUNCATE a;"
+    ),
+    [
+      "rewrites rows",
+      "rewrites rows",
+      "rewrites rows",
+      "rewrites rows",
+      "rewrites rows",
+      "rewrites rows",
+      "rewrites rows",
+    ]
   );
-  assert.equal(found.length, 8);
-  assert.match(found[1], /adds a NOT NULL column without a DEFAULT/);
 });
 
-test("row rewrites are flagged, including through a CTE or an upsert", () => {
-  const found = findBreakingStatements(
-    "DELETE FROM a WHERE x = 1;\n" +
-      "WITH ranked AS (SELECT id FROM a) UPDATE a SET x = 2 WHERE id IN (SELECT id FROM ranked);\n" +
-      "WITH dupes AS (SELECT id FROM a) DELETE FROM a USING dupes WHERE a.id = dupes.id;\n" +
-      "INSERT INTO a (id, x) VALUES (1, 2) ON CONFLICT (id) DO UPDATE SET x = EXCLUDED.x;\n" +
-      "TRUNCATE a;"
+test("contractions are flagged per ALTER TABLE action and for every DROP", () => {
+  assert.deepEqual(
+    reasons(
+      "ALTER TABLE a DROP COLUMN b;\n" +
+        "ALTER TABLE a ADD COLUMN c TEXT NOT NULL, ADD COLUMN d TEXT NOT NULL DEFAULT 'x';\n" +
+        "ALTER TABLE a ALTER COLUMN e TYPE BIGINT;\n" +
+        "ALTER TABLE a ALTER f SET NOT NULL;\n" +
+        "ALTER TABLE a RENAME COLUMN g TO h;\n" +
+        'ALTER TABLE IF EXISTS "a" DROP i;\n' +
+        'ALTER TABLE "public"."accounts" DROP COLUMN old;\n' +
+        "ALTER TABLE ONLY public.accounts ADD COLUMN j TEXT NOT NULL;\n" +
+        "ALTER TABLE a DROP CONSTRAINT a_unique;\n" +
+        "DROP INDEX CONCURRENTLY IF EXISTS a_b_idx;\n" +
+        "DROP FUNCTION f(text);\n" +
+        "DROP TRIGGER t ON a;\n" +
+        "DROP TABLE old_table;"
+    ),
+    [
+      "drops a column",
+      "adds a NOT NULL column without a DEFAULT",
+      "changes a column type",
+      "makes an existing column NOT NULL",
+      "renames a table or column",
+      "drops a column",
+      "drops a column",
+      "adds a NOT NULL column without a DEFAULT",
+      "drops a constraint",
+      "drops a index",
+      "drops a function",
+      "drops a trigger",
+      "drops a table",
+    ]
   );
-  assert.equal(found.length, 5);
-  assert.ok(found.every((finding) => finding.startsWith("rewrites rows")));
+});
+
+test("dropping something this file recreates is a replace, not a contraction", () => {
+  const sql =
+    "ALTER TABLE a DROP CONSTRAINT IF EXISTS a_shape;\n" +
+    "ALTER TABLE a ADD CONSTRAINT a_shape CHECK (x IS NOT NULL);\n" +
+    "ALTER TABLE b DROP CONSTRAINT b_kind_check, ADD CONSTRAINT b_kind_check_v2 CHECK (kind IN ('x', 'y'));\n" +
+    "DROP INDEX IF EXISTS a_idx;\n" +
+    "CREATE UNIQUE INDEX a_idx ON a (x, y);\n" +
+    "DROP TRIGGER IF EXISTS t ON a;\n" +
+    "CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n" +
+    "CREATE OR REPLACE FUNCTION f() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
+    "ALTER TABLE a ADD COLUMN tmp TEXT;\n" +
+    "ALTER TABLE a DROP COLUMN tmp;";
+  assert.deepEqual(findBreakingStatements(sql), []);
+});
+
+test("statements inside DO blocks are checked", () => {
+  const guarded =
+    "DO $$\nBEGIN\n  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'a' AND column_name = 'b') THEN\n" +
+    "    ALTER TABLE a DROP COLUMN b;\n  END IF;\nEND $$;";
+  assert.deepEqual(reasons(guarded), ["drops a column"]);
+
+  const readOnly =
+    "DO $body$\nDECLARE\n  n INTEGER := 0;\nBEGIN\n  SELECT count(*) INTO n FROM a;\n" +
+    "  IF n > 0 THEN\n    RAISE EXCEPTION 'unexpected rows: %; refusing', n;\n  END IF;\n" +
+    "  ALTER TABLE a ADD COLUMN c TEXT;\nEND\n$body$;";
+  assert.deepEqual(findBreakingStatements(readOnly), []);
 });
 
 test("a flagged migration needs the breaking directive", () => {
@@ -67,4 +140,13 @@ test("files outside the postgres directory and deleted files are ignored", () =>
     []
   );
   assert.deepEqual(check("DROP TABLE a;", ["apps/sdp-api/src/db/migrations/notes.sql"]), []);
+});
+
+test("existing migrations: a same-file backfill passes and a data repair is flagged", () => {
+  const read = (name) => readFileSync(new URL(name, POSTGRES), "utf8");
+  assert.deepEqual(findBreakingStatements(read("0118_earn_queued_withdrawal_schedule.sql")), []);
+  assert.deepEqual(reasons(read("0116_bvnk_offramp_provider_data.sql")), [
+    "rewrites rows",
+    "rewrites rows",
+  ]);
 });

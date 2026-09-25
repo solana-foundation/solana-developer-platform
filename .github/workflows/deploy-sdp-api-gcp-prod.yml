@@ -23,10 +23,6 @@ on:
         type: boolean
         required: false
         default: false
-    outputs:
-      pending_migrations:
-        description: "true when the merge deploy was held because prod has not applied every migration on image_sha"
-        value: ${{ jobs.schema.outputs.pending }}
   workflow_dispatch:
     inputs:
       image_sha:
@@ -95,65 +91,17 @@ jobs:
       contents: read
       id-token: write
 
-  schema:
-    name: Check pending migrations against prod
-    if: >-
-      github.repository == 'solana-foundation/solana-developer-platform' &&
-      github.event_name != 'workflow_dispatch' &&
-      inputs.image_sha != '' &&
-      !inputs.approved_schema
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: production
-    outputs:
-      pending: ${{ steps.pending.outputs.pending }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-        with:
-          fetch-depth: 0
-
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
-          service_account: ${{ vars.DEPLOY_SA }}
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
-
-      - name: Diff migrations against the schema prod last applied
-        id: pending
-        run: |
-          set -euo pipefail
-          applied="$(gcloud run jobs describe sdp-prod-api-public-migrate \
-            --region us-central1 --project solana-developer-platform \
-            --format 'value(metadata.labels.sdp_schema_sha)')"
-          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
-            pending="$(git diff --name-only "${applied}..HEAD" -- apps/sdp-api/src/db/migrations/postgres)"
-          else
-            pending="prod schema position unknown (sdp_schema_sha=${applied:-unset})"
-          fi
-          if [[ -n "${pending}" ]]; then
-            echo "pending=true" >> "${GITHUB_OUTPUT}"
-            printf 'Prod deploy held. The caller dispatches apply-prod-migrations.yml; approve it in the release-production environment. Pending migrations:\n\n%s\n' "${pending}" >> "${GITHUB_STEP_SUMMARY}"
-          else
-            echo "pending=false" >> "${GITHUB_OUTPUT}"
-          fi
-
   deploy:
     outputs:
       canary: ${{ steps.canary_outcome.outputs.result }}
       tail_clean: ${{ steps.tail_outcome.outputs.clean }}
     name: Deploy production image
-    needs: [smoke, schema]
+    needs: smoke
     if: >-
       always() &&
       (needs.smoke.result == 'success' ||
        (github.event_name == 'workflow_dispatch' && needs.smoke.result == 'skipped') ||
        (inputs.image_sha != '' && github.event_name != 'workflow_dispatch' && needs.smoke.result == 'skipped')) &&
-      (needs.schema.result == 'skipped' ||
-       (needs.schema.result == 'success' && needs.schema.outputs.pending != 'true')) &&
       github.repository == 'solana-foundation/solana-developer-platform' &&
       github.ref == 'refs/heads/main' &&
       ((inputs.release_sha != '' && inputs.release_tag != '') ||
@@ -210,20 +158,38 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
-      - name: Refuse an approved deploy that is behind prod
-        if: ${{ inputs.approved_schema }}
+      - name: Read the schema position prod last applied
+        run: |
+          set -euo pipefail
+          applied="$(gcloud run jobs describe "${MIGRATE_JOB}" \
+            --region "${REGION}" --project "${PROJECT_ID}" \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
+            echo "APPLIED_SCHEMA_SHA=${applied}" >> "${GITHUB_ENV}"
+          else
+            echo "APPLIED_SCHEMA_SHA=" >> "${GITHUB_ENV}"
+            echo "::warning::sdp_schema_sha on ${MIGRATE_JOB} is unset or unknown (${applied:-unset}); schema ordering is not checked for this deploy."
+          fi
+
+      - name: Refuse a migrating deploy that is behind prod
+        if: ${{ env.BUILD_IMAGE == 'true' }}
         run: |
           set -euo pipefail
           if ! git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" origin/main; then
             echo "${DEPLOY_IMAGE_SHA} is not on main." >&2
             exit 1
           fi
-          applied="$(gcloud run jobs describe "${MIGRATE_JOB}" \
-            --region "${REGION}" --project "${PROJECT_ID}" \
-            --format 'value(metadata.labels.sdp_schema_sha)')"
-          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null \
-            && ! git merge-base --is-ancestor "${applied}" "${DEPLOY_IMAGE_SHA}"; then
-            echo "Prod already applied ${applied}, which ${DEPLOY_IMAGE_SHA} does not include. Approve the newest held run instead." >&2
+          if [[ -n "${APPLIED_SCHEMA_SHA}" ]] && ! git merge-base --is-ancestor "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}"; then
+            echo "Prod already applied ${APPLIED_SCHEMA_SHA}, which ${DEPLOY_IMAGE_SHA} does not include. Deploy a newer commit instead." >&2
+            exit 1
+          fi
+
+      - name: Refuse a redeploy that is ahead of the prod schema
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.approved_schema }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${APPLIED_SCHEMA_SHA}" ]] && ! git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
+            echo "${DEPLOY_IMAGE_SHA} may carry migrations prod has not applied (schema is at ${APPLIED_SCHEMA_SHA}). Deploy it through a release or the schema approval instead." >&2
             exit 1
           fi
 
