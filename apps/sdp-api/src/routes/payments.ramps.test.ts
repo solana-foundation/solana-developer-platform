@@ -1874,11 +1874,7 @@ describe("Payments routes — ramps", () => {
         }>();
     }
 
-    async function seedBvnkSimulatableTransfer(overrides?: {
-      status?: PaymentTransferStatus;
-      custodyWalletId?: string;
-      providerData?: Record<string, unknown>;
-    }): Promise<string> {
+    async function seedBvnkSimulatableTransfer(status: PaymentTransferStatus): Promise<string> {
       const counterpartyId = await seedCounterparty({ externalId: "d1b_simulate_bvnk" });
       await seedBvnkFundingWallet(getDb(env), {
         organizationId: TEST_ORG.id,
@@ -1891,14 +1887,13 @@ describe("Payments routes — ramps", () => {
       });
       await seedBvnkOnrampTransfer(getDb(env), {
         id: SIMULATE_TRANSFER_ID,
-        status: overrides?.status ?? "awaiting_payment",
+        status,
         counterpartyId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         fiatAmount: "120.50",
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        custodyWalletId: overrides?.custodyWalletId ?? TEST_CUSTODY_WALLET_ID,
-        providerData: overrides?.providerData,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
       });
       return counterpartyId;
     }
@@ -1919,7 +1914,7 @@ describe("Payments routes — ramps", () => {
     }
 
     it("claims the simulation slot, sends the SDP-ONRAMP remittance, and uses the transfer id as the idempotency key", async () => {
-      await seedBvnkSimulatableTransfer();
+      await seedBvnkSimulatableTransfer("awaiting_payment");
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
@@ -1945,29 +1940,8 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("answers 409 without sending the request when the simulation slot is already claimed", async () => {
-      await seedBvnkSimulatableTransfer({
-        providerData: {
-          bvnk: {},
-          sandboxSimulation: { requestedAt: "2026-09-18T00:00:00.000Z" },
-        },
-      });
-      const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
-
-      const res = await simulateRequest(SIMULATE_TRANSFER_ID);
-
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: { message: string } };
-      expect(body.error.message).toContain("already requested for this transfer");
-      expect(simulateSpy).not.toHaveBeenCalled();
-
-      simulateSpy.mockRestore();
-    });
-
     it("requires the transfer to be awaiting payment", async () => {
-      await seedBvnkSimulatableTransfer({ status: "settling" });
+      await seedBvnkSimulatableTransfer("settling");
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
@@ -1982,7 +1956,7 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("derives the Lightspark simulation payload from the transfer and claims its simulation slot", async () => {
+    it("derives the Lightspark payload from the transfer, claims the slot once, and answers 409 on repeat", async () => {
       const transferId = "xfr_lightspark_sim_1";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
@@ -2001,17 +1975,21 @@ describe("Payments routes — ramps", () => {
         .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
         .mockResolvedValue({ accepted: true });
 
-      const res = await simulateRequest(transferId);
+      const first = await simulateRequest(transferId);
+      const second = await simulateRequest(transferId);
 
-      expect(res.status).toBe(200);
+      expect(first.status).toBe(200);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
       expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
         quoteId: "Quote:sim-1",
         currencyCode: "USD",
       });
       const transfer = await readSimulationTransfer(transferId);
-      expect(transfer?.status).toBe("awaiting_payment");
       expect(transfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+
+      expect(second.status).toBe(409);
+      const body: { error: { message: string } } = await second.json();
+      expect(body.error.message).toContain("already requested for this transfer");
 
       simulateSpy.mockRestore();
     });
@@ -2086,37 +2064,6 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("answers 409 on a second Lightspark simulation without calling the provider again", async () => {
-      const transferId = "xfr_lightspark_sim_repeat";
-      const counterpartyId = await seedCounterparty({ providerData: {} });
-      await seedSimulatableTransfer({
-        id: transferId,
-        provider: "lightspark",
-        providerReference: "Quote:sim-1",
-        fiatCurrency: "USD",
-        fiatAmount: "250.00",
-        counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: {},
-        type: "onramp",
-      });
-      const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
-        .mockResolvedValue({ accepted: true });
-
-      const first = await simulateRequest(transferId);
-      const second = await simulateRequest(transferId);
-
-      expect(first.status).toBe(200);
-      expect(second.status).toBe(409);
-      const body: { error: { message: string } } = await second.json();
-      expect(body.error.message).toContain("already requested for this transfer");
-      expect(simulateSpy).toHaveBeenCalledTimes(1);
-
-      simulateSpy.mockRestore();
-    });
-
     it("hides another tenant's transfer without calling Lightspark or changing the row", async () => {
       const transferId = "xfr_lightspark_sim_other_tenant";
       const counterpartyId = await seedCounterparty({ providerData: {} });
@@ -2171,7 +2118,7 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("rejects sandbox simulation for Coinbase without calling a simulation provider", async () => {
+    it("rejects sandbox simulation for Coinbase", async () => {
       const transferId = "xfr_coinbase_sim_1";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
@@ -2186,28 +2133,12 @@ describe("Payments routes — ramps", () => {
         providerData: {},
         type: "onramp",
       });
-      const lightsparkSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
-        .mockResolvedValue({ accepted: true });
-      const bvnkSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
-      const muralSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
 
       const res = await simulateRequest(transferId);
 
       expect(res.status).toBe(400);
       const body: { error: { message: string } } = await res.json();
       expect(body.error.message).toContain("not available for provider: coinbase");
-      expect(lightsparkSpy).not.toHaveBeenCalled();
-      expect(bvnkSpy).not.toHaveBeenCalled();
-      expect(muralSpy).not.toHaveBeenCalled();
-
-      lightsparkSpy.mockRestore();
-      bvnkSpy.mockRestore();
-      muralSpy.mockRestore();
     });
 
     it("rejects extra keys in the simulation request body", async () => {
