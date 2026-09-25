@@ -7,6 +7,7 @@ import type {
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EnglishTestI18n } from "../test-i18n";
@@ -131,6 +132,13 @@ function renderModal(
     </EnglishTestI18n>
   );
   return { ...render(renderUi()), props, renderUi };
+}
+
+function dispatchClick(element: HTMLElement): void {
+  // Flush the discrete DOM update without wrapping the event in Testing
+  // Library's act helper, which would also flush the passive preview effect:
+  // the stale window must be observed before React's next passive tick.
+  flushSync(() => element.click());
 }
 
 async function openReview(amount = "5") {
@@ -262,6 +270,57 @@ describe("EarnVaultQueuedWithdrawModal", () => {
       expect.objectContaining({ shares: "10" }),
       SECOND_KEY,
     ]);
+  });
+
+  it("refuses to submit changed intent under a retained stale preview", async () => {
+    mocks.fetchPreview.mockImplementation(async (input: { shares: string }) => ({
+      kind: "ready",
+      value: {
+        ...preview,
+        shares: input.shares,
+        assets: input.shares === "10" ? "9.975" : "4.9875",
+      },
+    }));
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Queue temporarily unavailable",
+      body: null,
+    });
+    renderModal();
+
+    await openReview();
+    expect(screen.getByText("$4.98")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Request withdrawal" }) as HTMLButtonElement).disabled
+    ).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "10" } });
+
+    // Re-enter Review before the passive preview effect can run: the retained
+    // quote for 5 shares must be hidden for the changed 10-share intent, and
+    // submission must stay disabled until a quote for THAT intent lands.
+    dispatchClick(screen.getByRole("button", { name: "Continue" }));
+    const submit = screen.getByRole("button", { name: "Request withdrawal" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(screen.queryByText("$4.98")).toBeNull();
+
+    dispatchClick(submit);
+    expect(mocks.createRequest).not.toHaveBeenCalled();
+
+    // The supported flow survives: the fresh quote for the current input arms
+    // submission and submits exactly the current intent.
+    await waitFor(() => expect(screen.getByText("$9.97")).toBeTruthy());
+    expect(
+      (screen.getByRole("button", { name: "Request withdrawal" }) as HTMLButtonElement).disabled
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    expect(mocks.createRequest).toHaveBeenLastCalledWith(
+      expect.objectContaining({ shares: "10" }),
+      FIRST_KEY
+    );
   });
 
   it("refuses a deadline above the provider maximum before previewing", () => {

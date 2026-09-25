@@ -42,6 +42,7 @@ import {
   vaultAsyncWithdrawalIdempotencyKeyStore,
   vaultAsyncWithdrawalRequestFingerprint,
 } from "./earn-vault-async-withdrawal-tracking";
+import { earnVaultPreviewInputFingerprint } from "./earn-vault-preview-identity";
 import {
   earnVaultQueuedWithdrawalStatusPresentation,
   isEarnVaultQueuedWithdrawalTerminal,
@@ -177,27 +178,44 @@ function queuedWithdrawalStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | nul
  * Owns the review-step preview lifecycle: every change to the queue intent
  * refetches a preview while the modal shows the review step, and submit-time
  * errors share this hook's error state so the review view renders one message.
+ *
+ * A resolved preview is bound to the fingerprint of the input that produced it
+ * and is surfaced only while that fingerprint still matches the current input.
+ * The comparison runs during render, so an input change marks the retained
+ * quote stale SYNCHRONOUSLY — before the refetch effect's next passive run —
+ * closing the window where a changed intent could be submitted under the old
+ * quote (SOLA9-65).
  */
 function useQueuedWithdrawalPreview(
   previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
   active: boolean
 ) {
   const t = useTranslations();
-  const [preview, setPreview] = useState<EarnVaultQueuedWithdrawalPreview | null>(null);
+  const [resolved, setResolved] = useState<{
+    fingerprint: string;
+    preview: EarnVaultQueuedWithdrawalPreview;
+  } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const fingerprint = previewInput ? earnVaultPreviewInputFingerprint(previewInput) : null;
+
   useEffect(() => {
     if (!active || !previewInput) return;
+    const input = previewInput;
+    const inputFingerprint = earnVaultPreviewInputFingerprint(input);
     const controller = new AbortController();
-    setPreview(null);
+    setResolved(null);
     setPreviewLoading(true);
     setError(null);
-    void fetchEarnVaultQueuedWithdrawalPreview(previewInput, controller.signal)
+    void fetchEarnVaultQueuedWithdrawalPreview(input, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
-        if (result.kind === "ready") setPreview(result.value);
-        else setError(t("DashboardEarn.queuedWithdraw.previewError"));
+        if (result.kind === "ready") {
+          setResolved({ fingerprint: inputFingerprint, preview: result.value });
+        } else {
+          setError(t("DashboardEarn.queuedWithdraw.previewError"));
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setPreviewLoading(false);
@@ -205,7 +223,18 @@ function useQueuedWithdrawalPreview(
     return () => controller.abort();
   }, [previewInput, active, t]);
 
-  return { preview, previewLoading, error, setError };
+  // Only a quote fetched for the exact current input may render or arm
+  // submission; anything else is a stale quote for changed intent.
+  const preview =
+    resolved && fingerprint !== null && resolved.fingerprint === fingerprint
+      ? resolved.preview
+      : null;
+  // Between an input change and this hook's next passive refetch there is no
+  // matching quote yet: report pending so review never renders a boundless
+  // non-loading blank alongside a disarmed submit button.
+  const previewPending = active && fingerprint !== null && preview === null && error === null;
+
+  return { preview, previewLoading: previewLoading || previewPending, error, setError };
 }
 
 /**
