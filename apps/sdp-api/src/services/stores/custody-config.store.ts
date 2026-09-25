@@ -65,7 +65,33 @@ export interface PreviousDefaultWallet {
   wallet_id: string | null;
 }
 
-export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
+export type DeactivateWalletResult =
+  | "deactivated"
+  | "wallet_not_found"
+  | "last_wallet"
+  | "dvp_settlement_authority";
+
+/**
+ * The substantive reason a load-bearing DvP settlement authority refuses
+ * deactivation. Shared verbatim by the store error and the service-level
+ * SigningError so the two refusals cannot drift apart.
+ */
+export const DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON =
+  "It is part of each trade's on-chain address, so deactivating it would leave them permanently unsettleable — settle or cancel them first.";
+
+/**
+ * Thrown when a deactivation path refuses to mark a settlement authority
+ * inactive while open DvP trades still depend on it.
+ */
+export class DvpSettlementAuthorityLockedError extends Error {
+  constructor(custodyWalletId: string) {
+    super(
+      `Custody wallet ${custodyWalletId} is the DvP settlement authority for open trade(s). ${DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON}`
+    );
+    // biome-ignore lint/security/noSecrets: error class name, not a secret.
+    this.name = "DvpSettlementAuthorityLockedError";
+  }
+}
 
 // Database row types (snake_case)
 interface CustodyConfigRow {
@@ -705,6 +731,36 @@ export class CustodyConfigStore implements SigningConfigStore {
    * Deactivate a wallet record associated with a custody config.
    */
   async deactivateWallet(configId: string, walletId: string): Promise<void> {
+    // The DvP check lives in the same conditional statement as the update, not
+    // in a read-before-write pair: a guard checked first and applied second can
+    // race a trade created in between, deactivating an authority that just
+    // became load-bearing.
+    const result = await this.db
+      .prepare(
+        `UPDATE custody_wallets
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = (
+           SELECT id
+           FROM custody_wallets
+           WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
+           LIMIT 1
+         )
+         AND (
+           SELECT COUNT(*)
+             FROM dvp_settlement_wallets s
+             JOIN dvp_trades t
+               ON t.project_id = s.project_id
+              AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+            WHERE s.custody_wallet_id = custody_wallets.id
+         ) = 0`
+      )
+      .bind(configId, walletId)
+      .run();
+
+    if (result > 0) {
+      return;
+    }
+
     const existing = await this.db
       .prepare(
         `SELECT id
@@ -719,53 +775,18 @@ export class CustodyConfigStore implements SigningConfigStore {
       throw new Error("Wallet not found");
     }
 
-    await this.assertNotLoadBearingDvpAuthority(existing.id);
-
-    await this.db
-      .prepare(
-        `UPDATE custody_wallets
-         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = ?`
-      )
-      .bind(existing.id)
-      .run();
+    throw new DvpSettlementAuthorityLockedError(existing.id);
   }
 
   /**
-   * Refuses to deactivate a settlement authority that open trades depend on.
-   *
-   * The authority is a PDA seed on every trade created under it, so it cannot
-   * be swapped after the fact: deactivating one with open trades makes each of
-   * them permanently unsettleable and unrefundable BY ANYONE, including the
-   * counterparty who has already paid into an escrow. Nothing recovers that.
-   *
-   * Only trades that are still open block it. Once they are all closed the
-   * wallet is ordinary again and this stops caring.
-   */
-  private async assertNotLoadBearingDvpAuthority(custodyWalletId: string): Promise<void> {
-    const blocking = await this.db
-      .prepare(
-        `SELECT COUNT(*) AS open_trades
-           FROM dvp_settlement_wallets s
-           JOIN dvp_trades t
-             ON t.project_id = s.project_id
-            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-          WHERE s.custody_wallet_id = ?`
-      )
-      .bind(custodyWalletId)
-      .first<{ open_trades: number | string }>();
-
-    const openTrades = Number(blocking?.open_trades ?? 0);
-    if (openTrades > 0) {
-      throw new Error(
-        `This wallet is the DvP settlement authority for ${openTrades} open trade(s). It is part of each trade's on-chain address, so deactivating it would leave them permanently unsettleable — settle or cancel them first.`
-      );
-    }
-  }
-
-  /**
-   * Deactivate a wallet only when at least one other active wallet exists.
+   * Deactivate a wallet only when at least one other active wallet exists and
+   * the wallet is not a load-bearing DvP settlement authority.
    * Returns an enum result to support race-safe last-wallet guards.
+   *
+   * The DvP check lives in the same conditional statement as the update, not
+   * in a read-before-write pair: a guard checked first and applied second can
+   * race a trade created in between, deactivating an authority that just
+   * became load-bearing.
    */
   async deactivateWalletIfNotLast(
     configId: string,
@@ -785,7 +806,15 @@ export class CustodyConfigStore implements SigningConfigStore {
            SELECT COUNT(*)
            FROM custody_wallets
            WHERE custody_config_id = ? AND status = 'active'
-         ) > 1`
+         ) > 1
+         AND (
+           SELECT COUNT(*)
+             FROM dvp_settlement_wallets s
+             JOIN dvp_trades t
+               ON t.project_id = s.project_id
+              AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+            WHERE s.custody_wallet_id = custody_wallets.id
+         ) = 0`
       )
       .bind(configId, walletId, configId)
       .run();
@@ -808,7 +837,32 @@ export class CustodyConfigStore implements SigningConfigStore {
       return "wallet_not_found";
     }
 
+    if (await this.isOpenDvpSettlementAuthority(activeWallet.id)) {
+      return "dvp_settlement_authority";
+    }
+
     return "last_wallet";
+  }
+
+  /**
+   * True when the wallet is the settlement authority for at least one open DvP
+   * trade. Used by the guarded deactivate paths to distinguish a
+   * load-bearing authority from an ordinary last-wallet refusal.
+   */
+  private async isOpenDvpSettlementAuthority(custodyWalletId: string): Promise<boolean> {
+    const blocking = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS open_trades
+           FROM dvp_settlement_wallets s
+           JOIN dvp_trades t
+             ON t.project_id = s.project_id
+            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+          WHERE s.custody_wallet_id = ?`
+      )
+      .bind(custodyWalletId)
+      .first<{ open_trades: number | string }>();
+
+    return Number(blocking?.open_trades ?? 0) > 0;
   }
 
   /**

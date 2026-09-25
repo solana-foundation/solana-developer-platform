@@ -66,6 +66,7 @@ import {
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
+  DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON,
   type CustodyConfigWallet,
   type CustodyWallet,
   type CustodyWalletLookup,
@@ -1500,6 +1501,12 @@ export class SigningService {
     );
     if (deactivateResult === "wallet_not_found") {
       throw new SigningError("Custody wallet not found", "WALLET_NOT_FOUND");
+    }
+    if (deactivateResult === "dvp_settlement_authority") {
+      throw new SigningError(
+        `This wallet is the DvP settlement authority for open trade(s). ${DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON}`,
+        "INVALID_REQUEST"
+      );
     }
     if (deactivateResult === "last_wallet") {
       throw new SigningError(
