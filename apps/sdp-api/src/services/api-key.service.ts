@@ -741,6 +741,40 @@ export class ApiKeyService {
           this.scope.projectId
         )
         .run();
+
+      // The rotation transferred provisioned-binding exclusivity to the
+      // replacement (the original's bindings were unflagged so the clone
+      // could hold the flag). The undo puts Postgres back into the state
+      // the stale cache entry describes, so the flag moves back too: the
+      // original key is the wallet's exclusive holder again and a retried
+      // rotation re-clones the flagged binding instead of a shareable one.
+      // The flagged wallets are read before the replacement's rows are
+      // unflagged — they identify what the replacement held exclusively.
+      const flagged = await tx.queryMany<{ wallet_id: string }>(
+        `SELECT wallet_id FROM api_key_wallet_permissions
+          WHERE api_key_id = ? AND provisioned_binding`,
+        [replacementKeyId]
+      );
+      if (flagged.length > 0) {
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+             SET provisioned_binding = FALSE
+             WHERE api_key_id = ? AND provisioned_binding`
+          )
+          .bind(replacementKeyId)
+          .run();
+
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+             SET provisioned_binding = TRUE
+             WHERE api_key_id = ? AND NOT provisioned_binding
+               AND wallet_id IN (${flagged.map(() => "?").join(", ")})`
+          )
+          .bind(keyId, ...flagged.map((row) => row.wallet_id))
+          .run();
+      }
     });
   }
 
