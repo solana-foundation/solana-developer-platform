@@ -509,6 +509,8 @@ export interface EarnVaultWithdrawModalProps {
       amount: string;
       /** False when an approval already executed this replayed intent. */
       projectBalance: boolean;
+      /** Client clock when the POST began; a positions read that landed earlier cannot contain this exit. */
+      submittedAt: number;
     }
   ) => void;
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
@@ -1004,6 +1006,7 @@ export function EarnVaultWithdrawModal({
     rememberVaultWithdrawalFloor(fingerprint, replay.floor);
 
     // No abort signal on the value-moving POST — see the deposit modal.
+    const submittedAt = Date.now();
     const result = await createEarnVaultWithdrawal(
       scope,
       {
@@ -1049,6 +1052,7 @@ export function EarnVaultWithdrawModal({
         // A share-denominated provider order has no honest dollar projection
         // until NAV is struck. The caller still refreshes live holdings.
         projectBalance: shouldProjectWithdrawalBalance(resolution.outcome, settlement),
+        submittedAt,
       });
     }
   }

@@ -670,7 +670,12 @@ describe("EarnVaultDepositModal", () => {
     // The movement is real and may still be settling: refresh and watch it.
     expect(onDeposited).toHaveBeenCalledWith(
       expect.objectContaining({ movementId: "movement_1", replayed: true }),
-      { amount: "1", custodyWalletId: "wallet_1", projectBalance: false }
+      {
+        amount: "1",
+        custodyWalletId: "wallet_1",
+        projectBalance: false,
+        submittedAt: expect.any(Number),
+      }
     );
     // Recorded deposit retires the key, so a deliberate second deposit mints
     // fresh and genuinely moves money.
@@ -863,6 +868,7 @@ describe("EarnVaultDepositModal", () => {
         amount: "1",
         custodyWalletId: "wallet_1",
         projectBalance: true,
+        submittedAt: expect.any(Number),
       });
     }
   );
@@ -896,6 +902,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "1",
       custodyWalletId: "wallet_1",
       projectBalance: false,
+      submittedAt: expect.any(Number),
     });
   });
 
@@ -1068,6 +1075,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "5",
       custodyWalletId: "wallet_1",
       projectBalance: false,
+      submittedAt: expect.any(Number),
     });
     // Paying in a different token is a DIFFERENT request: the held-key
     // fingerprint must not collide with an unswapped deposit of the same

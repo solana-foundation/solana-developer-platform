@@ -17,7 +17,7 @@ interface EarnVaultAsyncWithdrawModalProps {
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,
-    intent: { amount: string; projectBalance: boolean }
+    intent: { amount: string; projectBalance: boolean; submittedAt: number }
   ) => void;
   position: EarnVaultPosition;
   projectId: string | null;

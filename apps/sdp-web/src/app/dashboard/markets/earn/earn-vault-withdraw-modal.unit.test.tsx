@@ -158,6 +158,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(onWithdrawn).toHaveBeenCalledWith(submitted, {
       amount: exactShares,
       projectBalance: false,
+      submittedAt: expect.any(Number),
     });
   });
 
@@ -260,6 +261,7 @@ describe("EarnVaultWithdrawModal", () => {
     expect(onWithdrawn).toHaveBeenCalledWith(recorded, {
       amount: "6",
       projectBalance: true,
+      submittedAt: expect.any(Number),
     });
   });
 

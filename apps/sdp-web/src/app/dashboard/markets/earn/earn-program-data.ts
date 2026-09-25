@@ -40,7 +40,7 @@ import {
   SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
@@ -463,15 +463,54 @@ export async function fetchEarnVaultPositions(
   );
 }
 
-/** Live position values refresh while the surface is mounted. */
+/**
+ * One landed positions read with the client clock at both ends. Treasury's
+ * optimistic balances judge a movement against reads: one that landed before
+ * the POST began cannot contain it, one that started after the commit was
+ * seen should. The balance a read carries never decides that on its own.
+ */
+export interface EarnVaultPositionsRead {
+  positions: EarnVaultPosition[];
+  startedAt: number;
+  landedAt: number;
+}
+
+async function readEarnVaultPositions(scope: EarnRequestScope): Promise<EarnVaultPositionsRead> {
+  const startedAt = Date.now();
+  const positions = await fetchEarnVaultPositions(scope);
+  return { positions, startedAt, landedAt: Date.now() };
+}
+
+/** Three minutes at the live cadence: enough to hold a read that predates any movement still projected. */
+const RECENT_VAULT_POSITIONS_READS = 12;
+
+function appendVaultPositionsRead(
+  reads: readonly EarnVaultPositionsRead[],
+  read: EarnVaultPositionsRead
+): readonly EarnVaultPositionsRead[] {
+  if (reads[reads.length - 1]?.startedAt === read.startedAt) return reads;
+  return [...reads, read].slice(-RECENT_VAULT_POSITIONS_READS);
+}
+
+/** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
 export function useEarnVaultPositions() {
   const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
     scope ? earnQueryKeys.vaultPositions(scope) : null,
-    () => fetchEarnVaultPositions(scope as EarnRequestScope),
+    () => readEarnVaultPositions(scope as EarnRequestScope),
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
-  return { positions: data, error, isLoading, refresh: () => void mutate() };
+  const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
+  useEffect(() => {
+    if (data) setHistory((current) => appendVaultPositionsRead(current, data));
+  }, [data]);
+  // The history state lands one render late; fold the newest read in directly.
+  const reads = useMemo(
+    () => (data ? appendVaultPositionsRead(history, data) : history),
+    [data, history]
+  );
+  const refresh = useCallback(() => void mutate(), [mutate]);
+  return { positions: data?.positions, reads, error, isLoading, refresh };
 }
 
 /**
