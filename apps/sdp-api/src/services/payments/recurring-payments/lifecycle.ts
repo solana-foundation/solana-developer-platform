@@ -40,6 +40,7 @@ import {
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
   recurringPaymentErrorMessage,
+  requireUpdatedSubscription,
   sendSubscriptionInstructions,
 } from "./shared";
 
@@ -813,15 +814,17 @@ async function finalizePendingActivationCancellationLocally(input: {
       outcome: inFlightAttemptOutcome,
     });
     if (input.subscription) {
-      await txSubscriptionsRepo.updateSubscription({
-        subscriptionId: input.subscription.id,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        status: "canceled",
-        cancelAt: finalizedAt,
-        canceledAt: finalizedAt,
-        updatedAt: finalizedAt,
-      });
+      requireUpdatedSubscription(
+        await txSubscriptionsRepo.updateSubscription({
+          subscriptionId: input.subscription.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          status: "canceled",
+          cancelAt: finalizedAt,
+          canceledAt: finalizedAt,
+          updatedAt: finalizedAt,
+        })
+      );
     }
     return updated;
   });
