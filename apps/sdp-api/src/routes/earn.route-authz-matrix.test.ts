@@ -364,6 +364,10 @@ describe("session callers are membership-checked, per route (EARN-027)", () => {
   it("a member project header is honored (never the membership 403)", async () => {
     for (const route of ROUTES) {
       const res = await requestAsSession(route, tenant.sessionId, tenant.project.id);
+      // A valid session with a project the user belongs to must stay
+      // authenticated: a 401 here means the credential was downgraded to
+      // anonymous, never mind the membership answer.
+      expect(res.status, `${route} downgraded a valid member session to 401`).not.toBe(401);
       if (res.status !== 403) continue;
       const body = (await res.json()) as ErrorBody;
       expect(

@@ -624,6 +624,140 @@ function sectionSource(boundary: OrderedBoundary): string {
   return source.slice(start);
 }
 
+/**
+ * The source text of the live `it`/`test` (or `it.each`/`test.each`) call whose
+ * name encloses `at` — an index of a test-name string inside `source` — or
+ * null when the name does not sit inside a live declaration. Skip/todo/only
+ * variants never match: replay evidence may not live in a test that cannot
+ * run. The scanner understands strings, template literals (including `${}`
+ * interpolation) and comments so braces inside literals cannot skew the call
+ * span; it does not tokenize regex literals, which these suites do not use
+ * with unbalanced brackets.
+ */
+function liveTestCall(source: string, at: number): string | null {
+  const opening = /\b(?:it|test)(?:\.each)?\s*\(/g;
+  for (const match of source.matchAll(opening)) {
+    if (match.index > at) break;
+    const span = testCallSpan(source, match.index);
+    if (!span) continue;
+    if (span.start < at && at < span.end) return source.slice(span.start, span.end);
+  }
+  return null;
+}
+
+/**
+ * `source` with every comment replaced by whitespace of identical length, so
+ * indices into the result address the original file while a name surviving
+ * only inside a comment can no longer be found.
+ */
+function stripComments(source: string): string {
+  const chars = source.split("");
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i = skipQuoted(source, i);
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "/") {
+      const newline = source.indexOf("\n", i);
+      const end = newline === -1 ? source.length : newline;
+      for (let j = i; j < end; j += 1) chars[j] = " ";
+      i = end;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      for (let j = i; j < stop; j += 1) {
+        if (chars[j] !== "\n") chars[j] = " ";
+      }
+      i = stop;
+      continue;
+    }
+    i += 1;
+  }
+  return chars.join("");
+}
+
+/** The `[start, end)` span of a whole test call beginning at `callStart`. */
+function testCallSpan(source: string, callStart: number): { start: number; end: number } | null {
+  let end = scanDelimited(source, source.indexOf("(", callStart), "(", ")");
+  if (end === null) return null;
+  if (!/\.(each)\s*$/.test(source.slice(callStart, source.indexOf("(", callStart)))) {
+    return { start: callStart, end: end + 1 };
+  }
+  // `it.each(cases)(name, body)`: the name lives in the second argument list.
+  let cursor = end + 1;
+  while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+  if (source[cursor] !== "(") return null;
+  end = scanDelimited(source, cursor, "(", ")");
+  return end === null ? null : { start: callStart, end: end + 1 };
+}
+
+/**
+ * Index of the `close` matching the `open` at `openIndex`, skipping strings,
+ * template literals and comments along the way.
+ */
+function scanDelimited(
+  source: string,
+  openIndex: number,
+  open: string,
+  close: string
+): number | null {
+  let depth = 0;
+  let i = openIndex;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i = skipQuoted(source, i);
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "/") {
+      const newline = source.indexOf("\n", i);
+      if (newline === -1) return null;
+      i = newline + 1;
+      continue;
+    }
+    if (ch === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      if (end === -1) return null;
+      i = end + 2;
+      continue;
+    }
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/** Index just past the quoted literal (single, double or template) at `start`. */
+function skipQuoted(source: string, start: number): number {
+  const quote = source[start];
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (quote !== "`" && ch === "\n") return i;
+    if (ch === quote) return i + 1;
+    if (quote === "`" && ch === "$" && source[i + 1] === "{") {
+      const close = scanDelimited(source, i + 1, "{", "}");
+      if (close === null) return source.length;
+      i = close + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return source.length;
+}
+
 describe("value-moving authorization and replay conformance", () => {
   it("covers every required value-moving family", () => {
     // `earn` appears twice: money-in (vault deposits) and money-out (vault
@@ -673,9 +807,26 @@ describe("value-moving authorization and replay conformance", () => {
   it.each(contracts)("keeps explicit replay evidence for $family", (contract) => {
     expect(contract.replay.length).toBeGreaterThan(0);
     for (const replay of contract.replay) {
-      expect(readSource(replay.file), `${contract.family}: ${replay.mode}`).toContain(
-        replay.evidence
-      );
+      // Comments are stripped before searching: a name surviving only in a
+      // comment is not evidence, and must fail the "still named" assertion.
+      const source = stripComments(readSource(replay.file));
+      const evidenceIndex = source.indexOf(replay.evidence);
+      expect(
+        evidenceIndex,
+        `${contract.family}: ${replay.mode} must still be named in ${replay.file}`
+      ).toBeGreaterThanOrEqual(0);
+      // The name alone is not evidence: it must belong to a live (non-skipped)
+      // it()/test() declaration, and that declaration's body must assert. A
+      // test whose body was emptied while keeping its name must fail here.
+      const call = liveTestCall(source, evidenceIndex);
+      expect(
+        call,
+        `${contract.family}: ${replay.mode} must be the name of a live it()/test() in ${replay.file}`
+      ).not.toBeNull();
+      expect(
+        call as string,
+        `${contract.family}: ${replay.mode} test must assert — a gutted body is not replay evidence`
+      ).toContain("expect(");
     }
   });
 
