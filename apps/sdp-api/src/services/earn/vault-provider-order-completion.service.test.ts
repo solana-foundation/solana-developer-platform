@@ -14,6 +14,35 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   resolveVaultDirectClient: () => ({ readDepositOrderCompletion }),
 }));
 
+/**
+ * The bounded exclusion slice, behind a switch: the walk test needs the pass
+ * to read an EMPTY slice while the ledger's unique index still refuses a
+ * second stamp of the same order — the slice's newest-first ceiling,
+ * compressed to a flag.
+ */
+let exclusionSliceEnabled = true;
+
+vi.mock("@/db/repositories/earn-movements.repository", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/db/repositories/earn-movements.repository")>();
+  const real = actual.createPostgresEarnMovementsRepository;
+  return {
+    ...actual,
+    createPostgresEarnMovementsRepository: (...args: Parameters<typeof real>) => {
+      const repo = real(...args);
+      return {
+        ...repo,
+        listCompletedProviderOrderReferences: (
+          ...refArgs: Parameters<typeof repo.listCompletedProviderOrderReferences>
+        ) =>
+          exclusionSliceEnabled
+            ? repo.listCompletedProviderOrderReferences(...refArgs)
+            : Promise.resolve([]),
+      };
+    },
+  };
+});
+
 const { completeProviderOrderDeposits } = await import("./vault-provider-order-completion.service");
 
 const ORG = "org_provider_completion";
@@ -25,6 +54,7 @@ const COMPLETED_AT = "2026-09-22T10:00:00.000Z";
 beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
+  exclusionSliceEnabled = true;
   const db = getDb(env);
   await db.batch([
     db
@@ -215,5 +245,63 @@ describe("completeProviderOrderDeposits", () => {
         requestedMinSharesOut: null,
       })
     ).resolves.toBeNull();
+  });
+
+  it("walks past a consumed order the bounded exclusion slice no longer holds", async () => {
+    // The slice is a newest-first LIMIT: once enough orders have completed, an
+    // older consumed identity drops out of it — and a reader that still sees
+    // that order in the feed would re-select it for a twin deposit on every
+    // tick, the ledger refusing its stamp each time, never reaching the twin's
+    // own order, its settlement and cross-key claim stuck for good. This test
+    // hides the consumed identity from the slice entirely (the slice ceiling,
+    // compressed) while the unique index still refuses a second stamp of it:
+    // the pass must feed the refused identity back into the read and settle
+    // from the deposit's OWN order.
+    exclusionSliceEnabled = false;
+    const settledElsewhere = await chainFinalDeposit();
+    const second = await chainFinalDeposit();
+    const ledger = createPostgresEarnMovementsRepository(getDb(env));
+    await expect(
+      ledger.recordVaultMovementProviderCompletion({
+        movementId: settledElsewhere.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-stale",
+      })
+    ).resolves.toMatchObject({ id: settledElsewhere.id });
+
+    // The feed offers the stale order first, then the deposit's own one.
+    let candidate: string | null = "order-stale";
+    readDepositOrderCompletion.mockImplementation(
+      async (
+        _ctx: unknown,
+        input: { providerReference: string | null }
+      ): Promise<{ orderReference: string; completedAt: string } | null> => {
+        if (input.providerReference !== second.vault_address) return null;
+        const current = candidate;
+        candidate = "order-own";
+        return current === null ? null : { orderReference: current, completedAt: COMPLETED_AT };
+      }
+    );
+
+    await expect(completeProviderOrderDeposits(env)).resolves.toMatchObject({
+      claimed: 1,
+      completed: 1,
+      unobserved: 0,
+      errors: 0,
+    });
+    await expect(ledgerRow(second.id)).resolves.toMatchObject({
+      provider_completed_order_reference: "order-own",
+    });
+
+    // The second read carried the refused identity: the walk, not luck.
+    const reads = readDepositOrderCompletion.mock.calls.filter(
+      ([, input]) =>
+        (input as { providerReference: string | null }).providerReference === second.vault_address
+    );
+    expect(reads).toHaveLength(2);
+    expect(
+      (reads[1][1] as { excludedOrderReferences: string[] }).excludedOrderReferences
+    ).toContain("order-stale");
   });
 });
