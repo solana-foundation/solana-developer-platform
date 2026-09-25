@@ -389,17 +389,29 @@ export class AuditService {
    * check runs inside the same serialized ledger write as the insert, so
    * concurrent repair writers cannot both pass the check and duplicate an
    * immutable event. Returns whether this call wrote the event.
+   *
+   * When the entry names its actor (a repair rebuilding the original
+   * creator), that naming is exact: the other identity field stays null
+   * instead of being backfilled from the requesting credential.
    */
   async logOnce(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<boolean> {
     if (!entry.resourceId) {
       throw new Error("logOnce requires a resourceId to guard against duplicates");
     }
-    return this.persist(
-      entry,
-      this.resolveRequestActor(c, entry),
-      this.checkpointStore ?? createKVStoreSet(c.env).cache,
-      { skipIfPresent: true }
-    );
+    const actor = this.resolveRequestActor(c, entry);
+    if (entry.userId || entry.apiKeyId) {
+      // The caller named the actor (an audit repair rebuilding the original
+      // creator from the committed rows): pin both identity fields. Without
+      // this, a cross-mode replay — a dashboard session repairing an
+      // API-key creation, or an API key repairing a dashboard creation —
+      // would backfill the idle identity field from the replaying
+      // request's credential and misattribute the immutable event.
+      actor.userId = entry.userId ?? null;
+      actor.apiKeyId = entry.apiKeyId ?? null;
+    }
+    return this.persist(entry, actor, this.checkpointStore ?? createKVStoreSet(c.env).cache, {
+      skipIfPresent: true,
+    });
   }
 
   /**

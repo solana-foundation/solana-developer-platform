@@ -52,6 +52,9 @@ const REPLAY_API_KEY = {
   raw: "sk_test_replay_fixture",
   prefix: "sk_test_rep",
 };
+// A dashboard session (the other auth mode) for TEST_USER, driving cross-mode
+// replays: a repaired audit event must not adopt the replaying credential.
+const REPLAY_SESSION_ID = "sess_audit_replay";
 
 async function countRows(query: string, ...bind: string[]): Promise<number> {
   const statement = getDb(env).prepare(query);
@@ -143,6 +146,29 @@ describe("issuance creation: audit admission before effect + idempotent replay",
       id: REPLAY_API_KEY.id,
       permissions: ["tokens:write"],
     });
+
+    // A dashboard session for TEST_USER (org + project membership) replays
+    // creations in the cross-mode attribution tests.
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES ('om_audit_replay', ?, ?, 'admin', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_USER.id),
+      db
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES ('pm_audit_replay', ?, ?, 'admin')`
+        )
+        .bind(TEST_PROJECT.id, TEST_USER.id),
+      db
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', '2099-01-01T00:00:00.000Z')`
+        )
+        .bind(REPLAY_SESSION_ID, TEST_USER.id, TEST_ORG.id),
+    ]);
   });
 
   beforeEach(async () => {
@@ -176,6 +202,14 @@ describe("issuance creation: audit admission before effect + idempotent replay",
   const headers = (idempotencyKey?: string, key = TEST_PROJECT_API_KEY) => ({
     "Content-Type": "application/json",
     Authorization: `Bearer ${key.raw}`,
+    ...(idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey }),
+  });
+  // Dashboard callers authenticate with the session cookie and select their
+  // project per request.
+  const sessionHeaders = (idempotencyKey?: string) => ({
+    "Content-Type": "application/json",
+    Cookie: `sdp_session=${REPLAY_SESSION_ID}`,
+    "x-project-id": TEST_PROJECT.id,
     ...(idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey }),
   });
 
@@ -470,6 +504,73 @@ describe("issuance creation: audit admission before effect + idempotent replay",
       const actor = await profileAuditActor(firstBody.data.assetProfile.id);
       expect(actor.api_key_id).toBe(TEST_PROJECT_API_KEY.id);
       expect(actor.user_id).toBeNull();
+    });
+
+    it("attributes a cross-mode repaired event to the original creator when a dashboard session replays an API-key creation", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-cross-mode"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+
+      const db = getDb(env);
+      await db.prepare("TRUNCATE TABLE audit_logs, audit_ledger_anchors RESTART IDENTITY").run();
+      await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+      // The other auth mode replays the creation: the repaired event must
+      // stay keyed to the creating credential, not gain the replaying
+      // session's user identity.
+      const retry = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: sessionHeaders("profile-audit-cross-mode"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(retry.status).toBe(201);
+      const actor = await profileAuditActor(firstBody.data.assetProfile.id);
+      expect(actor.api_key_id).toBe(TEST_PROJECT_API_KEY.id);
+      expect(actor.user_id).toBeNull();
+    });
+
+    it("attributes a cross-mode repaired event to the original creator when an API key replays a dashboard creation", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: sessionHeaders("profile-audit-cross-mode-reverse"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+
+      const db = getDb(env);
+      await db.prepare("TRUNCATE TABLE audit_logs, audit_ledger_anchors RESTART IDENTITY").run();
+      await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+      const retry = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-cross-mode-reverse", REPLAY_API_KEY),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(retry.status).toBe(201);
+      const actor = await profileAuditActor(firstBody.data.assetProfile.id);
+      expect(actor.user_id).toBe(TEST_USER.id);
+      expect(actor.api_key_id).toBeNull();
     });
 
     it("writes a missing profile audit event exactly once under concurrent replays", async () => {
