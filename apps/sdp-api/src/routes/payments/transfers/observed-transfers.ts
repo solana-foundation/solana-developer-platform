@@ -762,23 +762,40 @@ function collectObservedMintAddresses(parsedTransaction: ParsedTransaction): Add
 }
 
 /**
+ * Cap on mint extension-state read attempts per mint within one batch. A
+ * failed read is evicted so a later signature can retry it, but a persistent
+ * outage must not re-bill the same mint for every signature in the
+ * 200-signature history cap: once the budget is spent the mint stays
+ * unresolved for the rest of the call. Definitive resolutions never consume
+ * the budget.
+ */
+export const MAX_MINT_AMOUNT_STATE_READ_ATTEMPTS = 2;
+
+/**
  * A per-call resolver of mint extension states that shares one lookup per
  * mint across every signature in the batch: repeated signatures over the same
  * mint await the single in-flight read instead of re-billing it. A
  * transiently failed read resolves to `unresolved` for the signatures already
  * awaiting it but is evicted, so a later signature retries the read instead
- * of inheriting the omission; a definitive resolution stays cached for the
- * rest of the call.
+ * of inheriting the omission — up to the per-mint attempt budget, after which
+ * the mint stays unresolved for the rest of the call; a definitive resolution
+ * stays cached for the rest of the call.
  */
 function createMintAmountStateResolver(rpc: solanaRpc.SolanaRpc) {
   const pending = new Map<string, Promise<ObservedMintAmountState>>();
+  const failedAttempts = new Map<string, number>();
   return (mint: Address): Promise<ObservedMintAmountState> => {
     let state = pending.get(mint);
     if (!state) {
+      if ((failedAttempts.get(mint) ?? 0) >= MAX_MINT_AMOUNT_STATE_READ_ATTEMPTS) {
+        return Promise.resolve({ kind: "unresolved" });
+      }
       state = fetchObservedMintAmountState(rpc, mint).catch((error) => {
-        // Evict so the next signature can retry a read that failed
-        // temporarily; definitive resolutions never land here.
+        // Evict so a later signature can retry a read that failed
+        // temporarily, within the per-mint attempt budget; definitive
+        // resolutions never land here.
         pending.delete(mint);
+        failedAttempts.set(mint, (failedAttempts.get(mint) ?? 0) + 1);
         getLogger().warn(
           { mint, error: error instanceof Error ? error.message : String(error) },
           "observed-transfers: failed to resolve mint extension state; dropping its observations"

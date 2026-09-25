@@ -30,6 +30,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   buildObservedTransfersForSignatures,
   clearObservedTransferCaches,
+  MAX_MINT_AMOUNT_STATE_READ_ATTEMPTS,
 } from "./observed-transfers";
 
 const base58 = getBase58Codec();
@@ -70,6 +71,8 @@ interface MintAccountPayload {
 interface TestRpcOptions {
   /** Base64 mint-account payloads served for `getAccountInfo`; absent → account missing. */
   mintAccountsByAddress?: Record<string, MintAccountPayload | null>;
+  /** Serve every `getAccountInfo` with a 500 (a persistent RPC outage), after counting the read. */
+  failAccountInfoReads?: boolean;
 }
 
 interface ParsedTransferTestTransaction {
@@ -198,6 +201,17 @@ function startTokenRpcServer(
       if (rpcRequest.method === "getAccountInfo") {
         const mint = (rpcRequest.params as [string])[0];
         accountInfoCalls.push(mint);
+        if (options.failAccountInfoReads) {
+          response.writeHead(500, { "Content-Type": "application/json" });
+          response.end(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              error: { message: "upstream mint-read outage" },
+            })
+          );
+          return;
+        }
         const account = options.mintAccountsByAddress?.[mint];
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
@@ -547,6 +561,28 @@ describe("observed Token-2022 transfer amount conversion", () => {
       const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
       expect(rows).toEqual([]);
       expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("bounds mint-state read attempts per mint when the reads keep failing", async () => {
+    // A failed read is evicted so a later signature can retry it, but a
+    // persistent outage must not re-bill the mint for every signature in the
+    // batch (the history cap allows 200): once the per-mint attempt budget is
+    // spent, the mint stays unresolved for the rest of the call.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      failAccountInfoReads: true,
+    });
+
+    try {
+      const signatures = Array.from({ length: 15 }, (_, index) =>
+        signatureEntry({ signature: `sig_outage_${index}` })
+      );
+      const rows = await buildObservedRows(rpcServer, signatures);
+
+      expect(rows).toEqual([]);
+      expect(rpcServer.getAccountInfoCalls().length).toBe(MAX_MINT_AMOUNT_STATE_READ_ATTEMPTS);
     } finally {
       await rpcServer.close();
     }
