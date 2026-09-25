@@ -685,7 +685,11 @@ async function resolveInFlightCancelLifecycleAttemptOutcome(input: {
   organizationId: string;
   projectId: string;
   recurringPaymentId: string;
-}): Promise<{ status: "confirmed" | "failed"; error: string | null }> {
+}): Promise<{
+  status: "confirmed" | "failed";
+  error: string | null;
+  resolvedSignature: boolean;
+}> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
     createTenantScope(input)
@@ -698,13 +702,13 @@ async function resolveInFlightCancelLifecycleAttemptOutcome(input: {
     statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
   });
   if (!attempt) {
-    return { status: "confirmed", error: null };
+    return { status: "confirmed", error: null, resolvedSignature: false };
   }
   const signature = parseNullableStoredSignature(attempt.signature);
   if (!signature) {
     // Nothing was broadcast for this attempt, so no transaction outcome is
     // being reported when the rows finalize locally.
-    return { status: "confirmed", error: null };
+    return { status: "confirmed", error: null, resolvedSignature: false };
   }
   try {
     await confirmSubscriptionSignature(
@@ -712,12 +716,16 @@ async function resolveInFlightCancelLifecycleAttemptOutcome(input: {
       signature,
       "Recurring payment cancellation failed on-chain"
     );
-    return { status: "confirmed", error: null };
+    return { status: "confirmed", error: null, resolvedSignature: true };
   } catch (error) {
     if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
       // The submitted cancellation provably failed on chain, so the journal
       // must record it as failed instead of a confirmed cancellation.
-      return { status: "failed", error: recurringPaymentErrorMessage(error) };
+      return {
+        status: "failed",
+        error: recurringPaymentErrorMessage(error),
+        resolvedSignature: true,
+      };
     }
     // Chain state is unknown: keep the record recoverable instead of
     // finalizing a cancellation whose outcome is unresolved.
@@ -766,14 +774,21 @@ async function finalizePendingActivationCancellationLocally(input: {
   projectId: string;
   recurringPayment: PaymentRecurringPaymentRow;
   subscription: PaymentSubscriptionRow | null;
+  inFlightAttemptOutcome?: {
+    status: "confirmed" | "failed";
+    error: string | null;
+    resolvedSignature: boolean;
+  };
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
-  const inFlightAttemptOutcome = await resolveInFlightCancelLifecycleAttemptOutcome({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    recurringPaymentId: input.recurringPayment.id,
-  });
+  const inFlightAttemptOutcome =
+    input.inFlightAttemptOutcome ??
+    (await resolveInFlightCancelLifecycleAttemptOutcome({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+    }));
   return getDb(input.env).transaction(async (tx) => {
     const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -924,8 +939,41 @@ async function cancelReconcilablePendingActivationRecurringPayment(input: {
           subscriptionPda,
         });
       }
+      return finalizePendingActivationCancellationLocally({ ...input, subscription });
     }
-    return finalizePendingActivationCancellationLocally({ ...input, subscription });
+
+    // No retained authorization signature: the activation journal is the only
+    // evidence of a submitted Subscribe (SOLA9-454). An activation attempt
+    // that reached the authorization stage without journaling its signature
+    // leaves the submitted authorization unresolvable, so the record stays
+    // recoverable instead of finalizing a cancellation the authorization
+    // could survive. A journalled cancellation attempt carrying a signature is
+    // resolved on chain instead: a confirmed one revoked a delegation that
+    // must have existed, and a provably failed one left the absent delegation
+    // as proof the authorization never landed.
+    const inFlightAttemptOutcome = await resolveInFlightCancelLifecycleAttemptOutcome({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+    });
+    if (
+      !inFlightAttemptOutcome.resolvedSignature &&
+      (await recurringRepo.hasUnresolvedActivationAuthorization({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: input.recurringPayment.id,
+      }))
+    ) {
+      throw internalError(
+        "Recurring payment cancellation could not resolve the pending activation authorization"
+      );
+    }
+    return finalizePendingActivationCancellationLocally({
+      ...input,
+      subscription,
+      inFlightAttemptOutcome,
+    });
   }
 
   return revokeLivePendingActivationDelegation({

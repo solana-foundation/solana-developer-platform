@@ -476,6 +476,11 @@ export interface PaymentRecurringPaymentsRepository {
   getLatestActivationAttempt(
     input: GetLatestPaymentRecurringPaymentActivationAttemptInput
   ): Promise<PaymentRecurringPaymentActivationAttemptRow | null>;
+  hasUnresolvedActivationAuthorization(input: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+  }): Promise<boolean>;
   createLifecycleAttempt(
     input: CreatePaymentRecurringPaymentLifecycleAttemptInput
   ): Promise<PaymentRecurringPaymentLifecycleAttemptRow | null>;

@@ -921,6 +921,30 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       return row ? mapActivationAttemptRow(row) : null;
     },
 
+    async hasUnresolvedActivationAuthorization(input: {
+      organizationId: string;
+      projectId: string;
+      recurringPaymentId: string;
+    }) {
+      // An activation attempt that reached the authorization broadcast stage
+      // without journaling its signature proves a Subscribe was submitted
+      // whose outcome cannot be resolved from the journal.
+      const row = await db
+        .prepare(
+          `SELECT 1 AS matched
+             FROM payment_recurring_payment_activation_attempts
+            WHERE organization_id = ?
+              AND project_id = ?
+              AND recurring_payment_id = ?
+              AND stage IN ('authorize_subscription', 'finalize')
+              AND authorization_signature IS NULL
+            LIMIT 1`
+        )
+        .bind(input.organizationId, input.projectId, input.recurringPaymentId)
+        .first<Record<string, unknown>>();
+      return row !== null;
+    },
+
     async createLifecycleAttempt(input: CreatePaymentRecurringPaymentLifecycleAttemptInput) {
       await db
         .prepare(

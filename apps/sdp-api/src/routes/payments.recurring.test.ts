@@ -1890,7 +1890,7 @@ describe("Payments routes — recurring", () => {
     expect(beforeCancel?.subscription_pda).toBeTruthy();
   });
 
-  it("completes a pending_activation cancel locally when the delegation never landed on chain", async () => {
+  it("keeps a pending_activation recurring payment recoverable when the unjournalled authorization is unresolved", async () => {
     const _sourceSigner = recurringExecution.sourceSigner();
     mockDistinctRecentBlockhashes();
     const signAndSendMock = recurringExecution.signAndSendMock();
@@ -1903,6 +1903,65 @@ describe("Payments routes — recurring", () => {
     const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
     expect(activationResponse.status).toBe(500);
     await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // The journal-write failure left the activation attempt at the
+    // authorization stage without a signature, so the submitted Subscribe
+    // cannot be resolved from the journal. Even though the delegation read
+    // finds nothing, the cancel must not finalize locally: the authorization
+    // could still land and leave a live delegation behind.
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    const cancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(cancelRes.status).toBe(500);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    const afterCancel = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{ recurring_status: string; subscription_status: string }>();
+    expect(afterCancel).toMatchObject({
+      recurring_status: "pending_activation",
+      subscription_status: "pending_authorization",
+    });
+  });
+
+  it("completes a pending_activation cancel locally when the journal shows no unjournalled authorization", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // Records whose activation journal carries no authorization-broadcast
+    // evidence (no attempt reached the authorization stage without
+    // journaling its signature) cannot have a Subscribe in flight, so the
+    // cancel still finalizes locally without an on-chain transaction.
+    await getDb(env)
+      .prepare(
+        "DELETE FROM payment_recurring_payment_activation_attempts WHERE recurring_payment_id = ?"
+      )
+      .bind(recurringPayment.id)
+      .run();
 
     fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
       exists: false,
