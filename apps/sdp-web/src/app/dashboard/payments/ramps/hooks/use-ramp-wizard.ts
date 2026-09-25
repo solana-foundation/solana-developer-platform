@@ -27,6 +27,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { freshIdempotencyKey, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -87,26 +88,33 @@ export interface RampWizardConfig<TId extends string = string> {
 async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
-  t: Translate
+  t: Translate,
+  idempotencyKey: string
 ): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      [IDEMPOTENCY_KEY_HEADER]: idempotencyKey,
+    },
     body: JSON.stringify(payload),
   });
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote; transferId?: string };
-    error?: { message?: string };
-  };
 
   if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string };
+    };
     throw new Error(
       getApiError(
-        body,
+        errorBody,
         t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
       )
     );
   }
+
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: { quote?: PaymentRampQuote; transferId?: string };
+  };
 
   if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
@@ -281,36 +289,46 @@ export function useRampWizard<TId extends string>(
   const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteForCurrentSelection = async (
-    providerAccountId: string | null
+    providerAccountId: string | null,
+    idempotencyKey: string
   ): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+    const payload = buildQuotePayload(providerAccountId);
+    if (payload === null) {
       return null;
     }
-    const created = await createRampQuote(
-      config.quoteEndpoint,
-      config.buildQuotePayload({
-        fields,
-        selectedWallet,
-        provider: fields.provider,
-        selectedRampPair,
-        assetRail: selectedRampPair.assetRail,
-        collectedData: requirements.collectedData,
-        selectedProviderAccountId: providerAccountId,
-        selectedPayoutAccount: requirements.selectedPayoutAccount,
-        rampsMemo: memoRowsToRecord(memoRows),
-      }),
-      t
-    );
+    const created = await createRampQuote(config.quoteEndpoint, payload, t, idempotencyKey);
     setCreatedQuote(created);
     return created;
   };
 
+  const buildQuotePayload = (providerAccountId: string | null): Record<string, unknown> | null => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+      return null;
+    }
+    return config.buildQuotePayload({
+      fields,
+      selectedWallet,
+      provider: fields.provider,
+      selectedRampPair,
+      assetRail: selectedRampPair.assetRail,
+      collectedData: requirements.collectedData,
+      selectedProviderAccountId: providerAccountId,
+      selectedPayoutAccount: requirements.selectedPayoutAccount,
+      rampsMemo: memoRowsToRecord(memoRows),
+    });
+  };
+
+  // A deliberate quote refresh (e.g. an expiring provider session) is a NEW
+  // operation: it mints a fresh key per invocation.
   const refreshQuote = async () => {
     try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
+      await createQuoteForCurrentSelection(
+        requirements.selectedProviderAccountId,
+        freshIdempotencyKey("ramp-quote-refresh")
+      );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         description:
@@ -330,10 +348,40 @@ export function useRampWizard<TId extends string>(
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const quoteCreationAttempted = useRef(false);
+  // One stable operation key per committed quote selection: the first quote
+  // attempt mints it and every retry reuses it, so an ambiguous failure (a
+  // lost response, a JSON parse error, the explicit Try Again) replays the
+  // ORIGINAL provider session and transfer instead of minting a second one.
+  // The key is bound to the exact payload it was minted for: a retry after the
+  // user edited a selection builds a DIFFERENT payload, which is a new
+  // operation — reusing the old key would 409 on the fingerprint forever, so
+  // it mints a fresh key instead.
+  const quoteOperationKeyRef = useRef<{
+    key: string;
+    payloadSignature: string;
+  } | null>(null);
+  const quoteOperationKey = (payload: Record<string, unknown>): string => {
+    const payloadSignature = JSON.stringify(payload);
+    const bound = quoteOperationKeyRef.current;
+    if (bound === null || bound.payloadSignature !== payloadSignature) {
+      const key = freshIdempotencyKey("ramp-quote");
+      quoteOperationKeyRef.current = { key, payloadSignature };
+      return key;
+    }
+    return bound.key;
+  };
   const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(providerAccountId);
+      // Built inside the try: a payload builder that throws (e.g. a
+      // requirements refetch dropped the selected payout account's country)
+      // must surface through quoteCreationError, not escape the retry.
+      const payload = buildQuotePayload(providerAccountId);
+      if (payload === null) {
+        setQuoteCreationError(null);
+        return;
+      }
+      await createQuoteForCurrentSelection(providerAccountId, quoteOperationKey(payload));
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = {
@@ -22,5 +23,9 @@ export async function POST(request: Request, context: RouteContext) {
     request,
     traceSource: "route.dashboard.payments.ramps.quote.post",
     path: `/v1/payments/ramps/${direction}/quote`,
+    // The dashboard's stable operation key rides through so an ambiguous
+    // retry replays the original quote instead of minting a second
+    // provider session and Payment Transfer.
+    upstreamHeaders: forwardedIdempotencyHeaders(request),
   });
 }

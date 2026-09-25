@@ -4,6 +4,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { findRampQuoteIdempotentKeyReplay } from "../quote-idempotency";
 import {
   createOfframpQuote,
   estimateOfframp,
@@ -27,7 +28,10 @@ offramp.post(
   requirePermissions("payments:write", "wallets:read"),
   validateBody(createOfframpQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
-  policyGate({ extract: extractOfframpQuotePolicyCandidate }),
+  policyGate({
+    extract: extractOfframpQuotePolicyCandidate,
+    findIdempotentKeyReplay: findRampQuoteIdempotentKeyReplay,
+  }),
   createOfframpQuote
 );
 

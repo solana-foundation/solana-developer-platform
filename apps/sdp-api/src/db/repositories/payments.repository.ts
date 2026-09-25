@@ -204,6 +204,23 @@ export interface PaymentsRepository {
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
+  /**
+   * Atomically claims a failed or abandoned reservation for in-place reuse:
+   * the update applies only while the row is still `failed`, or still
+   * `pending` with an `updated_at` older than `pendingUpdatedBefore` (the
+   * abandoned-reservation window). Returns the row reset to a fresh reserved
+   * shape (pending, no provider reference/delivery mode/error), or null when
+   * another writer claimed it first or the reservation is live — the caller
+   * must not proceed to its provider on null.
+   */
+  claimReusableRampQuoteReservation(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    /** ISO timestamp: a pending row is reusable only when updated_at is at or before it. */
+    pendingUpdatedBefore: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
     transferId: string;
     organizationId: string;

@@ -11,7 +11,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import type { PaymentsRepository } from "./payments.repository";
+import type { PaymentsRepository, PaymentTransferRow } from "./payments.repository";
 import { createPostgresPaymentsRepository } from "./payments.repository.postgres";
 
 const TEST_PROJECT_ID = "prj_payments_repo_test";
@@ -1212,5 +1212,194 @@ describe("PaymentsRepository.listTransfers wallet allowlist (postgres)", () => {
       expect.objectContaining({ custody_wallet_id: CUSTODY_WALLET_A })
     );
     expect(denied).toEqual({ rows: [], total: 0 });
+  });
+});
+
+describe("PaymentsRepository.claimReusableRampQuoteReservation (postgres)", () => {
+  let repo: PaymentsRepository;
+
+  beforeAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  afterAll(async () => {
+    await seedTestDatabase(env as Parameters<typeof seedTestDatabase>[0]);
+  });
+
+  beforeEach(async () => {
+    const db = getDb(env);
+    await db.prepare("DELETE FROM custody_scope_defaults").run();
+    await db.prepare("DELETE FROM payment_transfers").run();
+    await db.prepare("DELETE FROM custody_wallets").run();
+    await db.prepare("DELETE FROM custody_configs").run();
+    await db.prepare("DELETE FROM projects").run();
+
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare(
+        "INSERT OR REPLACE INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')"
+      )
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT_ID, production: `${TEST_PROJECT_ID}_production` },
+    });
+    await seedExactWallet();
+
+    repo = createPostgresPaymentsRepository(db);
+  });
+
+  async function seedReservation(input: {
+    id: string;
+    status: string;
+    providerReference?: string | null;
+    deliveryMode?: string | null;
+    error?: string | null;
+    minutesAgo?: number;
+  }): Promise<void> {
+    const stamped = new Date(Date.now() - (input.minutesAgo ?? 0) * 60_000).toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO payment_transfers
+           (id, organization_id, project_id, wallet_id, token, type, direction, status,
+            provider_reference, delivery_mode, error, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'USDC', 'onramp', 'inbound', ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        input.id,
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        TEST_WALLET_ID,
+        input.status,
+        input.providerReference ?? null,
+        input.deliveryMode ?? null,
+        input.error ?? null,
+        stamped,
+        stamped
+      )
+      .run();
+  }
+
+  async function readRow(id: string): Promise<PaymentTransferRow | null> {
+    const row = await getDb(env)
+      .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+      .bind(id)
+      .first<PaymentTransferRow>();
+    return row ?? null;
+  }
+
+  it("claims a failed reservation in place and resets it to a fresh reserved shape", async () => {
+    await seedReservation({
+      id: "xfr_claim_failed",
+      status: "failed",
+      providerReference: "prov_ref_stale",
+      deliveryMode: "manual_instructions",
+      error: "provider exploded",
+      minutesAgo: 1,
+    });
+
+    const claimed = await repo.claimReusableRampQuoteReservation({
+      transferId: "xfr_claim_failed",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      pendingUpdatedBefore: new Date(Date.now() - 10 * 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(claimed?.status).toBe("pending");
+    expect(claimed?.provider_reference).toBeNull();
+    expect(claimed?.delivery_mode).toBeNull();
+    expect(claimed?.error).toBeNull();
+    const row = await readRow("xfr_claim_failed");
+    expect(row?.status).toBe("pending");
+    expect(row?.provider_reference).toBeNull();
+    expect(row?.error).toBeNull();
+  });
+
+  it("claims a pending reservation only once its updated_at is past the abandoned window", async () => {
+    await seedReservation({
+      id: "xfr_claim_abandoned",
+      status: "pending",
+      providerReference: "prov_ref_stale",
+      minutesAgo: 11,
+    });
+
+    const claimed = await repo.claimReusableRampQuoteReservation({
+      transferId: "xfr_claim_abandoned",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      pendingUpdatedBefore: new Date(Date.now() - 10 * 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(claimed?.status).toBe("pending");
+    expect(claimed?.provider_reference).toBeNull();
+  });
+
+  it("returns null for a live pending reservation and leaves it untouched", async () => {
+    await seedReservation({
+      id: "xfr_claim_live",
+      status: "pending",
+      providerReference: "prov_ref_live",
+      minutesAgo: 1,
+    });
+
+    const claimed = await repo.claimReusableRampQuoteReservation({
+      transferId: "xfr_claim_live",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      pendingUpdatedBefore: new Date(Date.now() - 10 * 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(claimed).toBeNull();
+    const row = await readRow("xfr_claim_live");
+    expect(row?.provider_reference).toBe("prov_ref_live");
+    expect(row?.status).toBe("pending");
+  });
+
+  it("lets exactly one concurrent retry claim: the second claim loses and gets null", async () => {
+    await seedReservation({
+      id: "xfr_claim_race",
+      status: "failed",
+      error: "provider exploded",
+      minutesAgo: 1,
+    });
+    const claimArgs = {
+      transferId: "xfr_claim_race",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      pendingUpdatedBefore: new Date(Date.now() - 10 * 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const winner = await repo.claimReusableRampQuoteReservation(claimArgs);
+    const loser = await repo.claimReusableRampQuoteReservation(claimArgs);
+
+    expect(winner?.status).toBe("pending");
+    expect(loser).toBeNull();
+  });
+
+  it("does not claim a reservation owned by a different organization", async () => {
+    await seedReservation({ id: "xfr_claim_other_org", status: "failed", minutesAgo: 1 });
+
+    const claimed = await repo.claimReusableRampQuoteReservation({
+      transferId: "xfr_claim_other_org",
+      organizationId: "org_someone_else",
+      projectId: TEST_PROJECT_ID,
+      pendingUpdatedBefore: new Date(Date.now() - 10 * 60_000).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(claimed).toBeNull();
+    expect((await readRow("xfr_claim_other_org"))?.status).toBe("failed");
   });
 });
