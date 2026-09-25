@@ -9,7 +9,7 @@
  * unselectable by the due worker until the first eligible collection.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentRecurringPaymentsRepository } from "@/db/repositories";
 import app from "@/index";
@@ -78,48 +78,56 @@ describe("Payments routes — recurring activation schedule (APE-775)", () => {
   });
 
   it("normalizes an expired firstCollectionAt to the first eligible collection", async () => {
-    const firstCollectionAt = new Date(Date.now() + 100).toISOString();
-    const recurringPayment = await createRecurringPaymentFixture({
-      headers: RECURRING_HEADERS,
-      sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-      destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-      token: DEVNET_USDC_MINT,
-      amount: "25.00",
-      periodHours: PERIOD_HOURS,
-      firstCollectionAt,
-    });
+    // The create schema rejects a past firstCollectionAt, so this test runs on
+    // a controlled clock (only `Date` is faked): the requested deadline is
+    // seeded in the future and expired deterministically before activation,
+    // instead of racing a real timeout that slow CI runs could lose.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const requestedFirstCollectionAt = new Date(Date.now() + 100);
+      const recurringPayment = await createRecurringPaymentFixture({
+        headers: RECURRING_HEADERS,
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        periodHours: PERIOD_HOURS,
+        firstCollectionAt: requestedFirstCollectionAt.toISOString(),
+      });
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+      vi.setSystemTime(new Date(requestedFirstCollectionAt.getTime() + 1000));
 
-    const activationResponse = await app.request(
-      `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
-      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
-      env
-    );
-    expect(activationResponse.status).toBe(200);
+      const activationResponse = await app.request(
+        `/v1/payments/recurring-payments/${recurringPayment.id}/activate`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+      expect(activationResponse.status).toBe(200);
 
-    const state = await readActivationScheduleState(recurringPayment.id);
-    expect(state.status).toBe("active");
+      const state = await readActivationScheduleState(recurringPayment.id);
+      expect(state.status).toBe("active");
 
-    // One resolved due time, atomically mirrored to both tables.
-    expect(state.recurring_due_at).toBe(state.subscription_due_at);
+      // One resolved due time, atomically mirrored to both tables.
+      expect(state.recurring_due_at).toBe(state.subscription_due_at);
 
-    // The due time must never precede the first eligible collection, i.e. the
-    // authorization period start plus one full period.
-    const dueTime = new Date(state.recurring_due_at ?? "").getTime();
-    const firstEligibleTime = new Date(state.current_period_start_at ?? "").getTime() + PERIOD_MS;
-    expect(dueTime).toBeGreaterThanOrEqual(firstEligibleTime);
+      // The due time must never precede the first eligible collection, i.e. the
+      // authorization period start plus one full period.
+      const dueTime = new Date(state.recurring_due_at ?? "").getTime();
+      const firstEligibleTime = new Date(state.current_period_start_at ?? "").getTime() + PERIOD_MS;
+      expect(dueTime).toBeGreaterThanOrEqual(firstEligibleTime);
 
-    // The due worker must not treat the freshly activated row as overdue.
-    const now = new Date().toISOString();
-    const dueRows = await createPostgresPaymentRecurringPaymentsRepository(
-      getDb(env)
-    ).listDueCollectionPayments({
-      dueBefore: now,
-      retryBefore: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      limit: 25,
-    });
-    expect(dueRows.map((row) => row.id)).not.toContain(recurringPayment.id);
+      // The due worker must not treat the freshly activated row as overdue.
+      const dueRows = await createPostgresPaymentRecurringPaymentsRepository(
+        getDb(env)
+      ).listDueCollectionPayments({
+        dueBefore: new Date().toISOString(),
+        retryBefore: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        limit: 25,
+      });
+      expect(dueRows.map((row) => row.id)).not.toContain(recurringPayment.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("honors a future firstCollectionAt beyond the first period", async () => {
