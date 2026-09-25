@@ -7,6 +7,7 @@ import type {
   EarnVaultWithdrawalRequestRecord,
 } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -154,6 +155,73 @@ afterEach(() => {
 });
 
 describe("EarnVaultParRedemptionModal", () => {
+  function dispatchClick(element: HTMLElement): void {
+    // Flush the discrete DOM update without wrapping the event in Testing
+    // Library's act helper, which would also flush the passive preview
+    // effect: the stale window must be observed before React's next
+    // passive tick.
+    flushSync(() => element.click());
+  }
+
+  it("refuses to submit changed shares under a retained stale preview", async () => {
+    mocks.fetchPreview.mockImplementation(async (input: { shares: string }) => ({
+      kind: "ready",
+      value: {
+        ...preview,
+        shares: input.shares,
+        assets: input.shares,
+        intermediateAmount: input.shares,
+      },
+    }));
+    mocks.createRequest.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "Operator redemption temporarily unavailable",
+      body: null,
+    });
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    const review = await screen.findByRole("button", { name: "Request par redemption" });
+    await waitFor(() => expect(screen.getByText("$2,500.00")).toBeTruthy());
+    expect((review as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "3000" } });
+
+    // Re-enter Review before the passive preview effect can run: the retained
+    // quote for 2,500 shares must be hidden for the changed 3,000-share
+    // intent, and submission must stay disabled until a quote for THAT
+    // intent lands.
+    dispatchClick(screen.getByRole("button", { name: "Continue" }));
+    const submit = screen.getByRole("button", {
+      name: "Request par redemption",
+    }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(screen.queryByText("$2,500.00")).toBeNull();
+
+    dispatchClick(submit);
+    expect(mocks.createRequest).not.toHaveBeenCalled();
+
+    // The supported flow survives: the fresh quote for the current input arms
+    // submission and submits exactly the current intent.
+    await waitFor(() => expect(screen.getByText("$3,000.00")).toBeTruthy());
+    expect(
+      (screen.getByRole("button", { name: "Request par redemption" }) as HTMLButtonElement).disabled
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
+    expect(mocks.createRequest).toHaveBeenLastCalledWith(
+      {
+        positionId: position.id,
+        shares: "3000",
+        mechanism: "operatorRedemption",
+      },
+      IDEMPOTENCY_KEY
+    );
+  });
+
   it("discloses the off-chain batching threshold and submits an operator request", async () => {
     const onRequested = vi.fn();
     mocks.createRequest.mockResolvedValue({

@@ -40,6 +40,7 @@ import {
   isEarnVaultParRedemptionCancelable,
   isEarnVaultParRedemptionTerminal,
 } from "./earn-vault-par-redemption-presentation";
+import { earnVaultPreviewInputFingerprint } from "./earn-vault-preview-identity";
 import {
   VAULT_WITHDRAWAL_AMOUNT_DECIMALS,
   validateVaultWithdrawalAmount,
@@ -139,26 +140,46 @@ function freshCancelRecord(
   return observed;
 }
 
+/**
+ * Owns the review-step preview lifecycle, mirroring the queued-withdraw modal.
+ *
+ * A resolved preview is bound to the fingerprint of the input that produced it
+ * and is surfaced only while that fingerprint still matches the current input.
+ * The comparison runs during render, so an input change marks the retained
+ * quote stale SYNCHRONOUSLY — before the refetch effect's next passive run —
+ * closing the window where a changed intent could be submitted under the old
+ * quote (SOLA9-65).
+ */
 function useParRedemptionPreview(
   input: EarnVaultParRedemptionTermsRequest | null,
   active: boolean
 ) {
   const t = useTranslations();
-  const [preview, setPreview] = useState<EarnVaultParRedemptionPreview | null>(null);
+  const [resolved, setResolved] = useState<{
+    fingerprint: string;
+    preview: EarnVaultParRedemptionPreview;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const fingerprint = input ? earnVaultPreviewInputFingerprint(input) : null;
+
   useEffect(() => {
     if (!active || !input) return;
+    const request = input;
+    const inputFingerprint = earnVaultPreviewInputFingerprint(request);
     const controller = new AbortController();
-    setPreview(null);
+    setResolved(null);
     setLoading(true);
     setError(null);
-    void fetchEarnVaultParRedemptionPreview(input, controller.signal)
+    void fetchEarnVaultParRedemptionPreview(request, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
-        if (result.kind === "ready") setPreview(result.value);
-        else setError(t("DashboardEarn.parRedemption.previewError"));
+        if (result.kind === "ready") {
+          setResolved({ fingerprint: inputFingerprint, preview: result.value });
+        } else {
+          setError(t("DashboardEarn.parRedemption.previewError"));
+        }
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -166,7 +187,18 @@ function useParRedemptionPreview(
     return () => controller.abort();
   }, [active, input, t]);
 
-  return { preview, loading, error, setError };
+  // Only a quote fetched for the exact current input may render or arm
+  // submission; anything else is a stale quote for changed intent.
+  const preview =
+    resolved && fingerprint !== null && resolved.fingerprint === fingerprint
+      ? resolved.preview
+      : null;
+  // Between an input change and this hook's next passive refetch there is no
+  // matching quote yet: report pending so review never renders a boundless
+  // non-loading blank alongside a disarmed submit button.
+  const pending = active && fingerprint !== null && preview === null && error === null;
+
+  return { preview, loading: loading || pending, error, setError };
 }
 
 function useParRedemptionSubmission(options: {
