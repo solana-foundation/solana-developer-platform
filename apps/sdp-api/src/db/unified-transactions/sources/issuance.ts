@@ -1,5 +1,10 @@
 import type { UnifiedTransactionSource } from "./types";
 
+// Value-moving kinds (mint, burn, seize, force_burn) persist the exact decimal
+// in operation_params.amount; lifecycle-only kinds have none. operation_params
+// is TEXT, so the extraction is guarded: malformed or legacy rows project NULL
+// instead of aborting the unified view, and only plain unsigned decimals (the
+// same grammar the mint supply bookkeeping reads) are projected.
 export const issuanceUnifiedTransactionSource = {
   sql: () => `SELECT
   it.id,
@@ -10,7 +15,13 @@ export const issuanceUnifiedTransactionSource = {
   tok.project_id,
   it.custody_wallet_id,
   tok.mint_address AS token,
-  NULL::text AS amount,
+  CASE
+    WHEN it.type IN ('mint', 'burn', 'seize', 'force_burn')
+      AND pg_input_is_valid(it.operation_params, 'jsonb')
+      AND it.operation_params::jsonb ->> 'amount' ~ '^\\d+(\\.\\d+)?$'
+    THEN it.operation_params::jsonb ->> 'amount'
+    ELSE NULL
+  END AS amount,
   NULL::text AS counterparty_id,
   it.signature,
   it.created_at

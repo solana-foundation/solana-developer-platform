@@ -245,7 +245,13 @@ SELECT
   tok.project_id,
   it.custody_wallet_id,
   tok.mint_address AS token,
-  NULL::text AS amount,
+  CASE
+    WHEN it.type IN ('mint', 'burn', 'seize', 'force_burn')
+      AND pg_input_is_valid(it.operation_params, 'jsonb')
+      AND it.operation_params::jsonb ->> 'amount' ~ '^\d+(\.\d+)?$'
+    THEN it.operation_params::jsonb ->> 'amount'
+    ELSE NULL
+  END AS amount,
   NULL::text AS counterparty_id,
   it.signature,
   it.created_at
