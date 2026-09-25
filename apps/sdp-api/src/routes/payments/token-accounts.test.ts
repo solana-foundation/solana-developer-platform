@@ -1,7 +1,8 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { getLogger } from "@/runtime/logger";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
 import { getSplTokenBalances, resolveTokenLabel, withIssuedTokenLabels } from "./token-accounts";
@@ -58,7 +59,8 @@ function tokenAccount(
 
 function rpcWithAccounts(
   splTokenAccounts: ParsedTokenAccount[],
-  token2022Accounts: ParsedTokenAccount[]
+  token2022Accounts: ParsedTokenAccount[],
+  mintDecimalsByMint: Record<string, number> = {}
 ): SolanaRpc {
   return {
     getTokenAccountsByOwner: (_owner: Address, { programId }: { programId: string }) => ({
@@ -70,6 +72,15 @@ function rpcWithAccounts(
               ? token2022Accounts
               : [],
       }),
+    }),
+    getTokenSupply: (mint: Address) => ({
+      send: async () => {
+        const decimals = mintDecimalsByMint[mint];
+        if (decimals === undefined) {
+          throw new Error(`mint supply unavailable for ${mint}`);
+        }
+        return { value: { decimals } };
+      },
     }),
   } as unknown as SolanaRpc;
 }
@@ -191,6 +202,101 @@ describe("getSplTokenBalances", () => {
     expect(balances).toEqual([
       { token: "USDC", mint: USDC_DEVNET, amount: "2000000", uiAmount: "2", decimals: 6 },
     ]);
+  });
+
+  it("settles a same-mint decimals conflict against the mint's own decimals", async () => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+    try {
+      const balances = await getSplTokenBalances(
+        rpcWithAccounts(
+          [
+            tokenAccount("acc-1", "1000000", "1", 2, USDC_DEVNET),
+            tokenAccount("acc-2", "999000000", "999", USDC_DECIMALS, USDC_DEVNET),
+          ],
+          [],
+          { [USDC_DEVNET]: USDC_DECIMALS }
+        ),
+        OWNER
+      );
+
+      expect(balances).toEqual([
+        { token: "USDC", mint: USDC_DEVNET, amount: "999000000", uiAmount: "999", decimals: 6 },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenAccount: "acc-1",
+          mint: USDC_DEVNET,
+          decimals: 2,
+          mintDecimals: USDC_DECIMALS,
+        }),
+        expect.any(String)
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("fails the read when a same-mint decimals conflict cannot be settled", async () => {
+    const balances = getSplTokenBalances(
+      rpcWithAccounts(
+        [
+          tokenAccount("acc-1", "1000000", "1", USDC_DECIMALS, USDC_DEVNET),
+          tokenAccount("acc-2", "999000000", "999", 2, USDC_DEVNET),
+        ],
+        []
+      ),
+      OWNER
+    );
+
+    await expect(balances).rejects.toThrow(/could not settle the conflicting scales/);
+  });
+
+  it("ignores an account whose decimals are not a non-negative integer", async () => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+    try {
+      const balances = await getSplTokenBalances(
+        rpcWithAccounts(
+          [
+            tokenAccount("acc-1", "1000000", "1", 2.5, USDC_DEVNET),
+            tokenAccount("acc-2", "2000000", "2", USDC_DECIMALS, USDC_DEVNET),
+          ],
+          []
+        ),
+        OWNER
+      );
+
+      expect(balances).toEqual([
+        { token: "USDC", mint: USDC_DEVNET, amount: "2000000", uiAmount: "2", decimals: 6 },
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tokenAccount: "acc-1",
+          mint: USDC_DEVNET,
+          decimals: 2.5,
+        }),
+        expect.any(String)
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reports no balance for a mint whose only account has non-integer decimals", async () => {
+    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+    try {
+      const balances = await getSplTokenBalances(
+        rpcWithAccounts([tokenAccount("acc-1", "1000000", "1", 2.5, USDC_DEVNET)], []),
+        OWNER
+      );
+
+      expect(balances).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
