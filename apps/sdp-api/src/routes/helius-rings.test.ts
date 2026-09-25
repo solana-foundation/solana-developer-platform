@@ -1,3 +1,4 @@
+import { createServer, type Server } from "node:http";
 import type {
   ReadIdentityInput,
   ReadIdentityResult,
@@ -12,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createHeliusRingsWalletRepository } from "@/db/repositories";
 import app from "@/index";
+import { clearHeliusDasCachesForTests } from "@/services/helius-das.service";
+import { clearJupiterPriceCacheForTests } from "@/services/jupiter-price.service";
 import { HeliusRingsConnectionStore } from "@/services/stores/helius-rings-connection.store";
 import { ProviderCredentialStore } from "@/services/stores/provider-credential.store";
 import { InMemoryRingsGateway } from "@/test/fixtures/in-memory-rings-gateway";
@@ -845,6 +848,173 @@ describe("Helius Rings routes", () => {
         env
       );
       expect(res.status).toBe(403);
+    });
+  });
+
+  // SOLA9-346: the sync route must present a numeric totalUsd only when it is
+  // complete — every held balance priced. A total over just the priced subset
+  // understates the wallet without any incompleteness signal.
+  describe("pricing completeness", () => {
+    /** Neither USD-stable nor in any price index; Jupiter omits it fail-soft. */
+    const UNKNOWN_MINT = "HzwqbKZw8HxMN6bF2yFZNrht3c2iXXzpKcFu7uBEDKtr";
+
+    let originalJupiterUrl: string | undefined;
+    let originalHeliusUrl: string | undefined;
+    let priceServer: Server | undefined;
+    let requestedMints: string[] = [];
+
+    function balance(
+      mint: string,
+      amountRaw: string,
+      decimals: number
+    ): SyncPhotonResult["balances"][number] {
+      return {
+        mint,
+        symbol: mint === USDC_MINT ? "USDC" : "UNKNOWN",
+        amountRaw,
+        decimals,
+        ringProgramId: null,
+        noteCount: 1,
+      };
+    }
+
+    function stubSyncedBalances(balances: SyncPhotonResult["balances"]): void {
+      gatewayOverride.current = {
+        syncPhoton: async () => ({
+          balances,
+          history: [],
+          indexedOperationSignatures: [],
+          observedAt: "2026-09-24T00:00:00.000Z",
+          report: {
+            storedNotes: balances.length,
+            unparsedTransactions: 0,
+            undecryptableCandidates: 0,
+            unknownAssetIds: 0,
+            unknownAssetFields: 0,
+            degraded: false,
+          },
+        }),
+      } as unknown as RingsGatewayPort;
+    }
+
+    async function syncBalances(): Promise<{
+      balances: Array<{ mint: string; usdPrice?: number; usdValue?: number }>;
+      totalUsd: number | null;
+    }> {
+      const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: {
+          balances: Array<{ mint: string; usdPrice?: number; usdValue?: number }>;
+          totalUsd: number | null;
+        };
+      };
+      return body.data;
+    }
+
+    async function provisionSyncedWallet(): Promise<void> {
+      const row = await createHeliusRingsWalletRepository(env).markProvisioned({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        id: ringsWalletId,
+        shieldedAddress: "rings1pricing_completeness",
+        ownerAddress: "HrRouteTestPublicKey111111111111111111111111",
+        materialTag: "simulated",
+        expectedStatus: "pending",
+      });
+      if (!row) throw new Error("rings wallet fixture was not provisioned for pricing tests");
+    }
+
+    beforeEach(async () => {
+      await provisionSyncedWallet();
+      originalJupiterUrl = env.JUPITER_PRICE_API_URL;
+      originalHeliusUrl = env.SOLANA_RPC_HELIUS_URL;
+      // No Helius DAS fallback: the omitted mint must stay unpriced through the
+      // whole pricing chain, which is how a real unindexed mint behaves.
+      env.SOLANA_RPC_HELIUS_URL = undefined;
+      clearJupiterPriceCacheForTests();
+      clearHeliusDasCachesForTests();
+      requestedMints = [];
+
+      // Stubs Jupiter's documented fail-soft answer: a mint it cannot price is
+      // omitted from the response entirely. USDC never reaches this server —
+      // it prices through the tracked stablecoin path.
+      priceServer = createServer((request, response) => {
+        const url = new URL(request.url ?? "/", "http://127.0.0.1");
+        requestedMints = url.searchParams.get("ids")?.split(",").filter(Boolean) ?? [];
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({}));
+      });
+      await new Promise<void>((resolve) => priceServer?.listen(0, "127.0.0.1", () => resolve()));
+      const address = priceServer.address();
+      if (!address || typeof address === "string") throw new Error("price server did not bind");
+      env.JUPITER_PRICE_API_URL = `http://127.0.0.1:${address.port}/price/v3`;
+    });
+
+    afterEach(async () => {
+      env.JUPITER_PRICE_API_URL = originalJupiterUrl;
+      env.SOLANA_RPC_HELIUS_URL = originalHeliusUrl;
+      clearJupiterPriceCacheForTests();
+      clearHeliusDasCachesForTests();
+      await new Promise<void>((resolve) => priceServer?.close(() => resolve()));
+      priceServer = undefined;
+    });
+
+    it("returns a null totalUsd when a held balance has no usable price", async () => {
+      stubSyncedBalances([
+        balance(USDC_MINT, "12000000", 6),
+        balance(UNKNOWN_MINT, "1000000000", 9),
+      ]);
+
+      const data = await syncBalances();
+
+      // The unpriced mint was genuinely asked about and left unpriced — the
+      // row keeps no usdValue instead of being coerced to zero.
+      expect(requestedMints).toContain(UNKNOWN_MINT);
+      const pricedRow = data.balances.find((row) => row.mint === USDC_MINT);
+      expect(pricedRow).toMatchObject({ usdPrice: 1, usdValue: 12 });
+      const unpricedRow = data.balances.find((row) => row.mint === UNKNOWN_MINT);
+      expect(unpricedRow?.usdValue).toBeUndefined();
+      expect(unpricedRow?.usdPrice).toBeUndefined();
+      // The invariant: a subset sum must never be presented as the wallet total.
+      expect(data.totalUsd).toBeNull();
+    });
+
+    it("still sums a fully priced wallet", async () => {
+      stubSyncedBalances([balance(USDC_MINT, "12000000", 6)]);
+
+      const data = await syncBalances();
+
+      expect(data.balances[0]).toMatchObject({ usdPrice: 1, usdValue: 12 });
+      expect(data.totalUsd).toBe(12);
+    });
+
+    it("reports 0 for an observed empty wallet", async () => {
+      stubSyncedBalances([]);
+
+      const data = await syncBalances();
+
+      expect(data.totalUsd).toBe(0);
+    });
+
+    it("answers a pricing outage with unpriced balances and a null total", async () => {
+      await new Promise<void>((resolve) => priceServer?.close(() => resolve()));
+      priceServer = createServer((_request, response) => {
+        response.writeHead(500, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: "upstream" }));
+      });
+      await new Promise<void>((resolve) => priceServer?.listen(0, "127.0.0.1", () => resolve()));
+      const address = priceServer.address();
+      if (!address || typeof address === "string") throw new Error("price server did not rebind");
+      env.JUPITER_PRICE_API_URL = `http://127.0.0.1:${address.port}/price/v3`;
+      stubSyncedBalances([balance(UNKNOWN_MINT, "1000000000", 9)]);
+
+      const data = await syncBalances();
+
+      const unpricedRow = data.balances[0];
+      expect(unpricedRow?.mint).toBe(UNKNOWN_MINT);
+      expect(unpricedRow?.usdValue).toBeUndefined();
+      expect(data.totalUsd).toBeNull();
     });
   });
 
