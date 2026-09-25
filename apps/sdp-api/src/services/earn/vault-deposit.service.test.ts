@@ -686,6 +686,65 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * The provider-order claim's release point is the durable `settled_at`
+   * completion fact — the one fact chain finality can never stand in for. The
+   * authenticated provider reconciler stamps it via `advanceVaultMovement`
+   * exactly when it closes the row for the `?settled=` surface, so the claim
+   * releases with the same fact rather than being structurally unable to
+   * release: a later same-amount deposit with a fresh key starts a fresh
+   * movement once the provider order is complete. Chain finality alone keeps
+   * the claim (pinned by the test above).
+   */
+  it("releases a provider-order claim once the provider completion fact is stamped", async () => {
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const first = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+
+    // The reconciler's completion stamp: the row advances to the
+    // success-terminal state WITH the durable fact (the same write shape
+    // atomic settlement uses, offered to the provider reconciler).
+    const closed = await repository.advanceVaultMovement({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    });
+    expect(closed?.settled_at).not.toBeNull();
+
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([3]),
+      signature: "sig_provider_order_released",
+      lastValidBlockHeight: "12345",
+    });
+    const twin = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(twin).toMatchObject({ replayed: false });
+    expect(twin.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+
+    // One completion fact, moved once: the same fact closes the row on the
+    // settled surface that released the claim.
+    const settledPage = await repository.listVaultMovements({
+      organizationId: ORG,
+      environment: "sandbox",
+      projectId: PROJECT,
+      custodyWalletIds: [WALLET_ROW_ID],
+      direction: "deposit",
+      limit: 10,
+      before: null,
+      settled: true,
+    });
+    expect(settledPage.rows.map((row) => row.id)).toEqual([first.movement.id]);
+  });
+
   it("binds independent request keys for distinct intents into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
     signVaultPlan.mockImplementation(async (_env, input) => {
