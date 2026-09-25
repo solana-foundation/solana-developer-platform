@@ -110,6 +110,8 @@ function recurringRow(
     authorization_signature: "auth_sig",
     status,
     metadata_uri: null,
+    idempotency_key: null,
+    idempotency_fingerprint: null,
     created_by: null,
     created_at: "2026-07-01T11:00:00.000Z",
     updated_at: "2026-07-01T11:00:00.000Z",

@@ -44,6 +44,8 @@ export interface PaymentRecurringPaymentRow {
   authorization_signature: string | null;
   status: PaymentRecurringPaymentStatus;
   metadata_uri: string | null;
+  idempotency_key: string | null;
+  idempotency_fingerprint: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -148,6 +150,8 @@ export interface CreatePaymentRecurringPaymentInput {
   periodHours: number;
   firstCollectionAt: string | null;
   metadataUri: string | null;
+  idempotencyKey?: string | null;
+  idempotencyFingerprint?: string | null;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string;
@@ -433,6 +437,11 @@ export interface PaymentRecurringPaymentsRepository {
   createRecurringPayment(
     input: CreatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
+  findRecurringPaymentByIdempotency(params: {
+    organizationId: string;
+    projectId: string;
+    idempotencyKey: string;
+  }): Promise<PaymentRecurringPaymentRow | null>;
   updateRecurringPayment(
     input: UpdatePaymentRecurringPaymentInput
   ): Promise<PaymentRecurringPaymentRow | null>;
