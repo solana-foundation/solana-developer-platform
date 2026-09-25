@@ -1,3 +1,4 @@
+import { resolveComplianceVerdict } from "@sdp/types";
 import type {
   ComplianceAddressScreeningInput,
   ComplianceProvider,
@@ -94,8 +95,34 @@ export class TrmComplianceProvider implements ComplianceProvider {
         };
       }
 
-      const result = (await response.json().catch(() => [])) as TrmAddressScreeningResponse;
-      const first = Array.isArray(result) ? result[0] : undefined;
+      let parsedBody: unknown;
+      try {
+        parsedBody = await response.json();
+      } catch {
+        parsedBody = null;
+      }
+
+      // An `ok` TRM body is an array with one screening result per submitted
+      // address, so the shape is validated before a missing risk field can be
+      // read as the documented no-attribution pass: invalid JSON, a non-array
+      // body, an empty array, or a non-object entry used to normalize to "no
+      // score, no label" and pass screening (SOLA9-160).
+      const first =
+        Array.isArray(parsedBody) &&
+        typeof parsedBody[0] === "object" &&
+        parsedBody[0] !== null &&
+        !Array.isArray(parsedBody[0])
+          ? (parsedBody[0] as TrmAddressScreeningResponse[number])
+          : undefined;
+      if (!first) {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `TRM returned a malformed screening response at ${TRM_ADDRESS_SCREENING_PATH} (expected a non-empty array of result objects); refusing to treat it as a screening.`,
+          evaluatedAt,
+        };
+      }
       const riskScore =
         typeof first?.addressHighestRiskScoreLevel === "number"
           ? first.addressHighestRiskScoreLevel
@@ -104,6 +131,21 @@ export class TrmComplianceProvider implements ComplianceProvider {
         typeof first?.addressHighestRiskScoreLevelLabel === "string"
           ? first.addressHighestRiskScoreLevelLabel
           : undefined;
+
+      // An `ok` result must carry a verdict this product recognizes: no score
+      // plus a label outside the shared vocabulary is contract drift that used
+      // to normalize as a clean screening (SOLA9-160). A null score with no
+      // label stays TRM's documented no-attribution completion.
+      const verdict = resolveComplianceVerdict({ provider: this.name, riskScore, riskLevel });
+      if (verdict === "unrecognized") {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `TRM returned an unrecognized risk verdict (score: ${JSON.stringify(riskScore)}, level: ${JSON.stringify(riskLevel ?? null)}); refusing to treat it as a screening.`,
+          evaluatedAt,
+        };
+      }
 
       return {
         provider: this.name,

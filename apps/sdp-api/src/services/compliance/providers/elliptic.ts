@@ -1,3 +1,4 @@
+import { resolveComplianceVerdict } from "@sdp/types";
 import { z } from "zod";
 import type {
   ComplianceAddressScreeningInput,
@@ -249,7 +250,25 @@ export class EllipticComplianceProvider implements ComplianceProvider {
       }
 
       // A null canonical score is Elliptic's documented "no risk rules
-      // triggered" — a completed verdict, not an absence of one.
+      // triggered" — a completed verdict, not an absence of one. An `ok`
+      // result must still carry a verdict this product recognizes: a null
+      // score paired with a label outside the shared vocabulary is contract
+      // drift, and reporting it `ok` read as a clean screening (SOLA9-160).
+      const verdict = resolveComplianceVerdict({
+        provider: this.name,
+        riskScore,
+        riskLevel,
+      });
+      if (verdict === "unrecognized") {
+        return {
+          provider: this.name,
+          status: "error",
+          riskScore: null,
+          message: `Elliptic returned an unrecognized risk verdict (score: ${JSON.stringify(riskScore)}, level: ${JSON.stringify(riskLevel ?? null)}); refusing to treat it as a screening.`,
+          evaluatedAt,
+        };
+      }
+
       const screened: ComplianceProviderResult = {
         provider: this.name,
         status: "ok",

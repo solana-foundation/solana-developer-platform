@@ -6,6 +6,7 @@ export * from "./advanced-settings";
 export * from "./api-keys";
 export * from "./asset-profiles";
 export * from "./audit";
+export * from "./compliance";
 export * from "./counterparties";
 export * from "./countries";
 export * from "./custody";
