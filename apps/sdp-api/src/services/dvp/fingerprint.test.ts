@@ -11,7 +11,11 @@
 import { type Address, address } from "@solana/kit";
 import { describe, expect, it } from "vitest";
 import type { CreateDvpTradeInput, DvpPartyInput } from "./create";
-import { dvpCreateFingerprint, type ResolvedParty } from "./fingerprint";
+import {
+  dvpCreateFingerprint,
+  dvpCreateLegacyFingerprint,
+  type ResolvedParty,
+} from "./fingerprint";
 
 const ADDR_A: Address = address("7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg");
 const ADDR_A_OTHER: Address = address("GjupWG8a4BXmduuUQt7vP7QxJ5Kq5YhwKZNkFYp5KPr");
@@ -149,5 +153,49 @@ describe("dvpCreateFingerprint", () => {
       resolvedB: resolved(ADDR_B, null),
     });
     expect(fpA).not.toBe(fpB);
+  });
+});
+
+// APE-693 legacy replay. Rows stored before the project entered the hash carry
+// this format, and the replay comparison accepts it so their retry path
+// survives the change. The format is FROZEN: any change here strands every
+// pre-APE-693 retry into a 409 — and a retry with a fresh key into a second
+// escrow.
+describe("dvpCreateLegacyFingerprint", () => {
+  it("differs from the current fingerprint, whose material includes the project", () => {
+    const input = baseInput({ address: ADDR_A }, { address: ADDR_B });
+    const args = {
+      input,
+      resolvedA: resolved(ADDR_A, null),
+      resolvedB: resolved(ADDR_B, null),
+    };
+    expect(dvpCreateLegacyFingerprint(args)).not.toBe(dvpCreateFingerprint(args));
+  });
+
+  it("ignores the project scope, so a retry under the row's own project replays", () => {
+    const underA = baseInput({ address: ADDR_A }, { address: ADDR_B });
+    const underB = { ...baseInput({ address: ADDR_A }, { address: ADDR_B }), projectId: "prj_y" };
+    const argsA = {
+      input: underA,
+      resolvedA: resolved(ADDR_A, null),
+      resolvedB: resolved(ADDR_B, null),
+    };
+    const argsB = {
+      input: underB,
+      resolvedA: resolved(ADDR_A, null),
+      resolvedB: resolved(ADDR_B, null),
+    };
+    expect(dvpCreateLegacyFingerprint(argsA)).toBe(dvpCreateLegacyFingerprint(argsB));
+  });
+
+  it("pins the frozen legacy digest", () => {
+    const input = baseInput({ address: ADDR_A }, { address: ADDR_B });
+    expect(
+      dvpCreateLegacyFingerprint({
+        input,
+        resolvedA: resolved(ADDR_A, null),
+        resolvedB: resolved(ADDR_B, null),
+      })
+    ).toBe("552754e359c473b42b5043280de042721ce1c84550a1889b0e5b661d34450add");
   });
 });

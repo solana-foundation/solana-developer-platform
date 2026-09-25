@@ -168,5 +168,7 @@ export const DVP_CREATE_REFUSAL = {
   reviewedProjectRequired: "dvp_create_reviewed_project_required",
   /** The selected project moved after the form was reviewed. */
   reviewedProjectMismatch: "dvp_create_reviewed_project_mismatch",
+  /** No project was selected in the dashboard at submit time. */
+  selectedProjectRequired: "dvp_create_selected_project_required",
 } as const;
 export type DvpCreateRefusalReason = (typeof DVP_CREATE_REFUSAL)[keyof typeof DVP_CREATE_REFUSAL];

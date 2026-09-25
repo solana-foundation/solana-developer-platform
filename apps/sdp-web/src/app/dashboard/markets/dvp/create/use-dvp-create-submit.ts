@@ -64,6 +64,7 @@ const createRefusalReasonSchema = z.enum(DVP_CREATE_REFUSAL);
 const CREATE_REFUSAL_COPY = {
   [DVP_CREATE_REFUSAL.reviewedProjectRequired]: "DashboardMarkets.dvp.projectReviewRequired",
   [DVP_CREATE_REFUSAL.reviewedProjectMismatch]: "DashboardMarkets.dvp.projectChangedSubmit",
+  [DVP_CREATE_REFUSAL.selectedProjectRequired]: "DashboardMarkets.dvp.projectSelectionRequired",
 } as const satisfies Record<DvpCreateRefusalReason, MessageKey>;
 
 export function useDvpCreateSubmit(

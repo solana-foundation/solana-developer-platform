@@ -45,6 +45,7 @@ import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores } from "@/test/mocks/kv";
 import type { Env } from "@/types/env";
+import { dvpCreateLegacyFingerprint } from "./fingerprint";
 
 const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/dvp"), { env });
 
@@ -608,6 +609,34 @@ describe("createDvpTrade", () => {
     expect(retried.id).toBe(first.id);
     expect(retried.swapDvp).toBe(first.swapDvp);
     // The retry must not broadcast a second transaction.
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  // Rows stored before the project entered the hash (APE-693) carry the legacy
+  // fingerprint. The retry must still replay one: 409ing it would leave the
+  // caller with no safe retry after an ambiguous broadcast, and retrying with
+  // a fresh key would create a second escrow.
+  it("replays a row stored under the pre-APE-693 fingerprint format", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-legacy" };
+    const first = await createDvpTrade(env, auditContext, input);
+
+    // Rewrite the stored fingerprint to the format the pre-APE-693 create
+    // wrote: the same terms hashed with no project scope. Party A is the
+    // custody wallet the fixture seeds; party B is the pasted address.
+    await getDb(env).execute("UPDATE dvp_trades SET idempotency_fingerprint = ? WHERE id = ?", [
+      dvpCreateLegacyFingerprint({
+        input,
+        resolvedA: { address: address(custodyWalletAddress), counterpartyAccountId: null },
+        resolvedB: { address: address(COUNTERPARTY_ADDRESS), counterpartyAccountId: null },
+      }),
+      first.id,
+    ]);
+
+    const retried = await createDvpTrade(env, auditContext, input);
+
+    expect(retried.id).toBe(first.id);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });

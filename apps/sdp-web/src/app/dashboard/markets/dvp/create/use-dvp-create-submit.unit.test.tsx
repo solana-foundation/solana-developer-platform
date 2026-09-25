@@ -309,6 +309,34 @@ describe("useDvpCreateSubmit confirmation", () => {
     );
   });
 
+  // The no-selection refusal is named by the proxy too, so it is also said in
+  // the reader's language rather than relayed.
+  it("names a no-project-selected refusal in the catalog's own words", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: {
+            message: "Selected project required",
+            details: { reason: "dvp_create_selected_project_required" },
+          },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "No project is selected right now, so this trade can't be submitted. Choose a project and create it again."
+    );
+  });
+
   // A refusal without a known code is relayed as sent — the codes are only for
   // refusals this form can name.
   it("relays an unnamed refusal's own message", async () => {

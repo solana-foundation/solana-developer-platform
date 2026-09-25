@@ -97,6 +97,10 @@ describe("POST /api/dashboard/markets/dvp/trades", () => {
     const response = await POST(createRequest({ [REVIEWED]: "project_a" }));
 
     expect(response.status).toBe(400);
+    const body = (await response.json()) as {
+      error?: { message?: string; details?: { reason?: string } };
+    };
+    expect(body.error?.details?.reason).toBe("dvp_create_selected_project_required");
     expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
   });
 

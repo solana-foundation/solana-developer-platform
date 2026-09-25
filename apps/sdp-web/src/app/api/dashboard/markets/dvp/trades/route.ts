@@ -84,9 +84,10 @@ export async function POST(request: Request) {
   }
   const selectedProjectId = await getSelectedProjectId();
   if (!selectedProjectId) {
-    return proxyFailure(
-      createTimedTrace("route.dashboard.dvp.trades.create", request),
+    return refusal(
+      request,
       400,
+      DVP_CREATE_REFUSAL.selectedProjectRequired,
       "Selected project required"
     );
   }
