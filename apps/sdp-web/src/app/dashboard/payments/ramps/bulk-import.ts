@@ -41,6 +41,7 @@ export function validateBulkRows(rows: BulkImportRow[]): {
 } {
   const valid: BulkImportRow[] = [];
   const errors: BulkRowError[] = [];
+  const seenAccountIds = new Set<string>();
 
   rows.forEach((row, index) => {
     if (isEmptyBulkRow(row)) {
@@ -60,6 +61,14 @@ export function validateBulkRows(rows: BulkImportRow[]): {
       errors.push({ row: line, message: "Amount must be a positive number" });
       return;
     }
+    // One leg per account: the wizard keys batches by account id, so a
+    // repeated id would silently overwrite the earlier row's amount and drop
+    // that transfer leg. Refuse it here, where the operator can fix the row.
+    if (seenAccountIds.has(row.accountId)) {
+      errors.push({ row: line, message: "Duplicate counterparty_wallet_id" });
+      return;
+    }
+    seenAccountIds.add(row.accountId);
     valid.push(row);
   });
 

@@ -224,7 +224,20 @@ export function useBatchSendWizard({
   };
 
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
-    const ids = [...new Set(rows.map((row) => row.accountId))];
+    // Entries are keyed by account id, so two rows for the same account would
+    // silently overwrite the earlier amount and drop that transfer leg.
+    // Refuse duplicates before any state changes — never collapse them.
+    const seenAccountIds = new Set<string>();
+    for (const row of rows) {
+      if (seenAccountIds.has(row.accountId)) {
+        throw new Error(
+          t("DashboardPayments.batchSend.importDuplicateWallet", { id: row.accountId })
+        );
+      }
+      seenAccountIds.add(row.accountId);
+    }
+
+    const ids = [...seenAccountIds];
     const resolved = await fetchBatchRecipients({ ids }, t);
     const byId = new Map(
       resolved.accounts.map((recipient) => [recipient.counterpartyAccountId, recipient])
