@@ -129,9 +129,11 @@ export interface Env {
   SOLANA_RPC_NODIT_URL?: string;
   SOLANA_RPC_NODIT_API_KEY?: string;
   /**
-   * Most custody wallets with a SOL+SPL balance read in flight at once
-   * (default 8). Cold-cache read latency scales with ceil(wallets / value),
-   * so a provider with headroom can raise it; the rejected-read burst risk a
+   * Most custody wallets with a balance read in flight at once per leg — the
+   * SOL balance read and the token-program reads each run under this bound
+   * (default 16), so a slow token scan never queues a wallet's SOL read
+   * behind it. Cold-cache read latency scales with ceil(wallets / value), so
+   * a provider with headroom can raise it; the rejected-read burst risk a
    * higher bound carries scales with it too. Must be a positive integer.
    */
   WALLET_BALANCE_READ_CONCURRENCY?: string;

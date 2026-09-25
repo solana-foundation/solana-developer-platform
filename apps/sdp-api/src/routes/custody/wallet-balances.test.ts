@@ -172,6 +172,52 @@ describe("readWalletBalances", () => {
     expect(balances.has("cwlt_57")).toBe(false);
   });
 
+  it("keeps later SOL reads flowing past a held token read", async () => {
+    const { rpc, balanceReads, tokenReads } = heldRpc();
+    const wallets = Array.from({ length: WALLET_BALANCE_READ_CONCURRENCY + 1 }, (_, index) =>
+      wallet(index)
+    );
+
+    const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
+    await flush();
+
+    // The first wave of each leg fills its own bound.
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY);
+    expect(tokenReads).toHaveLength(2 * WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Answer one wallet's SOL read while every token read stays held: the
+    // freed SOL slot starts the next wallet's SOL read instead of queueing it
+    // behind the outstanding token scans.
+    balanceReads[0]?.resolve({ value: 5n });
+    await flush();
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY + 1);
+    expect(tokenReads).toHaveLength(2 * WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Drain every remaining read.
+    const answered = new Set<object>();
+    for (;;) {
+      await flush();
+      const nextBalanceReads = balanceReads.filter((read) => !answered.has(read));
+      const nextTokenReads = tokenReads.filter((read) => !answered.has(read));
+      if (nextBalanceReads.length === 0 && nextTokenReads.length === 0) {
+        break;
+      }
+      for (const read of nextBalanceReads) {
+        answered.add(read);
+        read.resolve({ value: 3n });
+      }
+      for (const read of nextTokenReads) {
+        answered.add(read);
+        read.resolve({ value: [] });
+      }
+    }
+
+    const balances = await result;
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY + 1);
+    expect(tokenReads).toHaveLength(2 * (WALLET_BALANCE_READ_CONCURRENCY + 1));
+    expect(balances.size).toBe(WALLET_BALANCE_READ_CONCURRENCY + 1);
+  });
+
   it("shares one read between two callers asking at the same time", async () => {
     const { rpc, balanceReads, tokenReads } = heldRpc();
 
@@ -277,8 +323,8 @@ describe("readWalletBalances", () => {
  * about and no positional batch is issued at all.
  */
 describe("parseWalletBalanceReadConcurrency", () => {
-  it("defaults to the burst floor when unset", () => {
-    expect(parseWalletBalanceReadConcurrency(undefined)).toBe(8);
+  it("defaults to the per-leg burst floor when unset", () => {
+    expect(parseWalletBalanceReadConcurrency(undefined)).toBe(16);
   });
 
   it("accepts a positive integer override", () => {
