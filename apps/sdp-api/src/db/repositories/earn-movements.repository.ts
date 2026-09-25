@@ -1696,22 +1696,52 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // finalized row. Withdrawals sum `token_amount_settled` (0103), the
       // observed payout; a finalized withdrawal with none is counted so the
       // read can withhold earned instead of understating it.
+      //
+      // Settlement is provider-aware (SOLA9-487), the same boundary
+      // reconciliation enforces: a `finalized` row counts as settled only when
+      // its provider's Solana leg is itself atomic, or when the row is an
+      // authenticated queued-withdrawal fulfillment (the id prefix is the
+      // writer's own key — `recordFulfilledQueueMovement` finalizes a
+      // provider-order withdrawal inside the transaction that recorded provider
+      // completion). A legacy pre-0115 provider-order row stored as finalized —
+      // a WisdomTree leg whose chain payment reached finality before any
+      // authenticated completion path existed — stays pending: excluded from
+      // the settled sums and counted in `unsettled_movement_count` so the
+      // earnings read withholds `earned` (`movements_pending`) instead of
+      // treating finality of the payment leg as economic settlement. Unknown
+      // providers fail closed: atomicity is a positive settlement claim, so a
+      // provider absent from the registry is never settled by a chain fact.
       const result = await db
         .prepare(
           `WITH facts AS (
              SELECT position_id,
                     CASE WHEN direction = 'deposit' AND status = 'finalized'
+                              AND provider = ANY (?::text[])
                          THEN COALESCE(amount_settled, amount_requested)::numeric
                          ELSE 0::numeric END AS finalized_deposits,
                     CASE WHEN direction = 'withdrawal' AND status = 'finalized'
+                              AND (provider = ANY (?::text[])
+                                   OR starts_with(id, '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}'))
                          THEN COALESCE(token_amount_settled, '0')::numeric
                          ELSE 0::numeric END AS finalized_withdrawals,
                     CASE WHEN direction = 'withdrawal' AND status = 'finalized'
+                              AND (provider = ANY (?::text[])
+                                   OR starts_with(id, '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}'))
                          THEN 1 ELSE 0 END AS finalized_withdrawal_count,
                     CASE WHEN direction = 'withdrawal' AND status = 'finalized'
-                               AND token_amount_settled IS NULL
+                              AND (provider = ANY (?::text[])
+                                   OR starts_with(id, '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}'))
+                              AND token_amount_settled IS NULL
                          THEN 1 ELSE 0 END AS unvalued_withdrawal_count,
                     CASE WHEN status IN ('requested', 'submitted', 'confirmed')
+                              OR (status = 'finalized' AND NOT (
+                                    (direction = 'deposit' AND provider = ANY (?::text[]))
+                                 OR (direction = 'withdrawal' AND (
+                                       provider = ANY (?::text[])
+                                       OR starts_with(id, '${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}')
+                                     )
+                                   ))
+                                )
                          THEN 1 ELSE 0 END AS unsettled_movement_count
                FROM earn_movements
               WHERE organization_id = ?
@@ -1755,9 +1785,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                   COALESCE(SUM(unvalued_withdrawal_count), 0) AS unvalued_withdrawal_count,
                   COALESCE(SUM(unsettled_movement_count), 0) AS unsettled_movement_count
              FROM facts
-            GROUP BY position_id`
+             GROUP BY position_id`
         )
         .bind(
+          // The settlement arrays lead because the facts CTE's CASE
+          // expressions bind before the WHERE scope: deposits then
+          // withdrawals, once per CASE that consults each direction.
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.deposit],
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.deposit],
+          [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.withdrawal],
           params.organizationId,
           params.projectId,
           params.environment,
