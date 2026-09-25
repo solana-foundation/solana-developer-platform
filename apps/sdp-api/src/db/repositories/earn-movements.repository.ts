@@ -363,11 +363,10 @@ export interface EarnMovementsRepository {
    * DELIBERATELY: finality proves only that the payment leg cannot be rolled
    * back, not that the provider finished the order, so a claim released there
    * lets a cross-key twin sign and broadcast a second deposit for an order
-   * still pending. The release point is the settled boundary itself — for a
-   * provider order, the durable `settled_at` completion fact the future
-   * authenticated provider reconciler stamps (see `vaultSettlementFilter`) —
-   * so closing those rows for the `?settled=` surface closes their claims
-   * with it, one completion fact moved once for both.
+   * still pending. The release point is the settled boundary itself, so the
+   * future authenticated provider reconciler that can finally close these rows
+   * (see `vaultSettlementFilter`) closes their claims with it — one completion
+   * fact, moved once, for the settled surface and this claim together.
    *
    * A twin the caller has flagged DELIBERATE
    * (`allowConcurrentDuplicateIntent`) never reaches this read: the caller
@@ -1060,15 +1059,14 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
 } as const satisfies Record<EarnMovementDirection, readonly EarnMovementStatus[]>;
 
 /**
- * A failed movement is terminal for every provider. A row carrying the durable
- * `settled_at` completion fact is terminal too — for provider orders that
- * fact is exactly what the authenticated provider reconciler stamps when it
- * correlates the provider's own completion, the one fact chain finality can
- * never stand in for. Without it, success is terminal only for a provider
- * whose Solana leg is itself atomic: provider orders (and unknown historical
- * providers) remain discoverable even if a legacy row says finalized, and
- * chain finality alone (`chain_finalized_at`, row still `confirmed`) never
- * closes them.
+ * A failed movement is terminal for every provider. Success is terminal only
+ * for a provider whose Solana leg is itself atomic. Provider orders (and
+ * unknown historical providers) remain discoverable even if a legacy row says
+ * finalized or carries a legacy `settled_at` stamp from the era when the sweep
+ * recorded chain finality there — neither is a settlement fact. A future
+ * authenticated provider reconciler must introduce its own durable completion
+ * fact before this predicate can close those rows (chain finality alone —
+ * `chain_finalized_at`, row still `confirmed` — never does).
  */
 function vaultSettlementFilter(
   direction: EarnMovementDirection,
@@ -1076,7 +1074,7 @@ function vaultSettlementFilter(
 ): { clause: string; values: readonly unknown[] } {
   if (settled === undefined) return { clause: "", values: [] };
   const predicate =
-    "(status = 'failed' OR settled_at IS NOT NULL OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
   return {
     clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
     values: [
@@ -1298,16 +1296,15 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async findOpenVaultDepositIntentClaim(params) {
       // The unsettled predicate of `listVaultMovements`' `?settled=true` —
-      // `failed`, the durable `settled_at` completion fact, or success past
-      // the provider's atomic settlement boundary — is the definition of "the
-      // prior movement is terminal" here. Reuse it rather than restating it:
-      // a settlement-boundary change must move the claim's release point with
-      // it. Chain finality is deliberately NOT a release point: for a
-      // provider-order deposit it coexists with an order the provider has not
-      // completed, and a cross-key twin released there would start a second
-      // sign/record/broadcast path for money already committed. For those rows
-      // the claim releases when the provider reconciler stamps `settled_at` —
-      // the same fact that closes the row on the settled surface. The rank
+      // `failed`, or success past the provider's atomic settlement boundary —
+      // is the definition of "the prior movement is terminal" here. Reuse it
+      // rather than restating it: a settlement-boundary change must move the
+      // claim's release point with it. Chain finality is deliberately NOT a
+      // release point: for a provider-order deposit it coexists with an order
+      // the provider has not completed, and a cross-key twin released there
+      // would start a second sign/record/broadcast path for money already
+      // committed. A legacy `settled_at` stamp is not a release point either —
+      // it is a chain-era artifact, not a provider completion fact. The rank
       // puts movements whose floor honors the request first (newest of
       // those), recency second — so the row that comes back honors the
       // request whenever ANY open movement does, and the floor rule

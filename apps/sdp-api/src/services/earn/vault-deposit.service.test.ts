@@ -687,51 +687,49 @@ describe("depositIntoVault — idempotency", () => {
   });
 
   /**
-   * The provider-order claim's release point is the durable `settled_at`
-   * completion fact — the one fact chain finality can never stand in for. The
-   * authenticated provider reconciler stamps it via `advanceVaultMovement`
-   * exactly when it closes the row for the `?settled=` surface, so the claim
-   * releases with the same fact rather than being structurally unable to
-   * release: a later same-amount deposit with a fresh key starts a fresh
-   * movement once the provider order is complete. Chain finality alone keeps
-   * the claim (pinned by the test above).
+   * A `settled_at` stamp on a provider-order row is a LEGACY chain-era
+   * artifact — the old dual-write and the sweep recorded chain finality there
+   * — not an authenticated provider completion fact, so it must not close the
+   * row on the `?settled=` surface and must not release the cross-key claim
+   * either: releasing on it would re-open the double-broadcast hole for every
+   * legacy row the moment it was stamped at finality. The claim and the
+   * settled surface move together, one completion fact, when the future
+   * provider reconciler actually lands one (pinned here and by the settlement
+   * route tests). Until then the deliberate-duplicate flag is the only way a
+   * second same-amount deposit starts (pinned by the test above).
    */
-  it("releases a provider-order claim once the provider completion fact is stamped", async () => {
+  it("keeps a provider-order claim even when a legacy settled_at stamp marks the row", async () => {
     const repository = createPostgresEarnMovementsRepository(getDb(env));
     const first = await depositIntoVault(
       env,
       depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
     );
 
-    // The reconciler's completion stamp: the row advances to the
-    // success-terminal state WITH the durable fact (the same write shape
-    // atomic settlement uses, offered to the provider reconciler).
-    const closed = await repository.advanceVaultMovement({
+    // The legacy stamp: the row advances to `finalized` WITH `settled_at` —
+    // the write shape the pre-provider-order era used at chain finality.
+    const stamped = await repository.advanceVaultMovement({
       movementId: first.movement.id,
       organizationId: ORG,
       toStatus: "finalized",
       confirmedAt: new Date().toISOString(),
       settledAt: new Date().toISOString(),
     });
-    expect(closed?.settled_at).not.toBeNull();
+    expect(stamped?.settled_at).not.toBeNull();
 
-    signVaultPlan.mockResolvedValue({
-      bytes: new Uint8Array([3]),
-      signature: "sig_provider_order_released",
-      lastValidBlockHeight: "12345",
-    });
     const twin = await depositIntoVault(
       env,
       depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
     );
 
-    expect(twin).toMatchObject({ replayed: false });
-    expect(twin.movement.id).not.toBe(first.movement.id);
-    expect(await tableCount("earn_movements")).toBe(2);
-    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+    // The stamp is not a completion fact: the accidental twin is still
+    // answered with the open movement, and nothing new is signed.
+    expect(twin).toMatchObject({ replayed: true });
+    expect(twin.movement.id).toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
 
-    // One completion fact, moved once: the same fact closes the row on the
-    // settled surface that released the claim.
+    // One fact, moved once: the row is not closed on the settled surface
+    // either — the same reason the claim held.
     const settledPage = await repository.listVaultMovements({
       organizationId: ORG,
       environment: "sandbox",
@@ -742,7 +740,7 @@ describe("depositIntoVault — idempotency", () => {
       before: null,
       settled: true,
     });
-    expect(settledPage.rows.map((row) => row.id)).toEqual([first.movement.id]);
+    expect(settledPage.rows.map((row) => row.id)).toEqual([]);
   });
 
   it("binds independent request keys for distinct intents into distinct on-chain memo instructions", async () => {
