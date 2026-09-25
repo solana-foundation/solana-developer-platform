@@ -12,6 +12,8 @@ const getTransaction = vi.hoisted(() => vi.fn());
 const readVaultPositions = vi.hoisted(() => vi.fn());
 const broadcastVaultTransaction = vi.hoisted(() => vi.fn());
 const reconcileEarnVaultQueuedWithdrawals = vi.hoisted(() => vi.fn());
+const completeProviderOrderDeposits = vi.hoisted(() => vi.fn());
+const repairUnvaluedWithdrawalPayoutsMock = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
@@ -30,10 +32,24 @@ vi.mock("@/services/earn/vault-execution.service", () => ({ broadcastVaultTransa
 vi.mock("@/services/earn/vault-queued-withdrawal-reconciliation.service", () => ({
   reconcileEarnVaultQueuedWithdrawals,
 }));
+vi.mock("@/services/earn/vault-provider-order-completion.service", () => ({
+  completeProviderOrderDeposits,
+}));
+// Pass the payout-repair pass through to the real implementation unless a test
+// overrides it: the job must run it inside the movement pipeline, and one test
+// below makes it throw to prove the completion sibling runs anyway.
+vi.mock("@/services/earn/vault-movement-reconciliation.service", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@/services/earn/vault-movement-reconciliation.service")>();
+  realRepairUnvaluedWithdrawalPayouts = original.repairUnvaluedWithdrawalPayouts;
+  return { ...original, repairUnvaluedWithdrawalPayouts: repairUnvaluedWithdrawalPayoutsMock };
+});
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent,
 }));
+
+let realRepairUnvaluedWithdrawalPayouts: typeof import("@/services/earn/vault-movement-reconciliation.service")["repairUnvaluedWithdrawalPayouts"];
 
 const { reconcileEarnVaultMovements } = await import("./reconcile-earn-vault-movements");
 const { runWithCronRunEvent, CRON_RUN_EVENT } = await import("../../cron/run-event");
@@ -87,6 +103,16 @@ beforeEach(async () => {
   getTransaction.mockResolvedValue(null);
   readVaultPositions.mockResolvedValue([]);
   reconcileEarnVaultQueuedWithdrawals.mockResolvedValue(undefined);
+  completeProviderOrderDeposits.mockResolvedValue({
+    claimed: 0,
+    completed: 0,
+    unobserved: 0,
+    errors: 0,
+  });
+  repairUnvaluedWithdrawalPayoutsMock.mockImplementation(
+    async (...args: Parameters<typeof realRepairUnvaluedWithdrawalPayouts>) =>
+      realRepairUnvaluedWithdrawalPayouts(...args)
+  );
 });
 
 async function seedMovement(lastValidBlockHeight = "100", provider = "kamino") {
@@ -1082,6 +1108,67 @@ describe("reconcileEarnVaultMovements: async-withdrawal sibling", () => {
         claimed: 0,
       })
     );
+  });
+});
+
+describe("reconcileEarnVaultMovements: provider-order completion sibling", () => {
+  function tickPayload(): Record<string, unknown> | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[1];
+  }
+
+  function tickLevel(): string | undefined {
+    const call = logEvent.mock.calls.find(
+      ([, payload]) => payload?.event === "sdp_api_earn_vault_reconciliation_tick"
+    );
+    return call?.[0];
+  }
+
+  it("runs the completion pass on every tick, independently of the movement pipeline", async () => {
+    await reconcileEarnVaultMovements(env);
+
+    expect(completeProviderOrderDeposits).toHaveBeenCalledOnce();
+    expect(completeProviderOrderDeposits).toHaveBeenCalledWith(env);
+    expect(tickPayload()).toMatchObject({
+      provider_completion_claimed: 0,
+      provider_completion_completed: 0,
+      provider_completion_unobserved: 0,
+      provider_completion_errors: 0,
+    });
+  });
+
+  it("still runs the completion pass when an earlier pipeline step keeps throwing", async () => {
+    // The exact regression the pass's independence exists for: a payout-repair
+    // failure that throws out of the movement pipeline used to exit the tick
+    // before the completion pass ran, so provider-order deposits stayed
+    // unsettled and their cross-key claims held even while the provider was
+    // reachable. The pass now runs regardless; the pipeline failure still
+    // decides the run's verdict.
+    repairUnvaluedWithdrawalPayoutsMock.mockRejectedValue(new Error("payout repair down"));
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow("payout repair down");
+
+    expect(completeProviderOrderDeposits).toHaveBeenCalledOnce();
+    expect(completeProviderOrderDeposits).toHaveBeenCalledWith(env);
+  });
+
+  it("fails the tick loudly when the completion pass itself throws", async () => {
+    // An unobserved completion feed must not read as an ok tick either: the
+    // deposits it was owed a stamp for go unjudged, same EARN-006 shape as a
+    // chain-read failure.
+    const completionFailure = new Error("wisdomtree orders feed unavailable");
+    completeProviderOrderDeposits.mockRejectedValue(completionFailure);
+
+    await expect(reconcileEarnVaultMovements(env)).rejects.toThrow(AggregateError);
+
+    expect(tickLevel()).toBe("error");
+    expect(tickPayload()).toMatchObject({
+      provider_completion_claimed: 0,
+      provider_completion_completed: 0,
+      provider_completion_errors: 1,
+    });
   });
 });
 

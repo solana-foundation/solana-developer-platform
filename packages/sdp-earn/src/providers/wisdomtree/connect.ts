@@ -544,6 +544,16 @@ const WISDOMTREE_COMPLETED_ORDER_STATUSES: ReadonlySet<string> = new Set(["compl
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 
 /**
+ * How far an order's completion may PREDATE the deposit's own record and still
+ * correlate to it. The payment leg is broadcast only after SDP writes the
+ * movement row, so a genuine order for that deposit completes after it —
+ * the tolerance exists solely for a provider clock lagging SDP's when the
+ * order completes within moments of the broadcast. An older purchase of the
+ * same wallet, fund, and amount completes materially earlier, far outside it.
+ */
+const ORDER_CORRELATION_CLOCK_SKEW_MS = 10 * 60 * 1_000;
+
+/**
  * Exact numeric equality of two unsigned decimal strings, with no float on the
  * money path: "10.00" and "10" are the same order, "0.10" and "0.1" too.
  * Scales both fractional halves to a common width and compares the integers.
@@ -561,10 +571,17 @@ function sameDecimalAmount(left: string, right: string): boolean {
  *
  * Authenticated correlation, fail-closed. The provider's own order book — read
  * with SDP's credentials — must name ALL of: this wallet, a Purchase, this
- * fund, this amount, and a completed status, for the deposit's settlement to
- * be demonstrated. Anything less (a miss, a pending order, a malformed feed,
- * an unconfigured credential) answers null and the row stays open — never a
- * guess that closes a claim on money already committed.
+ * fund, this amount, a completed status, and a completion instant that is not
+ * OLDER than this deposit's own record (`movementCreatedAt`, less a small
+ * clock-skew tolerance), for the deposit's settlement to be demonstrated. The
+ * temporal bound is what separates this deposit's order from an older
+ * completed purchase of the same wallet, fund, and amount: without it, a new
+ * deposit whose own order is still pending would be settled by that older
+ * order, its claim would release, and a twin deposit could double-broadcast.
+ * Anything less (a miss, a pending order, a match that cannot be bound in
+ * time — no readable `completed_at` — a malformed feed, an unconfigured
+ * credential) answers null and the row stays open — never a guess that closes
+ * a claim on money already committed.
  *
  * UNVERIFIED field names throughout (`trade_type`, `wallet_address`, `fund`,
  * `amount`, `status`, `completed_at`, `id`): each is a single reader above, so
@@ -576,8 +593,14 @@ export async function readWisdomTreePurchaseOrderCompletion(
     owner: string;
     fundExchangeCode: string;
     amountRequested: string;
+    movementCreatedAt: string;
   }
 ): Promise<WisdomTreePurchaseOrderCompletion | null> {
+  const movementCreatedMs = Date.parse(input.movementCreatedAt);
+  if (Number.isNaN(movementCreatedMs)) {
+    // This deposit cannot be bound to any order in time: fail closed.
+    return null;
+  }
   const orders = await _listWisdomTreeOrders(ctx);
   for (const entry of orders) {
     const order = readWisdomTreeOrderRecord(entry);
@@ -599,6 +622,18 @@ export async function readWisdomTreePurchaseOrderCompletion(
       !DECIMAL_STRING.test(order.amount) ||
       !DECIMAL_STRING.test(input.amountRequested) ||
       !sameDecimalAmount(order.amount, input.amountRequested)
+    ) {
+      continue;
+    }
+    // The temporal binding: an order with no readable completion instant
+    // cannot be shown to belong to THIS deposit rather than an older twin
+    // purchase, and one that demonstrably completed before the deposit's
+    // record exists cannot be its order either. Both stay open (null), retried
+    // on a later tick — never a guess that releases a claim on committed money.
+    const completedMs = order.completedAt === null ? Number.NaN : Date.parse(order.completedAt);
+    if (
+      Number.isNaN(completedMs) ||
+      completedMs < movementCreatedMs - ORDER_CORRELATION_CLOCK_SKEW_MS
     ) {
       continue;
     }

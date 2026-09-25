@@ -25,11 +25,14 @@ const ctx: EarnRuntimeContext = {
 const OWNER = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const FUND = "WTGXX";
 const AMOUNT = "250.50";
+/** The deposit's own record instant: fixtures complete at or after it. */
+const MOVEMENT_CREATED_AT = "2026-09-25T00:00:00Z";
 
 const input = {
   owner: OWNER,
   fundExchangeCode: FUND,
   amountRequested: AMOUNT,
+  movementCreatedAt: MOVEMENT_CREATED_AT,
 };
 
 const tokenReply = { access_token: "bearer-token", expires_in: 600 };
@@ -58,12 +61,12 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
         wallet_address: OWNER,
         fund: FUND,
         amount: AMOUNT,
-        completed_at: "2026-09-20T10:00:00Z",
+        completed_at: "2026-09-25T10:00:00Z",
       },
     ]);
     assert.deepEqual(await readWisdomTreePurchaseOrderCompletion(ctx, input), {
       orderReference: "order-7",
-      completedAt: "2026-09-20T10:00:00Z",
+      completedAt: "2026-09-25T10:00:00Z",
     });
   });
 
@@ -76,12 +79,12 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
         wallet_address: OWNER,
         fund: FUND,
         amount: "250.5000",
-        completed_at: null,
+        completed_at: "2026-09-25T10:00:00Z",
       },
     ]);
     assert.deepEqual(await readWisdomTreePurchaseOrderCompletion(ctx, input), {
       orderReference: "order-7",
-      completedAt: null,
+      completedAt: "2026-09-25T10:00:00Z",
     });
   });
 
@@ -94,7 +97,7 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
         wallet_address: OWNER.toLowerCase(),
         fund: FUND.toLowerCase(),
         amount: AMOUNT,
-        completed_at: null,
+        completed_at: "2026-09-25T10:00:00Z",
       },
     ]);
     const completion = await readWisdomTreePurchaseOrderCompletion(ctx, input);
@@ -146,12 +149,12 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
         wallet_address: OWNER,
         fund: FUND,
         amount: "250.50",
-        completed_at: "2026-09-21T10:00:00Z",
+        completed_at: "2026-09-26T10:00:00Z",
       },
     ]);
     assert.deepEqual(await readWisdomTreePurchaseOrderCompletion(ctx, input), {
       orderReference: "order-11",
-      completedAt: "2026-09-21T10:00:00Z",
+      completedAt: "2026-09-26T10:00:00Z",
     });
   });
 
@@ -187,6 +190,113 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
       },
     ]);
     assert.equal(await readWisdomTreePurchaseOrderCompletion(ctx, input), null);
+  });
+
+  it("does not settle this deposit from an older purchase of the same wallet, fund, and amount", async () => {
+    // The exact false-settle: an order that completed BEFORE the deposit was
+    // recorded matches every other key. Settling the deposit from it would
+    // release the cross-key claim while this deposit's own order is still
+    // pending and let a twin double-broadcast.
+    stubOrdersFeed([
+      {
+        id: "order-2",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-20T10:00:00Z",
+      },
+    ]);
+    assert.equal(await readWisdomTreePurchaseOrderCompletion(ctx, input), null);
+  });
+
+  it("skips an older purchase and answers the deposit's own later order", async () => {
+    stubOrdersFeed([
+      {
+        id: "order-2",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-20T10:00:00Z",
+      },
+      {
+        id: "order-9",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T10:00:00Z",
+      },
+    ]);
+    assert.deepEqual(await readWisdomTreePurchaseOrderCompletion(ctx, input), {
+      orderReference: "order-9",
+      completedAt: "2026-09-25T10:00:00Z",
+    });
+  });
+
+  it("correlates an order completed within the clock-skew tolerance", async () => {
+    // A provider clock lagging SDP's by moments must not strand a genuine
+    // completion: one minute behind is tolerated; last week is not.
+    stubOrdersFeed([
+      {
+        id: "order-7",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-24T23:59:00Z",
+      },
+    ]);
+    assert.equal(
+      (await readWisdomTreePurchaseOrderCompletion(ctx, input))?.orderReference,
+      "order-7"
+    );
+  });
+
+  it("cannot bind an order with no readable completion time to this deposit", async () => {
+    // Without a completion instant there is no fact that separates this
+    // deposit's order from an older twin purchase, so the match is ambiguous
+    // and the row stays open.
+    for (const completed_at of [null, "not-a-date"]) {
+      stubOrdersFeed([
+        {
+          id: "order-7",
+          trade_type: "Purchase",
+          status: "completed",
+          wallet_address: OWNER,
+          fund: FUND,
+          amount: AMOUNT,
+          completed_at,
+        },
+      ]);
+      assert.equal(await readWisdomTreePurchaseOrderCompletion(ctx, input), null);
+    }
+  });
+
+  it("answers null when the deposit's own record instant is unreadable", async () => {
+    stubOrdersFeed([
+      {
+        id: "order-7",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T10:00:00Z",
+      },
+    ]);
+    assert.equal(
+      await readWisdomTreePurchaseOrderCompletion(ctx, {
+        ...input,
+        movementCreatedAt: "not-a-date",
+      }),
+      null
+    );
   });
 
   it("throws PROVIDER_UNAVAILABLE on a malformed order entry", async () => {

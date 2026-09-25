@@ -1096,6 +1096,17 @@ export interface EarnProviderOrderCompletionInput {
   providerReference: string;
   /** The deposit's requested amount, a decimal string in the deposit token. */
   amountRequested: string;
+  /**
+   * When SDP recorded this deposit (the movement row's `created_at`, ISO). The
+   * payment leg is broadcast only after that row is written, so an order for
+   * THIS deposit cannot have completed before this instant. The completion
+   * read must correlate orders against it: wallet, fund, and amount alone
+   * would match an OLDER completed purchase of the same shape and falsely
+   * settle a deposit whose own order is still pending, releasing its claim
+   * and double-depositing. A provider clock may lag SDP's, so implementations
+   * tolerate a small skew rather than comparing the instants exactly.
+   */
+  movementCreatedAt: string;
 }
 
 /**

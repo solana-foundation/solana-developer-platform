@@ -111,6 +111,10 @@ export async function completeProviderOrderDeposits(
           owner,
           providerReference,
           amountRequested: movement.amount_requested,
+          // The movement's own record instant: the correlation may only accept
+          // orders that cannot be OLDER than this deposit (an older completed
+          // purchase of the same wallet, fund, and amount must never settle it).
+          movementCreatedAt: movement.created_at,
         }
       );
       if (!completion) {

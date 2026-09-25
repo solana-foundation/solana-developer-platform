@@ -361,6 +361,7 @@ export class WisdomTreeVaultDirectClient
       owner: input.owner,
       fundExchangeCode: fund.exchangeCode,
       amountRequested: input.amountRequested,
+      movementCreatedAt: input.movementCreatedAt,
     });
     return completion === null
       ? null
