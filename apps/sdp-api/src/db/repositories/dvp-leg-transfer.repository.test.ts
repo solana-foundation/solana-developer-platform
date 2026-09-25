@@ -197,6 +197,7 @@ describe("DvpLegTransferRepository", () => {
       await repo.saveScan(TRADE_ID, {
         side: "a",
         cursor: { signature: sig(1), slot: "420" },
+        cursorSlotComplete: false,
         scannedAt: null,
       });
 
@@ -205,7 +206,12 @@ describe("DvpLegTransferRepository", () => {
       );
       await expect(
         runWithTenantDatabaseIdentity({ organizationId: CREATOR_ORG }, () =>
-          repo.saveScan(TRADE_ID, { side: "b", cursor: null, scannedAt: null })
+          repo.saveScan(TRADE_ID, {
+            side: "b",
+            cursor: null,
+            cursorSlotComplete: false,
+            scannedAt: null,
+          })
         )
       ).rejects.toThrow(/row-level security/);
 
@@ -214,10 +220,16 @@ describe("DvpLegTransferRepository", () => {
   });
 
   it("moves a leg's read position forward in place", async () => {
-    await repo.saveScan(TRADE_ID, { side: "a", cursor: null, scannedAt: null });
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: null,
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(7), slot: "700" },
+      cursorSlotComplete: true,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
 
@@ -225,6 +237,7 @@ describe("DvpLegTransferRepository", () => {
       {
         side: "a",
         cursor: { signature: sig(7), slot: "700" },
+        cursorSlotComplete: true,
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
     ]);
@@ -236,31 +249,79 @@ describe("DvpLegTransferRepository", () => {
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: true,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(8), slot: "899" },
+      cursorSlotComplete: false,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
-    await repo.saveScan(TRADE_ID, { side: "b", cursor: null, scannedAt: null });
+    await repo.saveScan(TRADE_ID, {
+      side: "b",
+      cursor: null,
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
     await repo.saveScan(TRADE_ID, {
       side: "b",
       cursor: { signature: sig(3), slot: "300" },
+      cursorSlotComplete: false,
       scannedAt: null,
     });
-    await repo.saveScan(TRADE_ID, { side: "b", cursor: null, scannedAt: null });
+    await repo.saveScan(TRADE_ID, {
+      side: "b",
+      cursor: null,
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
 
     const scans = await repo.listScans(TRADE_ID);
 
     expect(scans.find((scan) => scan.side === "a")).toEqual({
       side: "a",
       cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: true,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
     expect(scans.find((scan) => scan.side === "b")?.cursor).toEqual({
       signature: sig(3),
       slot: "300",
+    });
+    // A positionless save says nothing about the slot's watermark, which keeps
+    // qualifying the cursor it arrived with.
+    expect(scans.find((scan) => scan.side === "b")?.cursorSlotComplete).toBe(false);
+  });
+
+  // The watermark qualifies the cursor, so it moves with the cursor it is
+  // saved for: a same-slot replacement carries the newer read's proof, and a
+  // positionless save leaves the stored proof alone.
+  it("moves the slot watermark with the cursor it qualifies", async () => {
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(8), slot: "900" },
+      cursorSlotComplete: true,
+      scannedAt: null,
+    });
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: null,
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
+
+    expect((await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")).toEqual({
+      side: "a",
+      cursor: { signature: sig(8), slot: "900" },
+      cursorSlotComplete: true,
+      scannedAt: null,
     });
   });
 

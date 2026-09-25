@@ -245,7 +245,12 @@ describe("reconcileDvpTrades", () => {
     async function scanned(tradeId: string, scannedAt: string | null) {
       const transfers = createPostgresDvpLegTransferRepository(getDb(env));
       for (const side of ["a", "b"] as const) {
-        await transfers.saveScan(tradeId, { side, cursor: null, scannedAt });
+        await transfers.saveScan(tradeId, {
+          side,
+          cursor: null,
+          cursorSlotComplete: false,
+          scannedAt,
+        });
       }
     }
 

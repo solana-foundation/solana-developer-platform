@@ -368,7 +368,12 @@ describe("syncDvpLegTransfers", () => {
     ]);
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(3), slot: "3" }, scannedAt: expect.any(String) },
+      {
+        side: "a",
+        cursor: { signature: sig(3), slot: "3" },
+        cursorSlotComplete: true,
+        scannedAt: expect.any(String),
+      },
     ]);
   });
 
@@ -387,6 +392,7 @@ describe("syncDvpLegTransfers", () => {
       {
         side: "a",
         cursor: { signature: sig(5), slot: "5" },
+        cursorSlotComplete: true,
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -457,9 +463,16 @@ describe("syncDvpLegTransfers", () => {
     await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
 
     expect([...rows.keys()]).toEqual([sig(1)]);
-    // Not a complete read, so the leg stays due for the next sweep.
+    // Not a complete read, so the leg stays due for the next sweep. The stop
+    // left the position on a slot the listing never continued below, so the
+    // watermark says the next read takes the whole overlap from the top.
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+      {
+        side: "a",
+        cursor: { signature: sig(1), slot: "1" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
     ]);
   });
 
@@ -472,12 +485,19 @@ describe("syncDvpLegTransfers", () => {
       reader,
       transfers,
       LEG,
-      { side: "a", cursor: null, scannedAt: "2026-09-15T00:00:00.000Z" },
+      {
+        side: "a",
+        cursor: null,
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
       { remaining: 10 }
     );
 
     expect(rows.size).toBe(0);
-    expect(saved).toEqual([{ side: "a", cursor: null, scannedAt: null }]);
+    expect(saved).toEqual([
+      { side: "a", cursor: null, cursorSlotComplete: false, scannedAt: null },
+    ]);
   });
 
   it("skips an unreadable transaction without recording it, and moves past it", async () => {
@@ -506,7 +526,12 @@ describe("syncDvpLegTransfers", () => {
     expect(budget.remaining).toBe(0);
     expect([...rows.keys()]).toEqual([sig(1), sig(2)]);
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(2), slot: "2" }, scannedAt: null },
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "2" },
+        cursorSlotComplete: true,
+        scannedAt: null,
+      },
     ]);
   });
 
@@ -523,7 +548,12 @@ describe("syncDvpLegTransfers", () => {
 
       expect(rows.get(sig(2))?.finalized).toBe(false);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: false,
+          scannedAt: null,
+        },
       ]);
     });
 
@@ -553,7 +583,12 @@ describe("syncDvpLegTransfers", () => {
         reader,
         transfers,
         LEG,
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: null,
+        },
         { remaining: 10 }
       );
 
@@ -561,7 +596,14 @@ describe("syncDvpLegTransfers", () => {
       expect(knowsSignatures).not.toHaveBeenCalled();
       expect(rows.get(sig(2))?.finalized).toBe(true);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(2), slot: "2" }, scannedAt: expect.any(String) },
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "2" },
+          // The listing showed nothing below slot 2, so the watermark does not
+          // travel: the next read takes the overlap and looks again.
+          cursorSlotComplete: false,
+          scannedAt: expect.any(String),
+        },
       ]);
     });
 
@@ -574,14 +616,24 @@ describe("syncDvpLegTransfers", () => {
         reader,
         transfers,
         LEG,
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: null,
+        },
         { remaining: 10 }
       );
 
       expect(knowsSignatures).toHaveBeenCalledWith([sig(2)]);
       expect(deleted).toEqual([sig(2)]);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: expect.any(String) },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
       ]);
     });
 
@@ -630,6 +682,163 @@ describe("syncDvpLegTransfers", () => {
 
       expect(knowsSignatures).not.toHaveBeenCalled();
       expect(rows.has(sig(2))).toBe(true);
+    });
+  });
+
+  // Two movements can share a slot, and a node caught mid-index can list the
+  // newer one while omitting the older (SOLA9-676). A cursor parked on the
+  // newer signature would exclude the older one from every later read, so the
+  // read position only moves onto a slot the listing was seen to continue
+  // below, and a page that stops inside a slot is re-read with overlap until
+  // the node shows what it omitted.
+  describe("same-slot history watermark", () => {
+    /** A movement in the shared slot, above the trade's creation floor. */
+    function sameSlot(n: number): DvpEscrowHistoryEntry {
+      return {
+        ...history([n])[0],
+        slot: 420n,
+        blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+      };
+    }
+
+    it("recovers an omitted same-slot movement on the overlap read", async () => {
+      // First read: the index race lists only the newer movement. Second read:
+      // the node caught up, but only a listing unbounded by the raced cursor
+      // can show it — a walk bounded at the newer signature never lists the
+      // older one again.
+      const pages = [[sameSlot(2)], [sameSlot(2), sameSlot(1)]];
+      listSignatures.mockImplementation(async (_escrow, page) =>
+        page.until === null ? (pages.shift() ?? []) : []
+      );
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+      await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+      expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
+        { before: null, until: null },
+        // The second read must not bind itself to the raced signature.
+        { before: null, until: null },
+      ]);
+      expect(rows.has(sig(1))).toBe(true);
+      expect(rows.has(sig(2))).toBe(true);
+    });
+
+    it("re-reads from the top while the stored cursor's slot is unproven", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: false,
+          scannedAt: "2026-09-15T00:00:00.000Z",
+        },
+        { remaining: 10 }
+      );
+
+      expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
+    });
+
+    it("marks a slot the listing never continued below as unproven", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      // The position carries the newest finalized signature, but the watermark
+      // says the listing stopped inside its slot: the next read may not bound
+      // itself at it.
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: false,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("records both same-slot movements when the page is complete", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2), sameSlot(1)]);
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(rows.has(sig(1))).toBe(true);
+      expect(rows.has(sig(2))).toBe(true);
+    });
+
+    it("advances the cursor over a slot the listing continued below", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2), ...history([1])]);
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("keeps a proven slot's watermark as the cursor moves within it", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: "2026-09-15T00:00:00.000Z",
+        },
+        { remaining: 10 }
+      );
+
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("treats a listing that ran past the trade's creation as proof of depth", async () => {
+      listSignatures.mockResolvedValueOnce([
+        sameSlot(2),
+        // An hour before the row: a previous life of the address, dropped from
+        // the walk — but the listing reached past the creation floor.
+        ...history([1], { blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS - 3_600)) }),
+      ]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(readTransaction.mock.calls.map(([requested]) => requested)).toEqual([sig(2)]);
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
     });
   });
 });

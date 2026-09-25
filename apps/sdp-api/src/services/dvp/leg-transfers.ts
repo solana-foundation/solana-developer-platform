@@ -14,6 +14,11 @@
  *   it is seen finalized. The read position only moves over finalized
  *   signatures, so a provisional one is listed again on the next sweep, and a
  *   provisional row whose transaction the cluster no longer knows is deleted.
+ *   The position also remembers whether the listing was seen to continue below
+ *   its own slot: a short page that stops inside a slot can be a node caught
+ *   mid-index, which lists the newest of two same-slot movements and omits the
+ *   older, so the next read re-takes the whole overlap until the slot is
+ *   proven and an omitted movement is never fenced out for good.
  * - History is read back no further than the trade's creation, less the clock
  *   skew the close lookup allows: an older transaction cannot concern this
  *   trade, even at a reused escrow address.
@@ -336,12 +341,15 @@ function historyFloor(leg: DvpLegEscrow): bigint {
  * The escrow's history after `until`, newest first, back no further than the
  * trade's creation. Null when it runs past the page cap, since resolving the
  * oldest of a truncated read would leave a gap behind it no later read fills.
+ * `floorReached` says whether the listing ran past that creation: the read
+ * then saw depth below every slot it lists, which is proof no later read has
+ * to see again.
  */
 async function readHistorySince(
   reader: DvpEscrowHistoryReader,
   leg: DvpLegEscrow,
   until: Signature | null
-): Promise<DvpEscrowHistoryEntry[] | null> {
+): Promise<{ entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null> {
   const floor = historyFloor(leg);
   const newestFirst: DvpEscrowHistoryEntry[] = [];
   let before: Signature | null = null;
@@ -351,13 +359,13 @@ async function readHistorySince(
     for (const entry of entries) {
       // Newest first, so everything after this one is older still.
       if (entry.blockTime !== null && entry.blockTime < floor) {
-        return newestFirst;
+        return { entries: newestFirst, floorReached: true };
       }
       newestFirst.push(entry);
     }
     const oldest = entries.at(-1);
     if (entries.length < HISTORY_PAGE_LIMIT || oldest === undefined) {
-      return newestFirst;
+      return { entries: newestFirst, floorReached: false };
     }
     before = oldest.signature;
   }
@@ -539,14 +547,24 @@ export async function syncDvpLegTransfers(
   scan: DvpLegTransferScan | null,
   budget: DvpLegTransferBudget
 ): Promise<number> {
-  const newestFirst = await readHistorySince(reader, leg, scan?.cursor?.signature ?? null);
-  if (newestFirst === null) {
+  // A cursor is a safe `until` only when the read that reached it saw the
+  // listing continue below its slot. A page that stops inside the cursor's own
+  // slot can be a node caught mid-index, one that listed the newest of two
+  // same-slot movements and omitted the older — and a later read bounded at
+  // the cursor would never be offered it again. An unproven cursor is not
+  // trusted as a bound: the read takes the whole overlap from the top, where
+  // the omission can still surface.
+  const stored = scan?.cursor ?? null;
+  const since = scan?.cursorSlotComplete === true ? (stored?.signature ?? null) : null;
+  const read = await readHistorySince(reader, leg, since);
+  if (read === null) {
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
       "dvp transfers: escrow history since the last read exceeds the scan cap"
     );
     return 0;
   }
+  const newestFirst = read.entries;
 
   const known = new Map(
     (await transfers.listForLeg(leg.tradeId, leg.side)).map((transfer) => [
@@ -554,7 +572,10 @@ export async function syncDvpLegTransfers(
       transfer,
     ])
   );
-  let cursor = scan?.cursor ?? null;
+  let cursor = stored;
+  // The watermark qualifies the cursor it arrived with: a stored cursor was
+  // only ever saved over a slot the listing continued below.
+  let cursorSlotComplete = scan?.cursorSlotComplete ?? false;
   let finalizedSoFar = true;
   let complete = true;
   let recorded = 0;
@@ -567,7 +588,17 @@ export async function syncDvpLegTransfers(
     }
     recorded += outcome.recorded ? 1 : 0;
     if (finalizedSoFar && entry.finalized) {
-      cursor = { signature: entry.signature, slot: entry.slot.toString() };
+      const slot = entry.slot.toString();
+      // Moving the position within the slot it already sits on keeps that
+      // slot's proof: everything between the two signatures was listed by
+      // this very read. Any other advance is proven only by the listing
+      // continuing below the new slot — an entry at an earlier slot, or
+      // history past the trade's creation.
+      cursorSlotComplete =
+        (cursor !== null && cursor.slot === slot && cursorSlotComplete) ||
+        read.floorReached ||
+        newestFirst.some((listed) => listed.slot < entry.slot);
+      cursor = { signature: entry.signature, slot };
     } else {
       finalizedSoFar = false;
     }
@@ -587,6 +618,7 @@ export async function syncDvpLegTransfers(
   await transfers.saveScan(leg.tradeId, {
     side: leg.side,
     cursor,
+    cursorSlotComplete: cursor === null ? false : cursorSlotComplete,
     scannedAt: settled ? new Date().toISOString() : null,
   });
   return recorded;
