@@ -146,6 +146,14 @@ describe("0057_helius_rings schema", () => {
   });
 
   it("seeds the allowlist with SOL and devnet USDC only", async () => {
+    // The worker database outlives the files that run against it, and an
+    // earlier file in the same pool may have inserted allowlist fixtures of
+    // its own. Reset to the migration's own seed first — every statement in
+    // 0057 is IF NOT EXISTS / ON CONFLICT DO NOTHING, so re-applying is the
+    // no-op the sibling test proves — and assert what 0057 itself seeds.
+    await client.query("TRUNCATE helius_rings_asset_allowlist");
+    await expect(client.query(migrationSql)).resolves.toBeDefined();
+
     const seeded = await client.query<{ mint: string; symbol: string; decimals: number }>(
       "SELECT mint, symbol, decimals FROM helius_rings_asset_allowlist ORDER BY symbol"
     );

@@ -365,6 +365,76 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(row?.first_flagged_at).not.toBeNull();
   });
 
+  it("keeps an advisory open when finalized sub-floor deposits jointly meet the floor", async () => {
+    // Two halves of a manual split each fall below the floor, yet together
+    // they sum to it. That sum is committed evidence the follow-up landed, so
+    // a terminal `unfunded` would drop finalized evidence and misrecord a
+    // recovered split as "the swap never broadcast". The schema names one
+    // resolving movement per advisory, so the advisory stays open as
+    // ambiguous with the aggregate named in the event, for a human.
+    const id = await seedAdvisory(2 * HOUR);
+    const first = await seedFollowUpMovement("finalized", { amount: "10" });
+    const second = await seedFollowUpMovement("finalized", { amount: "14.8" });
+    // The swapped tokens went into the vault in two chunks: back at baseline.
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ ambiguous: 1, unfunded: 0, deposit_observed: 0 });
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[0]).toBe("warn");
+    expect(ambiguous?.[1]).toMatchObject({
+      advisory_id: id,
+      escalated: true,
+      aggregate_deposit_atoms: FLOOR.toString(),
+      covering_deposit_ids: expect.arrayContaining([first, second]),
+    });
+    const row = await advisoryRow(id);
+    expect(row?.resolved_at).toBeNull();
+    expect(row?.first_flagged_at).not.toBeNull();
+  });
+
+  it("keeps an above-floor aggregate of sub-floor deposits open as ambiguous too", async () => {
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("finalized", { amount: "20" });
+    await seedFollowUpMovement("finalized", { amount: "10" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ ambiguous: 1, unfunded: 0 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("holds an aggregate recovery open without escalating inside the grace period", async () => {
+    const id = await seedAdvisory(45 * MINUTE);
+    await seedFollowUpMovement("finalized", { amount: "10" });
+    await seedFollowUpMovement("finalized", { amount: "14.8" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[1]).toMatchObject({ escalated: false });
+    expect((await advisoryRow(id))?.first_flagged_at).toBeNull();
+  });
+
+  it("still resolves unfunded when committed deposits do not reach the floor in aggregate", async () => {
+    // Negative case: small unrelated deposits that sum below the floor are not
+    // follow-up evidence, so the swap never broadcast and `unfunded` stands.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpMovement("finalized", { amount: "2" });
+    await seedFollowUpMovement("finalized", { amount: "3" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(eventsNamed("sdp_api_earn_split_swap_ambiguous")).toHaveLength(0);
+    expect(tick().payload).toMatchObject({ unfunded: 1, ambiguous: 0 });
+    expect(await advisoryRow(id)).toMatchObject({ resolution: "unfunded" });
+  });
+
   it("still flags an orphan when the only same-mint deposit is too small to be the follow-up", async () => {
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("confirmed", { amount: "1" });
