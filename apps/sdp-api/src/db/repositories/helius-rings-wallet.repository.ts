@@ -106,9 +106,24 @@ export interface QuarantineHeliusRingsWalletInput extends HeliusRingsProjectScop
   expectedShieldedAddress: string;
 }
 
+/**
+ * The identity a read was for: the owner and shielded address name the
+ * on-chain identity a wallet's notes are encrypted to, and a re-key replaces
+ * both. Requiring them back on a late write proves the row still carries the
+ * identity the data describes — without it, a sync or operation that began
+ * under the abandoned identity would pin its observations onto the
+ * replacement.
+ */
+export interface HeliusRingsWalletIdentity {
+  ownerAddress: string;
+  shieldedAddress: string;
+}
+
 export interface UpdateHeliusRingsWalletSyncCursorInput extends HeliusRingsProjectScope {
   id: string;
   syncCursor: string;
+  /** Compare-and-swap guard: the identity the sync read. */
+  expectedIdentity: HeliusRingsWalletIdentity;
 }
 
 export interface RekeyHeliusRingsWalletInput extends HeliusRingsProjectScope {
@@ -203,9 +218,18 @@ export interface HeliusRingsWalletRepository {
    * sync — and they can report out of order. Taking the lower of the two would
    * let a later read gate on a position the wallet has already passed, which is
    * exactly the stale view this is meant to prevent.
+   *
+   * `expectedIdentity` narrows the write to the identity the observation was
+   * made for; losing the guard (a null return) means the row was re-keyed in
+   * the meantime and the slot must not seed the replacement's read position.
    */
   advanceIndexedSlot(
-    input: HeliusRingsProjectScope & { id: string; slot: string }
+    input: HeliusRingsProjectScope & {
+      id: string;
+      slot: string;
+      /** Compare-and-swap guard: the identity the observation was made for. */
+      expectedIdentity?: HeliusRingsWalletIdentity;
+    }
   ): Promise<HeliusRingsWalletRow | null>;
 }
 

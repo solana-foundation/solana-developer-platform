@@ -1,4 +1,4 @@
-import type { BuildOperationInput } from "@sdp/helius-rings";
+import type { BuildOperationInput, SyncPhotonResult } from "@sdp/helius-rings";
 import {
   HeliusRingsError,
   type PrivateOperationInput,
@@ -590,6 +590,96 @@ describe("HeliusRingsService", () => {
       expect(row?.shielded_address).toBe("rings1recovered");
     });
 
+    it("does not attach an abandoned identity's sync to the re-keyed wallet", async () => {
+      // A successful sync that began under identity A can finish after the
+      // public identity is re-keyed to identity B. The result then describes
+      // keys the wallet no longer has: its balances must not be returned as
+      // current, and its observation cursor/slot must not land on the
+      // replacement row — the re-key cleared them precisely so the new identity
+      // starts with nothing carried over. Only the upstream read is held at the
+      // exact ordering needed to reproduce the race; the repository and service
+      // methods are the real ones.
+      class DelayedRekeyGateway extends InMemoryRingsGateway {
+        readonly syncEntered = deferred<void>();
+        readonly syncRelease = deferred<SyncPhotonResult>();
+
+        override async readIdentity() {
+          return {
+            status: "foreign",
+            derivedShieldedAddress: "rings1replacementidentity",
+            publishedShieldedAddress: WALLET_SHIELDED_IDENTITY,
+            mismatch: "nullifier_key",
+          } as const;
+        }
+
+        override async syncPhoton() {
+          this.syncEntered.resolve();
+          return this.syncRelease.promise;
+        }
+      }
+
+      const gateway = new DelayedRekeyGateway();
+      const rings = service({ gateway });
+
+      const syncPromise = rings.syncWallet(walletId);
+      await gateway.syncEntered.promise;
+
+      const rekeyed = await rings.rekeyWalletIdentity(
+        walletId,
+        { confirmation: "Treasury", custodyOwner: WALLET_OWNER },
+        { apiKeyId: "key_1", actor: null }
+      );
+      const afterRekey = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      expect(afterRekey).toMatchObject({
+        status: "ready",
+        shielded_address: rekeyed.shieldedAddress,
+        sync_cursor: null,
+        last_indexed_slot: null,
+      });
+
+      gateway.syncRelease.resolve({
+        balances: [
+          {
+            mint: "So11111111111111111111111111111111111111112",
+            symbol: "SOL",
+            amountRaw: "2000000000",
+            decimals: 9,
+            ringProgramId: null,
+            noteCount: 2,
+          },
+        ],
+        history: [],
+        report: {
+          storedNotes: 2,
+          unparsedTransactions: 0,
+          undecryptableCandidates: 0,
+          unknownAssetIds: 0,
+          unknownAssetFields: 0,
+          degraded: false,
+        },
+        indexedOperationSignatures: [],
+        observedAt: "2026-09-24T15:00:00.000Z",
+        observedSlot: "9001",
+      });
+
+      // The late result belongs to the abandoned identity, so it is refused
+      // rather than presented as the wallet's current balance.
+      await expect(syncPromise).rejects.toMatchObject({ code: "conflict" });
+
+      const finalRow = await createHeliusRingsWalletRepository(env).getWalletById({
+        ...tenant,
+        id: walletId,
+      });
+      expect(finalRow).toMatchObject({
+        shielded_address: rekeyed.shieldedAddress,
+        sync_cursor: null,
+        last_indexed_slot: null,
+      });
+    });
+
     it("refuses to prepare an operation on a paused wallet", async () => {
       // A paused wallet cannot decrypt its own notes, so the operation is
       // already lost. Reserving an intent for it spends an intent key to reach
@@ -693,6 +783,10 @@ describe("HeliusRingsService", () => {
         ...tenant,
         id: walletId,
         syncCursor: new Date().toISOString(),
+        expectedIdentity: {
+          ownerAddress: WALLET_OWNER,
+          shieldedAddress: WALLET_SHIELDED_IDENTITY,
+        },
       });
       const paused = await pause();
 

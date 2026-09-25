@@ -27,7 +27,14 @@ export function ShieldedBalanceCard({
   // refused for an identity that cannot be derived, and this card mounts per
   // wallet on every visit, so asking would fail on a loop.
   const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
-  const { state } = useRingsBalance(readable ? wallet.id : null, refreshTick);
+  // The shielded address rides along as the identity token: a re-key keeps the
+  // wallet's id and rotates the address, and the balance must then be read for
+  // the new identity rather than inherit the old one's result.
+  const { state } = useRingsBalance(
+    readable ? wallet.id : null,
+    refreshTick,
+    wallet.shieldedAddress
+  );
 
   // Paused is checked first, and having no address does not exempt a wallet from
   // it: a re-key claims the row before it rotates, so a rotation that fails

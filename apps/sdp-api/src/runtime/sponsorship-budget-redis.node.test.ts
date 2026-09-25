@@ -1,6 +1,7 @@
 import Redis from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SponsorshipBudgetPolicy } from "@/db/repositories/sponsorship-budget.repository";
+import { workerScopedRedisUrl } from "@/test/helpers/worker-redis-url";
 import type { Env } from "@/types/env";
 import { closeAllRedisClients } from "./kv-redis";
 import { SponsorshipBudgetRedis } from "./sponsorship-budget-redis";
@@ -12,7 +13,9 @@ vi.mock("./money-path-events", async (importOriginal) => ({
   logEvent,
 }));
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+// Scoped per worker: this file FLUSHALLs between tests, so sharing the base
+// logical database with another parallel test file clobbers both.
+const REDIS_URL = workerScopedRedisUrl(process.env.REDIS_URL ?? "redis://127.0.0.1:6379");
 const EMPTY_USAGE = {
   hour: { global: 0, organization: 0, project: 0 },
   day: { global: 0, organization: 0, project: 0 },
@@ -55,7 +58,10 @@ describe("SponsorshipBudgetRedis", () => {
   });
 
   beforeEach(async () => {
-    await raw.flushall();
+    // FLUSHDB, not FLUSHALL: the wipe must stop at this worker's logical
+    // database, because a parallel worker's Redis state lives on the same
+    // instance and FLUSHALL would reach straight through it.
+    await raw.flushdb();
   });
 
   it("admits organization-only scopes without corrupting Lua argument indexes", async () => {

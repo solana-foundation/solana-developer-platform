@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
@@ -62,6 +62,14 @@ function renderOverview(projectRings: ProjectRing[] = [], wallet: RingsWallet = 
       <WalletOverview wallet={wallet} projectRings={projectRings} />
     </I18nProvider>
   );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 beforeEach(() => {
@@ -188,5 +196,54 @@ describe("WalletOverview", () => {
       true
     );
     expect(mocks.syncRingsWallet).not.toHaveBeenCalled();
+  });
+
+  it("does not render an abandoned identity's balance after a same-id re-key", async () => {
+    // A re-key keeps the wallet row's id and rotates its shielded address. A
+    // balance read that began under the old identity can land after the
+    // rotation; it describes keys the wallet no longer has, so it must never
+    // render under the replacement identity — the read is cancelled and the
+    // new identity is synced in its place.
+    const pending = deferred<{ sync: RingsWalletSync }>();
+    const replacement = deferred<{ sync: RingsWalletSync }>();
+    mocks.syncRingsWallet.mockReturnValueOnce(pending.promise).mockReturnValue(replacement.promise);
+
+    const view = renderOverview();
+    expect(mocks.syncRingsWallet).toHaveBeenCalledExactlyOnceWith(WALLET.id);
+
+    const rekeyed = { ...WALLET, shieldedAddress: "rings1replacementidentity" };
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <WalletOverview wallet={rekeyed} projectRings={[]} />
+      </I18nProvider>
+    );
+
+    // The read for the abandoned identity lands after the rotation.
+    await act(async () => {
+      pending.resolve({
+        sync: {
+          balances: [
+            {
+              mint: SOL,
+              symbol: "SOL",
+              amountRaw: "2000000000",
+              decimals: 9,
+              ringProgramId: null,
+              usdValue: 300,
+              noteCount: 2,
+            },
+          ],
+          degraded: false,
+          observedAt: "2026-09-24T15:00:00.000Z",
+          totalUsd: 300,
+        },
+      });
+    });
+
+    expect(screen.queryAllByText("$300.00")).toEqual([]);
+    expect(screen.getByText("Treasury")).toBeTruthy();
+    // The replacement identity is read for itself instead of inheriting the
+    // stale observation.
+    expect(mocks.syncRingsWallet).toHaveBeenCalledTimes(2);
   });
 });

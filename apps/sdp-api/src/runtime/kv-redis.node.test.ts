@@ -7,10 +7,13 @@
 
 import Redis from "ioredis";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { workerScopedRedisUrl } from "@/test/helpers/worker-redis-url";
 import type { Env } from "@/types/env";
 import { closeAllRedisClients, createKVStoreSet, RedisKVStore } from "./kv-redis";
 
-const REDIS_URL = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+// Scoped per worker: this file FLUSHALLs between tests, so sharing the base
+// logical database with another parallel test file clobbers both.
+const REDIS_URL = workerScopedRedisUrl(process.env.REDIS_URL ?? "redis://127.0.0.1:6379");
 
 describe("RedisKVStore (HOO-510)", () => {
   let raw: Redis;
@@ -24,7 +27,10 @@ describe("RedisKVStore (HOO-510)", () => {
   });
 
   beforeEach(async () => {
-    await raw.flushall();
+    // FLUSHDB, not FLUSHALL: the wipe must stop at this worker's logical
+    // database, because a parallel worker's Redis state lives on the same
+    // instance and FLUSHALL would reach straight through it.
+    await raw.flushdb();
   });
 
   describe("get / put / delete", () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -15,6 +15,16 @@ describe("HeliusRingsAssetRepository (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     repo = createPostgresHeliusRingsAssetRepository(getDb(env));
+  });
+
+  afterEach(async () => {
+    // The allowlist is reference data that seedTestDatabase deliberately does
+    // not truncate, so the row inserted below would outlive this suite and
+    // break the 0057 migration test wherever the two share a worker database.
+    await getDb(env)
+      .prepare("DELETE FROM helius_rings_asset_allowlist WHERE mint = ?")
+      .bind(DISABLED_MINT)
+      .run();
   });
 
   it("returns the seeded SOL and USDC rows as active", async () => {
