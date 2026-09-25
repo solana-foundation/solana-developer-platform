@@ -55,6 +55,18 @@ function isPublicSafePath(path: string): boolean {
   return path.startsWith("asset.") || path === "chain.decimals";
 }
 
+export interface ProjectPublicMetadataOptions {
+  /**
+   * Authoritative mint/accounting scale from the token row
+   * (`issued_tokens.decimals`). When set, a projected `chain.decimals` is
+   * always bound to it and never read from the caller-supplied metadata, so
+   * the cached public projection cannot disagree with the deployed mint
+   * (SOLA9-439). The issuer still decides whether the path is published; the
+   * token row decides its value.
+   */
+  tokenDecimals?: number;
+}
+
 /**
  * Build the safe public metadata subset for an asset by copying selected
  * dot-paths out of the full (private) issuance metadata.
@@ -66,13 +78,20 @@ function isPublicSafePath(path: string): boolean {
  * `custom.*` are never copied even if a client asks for them. Paths that are
  * absent in the source are skipped.
  *
+ * `chain.decimals` is the exception to that sourcing rule when
+ * {@link ProjectPublicMetadataOptions.tokenDecimals} is provided: the published
+ * scale comes from the token row, because token and accounting paths use that
+ * value and a caller-supplied scale that drifted from it would misstate the
+ * token's unit scale to every public metadata consumer.
+ *
  * Returns an empty object for unknown (category, type) pairs; callers validate
  * the pair against the registry before persisting.
  */
 export function projectPublicMetadata(
   category: AssetCategory,
   type: string,
-  issuanceMetadata: IssuanceMetadata
+  issuanceMetadata: IssuanceMetadata,
+  options: ProjectPublicMetadataOptions = {}
 ): PublicTokenMetadata {
   const entry = getAssetTypeRegistryEntry(category, type);
   if (!entry) {
@@ -87,6 +106,10 @@ export function projectPublicMetadata(
   const projected: Record<string, unknown> = {};
   for (const path of selected) {
     if (!isPublicSafePath(path)) {
+      continue;
+    }
+    if (path === "chain.decimals" && options.tokenDecimals !== undefined) {
+      setByPath(projected, path, options.tokenDecimals);
       continue;
     }
     const value = getByPath(issuanceMetadata, path);

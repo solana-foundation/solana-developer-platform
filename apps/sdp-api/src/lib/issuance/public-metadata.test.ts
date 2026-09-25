@@ -86,4 +86,67 @@ describe("projectPublicMetadata", () => {
   it("returns an empty object for an unknown asset type", () => {
     expect(projectPublicMetadata("stablecoin", "not_a_type", baseMetadata)).toEqual({});
   });
+
+  // SOLA9-439: the published scale is the token row's, never the caller's claim.
+  describe("tokenDecimals binding", () => {
+    it("overrides a caller-claimed scale that drifts from the token row", () => {
+      const result = projectPublicMetadata("stablecoin", "fiat_backed", baseMetadata, {
+        tokenDecimals: 6,
+      });
+      expect(result.chain).toEqual({ decimals: 6 });
+
+      const drifted = projectPublicMetadata(
+        "stablecoin",
+        "fiat_backed",
+        { ...baseMetadata, chain: { decimals: 18 } },
+        { tokenDecimals: 6 }
+      );
+      expect(drifted.chain).toEqual({ decimals: 6 });
+    });
+
+    it("binds the scale even when the caller omits chain metadata", () => {
+      const { chain, ...metadataWithoutChain } = baseMetadata;
+      const result = projectPublicMetadata("stablecoin", "fiat_backed", metadataWithoutChain, {
+        tokenDecimals: 9,
+      });
+      expect(result.chain).toEqual({ decimals: 9 });
+    });
+
+    it("binds a zero scale (boundary)", () => {
+      const result = projectPublicMetadata("stablecoin", "fiat_backed", baseMetadata, {
+        tokenDecimals: 0,
+      });
+      expect(result.chain).toEqual({ decimals: 0 });
+    });
+
+    it("does not project chain.decimals when the issuer's selection excludes it", () => {
+      const result = projectPublicMetadata(
+        "stablecoin",
+        "fiat_backed",
+        { ...baseMetadata, visibility: { public: ["asset.name"] } },
+        { tokenDecimals: 6 }
+      );
+      expect(result).toEqual({ asset: { name: "USD Coin" } });
+      expect(result).not.toHaveProperty("chain");
+    });
+
+    it("leaves every other projected path sourced from the metadata", () => {
+      const result = projectPublicMetadata("stablecoin", "fiat_backed", baseMetadata, {
+        tokenDecimals: 6,
+      });
+      expect(result.asset).toEqual({
+        name: "USD Coin",
+        issuerName: "Acme Inc",
+        pegCurrency: "USD",
+        website: "https://acme.example",
+      });
+    });
+
+    it("keeps caller-sourced sourcing when no token decimals are provided", () => {
+      const drifted = { ...baseMetadata, chain: { decimals: 18 } };
+      expect(projectPublicMetadata("stablecoin", "fiat_backed", drifted).chain).toEqual({
+        decimals: 18,
+      });
+    });
+  });
 });

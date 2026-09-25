@@ -83,6 +83,8 @@ export function buildDefaultAssetProfile(token: ProfileSourceToken) {
     assetType,
     assetTypeVersion: registryEntry.version,
     issuanceMetadata,
-    publicMetadata: projectPublicMetadata(assetCategory, assetType, issuanceMetadata),
+    publicMetadata: projectPublicMetadata(assetCategory, assetType, issuanceMetadata, {
+      tokenDecimals: token.decimals,
+    }),
   };
 }

@@ -8,6 +8,7 @@ import {
   hasPermission,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
+  type PublicTokenMetadata,
 } from "@sdp/types";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -30,7 +31,7 @@ import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
-import { type AppContext, getAssetProfilesRepository } from "./context";
+import { type AppContext, getAssetProfilesRepository, getTokenRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
   assetProfileTokenIdParamsSchema,
@@ -295,11 +296,21 @@ export const updateAssetProfile = async (
       : undefined;
   const nextMetadata = persistedMetadata ?? current.issuance_metadata;
 
-  // Recompute public projection when inputs change.
-  const publicMetadata =
-    typeChanged || metadataChanged
-      ? projectPublicMetadata(nextCategory, nextType, nextMetadata)
-      : undefined;
+  // Recompute public projection when inputs change. The published
+  // `chain.decimals` is bound to the token row's scale, never the caller's
+  // metadata claim (SOLA9-439); the FK on asset_profiles.token_id guarantees
+  // the referenced token exists in this tenant, so a miss is unrecoverable
+  // corruption rather than a state the projection may guess through.
+  let publicMetadata: PublicTokenMetadata | undefined;
+  if (typeChanged || metadataChanged) {
+    const token = await getTokenRepository(c).getById(current.token_id);
+    if (!token) {
+      throw internalError("Token referenced by asset profile not found");
+    }
+    publicMetadata = projectPublicMetadata(nextCategory, nextType, nextMetadata, {
+      tokenDecimals: token.decimals,
+    });
+  }
 
   const updated = await repo.updateAssetProfile({
     profileId,

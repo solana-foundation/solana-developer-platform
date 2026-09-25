@@ -102,7 +102,12 @@ export const createTokenWithAssetProfile = async (
   }
 
   const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});
-  const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata);
+  // `resolved.decimals` is what the token row below persists, so the cached
+  // public projection is bound to the mint/accounting scale, not the caller's
+  // `chain.decimals` claim (SOLA9-439).
+  const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata, {
+    tokenDecimals: resolved.decimals,
+  });
   const createdBy = await resolveCreatorUserId(c);
 
   const db = getDb(c.env);
