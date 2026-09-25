@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it, mock } from "node:test";
-import { wellKnownMint } from "@sdp/types";
+import { GENESIS_HASH_BY_CLUSTER, wellKnownMint } from "@sdp/types";
 import type { EarnRuntimeContext } from "../../types";
 import {
   distillKaminoVault,
@@ -489,6 +489,149 @@ describe("KaminoEarnClient.listStrategies", () => {
     stubKaminoFetch({ status: 503, body: { message: "upstream down" } });
 
     await assert.rejects(client.listStrategies(productionCtx), /upstream down/);
+  });
+
+  /**
+   * The dual-cluster deployment shape (SOLA9-133): `SOLANA_RPC_URL` is the
+   * PROCESS endpoint — in a production deployment it serves MAINNET while the
+   * catalogue sync still walks the sandbox devnet shelf in the same process.
+   * The devnet read must resolve `SOLANA_DEVNET_RPC_URL` (the same override the
+   * execution path reads), or the genesis proof refuses the wrong-chain
+   * endpoint as PROVIDER_NOT_CONFIGURED — a steady-state skip for the sync,
+   * which then never converges the devnet sub-shelf and leaves previously
+   * active devnet rows `fundable` and deposit-admissible forever.
+   */
+  describe("the devnet read honours the per-cluster RPC override", () => {
+    const urls = { devnet: "https://devnet.rpc.test", mainnet: "https://mainnet.rpc.test" };
+
+    /**
+     * Encodes one devnet `VaultState` per the positional layout in ./devnet.ts
+     * (size and byte offsets restated here so the fixture is readable; a layout
+     * drift fails the decode and empties the fixture vault, failing the tests
+     * below rather than passing vacuously).
+     */
+    function encodeDevnetVaultState(): string {
+      const data = new Uint8Array(62_552);
+      const place = (mint: string, offset: number) => {
+        const bytes = new Uint8Array(32);
+        const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+        let n = 0n;
+        for (const char of mint) {
+          const index = ALPHABET.indexOf(char);
+          assert.ok(index >= 0, `invalid base58 character ${char}`);
+          n = n * 58n + BigInt(index);
+        }
+        let i = 32;
+        while (n > 0n && i > 0) {
+          i -= 1;
+          bytes[i] = Number(n & 0xffn);
+          n >>= 8n;
+        }
+        data.set(bytes, offset);
+      };
+      place(USDC_DEVNET, 80); // token mint
+      place("sHaReDev1111111111111111111111111111111111", 184); // shares mint
+      data.set(new TextEncoder().encode("Allez USDC"), 58_528); // name
+      return Buffer.from(data).toString("base64");
+    }
+
+    interface SeenCall {
+      url: string;
+      method: string;
+    }
+
+    /** Genesis is answered per URL cluster; vault accounts exist on devnet only. */
+    function stubTwoClusterRpc(): SeenCall[] {
+      const seen: SeenCall[] = [];
+      mock.method(globalThis, "fetch", async (url: unknown, init?: RequestInit) => {
+        const rpcUrl = String(url);
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
+        const method = body.method ?? "unknown";
+        seen.push({ url: rpcUrl, method });
+        const onDevnet = rpcUrl === urls.devnet;
+        if (method === "getGenesisHash") {
+          return jsonResponse(200, {
+            jsonrpc: "2.0",
+            id: 1,
+            result: GENESIS_HASH_BY_CLUSTER[onDevnet ? "devnet" : "mainnet-beta"],
+          });
+        }
+        if (method === "getProgramAccounts" && onDevnet) {
+          return jsonResponse(200, {
+            jsonrpc: "2.0",
+            id: 1,
+            result: [
+              {
+                pubkey: "devVaULt111111111111111111111111111111111111",
+                account: { data: [encodeDevnetVaultState(), "base64"] },
+              },
+            ],
+          });
+        }
+        throw new Error(`unexpected ${method} on the ${onDevnet ? "devnet" : "mainnet"} endpoint`);
+      });
+      return seen;
+    }
+
+    it("reads the devnet shelf through SOLANA_DEVNET_RPC_URL when SOLANA_RPC_URL serves mainnet", async () => {
+      const seen = stubTwoClusterRpc();
+
+      const snapshots = await client.listStrategies({
+        env: { SOLANA_RPC_URL: urls.mainnet, SOLANA_DEVNET_RPC_URL: urls.devnet },
+        environment: "sandbox",
+      });
+
+      // The override was honoured: the real devnet vault decoded into a row.
+      assert.equal(snapshots.length, 1);
+      assert.equal(snapshots[0]?.hostCluster, "devnet");
+      assert.equal(snapshots[0]?.name, "Allez USDC");
+      assert.ok(
+        seen.every((call) => call.url === urls.devnet),
+        `every call must hit the devnet endpoint, saw: ${seen.map((c) => c.url).join(", ")}`
+      );
+    });
+
+    it("still proves the cluster by genesis hash on the resolved endpoint before reading", async () => {
+      const seen = stubTwoClusterRpc();
+
+      await client.listStrategies({
+        env: { SOLANA_RPC_URL: urls.mainnet, SOLANA_DEVNET_RPC_URL: urls.devnet },
+        environment: "sandbox",
+      });
+
+      assert.deepEqual(seen[0], { url: urls.devnet, method: "getGenesisHash" });
+      assert.ok(seen.slice(1).every((call) => call.method !== "getGenesisHash"));
+    });
+
+    it("fails closed, never empty, when no endpoint serves devnet", async () => {
+      stubTwoClusterRpc();
+
+      // No override: the process endpoint serves mainnet and the genesis proof
+      // must refuse it. PROVIDER_NOT_CONFIGURED is a steady-state skip — an
+      // empty shelf would be the shape that mass-delists the devnet rows.
+      await assert.rejects(
+        client.listStrategies({ env: { SOLANA_RPC_URL: urls.mainnet }, environment: "sandbox" }),
+        (error: unknown) => {
+          assert.ok(error instanceof Error);
+          assert.equal((error as { code?: string }).code, "PROVIDER_NOT_CONFIGURED");
+          assert.match(error.message, /devnet/);
+          return true;
+        }
+      );
+    });
+
+    it("keeps falling back to the process endpoint when it already serves devnet", async () => {
+      // Single-cluster deployment with no override: today's behaviour unchanged.
+      const seen = stubTwoClusterRpc();
+
+      const snapshots = await client.listStrategies({
+        env: { SOLANA_RPC_URL: urls.devnet },
+        environment: "sandbox",
+      });
+
+      assert.equal(snapshots.length, 1);
+      assert.ok(seen.every((call) => call.url === urls.devnet));
+    });
   });
 });
 

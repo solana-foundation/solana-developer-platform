@@ -10,6 +10,7 @@ import {
   vedaDeployment,
 } from "@sdp/types/veda-programs";
 import { providerNotConfigured } from "../../errors";
+import { resolveCatalogueRpcUrl } from "../../solana-rpc";
 import type {
   EarnDeclaredStrategySupport,
   EarnRuntimeContext,
@@ -168,7 +169,18 @@ export class VedaEarnClient extends StubEarnClient {
       );
     }
 
-    return this._listVaultStrategies(ctx.env.SOLANA_RPC_URL ?? "", cluster, deployment);
+    // The catalogue sync walks BOTH clusters in one process, so the RPC is
+    // resolved PER CLUSTER (`resolveCatalogueRpcUrl`, the same override keys
+    // the execution path reads): a dual-cluster deployment runs the process
+    // endpoint (`SOLANA_RPC_URL`) on mainnet while this devnet read must reach
+    // `SOLANA_DEVNET_RPC_URL`. Reading the process endpoint directly failed the
+    // genesis proof as PROVIDER_NOT_CONFIGURED — a steady-state skip for the
+    // sync, which then never converged the devnet sub-shelf and left
+    // previously active devnet rows `fundable` and deposit-admissible
+    // (SOLA9-133). With no override the process endpoint is tried exactly as
+    // before, and `readVedaVaults` still proves whatever URL comes back by
+    // genesis hash before reading a single account.
+    return this._listVaultStrategies(resolveCatalogueRpcUrl(ctx.env, cluster), cluster, deployment);
   }
 
   /**
