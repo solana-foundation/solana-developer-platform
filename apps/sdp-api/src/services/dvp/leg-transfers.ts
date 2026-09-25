@@ -18,7 +18,10 @@
  *   its own slot: a short page that stops inside a slot can be a node caught
  *   mid-index, which lists the newest of two same-slot movements and omits the
  *   older, so the next read re-takes the whole overlap until the slot is
- *   proven and an omitted movement is never fenced out for good.
+ *   proven and an omitted movement is never fenced out for good. A proven
+ *   position is audited against the whole history on a clock of its own,
+ *   because a node can also list straight past a hole it holds — only a walk
+ *   from the top serves what a walk bounded at the position never lists again.
  * - History is read back no further than the trade's creation, less the clock
  *   skew the close lookup allows: an older transaction cannot concern this
  *   trade, even at a reused escrow address.
@@ -57,6 +60,15 @@ export const HISTORY_PAGE_LIMIT = 1_000;
  * last read is somebody spamming it, and is logged rather than chased.
  */
 const HISTORY_PAGE_CAP = 3;
+/**
+ * How long a proven read position is trusted as a bound before the escrow's
+ * whole history is walked again. The proof is a listing that continued below
+ * the position's slot, and a node can list past a hole it holds — an omitted
+ * movement with newer ones listed above and older ones below — so the proof
+ * ages out and the audit reads from the top, where the node serves what it
+ * omitted once its index has caught up.
+ */
+export const HISTORY_AUDIT_MS = 60 * 60_000;
 /** `getSignatureStatuses` answers at most this many signatures per call. */
 const SIGNATURE_STATUS_LIMIT = 256;
 
@@ -553,10 +565,33 @@ export async function syncDvpLegTransfers(
   // same-slot movements and omitted the older — and a later read bounded at
   // the cursor would never be offered it again. An unproven cursor is not
   // trusted as a bound: the read takes the whole overlap from the top, where
-  // the omission can still surface.
+  // the omission can still surface. A proven cursor is trusted only until the
+  // audit falls due, for the same reason: the node that proved the slot could
+  // have been listing straight past a hole it holds, and only an unbounded
+  // walk serves what a bounded one never lists again.
   const stored = scan?.cursor ?? null;
-  const since = scan?.cursorSlotComplete === true ? (stored?.signature ?? null) : null;
-  const read = await readHistorySince(reader, leg, since);
+  const scannedAt = scan?.scannedAt ?? null;
+  const auditDue =
+    scan?.cursorSlotComplete === true &&
+    scannedAt !== null &&
+    Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) <
+      Math.floor(Date.now() / HISTORY_AUDIT_MS);
+  const since = scan?.cursorSlotComplete === true && !auditDue ? (stored?.signature ?? null) : null;
+  let read = await readHistorySince(reader, leg, since);
+  if (read === null && stored !== null && since === null) {
+    // The walk from the top ran past the scan cap. Resolving the oldest of a
+    // truncated read would leave a gap behind it, but giving up here stalls
+    // the leg on a read it can never finish — an unproven cursor un-bounds
+    // every later sweep too. The saved cursor is the bound this leg read
+    // behind before the watermark existed, so the sweep reads on from there
+    // and stays due: the watermark keeps the next sweep asking for the whole
+    // history, and the audit keeps that ask alive for a proven one.
+    getLogger().warn(
+      { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
+      "dvp transfers: escrow history from the top exceeds the scan cap; reading on from the saved cursor"
+    );
+    read = await readHistorySince(reader, leg, stored.signature);
+  }
   if (read === null) {
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
