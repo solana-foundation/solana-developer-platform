@@ -34,6 +34,7 @@ import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-ske
 import {
   CounterpartyCreateSkeleton,
   CounterpartyDetailSkeleton,
+  PaymentRequestCreateSkeleton,
   PaymentsDepositPageSkeleton,
   PaymentsPayPageSkeleton,
   PaymentsTransactionsPageSkeleton,
@@ -119,6 +120,8 @@ export function resolvePageLoadingComponent(
       return PaymentsDepositPageSkeleton;
     case "payment-requests":
       return PaymentRequestsLoading;
+    case "payment-request-create":
+      return PaymentRequestCreateSkeleton;
     case "counterparty-directory":
       return CounterpartyDirectoryLoading;
     case "counterparty-create":

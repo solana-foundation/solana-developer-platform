@@ -132,6 +132,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/payments", "Shared.dashboardShell.payments"],
     ["/dashboard/payments/transactions", "Shared.dashboardShell.transactions"],
     ["/dashboard/payments/requests", "Shared.dashboardShell.requests"],
+    ["/dashboard/payments/requests/new", "DashboardPayments.requests.newRequest"],
     ["/dashboard/payments/recurring", "Shared.dashboardShell.recurringPayments"],
     ["/dashboard/payments/recurring/create", "DashboardPayments.recurring.newSchedule"],
     ["/dashboard/payments/recurring/rp_1", "Shared.dashboardShell.recurringPayment"],

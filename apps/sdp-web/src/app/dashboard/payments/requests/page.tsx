@@ -2,7 +2,11 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { paymentsPlaygroundHref } from "@/lib/payments-routes";
+import {
+  PAYMENT_REQUEST_CREATE_PARAM,
+  PAYMENT_REQUEST_NEW_HREF,
+  paymentsPlaygroundHref,
+} from "@/lib/payments-routes";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../payments-page.data";
 import { fetchPaymentRequestDirectory } from "./payment-requests-page.data";
@@ -22,9 +26,14 @@ export default async function PaymentRequestsPage({
   if (!orgId) {
     redirect("/dashboard");
   }
-  if ((await searchParams).tab === "playground") {
+  const params = await searchParams;
+  if (params.tab === "playground") {
     // Requests no longer has a playground tab; its endpoints moved into the Payments one.
     redirect(paymentsPlaygroundHref("list-payment-requests"));
+  }
+  if (params[PAYMENT_REQUEST_CREATE_PARAM] === "1") {
+    // The new-request form was a dialog here; it is its own page now.
+    redirect(PAYMENT_REQUEST_NEW_HREF);
   }
 
   return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {

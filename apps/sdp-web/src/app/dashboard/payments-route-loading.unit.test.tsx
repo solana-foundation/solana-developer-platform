@@ -21,6 +21,7 @@ import RecurringPaymentDetailLoading from "./payments/recurring/[recurringPaymen
 import RecurringPaymentCreateLoading from "./payments/recurring/create/loading";
 import RecurringPaymentsLoading from "./payments/recurring/loading";
 import PaymentRequestsLoading from "./payments/requests/loading";
+import PaymentRequestCreateLoading from "./payments/requests/new/loading";
 import TransactionsLoading from "./payments/transactions/loading";
 
 const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
@@ -42,6 +43,7 @@ const EXPECTED_ROUTE_LAYOUTS = [
   "payments-pay",
   "payments-deposit",
   "payment-requests",
+  "payment-request-create",
   "counterparty-directory",
   "counterparty-create",
   "counterparty-detail",
@@ -59,6 +61,7 @@ function renderAuthenticatedLoadingStates(): string {
       <PayLoading />
       <DepositLoading />
       <PaymentRequestsLoading />
+      <PaymentRequestCreateLoading />
       <TransactionsLoading />
       <CounterpartyLoading />
       <CounterpartyCreateLoading />
@@ -92,7 +95,7 @@ describe("home and payments route loading states", () => {
 
     // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-wizard/g)).toHaveLength(3);
+    expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");

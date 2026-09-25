@@ -197,9 +197,12 @@ function UnderlineFieldSkeleton({ value = "w-48" }: { value?: string }) {
  */
 function FlowPageSkeleton({
   layout,
+  stepper = true,
   children,
 }: {
-  layout: "payments-pay" | "recurring-payment-create";
+  layout: "payments-pay" | "recurring-payment-create" | "payment-request-create";
+  /** A single-page form has no step bar, and its fields sit 24px apart instead of 32. */
+  stepper?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -211,14 +214,16 @@ function FlowPageSkeleton({
     >
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6">
         <div className="mx-auto w-full max-w-flow">
-          <div className="mb-12 space-y-2" data-loading-stepper>
-            <div className="flex items-center justify-between gap-3">
-              <SkeletonBlock className="h-4 w-24" />
-              <SkeletonBlock className="h-4 w-20" />
+          {stepper ? (
+            <div className="mb-12 space-y-2" data-loading-stepper>
+              <div className="flex items-center justify-between gap-3">
+                <SkeletonBlock className="h-4 w-24" />
+                <SkeletonBlock className="h-4 w-20" />
+              </div>
+              <SkeletonBlock className="h-1 w-full rounded-full" />
             </div>
-            <SkeletonBlock className="h-1 w-full rounded-full" />
-          </div>
-          <div className="space-y-8">{children}</div>
+          ) : null}
+          <div className={stepper ? "space-y-8" : "space-y-6"}>{children}</div>
         </div>
       </div>
       <div className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6">
@@ -315,6 +320,25 @@ export function RecurringPaymentCreateSkeleton() {
       <div className="grid grid-cols-2 gap-6">
         <UnderlineFieldSkeleton value="w-24" />
         <UnderlineFieldSkeleton value="w-16" />
+      </div>
+    </FlowPageSkeleton>
+  );
+}
+
+/** New request: amount and token side by side, the wallet, who pays, the expiry, the sentence. */
+export function PaymentRequestCreateSkeleton() {
+  return (
+    <FlowPageSkeleton layout="payment-request-create" stepper={false}>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <UnderlineFieldSkeleton value="w-16" />
+        <UnderlineFieldSkeleton value="w-14" />
+      </div>
+      <UnderlineFieldSkeleton value="w-28" />
+      <UnderlineFieldSkeleton value="w-44" />
+      <UnderlineFieldSkeleton value="w-24" />
+      <div className="space-y-2 pt-2">
+        <SkeletonBlock className="h-3.5 w-16" />
+        <SkeletonBlock className="h-4 w-80 max-w-full" />
       </div>
     </FlowPageSkeleton>
   );

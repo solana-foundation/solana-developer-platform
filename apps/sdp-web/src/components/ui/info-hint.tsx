@@ -2,9 +2,13 @@
 
 import { InfoIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-/** An info icon beside a label; the text shows on hover and focus and names the button. */
-export function InfoHint({ text }: { text: string }) {
+/**
+ * An info icon beside a label; the text shows on hover and focus and names the button.
+ * `className` sets the icon's resting ink (tertiary by default).
+ */
+export function InfoHint({ text, className }: { text: string; className?: string }) {
   return (
     <TooltipProvider>
       <Tooltip>
@@ -12,7 +16,10 @@ export function InfoHint({ text }: { text: string }) {
           <button
             type="button"
             aria-label={text}
-            className="inline-flex text-tertiary transition-colors hover:text-primary"
+            className={cn(
+              "inline-flex text-tertiary transition-colors hover:text-primary",
+              className
+            )}
           >
             <InfoIcon className="size-4" aria-hidden="true" />
           </button>

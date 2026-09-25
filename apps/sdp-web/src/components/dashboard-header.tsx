@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { PAYMENT_REQUEST_CREATE_PARAM } from "@/lib/payments-routes";
+import { PAYMENT_REQUEST_NEW_HREF, PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -975,17 +975,25 @@ function getRefreshPaymentsPageConfig(
       },
     };
   }
-  if (pathname === "/dashboard/payments/requests") {
+  if (pathname === PAYMENT_REQUESTS_HREF) {
     return {
       title: t("Shared.dashboardShell.requests"),
       titlePosition: "left",
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
         label: t("DashboardPayments.requests.new"),
-        href: `/dashboard/payments/requests?${PAYMENT_REQUEST_CREATE_PARAM}=1`,
+        href: PAYMENT_REQUEST_NEW_HREF,
         icon: "plus",
         variant: "primary",
       },
+    };
+  }
+  if (pathname === PAYMENT_REQUEST_NEW_HREF) {
+    return {
+      title: t("DashboardPayments.requests.newRequest"),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: { href: PAYMENT_REQUESTS_HREF, label: t("Shared.dashboardShell.requests") },
     };
   }
   if (pathname === "/dashboard/payments/recurring") {
