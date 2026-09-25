@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
 import { EnglishTestI18n } from "../test-i18n";
-import { VAULT_QUOTE_DEBOUNCE_MS } from "./earn-vault-slippage";
+import { VAULT_QUOTE_DEBOUNCE_MS, VAULT_QUOTE_TTL_MS } from "./earn-vault-slippage";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -637,5 +637,179 @@ describe("exit slippage floors (quote-derived)", () => {
       shares: "5",
     });
     expect(screen.queryByText(/Slippage tolerance:/)).toBeNull();
+  });
+});
+
+describe("exit quote expiry backstop (SOLA9-539)", () => {
+  const vedaPosition: EarnVaultPosition = {
+    ...position,
+    provider: "veda",
+    label: "Veda USDC vault #0",
+  };
+
+  function quoted(assetsOut: string) {
+    return {
+      kind: "quoted" as const,
+      preview: {
+        positionId: vedaPosition.id,
+        assetsOut,
+        assetDecimals: 6,
+        blockingIssues: [] as { code: string; message: string }[],
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function advanceTimers(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  /** Flush the submit's promise chain without moving any timer. */
+  async function flushSubmission() {
+    await act(async () => {
+      for (let step = 0; step < 25; step += 1) await Promise.resolve();
+    });
+  }
+
+  /** Enter 5 shares on the veda position and wait out the quote debounce. */
+  async function armFlooredExit() {
+    screen.getByRole("dialog");
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "5" } });
+    await advanceTimers(VAULT_QUOTE_DEBOUNCE_MS);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await advanceTimers(250);
+    // The floor waits on the debounced live quote; the summary row appearing is
+    // the signal that confirm is armed with a quote-derived floor.
+    screen.getByText("Minimum received");
+  }
+
+  it("re-quotes an exit floor older than the TTL at submit, then sends the reviewed floor", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce(quoted("4.997"))
+      .mockResolvedValue(quoted("4.995"));
+    mocks.createEarnVaultWithdrawal.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+    });
+    renderModal(vi.fn(), vedaPosition);
+    await armFlooredExit();
+    // The clock passes the TTL without the auto-refresh timer firing — the
+    // throttled-background-tab case the submit-time check exists for.
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // The fresh check ran, BEFORE the money moved…
+    expect(mocks.fetchEarnVaultWithdrawalPreview).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchEarnVaultWithdrawalPreview.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.createEarnVaultWithdrawal.mock.invocationCallOrder[0]
+    );
+    // …and the floor sent is the one the user REVIEWED, freshly revalidated:
+    // the still-satisfiable 4.992003, never a weaker floor off the 4.995 rate.
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+      positionId: vedaPosition.id,
+      shares: "5",
+      minAmountOut: "4.992003",
+    });
+    expect(screen.getByText("Withdrawal submitted")).toBeTruthy();
+  });
+
+  it("stops a stale exit whose fresh rate broke the floor: slippage copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce(quoted("4.997"))
+      .mockResolvedValue(quoted("2.5"));
+    renderModal(vi.fn(), vedaPosition);
+    await armFlooredExit();
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // The rate moved beyond the chosen tolerance while the quote sat stale:
+    // friction lands HERE, before submit, never as a server refusal after.
+    expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
+    expect(screen.getByText(/Increase the tolerance below and try again/)).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Slippage tolerance (basis points)") as HTMLInputElement).value
+    ).toBe("10");
+    // The displayed quote re-syncs so the retry reviews the fresh floor
+    // (2.4975 renders as $2.49 — the deposit token is USD-stable).
+    await advanceTimers(1);
+    expect(mocks.fetchEarnVaultWithdrawalPreview.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(screen.getByText("$2.49")).toBeTruthy();
+  });
+
+  it("stops a stale exit whose revalidation quote is unavailable: error copy, no POST", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce(quoted("4.997"))
+      .mockResolvedValue({ kind: "unavailable" });
+    renderModal(vi.fn(), vedaPosition);
+    await armFlooredExit();
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // An unreadable re-quote must never let the stale floor through: the same
+    // fail-closed posture as an unavailable quote everywhere else.
+    expect(mocks.createEarnVaultWithdrawal).not.toHaveBeenCalled();
+    expect(screen.getByText(/live payout quote is unavailable/)).toBeTruthy();
+  });
+
+  it("replays a kept key's floor verbatim past the TTL, bypassing the expiry check", async () => {
+    mocks.fetchEarnVaultWithdrawalPreview
+      .mockResolvedValueOnce(quoted("4.997"))
+      .mockResolvedValue(quoted("2.5"));
+    // A 5xx is the ambiguous case: the API may have recorded and broadcast the
+    // exit, and the key stays live in the store either way.
+    mocks.createEarnVaultWithdrawal
+      .mockResolvedValueOnce({
+        ok: false,
+        error: "Bad gateway",
+        status: 503,
+        body: null,
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        data: { kind: "submitted", withdrawal: withdrawal("submitted") },
+      });
+
+    const first = renderModal(vi.fn(), vedaPosition);
+    await armFlooredExit();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    renderModal(vi.fn(), vedaPosition);
+    await armFlooredExit();
+    vi.setSystemTime(Date.now() + VAULT_QUOTE_TTL_MS + 1000);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
+    await flushSubmission();
+
+    // The retry is the SAME request under the SAME key, so it must carry the
+    // floor that key was MINTED with — verbatim, past the TTL too. Had the
+    // expiry gate run here, the 2.5 re-quote would have refused the kept
+    // 4.992003 floor and stranded the ambiguous first attempt.
+    expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({
+      minAmountOut: "4.992003",
+    });
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    );
   });
 });
