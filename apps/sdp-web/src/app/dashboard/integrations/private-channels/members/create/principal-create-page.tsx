@@ -15,8 +15,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { WizardFrame } from "@/components/wizard-frame";
 import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { verifyWalletAction } from "../../wallets/actions";
-import { createPrincipalAction } from "../actions";
+import { createAndVerifyPrincipalAction } from "../actions";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
@@ -51,20 +50,23 @@ export function PrincipalCreatePage({
     if (trimmedName.length < 2 || !walletId) return;
 
     startTransition(async () => {
-      let principalId = createdPrincipalId;
-      if (!principalId) {
-        const principalResult = await createPrincipalAction({ name: trimmedName, projectId });
-        if (!principalResult.ok) {
-          toast.error(principalResult.message);
-          return;
+      // One guarded server action: the stale-selection check runs before the
+      // principal is created and both writes bind to the rendered project, so
+      // a sibling tab that moves the shared cookie can no longer reject the
+      // verification after the principal was already created.
+      const result = await createAndVerifyPrincipalAction({
+        name: trimmedName,
+        walletId,
+        projectId,
+        principalId: createdPrincipalId ?? undefined,
+      });
+      if (!result.ok) {
+        if (result.principalId) {
+          // The principal exists but is unverified; a retry re-runs only the
+          // verification instead of creating a duplicate.
+          setCreatedPrincipalId(result.principalId);
         }
-        principalId = principalResult.value.id;
-        setCreatedPrincipalId(principalId);
-      }
-
-      const walletResult = await verifyWalletAction({ walletId, projectId, principalId });
-      if (!walletResult.ok) {
-        toast.error(walletResult.message);
+        toast.error(result.message);
         return;
       }
 

@@ -1,39 +1,69 @@
 "use server";
 
-import type { PrivateChannelPrincipalDto } from "@sdp/types";
+import type { PrivateChannelVerifiedWalletDto } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import {
   addPrincipalChannelMembership,
   createPrivateChannelPrincipal,
   disablePrivateChannelPrincipal,
   removePrincipalChannelMembership,
+  verifyPrivateChannelWallet,
 } from "@/lib/private-channels";
 import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { getTranslations } from "@/i18n/server";
 import { bindRenderedProjectClient } from "../private-channels-project-client";
 
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
 export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; message: string };
 
+export type CreateAndVerifyPrincipalResult =
+  | { ok: true; wallet: PrivateChannelVerifiedWalletDto }
+  | { ok: false; message: string; principalId?: string };
+
 /**
- * Creates the principal under the project the wizard rendered with instead of
- * re-resolving the mutable selection cookie at submit time. The stale-selection
- * check runs before the write, so a sibling tab that moved the shared cookie
- * makes the submission reload instead of leaving a principal stranded in
- * another project's scope before its wallet verification can bind to it.
+ * Creates the principal and verifies its wallet in one server action, so one
+ * stale-selection check runs before either write and both writes go through
+ * the same project-bound client. Splitting this into two actions would give a
+ * sibling tab that moves the shared cookie between the two submissions a
+ * window to reject the verification after the principal was already created,
+ * stranding it unverified once the wizard reloads. On a verification failure
+ * after creation the created id is returned so a retry re-runs only the
+ * verification instead of creating a duplicate principal.
  */
-export async function createPrincipalAction(input: {
+export async function createAndVerifyPrincipalAction(input: {
   name: string;
+  walletId: string;
   projectId: string;
-}): Promise<ActionResult<PrivateChannelPrincipalDto>> {
+  /** Retry path: the id of a principal this wizard already created. */
+  principalId?: string;
+}): Promise<CreateAndVerifyPrincipalResult> {
+  const t = await getTranslations();
+  if (!input.walletId) {
+    return { ok: false, message: t("DashboardPrivateChannels.verifiedWallets.walletRequired") };
+  }
   try {
     const bound = await bindRenderedProjectClient(input.projectId);
     if (!bound.ok) {
       return bound;
     }
-    const { principal } = await createPrivateChannelPrincipal(bound.client, { name: input.name });
-    revalidatePath(PRINCIPALS_PATH);
-    return { ok: true, value: principal };
+    let principalId = input.principalId;
+    if (!principalId) {
+      const { principal } = await createPrivateChannelPrincipal(bound.client, {
+        name: input.name,
+      });
+      principalId = principal.id;
+      revalidatePath(PRINCIPALS_PATH);
+    }
+    try {
+      const wallet = await verifyPrivateChannelWallet(bound.client, input.walletId, {
+        principalId,
+      });
+      revalidatePath(PRINCIPALS_PATH);
+      return { ok: true, wallet };
+    } catch (error) {
+      return { ok: false, message: extractSdpApiErrorMessage(error), principalId };
+    }
   } catch (error) {
     return { ok: false, message: extractSdpApiErrorMessage(error) };
   }
