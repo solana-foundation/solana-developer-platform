@@ -88,6 +88,13 @@ export interface AssetProfilesRepository {
     profileId: string;
     organizationId: string;
     projectId: string;
+    /**
+     * Lock the row (`SELECT ... FOR UPDATE`) until the surrounding transaction
+     * ends. Read-modify-write handlers that validate the row before updating
+     * it must lock: concurrent writers then serialize on the lock and each
+     * validates the committed state, never a stale pre-write snapshot.
+     */
+    lockForUpdate?: boolean;
   }): Promise<AssetProfileRow | null>;
   getActiveAssetProfileByTokenId(params: {
     tokenId: string;

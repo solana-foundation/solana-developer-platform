@@ -176,6 +176,23 @@ describe("requiredForDeploy metadata gate (SOLA9-37)", () => {
     }
   });
 
+  it("rejects a create whose required fields are not strings", async () => {
+    // The metadata schema is intentionally open: objects, arrays, booleans,
+    // and numbers all pass schema validation, so the gate itself must treat
+    // any non-string required value as unsupplied (fail closed).
+    for (const asset of [
+      { issuerName: {}, pegCurrency: "USD" },
+      { issuerName: "Acme", pegCurrency: false },
+      { issuerName: ["Acme Financial Inc."], pegCurrency: "USD" },
+      { issuerName: 42, pegCurrency: "USD" },
+    ]) {
+      const res = await createProfileBody({ asset });
+      const body = (await res.json()) as { error?: { message?: string } };
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(body.error?.message ?? "").toMatch(MISSING_FIELDS_MESSAGE);
+    }
+  });
+
   it("accepts a populated profile for the same type (compatibility)", async () => {
     const res = await createProfileBody({
       asset: { issuerName: "Acme Financial Inc.", pegCurrency: "USD" },
@@ -278,6 +295,106 @@ describe("requiredForDeploy metadata gate (SOLA9-37)", () => {
     const patchBody = (await patch.json()) as { error?: { message?: string } };
     expect(patch.status, JSON.stringify(patchBody)).toBe(400);
     expect(patchBody.error?.message ?? "").toMatch(MISSING_FIELDS_MESSAGE);
+  });
+
+  it("rejects a profile update that strips required fields from a retype that lands first (concurrency)", async () => {
+    // The race the row lock closes: a retype to fiat_backed and a metadata
+    // strip both validated against the same original generic row used to
+    // interleave, and the strip landing last left a fiat_backed profile with
+    // unmet required fields. The update now holds the row lock for its whole
+    // read-validate-write, so the strip re-validates against the committed
+    // post-retype row and fails closed.
+    const tokenId = await createToken();
+    const profile = await app.request(
+      `/v1/issuance/asset-profiles/by-token/${tokenId}`,
+      { headers: { Authorization: `Bearer ${GATE_KEY.raw}` } },
+      REGRESSION_ENV
+    );
+    const profileBody = (await profile.json()) as {
+      data?: { assetProfile?: { id?: string } };
+    };
+    const profileId = profileBody.data?.assetProfile?.id;
+    expect(profileId).toEqual(expect.any(String));
+
+    let markRaceReady: (() => void) | undefined;
+    let releaseRace: (() => void) | undefined;
+    const raceReady = new Promise<void>((resolve) => {
+      markRaceReady = resolve;
+    });
+    const raceGate = new Promise<void>((resolve) => {
+      releaseRace = resolve;
+    });
+
+    // Hold the profile row lock, then commit the racing retype as the lock is
+    // released — the write a stale-snapshot strip used to slip past.
+    const race = getDb(REGRESSION_ENV).transaction(async (tx) => {
+      await tx.queryOne("SELECT id FROM asset_profiles WHERE id = ? FOR UPDATE", [profileId]);
+      markRaceReady?.();
+      await raceGate;
+      await tx.queryOne(
+        `UPDATE asset_profiles
+            SET asset_category = 'stablecoin', asset_type = 'fiat_backed',
+                asset_type_version = 2,
+                issuance_metadata = ?::jsonb, public_metadata = '{}'::jsonb
+          WHERE id = ?`,
+        [
+          JSON.stringify({ asset: { issuerName: "Acme Financial Inc.", pegCurrency: "USD" } }),
+          profileId,
+        ]
+      );
+    });
+    await raceReady;
+
+    const patch = app.request(
+      `/v1/issuance/asset-profiles/${profileId}`,
+      {
+        method: "PATCH",
+        headers: AUTH,
+        body: JSON.stringify({ issuanceMetadata: { asset: { name: "Stripped" } } }),
+      },
+      REGRESSION_ENV
+    );
+
+    // The PATCH must block on the race's row lock — proof it re-reads under
+    // FOR UPDATE inside its transaction instead of snapshotting up front.
+    try {
+      const deadline = Date.now() + 10_000;
+      while (true) {
+        const waiting = await getDb(REGRESSION_ENV).queryOne<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1 FROM pg_stat_activity
+             WHERE datname = current_database() AND wait_event_type = 'Lock'
+               AND query LIKE '%FROM asset_profiles%FOR UPDATE%'
+           ) AS waiting`
+        );
+        if (waiting?.waiting) {
+          break;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error("Concurrent PATCH did not reach the asset profile row lock");
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      }
+    } finally {
+      releaseRace?.();
+      await race;
+    }
+
+    // Unblocked after the retype committed: the strip now fails the registry
+    // gate against the committed fiat_backed row.
+    const response = await patch;
+    const responseBody = (await response.json()) as { error?: { message?: string } };
+    expect(response.status, JSON.stringify(responseBody)).toBe(400);
+    expect(responseBody.error?.message ?? "").toMatch(MISSING_FIELDS_MESSAGE);
+
+    // The committed profile keeps its required fields — no partial write.
+    const stored = await getDb(REGRESSION_ENV).queryOne<{
+      issuance_metadata: { asset?: { issuerName?: string; pegCurrency?: string } };
+    }>("SELECT issuance_metadata FROM asset_profiles WHERE id = ?", [profileId]);
+    expect(stored?.issuance_metadata.asset).toMatchObject({
+      issuerName: "Acme Financial Inc.",
+      pegCurrency: "USD",
+    });
   });
 
   it("accepts a profile update that keeps required fields populated (compatibility)", async () => {

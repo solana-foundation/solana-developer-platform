@@ -16,19 +16,20 @@ export interface RequiredForDeployMetadataError {
   reason: "required";
 }
 
+// Fail closed: a required value must be a non-empty, non-whitespace string.
+// Objects, arrays, booleans, and numbers are not issuer-entered text — a
+// caller sending `issuerName: {}` or `pegCurrency: false` has not supplied
+// the field, and the gate must not treat the value as present.
 function isBlank(value: unknown): boolean {
-  if (value === undefined || value === null) {
-    return true;
-  }
-  return typeof value === "string" && value.trim().length === 0;
+  return typeof value !== "string" || value.trim().length === 0;
 }
 
 /**
  * Check every `requiredForDeploy` dot-path of the registry entry for
- * (category, type) against the issuance metadata. Missing, null, empty, and
- * whitespace-only values are reported field-specifically; types that declare
- * no requirements (and unknown pairs, which callers validate separately)
- * always pass.
+ * (category, type) against the issuance metadata. Missing, null, empty,
+ * whitespace-only, and non-string values are reported field-specifically;
+ * types that declare no requirements (and unknown pairs, which callers
+ * validate separately) always pass.
  */
 export function validateRequiredForDeployMetadata(
   category: AssetCategory,
@@ -50,7 +51,7 @@ export function validateRequiredForDeployMetadata(
 
 /**
  * Fail closed with a field-specific 400 when a registry-required issuance
- * metadata value is missing, null, empty, or whitespace-only.
+ * metadata value is missing, null, empty, whitespace-only, or not a string.
  */
 export function assertRequiredForDeployMetadata(
   category: AssetCategory,
