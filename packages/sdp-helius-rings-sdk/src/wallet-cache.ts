@@ -30,6 +30,17 @@ export function invalidateCachedWallet(walletId: string): void {
   cache.delete(walletId);
 }
 
+/**
+ * Evicts the cached wallet only when it is still the one `used` names: a sync
+ * that ran on a private wallet object — or that raced with a hydration caching
+ * a different, clean wallet meanwhile — must not drop an entry it never advanced.
+ */
+export function invalidateCachedWalletIfUsed(walletId: string, used: Wallet): void {
+  if (cache.get(walletId)?.wallet === used) {
+    cache.delete(walletId);
+  }
+}
+
 /** Test seam; production callers should never need this. */
 export function clearWalletCache(): void {
   cache.clear();
