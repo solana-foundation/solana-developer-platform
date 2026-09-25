@@ -241,8 +241,12 @@ async function priceRingsBalances(
     };
   });
 
-  const anyPriced = enriched.some((balance) => typeof balance.usdValue === "number");
-  const totalUsd = anyPriced
+  // A numeric total is only honest when it is complete: one unpriced balance
+  // would turn the sum into a priced-subset figure that understates the wallet
+  // with no signal, so an incomplete pricing answers null (SOLA9-346) and the
+  // per-balance rows carry the unpriced marker instead.
+  const allPriced = enriched.every((balance) => typeof balance.usdValue === "number");
+  const totalUsd = allPriced
     ? Number(enriched.reduce((sum, balance) => sum + (balance.usdValue ?? 0), 0).toFixed(2))
     : null;
   return { balances: enriched, totalUsd };
