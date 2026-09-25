@@ -147,11 +147,28 @@ describe("OpenAPI spec", () => {
     const unionVariants = transactionItems?.oneOf ?? transactionItems?.anyOf;
     expect(unionVariants).toBeDefined();
     for (const variant of unionVariants ?? []) {
-      // The module-agnostic variant types `module` as a plain string and
-      // carries no enum at all; every branching variant must exclude the
-      // held-back module from its enum.
+      // The module-agnostic variant types `module` as a plain string with no
+      // enum of its own; every branching variant must exclude the held-back
+      // module from its enum.
       expect(variant.properties?.module?.enum ?? []).not.toContain("earn");
     }
+    // The module-agnostic variant must refuse the published modules as a
+    // document-level constraint (`not.enum`), so a generated client cannot
+    // parse a published row — whatever its `kind` or `moduleStatus` — through
+    // it: published rows resolve to their own branch, and generated types can
+    // narrow those fields by module. The `not` enumerates only published
+    // modules; naming the held-back family is what the hold forbids.
+    const moduleAgnosticVariant = (unionVariants ?? []).find(
+      (variant) => variant.properties?.module?.enum === undefined
+    );
+    expect(moduleAgnosticVariant).toBeDefined();
+    expect(moduleAgnosticVariant?.properties?.module?.not?.enum).toEqual([
+      "payments",
+      "dvp",
+      "private_channels",
+      "issuance",
+      "rings",
+    ]);
     // Earn-only lifecycle vocabulary must not survive through a shared
     // variant: these moduleStatus values name no other module's contract.
     const unionJson = JSON.stringify(transactionItems);

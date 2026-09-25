@@ -153,11 +153,24 @@ export const unifiedTransactionSchema = unifiedTransactionSchemaForModules(
  * on a published module fails the union instead of being absorbed here —
  * while rows of modules the selector does not name (held back, or added to
  * the runtime later) still parse.
+ *
+ * The refusal is carried twice, for the two audiences of the contract. The
+ * runtime `.refine` enforces it when the Zod schema parses. The `.meta`
+ * `not: { enum }` mirrors it into the published OpenAPI document, where a
+ * refinement is invisible: generated clients read the document, so the
+ * variant's `module` must exclude the named modules as a schema constraint,
+ * or every published row (whatever its `kind`/`moduleStatus`) would still
+ * match the variant and generated types could not narrow those fields by
+ * module. The `not` enumerates only the published modules — naming the
+ * held-back family is exactly what the hold forbids.
  */
 export function unpublishedModuleTransactionSchema(namedModules: readonly string[]) {
   return z.object({
     ...commonFields,
-    module: z.string().refine((module) => !namedModules.includes(module)),
+    module: z
+      .string()
+      .refine((module) => !namedModules.includes(module))
+      .meta({ not: { enum: [...namedModules] } }),
     kind: z.string(),
     moduleStatus: z.string(),
   });
