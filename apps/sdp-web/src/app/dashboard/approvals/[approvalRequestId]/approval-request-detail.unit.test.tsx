@@ -157,6 +157,64 @@ describe("ApprovalRequestDetail", () => {
   // the proxy answers one: the response is dropped and the page refetches
   // under its own binding instead.
   it("ignores a decision response answered for another project", async () => {
+    const fetchResponse = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        data: { approvalRequest: { ...pendingRequest, projectId: "prj_other" } },
+      })
+    );
+    // The follow-up read confirms the mounted request is approved, so the
+    // page can report the decision it could verify.
+    fetchResponse.mockResolvedValueOnce(
+      Response.json({
+        data: {
+          approvalRequest: {
+            ...pendingRequest,
+            status: "approved",
+            operation: { ...pendingRequest.operation, status: "completed" },
+          },
+        },
+      })
+    );
+    vi.stubGlobal("fetch", fetchResponse);
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          projectId="prj_1"
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(await screen.findByText("Request approved")).toBeTruthy();
+    // The out-of-scope response never replaced the page's request.
+    expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
+    // The decision went through, then the page read the latest state back
+    // under its own project binding rather than trusting the foreign body.
+    expect(fetchResponse.mock.calls).toEqual([
+      [
+        "/api/dashboard/approval-requests/apr_1/approve",
+        { method: "POST", headers: { "x-project-id": "prj_1" } },
+      ],
+      [
+        "/api/dashboard/approval-requests/apr_1",
+        { cache: "no-store", headers: { "x-project-id": "prj_1" } },
+      ],
+    ]);
+  });
+
+  // A decision reply for another project plus a follow-up read that also
+  // cannot confirm the mounted request leaves the decision unverified: the
+  // page must not announce a success it cannot back up while the request may
+  // still be Pending.
+  it("warns instead of reporting success when a decision cannot be confirmed", async () => {
     const fetchResponse = vi.fn<typeof fetch>().mockResolvedValue(
       Response.json({
         data: { approvalRequest: { ...pendingRequest, projectId: "prj_other" } },
@@ -180,21 +238,17 @@ describe("ApprovalRequestDetail", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
     await user.click(screen.getByRole("button", { name: "Approve request" }));
 
-    expect(await screen.findByText("Request approved")).toBeTruthy();
-    // The out-of-scope response never replaced the page's request.
+    expect(
+      await screen.findByText(
+        "The decision could not be confirmed on this request. Reload to see its latest status."
+      )
+    ).toBeTruthy();
+    // The request stays Pending on screen, and no success toast appeared.
     expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Approved")).toBeNull();
-    // The decision went through, then the page read the latest state back
-    // under its own project binding rather than trusting the foreign body.
-    expect(fetchResponse.mock.calls).toEqual([
-      [
-        "/api/dashboard/approval-requests/apr_1/approve",
-        { method: "POST", headers: { "x-project-id": "prj_1" } },
-      ],
-      [
-        "/api/dashboard/approval-requests/apr_1",
-        { cache: "no-store", headers: { "x-project-id": "prj_1" } },
-      ],
+    expect(
+      [...document.querySelectorAll("[data-sonner-toast]")].map((toast) => toast.textContent)
+    ).toEqual([
+      "The decision could not be confirmed on this request. Reload to see its latest status.",
     ]);
   });
 

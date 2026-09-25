@@ -9,6 +9,7 @@ import {
   filterApprovalRequests,
   formatApprovalLabel,
   mergeApprovalRequests,
+  scopedApprovalBatch,
 } from "./approval-requests.data";
 
 function approvalRequest(
@@ -221,5 +222,39 @@ describe("approvalRequestsInProjectScope", () => {
   it("rejects a batch with a row that reports no project", () => {
     const batch = [approvalRequest("a", "pending", { projectId: null })];
     expect(approvalRequestsInProjectScope(batch, "project-1")).toBe(false);
+  });
+
+  // An empty batch carries no rows, so it proves nothing about which project
+  // answered: an older proxy still resolving the shared selection cookie can
+  // return one for a sibling tab's empty project.
+  it("never reads an empty batch as in scope", () => {
+    expect(approvalRequestsInProjectScope([], "project-1")).toBe(false);
+  });
+});
+
+describe("scopedApprovalBatch", () => {
+  const inScope = [approvalRequest("a", "pending")];
+
+  it("merges a pair whose rows all carry the bound project", () => {
+    expect(scopedApprovalBatch(inScope, inScope, "project-1")).toEqual(inScope);
+  });
+
+  it("skips the repaint when both batches are empty", () => {
+    expect(scopedApprovalBatch([], [], "project-1")).toBeNull();
+  });
+
+  it("skips the scope check when the inbox has no project binding", () => {
+    expect(scopedApprovalBatch(inScope, [], null)).toEqual(inScope);
+  });
+
+  it("throws when a batch with rows answers for another project", () => {
+    const foreign = [approvalRequest("a", "pending", { projectId: "project-2" })];
+    expect(() => scopedApprovalBatch(foreign, [], "project-1")).toThrow(
+      "Approval reload left the mounted project"
+    );
+    expect(() => scopedApprovalBatch([], foreign, "project-1")).toThrow(
+      "Approval reload left the mounted project"
+    );
+    expect(() => scopedApprovalBatch([], [], "project-1")).not.toThrow();
   });
 });

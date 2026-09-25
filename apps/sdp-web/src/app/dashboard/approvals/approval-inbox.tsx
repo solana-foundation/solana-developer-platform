@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   DashboardWorkspaceCard,
@@ -39,9 +39,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
-import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { cn } from "@/lib/utils";
 import { formatDisplayAmount, resolveTokenByMint } from "../payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments/payments-page.data";
@@ -55,14 +55,13 @@ import {
   approvalApiKeyLabel,
   approvalBadgeStatus,
   approvalReason,
-  approvalRequestsInProjectScope,
   approvalWalletLabel,
   EMPTY_APPROVAL_FILTERS,
+  fetchApprovalRequests,
   filterApprovalRequests,
   formatApprovalLabel,
   formatApprovalRelativeTime,
   hasApprovalFilters,
-  mergeApprovalRequests,
   shortApprovalIdentifier,
 } from "./approval-requests.data";
 
@@ -100,6 +99,238 @@ interface InboxState {
   loadError: boolean;
 }
 
+/** The wallet and API-key filter options derived from the mounted rows. */
+interface ApprovalFilterOptions {
+  walletOptions: [string, string][];
+  apiKeyOptions: [string, string][];
+}
+
+function sortedLabels(entries: Iterable<[string, string]>): [string, string][] {
+  return [...entries].sort((left, right) => left[1].localeCompare(right[1]));
+}
+
+function approvalFilterOptions(
+  requests: WalletApprovalRequestSummary[],
+  apiKeyNames: Record<string, string>
+): ApprovalFilterOptions {
+  const wallets = new Map<string, string>();
+  const apiKeys = new Map<string, string>();
+  for (const request of requests) {
+    wallets.set(request.operation.walletId, approvalWalletLabel(request));
+    const apiKeyId = request.operation.apiKeyId;
+    if (apiKeyId) apiKeys.set(apiKeyId, apiKeyNames[apiKeyId] || shortApprovalIdentifier(apiKeyId));
+  }
+  return { walletOptions: sortedLabels(wallets), apiKeyOptions: sortedLabels(apiKeys) };
+}
+
+/** The empty-state copy for the active tab, sensitive to active filters. */
+function emptyStateKeys(
+  tab: ApprovalInboxTab,
+  hasFilters: boolean
+): {
+  title: MessageKey;
+  description: MessageKey;
+} {
+  if (hasFilters) {
+    return {
+      title: "DashboardApprovals.emptyFiltered",
+      description: "DashboardApprovals.emptyFilteredDescription",
+    };
+  }
+  return tab === "pending"
+    ? {
+        title: "DashboardApprovals.emptyPending",
+        description: "DashboardApprovals.emptyPendingDescription",
+      }
+    : {
+        title: "DashboardApprovals.emptyHistory",
+        description: "DashboardApprovals.emptyHistoryDescription",
+      };
+}
+
+/**
+ * Drives an inbox's refreshes: manual reloads and the five-second
+ * auto-refresh, all pinned to the mounted scope's identity.
+ *
+ * Every fetch names the mounted project explicitly (`x-project-id`), so the
+ * proxy binds the response to this inbox's scope instead of resolving the
+ * shared selection cookie, which a sibling tab can change at any moment.
+ */
+function useInboxRefresh(options: {
+  projectId: string | null;
+  scope: InboxState["scope"];
+  setInbox: Dispatch<SetStateAction<InboxState>>;
+  hasRows: boolean;
+}) {
+  const t = useTranslations();
+  const [isReloading, setReloading] = useState(false);
+  const [spinning, setSpinning] = useState(false);
+  if (isReloading && !spinning) setSpinning(true);
+
+  /**
+   * Refetches pending and recent approval requests and merges them into state.
+   *
+   * @param request - `silent` suppresses the failure toast for background
+   * auto-refreshes; manual reloads pass `silent: false` to surface the error.
+   */
+  async function reload(request: { silent: boolean }) {
+    if (isReloading) return;
+    // The scope pins this attempt to the mounted project: its identity is
+    // what the update below is judged against, so a response that resolves
+    // after the project changed never writes into the new scope.
+    const scope = options.scope;
+    setReloading(true);
+    try {
+      // `null` when the batch pair establishes nothing (both batches empty):
+      // an older proxy still resolving the shared cookie can answer like that
+      // for a sibling tab's empty project, so the mounted rows stand rather
+      // than being erased by an answer that proves nothing.
+      const merged = await fetchApprovalRequests(options.projectId);
+      // Functional so a response that resolves after the scope moved on is
+      // dropped rather than written into the new scope's inbox.
+      options.setInbox((prev) => {
+        if (prev.scope !== scope) return prev;
+        const repaint = merged ? { requests: merged, relativeTimeBase: Date.now() } : {};
+        return { ...prev, ...repaint, loadError: false };
+      });
+      if (merged) window.dispatchEvent(new Event("sdp:approval-requests-updated"));
+    } catch {
+      options.setInbox((prev) => (prev.scope === scope ? { ...prev, loadError: true } : prev));
+      if (!request.silent && options.hasRows) {
+        toast.error(t("DashboardApprovals.refreshFailed"), { position: "bottom-right" });
+      }
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the timer is deliberately recreated whenever the mounted project changes, so no interval outlives its scope.
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      void reloadRef.current({ silent: true });
+    }, AUTO_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [options.projectId]);
+
+  return {
+    isReloading,
+    spinning,
+    reload,
+    // A finished reload stops the spinner at its next full revolution.
+    onSpinRest: () => {
+      if (!isReloading) setSpinning(false);
+    },
+  };
+}
+
+function ReloadSpinner({ spinning, onRest }: { spinning: boolean; onRest: () => void }) {
+  return (
+    <RotateCw className={cn("size-4", spinning && "animate-spin")} onAnimationIteration={onRest} />
+  );
+}
+
+/** The takeover panel shown when the mounted project's initial load failed. */
+function InboxLoadErrorPanel({
+  isReloading,
+  spinning,
+  onSpinRest,
+  onReload,
+}: {
+  isReloading: boolean;
+  spinning: boolean;
+  onSpinRest: () => void;
+  onReload: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex h-full min-h-[420px] items-center justify-center p-6">
+      <div className="max-w-md text-center">
+        <h1 className="text-xl font-medium text-primary">{t("DashboardApprovals.unableToLoad")}</h1>
+        <p className="mt-2 text-sm text-secondary">
+          {t("DashboardApprovals.unableToLoadDescription")}
+        </p>
+        <Button
+          className="mt-5"
+          variant="outline"
+          onClick={onReload}
+          disabled={isReloading}
+          iconLeft={<ReloadSpinner spinning={spinning} onRest={onSpinRest} />}
+        >
+          {t("DashboardApprovals.reload")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function InboxFooter({
+  total,
+  rangeStart,
+  rangeEnd,
+  pendingCount,
+  page,
+  pageCount,
+  onPageChange,
+  pageSize,
+  onPageSizeChange,
+  onReload,
+  isReloading,
+  spinning,
+  onSpinRest,
+}: {
+  total: number;
+  rangeStart: number;
+  rangeEnd: number;
+  pendingCount: number;
+  page: number;
+  pageCount: number;
+  onPageChange: (page: number) => void;
+  pageSize: number;
+  onPageSizeChange: (pageSize: number) => void;
+  onReload: () => void;
+  isReloading: boolean;
+  spinning: boolean;
+  onSpinRest: () => void;
+}) {
+  const t = useTranslations();
+  if (total === 0) return null;
+  return (
+    <PaginatedFooter
+      className="mt-auto"
+      page={page}
+      pageCount={pageCount}
+      onPageChange={onPageChange}
+      summary={t("DashboardApprovals.range", { from: rangeStart, to: rangeEnd, total })}
+      pageSizeControl={{ pageSize, onPageSizeChange }}
+    >
+      <div className="flex items-center gap-2 text-xs text-secondary">
+        <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              onClick={onReload}
+              disabled={isReloading}
+              aria-label={t("DashboardApprovals.reload")}
+            >
+              <ReloadSpinner spinning={spinning} onRest={onSpinRest} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs">
+            {t("DashboardApprovals.autoRefresh")}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </PaginatedFooter>
+  );
+}
+
 export function ApprovalInbox({
   projectId,
   initialRequests,
@@ -124,9 +355,12 @@ export function ApprovalInbox({
   }));
   const { requests, relativeTimeBase, loadError: hasLoadError } = inbox;
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
-  const [isReloading, setReloading] = useState(false);
-  const [spinning, setSpinning] = useState(false);
-  if (isReloading && !spinning) setSpinning(true);
+  const { isReloading, spinning, reload, onSpinRest } = useInboxRefresh({
+    projectId,
+    scope: inbox.scope,
+    setInbox,
+    hasRows: requests.length > 0,
+  });
   const [previousTab, setPreviousTab] = useState(tab);
   if (previousTab !== tab) {
     setPreviousTab(tab);
@@ -140,34 +374,24 @@ export function ApprovalInbox({
       scope: { projectId },
       requests: initialRequests,
       relativeTimeBase: renderedAt,
-      loadError: false,
+      // The new scope's page props carry its own load state, so a project
+      // whose initial load failed shows the error panel, not an empty inbox.
+      loadError,
     });
     setFilters(EMPTY_APPROVAL_FILTERS);
   }
 
-  const pendingCount = useMemo(
-    () => requests.filter((request) => request.status === "pending").length,
-    [requests]
+  const { walletOptions, apiKeyOptions } = useMemo(
+    () => approvalFilterOptions(requests, apiKeyNames),
+    [apiKeyNames, requests]
   );
-  const walletOptions = useMemo(() => {
-    const options = new Map<string, string>();
-    for (const request of requests) {
-      options.set(request.operation.walletId, approvalWalletLabel(request));
-    }
-    return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]));
-  }, [requests]);
-  const apiKeyOptions = useMemo(() => {
-    const options = new Map<string, string>();
-    for (const request of requests) {
-      const apiKeyId = request.operation.apiKeyId;
-      if (apiKeyId)
-        options.set(apiKeyId, apiKeyNames[apiKeyId] || shortApprovalIdentifier(apiKeyId));
-    }
-    return [...options.entries()].sort((left, right) => left[1].localeCompare(right[1]));
-  }, [apiKeyNames, requests]);
   const filteredRequests = useMemo(
     () => filterApprovalRequests(requests, tab, filters),
     [filters, requests, tab]
+  );
+  const pendingCount = useMemo(
+    () => requests.filter((request) => request.status === "pending").length,
+    [requests]
   );
   const pageCount = Math.max(1, Math.ceil(filteredRequests.length / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -191,136 +415,18 @@ export function ApprovalInbox({
     setPage(1);
   }
 
-  /**
-   * Refetches pending and recent approval requests and merges them into state.
-   *
-   * Every fetch names the mounted project explicitly (`x-project-id`), so the
-   * proxy binds the response to this inbox's scope instead of resolving the
-   * shared selection cookie, which a sibling tab can change at any moment. A
-   * response whose rows carry another project's id is dropped whole, and so
-   * is a response that resolves after the mounted project changed.
-   *
-   * @param options - `silent` suppresses the failure toast for background auto-refreshes;
-   * manual reloads pass `silent: false` to surface the error.
-   */
-  async function reload(options: { silent: boolean }) {
-    if (isReloading) return;
-    // The scope pins this attempt to the mounted project: its identity is
-    // what the update below is judged against, so a response that resolves
-    // after the project changed never writes into the new scope.
-    const scope = inbox.scope;
-    setReloading(true);
-    try {
-      const projectHeaders = projectId ? { [PROJECT_HEADER_NAME]: projectId } : undefined;
-      const [pendingResponse, recentResponse] = await Promise.all([
-        fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
-          cache: "no-store",
-          headers: projectHeaders,
-        }),
-        fetch("/api/dashboard/approval-requests?limit=100", {
-          cache: "no-store",
-          headers: projectHeaders,
-        }),
-      ]);
-      const [pendingBody, recentBody] = (await Promise.all([
-        pendingResponse.json().catch(() => null),
-        recentResponse.json().catch(() => null),
-      ])) as Array<{
-        data?: { approvalRequests?: WalletApprovalRequestSummary[] };
-      } | null>;
-      const pendingRequests = pendingBody?.data?.approvalRequests;
-      const recentRequests = recentBody?.data?.approvalRequests;
-      if (!pendingResponse.ok || !recentResponse.ok || !pendingRequests || !recentRequests) {
-        throw new Error("Approval reload failed");
-      }
-      // Defense in depth for the explicit binding: a batch answered for
-      // another project — an older proxy deploy still resolving the shared
-      // cookie, say — must not repaint this inbox.
-      if (projectId !== null) {
-        if (!approvalRequestsInProjectScope(pendingRequests, projectId)) {
-          throw new Error("Approval reload left the mounted project");
-        }
-        if (!approvalRequestsInProjectScope(recentRequests, projectId)) {
-          throw new Error("Approval reload left the mounted project");
-        }
-      }
-      // Functional so a response that resolves after the scope moved on is
-      // dropped rather than written into the new scope's inbox.
-      setInbox((prev) =>
-        prev.scope === scope
-          ? {
-              ...prev,
-              requests: mergeApprovalRequests(pendingRequests, recentRequests),
-              relativeTimeBase: Date.now(),
-              loadError: false,
-            }
-          : prev
-      );
-      window.dispatchEvent(new Event("sdp:approval-requests-updated"));
-    } catch {
-      setInbox((prev) => (prev.scope === scope ? { ...prev, loadError: true } : prev));
-      if (!options.silent && requests.length > 0) {
-        toast.error(t("DashboardApprovals.refreshFailed"), { position: "bottom-right" });
-      }
-    } finally {
-      setReloading(false);
-    }
-  }
-
-  const reloadRef = useRef(reload);
-  useEffect(() => {
-    reloadRef.current = reload;
-  });
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the timer is deliberately recreated whenever the mounted project changes, so no interval outlives its scope.
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      void reloadRef.current({ silent: true });
-    }, AUTO_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(intervalId);
-  }, [projectId]);
-
   if (hasLoadError && requests.length === 0) {
     return (
-      <div className="flex h-full min-h-[420px] items-center justify-center p-6">
-        <div className="max-w-md text-center">
-          <h1 className="text-xl font-medium text-primary">
-            {t("DashboardApprovals.unableToLoad")}
-          </h1>
-          <p className="mt-2 text-sm text-secondary">
-            {t("DashboardApprovals.unableToLoadDescription")}
-          </p>
-          <Button
-            className="mt-5"
-            variant="outline"
-            onClick={() => reload({ silent: false })}
-            disabled={isReloading}
-            iconLeft={
-              <RotateCw
-                className={cn("size-4", spinning && "animate-spin")}
-                onAnimationIteration={() => {
-                  if (!isReloading) setSpinning(false);
-                }}
-              />
-            }
-          >
-            {t("DashboardApprovals.reload")}
-          </Button>
-        </div>
-      </div>
+      <InboxLoadErrorPanel
+        isReloading={isReloading}
+        spinning={spinning}
+        onSpinRest={onSpinRest}
+        onReload={() => reload({ silent: false })}
+      />
     );
   }
 
-  const emptyFiltered = hasApprovalFilters(filters);
-  const emptyTitle = emptyFiltered
-    ? t("DashboardApprovals.emptyFiltered")
-    : tab === "pending"
-      ? t("DashboardApprovals.emptyPending")
-      : t("DashboardApprovals.emptyHistory");
-  const emptyDescription = emptyFiltered
-    ? t("DashboardApprovals.emptyFilteredDescription")
-    : tab === "pending"
-      ? t("DashboardApprovals.emptyPendingDescription")
-      : t("DashboardApprovals.emptyHistoryDescription");
+  const emptyState = emptyStateKeys(tab, hasApprovalFilters(filters));
 
   return (
     <DashboardWorkspaceOverviewPanel className="flex flex-col">
@@ -352,8 +458,8 @@ export function ApprovalInbox({
             {visibleRequests.length === 0 ? (
               <ListEmptyState
                 icon={<InboxIcon className="size-5" />}
-                message={emptyTitle}
-                description={emptyDescription}
+                message={t(emptyState.title)}
+                description={t(emptyState.description)}
               />
             ) : (
               <ApprovalRequestRows
@@ -367,46 +473,21 @@ export function ApprovalInbox({
           </motion.div>
         </AnimatePresence>
 
-        {filteredRequests.length === 0 ? null : (
-          <PaginatedFooter
-            className="mt-auto"
-            page={currentPage}
-            pageCount={pageCount}
-            onPageChange={setPage}
-            summary={t("DashboardApprovals.range", {
-              from: rangeStart,
-              to: rangeEnd,
-              total: filteredRequests.length,
-            })}
-            pageSizeControl={{ pageSize, onPageSizeChange: setPageSize }}
-          >
-            <div className="flex items-center gap-2 text-xs text-secondary">
-              <span>{t("DashboardApprovals.pendingCount", { count: pendingCount })}</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={() => reload({ silent: false })}
-                    disabled={isReloading}
-                    aria-label={t("DashboardApprovals.reload")}
-                  >
-                    <RotateCw
-                      className={cn("size-4", spinning && "animate-spin")}
-                      onAnimationIteration={() => {
-                        if (!isReloading) setSpinning(false);
-                      }}
-                    />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">
-                  {t("DashboardApprovals.autoRefresh")}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-          </PaginatedFooter>
-        )}
+        <InboxFooter
+          total={filteredRequests.length}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          pendingCount={pendingCount}
+          page={currentPage}
+          pageCount={pageCount}
+          onPageChange={setPage}
+          pageSize={pageSize}
+          onPageSizeChange={setPageSize}
+          onReload={() => reload({ silent: false })}
+          isReloading={isReloading}
+          spinning={spinning}
+          onSpinRest={onSpinRest}
+        />
       </DashboardWorkspaceCard>
     </DashboardWorkspaceOverviewPanel>
   );

@@ -207,8 +207,14 @@ function useApprovalDecision(projectId: string, initialRequest: WalletApprovalRe
         // Approving runs the operation in the same call. A run that failed must
         // not be announced as a plain success.
         toast.error(t("DashboardApprovals.approvedExecutionFailedToast"));
-      } else {
+      } else if (latest) {
         toast.success(t(feedback.message));
+      } else {
+        // The decision was accepted, but neither its reply nor the follow-up
+        // read could be confirmed on the mounted scope, so success is not
+        // established. The toast stays at a warning about re-reading state —
+        // never a success the page cannot back up.
+        toast.warning(t("DashboardApprovals.decisionUnconfirmed"));
       }
     } catch {
       toast.error(t("DashboardApprovals.decisionFailed"));
