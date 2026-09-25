@@ -61,6 +61,7 @@ type OnChainPlanOverride = {
   amount?: bigint;
   periodHours?: bigint;
   metadataUri?: string;
+  mint?: string;
 };
 
 /** Installs the authoritative on-chain plan the routes must be anchored to. */
@@ -78,7 +79,7 @@ function mockOnChainPlan(overrides: OnChainPlanOverride = {}): void {
             status: overrides.status ?? subscriptionsProgram.PlanStatus.Active,
             data: {
               planId: 1n,
-              mint: DEVNET_USDC_MINT,
+              mint: (overrides.mint ?? DEVNET_USDC_MINT) as never,
               terms: {
                 amount: overrides.amount ?? 25_000_000n,
                 periodHours: overrides.periodHours ?? 720n,
@@ -702,6 +703,14 @@ it("validates destination and status claims when a plan references an on-chain p
   const archivedWhileActive = await createPlan({ ...requestBody, status: "archived" });
   expect(archivedWhileActive.status).toBe(400);
 
+  // An attached planPda also restates the on-chain plan's immutable terms.
+  mockOnChainPlan({ destinations: [DESTINATION], amount: 30_000_000n });
+  const mismatchedAttachedAmount = await createPlan(requestBody);
+  expect(mismatchedAttachedAmount.status).toBe(400);
+  expect(errorResponseSchema.parse(await mismatchedAttachedAmount.json()).error.message).toContain(
+    "amount"
+  );
+
   mockOnChainPlan({ destinations: [DESTINATION] });
   const attached = await createPlan({
     ...requestBody,
@@ -766,6 +775,36 @@ it("binds a create that references a live program plan id even without a planPda
   mockOnChainPlan({ status: subscriptionsProgram.PlanStatus.Active });
   const prematureArchive = await createPlan({ programPlanId: "323", status: "archived" });
   expect(prematureArchive.status).toBe(400);
+
+  // A bound create must restate the on-chain plan's immutable terms: the
+  // amount and the period are not editable once the record is stored.
+  mockOnChainPlan({ amount: 30_000_000n });
+  const mismatchedAmount = await createPlan({
+    programPlanId: "325",
+    destinationAddress: DESTINATION,
+  });
+  expect(mismatchedAmount.status).toBe(400);
+  expect(errorResponseSchema.parse(await mismatchedAmount.json()).error.message).toContain(
+    "amount"
+  );
+
+  mockOnChainPlan({ periodHours: 480n });
+  const mismatchedPeriod = await createPlan({
+    programPlanId: "326",
+    destinationAddress: DESTINATION,
+  });
+  expect(mismatchedPeriod.status).toBe(400);
+  expect(errorResponseSchema.parse(await mismatchedPeriod.json()).error.message).toContain(
+    "period"
+  );
+
+  mockOnChainPlan({ mint: OTHER_DESTINATION });
+  const mismatchedToken = await createPlan({
+    programPlanId: "327",
+    destinationAddress: DESTINATION,
+  });
+  expect(mismatchedToken.status).toBe(400);
+  expect(errorResponseSchema.parse(await mismatchedToken.json()).error.message).toContain("token");
 
   mockOnChainPlan({});
   const bound = await createPlan({ programPlanId: "324", destinationAddress: DESTINATION });

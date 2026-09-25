@@ -1,5 +1,7 @@
 import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
+import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   ListPaymentSubscriptionPlansResponse,
   PaymentSubscriptionPlan,
@@ -20,9 +22,11 @@ import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequest, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { resolveMintDecimals } from "@/routes/payments/token-accounts";
 import { assertApiKeyWalletAccess } from "@/services/api-key-scope.service";
 import { normalizePaymentToken, parseU64String } from "@/services/payment-operation.service";
 import {
+  assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
   fetchLiveSubscriptionPlan,
@@ -119,13 +123,20 @@ async function resolvePullerWalletAddress(
  * A create request that references an existing on-chain plan claims consent
  * the subscriptions program already enforces: an attached planPda, or a
  * programPlanId whose derived plan already exists on-chain. As with updates,
- * the stored record may only describe state the chain confirms (SOLA9-634).
+ * the stored record may only describe state the chain confirms (SOLA9-634):
+ * destinations, status, and the plan's immutable terms (mint, amount, period)
+ * must all match the authoritative on-chain plan, because none of them can be
+ * corrected after the record is created.
  */
 async function assertPlanConsentMatchesChain(
+  c: AppContext,
   onChainPlan: Awaited<ReturnType<typeof fetchLiveSubscriptionPlan>>,
   requested: {
     destinationAddress: string | null | undefined;
     status: string;
+    token: string;
+    amount: string;
+    periodHours: number;
   }
 ): Promise<void> {
   if (requested.destinationAddress) {
@@ -150,6 +161,25 @@ async function assertPlanConsentMatchesChain(
         "Subscription plan cannot be created as archived while its on-chain plan is still active"
       );
     }
+  }
+
+  if (!onChainPlan) {
+    return;
+  }
+
+  // A bound create restates the on-chain plan's terms: collection preparation
+  // rejects any drift, and neither the amount nor the period is editable
+  // afterward, so the record must match the chain at creation (SOLA9-634).
+  const mint = assertSubscriptionTokenMint(normalizePaymentToken(requested.token, c.env));
+  if (onChainPlan.data.mint !== mint) {
+    throw badRequest("Subscription plan token does not match the on-chain plan");
+  }
+  if (onChainPlan.data.terms.periodHours !== BigInt(requested.periodHours)) {
+    throw badRequest("Subscription plan period does not match the on-chain plan");
+  }
+  const decimals = await resolveMintDecimals(solanaRpc.createRpc(c.env), mint);
+  if (onChainPlan.data.terms.amount !== parseDecimalAmount(requested.amount, decimals)) {
+    throw badRequest("Subscription plan amount does not match the on-chain plan");
   }
 }
 
@@ -185,9 +215,12 @@ export const createSubscriptionPlan = async (
     if (onChainPlan || body.planPda) {
       // An attached planPda claims a live plan, so its consent claims are
       // validated even when the account is currently missing.
-      await assertPlanConsentMatchesChain(onChainPlan, {
+      await assertPlanConsentMatchesChain(c, onChainPlan, {
         destinationAddress: body.destinationAddress ?? null,
         status: body.status,
+        token: body.token,
+        amount: body.amount,
+        periodHours: body.periodHours,
       });
     }
     planPda = onChainPlan || body.planPda ? derivedPlanPda : null;
