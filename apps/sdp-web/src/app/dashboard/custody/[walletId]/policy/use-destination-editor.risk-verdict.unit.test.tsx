@@ -22,6 +22,7 @@ import type { PolicyAuthoringState } from "./wallet-policy-authoring";
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 const ADDRESS = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
+const SECOND_ADDRESS = "So11111111111111111111111111111111111111112";
 const CHECKED_AT = "2026-09-24T00:00:00.000Z";
 
 function withI18n({ children }: { children: ReactNode }) {
@@ -147,5 +148,43 @@ describe("useDestinationEditor single-add on an ambiguous screening (SOLA9-160)"
     });
 
     expect(readState().destinationAllowText).toContain(ADDRESS);
+  });
+});
+
+describe("useDestinationEditor bulk paste on an ambiguous screening (SOLA9-160)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not auto-commit unrecognized verdicts and queues them for review", async () => {
+    // The bulk-paste handler reaches the same blocking decision through
+    // screenDestination, so a drift there cannot silently commit an
+    // ambiguous screening from a multi-address paste either.
+    const { result, readState } = renderEditor({
+      providers: UNKNOWN_VERDICT_RESULTS,
+    });
+
+    await act(async () => {
+      result.current.handleQueryChange(`${ADDRESS}, ${SECOND_ADDRESS}`);
+    });
+
+    expect(readState().destinationAllowText).not.toContain(ADDRESS);
+    expect(readState().destinationAllowText).not.toContain(SECOND_ADDRESS);
+    expect(result.current.flagged.map((entry) => entry.address)).toEqual([ADDRESS, SECOND_ADDRESS]);
+    expect(result.current.flagged.every((entry) => !entry.unavailable)).toBe(true);
+  });
+
+  it("still commits a recognized-clean bulk paste", async () => {
+    const { result, readState } = renderEditor({
+      providers: [providerResult({ provider: "trm" })],
+    });
+
+    await act(async () => {
+      result.current.handleQueryChange(`${ADDRESS}, ${SECOND_ADDRESS}`);
+    });
+
+    expect(readState().destinationAllowText).toContain(ADDRESS);
+    expect(readState().destinationAllowText).toContain(SECOND_ADDRESS);
+    expect(result.current.flagged).toEqual([]);
   });
 });
