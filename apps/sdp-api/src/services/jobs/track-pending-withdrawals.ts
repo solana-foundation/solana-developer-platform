@@ -11,14 +11,29 @@
  *     (pre-burn-confirmation — no balance moved yet). Status reads are batched
  *     per tick: every submitted burn targeting the same gateway rides a single
  *     getSignatureStatuses call instead of one RPC round trip per row.
- *  3. `confirmed` → `settled` via the polling oracle: scan the CURRENT
- *     instance's escrow ATA on devnet for outgoing SPL transfers matching a
- *     withdrawal's (destinationAta, mint, baseUnits), CLAIM the match by
- *     inserting into `private_channel_settlement_observations` (UNIQUE guards
- *     against double-claim + racing pollers), then CAS-advance the withdrawal
- *     to `settled` with `settlement_ref = signature`. Stale unmatched → operator
+ *  3. `confirmed` → `settled` via the polling oracle: walk the CURRENT
+ *     instance's escrow ATA on devnet backwards through address history for
+ *     outgoing SPL transfers matching a withdrawal's (destinationAta, mint,
+ *     baseUnits), CLAIM the match by inserting into
+ *     `private_channel_settlement_observations` (UNIQUE guards against
+ *     double-claim + racing pollers), then CAS-advance the withdrawal to
+ *     `settled` with `settlement_ref = signature`. Stale unmatched → operator
  *     `TRANSFER_STUCK_WARNING` (debounced via `context.lastStuckWarningAt`),
  *     never auto-`failed` — the balance is already burned.
+ *
+ *     The walk pages backwards with `before` instead of reading one fixed
+ *     newest page (SOLA9-157): a permissionless payer can fill the newest page
+ *     with transactions that merely reference the escrow ATA, which would
+ *     otherwise evict a real release from every scan. Each (instance, mint)
+ *     group persists how deep it has parsed in
+ *     `private_channel_release_scans`; the cursor only moves deeper over fully
+ *     parsed signatures, so progress accumulates across ticks and a release
+ *     cannot be pushed permanently out of reach. Before the first cursor
+ *     exists the walk is bounded below by the oldest unsettled withdrawal's
+ *     `created_at` (a release always postdates the intent's creation), with a
+ *     clock-skew margin. A walk that hits the page cap still parses the newest
+ *     candidates but does not advance the cursor — the unexplored region below
+ *     stays due, and the tick logs a warning.
  *
  * The release reconciler resolves the project's CURRENT RPC connection each
  * tick, so provider changes and credential rotations apply to in-flight intents.
@@ -34,13 +49,16 @@
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { PRIVATE_CHANNEL_EVENT_TYPES } from "@sdp/types";
-import { address, type Signature } from "@solana/kit";
+import { type Address, address, type Signature } from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   createPrivateChannelInstanceRepository,
+  createPrivateChannelReleaseScanRepository,
   createPrivateChannelSettlementObservationRepository,
   createPrivateChannelWithdrawalRepository,
   type PrivateChannelInstanceRow,
+  type PrivateChannelReleaseScanCursor,
+  type PrivateChannelReleaseScanRepository,
   type PrivateChannelSettlementObservationRepository,
   type PrivateChannelWithdrawalRepository,
   type PrivateChannelWithdrawalRow,
@@ -62,8 +80,28 @@ const RELEASE_STUCK_AFTER_MS = 30 * 60 * 1000;
 /** Rate-limit the stuck-warning event: at most once per hour per withdrawal. */
 const STUCK_WARNING_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_PER_RUN = 100;
-/** How many recent instance-ATA signatures to scan for releases per group. */
-const RELEASE_SCAN_LIMIT = 100;
+/** Signatures per getSignaturesForAddress page while walking escrow history (RPC max). */
+const RELEASE_SCAN_PAGE_LIMIT = 1000;
+/**
+ * Page-fetch cap per (instance, mint) group per tick. A walk that stops here
+ * could not reach the cursor, the created_at bound, or history's end, so its
+ * window is not provably contiguous with the parsed region: it still parses
+ * (budget-capped) but never advances the cursor. Caps the list-call cost of
+ * one tick against a flooded escrow ATA.
+ */
+const RELEASE_SCAN_MAX_PAGES = 20;
+/**
+ * getTransaction lookups per (instance, mint) group per tick. Parsing is
+ * bounded independently of how much history the walk listed, so a flood of
+ * referencing transactions cannot scale the reconciler's paid-RPC work.
+ */
+const RELEASE_PARSE_BUDGET = 300;
+/**
+ * Clock-skew margin on the created_at lower bound for a cursor-less first
+ * scan. Only skew needs covering: a release always postdates the intent's
+ * creation by flow, so anything older is not this batch's release.
+ */
+const RELEASE_SCAN_TIME_MARGIN_MS = 2 * 60 * 60 * 1000;
 /** Bound concurrent getTransaction lookups while parsing release candidates. */
 const RELEASE_LOOKUP_CONCURRENCY = 5;
 
@@ -71,10 +109,16 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   const repo = createPrivateChannelWithdrawalRepository(env);
   const instanceRepo = createPrivateChannelInstanceRepository(env);
   const observationRepo = createPrivateChannelSettlementObservationRepository(env);
+  const releaseScanRepo = createPrivateChannelReleaseScanRepository(env);
   const pending = await repo.listNonTerminal(MAX_PER_RUN);
   if (pending.length === 0) {
     return;
   }
+  // Cursor advance requires knowing the group's COMPLETE unsettled set: a
+  // parsed release may only be skipped for good when every withdrawal that
+  // could claim it was in the batch. A batch cut off at MAX_PER_RUN may have
+  // left some out, so this tick settles but never advances cursors.
+  const batchComplete = pending.length < MAX_PER_RUN;
 
   const instances = new Map<string, PrivateChannelInstanceRow | null>();
   const projectRpcs = new Map<string, Promise<PrivateChannelProjectRpcClient>>();
@@ -243,9 +287,11 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
           env,
           repo,
           observationRepo,
+          releaseScanRepo,
           group,
           await loadProjectRpc(group.instance),
-          now
+          now,
+          batchComplete
         );
       } catch (err) {
         getLogger().error(
@@ -433,20 +479,26 @@ async function applySubmittedVerdict(
 }
 
 /**
- * confirmed → settled for one (instance, mint). Scans the instance escrow ATA's
- * recent devnet signatures for outgoing transfers matching a pending withdrawal's
- * (destinationAta, mint, amount), claims the attribution via
- * `settlement_observations`, and advances the intent. Stale unmatched →
- * stuck-warning event, debounced via context.lastStuckWarningAt. NEVER
- * auto-`failed` — the burn is already confirmed.
+ * confirmed → settled for one (instance, mint). Walks the instance escrow ATA's
+ * devnet history backwards (SOLA9-157): pages with `before` until the persisted
+ * scan cursor, the created_at lower bound, or history's end, parses release
+ * candidates within a per-tick budget, and matches them against the batch's
+ * (destinationAta, mint, amount). Claims the attribution via
+ * `settlement_observations`, advances the intent, then — only when the walk
+ * reached a provable stopping point and the batch was complete — moves the scan
+ * cursor deeper over the fully parsed prefix. Stale unmatched → stuck-warning
+ * event, debounced via context.lastStuckWarningAt. NEVER auto-`failed` — the
+ * burn is already confirmed.
  */
 async function reconcileReleaseGroup(
   env: Env,
   repo: PrivateChannelWithdrawalRepository,
   observationRepo: PrivateChannelSettlementObservationRepository,
+  releaseScanRepo: PrivateChannelReleaseScanRepository,
   group: ReleaseGroup,
   projectRpc: PrivateChannelProjectRpcClient,
-  now: number
+  now: number,
+  batchComplete: boolean
 ): Promise<void> {
   const withdrawals = group.withdrawals;
   if (withdrawals.length === 0) {
@@ -473,24 +525,51 @@ async function reconcileReleaseGroup(
     tokenProgram,
   });
 
-  const sigInfos = await solanaRpc.getSignaturesForAddress(projectRpc.rpc, vaultAta, {
-    limit: RELEASE_SCAN_LIMIT,
-  });
+  // A cursor recorded for a different escrow ATA (the instance's escrow can be
+  // rotated) reads as no cursor: history on this ATA has not been walked yet.
+  const scan = await releaseScanRepo.getScan(group.instance.id, group.mint, vaultAta);
 
-  // Collect the outgoing token transfers seen on the vault ATA. Same-tx multiple
-  // transfers keep their index so batched releases don't collide on the
-  // settlement_observations PK.
-  const releases = await collectReleases(
-    projectRpc.rpc,
-    sigInfos.filter((s) => !s.err).map((s) => ({ signature: s.signature, blockTime: s.blockTime }))
-  );
+  // A release always postdates its withdrawal's intent creation, so a
+  // cursor-less first scan never needs history older than the oldest
+  // unsettled withdrawal's created_at (plus a skew margin). `created_at`
+  // rather than `updated_at`: context patches (stuck warnings) move
+  // `updated_at` forward and would shallow the bound past a real release.
+  const lowerBoundMs =
+    Math.min(...withdrawals.map((w) => Date.parse(w.created_at))) - RELEASE_SCAN_TIME_MARGIN_MS;
+
+  const walk = await walkReleaseHistory(projectRpc.rpc, vaultAta, scan, lowerBoundMs);
+  if (!walk.complete) {
+    getLogger().warn(
+      {
+        instanceId: group.instance.id,
+        mint: group.mint,
+        pages: RELEASE_SCAN_MAX_PAGES,
+      },
+      "trackPendingWithdrawals: escrow history walk hit the page cap before a stopping point; cursor held, region stays due"
+    );
+  }
+
+  // Oldest first. With a complete walk this points parsing at the region just
+  // above the scan cursor, so the parsed prefix stays contiguous with
+  // everything already parsed and the cursor can advance. With a capped walk
+  // the newest candidates are the likeliest fresh releases, so parse in walk
+  // order instead. Failed on-chain transactions cannot contain a release and
+  // cost no lookup.
+  const ordered = [...walk.entries].reverse();
+  const parseTargets = (walk.complete ? ordered : walk.entries)
+    .filter((s) => s.err === null)
+    .slice(0, RELEASE_PARSE_BUDGET);
+
+  const { releases, parsedSignatures } = await collectReleases(projectRpc.rpc, parseTargets);
 
   // Releases already claimed this tick, or found to be claimed by a prior tick
   // via PK conflict. Skip them on subsequent lookups.
   const claimedSignatures = new Set<string>();
   // Oldest first so concurrent same-content withdrawals settle FIFO.
-  const ordered = [...withdrawals].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  for (const withdrawal of ordered) {
+  const orderedWithdrawals = [...withdrawals].sort((a, b) =>
+    a.created_at.localeCompare(b.created_at)
+  );
+  for (const withdrawal of orderedWithdrawals) {
     const [destinationAta] = await findAssociatedTokenPda({
       owner: address(withdrawal.destination),
       mint,
@@ -543,6 +622,75 @@ async function reconcileReleaseGroup(
       await maybeEmitStuckWarning(env, repo, withdrawal, now);
     }
   }
+
+  // Advance the cursor only after the claims above committed (a crash costs a
+  // re-parse, never a lost release), only over the contiguous fully-parsed
+  // prefix of the walked region, and only on a complete walk of a complete
+  // batch. A capped walk leaves the region below its window unexplored; a
+  // truncated batch may not contain every withdrawal that could claim a
+  // parsed-but-unmatched release.
+  if (!walk.complete || !batchComplete) {
+    return;
+  }
+  let deepestParsed: PrivateChannelReleaseScanCursor | null = null;
+  for (const entry of ordered) {
+    const complete = entry.err !== null || parsedSignatures.has(entry.signature);
+    if (!complete) {
+      break;
+    }
+    deepestParsed = {
+      signature: entry.signature,
+      slot: entry.slot.toString(),
+    };
+  }
+  if (deepestParsed) {
+    await releaseScanRepo.advanceScan({
+      instanceId: group.instance.id,
+      mint: group.mint,
+      vaultAta,
+      cursor: deepestParsed,
+    });
+  }
+}
+
+/**
+ * Newest-first backward walk over the escrow ATA's address history, stopping at
+ * the first provable bound: the persisted cursor (everything at or behind it
+ * was parsed on an earlier tick), the created_at lower bound (only checked
+ * cursor-less — with a cursor the walk's job is exactly the unparsed region
+ * above it, whatever its age), history's end, or the page cap.
+ */
+async function walkReleaseHistory(
+  rpc: solanaRpc.SolanaRpc,
+  vaultAta: Address,
+  scan: PrivateChannelReleaseScanCursor | null,
+  lowerBoundMs: number
+): Promise<{ entries: solanaRpc.SignatureInfo[]; complete: boolean }> {
+  const entries: solanaRpc.SignatureInfo[] = [];
+  let before: Signature | undefined;
+  for (let page = 0; page < RELEASE_SCAN_MAX_PAGES; page += 1) {
+    const infos = await solanaRpc.getSignaturesForAddress(rpc, vaultAta, {
+      limit: RELEASE_SCAN_PAGE_LIMIT,
+      ...(before ? { before } : {}),
+    });
+    if (infos.length === 0) {
+      return { entries, complete: true };
+    }
+    for (const info of infos) {
+      if (scan && info.signature === scan.signature) {
+        return { entries, complete: true };
+      }
+      if (!scan && info.blockTime !== null && Number(info.blockTime) * 1000 < lowerBoundMs) {
+        return { entries, complete: true };
+      }
+      entries.push(info);
+    }
+    if (infos.length < RELEASE_SCAN_PAGE_LIMIT) {
+      return { entries, complete: true };
+    }
+    before = infos[infos.length - 1].signature;
+  }
+  return { entries, complete: false };
 }
 
 async function advanceToSettled(
@@ -610,23 +758,35 @@ interface ReleaseTransfer {
   blockTime: number | null;
 }
 
-/** Fetch + parse each signature, extracting outgoing SPL token transfers. */
+/**
+ * Fetch + parse each signature, extracting outgoing SPL token transfers.
+ *
+ * Returns the releases (in the caller's order, so a deepest-first target list
+ * yields oldest-first candidates) plus the set of signatures whose transaction
+ * was actually resolved: a signature the RPC could not serve stays unparsed,
+ * which holds the scan cursor above it until a later tick serves it.
+ */
 async function collectReleases(
   rpc: solanaRpc.SolanaRpc,
   signatures: { signature: Signature; blockTime: bigint | null }[]
-): Promise<ReleaseTransfer[]> {
-  // Bounded: the scan window is capped at RELEASE_SCAN_LIMIT, but a bare
-  // Promise.all would still open that many concurrent getTransaction calls
+): Promise<{ releases: ReleaseTransfer[]; parsedSignatures: Set<string> }> {
+  // Bounded: the parse budget caps how many signatures enter this list, and a
+  // bare Promise.all would still open that many concurrent getTransaction calls
   // against the RPC in one tick — and a serial loop would pay the latency of
   // one round trip per signature. A failed lookup drops that candidate release
-  // (logged below); the next tick rescans the same window.
+  // (logged below) and holds the cursor above it; the next tick retries.
   const settled = await mapSettledWithConcurrency(
     signatures,
     RELEASE_LOOKUP_CONCURRENCY,
     async ({ signature, blockTime }) => {
       const tx = await solanaRpc.getTransaction(rpc, signature);
-      if (!tx || tx.err) {
-        return [];
+      if (!tx) {
+        return { transfers: [] as ReleaseTransfer[], found: false };
+      }
+      if (tx.err) {
+        // A failed transaction cannot contain a release, but the lookup did
+        // resolve what the chain recorded.
+        return { transfers: [] as ReleaseTransfer[], found: true };
       }
       const transfers: ReleaseTransfer[] = [];
       // Same-tx multiple transfers keep their index so batched releases don't
@@ -643,12 +803,18 @@ async function collectReleases(
           });
         }
       });
-      return transfers;
+      return { transfers, found: true };
     }
   );
-  return settled.flatMap((result, index) => {
+  const parsedSignatures = new Set<string>();
+  settled.forEach((result, index) => {
+    if (result.status === "fulfilled" && result.value.found) {
+      parsedSignatures.add(signatures[index]?.signature as string);
+    }
+  });
+  const releases = settled.flatMap((result, index) => {
     if (result.status === "fulfilled") {
-      return result.value;
+      return result.value.transfers;
     }
     // The lookup failure must not vanish silently: operators need to know the
     // scan was incomplete, otherwise unresolved withdrawals and missing
@@ -662,6 +828,7 @@ async function collectReleases(
     );
     return [];
   });
+  return { releases, parsedSignatures };
 }
 
 /** Pull (destinationTokenAccount, baseUnits) from a parsed spl-token transfer ix. */

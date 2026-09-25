@@ -50,6 +50,8 @@ import type { PrivateChannelInstanceRepository } from "./private-channel-instanc
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 import type { PrivateChannelReferenceRepository } from "./private-channel-reference.repository";
 import { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
+import type { PrivateChannelReleaseScanRepository } from "./private-channel-release-scan.repository";
+import { createPostgresPrivateChannelReleaseScanRepository } from "./private-channel-release-scan.repository";
 import type { PrivateChannelSettlementObservationRepository } from "./private-channel-settlement-observation.repository";
 import { createPostgresPrivateChannelSettlementObservationRepository } from "./private-channel-settlement-observation.repository.postgres";
 import type { PrivateChannelTransferRepository } from "./private-channel-transfer.repository";
@@ -305,6 +307,12 @@ export function createPrivateChannelSettlementObservationRepository(
   env: Env
 ): PrivateChannelSettlementObservationRepository {
   return createPostgresPrivateChannelSettlementObservationRepository(getDb(env));
+}
+
+export function createPrivateChannelReleaseScanRepository(
+  env: Env
+): PrivateChannelReleaseScanRepository {
+  return createPostgresPrivateChannelReleaseScanRepository(getDb(env));
 }
 
 export function createProjectUserRepository(env: Env): ProjectUserRepository {
