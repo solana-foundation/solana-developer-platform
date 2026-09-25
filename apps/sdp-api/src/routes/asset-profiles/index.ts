@@ -1,4 +1,6 @@
-import { Hono } from "hono";
+import { type Context, Hono, type Next } from "hono";
+import { AppError } from "@/lib/errors";
+import { isAssetProfilesEnabled } from "@/lib/feature-flags";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
@@ -17,6 +19,19 @@ import { updateAssetProfileSchema } from "./schemas";
 
 const assetProfiles = new Hono<{ Bindings: Env }>();
 
+// Self-hosted production keeps Asset Profiles an explicit opt-in
+// (SDP_FLAG_ASSET_PROFILES): the whole family — reads and mutations alike —
+// refuses to serve while the resolver says off, matching the holders routes in
+// the issuance router and the OpenAPI contract ("Requires the Asset Profiles
+// feature to be enabled"). Managed deployments and development are unaffected.
+async function requireAssetProfilesFeature(c: Context<{ Bindings: Env }>, next: Next) {
+  if (!isAssetProfilesEnabled(c.env)) {
+    throw new AppError("FORBIDDEN", "Asset Profiles are not enabled for this environment");
+  }
+  await next();
+}
+
+assetProfiles.use("*", requireAssetProfilesFeature);
 assetProfiles.use("*", unifiedAuthMiddleware({ allowClerk: true, allowSession: true }));
 assetProfiles.use("*", projectContextMiddleware());
 
