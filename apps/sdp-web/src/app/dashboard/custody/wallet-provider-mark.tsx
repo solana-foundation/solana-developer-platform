@@ -66,8 +66,11 @@ const PROVIDER_LOGOS: Partial<
 
 interface WalletProviderMarkProps {
   provider?: KnownCustodyProvider | null;
-  /** `nav` and `row` are the refresh design's round marks: a sidebar pin, a card or list row. */
-  size?: "nav" | "xs" | "sm" | "row" | "md";
+  /**
+   * `nav`, `row` and `page` are the refresh design's round marks: a sidebar pin, a card or list
+   * row, and the 48px mark beside a wallet page's title.
+   */
+  size?: "nav" | "xs" | "sm" | "row" | "md" | "page";
 }
 
 const MARK_SIZES = {
@@ -76,6 +79,7 @@ const MARK_SIZES = {
   sm: { box: "h-7 w-7 rounded-md", image: "28px", icon: 16, padding: null },
   row: { box: "size-8 rounded-full", image: "32px", icon: 16, padding: "p-1.5" },
   md: { box: "h-12 w-12 rounded-2xl", image: "48px", icon: 22, padding: null },
+  page: { box: "size-12 rounded-full", image: "48px", icon: 22, padding: "p-2.5" },
 } as const;
 
 export function WalletProviderMark({ provider, size = "md" }: WalletProviderMarkProps) {

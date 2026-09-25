@@ -1,11 +1,10 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { LayoutGridIcon, RotateCwIcon, Rows3Icon, SearchIcon, StarIcon } from "lucide-react";
+import { LayoutGridIcon, RotateCwIcon, Rows3Icon, SearchIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import {
   formatCustodyProviderName,
   getCustodyProviderEntry,
@@ -39,15 +38,10 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
 import { cn } from "@/lib/utils";
-import {
-  addWalletFavorite,
-  readWalletFavorites,
-  removeWalletFavorite,
-  restoreWalletFavorites,
-  syncWalletFavorites,
-  type WalletFavorite,
-} from "@/lib/wallet-favorites";
+import { syncWalletFavorites, type WalletFavorite } from "@/lib/wallet-favorites";
+import { useWalletFavoriteToggle } from "./use-wallet-favorite-toggle";
 import { WalletActionsMenu } from "./wallet-actions-menu";
+import { WalletFavoriteButton } from "./wallet-favorite-button";
 import { WalletProviderMark } from "./wallet-provider-mark";
 import {
   filterWallets,
@@ -118,71 +112,6 @@ function walletSupportsSignerCheck(item: WalletItem): boolean {
     : !item.wallet.provider;
 }
 
-/**
- * Pins or unpins a wallet and says so in a toast with Undo. Undo puts the earlier list back
- * exactly, so an unpinned wallet returns to its old place in the sidebar.
- */
-function useFavoriteToggle() {
-  const t = useTranslations();
-  const { storageKey, favorites } = useWalletFavorites();
-  const favoriteIds = useMemo(
-    () => new Set(favorites.map((favorite) => favorite.walletId)),
-    [favorites]
-  );
-
-  const toggle = (item: WalletItem) => {
-    if (!storageKey) return;
-    const previous = readWalletFavorites(storageKey);
-    const undo = {
-      label: t("DashboardCustody.undo"),
-      onClick: () => restoreWalletFavorites(storageKey, previous),
-    };
-    if (previous.some((favorite) => favorite.walletId === item.wallet.walletId)) {
-      removeWalletFavorite(storageKey, item.wallet.walletId);
-      toast(t("DashboardCustody.favoriteRemoved"), {
-        description: t("DashboardCustody.favoriteRemovedDescription", { wallet: item.name }),
-        action: undo,
-      });
-      return;
-    }
-    addWalletFavorite(storageKey, toFavorite(item));
-    toast(t("DashboardCustody.favoriteAdded"), {
-      description: t("DashboardCustody.favoriteAddedDescription", { wallet: item.name }),
-      action: undo,
-    });
-  };
-
-  return { storageKey, canPin: storageKey !== null, favoriteIds, toggle };
-}
-
-function FavoriteButton({
-  item,
-  pinned,
-  onToggle,
-}: {
-  item: WalletItem;
-  pinned: boolean;
-  onToggle: (item: WalletItem) => void;
-}) {
-  const t = useTranslations();
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      aria-pressed={pinned}
-      aria-label={t(
-        pinned ? "DashboardCustody.removeFromFavorites" : "DashboardCustody.addToFavorites",
-        { wallet: item.name }
-      )}
-      onClick={() => onToggle(item)}
-      data-wallet-favorite={item.wallet.walletId}
-    >
-      <StarIcon className={cn("size-4.5", pinned && "fill-current")} />
-    </Button>
-  );
-}
-
 function WalletRowActions({
   item,
   pinned,
@@ -192,11 +121,17 @@ function WalletRowActions({
   item: WalletItem;
   pinned: boolean;
   canPin: boolean;
-  onToggleFavorite: (item: WalletItem) => void;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
 }) {
   return (
     <div className="relative z-10 flex items-center">
-      {canPin ? <FavoriteButton item={item} pinned={pinned} onToggle={onToggleFavorite} /> : null}
+      {canPin ? (
+        <WalletFavoriteButton
+          favorite={toFavorite(item)}
+          pinned={pinned}
+          onToggle={onToggleFavorite}
+        />
+      ) : null}
       <WalletActionsMenu
         walletAddress={item.wallet.publicKey}
         walletId={item.wallet.walletId}
@@ -259,7 +194,7 @@ function WalletCard({
   item: WalletItem;
   pinned: boolean;
   canPin: boolean;
-  onToggleFavorite: (item: WalletItem) => void;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
 }) {
   const t = useTranslations();
   const { wallet } = item;
@@ -330,7 +265,7 @@ function WalletsList({
   items: WalletItem[];
   favoriteIds: ReadonlySet<string>;
   canPin: boolean;
-  onToggleFavorite: (item: WalletItem) => void;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
 }) {
   const t = useTranslations();
   return (
@@ -533,7 +468,8 @@ export function WalletsOverview({
     return items.filter((item) => visible.has(item.wallet));
   }, [items, normalizedSearch, wallets]);
   const searchIsPending = deferredSearchValue !== searchValue;
-  const { storageKey, canPin, favoriteIds, toggle } = useFavoriteToggle();
+  const { storageKey } = useWalletFavorites();
+  const { canPin, favoriteIds, toggle } = useWalletFavoriteToggle();
 
   // A pin keeps the name the list shows now, and a wallet that has gone drops out of the sidebar.
   useEffect(() => {

@@ -52,8 +52,9 @@ describe("wallet and custody route loading states", () => {
   it("keeps every wallet-detail section in place while data loads", () => {
     const html = renderToStaticMarkup(<WalletDetailSkeleton />);
 
-    expect(html).toContain('data-skeleton-section="wallet-controls"');
-    expect(html).toContain('data-skeleton-section="wallet-balances"');
+    expect(html).toContain('data-skeleton-section="wallet-state"');
+    expect(html).toContain('data-skeleton-section="wallet-balance"');
+    expect(html).toContain('data-skeleton-section="wallet-tokens"');
     expect(html).toContain('data-skeleton-section="wallet-activity"');
   });
 

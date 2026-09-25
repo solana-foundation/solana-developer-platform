@@ -90,4 +90,67 @@ describe("ApiPlaygroundShell refresh layout", () => {
     expect(panels).toHaveLength(2);
     expect(panels[0].textContent).toContain("/v1/test");
   });
+
+  it("offers Create an API key instead of Run when the project has none", () => {
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ThemeScopeProvider scope="refresh">
+          <ApiPlaygroundShell
+            apiKeyId={null}
+            endpoints={[endpoint]}
+            productName="Test product"
+            requiresApiKey
+            createApiKeyHref="/dashboard/api-keys/new"
+          />
+        </ThemeScopeProvider>
+      </I18nProvider>
+    );
+    expect(view.getByRole("link", { name: "Create an API key" }).getAttribute("href")).toBe(
+      "/dashboard/api-keys/new"
+    );
+    expect(view.queryByRole("button", { name: /Run request/ })).toBeNull();
+    expect(
+      view.queryByText("Create an API key first to enable live playground requests.")
+    ).toBeNull();
+  });
+
+  it("keeps Run waiting, and says why, for someone who cannot make a key", () => {
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ThemeScopeProvider scope="refresh">
+          <ApiPlaygroundShell
+            apiKeyId={null}
+            endpoints={[endpoint]}
+            productName="Test product"
+            requiresApiKey
+          />
+        </ThemeScopeProvider>
+      </I18nProvider>
+    );
+    expect((view.getByRole("button", { name: /Run request/ }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect(
+      view.getByText("Create an API key first to enable live playground requests.")
+    ).toBeTruthy();
+  });
+
+  it("writes the call in the chosen language and wraps it instead of scrolling", async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ThemeScopeProvider scope="refresh">
+          <ApiPlaygroundShell apiKeyId={null} endpoints={[endpoint]} productName="Test product" />
+        </ThemeScopeProvider>
+      </I18nProvider>
+    );
+    await user.click(view.getByRole("tab", { name: "Code" }));
+    const snippet = () => view.getAllByTestId("api-playground-code")[0];
+    expect(snippet().textContent).toContain("curl");
+    expect(snippet().querySelector("pre")?.className).toContain("whitespace-pre-wrap");
+
+    fireEvent.change(view.getByLabelText("Language"), { target: { value: "py" } });
+    expect(snippet().textContent).toContain("requests.get(");
+    expect(view.getByRole("button", { name: "Copy prompt for an assistant" })).toBeTruthy();
+  });
 });

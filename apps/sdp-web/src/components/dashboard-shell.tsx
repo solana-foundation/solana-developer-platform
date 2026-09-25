@@ -492,17 +492,19 @@ export function DashboardShell({
     privateChannelsEnabled,
     walletFavorites: walletFavoriteItems,
   });
-  const pageTitle =
+  const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
-      ? pageTitleOverride.title
-      : pageConfig.title;
+      ? pageTitleOverride
+      : null;
+  const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs;
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the
   // design does; the base shell keeps it in the title row beside a centred title.
-  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction) && !hasHeaderTabs;
+  // A refresh page sets its way back over its title, tabs or not (a wallet's page has both).
+  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction);
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
       href={pageConfig.backAction.href}
@@ -520,12 +522,23 @@ export function DashboardShell({
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
   const { searchParams: urlSearchParams } = useDashboardUrlState();
-  const headerAction =
+  const routeAction =
     pageConfig.headerAction &&
     (!pageConfig.headerAction.capability ||
       dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
       <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
     ) : null;
+  // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
+  const pageActions = activeTitleOverride?.actions;
+  const headerAction =
+    pageActions && routeAction ? (
+      <span className="flex items-center gap-2">
+        {pageActions}
+        {routeAction}
+      </span>
+    ) : (
+      (pageActions ?? routeAction)
+    );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the
   // design's 900px page column, or the flow's 660px when the page's content box is wider than
@@ -873,6 +886,7 @@ export function DashboardShell({
                         hasHeaderTabs={hasHeaderTabs}
                         action={headerAction}
                         above={stacksBackAboveTitle ? backAction : undefined}
+                        mark={activeTitleOverride?.mark}
                         layout={isRefresh ? "refresh" : "base"}
                         utilities={isPaymentsPath(pathname) ? <PaymentsDemoToggle /> : undefined}
                       />

@@ -665,7 +665,9 @@ export function HomeWorkspace({
   ];
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-16" data-overview>
+    // 64px under the last section, as the refresh panels leave: the shell pads nothing at the
+    // foot of a refresh page, so Recent activity would otherwise end on the window's edge.
+    <div className="flex w-full min-w-0 flex-col gap-16 pb-16" data-overview>
       <DashboardQuickStart variant="overview" />
       <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12">
         {firstRun ? (

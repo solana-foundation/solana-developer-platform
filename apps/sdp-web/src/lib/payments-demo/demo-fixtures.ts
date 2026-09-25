@@ -1634,6 +1634,56 @@ const PROVIDER_ACCOUNT_SPECS: Partial<
       accountNumberLast4: "8841",
     },
   ],
+  northwind: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "GBP",
+      destinationCountry: "GB",
+      paymentRail: "FPS",
+      bankName: "Barclays",
+      accountNumberLast4: "5307",
+    },
+  ],
+  lumen: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "WIRE",
+      bankName: "Silicon Valley Bank",
+      accountNumberLast4: "1188",
+    },
+  ],
+  orbit: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "EUR",
+      destinationCountry: "IE",
+      paymentRail: "SEPA",
+      bankName: "Bank of Ireland",
+      accountNumberLast4: "6620",
+    },
+  ],
+  kai: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+      bankName: "Wells Fargo",
+      accountNumberLast4: "4472",
+    },
+  ],
+  priya: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+      bankName: "Bank of America",
+      accountNumberLast4: "9015",
+    },
+  ],
 };
 
 function providerAccountsBody(world: DemoWorld, counterparty: Counterparty) {
@@ -1761,18 +1811,17 @@ export function paymentsDemoBody(pathWithQuery: string, now?: Date): unknown | u
     .filter((segment) => segment.length > 0)
     .map(decodeSegment);
   if (version !== "v1") return undefined;
+  const world = buildWorld(now ?? new Date());
   const params = url.searchParams;
   switch (resource) {
     case "wallets":
-      return walletsRoute(rest, params, buildWorld(now ?? new Date()));
+      return walletsRoute(rest, params, world);
     case "payments":
-      return paymentsRoute(rest, params, buildWorld(now ?? new Date()));
+      return paymentsRoute(rest, params, world);
     case "transactions":
-      return rest.length === 0
-        ? transactionsBody(buildWorld(now ?? new Date()), params)
-        : undefined;
+      return rest.length === 0 ? transactionsBody(world, params) : undefined;
     case "counterparties":
-      return counterpartiesRoute(rest, params, buildWorld(now ?? new Date()));
+      return counterpartiesRoute(rest, params, world);
     case "issuance":
       return rest.length === 1 && rest[0] === "tokens" ? emptyIssuedTokensBody(params) : undefined;
     default:

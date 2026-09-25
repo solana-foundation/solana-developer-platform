@@ -1,4 +1,3 @@
-import { WalletActivitySkeleton } from "@/app/dashboard/custody/wallet-activity-skeleton";
 import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
@@ -10,6 +9,7 @@ const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
 const FIVE_ITEMS = ["one", "two", "three", "four", "five"] as const;
 const CARD_FIELDS = ["address", "wallet-id"] as const;
+const RECORD_COLUMNS = ["left", "right"] as const;
 function Pulse({ className }: { className?: string }) {
   return <SkeletonBlock className={cn("motion-reduce:animate-none", className)} />;
 }
@@ -149,73 +149,39 @@ export function WalletSetupSkeleton() {
   );
 }
 
-function WalletSummaryCardSkeleton({ compact = false }: { compact?: boolean }) {
+/** Record rows as the wallet page draws them: 40px rules, a short label and a longer value. */
+function RecordRowsSkeleton() {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
-      <div className="space-y-6 p-6">
-        <div className="flex items-start gap-4">
-          {!compact ? <Pulse className="size-14 shrink-0 rounded-full" /> : null}
-          <div className="min-w-0 flex-1 space-y-2">
-            <Pulse className={compact ? "h-3 w-28" : "h-9 w-56 max-w-full"} />
-            <Pulse className={compact ? "h-10 w-36" : "h-4 w-28"} />
-          </div>
+    <div className="grid gap-x-12 md:grid-cols-2">
+      {RECORD_COLUMNS.map((column) => (
+        <div key={column}>
+          {THREE_ITEMS.map((row) => (
+            <div
+              key={row}
+              className="flex min-h-10 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
+            >
+              <Pulse className="h-3 w-16" />
+              <Pulse className="h-3.5 w-28" />
+            </div>
+          ))}
         </div>
-        <MetadataRows count={compact ? 3 : 4} />
-      </div>
-    </section>
+      ))}
+    </div>
   );
 }
 
-export function WalletControlsSkeleton() {
+function RecordTableSkeleton({ section }: { section: string }) {
   return (
-    <section
-      className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised"
-      data-skeleton-section="wallet-controls"
-    >
-      <div className="flex flex-col gap-5 p-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1 space-y-3">
-          <Pulse className="h-7 w-44" />
-          <Pulse className="h-4 w-full max-w-2xl" />
-          <div className="grid gap-2 sm:grid-cols-3">
-            {THREE_ITEMS.map((metric) => (
-              <div
-                key={metric}
-                className="space-y-2 rounded-lg border border-border-subtle bg-fill-subtle px-3 py-2"
-              >
-                <Pulse className="h-3 w-20" />
-                <Pulse className="h-4 w-24" />
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
-          <Pulse className="h-10 w-full rounded-lg sm:w-36" />
-          <Pulse className="h-10 w-full rounded-lg sm:w-40" />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export function WalletBalanceSummarySkeleton() {
-  return <WalletSummaryCardSkeleton compact />;
-}
-
-export function WalletBalancesSkeleton() {
-  return (
-    <section className="space-y-3" data-skeleton-section="wallet-balances">
-      <Pulse className="h-10 w-36" />
-      <div className="overflow-hidden rounded-2xl border border-border-default bg-surface-raised">
+    <section className="flex flex-col gap-4" data-skeleton-section={section}>
+      <Pulse className="h-5 w-32" />
+      <div>
         {THREE_ITEMS.map((row) => (
           <div
             key={row}
-            className="flex min-h-[58px] items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
+            className="flex min-h-11 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
           >
-            <div className="space-y-2">
-              <Pulse className="h-5 w-20" />
-              <Pulse className="h-3 w-48 sm:w-56" />
-            </div>
-            <Pulse className="h-4 w-24" />
+            <Pulse className="h-3.5 w-28" />
+            <Pulse className="h-3.5 w-24" />
           </div>
         ))}
       </div>
@@ -223,20 +189,26 @@ export function WalletBalancesSkeleton() {
   );
 }
 
+/**
+ * A wallet's page while it loads, in its Overview's geometry: the state band, the balance over
+ * its record rows, then the Tokens and Recent activity tables, 64px apart.
+ */
 export function WalletDetailSkeleton() {
   return (
-    <DashboardWorkspaceOverviewPanel className="space-y-6">
-      <LoadingRegion layout="wallet-detail" className="space-y-6">
-        <div className="flex justify-end">
-          <Pulse className="h-9 w-[132px] rounded-lg" />
+    <DashboardWorkspaceOverviewPanel>
+      <LoadingRegion layout="wallet-detail" className="flex flex-col gap-8 md:gap-16">
+        <div data-skeleton-section="wallet-state">
+          <Pulse className="h-16 w-full rounded-e-card" />
         </div>
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
-          <WalletSummaryCardSkeleton />
-          <WalletBalanceSummarySkeleton />
-        </div>
-        <WalletControlsSkeleton />
-        <WalletBalancesSkeleton />
-        <WalletActivitySkeleton />
+        <section className="flex flex-col gap-4" data-skeleton-section="wallet-balance">
+          <Pulse className="h-4 w-16" />
+          <Pulse className="h-11 w-48" />
+          <div className="mt-4">
+            <RecordRowsSkeleton />
+          </div>
+        </section>
+        <RecordTableSkeleton section="wallet-tokens" />
+        <RecordTableSkeleton section="wallet-activity" />
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
   );
