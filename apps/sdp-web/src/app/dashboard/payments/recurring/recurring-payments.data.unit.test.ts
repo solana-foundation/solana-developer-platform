@@ -117,6 +117,32 @@ describe("recurring payment write requests", () => {
     );
   });
 
+  it("replays the same Idempotency-Key on a retry long after an ambiguous failure — the unresolved key never expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn<typeof globalThis.fetch>()
+        .mockRejectedValueOnce(new TypeError("network down"))
+        .mockImplementationOnce(successResponse);
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(createRecurringPayment(CREATE_INPUT, undefined, t)).rejects.toThrow(
+        "network down"
+      );
+      // Far past the store's 15-minute expiry: the schedule may already be
+      // recorded, so the retry must still carry the original key.
+      vi.setSystemTime(Date.now() + 60 * 60_000);
+      await createRecurringPayment(CREATE_INPUT, undefined, t);
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(sentIdempotencyKey(fetchMock.mock.calls[1])).toBe(
+        sentIdempotencyKey(fetchMock.mock.calls[0])
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("releases the key after a definite 4xx refusal, so a corrected resubmit is a new schedule", async () => {
     const fetchMock = vi
       .fn<typeof globalThis.fetch>()

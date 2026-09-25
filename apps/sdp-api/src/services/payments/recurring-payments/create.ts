@@ -1,7 +1,9 @@
+import type { WalletOperationPolicyEnforcement } from "@sdp/policy";
 import { recurringPaymentPolicyPayloadSchema, type WalletOperationActor } from "@sdp/types";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPaymentRecurringPaymentsRepository,
+  createPolicyRepository,
   type PaymentRecurringPaymentRow,
 } from "@/db/repositories";
 import { internalError } from "@/lib/errors";
@@ -9,7 +11,8 @@ import {
   buildRecurringPaymentFingerprint,
   resolveIdentityBoundIdempotencyReplay,
 } from "@/lib/idempotency";
-import { createTenantScope } from "@/lib/tenant-scope";
+import { createTenantScope, type TenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { resolveSolanaCounterpartyAccount } from "../counterparty-account-resolution";
@@ -86,7 +89,7 @@ export async function createRecurringPayment(input: {
     }),
   ]);
 
-  await enforceRecurringPaymentPolicy({
+  const enforcement = await enforceRecurringPaymentPolicy({
     env: input.env,
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -139,9 +142,49 @@ export async function createRecurringPayment(input: {
     if (input.idempotencyKey && idempotencyFingerprint && isPostgresUniqueViolation(error)) {
       const existing = await resolveReplay();
       if (existing) {
+        // The winner's row is the answer, so this request's own policy
+        // records are duplicates of the winner's: retire them before
+        // responding, or they stay live as a second audit trail that also
+        // counts toward velocity sums.
+        await cancelConcurrentRetryWalletOperation(input.env, scope, enforcement);
         return { recurringPayment: existing, replayed: true };
       }
     }
     throw error;
+  }
+}
+
+/**
+ * Retire the policy records a losing concurrent retry already wrote.
+ *
+ * Two requests racing on one idempotency key both pass the pre-create replay
+ * lookup, and each records a wallet operation and policy evaluation before
+ * either inserts the schedule. The unique index picks a winner; the loser
+ * would otherwise leave an `evaluated` operation behind — a second audit
+ * trail for one create that velocity sums also count, since they exclude
+ * only `created`, `failed` and `canceled` rows. Transitioning it to
+ * `canceled` keeps the history of what ran while ending its counting life.
+ *
+ * Best-effort: the replayed answer is already correct, so a compensation
+ * failure is logged and never turns a successful response into an error.
+ */
+async function cancelConcurrentRetryWalletOperation(
+  env: Env,
+  scope: TenantScope,
+  enforcement: WalletOperationPolicyEnforcement
+): Promise<void> {
+  try {
+    await createPolicyRepository(env, scope).updateWalletOperationStatus(
+      enforcement.operation.id,
+      "canceled"
+    );
+  } catch (error) {
+    getLogger().error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        wallet_operation_id: enforcement.operation.id,
+      },
+      "Failed to cancel a losing concurrent retry's wallet operation"
+    );
   }
 }
