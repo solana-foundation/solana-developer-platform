@@ -757,6 +757,63 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
+  // The walk resolves the position-advancing read before the probe: a
+  // transaction behind the cursor that the node will not serve must not hold
+  // the movements ahead of the cursor hostage — the position would stay stale
+  // and every later sweep would stop at the same transaction instead of
+  // recording what the bounded read listed.
+  it("records the newer movements when the probe hits a transaction the node will not serve", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index), {
+        failed: true,
+        // Failed transactions need no read, which keeps this test to the
+        // paging; their block times stay above the trade's creation floor.
+        blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+      }),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+      );
+    // sig(6) is served nothing: reading it fails, and the walk stops there.
+    served.set(sig(8), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read's movement was recorded and the position advanced onto
+    // it; the probe's silence leaves the read incomplete, so the leg stays
+    // due and the next sweep asks again.
+    expect(rows.has(sig(8))).toBe(true);
+    expect(rows.has(sig(6))).toBe(false);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
   it("records nothing and saves nothing when listing the history fails mid-page", async () => {
     listSignatures
       .mockResolvedValueOnce(history(Array.from({ length: HISTORY_PAGE_LIMIT }, (_, i) => 900 - i)))

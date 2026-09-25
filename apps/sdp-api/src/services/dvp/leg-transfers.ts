@@ -748,7 +748,21 @@ export async function syncDvpLegTransfers(
   let finalizedSoFar = true;
   let complete = wholeHistory;
   let recorded = 0;
-  for (const [position, entry] of [...newestFirst].reverse().entries()) {
+  // The walk resolves each listing oldest first, and the position-advancing
+  // read before the probe: a transaction behind the cursor that the node will
+  // not serve must not hold the movements ahead of it hostage, and the
+  // probe's finds record wherever the walk reaches them.
+  const walk = [
+    ...newestFirst
+      .slice(0, advancing)
+      .reverse()
+      .map((entry) => ({ entry, mayAdvance: true })),
+    ...newestFirst
+      .slice(advancing)
+      .reverse()
+      .map((entry) => ({ entry, mayAdvance: false })),
+  ];
+  for (const { entry, mayAdvance } of walk) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
     const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget);
     if (outcome.step === "stop") {
@@ -761,7 +775,7 @@ export async function syncDvpLegTransfers(
         cursor,
         cursorSlotComplete,
         entry,
-        newestFirst.length - 1 - position < advancing,
+        mayAdvance,
         read.floorReached,
         evidence
       ));
