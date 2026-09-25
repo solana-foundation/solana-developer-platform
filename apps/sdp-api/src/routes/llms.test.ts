@@ -44,19 +44,29 @@ describe("GET /llms.txt", () => {
     const body = await res.text();
     const publicPaths = Object.keys(createPublicOpenApiDocument().paths ?? {});
 
-    // Every /v1/<family> prefix the discovery body advertises must exist in
-    // the public contract. On the vulnerable baseline this catches the
-    // hard-coded `- Earn: .../v1/earn` line: no public path starts with
-    // /v1/earn while EARN_PUBLIC_SURFACE_PUBLISHED is false.
-    const advertisedPrefixes = Array.from(
-      body.matchAll(/^- [^:]+: https:\/\/[^\s/]+(\/v1\/[a-z0-9-]+)(?:\/[^\s]*)?$/gm),
+    // Every representative URL the "Public endpoint families" section
+    // advertises must resolve against the public contract: the full advertised
+    // path must be published exactly or be a prefix of a published path.
+    // Checking the full path (not just the leading /v1/<family> segment)
+    // catches broken discovery links — e.g. an Asset Profiles line pointing at
+    // a nonexistent path under /v1/issuance would still pass a segment-only
+    // check because other issuance paths exist. On the vulnerable baseline
+    // this catches the hard-coded `- Earn: .../v1/earn` line too: no public
+    // path is at or under /v1/earn while EARN_PUBLIC_SURFACE_PUBLISHED is
+    // false.
+    const familiesSection = body.split("## Public endpoint families")[1] ?? "";
+    expect(familiesSection.trim().length).toBeGreaterThan(0);
+    const advertisedPaths = Array.from(
+      familiesSection.matchAll(/^- [^:\n]+: https:\/\/[^/\s]+(\/[^\s]+)$/gm),
       (match) => match[1]
     );
-    expect(advertisedPrefixes.length).toBeGreaterThan(0);
-    for (const prefix of advertisedPrefixes) {
+    expect(advertisedPaths.length).toBeGreaterThan(0);
+    for (const advertisedPath of advertisedPaths) {
       expect(
-        publicPaths.some((path) => path === prefix || path.startsWith(`${prefix}/`)),
-        `/llms.txt advertises ${prefix}, which the public OpenAPI document does not publish`
+        publicPaths.some(
+          (path) => path === advertisedPath || path.startsWith(`${advertisedPath}/`)
+        ),
+        `/llms.txt advertises ${advertisedPath}, which the public OpenAPI document does not publish`
       ).toBe(true);
     }
     expect(publicPaths.some((path) => path === "/health")).toBe(true);
