@@ -30,6 +30,7 @@ describe("isCredentialKey", () => {
       "pem",
       "fireblocksApiSecretPem",
       "accessToken",
+      "userAuthToken",
       "refresh_token",
       "cookie",
       "setCookie",

@@ -23,6 +23,7 @@ import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { mapToCounterparty } from "@/routes/counterparties/handlers";
+import { describeError, logEvent } from "@/runtime/money-path-events";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -33,6 +34,7 @@ import {
   resolveSdpEnvironment,
 } from "../../context";
 import { bvnkOnrampQuote, readBvnkCustomerLink } from "../providers/bvnk";
+import { readCoinbaseUserAuthToken, rememberCoinbaseUserAuthToken } from "../providers/coinbase";
 import { lightsparkProviderCustomerId } from "../providers/lightspark";
 import { muralOnrampQuote, resolveMuralOnrampAccount } from "../providers/mural";
 import {
@@ -326,14 +328,39 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           { provider: "coinbase", counterpartyId: counterparty.id, status: requirements.status }
         );
       }
-      quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
+      // A returning buyer's token lets Coinbase skip its one-time codes; a first-time
+      // buyer has none and verifies on Coinbase's screens inside the embedded order.
+      const storedToken = await readCoinbaseUserAuthToken(c.env, counterparty, projectId);
+      const order = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampOrder(rampRuntime(c), {
         assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
         fiatAmount: input.fiatAmount,
         destinationWalletAddress,
         externalCustomerId: counterparty.id,
         domain: input.domain,
+        coinbaseUserAuthToken: storedToken ?? undefined,
       });
+      quote = order.quote;
+      if (order.userAuthToken !== null) {
+        // Coinbase has already accepted the order; the token only serves a later
+        // purchase, so failing to keep it must not cost the buyer this one.
+        try {
+          await rememberCoinbaseUserAuthToken(
+            c.env,
+            counterparty,
+            projectId,
+            order.userAuthToken,
+            order.orderCreatedAt
+          );
+        } catch (error) {
+          logEvent("warn", {
+            event: "sdp_api_coinbase_user_auth_token_not_stored",
+            counterparty_id: counterparty.id,
+            order_id: order.quote.id,
+            ...describeError(error),
+          });
+        }
+      }
       break;
     }
     case "stripe": {

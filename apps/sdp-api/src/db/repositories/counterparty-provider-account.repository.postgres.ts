@@ -1,3 +1,4 @@
+import { coinbaseCustomerLinkMetadataSchema } from "@sdp/payments/ramps/providers/coinbase/counterparty";
 import { COUNTERPARTY_PROVIDER_ACCOUNT_LISTED_KINDS } from "@sdp/types";
 import type { AppDb } from "@/db";
 import { buildInClause } from "@/db/postgres-utils";
@@ -53,12 +54,17 @@ function assertProviderAccountMetadata(
   if (kind === "funding_wallet" && provider === "bvnk") {
     bvnkFundingWalletMetadataSchema.parse(metadata);
   }
+  if (kind === "customer_link" && provider === "coinbase") {
+    coinbaseCustomerLinkMetadataSchema.parse(metadata);
+  }
 }
 
+// Metadata is validated on every write (upsert and patch). Reads return the row as stored so
+// a row that predates a schema change cannot take a read path down with it; each reader parses
+// the metadata it needs and decides what a mismatch means (the Coinbase token reader treats it
+// as "no token" and lets the buyer verify again).
 function parseProviderAccountRow(row: Record<string, unknown>): CounterpartyProviderAccountRow {
-  const parsed = counterpartyProviderAccountRowSchema.parse(row);
-  assertProviderAccountMetadata(parsed.kind, parsed.provider, parsed.metadata);
-  return parsed;
+  return counterpartyProviderAccountRowSchema.parse(row);
 }
 
 function parseProviderAccountRows(
@@ -422,6 +428,9 @@ export function createPostgresCounterpartyProviderAccountsRepository(
         }
 
         const currentRow = parseProviderAccountRow(current);
+        if (input.onlyIf !== undefined && !input.onlyIf(currentRow.metadata)) {
+          return null;
+        }
         const metadata: Record<string, unknown> = {
           ...currentRow.metadata,
           ...input.set,

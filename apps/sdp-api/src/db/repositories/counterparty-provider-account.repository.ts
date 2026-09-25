@@ -171,6 +171,13 @@ export interface PatchAccountMetadataInput extends GetCounterpartyProviderAccoun
   set: Record<string, unknown>;
   /** Top-level keys removed after the merge. */
   unset: readonly string[];
+  /**
+   * Evaluated against the current metadata under the row lock; a false result
+   * leaves the row untouched and the patch returns null. Lets a caller make the
+   * write conditional on what is stored (compare-and-set) without racing a
+   * separate read.
+   */
+  onlyIf?: (current: Record<string, unknown>) => boolean;
 }
 
 export interface AssignCustomerLinkReferenceInput extends GetCounterpartyProviderAccountInput {
@@ -361,8 +368,8 @@ export interface CounterpartyProviderAccountsRepository {
    * result must satisfy the row kind's metadata schema or the write rolls
    * back.
    *
-   * @param input - Tenant scope, row id, provider, keys to merge, and keys to remove.
-   * @returns The patched row, or null when it is outside the scope.
+   * @param input - Tenant scope, row id, provider, keys to merge, keys to remove, and an optional `onlyIf` guard checked under the row lock.
+   * @returns The patched row, or null when it is outside the scope or `onlyIf` refused it.
    */
   patchAccountMetadata(
     input: PatchAccountMetadataInput
