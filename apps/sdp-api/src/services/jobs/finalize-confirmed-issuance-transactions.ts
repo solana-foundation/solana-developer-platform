@@ -19,11 +19,12 @@
  * there is no age cutoff, because the queue is the only finality-verified
  * recovery path for rows confirmed before this reconciler deployed or
  * stranded by an outage, and the unified ledger reads them as provisional
- * until the cluster verifies finality. Rows that keep coming back
- * provisional are deferred longer on every poll (5m doubling, capped at
+ * until the cluster verifies finality. Rows the chain keeps reporting
+ * provisional are deferred longer on every verdict (5m doubling, capped at
  * 24h), so a signature that never finalizes — one lost to a fork — stops
  * consuming RPC capacity every tick while the recovery path stays intact.
- * A failed RPC read rotates the page and rethrows, so the tick reports
+ * A failed RPC read rotates the page and rethrows without growing that
+ * backoff — nothing was learned about finality — so the tick reports
  * failure instead of an outage silently aging rows out of reconciliation.
  */
 
@@ -92,6 +93,8 @@ export async function finalizeConfirmedIssuanceTransactions(
     organizationId: row.organizationId,
     finalized: false,
     slot: null,
+    readFailed: false,
+    observedLastPolledAt: row.lastPolledAt,
   }));
 
   if (valid.length === 0) {
@@ -121,14 +124,18 @@ export async function finalizeConfirmedIssuanceTransactions(
             organizationId: row.organizationId,
             finalized: false,
             slot: null,
+            readFailed: true,
+            observedLastPolledAt: row.lastPolledAt,
           })
         ),
       ],
       updatedAt: now,
     });
-    // The poll stamps are committed, so the page rotates to the back of the
-    // queue, but the tick still reports failure: an outage must show up as
-    // failed reconciliation runs instead of silently passing while rows wait.
+    // The poll stamps are committed, so the page rotates, but the tick still
+    // reports failure: an outage must show up as failed reconciliation runs
+    // instead of silently passing while rows wait. The read learned nothing
+    // about finality, so the rows' non-finalization backoff is untouched —
+    // they stay due and are re-checked as soon as RPC recovers.
     throw error;
   }
 
@@ -151,8 +158,17 @@ export async function finalizeConfirmedIssuanceTransactions(
             organizationId: row.organizationId,
             finalized: true,
             slot: Number(status.slot),
+            readFailed: false,
+            observedLastPolledAt: row.lastPolledAt,
           }
-        : { id: row.id, organizationId: row.organizationId, finalized: false, slot: null };
+        : {
+            id: row.id,
+            organizationId: row.organizationId,
+            finalized: false,
+            slot: null,
+            readFailed: false,
+            observedLastPolledAt: row.lastPolledAt,
+          };
     }),
   ];
 

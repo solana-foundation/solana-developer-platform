@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
+import { createPostgresIssuanceTransactionsRepository } from "@/db/repositories";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -225,10 +226,15 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
 
     // The page still rotated, so a sustained outage cannot pin rows at the
     // front of the queue — but the tick itself failed, so monitoring sees the
-    // reconciliation stall instead of a healthy pass.
+    // reconciliation stall instead of a healthy pass. The failed read learned
+    // nothing about finality, so the row's non-finalization backoff is
+    // untouched: it stays due and is re-checked as soon as RPC recovers
+    // instead of waiting out a deferral it never earned.
     await expect(getTransaction("itx_fin_rpc")).resolves.toMatchObject({
       status: "confirmed",
       finalization_last_polled_at: expect.any(String),
+      finalization_poll_attempts: 0,
+      finalization_next_poll_at: null,
     });
   });
 
@@ -301,5 +307,73 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
     // 24h minus test-clocks skew on either side.
     expect(hoursAhead).toBeGreaterThan(60 * 23);
     expect(hoursAhead).toBeLessThan(60 * 25);
+  });
+
+  it("does not double the backoff when an overlapping tick already polled the row", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_overlap", confirmedMinutesAgo: 5 });
+    const repo = createPostgresIssuanceTransactionsRepository(getDb(env));
+    const [row] = await repo.listConfirmedTransactionsToPoll({ limit: 10 });
+
+    // Two overlapping self-hosted ticks select the same due row (both see the
+    // same poll stamp) before either writes.
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: row.id,
+          organizationId: row.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: false,
+          observedLastPolledAt: row.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    const afterFirst = await getTransaction("itx_fin_overlap");
+    expect(afterFirst?.finalization_poll_attempts).toBe(1);
+
+    // The second tick's page was read before the first one stamped the row,
+    // so its provisional verdict must not grow the deferral again.
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: row.id,
+          organizationId: row.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: false,
+          observedLastPolledAt: row.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    const afterSecond = await getTransaction("itx_fin_overlap");
+    expect(afterSecond?.finalization_poll_attempts).toBe(1);
+    expect(afterSecond?.finalization_next_poll_at).toBe(afterFirst?.finalization_next_poll_at);
+
+    // A verdict whose page observed the new stamp does grow the backoff.
+    await getDb(env)
+      .prepare(
+        `UPDATE issuance_transactions SET finalization_next_poll_at = ? WHERE id = 'itx_fin_overlap'`
+      )
+      .bind(minutesAgo(1))
+      .run();
+    const [reread] = await repo.listConfirmedTransactionsToPoll({ limit: 10 });
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: reread.id,
+          organizationId: reread.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: false,
+          observedLastPolledAt: reread.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    await expect(getTransaction("itx_fin_overlap")).resolves.toMatchObject({
+      finalization_poll_attempts: 2,
+    });
   });
 });

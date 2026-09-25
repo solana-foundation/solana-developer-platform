@@ -6,6 +6,7 @@ interface IssuanceTransactionPollRow {
   organization_id: string;
   signature: string;
   slot: number | null;
+  finalization_last_polled_at: string | null;
 }
 
 export function createPostgresIssuanceTransactionsRepository(
@@ -15,7 +16,8 @@ export function createPostgresIssuanceTransactionsRepository(
     async listConfirmedTransactionsToPoll({ limit }) {
       const rows = await db
         .prepare(
-          `SELECT it.id, it.organization_id, it.signature, it.slot
+          `SELECT it.id, it.organization_id, it.signature, it.slot,
+                  it.finalization_last_polled_at
            FROM issuance_transactions it
            WHERE it.status = 'confirmed'
              AND it.signature IS NOT NULL
@@ -32,6 +34,7 @@ export function createPostgresIssuanceTransactionsRepository(
         organizationId: row.organization_id,
         signature: row.signature,
         slot: row.slot,
+        lastPolledAt: row.finalization_last_polled_at,
       }));
     },
 
@@ -46,12 +49,16 @@ export function createPostgresIssuanceTransactionsRepository(
       // row the cluster still reports provisional only rotates its poll
       // stamp and never gains a false terminal history entry, and a
       // concurrent tick that already finalized a row makes this a no-op for
-      // it instead of duplicating its status history. A provisional poll
-      // also grows the row's backoff (finalization_poll_attempts, capped at
-      // one re-check per 24h), so a signature that never finalizes — one
-      // lost to a fork — stops consuming an RPC history lookup every tick
-      // while remaining queued: it is due again after
-      // 5m * 2^finalization_poll_attempts, and finalization clears both.
+      // it instead of duplicating its status history. A provisional verdict
+      // grows the row's backoff (finalization_poll_attempts, capped at one
+      // re-check per 24h) only when the row's poll stamp is unchanged since
+      // the verdict's page was read — so overlapping ticks that selected the
+      // same due row do not double the deferral, and a failed read
+      // (read_failed, nothing learned about finality) leaves both the
+      // counter and the deferral untouched. A signature that never
+      // finalizes — one lost to a fork — is due again after
+      // 5m * 2^finalization_poll_attempts instead of every tick, while the
+      // recovery path stays intact.
       const result = await db
         .prepare(
           `WITH advanced AS (
@@ -62,19 +69,28 @@ export function createPostgresIssuanceTransactionsRepository(
                     finalization_last_polled_at = ?,
                     finalization_poll_attempts = CASE
                       WHEN v.finalized THEN 0
-                      ELSE it.finalization_poll_attempts + 1
+                      WHEN v.read_failed THEN it.finalization_poll_attempts
+                      WHEN it.finalization_last_polled_at IS NOT DISTINCT FROM v.observed_last_polled_at
+                        THEN it.finalization_poll_attempts + 1
+                      ELSE it.finalization_poll_attempts
                     END,
                     finalization_next_poll_at = CASE
                       WHEN v.finalized THEN NULL
-                      ELSE to_char(
-                        timezone('UTC', ?::timestamptz + make_interval(secs => LEAST(
-                          86400,
-                          300 * POWER(2, LEAST(it.finalization_poll_attempts, 17))
-                        ))),
-                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-                      )
+                      WHEN v.read_failed THEN it.finalization_next_poll_at
+                      WHEN it.finalization_last_polled_at IS NOT DISTINCT FROM v.observed_last_polled_at
+                        THEN to_char(
+                          timezone('UTC', ?::timestamptz + make_interval(secs => LEAST(
+                            86400,
+                            300 * POWER(2, LEAST(it.finalization_poll_attempts, 17))
+                          ))),
+                          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                        )
+                      ELSE it.finalization_next_poll_at
                     END
-               FROM jsonb_to_recordset(?::jsonb) AS v(id text, organization_id text, finalized boolean, slot bigint)
+               FROM jsonb_to_recordset(?::jsonb) AS v(
+                 id text, organization_id text, finalized boolean,
+                 read_failed boolean, observed_last_polled_at text, slot bigint
+               )
               WHERE it.id = v.id
                 AND it.organization_id = v.organization_id
                 AND it.status = 'confirmed'
@@ -95,6 +111,8 @@ export function createPostgresIssuanceTransactionsRepository(
               id: t.id,
               organization_id: t.organizationId,
               finalized: t.finalized,
+              read_failed: t.readFailed,
+              observed_last_polled_at: t.observedLastPolledAt,
               slot: t.slot,
             }))
           ),
