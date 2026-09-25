@@ -133,6 +133,14 @@ test("statements inside DO blocks are checked", () => {
     "  IF n > 0 THEN\n    RAISE EXCEPTION 'unexpected rows: %; refusing', n;\n  END IF;\n" +
     "  ALTER TABLE a ADD COLUMN c TEXT;\nEND\n$body$;";
   assert.deepEqual(findBreakingStatements(readOnly), []);
+
+  const scratch =
+    "DO $$\nBEGIN\n  CREATE TABLE scratch (id TEXT);\n  INSERT INTO scratch SELECT id FROM a;\n" +
+    "  DELETE FROM scratch WHERE id IS NULL;\n  DROP TABLE scratch;\nEND $$;";
+  assert.deepEqual(findBreakingStatements(scratch), []);
+  assert.deepEqual(reasons("DO $$\nBEGIN\n  DROP TABLE a;\n  CREATE TABLE a (id TEXT);\nEND $$;"), [
+    "drops a table",
+  ]);
 });
 
 test("a flagged migration needs the breaking directive", () => {

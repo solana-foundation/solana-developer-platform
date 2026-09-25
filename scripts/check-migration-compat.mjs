@@ -166,7 +166,7 @@ function collectAdditions(statements) {
       return;
     }
     if (/^DO\b/i.test(statement)) {
-      for (const inner of plpgsqlStatements(dollarBody(statement) ?? "")) visit(inner, index);
+      for (const [inner, position] of innerStatements(statement, index)) visit(inner, position);
     }
   };
   statements.forEach(visit);
@@ -255,11 +255,16 @@ function statementFindings(statement, index, context) {
   }
 
   if (/^DO\b/i.test(main)) {
-    for (const inner of plpgsqlStatements(dollarBody(main) ?? "")) {
-      findings.push(...statementFindings(inner, index, context));
+    for (const [inner, position] of innerStatements(main, index)) {
+      findings.push(...statementFindings(inner, position, context));
     }
   }
   return findings;
+}
+
+function innerStatements(statement, index) {
+  const inner = plpgsqlStatements(dollarBody(statement) ?? "");
+  return inner.map((text, k) => [text, index + (k + 1) / (inner.length + 1)]);
 }
 
 export function findBreakingStatements(sql) {
