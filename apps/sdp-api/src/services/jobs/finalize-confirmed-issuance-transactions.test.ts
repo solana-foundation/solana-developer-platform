@@ -379,4 +379,75 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
       finalization_poll_attempts: 2,
     });
   });
+
+  it("preserves a newer tick's deferral when rotating a failed page", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_stale_fail", confirmedMinutesAgo: 5 });
+    const repo = createPostgresIssuanceTransactionsRepository(getDb(env));
+    const [row] = await repo.listConfirmedTransactionsToPoll({ limit: 10 });
+
+    // A first tick polls the row and defers it after a provisional verdict.
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: row.id,
+          organizationId: row.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: false,
+          observedLastPolledAt: row.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    const deferred = await getTransaction("itx_fin_stale_fail");
+    expect(deferred?.finalization_next_poll_at).not.toBeNull();
+
+    // An overlapping tick's failed read — its page predates that deferral —
+    // must not re-due the row and burn an immediate history lookup on it.
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: row.id,
+          organizationId: row.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: true,
+          observedLastPolledAt: row.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    await expect(getTransaction("itx_fin_stale_fail")).resolves.toMatchObject({
+      finalization_next_poll_at: deferred?.finalization_next_poll_at,
+    });
+
+    // A failed read whose page observed the current stamp does rotate the
+    // row: re-due at that tick's poll time. The deferral is long elapsed, so
+    // the row is due and a fresh page lists it.
+    await getDb(env)
+      .prepare(
+        `UPDATE issuance_transactions
+            SET finalization_next_poll_at = ?
+          WHERE id = 'itx_fin_stale_fail'`
+      )
+      .bind(minutesAgo(1))
+      .run();
+    const [reread] = await repo.listConfirmedTransactionsToPoll({ limit: 10 });
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: reread.id,
+          organizationId: reread.organizationId,
+          finalized: false,
+          slot: null,
+          readFailed: true,
+          observedLastPolledAt: reread.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+    const rotated = await getTransaction("itx_fin_stale_fail");
+    const stampedAt = new Date(rotated?.finalization_next_poll_at ?? "");
+    expect(Math.abs(stampedAt.getTime() - Date.now())).toBeLessThan(30 * 1000);
+  });
 });

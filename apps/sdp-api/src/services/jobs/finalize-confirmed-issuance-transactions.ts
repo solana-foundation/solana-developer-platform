@@ -135,8 +135,9 @@ export async function finalizeConfirmedIssuanceTransactions(
     // at the front of the queue while later rows wait — but the tick itself
     // failed, so monitoring sees the reconciliation stall instead of a
     // healthy pass. The read learned nothing about finality, so the rows'
-    // non-finalization backoff is untouched: they stay due (re-due at this
-    // poll's timestamp) and are re-checked as soon as RPC recovers.
+    // non-finalization backoff is untouched: they are re-due at this poll's
+    // timestamp (and only if no other tick already rescheduled them) and
+    // are re-checked as soon as RPC recovers.
     throw error;
   }
 

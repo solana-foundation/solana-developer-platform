@@ -49,18 +49,19 @@ export function createPostgresIssuanceTransactionsRepository(
       // row the cluster still reports provisional only rotates its poll
       // stamp and never gains a false terminal history entry, and a
       // concurrent tick that already finalized a row makes this a no-op for
-      // it instead of duplicating its status history. A provisional verdict
-      // grows the row's backoff (finalization_poll_attempts, capped at one
-      // re-check per 24h) only when the row's poll stamp is unchanged since
-      // the verdict's page was read — so overlapping ticks that selected the
-      // same due row do not double the deferral. A failed read (read_failed,
-      // nothing learned about finality) grows neither the counter nor the
-      // deferral: it re-dues the row at the poll time, which rotates the
-      // failed page behind the rest of the due queue so a sustained outage
-      // cannot pin the same 256 rows at the front while later rows wait. A
-      // signature that never finalizes — one lost to a fork — is due again
-      // after 5m * 2^finalization_poll_attempts instead of every tick, while
-      // the recovery path stays intact.
+      // it instead of duplicating its status history. Every deferral
+      // decision is stamped-guarded: it applies only while the row's poll
+      // stamp is unchanged since the verdict's page was read, so overlapping
+      // ticks that selected the same due row never overwrite each other's
+      // scheduling. A provisional verdict grows the row's backoff
+      // (finalization_poll_attempts, capped at one re-check per 24h). A
+      // failed read (read_failed, nothing learned about finality) grows
+      // neither the counter nor the deferral: it re-dues the row at the poll
+      // time, which rotates the failed page behind the rest of the due queue
+      // so a sustained outage cannot pin the same 256 rows at the front
+      // while later rows wait. A signature that never finalizes — one lost
+      // to a fork — is due again after 5m * 2^finalization_poll_attempts
+      // instead of every tick, while the recovery path stays intact.
       const result = await db
         .prepare(
           `WITH advanced AS (
@@ -78,10 +79,12 @@ export function createPostgresIssuanceTransactionsRepository(
                     END,
                     finalization_next_poll_at = CASE
                       WHEN v.finalized THEN NULL
-                      WHEN v.read_failed THEN to_char(
-                        timezone('UTC', ?::timestamptz),
-                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
-                      )
+                      WHEN v.read_failed
+                           AND it.finalization_last_polled_at IS NOT DISTINCT FROM v.observed_last_polled_at
+                        THEN to_char(
+                          timezone('UTC', ?::timestamptz),
+                          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                        )
                       WHEN it.finalization_last_polled_at IS NOT DISTINCT FROM v.observed_last_polled_at
                         THEN to_char(
                           timezone('UTC', ?::timestamptz + make_interval(secs => LEAST(

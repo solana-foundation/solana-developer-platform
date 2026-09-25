@@ -32,9 +32,10 @@ export interface ConfirmedIssuanceTransactionVerdict {
    */
   readFailed: boolean;
   /**
-   * The row's poll stamp when this verdict's page was read: the guarded
-   * statement only grows the non-finalization backoff while it is unchanged,
-   * so overlapping ticks that selected the same due row do not double-count.
+   * The row's poll stamp when this verdict's page was read: every deferral
+   * decision in the guarded statement applies only while it is unchanged,
+   * so overlapping ticks that selected the same due row never overwrite
+   * each other's scheduling.
    */
   observedLastPolledAt: string | null;
 }
@@ -74,11 +75,11 @@ export interface IssuanceTransactionsRepository {
    * poll, capped at 24h, tracked in finalization_poll_attempts and
    * finalization_next_poll_at, which also orders the queue) grows only for
    * rows the chain actually reported provisional, and only while the row's
-   * poll stamp is unchanged since the verdict's page was read — so a failed
-   * read (readFailed) leaves the counter untouched and overlapping ticks
-   * that selected the same due row do not double it. A failed read still
-   * re-dues its page at the poll time, rotating it behind the rest of the
-   * due queue so a sustained outage cannot pin the same rows at the front.
+   * poll stamp is unchanged since the verdict's page was read. A failed read
+   * (readFailed) leaves the counter untouched and re-dues its page at the
+   * poll time — rotating it behind the rest of the due queue so a sustained
+   * outage cannot pin the same rows at the front — under the same
+   * stamp guard, so it never erases a newer tick's deferral.
    * Finalization clears the deferral; finalized rows leave the queue with
    * their status and provisional ones return to it later.
    *
