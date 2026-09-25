@@ -167,6 +167,68 @@ describe("useDvpCreateSubmit idempotency key", () => {
     expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
   });
 
+  // A keyed replay of a create still in flight returns the recorded trade with
+  // no receipt: the row exists, but nothing on the wire proves the create
+  // transaction landed. That is not a completed create, so the key must
+  // survive it — rotating here would let the next press draw a second trade on
+  // the same terms while the first is still being broadcast.
+  it("reuses the key after an in-flight replay, so the retry replays the same trade", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_second", status: "creating", createSignature: "sig_second" } },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
+  });
+
+  // Restoring the terms of an unresolved create must find that request still
+  // pending: replaying it under its original key asks the server what became
+  // of it, while a fresh key would create a second copy of the same trade
+  // while the first may still be broadcasting.
+  it("replays the original key when the edited terms are restored while the first create is unresolved", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request({ amountA: "1500" }));
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(keyOf(fetchMock, 2)).toBe(keyOf(fetchMock, 0));
+    expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
+  });
+
   it("rotates the key once a trade was created, so identical terms make a second trade", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -226,6 +288,101 @@ describe("useDvpCreateSubmit confirmation", () => {
     });
 
     expect(result.current.error).toBe("Request failed (502).");
+  });
+
+  // A keyed replay of a create still in flight is not a completed create: the
+  // toast would claim a transaction that does not exist yet, and navigating
+  // would present an unresolved trade as final. The form stays put and says so.
+  it("says an in-flight replay is unconfirmed, and stays on the form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one. Changing the trade and creating again starts a new trade instead — the first one may still go through."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A kept key is bound to the request it was minted for. Edited terms are a
+  // new logical request: reusing the old key would make the server refuse the
+  // edited trade as a payload conflict, dead-ending the retry the form just
+  // offered. The edit must go out under a fresh key.
+  it("starts a new request with a fresh key when the trade was edited while a create was pending", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request({ amountA: "1500" }));
+    });
+
+    const keyOf = (call: number): string => {
+      const init = fetchMock.mock.calls[call][1] as { headers: Record<string, string> };
+      return init.headers["Idempotency-Key"];
+    };
+    expect(keyOf(1)).not.toBe(keyOf(0));
+    // The second body is the edit, sent whole — not the first attempt replayed.
+    const secondBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body) as Record<
+      string,
+      unknown
+    >;
+    expect(secondBody.amountA).toBe("1500");
+    // And the new request itself can go pending without dead-ending either.
+    expect(result.current.error).toBe(
+      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one. Changing the trade and creating again starts a new trade instead — the first one may still go through."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A fresh create whose same-request chain read lagged reports the trade as
+  // still `creating` — but its create transaction is recorded, and the receipt
+  // is on the wire. That IS a completed create: rotate, toast, navigate.
+  it("confirms a create whose transaction is recorded but not yet observed", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_1", status: "creating", createSignature: "sig_create" } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    const firstInit = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    const secondInit = fetchMock.mock.calls[1][1] as { headers: Record<string, string> };
+    expect(secondInit.headers["Idempotency-Key"]).not.toBe(firstInit.headers["Idempotency-Key"]);
+    expect(toast.success).toHaveBeenCalledTimes(2);
+    expect(push).toHaveBeenCalledWith("/dashboard/markets/dvp/dvp_1");
+    open.mockRestore();
   });
 
   // The create is SDP's own broadcast, so the toast reporting it links it.

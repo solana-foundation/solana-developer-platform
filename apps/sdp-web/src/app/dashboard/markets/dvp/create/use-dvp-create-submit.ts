@@ -59,22 +59,30 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One key per logical request. It rotates only once a trade was created, so
-  // a second trade on the same terms is a new request rather than a replay of
-  // the first. Every other outcome keeps it: a throw or a server error may have
-  // left the first attempt broadcasting, and the retry has to replay it rather
-  // than draw a second trade at a second address; a rejection stored nothing,
-  // so the key is still free.
-  const idempotencyKey = useRef<string | null>(null);
-  // Minted on first use rather than as the ref's initial value, which would draw
-  // (and throw away) fresh random bytes on every render.
-  function currentIdempotencyKey(): string {
-    const existing = idempotencyKey.current;
-    if (existing !== null) {
+  // One key per logical request, and a key rotates only once its create
+  // transaction is confirmed: a second trade on the same terms is then a new
+  // request rather than a replay of the first. Every other outcome keeps the
+  // key: a throw or a server error may have left the first attempt
+  // broadcasting, and the retry has to replay it rather than draw a second
+  // trade at a second address; a rejection stored nothing, so the key is
+  // still free; and a replay of a create still in flight is that same logical
+  // request, not a finished one.
+  const unresolvedKeys = useRef(new Map<string, string>());
+  // Keyed by the exact body, and kept per request rather than stored singly:
+  // edited terms are a new logical request (sending them under the old key
+  // would make the server refuse them as a payload conflict, dead-ending the
+  // retry the form just offered), but switching away and back must find the
+  // first request still unresolved — restoring the terms replays it under its
+  // original key instead of drawing a second copy of that trade.
+  // Minted on first use rather than eagerly, which would draw (and throw
+  // away) fresh random bytes on every render.
+  function currentIdempotencyKey(body: string): string {
+    const existing = unresolvedKeys.current.get(body);
+    if (existing !== undefined) {
       return existing;
     }
     const minted = freshDvpIdempotencyKey("dvp-create");
-    idempotencyKey.current = minted;
+    unresolvedKeys.current.set(body, minted);
     return minted;
   }
 
@@ -82,39 +90,40 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
     setSubmitting(true);
     setError(null);
     try {
+      const body = JSON.stringify({
+        partyA: request.parties.a.ref,
+        partyB: request.parties.b.ref,
+        mintA: request.mintA,
+        mintB: request.mintB,
+        // A PASTED address is assumed Token-2022; if it is not, create
+        // refuses and names the mismatch rather than publishing an escrow
+        // derived under the wrong program, which is the failure the form
+        // cannot detect itself.
+        tokenProgramA: request.tokenProgramA ?? TOKEN_2022_PROGRAM,
+        tokenProgramB: request.tokenProgramB ?? TOKEN_2022_PROGRAM,
+        amountA: request.amountA,
+        amountB: request.amountB,
+        // Local wall clock, deliberately: the person picked a time off
+        // their own clock, so the deadline lands at that local moment.
+        expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
+        ...(request.refString ? { refString: request.refString } : {}),
+        // Omitted rather than sent empty. The API reads absent as "the
+        // party's own address"; an empty string would fail the address
+        // pattern and 400 an otherwise ordinary trade.
+        ...(request.userASettlementDestination
+          ? { userASettlementDestination: request.userASettlementDestination }
+          : {}),
+        ...(request.userBSettlementDestination
+          ? { userBSettlementDestination: request.userBSettlementDestination }
+          : {}),
+      });
       const response = await fetch("/api/dashboard/markets/dvp/trades", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(),
+          [IDEMPOTENCY_KEY_HEADER]: currentIdempotencyKey(body),
         },
-        body: JSON.stringify({
-          partyA: request.parties.a.ref,
-          partyB: request.parties.b.ref,
-          mintA: request.mintA,
-          mintB: request.mintB,
-          // A PASTED address is assumed Token-2022; if it is not, create
-          // refuses and names the mismatch rather than publishing an escrow
-          // derived under the wrong program, which is the failure the form
-          // cannot detect itself.
-          tokenProgramA: request.tokenProgramA ?? TOKEN_2022_PROGRAM,
-          tokenProgramB: request.tokenProgramB ?? TOKEN_2022_PROGRAM,
-          amountA: request.amountA,
-          amountB: request.amountB,
-          // Local wall clock, deliberately: the person picked a time off
-          // their own clock, so the deadline lands at that local moment.
-          expiryTimestamp: String(Math.floor(new Date(`${request.expiry}:59`).getTime() / 1000)),
-          ...(request.refString ? { refString: request.refString } : {}),
-          // Omitted rather than sent empty. The API reads absent as "the
-          // party's own address"; an empty string would fail the address
-          // pattern and 400 an otherwise ordinary trade.
-          ...(request.userASettlementDestination
-            ? { userASettlementDestination: request.userASettlementDestination }
-            : {}),
-          ...(request.userBSettlementDestination
-            ? { userBSettlementDestination: request.userBSettlementDestination }
-            : {}),
-        }),
+        body,
       });
 
       // Status before body. A non-2xx response carries an error envelope, not
@@ -137,9 +146,22 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         setError(t("DashboardMarkets.dvp.createUnconfirmed"));
         return;
       }
-      // The next submit mints a new key: a second trade on the same terms is a new request.
-      idempotencyKey.current = null;
       const { id: createdId, createSignature } = created.data.data.trade;
+      // The signature is the create's receipt. A keyed replay of a create
+      // still in flight returns the recorded trade without one — the row
+      // exists, but nothing proves the transaction landed — and answering that
+      // as complete would toast a transaction that does not exist, navigate
+      // as though the trade were final, and clear the only key the replay
+      // answers to, letting the next press draw a second trade on the same
+      // terms. So an unreceived create stays unresolved: the key is kept, the
+      // form stays up, and the retry replays until the receipt arrives.
+      if (createSignature === null) {
+        setError(t("DashboardMarkets.dvp.createPending"));
+        return;
+      }
+      // This create is resolved: its key is spent, and a repeat of the same
+      // terms is a new request.
+      unresolvedKeys.current.delete(body);
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement

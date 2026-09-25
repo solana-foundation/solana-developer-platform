@@ -305,6 +305,7 @@
       "createDescription": "Name the seller and the buyer; each side funds its own escrow before settlement.",
       "createSubmitting": "Creating…",
       "createTitle": "New Trade",
+      "createPending": "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one. Changing the trade and creating again starts a new trade instead — the first one may still go through.",
       "createUnconfirmed": "The trade may have been created, but SDP couldn't read the answer. Press Create again to open it; it won't create a second one.",
       "deliveredLabel": "Delivered in full",
       "destinationDiffersBody": "One side of this trade pays out to a different address than it funds from. That is normal for an execution desk, and it is also what a forged trade looks like. Check both addresses before funding.",
