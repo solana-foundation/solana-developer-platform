@@ -10,6 +10,7 @@ import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-conte
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import { useOfframpWizard } from "./use-offramp-wizard";
 import { useOnrampWizard } from "./use-onramp-wizard";
 import type { UseRampWizardProps } from "./use-ramp-wizard";
 
@@ -121,7 +122,10 @@ function quoteKeysFromFetchCalls(): string[] {
     .filter((key): key is string => key !== null);
 }
 
-type WizardRender = RenderHookResult<ReturnType<typeof useOnrampWizard>, unknown>;
+type WizardRender = RenderHookResult<
+  ReturnType<typeof useOnrampWizard> | ReturnType<typeof useOfframpWizard>,
+  unknown
+>;
 
 /**
  * Drives the real wizard from the deposit step to the transaction stage, where
@@ -279,6 +283,174 @@ describe("useRampWizard quote operation key (SOLA9-302)", () => {
     await waitFor(() => expect(quoteKeysFromFetchCalls().length).toBe(2));
 
     const keys = quoteKeysFromFetchCalls();
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+});
+
+describe("useRampWizard quote operation key — lightspark offramp collected payout (SOLA9-302)", () => {
+  const OFFRAMP_ENDPOINT = "/api/dashboard/payments/ramps/offramp/quote";
+  const TRANSFER_ID_OFFRAMP = "xfr_lightspark_wizard";
+
+  // The lightspark offramp ready arm is the only requirements answer that
+  // resolves a payout account: the collect-details flow quotes against the
+  // RESOLVED account while no account is explicitly picked.
+  const LIGHTSPARK_READY = {
+    provider: "lightspark",
+    direction: "offramp",
+    status: "ready",
+    providerAccountId: "cpa_us_primary",
+  };
+
+  const LIGHTSPARK_QUOTE = {
+    id: "quote_lightspark",
+    provider: "lightspark",
+    status: "pending",
+    deliveryMode: "manual_instructions",
+    paymentInstructions: [],
+  };
+
+  const OFFRAMP_PROPS: UseRampWizardProps = {
+    ...PROPS,
+    enabledRampProviders: ["lightspark"],
+  };
+
+  function offrampQuotePosts(): { key: string | null; body: Record<string, unknown> }[] {
+    return fetchMock.mock.calls
+      .map((call) => {
+        const [input, init] = call;
+        if (String(input) !== OFFRAMP_ENDPOINT || (init?.method ?? "GET") !== "POST") {
+          return null;
+        }
+        return {
+          key: new Headers(init?.headers).get("Idempotency-Key"),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        };
+      })
+      .filter((entry): entry is { key: string | null; body: Record<string, unknown> } =>
+        Boolean(entry)
+      );
+  }
+
+  /** Drives the offramp wizard to the transaction stage with payout details
+   * collected (no saved account picked) and waits for the quote POST outcome. */
+  async function driveOfframpToQuote(rendered: WizardRender) {
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("lightspark"));
+    act(() => rendered.result.current.setField("amount", "100"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    act(() => rendered.result.current.setCollectedField("destinationCountry", "US"));
+    for (let step = 0; step < 4; step += 1) {
+      await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+  }
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("replays the retained operation when the retry has no explicitly picked payout account", async () => {
+    let quotePostCalls = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === OFFRAMP_ENDPOINT && method === "POST") {
+        quotePostCalls += 1;
+        if (quotePostCalls === 1) {
+          // The ambiguous failure: the request went out, the response never
+          // came back (network loss after the server committed its work).
+          return Promise.reject(new TypeError("network response lost"));
+        }
+        return Promise.resolve(
+          Response.json({ data: { quote: LIGHTSPARK_QUOTE, transferId: TRANSFER_ID_OFFRAMP } })
+        );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        return Promise.resolve(Response.json({ data: LIGHTSPARK_READY }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOfframpWizard(OFFRAMP_PROPS), { wrapper });
+    await driveOfframpToQuote(rendered);
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID_OFFRAMP));
+
+    const posts = offrampQuotePosts();
+    expect(posts.length).toBe(2);
+    expect(posts[0].key).toBeTruthy();
+    // The unchanged selection must repeat the retained operation verbatim: the
+    // same key and the same payload (the resolved payout account included), so
+    // the API replays the recorded quote instead of minting a second session
+    // and transfer row.
+    expect(posts[1].key).toBe(posts[0].key);
+    expect(posts[1].body).toEqual(posts[0].body);
+    expect(posts[0].body.providerAccountId).toBe("cpa_us_primary");
+  });
+
+  it("mints a fresh operation key when the offramp selection is edited after a failed attempt", async () => {
+    let quotePostCalls = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === OFFRAMP_ENDPOINT && method === "POST") {
+        quotePostCalls += 1;
+        if (quotePostCalls === 1) {
+          return Promise.reject(new TypeError("network response lost"));
+        }
+        return Promise.resolve(
+          Response.json({ data: { quote: LIGHTSPARK_QUOTE, transferId: TRANSFER_ID_OFFRAMP } })
+        );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        return Promise.resolve(Response.json({ data: LIGHTSPARK_READY }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOfframpWizard(OFFRAMP_PROPS), { wrapper });
+    await driveOfframpToQuote(rendered);
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    await act(async () => {
+      rendered.result.current.setField("amount", "250");
+    });
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID_OFFRAMP));
+
+    const keys = offrampQuotePosts().map((post) => post.key);
+    expect(keys.length).toBe(2);
     expect(keys[0]).toBeTruthy();
     expect(keys[1]).toBeTruthy();
     expect(keys[1]).not.toBe(keys[0]);
