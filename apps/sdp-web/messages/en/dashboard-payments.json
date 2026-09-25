@@ -1426,7 +1426,9 @@
       "noDeposits": "No deposits to this wallet yet.",
       "noWalletTitle": "No wallet to receive into",
       "noWalletDescription": "An address belongs to a wallet, and this project has none yet.",
-      "createWallet": "Create a wallet"
+      "createWallet": "Create a wallet",
+      "lastDeposit": "· last {date}",
+      "nothingYet": "· nothing yet"
     },
     "depositTimeline": {
       "label": "Deposit progress",

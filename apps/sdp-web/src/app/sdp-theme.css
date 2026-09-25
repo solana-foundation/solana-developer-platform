@@ -170,6 +170,14 @@
   scrollbar-color: var(--t12) transparent;
 }
 
+/* Base UI 1.8 marks the active tab `data-active`; the design-system tab still styles
+   `data-selected`, so without this the active tab keeps the idle ink and weight and only the
+   underline tells it apart. The design sets it in full ink, medium. */
+[data-sdp-theme="refresh"] [role="tab"][data-active] {
+  color: var(--tab-text-active);
+  font-weight: var(--tab-weight-active);
+}
+
 :root.dark {
   color-scheme: dark;
 

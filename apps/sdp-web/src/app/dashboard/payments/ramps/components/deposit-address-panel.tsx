@@ -85,8 +85,9 @@ function walletName(wallet: PaymentsDashboardWallet): string {
 
 /**
  * The address as a code. A phone shows it on the design's 176px white plate, dark modules in
- * both themes; from sm it is the bare 128px code beside the text column, inverting with the
- * theme.
+ * both themes; from sm it is the 128px code beside the text column, bare in the light theme and
+ * on a white tile with an 8px quiet zone in the dark one, so its finder squares never touch the
+ * card.
  */
 function AddressQr({ address, className }: { address: string; className?: string }) {
   const t = useTranslations();
@@ -103,7 +104,7 @@ function AddressQr({ address, className }: { address: string; className?: string
   return (
     <div
       className={cn(
-        "size-44 shrink-0 rounded-control bg-white p-4 sm:size-32 sm:rounded-none sm:bg-transparent sm:p-0",
+        "size-44 shrink-0 rounded-control bg-white p-4 sm:size-32 sm:rounded-sm sm:bg-transparent sm:p-0 sm:dark:bg-white sm:dark:p-2",
         className
       )}
     >
@@ -114,7 +115,7 @@ function AddressQr({ address, className }: { address: string; className?: string
           width={144}
           height={144}
           unoptimized
-          className="size-full sm:dark:invert"
+          className="size-full"
         />
       ) : (
         <div className="size-full animate-pulse rounded-control bg-fill" />
@@ -137,9 +138,11 @@ function WalletPicker({
   const provider = walletProviderLabel(wallet);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-        <span className="truncate text-field font-medium text-primary">{walletName(wallet)}</span>
-        {provider ? <span className="shrink-0 text-field text-tertiary">{provider}</span> : null}
+      <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-1.5 self-start rounded-control-inner py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-body font-medium text-primary">{walletName(wallet)}</span>
+          {provider ? <span className="shrink-0 text-meta text-tertiary">{provider}</span> : null}
+        </span>
         <ChevronDownIcon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
         <span className="sr-only">{t("DashboardPayments.depositAddress.chooseWallet")}</span>
       </DropdownMenuTrigger>
@@ -166,10 +169,12 @@ function WalletPicker({
 }
 
 /**
- * The design's 160px card: a 128px code in a 16px inset; the wallet and its address at the top
- * of the text column, the network warning at its foot. On a phone the card stacks: the code
- * first, centred on its plate, then the wallet, the address, a full-width copy button and the
- * warning as a 13px hint.
+ * The design's 160px card: a 128px code in a 16px inset, 16px from the text column; the wallet
+ * (14px, its provider 13px) and the address (16px mono, a 24px copy control beside it) at the
+ * top of the column, the network warning (13px) at its foot. The column has no padding of its
+ * own, which is what leaves a 44-character address room for one line. On a phone the card
+ * stacks: the code first, centred on its plate, then the wallet, the address, a full-width copy
+ * button and the warning.
  */
 function AddressCard({
   wallet,
@@ -186,10 +191,10 @@ function AddressCard({
 }) {
   const t = useTranslations();
   return (
-    <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
+    <section className="flex flex-col gap-4 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
       <AddressQr address={wallet.publicKey} className="self-center sm:order-last sm:self-auto" />
-      <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-6 sm:px-2 sm:pt-2">
-        <div className="space-y-3">
+      <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 flex-col gap-1.5">
           <WalletPicker wallet={wallet} wallets={wallets} onSelect={onSelectWallet} />
           <div className="flex items-start gap-2">
             <p className="min-w-0 font-mono text-field break-all text-primary">
@@ -200,11 +205,12 @@ function AddressCard({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-sm"
+                size="icon-xs"
+                className="mt-0.5 text-tertiary hover:text-primary"
                 aria-label={t("DashboardPayments.ramps.copyAddress")}
                 onClick={onCopy}
               >
-                <CopyIcon className="size-4" />
+                <CopyIcon className="size-3.5" />
               </Button>
             </span>
           </div>
@@ -220,7 +226,7 @@ function AddressCard({
         >
           {t("DashboardPayments.ramps.copyAddress")}
         </Button>
-        <p className="mt-4 text-meta text-secondary sm:mt-0 sm:text-body">
+        <p className="mt-4 text-meta text-secondary sm:mt-0">
           {t("DashboardPayments.depositAddress.networkWarning", { network })}
         </p>
       </div>
@@ -228,7 +234,7 @@ function AddressCard({
   );
 }
 
-/** What the address accepts, its minimum and how fast it lands: 40px rows over faint rules. */
+/** What the address accepts, its minimum and how fast it lands: 14px on 40px rows over faint rules. */
 function DepositFacts() {
   const t = useTranslations();
   const rows = [
@@ -249,9 +255,9 @@ function DepositFacts() {
   return (
     <dl className="mt-6 divide-y divide-border-subtle">
       {rows.map((row) => (
-        <div key={row.label} className="flex items-center justify-between gap-4 py-2">
-          <dt className="text-field text-secondary">{row.label}</dt>
-          <dd className="flex items-center gap-2 text-field text-primary">
+        <div key={row.label} className="flex items-center justify-between gap-4 py-2.5">
+          <dt className="text-body text-secondary">{row.label}</dt>
+          <dd className="flex items-center gap-1.5 text-body text-primary">
             {row.value}
             {row.hint ? (
               <TooltipProvider>
@@ -309,7 +315,15 @@ function RecentDeposits({
     );
   } else {
     body = (
-      <Table className="rounded-none border-0 refresh:-mx-3">
+      <Table className="table-fixed rounded-none border-0 refresh:-mx-3">
+        {/* Where the design's columns start in its 660px column: Amount at 136px, Contact at
+            319, Created at 577 (its own table runs wider than the card and is clipped). */}
+        <colgroup>
+          <col className="w-[19.5%]" />
+          <col className="w-[26.5%]" />
+          <col className="w-[37.75%]" />
+          <col className="w-[16.25%]" />
+        </colgroup>
         <TableHeader>
           <TableRow>
             <TableHead>{t("DashboardPayments.status")}</TableHead>
@@ -331,20 +345,20 @@ function RecentDeposits({
                     {t(statusMessageKey(deposit.status))}
                   </StatusText>
                 </TableCell>
-                <TableCell className="text-body whitespace-nowrap text-primary tabular-nums">
+                <TableCell className="truncate text-body font-medium text-primary tabular-nums">
                   {amount === null ? (
                     "—"
                   ) : (
                     <>
                       {amount.amount}
                       {amount.asset ? (
-                        <span className="text-secondary"> {amount.asset}</span>
+                        <span className="font-normal text-secondary"> {amount.asset}</span>
                       ) : null}
                     </>
                   )}
                 </TableCell>
-                <TableCell className="text-body text-primary">{contact ?? "—"}</TableCell>
-                <TableCell className="text-body text-secondary">
+                <TableCell className="truncate text-body text-primary">{contact ?? "—"}</TableCell>
+                <TableCell className="truncate text-body text-secondary">
                   {formatDate(deposit.createdAt, locale)}
                 </TableCell>
               </TableRow>
@@ -355,12 +369,14 @@ function RecentDeposits({
     );
   }
   return (
-    <section className="mt-14 space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    // 64px from the line above: the design's 24px rhythm plus the 40 a new block opens with.
+    <section className="mt-16 flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h2 className="text-subheading font-medium text-primary">
           {t("DashboardPayments.depositAddress.recentTitle")}
         </h2>
-        <Button asChild variant="outline" size="sm">
+        {/* The design's block action is its 30px control. */}
+        <Button asChild variant="outline" size="sm" className="[--button-height-md:1.875rem]">
           <Link
             href={`/dashboard/payments/transactions?module=payments&custodyWalletId=${encodeURIComponent(wallet.id)}`}
           >
@@ -478,19 +494,29 @@ export function DepositAddressPanel({
       {/* 24px under the card. */}
       <DepositFacts />
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-center gap-2.5 text-field text-secondary" aria-live="polite">
-          <span aria-hidden="true" className="size-2 rounded-full border border-border-strong" />
-          {lastDeposit
-            ? t("DashboardPayments.depositAddress.watchingLast", {
-                date: formatDate(lastDeposit, locale) ?? "",
-              })
-            : t("DashboardPayments.depositAddress.watching")}
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className="flex min-w-0 items-center gap-2 text-body text-secondary" aria-live="polite">
+          <span
+            aria-hidden="true"
+            className="size-2 shrink-0 rounded-full border border-border-strong motion-safe:animate-pulse"
+          />
+          <span>
+            {t("DashboardPayments.depositAddress.watching")}{" "}
+            <span className="text-tertiary">
+              {lastDeposit
+                ? t("DashboardPayments.depositAddress.lastDeposit", {
+                    date: formatDate(lastDeposit, locale) ?? "",
+                  })
+                : t("DashboardPayments.depositAddress.nothingYet")}
+            </span>
+          </span>
         </p>
         {cluster === "devnet" ? (
           <Button
             type="button"
             variant="ghost"
+            size="sm"
+            className="-me-2.5"
             iconLeft={<PlayIcon />}
             disabled={simulating}
             onClick={simulate}

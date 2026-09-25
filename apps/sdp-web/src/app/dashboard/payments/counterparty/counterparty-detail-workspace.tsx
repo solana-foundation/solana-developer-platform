@@ -149,12 +149,12 @@ function DetailBlock({
   );
 }
 
-/** A label and its value on one 40px rule, as the design's record rows read. */
+/** A label and its value on one 40px rule, as the design's record rows read: 13px, then 14px. */
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 last:border-b-0">
-      <dt className="shrink-0 text-nav text-secondary">{label}</dt>
-      <dd className="min-w-0 truncate text-right text-nav font-medium text-primary">{children}</dd>
+      <dt className="shrink-0 text-meta leading-5 text-secondary">{label}</dt>
+      <dd className="min-w-0 truncate text-right text-body text-primary">{children}</dd>
     </div>
   );
 }
@@ -172,9 +172,7 @@ function ContactRecord({
   const locale = useLocale();
   const summary = summarizePayouts(transfers);
   const notYet = (
-    <span className="font-normal text-tertiary">
-      {t("DashboardPayments.counterparty.detail.notPaidYet")}
-    </span>
+    <span className="text-tertiary">{t("DashboardPayments.counterparty.detail.notPaidYet")}</span>
   );
   return (
     <section className="grid gap-x-6 md:grid-cols-2">
@@ -186,7 +184,7 @@ function ContactRecord({
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.externalId")}>
           {counterparty.externalId === null ? (
-            <span className="font-normal text-tertiary">
+            <span className="text-tertiary">
               {t("DashboardPayments.counterparty.detail.notSet")}
             </span>
           ) : (
@@ -283,7 +281,9 @@ function PaymentAmount({ transfer }: { transfer: PaymentTransferSummary }) {
     const token = resolveTransferTokenLabel(transfer.token);
     return (
       <>
-        <span className="text-primary">{formatDecimalAmount(transfer.amount, locale)}</span>
+        <span className="font-medium text-primary">
+          {formatDecimalAmount(transfer.amount, locale)}
+        </span>
         {token === undefined ? null : <span className="text-secondary"> {token}</span>}
       </>
     );
@@ -291,7 +291,9 @@ function PaymentAmount({ transfer }: { transfer: PaymentTransferSummary }) {
   if (transfer.fiatAmount && transfer.fiatCurrency) {
     return (
       <>
-        <span className="text-primary">{formatDecimalAmount(transfer.fiatAmount, locale)}</span>
+        <span className="font-medium text-primary">
+          {formatDecimalAmount(transfer.fiatAmount, locale)}
+        </span>
         <span className="text-secondary"> {transfer.fiatCurrency.toUpperCase()}</span>
       </>
     );
