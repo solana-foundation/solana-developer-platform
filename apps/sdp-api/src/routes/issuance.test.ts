@@ -7699,10 +7699,26 @@ describe("Issuance Routes", () => {
             .first<{ id: string }>();
           expect(accountRow).toBeNull();
 
-          // The raw account stays the direct MintTo target the caller asked for.
+          // The raw account stays the direct MintTo target the caller asked
+          // for, pinned to the owner the policy was judged on: a re-resolution
+          // that observes the account under a different wallet must not be
+          // silently adopted into the transaction.
           expect(mintToSpy.mock.calls[0][0]).toMatchObject({
             destination: tokenAccount.address,
+            expectedOwner: owner.address,
           });
+
+          // Approval details keep the owner as the wallet-level destination
+          // but also expose the exact account the mint credits.
+          const operation = await getDb(env)
+            .prepare(
+              `SELECT raw_payload->'context'->>'destinationTokenAccount' AS account
+               FROM wallet_operations
+               WHERE operation_type = 'issuance_mint_execute'
+               ORDER BY created_at DESC LIMIT 1`
+            )
+            .first<{ account: string | null }>();
+          expect(operation?.account).toBe(tokenAccount.address);
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();

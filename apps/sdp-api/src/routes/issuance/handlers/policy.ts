@@ -54,6 +54,14 @@ export function buildIssuancePolicyCandidate(input: {
   operationType: IssuancePolicyOperationType;
   amount: string | null;
   destination: string | null;
+  /**
+   * Token-account address the operation credits, when that is not the
+   * destination wallet's derived ATA (an existing token-account mint
+   * destination). Kept separate from `destination` so wallet-level rules keep
+   * matching the owner wallet while approval details still show the exact
+   * account that receives the funds.
+   */
+  destinationTokenAccount?: string;
 }): PolicyCandidate {
   return {
     organizationId: input.auth.organizationId,
@@ -72,6 +80,9 @@ export function buildIssuancePolicyCandidate(input: {
       tokenId: input.token.id,
       tokenSymbol: input.token.symbol,
       mintAddress: input.token.mintAddress,
+      ...(input.destinationTokenAccount
+        ? { destinationTokenAccount: input.destinationTokenAccount }
+        : {}),
     },
     providerExtensions: {},
   };

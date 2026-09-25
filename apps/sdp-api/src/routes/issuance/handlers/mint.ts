@@ -542,6 +542,10 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     amount: mosaicAmount,
     mintAuthority,
     feePayer: signer.address,
+    // Same owner-pinning as the execute route: the checks above ran against the
+    // owner resolved at the top of this handler, so the built transaction must
+    // not silently adopt an owner the destination picked up in between.
+    expectedOwner: resolvedDestination.owner,
   });
 
   let simulation: unknown;
@@ -774,7 +778,11 @@ export async function extractMintPolicyCandidate(
       walletId: providerWalletId,
       operationType: "issuance_mint_execute",
       amount: input.mint.amount,
+      // Wallet-level policy keeps keying on the owner, but approval details
+      // must also show the exact account the MintTo credits — for an existing
+      // token-account destination that is the raw account, not just the owner.
       destination: resolvedDestination.owner,
+      destinationTokenAccount: resolvedDestination.tokenAccount,
     }),
     legs: [],
     body: input,
@@ -927,6 +935,10 @@ export const executeMint = async (c: AppContext) => {
         amount: mosaicAmount,
         mintAuthority: signer.address,
         feePayer: signer.address,
+        // The policy above was judged on the owner the destination resolved to
+        // at extraction time; refuse to build the mint if the account has
+        // changed hands since.
+        expectedOwner: destinationOwner,
       },
       async () => {
         reservedSupply = await reserveMintSupplyAtApprovedEffectBoundary(

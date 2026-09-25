@@ -679,6 +679,7 @@ export class MosaicService {
       amount: options.amount,
       mintAuthority: this.signer, // mint authority as TransactionSigner
       feePayer,
+      expectedOwner: options.expectedOwner,
     });
     const result = await this.signAndSubmit(fullTx, onBeforeSubmit);
 
@@ -704,6 +705,7 @@ export class MosaicService {
       amount: options.amount,
       mintAuthority: options.mintAuthority, // Just the address for prepare mode
       feePayer,
+      expectedOwner: options.expectedOwner,
     });
 
     return {
@@ -724,6 +726,10 @@ export class MosaicService {
    * raw account address and emit an ATA create the ATA program rejects. The
    * custom build thaws under the parsed owner wallet and mints directly to
    * the account.
+   *
+   * When `options.expectedOwner` is provided, the re-resolution here must still
+   * name the same owner wallet the caller authorized; a destination that has
+   * changed hands is rejected before any instruction is built.
    */
   private async buildMintToTransaction(options: {
     mint: Address;
@@ -731,6 +737,7 @@ export class MosaicService {
     amount: MintToOptions["amount"];
     mintAuthority: Address | TransactionSigner;
     feePayer: Address | TransactionSigner;
+    expectedOwner?: MintToOptions["expectedOwner"];
   }): Promise<{ fullTx: FullTransaction; tokenAccount: Address }> {
     const resolved = await resolveMintDestination(
       this.rpc,
@@ -738,6 +745,17 @@ export class MosaicService {
       options.mint,
       this.invalidArgumentError
     );
+
+    // The caller authorized this mint for the owner the destination resolved
+    // to at policy time. Re-resolving the account here can observe a different
+    // owner (the account changed hands, or an account appeared at what policy
+    // saw as a wallet); rejecting keeps the transaction keyed on the owner the
+    // mint was actually approved for.
+    if (options.expectedOwner && resolved.owner !== options.expectedOwner) {
+      throw this.invalidArgumentError(
+        `Mint destination ${options.destination} is owned by ${resolved.owner} but the mint was authorized for owner ${options.expectedOwner}`
+      );
+    }
 
     if (!resolved.destinationIsTokenAccount) {
       const fullTx = await createMintToTransaction(

@@ -865,6 +865,7 @@ describe("MosaicService mint-to — existing token-account destinations", () => 
       amount: 5,
       mintAuthority,
       feePayer,
+      expectedOwner: owner,
     });
 
     expect(result.tokenAccount).toBe(tokenAccount);
@@ -906,5 +907,32 @@ describe("MosaicService mint-to — existing token-account destinations", () => 
         tokenAccountOwner: owner,
       })
     );
+  });
+
+  it("rejects a token account whose owner changed since the mint was authorized", async () => {
+    // The handler authorized the mint for the owner it resolved at policy
+    // time; the account has since changed hands to a different wallet.
+    const changedOwner = (await Kit.generateKeyPairSigner()).address;
+
+    const error = await service
+      .prepareMintTo({
+        mint,
+        destination: tokenAccount,
+        amount: 5,
+        mintAuthority,
+        feePayer,
+        expectedOwner: changedOwner,
+      })
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("BAD_REQUEST");
+    // Rejected before anything was built: the SDK builder never ran and no
+    // instruction referencing the account was assembled.
+    expect(sdkMintBuilderSpy).not.toHaveBeenCalled();
+    expect(capturedInstructions).toHaveLength(0);
   });
 });
