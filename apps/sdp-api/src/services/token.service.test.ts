@@ -492,10 +492,11 @@ describe("TokenService", () => {
 
       const row = await storedSupply("tok_cap_refresh_inflight");
       expect(row?.total_supply_cached).toBe("600000000");
-      // A chain reading was taken even though the cache holds reservations above
-      // the figure it read — and the stamp is what settled-burn bookkeeping
-      // trusts to mean the chain was re-observed, so it moves.
-      expect(row?.total_supply_updated_at).not.toBe(before?.total_supply_updated_at);
+      // The hold left the figure exactly as it was, so the reading absorbed
+      // nothing into the cache: settled-burn bookkeeping reads the stamp as
+      // "the chain was re-observed", and a burn that settles after this
+      // reading still owes its own decrement.
+      expect(row?.total_supply_updated_at).toBe(before?.total_supply_updated_at);
       await expect(
         tokenService.reserveMintSupply("tok_cap_refresh_inflight", "600000000")
       ).resolves.toBeNull();
@@ -687,6 +688,67 @@ describe("TokenService", () => {
       // ...so the settled burn's bookkeeping subtracts the burn it still owes.
       await tokenService.applySettledBurnSupply(transactionId, tokenId, "250");
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("750000000");
+      expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
+    });
+
+    it("still subtracts a settled burn the held reconciliation did not absorb", async () => {
+      // A burn admitted before a refresh but settled after it is not inside the
+      // figure that refresh read. When in-flight mints hold the cache at the
+      // figure it already had, the hold changed nothing and absorbed nothing —
+      // so the stamp must stay on the burn's admission baseline and the burn's
+      // bookkeeping must subtract the decrement the cache still owes. Treating
+      // the held refresh as a reconciliation would skip the decrement and leave
+      // the cache high, denying valid mint headroom until a separate refresh.
+      const tokenId = "tok_cap_held_refresh_burn_subtract";
+      const transactionId = "ttx_cap_held_refresh_burn_subtract";
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", "2000000000");
+      await tokenService.reserveMintSupply(tokenId, "600000000");
+      // The stamp the burn reads when it is admitted: the one the reservation set.
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, serialized_tx, operation_params,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, 'mint', 'pending', NULL, ?, ?, ?)`
+        )
+        .bind(
+          `txn_${tokenId}_pending_executed_0`,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "600" }),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+
+      // The chain reading has not seen the burn (it settles afterward), and the
+      // in-flight mint holds the cache exactly where it was.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1600000000");
+      expect((await storedSupply(tokenId))?.total_supply_updated_at).toBe(baseline);
+
+      // So the settled burn's bookkeeping subtracts the decrement it still owes.
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1500000000");
       expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
     });
 

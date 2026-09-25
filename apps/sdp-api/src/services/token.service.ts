@@ -2175,6 +2175,13 @@ export class TokenService {
    * that already landed counts twice for the length of the window (once in the
    * chain total, once as its row); the floor is deliberately an upper bound, and
    * the excess falls away as rows settle or age out.
+   *
+   * The stamp moves only when the reading actually changed the figure. A hold
+   * that leaves the figure as it was absorbed nothing — a burn admitted before
+   * the reading but settled after it still owes its decrement — while a figure
+   * that came down to the reading or the floor took the settled effects the
+   * chain had already applied, including any burn whose bookkeeping had not run
+   * yet. Settled-burn bookkeeping reads that off `total_supply_updated_at`.
    */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
@@ -2218,7 +2225,11 @@ export class TokenService {
          )
          UPDATE issued_tokens
          SET total_supply_cached = resolved.supply::text,
-             total_supply_updated_at = ?,
+             total_supply_updated_at = CASE
+               WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                 THEN issued_tokens.total_supply_updated_at
+               ELSE ?
+             END,
              updated_at = ?
          FROM resolved
          WHERE issued_tokens.id = ?${tenantWrite.clause}
@@ -2247,10 +2258,14 @@ export class TokenService {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    // Held above the reading, so the figure on screen is SDP's own count — the
-    // stamp still moves, because a reading was taken: settled-burn bookkeeping
-    // trusts it to mean a refresh re-observed the chain, and the next refresh
-    // past the window is what finishes the reconciliation.
+    // Held above the reading, so the figure on screen is SDP's own count. The
+    // stamp only moves when the reading actually changed the figure: a hold
+    // that leaves the figure as it was absorbed nothing, and a burn admitted
+    // before the reading but settled after it must still subtract its own
+    // decrement. The stamp is what settled-burn bookkeeping trusts to mean the
+    // chain was re-observed — moving it on an unchanged hold would make that
+    // burn skip the one decrement the cache still owes, and the next refresh
+    // past the window would be the only thing that finished its reconciliation.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {
