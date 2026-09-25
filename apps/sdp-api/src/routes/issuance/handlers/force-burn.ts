@@ -190,7 +190,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
         "Approved force-burn execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (transaction.status === "confirmed" || transaction.status === "finalized") {
       await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.forceBurn.amount);
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
@@ -267,7 +267,7 @@ export const executeForceBurn = async (c: ValidatedBodyContext<typeof forceBurnS
         "Approved force-burn execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (transaction.status === "confirmed" || transaction.status === "finalized") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.forceBurn.amount);
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });

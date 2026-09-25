@@ -1540,7 +1540,7 @@ export class TokenService {
         throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
       }
       if (row.lifecycle_bookkeeping_applied_at !== null) {
-        if (row.status !== "confirmed") {
+        if (row.status !== "confirmed" && row.status !== "finalized") {
           throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
         }
         return;
@@ -1555,7 +1555,7 @@ export class TokenService {
            FROM issuance_transactions newer
            WHERE newer.token_id = ?
              AND newer.type IN ('pause', 'unpause')
-             AND newer.status = 'confirmed'
+             AND newer.status IN ('confirmed', 'finalized')
              AND (
                newer.slot > ?
                OR (newer.slot = ? AND newer.created_at > ?)
@@ -1632,7 +1632,7 @@ export class TokenService {
            FROM issuance_transactions
            WHERE token_id = ?
              AND type IN ('pause', 'unpause')
-             AND status = 'confirmed'
+             AND status IN ('confirmed', 'finalized')
              AND slot > ?
            LIMIT 1`
         )
@@ -1714,7 +1714,7 @@ export class TokenService {
         .first<FrozenAccountRow>();
 
       if (row.lifecycle_bookkeeping_applied_at !== null) {
-        if (row.status !== "confirmed" || !existing) {
+        if ((row.status !== "confirmed" && row.status !== "finalized") || !existing) {
           throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
         }
         return this.mapRowToFrozenAccount(existing);
@@ -1735,7 +1735,7 @@ export class TokenService {
            FROM issuance_transactions newer
            WHERE newer.token_id = ?
              AND newer.type IN ('freeze', 'unfreeze')
-             AND newer.status = 'confirmed'
+             AND newer.status IN ('confirmed', 'finalized')
              AND COALESCE(
                newer.operation_params::jsonb ->> 'tokenAccountAddress',
                newer.operation_params::jsonb ->> 'accountAddress'
@@ -1796,7 +1796,7 @@ export class TokenService {
     row: { status: string; signature: string | null; slot: number | null },
     now: string
   ): Promise<void> {
-    if (row.status === "confirmed") {
+    if (row.status === "confirmed" || row.status === "finalized") {
       if (row.slot === null) throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_LIFECYCLE");
       return;
     }
@@ -1918,7 +1918,11 @@ export class TokenService {
           authority_bookkeeping_applied_at: string | null;
         }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
-      if (row.type !== "update_authority" || row.status !== "confirmed" || row.slot === null) {
+      if (
+        row.type !== "update_authority" ||
+        (row.status !== "confirmed" && row.status !== "finalized") ||
+        row.slot === null
+      ) {
         throw new Error("TOKEN_TRANSACTION_NOT_SETTLED_AUTHORITY");
       }
       if (row.authority_bookkeeping_applied_at !== null) return;
@@ -1934,7 +1938,7 @@ export class TokenService {
            FROM issuance_transactions newer
            WHERE newer.token_id = ?
              AND newer.type = 'update_authority'
-             AND newer.status = 'confirmed'
+             AND newer.status IN ('confirmed', 'finalized')
              AND newer.operation_params::jsonb ->> 'role' = ?
              AND (
                newer.slot > ?

@@ -12,24 +12,17 @@ export function createPostgresIssuanceTransactionsRepository(
   db: DatabaseExecutor
 ): IssuanceTransactionsRepository {
   return {
-    async listConfirmedTransactionsToPoll({ confirmedAfter, limit }) {
+    async listConfirmedTransactionsToPoll({ limit }) {
       const rows = await db
         .prepare(
           `SELECT it.id, it.organization_id, it.signature, it.slot
            FROM issuance_transactions it
            WHERE it.status = 'confirmed'
              AND it.signature IS NOT NULL
-             AND COALESCE(
-                   (SELECT MAX(st.changed_at)
-                      FROM issuance_transaction_statuses st
-                     WHERE st.transaction_id = it.id
-                       AND st.status = 'confirmed'),
-                   it.updated_at
-                 ) > ?
            ORDER BY it.finalization_last_polled_at ASC NULLS FIRST, it.id ASC
            LIMIT ?`
         )
-        .bind(confirmedAfter, limit)
+        .bind(limit)
         .all<IssuanceTransactionPollRow>();
 
       return rows.results.map((row) => ({
@@ -42,14 +35,17 @@ export function createPostgresIssuanceTransactionsRepository(
 
     async advanceConfirmedTransactions({ polled, updatedAt }) {
       if (polled.length === 0) {
-        return;
+        return { advancedTransactionIds: [] };
       }
 
       // One statement so the history append sees exactly the rows this
-      // statement advanced: the guarded UPDATE returns them, and a concurrent
-      // tick that already finalized a row makes this a no-op for it instead of
-      // duplicating its status history.
-      await db
+      // statement advanced: the guarded UPDATE returns each row with its
+      // post-update status, and the history insert filters on it — a polled
+      // row the cluster still reports provisional only rotates its poll
+      // stamp and never gains a false terminal history entry, and a
+      // concurrent tick that already finalized a row makes this a no-op for
+      // it instead of duplicating its status history.
+      const result = await db
         .prepare(
           `WITH advanced AS (
              UPDATE issuance_transactions AS it
@@ -61,11 +57,13 @@ export function createPostgresIssuanceTransactionsRepository(
               WHERE it.id = v.id
                 AND it.organization_id = v.organization_id
                 AND it.status = 'confirmed'
-              RETURNING it.id
+              RETURNING it.id, it.status AS final_status
            )
            INSERT INTO issuance_transaction_statuses (id, transaction_id, status, changed_at)
            SELECT 'its_' || replace(gen_random_uuid()::text, '-', ''), a.id, 'finalized', ?
-           FROM advanced a`
+           FROM advanced a
+           WHERE a.final_status = 'finalized'
+           RETURNING transaction_id`
         )
         .bind(
           updatedAt,
@@ -80,7 +78,11 @@ export function createPostgresIssuanceTransactionsRepository(
           ),
           updatedAt
         )
-        .run();
+        .all<{ transaction_id: string }>();
+
+      return {
+        advancedTransactionIds: result.results.map((row) => row.transaction_id),
+      };
     },
   };
 }

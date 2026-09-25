@@ -178,7 +178,7 @@ async function updateAuthorityReplayResponse(
     "tokenId" | "tokenService" | "role" | "newAuthority" | "replay"
   >
 ) {
-  if (resolved.replay.status === "confirmed") {
+  if (resolved.replay.status === "confirmed" || resolved.replay.status === "finalized") {
     await resolved.tokenService.applySettledTokenAuthority(
       resolved.replay.id,
       resolved.tokenId,

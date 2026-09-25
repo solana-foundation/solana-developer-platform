@@ -163,6 +163,13 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
       ["itx_fin_pending"]
     );
     expect(unified?.status).toBe("pending");
+    // A provisional poll only rotates the poll stamp: it must never write a
+    // terminal `finalized` history entry for a row that did not advance.
+    const history = await getDb(env).queryMany<{ status: string }>(
+      `SELECT status FROM issuance_transaction_statuses WHERE transaction_id = ? ORDER BY changed_at`,
+      ["itx_fin_pending"]
+    );
+    expect(history.map((entry) => entry.status)).toEqual(["confirmed"]);
   });
 
   it("never introduces a failure status for a confirmed transaction the chain reports as errored", async () => {
@@ -179,18 +186,45 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
     await expect(getTransaction("itx_fin_err")).resolves.toMatchObject({ status: "confirmed" });
   });
 
-  it("leaves transactions beyond the finalization window unpolling", async () => {
-    await seedConfirmedTransaction({ id: "itx_fin_stale", confirmedMinutesAgo: 25 * 60 });
+  it("polls rows confirmed long before the tick — the finality-verified recovery path", async () => {
+    // No age cutoff: rows confirmed before this reconciler deployed, or
+    // stranded by an outage, stay in the least-recently-polled queue until
+    // the cluster verifies their finality — the unified ledger reads them as
+    // provisional until then.
+    await seedConfirmedTransaction({ id: "itx_fin_old", confirmedMinutesAgo: 25 * 60 });
     await seedConfirmedTransaction({ id: "itx_fin_fresh", confirmedMinutesAgo: 5 });
+    getSignatureStatusesMock.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => statusOf("finalized"))
+    );
 
-    await finalizeConfirmedIssuanceTransactions(env);
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 2,
+      finalized: 2,
+    });
 
-    expect(getSignatureStatusesMock).toHaveBeenCalledTimes(1);
-    const polledSignatures = getSignatureStatusesMock.mock.calls[0][1] as string[];
-    expect(polledSignatures).toHaveLength(1);
-    await expect(getTransaction("itx_fin_stale")).resolves.toMatchObject({
+    await expect(getTransaction("itx_fin_old")).resolves.toMatchObject({
+      status: "finalized",
+      finalization_last_polled_at: expect.any(String),
+    });
+    await expect(getTransaction("itx_fin_fresh")).resolves.toMatchObject({
+      status: "finalized",
+    });
+  });
+
+  it("reports a failed RPC read as a failed tick while still rotating the page", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_rpc", confirmedMinutesAgo: 5 });
+    getSignatureStatusesMock.mockImplementation(async () => {
+      throw new Error("rpc unreachable");
+    });
+
+    await expect(finalizeConfirmedIssuanceTransactions(env)).rejects.toThrow("rpc unreachable");
+
+    // The page still rotated, so a sustained outage cannot pin rows at the
+    // front of the queue — but the tick itself failed, so monitoring sees the
+    // reconciliation stall instead of a healthy pass.
+    await expect(getTransaction("itx_fin_rpc")).resolves.toMatchObject({
       status: "confirmed",
-      finalization_last_polled_at: null,
+      finalization_last_polled_at: expect.any(String),
     });
   });
 });

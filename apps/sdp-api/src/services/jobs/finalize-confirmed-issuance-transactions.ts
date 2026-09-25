@@ -16,11 +16,13 @@
  * finalizes (~30s) and leaves the node's short recent-status cache before the
  * next tick on the managed five-minute cadence; without it every confirmed
  * row would read null forever. One page per tick as a least-recently-polled
- * queue (finalization_last_polled_at, never-polled first), so stuck rows
- * cannot starve the rows behind them. Past CONFIRMED_FINALIZATION_WINDOW_MS
- * (anchored on when the row actually reached confirmed) a still-confirmed row
- * ages out of the poll and rests at confirmed instead of costing an RPC
- * history search forever.
+ * queue (finalization_last_polled_at, never-polled first) over every
+ * confirmed row — there is no age cutoff, because the queue is the only
+ * finality-verified recovery path for rows confirmed before this reconciler
+ * deployed or stranded by an outage, and the unified ledger reads them as
+ * provisional until the cluster verifies finality. A failed RPC read rotates
+ * the page and rethrows, so the tick reports failure instead of an outage
+ * silently aging rows out of reconciliation.
  */
 
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";
@@ -36,10 +38,6 @@ import type { Env } from "@/types/env";
 
 // getSignatureStatuses accepts at most 256 signatures per call.
 const MAX_SIGNATURES_PER_BATCH = 256;
-// A confirmed transaction finalizes within ~30s or never (fork, ledger reset);
-// past this window a still-confirmed row ages out of the finalization poll and
-// rests at confirmed.
-const CONFIRMED_FINALIZATION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface IssuanceFinalizationStats {
   polled: number;
@@ -78,9 +76,7 @@ export async function finalizeConfirmedIssuanceTransactions(
   env: Env
 ): Promise<IssuanceFinalizationStats> {
   const repo = createSystemIssuanceTransactionsRepository(env);
-  const windowFloor = new Date(Date.now() - CONFIRMED_FINALIZATION_WINDOW_MS).toISOString();
   const candidates = await repo.listConfirmedTransactionsToPoll({
-    confirmedAfter: windowFloor,
     limit: MAX_SIGNATURES_PER_BATCH,
   });
   if (candidates.length === 0) {
@@ -128,7 +124,10 @@ export async function finalizeConfirmedIssuanceTransactions(
       ],
       updatedAt: now,
     });
-    return { polled: candidates.length, finalized: 0 };
+    // The poll stamps are committed, so the page rotates to the back of the
+    // queue, but the tick still reports failure: an outage must show up as
+    // failed reconciliation runs instead of silently passing while rows wait.
+    throw error;
   }
 
   if (statuses.length !== valid.length) {
@@ -155,19 +154,26 @@ export async function finalizeConfirmedIssuanceTransactions(
     }),
   ];
 
-  await repo.advanceConfirmedTransactions({ polled, updatedAt: now });
+  const { advancedTransactionIds } = await repo.advanceConfirmedTransactions({
+    polled,
+    updatedAt: now,
+  });
 
-  const finalized = polled.filter((row) => row.finalized);
-  for (const row of finalized) {
+  // Report and log only the rows the guarded statement actually advanced: a
+  // concurrent tick can finalize the same row first, and this tick's verdict
+  // must not overstate what changed.
+  const advancedVerdicts = new Map(polled.map((row) => [row.id, row]));
+  for (const id of advancedTransactionIds) {
+    const row = advancedVerdicts.get(id);
     getLogger().info(
       {
-        transaction_id: row.id,
-        organization_id: row.organizationId,
+        transaction_id: id,
+        organization_id: row?.organizationId,
       },
       "finalizeConfirmedIssuanceTransactions: issuance transaction finalized"
     );
   }
-  return { polled: polled.length, finalized: finalized.length };
+  return { polled: polled.length, finalized: advancedTransactionIds.length };
 }
 
 function partitionByValidStoredSignature(rows: ConfirmedIssuanceTransactionRow[]): {

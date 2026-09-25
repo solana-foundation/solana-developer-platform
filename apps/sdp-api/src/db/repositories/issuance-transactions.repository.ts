@@ -27,16 +27,16 @@ export interface ConfirmedIssuanceTransactionVerdict {
 export interface IssuanceTransactionsRepository {
   /**
    * Lists the page of confirmed issuance transactions whose finality should be
-   * polled, least-recently-polled first. Confirmed-at anchors the
-   * finalization-eligibility window on when the row actually reached
-   * confirmed (from the status history, falling back to updated_at), so an
-   * outage longer than the window cannot strand rows that confirmed late.
+   * polled, least-recently-polled first. There is no age cutoff: rows
+   * confirmed before this reconciler deployed, or stranded by an outage
+   * longer than any window, stay in the queue until the cluster verifies
+   * their finality — the unified ledger reads them as provisional until then,
+   * so polling is the only finality-verified recovery path.
    *
-   * @param params - Window floor and page size.
+   * @param params - Page size.
    * @returns The next page of the finalization poll queue.
    */
   listConfirmedTransactionsToPoll(params: {
-    confirmedAfter: string;
     limit: number;
   }): Promise<ConfirmedIssuanceTransactionRow[]>;
 
@@ -45,16 +45,19 @@ export interface IssuanceTransactionsRepository {
    * transactions in one guarded statement: every polled row gets
    * finalization_last_polled_at stamped (rotating it to the back of the
    * queue), while only rows the cluster reported finalized advance — and only
-   * while still confirmed. A concurrent writer that already advanced a row
-   * makes this a no-op for it; the transition is upgrade-only and never
+   * while still confirmed. Status history is appended for the rows actually
+   * advanced to finalized and nothing else: a provisional poll never writes
+   * a terminal history entry. A concurrent writer that already advanced a
+   * row makes this a no-op for it; the transition is upgrade-only and never
    * introduces a failure status for a row whose funds were already observed.
    *
    * @param params - The page's verdicts and the poll timestamp.
+   * @returns The ids of the transactions this statement advanced.
    */
   advanceConfirmedTransactions(params: {
     polled: ConfirmedIssuanceTransactionVerdict[];
     updatedAt: string;
-  }): Promise<void>;
+  }): Promise<{ advancedTransactionIds: string[] }>;
 }
 
 export interface IssuanceTransactionsRepositoryContext {

@@ -34,6 +34,11 @@ import {
   recoverSettledTransactionReplay,
 } from "./settled-transaction";
 
+/** A settled issuance operation is one whose supply/status bookkeeping can replay. */
+function hasSettledStatus(transaction: { status: string }): boolean {
+  return transaction.status === "confirmed" || transaction.status === "finalized";
+}
+
 export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -83,7 +88,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
         "Approved pause-state execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (hasSettledStatus(transaction)) {
       await tokenService.applySettledTokenStatus(transaction.id, tokenId, "paused");
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
@@ -147,7 +152,7 @@ export const pauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSchema
         "Approved pause-state execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (hasSettledStatus(transaction)) {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "paused");
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
@@ -277,7 +282,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
         "Approved pause-state execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (hasSettledStatus(transaction)) {
       await tokenService.applySettledTokenStatus(transaction.id, tokenId, "active");
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
@@ -341,7 +346,7 @@ export const unpauseToken = async (c: ValidatedBodyContext<typeof pauseTokenSche
         "Approved pause-state execution is incomplete and requires manual reconciliation"
       );
     }
-    if (transaction.status === "confirmed") {
+    if (hasSettledStatus(transaction)) {
       await tokenService.applySettledTokenStatus(tx.id, tokenId, "active");
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
