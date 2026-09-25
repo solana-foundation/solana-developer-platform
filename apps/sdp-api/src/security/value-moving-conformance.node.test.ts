@@ -365,7 +365,7 @@ const contracts: ValueMovingContract[] = [
     authorization: {
       file: "apps/sdp-api/src/routes/payments/ramps/onramp/index.ts",
       section: '"/quote",',
-      before: "policyGate({ extract: extractOnrampQuotePolicyCandidate })",
+      before: "extract: extractOnrampQuotePolicyCandidate",
       after: "\n  createOnrampQuote\n",
     },
     replay: [

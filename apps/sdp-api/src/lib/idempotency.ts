@@ -189,6 +189,34 @@ function transferBatchFingerprint(
 export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
   transferBatchFingerprint(input, input.sourceCustodyWalletId);
 
+export interface RampQuoteFingerprintInput {
+  direction: "onramp" | "offramp";
+  /** The resolved custody wallet the quote is bound to. */
+  custodyWalletId: string;
+  /** The validated quote request body. */
+  request: Record<string, unknown>;
+}
+
+/**
+ * Fingerprint for a keyed ramp quote.
+ *
+ * The whole validated body is load-bearing: every field changes the operation
+ * the caller committed to (provider, counterparty, rail, amounts, memo,
+ * provider-specific options), so a key replayed with any changed field is a
+ * different request and must 409 rather than silently replay the first quote.
+ * `custodyWalletId` is the resolved internal wallet, so a key replayed by a
+ * caller who resolves a different wallet is refused for the same reason.
+ */
+export const buildRampQuoteFingerprint = (input: RampQuoteFingerprintInput): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "ramp_quote",
+      direction: input.direction,
+      custodyWalletId: input.custodyWalletId,
+      request: input.request,
+    })
+  );
+
 export interface EarnVaultDepositFingerprintInput {
   environment: string;
   provider: string;

@@ -87,11 +87,15 @@ export interface RampWizardConfig<TId extends string = string> {
 async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
+  idempotencyKey: string | null,
   t: Translate
 ): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey === null ? {} : { "Idempotency-Key": idempotencyKey }),
+    },
     body: JSON.stringify(payload),
   });
   const body = (await response.json().catch(() => ({}))) as {
@@ -281,7 +285,8 @@ export function useRampWizard<TId extends string>(
   const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteForCurrentSelection = async (
-    providerAccountId: string | null
+    providerAccountId: string | null,
+    idempotencyKey: string | null
   ): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
@@ -302,15 +307,31 @@ export function useRampWizard<TId extends string>(
         selectedPayoutAccount: requirements.selectedPayoutAccount,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
+      idempotencyKey,
       t
     );
     setCreatedQuote(created);
     return created;
   };
 
+  // One stable operation key per committed quote selection, retained across
+  // response loss, a malformed response, and the explicit Try Again: the API
+  // replays a keyed quote instead of minting a second provider session and
+  // transfer row for the same operation. A deliberate re-quote (an expiring
+  // provider session) is a NEW operation and mints a fresh key.
+  const quoteOperationKeyRef = useRef<string | null>(null);
+  const mintQuoteOperationKey = () => {
+    const key = `ramp-quote-${crypto.randomUUID()}`;
+    quoteOperationKeyRef.current = key;
+    return key;
+  };
+
   const refreshQuote = async () => {
     try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
+      await createQuoteForCurrentSelection(
+        requirements.selectedProviderAccountId,
+        mintQuoteOperationKey()
+      );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         description:
@@ -333,7 +354,12 @@ export function useRampWizard<TId extends string>(
   const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(providerAccountId);
+      await createQuoteForCurrentSelection(
+        providerAccountId,
+        // Retries of the committed selection reuse the operation key the first
+        // attempt minted; only the very first attempt mints one.
+        quoteOperationKeyRef.current ?? mintQuoteOperationKey()
+      );
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));

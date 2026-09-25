@@ -203,6 +203,19 @@ export interface PaymentsRepository {
     projectId: string | null;
     idempotencyKey: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Releases a failed keyed quote's Idempotency-Key so a retry can run fresh.
+   * The CAS on `status = 'failed'` and the key value means only the provably
+   * failed row the caller resolved is freed; any concurrent state move makes
+   * the write match zero rows and returns null.
+   */
+  clearTransferIdempotencyKey(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    idempotencyKey: string;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   updateTransfer(input: UpdatePaymentTransferInput): Promise<PaymentTransferRow | null>;
   persistSignedTransfer(input: {
     transferId: string;

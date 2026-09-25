@@ -75,7 +75,7 @@ import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-import { rampQuoteCryptoDepositProviderData } from "../quote-binding";
+import { rampQuoteCryptoDepositProviderData, throwRampQuoteKeyConflict } from "../quote-binding";
 
 const BVNK_UNRESOLVED_CONSENT_IP = "0.0.0.0";
 
@@ -107,36 +107,45 @@ export async function createPendingBvnkOfframpTransfer(
     cryptoAmount: string;
     fiatCurrency: RampFiatCurrency;
     rampsMemo: Record<string, string> | undefined;
+    idempotencyKey?: string | null;
+    idempotencyFingerprint?: string | null;
   }
 ): Promise<PaymentTransferRow> {
   const apiKey = c.get("apiKey");
-  const created = await getPaymentsRepository(c).createTransfer({
-    id: input.transferId,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    custodyWalletId: input.custodyWalletId,
-    walletId: input.walletId,
-    counterpartyId: input.counterpartyId,
-    sourceAddress: input.walletAddress,
-    destinationAddress: null,
-    token: rampTransferTokenMint(input.assetRail, c.env),
-    amount: input.cryptoAmount,
-    memo: null,
-    type: "offramp",
-    direction: "outbound",
-    status: "pending",
-    provider: "bvnk",
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: input.fiatCurrency,
-    fiatAmount: null,
-    rampsMemo: input.rampsMemo,
-    providerData: { bvnk: {} },
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: apiKey ? apiKey.id : null,
-  });
+  let created: PaymentTransferRow | null;
+  try {
+    created = await getPaymentsRepository(c).createTransfer({
+      id: input.transferId,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.custodyWalletId,
+      walletId: input.walletId,
+      counterpartyId: input.counterpartyId,
+      sourceAddress: input.walletAddress,
+      destinationAddress: null,
+      token: rampTransferTokenMint(input.assetRail, c.env),
+      amount: input.cryptoAmount,
+      memo: null,
+      type: "offramp",
+      direction: "outbound",
+      status: "pending",
+      provider: "bvnk",
+      providerReference: null,
+      deliveryMode: null,
+      fiatCurrency: input.fiatCurrency,
+      fiatAmount: null,
+      rampsMemo: input.rampsMemo,
+      providerData: { bvnk: {} },
+      serializedTx: null,
+      signature: null,
+      slot: null,
+      initiatedByKeyId: apiKey ? apiKey.id : null,
+      idempotencyKey: input.idempotencyKey ?? null,
+      idempotencyFingerprint: input.idempotencyFingerprint ?? null,
+    });
+  } catch (error) {
+    throwRampQuoteKeyConflict(error);
+  }
   if (!created) {
     throw internalError("Failed to create ramp transfer record");
   }
