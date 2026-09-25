@@ -111,7 +111,8 @@ export async function reclaimDvpTradeLeg(
   await refuseTransferHookMint(rpc, trade.id, mint);
 
   const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-  const receipt = await takeoverableReceipt(claims, rpc, trade.id, side);
+  const takeover = await takeoverableReceipt(claims, rpc, trade.id, side);
+  const receipt = takeover?.receipt ?? null;
 
   const signer = await createOrgSignerForCustodyWallet(
     env,
@@ -183,6 +184,15 @@ export async function reclaimDvpTradeLeg(
     throw conflict(`DvP trade ${trade.id}: this leg is already being moved; nothing was sent`, {
       reason: DVP_LEG_REFUSAL.legFundingInProgress,
     });
+  }
+
+  // The chain read proved the taken-over funding moved nothing, so its receipt
+  // recorded no funding and must not stand as one in the unified feed (the
+  // reconciler's expired-receipt sweep can no longer reach it: the claim row it
+  // read is gone). A receipt whose transfer LANDED stays — it is the leg's
+  // funding evidence, and the reclaim draining the escrow does not un-happen it.
+  if (takeover?.state === "moved_nothing") {
+    await claims.deleteFundingReceipt(trade.id, side, takeover.receipt);
   }
 
   // With the leg locked, a settle or cancel that starts now sees the lock and
@@ -321,7 +331,8 @@ async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) 
 }
 
 /**
- * The funding receipt a reclaim may take over, or null when the leg has no row.
+ * The funding receipt a reclaim may take over, and what the chain said it did,
+ * or null when the leg has no row.
  *
  * A funding row is either a lock (still being sent) or a receipt (`funding_tx`
  * set straight after broadcast, before anything confirms). Only a receipt whose
@@ -330,6 +341,8 @@ async function refuseTransferHookMint(rpc: Rpc, tradeId: string, mint: Address) 
  * and leaves that funding to land afterwards, re-funding the leg the caller was
  * just told was reclaimed.
  *
+ * @returns The receipt and its chain-classified state, or null when the leg had
+ *   no row.
  * @throws 409 `legFundingInProgress` while a funding on the leg can still land.
  */
 async function takeoverableReceipt(
@@ -337,7 +350,7 @@ async function takeoverableReceipt(
   rpc: Rpc,
   tradeId: string,
   side: DvpTradeSide
-): Promise<string | null> {
+): Promise<{ receipt: string; state: "landed" | "moved_nothing" } | null> {
   const existing = (await claims.listForTrade(tradeId)).find((row) => row.side === side);
   if (existing === undefined) {
     return null;
@@ -354,7 +367,11 @@ async function takeoverableReceipt(
       reason: DVP_LEG_REFUSAL.legFundingInProgress,
     });
   }
-  return existing.fundingTx;
+  const receipt = existing.fundingTx;
+  if (receipt === null) {
+    throw new Error("DvP funding receipt state resolved without a funding transaction");
+  }
+  return { receipt, state };
 }
 
 /**

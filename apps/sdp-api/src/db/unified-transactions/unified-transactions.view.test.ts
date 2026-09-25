@@ -161,13 +161,21 @@ async function seedDvp(status: string): Promise<string> {
              'destination-b', 'escrow-a', 'escrow-b', ?, '1', '2', '1', '2', 6, 6)`,
     [tradeId, TEST_ORG.id, PROJECT, `swap-${status}`, status]
   );
+  // The unified feed reads fund rows from the receipts table (0119), so a
+  // seeded claim that stands for a broadcast funding records one too.
   await getDb(env).execute(
     `INSERT INTO dvp_leg_funding_claims
-       (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
-     VALUES (?, 'a', ?, ?, ?, ?, '100')`,
+       (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height, funding_tx)
+     VALUES (?, 'a', ?, ?, ?, ?, '100', ?)`,
+    [tradeId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, `signature-${status}`, `signature-${status}`]
+  );
+  await getDb(env).execute(
+    `INSERT INTO dvp_leg_funding_receipts
+       (trade_id, side, organization_id, project_id, custody_wallet_id, signature)
+     VALUES (?, 'a', ?, ?, ?, ?)`,
     [tradeId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, `signature-${status}`]
   );
-  return `${tradeId}:fund:a`;
+  return `${tradeId}:fund:a:signature-${status}`;
 }
 
 async function seedRings(status: string): Promise<string> {
@@ -418,6 +426,11 @@ describe("unified_transactions view (postgres)", () => {
   it("projects base-unit amounts in token units and attributes DvP custody per side", async () => {
     const tradeId = "dvp_amount_units";
     await getDb(env).execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, status)
+       VALUES ('cwlt_unified_view_settlement', 'cfg_unified_view', 'wallet_unified_settlement',
+               'authority', 'active')`
+    );
+    await getDb(env).execute(
       `INSERT INTO dvp_trades
          (id, organization_id, project_id, swap_dvp, settlement_authority, user_a, user_b,
           mint_a, mint_b, nonce, token_program_a, token_program_b, amount_a, amount_b,
@@ -451,12 +464,14 @@ describe("unified_transactions view (postgres)", () => {
       {
         id: `${tradeId}:close:a`,
         amount: expect.stringMatching(/^1(?:\.0+)?$/),
-        custody_wallet_id: CUSTODY_WALLET,
+        // Both close rows were signed by the trade's settlement authority, so
+        // both name the authority's custody wallet — never the side funder's.
+        custody_wallet_id: "cwlt_unified_view_settlement",
       },
       {
         id: `${tradeId}:close:b`,
         amount: expect.stringMatching(/^2(?:\.0+)?$/),
-        custody_wallet_id: null,
+        custody_wallet_id: "cwlt_unified_view_settlement",
       },
     ]);
 

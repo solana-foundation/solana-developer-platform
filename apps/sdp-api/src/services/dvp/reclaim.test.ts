@@ -41,6 +41,7 @@ const rebindSignature = vi.hoisted(() => vi.fn());
 const hasClaim = vi.hoisted(() => vi.fn());
 const releaseClaim = vi.hoisted(() => vi.fn());
 const listForTrade = vi.hoisted(() => vi.fn());
+const deleteFundingReceipt = vi.hoisted(() => vi.fn());
 const readDvpFundingReceipt = vi.hoisted(() => vi.fn());
 const confirmTransaction = vi.hoisted(() => vi.fn());
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
@@ -70,6 +71,7 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
     hasClaim,
     listForTrade,
     release: releaseClaim,
+    deleteFundingReceipt,
   }),
 }));
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
@@ -162,6 +164,7 @@ describe("reclaimDvpTradeLeg", () => {
     rebindSignature.mockResolvedValue(true);
     hasClaim.mockResolvedValue(true);
     releaseClaim.mockResolvedValue(undefined);
+    deleteFundingReceipt.mockResolvedValue(undefined);
     prepareOwnedSubmission.mockImplementation(sponsor.prepareOwnedSubmission);
     createProjectSponsorshipFeePayment.mockResolvedValue({
       getFeePayer: async () => sponsor.address,
@@ -367,6 +370,13 @@ describe("reclaimDvpTradeLeg", () => {
         RECEIPT
       );
       expect(sendTransaction).toHaveBeenCalledTimes(1);
+      // A receipt the chain proved moved nothing is not funding history, so the
+      // takeover drops it; a landed funding's receipt is history and stays.
+      if (state === "moved_nothing") {
+        expect(deleteFundingReceipt).toHaveBeenCalledWith("dvp_reclaim_test", "a", RECEIPT);
+      } else {
+        expect(deleteFundingReceipt).not.toHaveBeenCalled();
+      }
     }
   );
 

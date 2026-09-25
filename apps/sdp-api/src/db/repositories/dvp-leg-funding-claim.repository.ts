@@ -1,11 +1,20 @@
 /**
- * The funding lock for a leg funded by somebody other than the trade's author.
+ * The funding lock for a leg funded by somebody other than the trade's author,
+ * and the leg's permanent funding history.
  *
  * Same compare-and-swap discipline as the columns on `dvp_trades` that 0080
  * added, with two differences that are the whole point of the table: the lock
  * is keyed by (trade, side) so two parties funding opposite legs never contend,
  * and the row belongs to the organization doing the funding so it stays inside
  * ordinary tenant isolation.
+ *
+ * The lock row is deliberately mutable — a rebind, a reclaim takeover, a
+ * release all rewrite or remove it — so the funding EVIDENCE lives in
+ * `dvp_leg_funding_receipts` (0119), written once per broadcast and never
+ * updated. `recordFundingTx` and `deleteBroadcastClaim` keep the two tables in
+ * step; nothing else may touch the receipt table, so the unified transaction
+ * feed's `fund` rows cannot be rewritten or withdrawn by a later lifecycle
+ * action on the lock (APE-695).
  */
 
 import { z } from "zod";
@@ -138,6 +147,15 @@ export interface DvpLegFundingClaimRepository {
    * @returns Whether this call now holds the leg.
    */
   claimForReclaim(input: DvpLegFundingClaimInsert, receipt: string | null): Promise<boolean>;
+  /**
+   * Deletes the funding receipt for a broadcast transfer the chain proved moved
+   * nothing.
+   *
+   * The receipt table (0119) is immutable history, so this is its only delete
+   * besides the reconciler's: evidence of a funding that settled nothing is not
+   * history. Guarded on the exact signature, like every release here.
+   */
+  deleteFundingReceipt(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
 }
 
 function toDvpLegFundingClaim(row: Record<string, unknown>): DvpLegFundingClaim {
@@ -223,14 +241,31 @@ export function createPostgresDvpLegFundingClaimRepository(
     },
 
     async recordFundingTx(tradeId, side, signature) {
-      await db
-        .prepare(
-          `UPDATE dvp_leg_funding_claims
-              SET funding_tx = ?, updated_at = sdp_iso_now()
-            WHERE trade_id = ? AND side = ? AND signature = ?`
-        )
-        .bind(signature, tradeId, side, signature)
-        .run();
+      // Two facts at once, in one transaction: the claim becomes a receipt
+      // (`funding_tx` set, which is what keeps the leg taken), and the funding
+      // gets its permanent receipt row (0119). The receipt row is what the
+      // unified transaction feed reads as a `fund` event, so it is written
+      // here, with the single writer of the funding lifecycle, and never
+      // updated again — a later reclaim or rebind may not rewrite history.
+      await db.batch([
+        db
+          .prepare(
+            `UPDATE dvp_leg_funding_claims
+                SET funding_tx = ?, updated_at = sdp_iso_now()
+              WHERE trade_id = ? AND side = ? AND signature = ?`
+          )
+          .bind(signature, tradeId, side, signature),
+        db
+          .prepare(
+            `INSERT INTO dvp_leg_funding_receipts
+               (trade_id, side, organization_id, project_id, custody_wallet_id, signature)
+             SELECT trade_id, side, organization_id, project_id, custody_wallet_id, ?
+               FROM dvp_leg_funding_claims
+              WHERE trade_id = ? AND side = ? AND signature = ?
+             ON CONFLICT (trade_id, side, signature) DO NOTHING`
+          )
+          .bind(signature, tradeId, side, signature),
+      ]);
     },
 
     async releaseExpired(blockHeight) {
@@ -346,10 +381,30 @@ export function createPostgresDvpLegFundingClaimRepository(
       // `funding_tx IS NOT NULL` keeps this from ever releasing an unbroadcast
       // lock: the caller decided on chain that THIS signature never landed,
       // and an unbroadcast claim was never checked against the chain at all.
+      // The receipt row goes with it: the chain proved the transfer moved
+      // nothing, so the receipt recorded no funding and must not stand as one
+      // in the unified feed.
+      await db.batch([
+        db
+          .prepare(
+            `DELETE FROM dvp_leg_funding_claims
+              WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NOT NULL`
+          )
+          .bind(tradeId, side, signature),
+        db
+          .prepare(
+            `DELETE FROM dvp_leg_funding_receipts
+              WHERE trade_id = ? AND side = ? AND signature = ?`
+          )
+          .bind(tradeId, side, signature),
+      ]);
+    },
+
+    async deleteFundingReceipt(tradeId, side, signature) {
       await db
         .prepare(
-          `DELETE FROM dvp_leg_funding_claims
-            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NOT NULL`
+          `DELETE FROM dvp_leg_funding_receipts
+            WHERE trade_id = ? AND side = ? AND signature = ?`
         )
         .bind(tradeId, side, signature)
         .run();

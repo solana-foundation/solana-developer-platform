@@ -238,6 +238,46 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(blocked).toBe(false);
   });
 
+  /**
+   * The receipt table (0119) is the funding history the unified feed reads. It
+   * is written once with the broadcast and then never rewritten: a rebind, a
+   * reclaim takeover, or a release may do anything to the LOCK row, but the
+   * funding evidence it produced cannot be reassigned or withdrawn.
+   */
+  it("records funding history once, and never lets the lock's lifecycle rewrite it", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+      const receipt = () =>
+        getDb(env).queryMany<{ signature: string; custody_wallet_id: string }>(
+          `SELECT signature, custody_wallet_id FROM dvp_leg_funding_receipts
+            WHERE trade_id = ? AND side = 'a'`,
+          [TRADE_ID]
+        );
+      expect(await receipt()).toEqual([
+        { signature: "sig_sent", custody_wallet_id: walletId(PARTY_A_ORG) },
+      ]);
+
+      // A rebroadcast under the same claim (idempotency retry) does not double.
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+      expect(await receipt()).toHaveLength(1);
+
+      // The reclaim takes the lock over and releases it; the receipt stands.
+      await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_sent");
+      await repo.release(TRADE_ID, "a", "sig_reclaim");
+      expect(await receipt()).toEqual([
+        { signature: "sig_sent", custody_wallet_id: walletId(PARTY_A_ORG) },
+      ]);
+
+      // Deleting the receipt needs the exact signature, and only the
+      // reconciler's moved-nothing path or reclaim's may do it.
+      await repo.deleteFundingReceipt(TRADE_ID, "a", "sig_other");
+      expect(await receipt()).toHaveLength(1);
+      await repo.deleteFundingReceipt(TRADE_ID, "a", "sig_sent");
+      expect(await receipt()).toEqual([]);
+    });
+  });
+
   // A reclaim takes the leg the way funding does, so the two can never be in
   // flight together; releasing it is what lets a reclaimed leg be funded again.
   describe("reclaiming a leg", () => {
@@ -434,6 +474,14 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.listForTrade(TRADE_ID)
       );
       expect(afterTarget.map((claim) => claim.signature)).toEqual(["sig_other"]);
+
+      // The deleted receipt's history row goes with it: the chain proved the
+      // transfer moved nothing, so it is evidence of nothing.
+      const receipts = await getDb(env).queryMany<{ signature: string }>(
+        "SELECT signature FROM dvp_leg_funding_receipts WHERE trade_id = ? ORDER BY signature",
+        [TRADE_ID]
+      );
+      expect(receipts.map((row) => row.signature)).toEqual(["sig_other"]);
     });
   });
 
