@@ -187,7 +187,7 @@ export function riskToneClassName(result: ComplianceProviderResult): string {
 }
 
 export async function fetchWallets(
-  options: { signal?: AbortSignal; includeBalances?: boolean },
+  options: { signal?: AbortSignal; includeBalances?: boolean; projectId?: string },
   t: Translate
 ): Promise<WalletRecord[]> {
   const query = new URLSearchParams({
@@ -195,6 +195,11 @@ export async function fetchWallets(
   });
   if (options.includeBalances) {
     query.set("includeBalances", "true");
+  }
+  // Carries the rendered workspace's project so the BFF binds the read to it
+  // instead of the mutable shared selection cookie (SOLA9-618).
+  if (options.projectId) {
+    query.set("projectId", options.projectId);
   }
   const response = await fetch(`/api/dashboard/wallets?${query.toString()}`, {
     method: "GET",

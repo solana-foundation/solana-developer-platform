@@ -111,7 +111,7 @@ describe("PrivyCredentialForm", () => {
         <SWRConfig value={{ provider: () => new Map() }}>
           <PrivyCredentialForm formId="byok-test-form" />
           <Inventory
-            cacheKey={paymentsQueryKeys.actionWallets()}
+            cacheKey={paymentsQueryKeys.actionWallets({ projectId: "project_test" })}
             name="payments"
             fetcher={walletRead}
           />
@@ -129,7 +129,7 @@ describe("PrivyCredentialForm", () => {
         </SWRConfig>
         <SWRConfig value={{ provider: () => new Map() }}>
           <Inventory
-            cacheKey={paymentsQueryKeys.actionWallets()}
+            cacheKey={paymentsQueryKeys.actionWallets({ projectId: "project_test" })}
             name="other-project"
             fetcher={otherProjectRead}
           />

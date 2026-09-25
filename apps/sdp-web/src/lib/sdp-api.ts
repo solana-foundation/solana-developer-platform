@@ -369,10 +369,23 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
 }
 
 /**
- * Creates a client pinned to an explicit project id for server actions that
- * must stay bound to the page they were rendered with instead of re-reading
- * the mutable selection cookie: a feed mounted for project A keeps asking for
- * project A even after the shared cookie has moved to B.
+ * A caller pinned a project the authenticated organization does not list. The
+ * request is refused before anything goes upstream, exactly like the API's own
+ * membership check, so an unlisted id can never select a project context.
+ */
+export class ProjectNotAvailableError extends Error {
+  constructor() {
+    super("Requested project is not available for this organization");
+    this.name = "ProjectNotAvailableError";
+  }
+}
+
+/**
+ * Creates a client pinned to an explicit project id for server actions and
+ * request handlers that must stay bound to the page they were rendered with
+ * instead of re-reading the mutable selection cookie: a feed mounted for
+ * project A keeps asking for project A even after the shared cookie has moved
+ * to B.
  *
  * The id is validated against this organization's project list first, so an
  * arbitrary or no-longer-listed project is refused here rather than sent
@@ -389,7 +402,7 @@ export async function createProjectBoundSdpApiClient(
   const token = await getRequestClerkToken();
   const projects = await fetchRequestProjects(token);
   if (!projects.some((project) => project.id === projectId)) {
-    throw new Error("Requested project is not available for this organization");
+    throw new ProjectNotAvailableError();
   }
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
@@ -435,12 +448,20 @@ export function proxyFailure(
  * body to `path` and streams the upstream response back with trace headers.
  * Unauthenticated callers get 401/403; other local failures 500, with the
  * standard `{ error: { message } }` envelope.
+ *
+ * Pass `explicitProjectId` to bind the upstream request to a project the
+ * caller names itself (the workspace the page was rendered with) instead of
+ * the shared selection cookie. The id is validated against the authenticated
+ * organization's project list and an unlisted project fails with a 400 before
+ * anything goes upstream, so a rendered workspace can never have its request
+ * resolved to a sibling tab's selection.
  */
 export async function proxyToSdpApi({
   request,
   traceSource,
   path,
   upstreamHeaders,
+  explicitProjectId,
 }: {
   request: Request;
   traceSource: string;
@@ -451,6 +472,7 @@ export async function proxyToSdpApi({
    * remain server-owned, while endpoint-specific metadata is opt-in.
    */
   upstreamHeaders?: HeadersInit;
+  explicitProjectId?: string;
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
@@ -461,13 +483,24 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  const projectId = await getSelectedProjectId();
-  if (!projectId) {
-    return proxyFailure(trace, 400, "Selected project required");
+  if (explicitProjectId !== undefined && explicitProjectId === "") {
+    return proxyFailure(trace, 400, new ProjectNotAvailableError().message);
+  }
+  if (explicitProjectId === undefined) {
+    const projectId = await getSelectedProjectId();
+    if (!projectId) {
+      return proxyFailure(trace, 400, "Selected project required");
+    }
   }
 
   try {
-    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const apiClient =
+      explicitProjectId !== undefined
+        ? await createProjectBoundSdpApiClient(
+            explicitProjectId,
+            trace.childContext(`${traceSource}.api`)
+          )
+        : await createSdpApiClient(trace.childContext(`${traceSource}.api`));
     const method = request.method;
     const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
     const response = await apiClient.request(path, {
@@ -489,6 +522,11 @@ export async function proxyToSdpApi({
       },
     });
   } catch (error) {
+    // An explicitly named project outside the organization is the caller's
+    // error, not a server fault.
+    if (error instanceof ProjectNotAvailableError) {
+      return proxyFailure(trace, 400, error.message);
+    }
     return proxyFailure(
       trace,
       500,

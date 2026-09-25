@@ -11,7 +11,7 @@ export function useWalletInventoryRefresh() {
   return () => {
     void mutate(
       (key) =>
-        key === paymentsQueryKeys.actionWallets() ||
+        paymentsQueryKeys.isActionWalletsKey(key) ||
         key === earnQueryKeys.fundingWallets() ||
         issuanceQueryKeys.isWalletInventoryKey(key),
       undefined,

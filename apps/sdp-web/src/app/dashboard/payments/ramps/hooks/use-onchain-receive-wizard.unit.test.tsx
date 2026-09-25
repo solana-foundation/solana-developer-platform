@@ -56,7 +56,7 @@ function wrapper({ children }: { children: ReactNode }) {
         }}
         serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
         projects={[]}
-        initialSelectedProjectId={null}
+        initialSelectedProjectId={renderedProjectId}
         shouldRepairInitialProjectCookie={false}
       >
         <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>{children}</SWRConfig>
@@ -65,9 +65,19 @@ function wrapper({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * The wallet read is bound to the workspace's rendered project; `null` renders
+ * a projectless workspace that must not fetch project-scoped wallets at all.
+ */
+let renderedProjectId: string | null = "project-test";
+
 beforeEach(() => {
+  renderedProjectId = "project-test";
   fetchMock.mockReset().mockImplementation((input) => {
-    if (String(input) === "/api/dashboard/wallets?view=summary&includeBalances=true") {
+    if (
+      String(input) ===
+      "/api/dashboard/wallets?view=summary&includeBalances=true&projectId=project-test"
+    ) {
       return Promise.resolve(Response.json({ data: { wallets } }));
     }
     return Promise.resolve(Response.json({ data: {} }));
@@ -112,5 +122,25 @@ describe("useOnchainReceiveWizard", () => {
     act(() => result.current.handlePrimary());
     expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+  });
+
+  it("does not fetch project-scoped wallets in a projectless workspace", async () => {
+    renderedProjectId = null;
+    const onExit = vi.fn();
+    renderHook(
+      () =>
+        useOnchainReceiveWizard({
+          wallets,
+          walletsError: null,
+          counterpartyId: "counterparty-test",
+          onExit,
+        }),
+      { wrapper }
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
