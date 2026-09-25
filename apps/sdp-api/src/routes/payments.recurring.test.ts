@@ -415,7 +415,7 @@ async function expectReplacementTokenMismatch(
   expect(responseBody.error.message).toBe(
     "Recurring payment token is not held by the requested source wallet"
   );
-  expect(recurringExecutionSnapshot(recurringPaymentId)).toEqual(before);
+  expect(await recurringExecutionSnapshot(recurringPaymentId)).toEqual(before);
   const afterCalls = recurringExecutionCallCounts();
   expect({ ...afterCalls, accountInfo: 0 }).toEqual({ ...executionCalls, accountInfo: 0 });
 }
