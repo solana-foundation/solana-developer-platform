@@ -214,7 +214,14 @@ async function priceRingsBalances(
 }> {
   if (balances.length === 0) return { balances: [], totalUsd: 0 };
 
-  const asCustody: CustodyWalletTokenBalance[] = balances.map((balance) => {
+  // A mint whose decimal scale the allowlist never supplied (decimals: null)
+  // has no known conversion from base units, so it cannot be turned into a UI
+  // amount or a USD value. A live price can still exist for such a mint, and
+  // pricing the raw integer at it would report a false multiple of the real
+  // position — those balances stay unpriced and out of the total.
+  const priceable = balances.filter((balance) => balance.decimals !== null);
+
+  const asCustody: CustodyWalletTokenBalance[] = priceable.map((balance) => {
     const decimals = balance.decimals ?? 0;
     return {
       token: balance.symbol,
@@ -227,13 +234,17 @@ async function priceRingsBalances(
 
   let priced: CustodyWalletTokenBalance[];
   try {
-    priced = await attachUsdValuesToBalances(env, asCustody);
+    priced = asCustody.length > 0 ? await attachUsdValuesToBalances(env, asCustody) : [];
   } catch {
     return { balances: balances.map((balance) => ({ ...balance })), totalUsd: null };
   }
 
-  const enriched = balances.map((balance, index) => {
-    const row = priced[index];
+  // `priceable` preserves `balances` order, so a cursor zips each pricing row
+  // back onto its balance; unknown-scale rows keep only their known fields.
+  let cursor = 0;
+  const enriched = balances.map((balance) => {
+    if (balance.decimals === null) return { ...balance };
+    const row = priced[cursor++];
     return {
       ...balance,
       ...(typeof row?.usdPrice === "number" ? { usdPrice: row.usdPrice } : {}),

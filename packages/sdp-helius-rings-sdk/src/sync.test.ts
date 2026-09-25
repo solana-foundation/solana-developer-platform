@@ -99,7 +99,7 @@ describe("syncRingsWallet", () => {
       {
         mint: USDC,
         symbol: "UNKNOWN",
-        decimals: 0,
+        decimals: null,
         amountRaw: "7",
         ringProgramId: RING_PROGRAM,
         noteCount: 1,
@@ -147,10 +147,12 @@ describe("syncRingsWallet", () => {
 
     // Dropping it would tell an operator the wallet is empty when it is not,
     // and guessing decimals would render the amount at the wrong magnitude.
+    // Scale stays explicitly unknown (`null`, never 0): a 0 would let the API
+    // read raw base units as whole tokens and price them at that multiple.
     expect(balance).toEqual({
       mint: USDC,
       symbol: "UNKNOWN",
-      decimals: 0,
+      decimals: null,
       amountRaw: "42",
       ringProgramId: null,
       noteCount: 1,

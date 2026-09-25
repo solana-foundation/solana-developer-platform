@@ -203,7 +203,9 @@ function toAssetBalance(
   return {
     mint,
     symbol: label?.symbol ?? "UNKNOWN",
-    decimals: label?.decimals ?? 0,
+    // Unknown scale is null, not 0: a 0 would read as a real zero-decimal
+    // mint and let a caller value the raw base units as whole tokens.
+    decimals: label?.decimals ?? null,
     amountRaw: position.amount.toString(),
     ringProgramId,
     noteCount: position.notes,
