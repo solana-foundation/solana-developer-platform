@@ -2138,9 +2138,7 @@ describe("Payments routes — recurring", () => {
         exists: true,
         address: address(TEST_SOLANA_ADDRESSES.wallet3),
         data: { expiresAtTs: 1_800_000_000n },
-      } as Awaited<
-        ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
-      >);
+      } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>>);
 
     const cancelRes = await app.request(
       `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
@@ -2419,6 +2417,106 @@ describe("Payments routes — recurring", () => {
       subscription_status: "canceled",
       attempt_status: "confirmed",
       attempt_stage: "finalize",
+      attempt_signature: cancelSignature,
+    });
+  });
+
+  /**
+   * Seeds the state Greptile flagged as "Unconfirmed attempt marked
+   * confirmed": closing a retained processing cancellation attempt must not
+   * report `confirmed` unless its submitted transaction is verified on chain.
+   * A transaction that provably failed closes as failed even though the rows
+   * still finalize canceled (no delegation exists to revoke).
+   */
+  it("closes a retained processing cancellation attempt as failed when its transaction failed on chain", async () => {
+    const _sourceSigner = recurringExecution.sourceSigner();
+    mockDistinctRecentBlockhashes();
+    const cancelSignature = testSignature(3);
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock.mockResolvedValue(cancelSignature);
+
+    const recurringPayment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
+    expect(activationResponse.status).toBe(500);
+    await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
+
+    // First cancel submits the on-chain cancellation but its confirmation
+    // outcome stays uncertain: the attempt keeps the signature and the claim
+    // returns to the recoverable pending_activation state.
+    confirmTransactionMock.mockRejectedValueOnce(new Error("rpc unavailable"));
+
+    const firstCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(firstCancelRes.status).toBe(500);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    // The retry finds no delegation, but the retained cancellation
+    // transaction provably failed on chain, so the attempt must close as
+    // failed instead of confirmed.
+    fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    confirmTransactionMock.mockResolvedValueOnce({
+      signature:
+        "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Awaited<
+          ReturnType<typeof solanaRpc.confirmTransaction>
+        >["signature"],
+      slot: 100n,
+      confirmationStatus: "confirmed",
+      err: { InstructionError: [0, "Custom"] },
+    });
+
+    const retryCancelRes = await app.request(
+      `/v1/payments/recurring-payments/${recurringPayment.id}/cancel`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+    expect(retryCancelRes.status).toBe(200);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+
+    const afterRetry = await getDb(env)
+      .prepare(
+        `SELECT rp.status AS recurring_status,
+                ps.status AS subscription_status,
+                a.status AS attempt_status,
+                a.stage AS attempt_stage,
+                a.error AS attempt_error,
+                a.signature AS attempt_signature
+           FROM payment_recurring_payments rp
+           JOIN payment_subscriptions ps ON ps.id = rp.subscription_id
+           LEFT JOIN payment_recurring_payment_lifecycle_attempts a
+             ON a.id = (
+               SELECT id
+                 FROM payment_recurring_payment_lifecycle_attempts
+                WHERE recurring_payment_id = rp.id
+                ORDER BY created_at DESC
+                LIMIT 1
+             )
+          WHERE rp.id = ?`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        recurring_status: string;
+        subscription_status: string;
+        attempt_status: string;
+        attempt_stage: string;
+        attempt_error: string | null;
+        attempt_signature: string | null;
+      }>();
+    expect(afterRetry).toMatchObject({
+      recurring_status: "canceled",
+      subscription_status: "canceled",
+      attempt_status: "failed",
+      attempt_stage: "submit",
+      attempt_error: "Recurring payment cancellation failed on-chain",
       attempt_signature: cancelSignature,
     });
   });

@@ -677,8 +677,54 @@ function hasRecurringPaymentPersistedSubscriptionRecords(
  * uncertain cancellation attempt is still journalled as processing (its
  * submitted cancellation landed and revoked the delegation). Recovery no
  * longer selects a canceled payment, so close the attempt in the same
- * transaction to keep the lifecycle journal coherent.
+ * transaction to keep the lifecycle journal coherent. The outcome is
+ * resolved on chain first: only a verified submission closes as confirmed.
  */
+async function resolveInFlightCancelLifecycleAttemptOutcome(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+}): Promise<{ status: "confirmed" | "failed"; error: string | null }> {
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const attempt = await recurringRepo.getLatestLifecycleAttempt({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    operation: "cancel",
+    statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  });
+  if (!attempt) {
+    return { status: "confirmed", error: null };
+  }
+  const signature = parseNullableStoredSignature(attempt.signature);
+  if (!signature) {
+    // Nothing was broadcast for this attempt, so no transaction outcome is
+    // being reported when the rows finalize locally.
+    return { status: "confirmed", error: null };
+  }
+  try {
+    await confirmSubscriptionSignature(
+      input.env,
+      signature,
+      "Recurring payment cancellation failed on-chain"
+    );
+    return { status: "confirmed", error: null };
+  } catch (error) {
+    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+      // The submitted cancellation provably failed on chain, so the journal
+      // must record it as failed instead of a confirmed cancellation.
+      return { status: "failed", error: recurringPaymentErrorMessage(error) };
+    }
+    // Chain state is unknown: keep the record recoverable instead of
+    // finalizing a cancellation whose outcome is unresolved.
+    throw error;
+  }
+}
+
 async function closeInFlightCancelLifecycleAttempt(
   recurringRepo: PaymentRecurringPaymentsRepository,
   input: {
@@ -686,6 +732,7 @@ async function closeInFlightCancelLifecycleAttempt(
     projectId: string;
     recurringPaymentId: string;
     finalizedAt: string;
+    outcome: { status: "confirmed" | "failed"; error: string | null };
   }
 ): Promise<void> {
   const attempt = await recurringRepo.getLatestLifecycleAttempt({
@@ -702,10 +749,10 @@ async function closeInFlightCancelLifecycleAttempt(
     attemptId: attempt.id,
     organizationId: input.organizationId,
     projectId: input.projectId,
-    status: "confirmed",
-    stage: "finalize",
+    status: input.outcome.status,
+    stage: input.outcome.status === "confirmed" ? "finalize" : attempt.stage,
     signature: attempt.signature,
-    error: null,
+    error: input.outcome.error,
     updatedAt: input.finalizedAt,
   });
   if (!closedAttempt) {
@@ -721,6 +768,12 @@ async function finalizePendingActivationCancellationLocally(input: {
   subscription: PaymentSubscriptionRow | null;
 }): Promise<PaymentRecurringPaymentRow> {
   const finalizedAt = new Date().toISOString();
+  const inFlightAttemptOutcome = await resolveInFlightCancelLifecycleAttemptOutcome({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPayment.id,
+  });
   return getDb(input.env).transaction(async (tx) => {
     const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
     const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
@@ -742,6 +795,7 @@ async function finalizePendingActivationCancellationLocally(input: {
       projectId: input.projectId,
       recurringPaymentId: input.recurringPayment.id,
       finalizedAt,
+      outcome: inFlightAttemptOutcome,
     });
     if (input.subscription) {
       await txSubscriptionsRepo.updateSubscription({
