@@ -18,7 +18,13 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import { associatedTokenAccountAddress } from "@sdp/solana/associated-token";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SolanaCluster,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
 import { SdpOndoError } from "./errors";
 import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
@@ -143,12 +149,26 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
 
 interface RpcTokenAccountsResponse {
   value?: {
+    pubkey?: string;
     account?: {
       data?: {
-        parsed?: { info?: { tokenAmount?: { amount?: string } } };
+        parsed?: { info?: { state?: string; tokenAmount?: { amount?: string } } };
       };
     };
   }[];
+}
+
+/**
+ * One parsed SPL token account, as far as spendability is concerned. The
+ * token program refuses every transfer out of a `frozen` account, so a
+ * frozen balance can never be a swap source — the same test the exit path
+ * runs into on-chain. The address pins WHICH account it is, because the exit
+ * swap can only spend from one of them (see `swapSourceAccount`).
+ */
+interface OndoTokenAccount {
+  address: string;
+  amount: bigint;
+  frozen: boolean;
 }
 
 export class OndoVaultDirectClient
@@ -511,6 +531,14 @@ export class OndoVaultDirectClient
    * strings — never `uiAmount`, which is a JSON number and lossy above 2^53
    * base units (the same rule the Kamino read follows).
    *
+   * `shares` is the whole holding across every token account, frozen or not.
+   * `withdrawableShares` is what an exit can spend RIGHT NOW: the exit swap
+   * is a Jupiter route whose source account the API pins to the owner's
+   * associated token account — derived the same way in `swapSourceAccount` —
+   * so only the ATA's balance can back a withdrawal, and only while its
+   * parsed SPL state is not `frozen`. A frozen ATA reports zero here, and so
+   * does USDY held in any auxiliary token account the route cannot reach.
+   *
    * An empty reference list means the configured shelf, which for Ondo is the
    * single USDY instrument. The valuation is allowed to fail INDEPENDENTLY of
    * the balance read: a quote outage makes the VALUE unknown, not the HOLDING.
@@ -533,7 +561,16 @@ export class OndoVaultDirectClient
         for (const reference of references) {
           assertActive();
           this.assertKnownReference(config, reference);
-          const atoms = await this.readOwnerTokenBalance(runtime, input.owner, reference);
+          const accounts = await this.readOwnerTokenAccounts(runtime, input.owner, reference);
+          let atoms = 0n;
+          let withdrawableAtoms = 0n;
+          const swapSource = await this.swapSourceAccount(input.owner, reference);
+          for (const account of accounts) {
+            atoms += account.amount;
+            if (account.address === swapSource && !account.frozen) {
+              withdrawableAtoms += account.amount;
+            }
+          }
           if (readAllHoldings && atoms === 0n) continue;
           const shares = formatDecimalAmount(atoms, TOKEN_DECIMALS);
 
@@ -560,8 +597,13 @@ export class OndoVaultDirectClient
             owner: input.owner,
             cluster: runtime.cluster,
             shares,
-            // No lock: the whole balance is exitable on the open market.
-            withdrawableShares: shares,
+            // What the exit can spend, not what the wallet holds: the swap
+            // route spends from the owner's USDY ATA only, and the token
+            // program refuses every transfer out of a frozen account. A
+            // frozen ATA — or USDY parked in an auxiliary account the route
+            // cannot reach — stays visible in `shares` and reports zero (or
+            // only the ATA's own balance) here.
+            withdrawableShares: formatDecimalAmount(withdrawableAtoms, TOKEN_DECIMALS),
             ...(tokenValue === undefined ? {} : { tokenValue }),
             tokenMint: config.depositMint,
             shareMint: config.deployment.usdyMint,
@@ -581,15 +623,47 @@ export class OndoVaultDirectClient
     return accounts.length > 0;
   }
 
-  private async readOwnerTokenBalance(
+  /**
+   * The one token account an exit swap can spend from: the owner's associated
+   * token account for the mint, derived exactly as the API's swap service
+   * pins a route's source (`findAssociatedTokenPda`, with this mint's token
+   * program from the same well-known catalogue). Balances held anywhere else
+   * are the owner's holding but are out of every built route's reach, so
+   * they must never back `withdrawableShares`.
+   */
+  private async swapSourceAccount(owner: string, mint: string): Promise<string> {
+    const kind = WELL_KNOWN_TOKEN_BY_MINT.get(mint)?.tokenProgram;
+    const tokenProgram = kind !== undefined ? SPL_TOKEN_PROGRAMS[kind] : undefined;
+    if (!tokenProgram) {
+      throw new SdpOndoError(
+        "POSITION_UNREADABLE",
+        `Cannot identify the account an exit swap spends from for ${mint}: the mint is not ` +
+          "in the well-known catalogue, so its token program is unknown."
+      );
+    }
+    return associatedTokenAccountAddress({ owner, mint, tokenProgram });
+  }
+
+  /**
+   * Per-account balances with their parsed SPL state. Frozen balances stay
+   * in the result so the holding stays visible, but are flagged so
+   * `withdrawableShares` counts only the account the swap can spend (see
+   * `swapSourceAccount`) while it is transferable.
+   *
+   * Fail-closed on an incomplete parse, same rule as the raw-balance check
+   * below: an account whose address or parsed state is absent or unrecognized
+   * cannot be matched against the swap source, and the reader refuses to
+   * report a partial position rather than guessing spendability.
+   */
+  private async readOwnerTokenAccounts(
     runtime: OndoRuntime,
     owner: string,
     mint: string
-  ): Promise<bigint> {
+  ): Promise<OndoTokenAccount[]> {
     const accounts = await this.tokenAccounts(runtime, owner, mint);
-    let total = 0n;
-    for (const entry of accounts) {
-      const raw = entry.account?.data?.parsed?.info?.tokenAmount?.amount;
+    return accounts.map((entry) => {
+      const info = entry.account?.data?.parsed?.info;
+      const raw = info?.tokenAmount?.amount;
       if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
         throw new SdpOndoError(
           "POSITION_UNREADABLE",
@@ -597,9 +671,27 @@ export class OndoVaultDirectClient
             "partial position."
         );
       }
-      total += BigInt(raw);
-    }
-    return total;
+      // The SPL AccountState enum, as jsonParsed spells it. Anything else —
+      // including a missing state — fails the read instead of assuming the
+      // account can move.
+      const state = info?.state;
+      if (state !== "initialized" && state !== "frozen" && state !== "uninitialized") {
+        throw new SdpOndoError(
+          "POSITION_UNREADABLE",
+          `A token account for ${mint} returned no parsed SPL account state; refusing to ` +
+            "report spendability for a partial position."
+        );
+      }
+      const address = entry.pubkey;
+      if (typeof address !== "string" || address.length === 0) {
+        throw new SdpOndoError(
+          "POSITION_UNREADABLE",
+          `A token account for ${mint} returned no address; refusing to report spendability ` +
+            "for a partial position."
+        );
+      }
+      return { address, amount: BigInt(raw), frozen: state === "frozen" };
+    });
   }
 
   private async tokenAccounts(

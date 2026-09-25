@@ -17,6 +17,14 @@ if (!MAINNET) throw new Error("test premise: mainnet deployment filled in");
 const USDY = MAINNET.usdyMint;
 const USDC = wellKnownMint("USDC", "mainnet-beta") as string;
 const OWNER = "C4XGF8r1gQP7p2PeKcRAFNwGAU1gCxiinRufqddY1m98";
+/**
+ * The owner's real mainnet-beta USDY ATA under the classic token program —
+ * the account the exit swap spends from (the API's swap service pins a
+ * route's source to `findAssociatedTokenPda(owner, usdyMint)`).
+ */
+const OWNER_ATA = "AM5oZfoUpUUpokKFVQgE23hmPAVw3dtEQatFHnMNP8DP";
+/** Any non-ATA token account: USDY parked where the exit swap cannot spend it. */
+const AUX = "AuxTokenAccount1111111111111111111111111111111";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
 
 function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
@@ -48,7 +56,15 @@ function makeClient(port: Partial<OndoSwapPort>) {
   );
 }
 
-function stubTokenAccounts(amounts: string[]) {
+/**
+ * Mirrors the real jsonParsed wire shape: `getTokenAccountsByOwner` reports
+ * each account's `pubkey` and the SPL account state (`initialized` | `frozen`
+ * | `uninitialized`) alongside the exact raw balance. A string entry means
+ * the owner's own ATA, initialized — the common holding.
+ */
+function stubTokenAccounts(
+  entries: (string | { amount: string; state?: string; pubkey?: string })[]
+) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -56,9 +72,16 @@ function stubTokenAccounts(amounts: string[]) {
         jsonrpc: "2.0",
         id: 1,
         result: {
-          value: amounts.map((amount) => ({
-            account: { data: { parsed: { info: { tokenAmount: { amount } } } } },
-          })),
+          value: entries.map((entry) => {
+            const amount = typeof entry === "string" ? entry : entry.amount;
+            const state =
+              typeof entry === "string" ? "initialized" : (entry.state ?? "initialized");
+            const pubkey = typeof entry === "string" ? OWNER_ATA : (entry.pubkey ?? OWNER_ATA);
+            return {
+              pubkey,
+              account: { data: { parsed: { info: { state, tokenAmount: { amount } } } } },
+            };
+          }),
         },
       })
     )
@@ -266,7 +289,7 @@ describe("quotes", () => {
 
 describe("readVaultPositions", () => {
   it("sums exact raw balances and values them through the exit quote", async () => {
-    stubTokenAccounts(["1000000", "2500000"]);
+    stubTokenAccounts(["1000000", { amount: "2500000", pubkey: AUX }]);
     const client = makeClient({
       quoteSwap: async () => ({ outAmount: "4.006", priceImpactPct: "0" }),
     });
@@ -282,12 +305,129 @@ describe("readVaultPositions", () => {
         owner: OWNER,
         cluster: "mainnet-beta",
         shares: "3.5",
-        withdrawableShares: "3.5",
+        // Only the ATA backs an exit: the string entry IS the ATA (1.0); the
+        // auxiliary 2.5 is holding, not liquidity.
+        withdrawableShares: "1",
         tokenValue: "4.006",
         tokenMint: USDC,
         shareMint: USDY,
       },
     ]);
+  });
+
+  it("keeps a nonzero frozen USDY account in holdings without claiming it is withdrawable", async () => {
+    // Regression fixture for SOLA9-375: the exact wire shape of a frozen
+    // mainnet USDY account (28,503,622 shares, parsed state "frozen").
+    stubTokenAccounts([{ amount: "28503622000000", state: "frozen" }]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "28503622", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    // The holding stays the truth: frozen tokens remain the owner's balance
+    // and are still valued, but the token program will reject any transfer
+    // out of a frozen account, so nothing there is immediately exitable.
+    expect(positions[0]?.shares).toBe("28503622");
+    expect(positions[0]?.withdrawableShares).toBe("0");
+    expect(positions[0]?.tokenValue).toBe("28503622");
+  });
+
+  it("reports an initialized account as fully withdrawable", async () => {
+    stubTokenAccounts([{ amount: "12000000", state: "initialized" }]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "12", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("12");
+    expect(positions[0]?.withdrawableShares).toBe("12");
+  });
+
+  it("reports nothing withdrawable when the swap source is frozen, even with a transferable auxiliary account", async () => {
+    // Greptile P1 regression: the exit swap spends from the ATA only (the
+    // API's swap service pins the route's source to it), so USDY held in a
+    // transferable auxiliary account cannot back a withdrawal while the ATA
+    // itself is frozen.
+    stubTokenAccounts([
+      { amount: "28503622000000", state: "frozen", pubkey: OWNER_ATA },
+      { amount: "5000000", state: "initialized", pubkey: AUX },
+    ]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "28508622", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("28503627");
+    expect(positions[0]?.withdrawableShares).toBe("0");
+  });
+
+  it("counts only the ATA toward withdrawableShares when a frozen auxiliary account exists", async () => {
+    // The mirror case: the ATA is spendable, and the frozen auxiliary
+    // balance is holding the route can never reach.
+    stubTokenAccounts([
+      { amount: "5000000", state: "initialized", pubkey: OWNER_ATA },
+      { amount: "28503622000000", state: "frozen", pubkey: AUX },
+    ]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "28508622", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("28503627");
+    expect(positions[0]?.withdrawableShares).toBe("5");
+  });
+
+  it("reports zero withdrawable when the ATA is closed but an auxiliary account holds the balance", async () => {
+    stubTokenAccounts([{ amount: "5000000", state: "initialized", pubkey: AUX }]);
+    const client = makeClient({});
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.shares).toBe("5");
+    expect(positions[0]?.withdrawableShares).toBe("0");
+  });
+
+  it("fails closed when the RPC omits the parsed SPL account state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          jsonrpc: "2.0",
+          id: 1,
+          result: {
+            value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: "12" } } } } } }],
+          },
+        })
+      )
+    );
+    const client = makeClient({});
+    await expect(
+      client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+    ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
   });
 
   it("keeps the holding when the valuation fails", async () => {
