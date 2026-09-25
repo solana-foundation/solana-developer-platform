@@ -66,10 +66,10 @@ import {
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
   CustodyConfigStore,
-  DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON,
   type CustodyConfigWallet,
   type CustodyWallet,
   type CustodyWalletLookup,
+  DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON,
   type WalletPurpose,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
