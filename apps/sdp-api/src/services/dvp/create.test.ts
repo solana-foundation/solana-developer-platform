@@ -54,6 +54,12 @@ const getFeePayer = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
+// Per-call overrides for the two repository methods the failure paths below
+// need to break; null means delegate to the real implementation.
+const repoOverrides = vi.hoisted(() => ({
+  getById: null as ((...args: unknown[]) => unknown) | null,
+  resolveCreate: null as ((...args: unknown[]) => unknown) | null,
+}));
 // The mint pre-flight is verified separately against real devnet mints in
 // mints.test.ts; here it is stubbed so these tests stay about broadcast
 // ordering. The last case below still proves create is wired to it.
@@ -68,6 +74,34 @@ vi.mock("@/services/sponsorship.service", async () => {
 });
 vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createDvpTradeRepository: (
+      ...args: Parameters<typeof actual.createDvpTradeRepository>
+    ): ReturnType<typeof actual.createDvpTradeRepository> => {
+      const repository = actual.createDvpTradeRepository(...args);
+      return {
+        ...repository,
+        getById: async (...getByIdArgs: Parameters<typeof repository.getById>) => {
+          const override = repoOverrides.getById;
+          if (override) {
+            return override(...getByIdArgs) as Awaited<ReturnType<typeof repository.getById>>;
+          }
+          return repository.getById(...getByIdArgs);
+        },
+        resolveCreate: async (...resolveArgs: Parameters<typeof repository.resolveCreate>) => {
+          const override = repoOverrides.resolveCreate;
+          if (override) {
+            return override(...resolveArgs) as Awaited<ReturnType<typeof repository.resolveCreate>>;
+          }
+          return repository.resolveCreate(...resolveArgs);
+        },
+      };
+    },
+  };
+});
 // The immediate chain read after a send is the reconciler's contract, tested in
 // observe-now.test.ts; here it is stubbed so these tests stay about the claim,
 // sign and send ordering. Null means "nothing observed yet".
@@ -972,6 +1006,7 @@ describe("createDvpTrade", () => {
       signature: z.string().optional(),
       tradeStatus: z.string().optional(),
       observed: z.boolean().optional(),
+      observationError: z.string().optional(),
       target: z
         .object({
           action: z.string(),
@@ -1164,6 +1199,77 @@ describe("createDvpTrade", () => {
       expect(retried.status).toBe("creating");
       expect(sendTransaction).toHaveBeenCalledTimes(2);
       await expect(rowsInDb()).resolves.toHaveLength(2);
+    });
+
+    it("seals the failure outcome even when the row resolution write fails", async () => {
+      sendTransaction.mockRejectedValue(preflightRejection());
+      repoOverrides.resolveCreate = async () => {
+        throw new Error("row resolution write failed");
+      };
+
+      try {
+        // The caller still sees the submission error, not the failed write
+        // that tried to record it.
+        await expect(
+          createDvpTrade(env, authenticatedContext(), tradeInput())
+        ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" });
+
+        // The row write was lost, so the sealed outcome is the ONLY record
+        // that the create definitively failed — the one a keyed retry reads.
+        const [intent, outcome] = await createAuditRows();
+        assert(intent, "Expected a create audit intent row");
+        assert(outcome, "Expected a create audit failure outcome row");
+        expect(outcome).toMatchObject({ status: "failure" });
+        const outcomeEvent = auditEventSchema.parse(JSON.parse(outcome.metadata ?? "{}"));
+        expect(outcomeEvent.auditIntentId).toBe(intent.resource_id);
+        expect(outcomeEvent.failureCode).toBe("TRANSACTION_FAILED");
+        await expect(rowsInDb()).resolves.toMatchObject([{ status: "creating" }]);
+      } finally {
+        repoOverrides.resolveCreate = null;
+      }
+    });
+
+    it("seals the submitted outcome when the claim read-back finds no row after the send", async () => {
+      repoOverrides.getById = async () => null;
+
+      try {
+        await expect(createDvpTrade(env, authenticatedContext(), tradeInput())).rejects.toThrow(
+          "DvP claim disappeared after sponsored submission"
+        );
+
+        // The send succeeded, so the intent is not left for reconciliation:
+        // the captured signature is sealed even though the row was unreadable.
+        const [intent, outcome] = await createAuditRows();
+        assert(intent, "Expected a create audit intent row");
+        assert(outcome, "Expected a create audit outcome row");
+        expect(outcome).toMatchObject({ status: "success" });
+        const outcomeEvent = auditEventSchema.parse(JSON.parse(outcome.metadata ?? "{}"));
+        expect(outcomeEvent.auditIntentId).toBe(intent.resource_id);
+        expect(outcomeEvent.signature).toEqual(expect.any(String));
+        expect(outcomeEvent.observed).toBe(false);
+        expect(outcomeEvent.observationError).toBe(
+          "DvP claim disappeared after sponsored submission"
+        );
+      } finally {
+        repoOverrides.getById = null;
+      }
+    });
+
+    it("seals the submitted outcome when the immediate chain read fails after the send", async () => {
+      observeDvpTradeNow.mockRejectedValueOnce(new Error("chain read failed"));
+
+      await expect(createDvpTrade(env, authenticatedContext(), tradeInput())).rejects.toThrow(
+        "chain read failed"
+      );
+
+      const [intent, outcome] = await createAuditRows();
+      assert(intent, "Expected a create audit intent row");
+      assert(outcome, "Expected a create audit outcome row");
+      expect(outcome).toMatchObject({ status: "success" });
+      const outcomeEvent = auditEventSchema.parse(JSON.parse(outcome.metadata ?? "{}"));
+      expect(outcomeEvent.auditIntentId).toBe(intent.resource_id);
+      expect(outcomeEvent.observed).toBe(false);
+      expect(outcomeEvent.observationError).toBe("chain read failed");
     });
 
     it("refuses the broadcast when the ledger cannot admit the create intent", async () => {
