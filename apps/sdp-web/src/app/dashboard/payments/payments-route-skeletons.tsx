@@ -28,6 +28,7 @@ const DETAIL_ROW_IDS = [
   "payments-loading-detail-7",
   "payments-loading-detail-8",
 ];
+const RECORD_COLUMN_IDS = ["payments-loading-record-1", "payments-loading-record-2"];
 interface ListSkeletonColumn {
   id: string;
   headerClassName?: string;
@@ -384,7 +385,7 @@ export function CounterpartyDetailSkeleton() {
     <DashboardWorkspaceOverviewPanel data-loading-layout="counterparty-detail" aria-busy="true">
       <div className="flex flex-col gap-6">
         <div className="grid gap-x-6 md:grid-cols-2" data-loading-detail-rows>
-          {["record-left", "record-right"].map((column) => (
+          {RECORD_COLUMN_IDS.map((column) => (
             <div key={column}>
               {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
                 <div
