@@ -26,7 +26,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { PAYMENT_REQUEST_OPEN_PARAM, PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
+import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
@@ -273,171 +273,171 @@ export function PaymentRequestCreateWorkspace({
   }
 
   return (
-    <>
-      <WizardFrame
-        steps={EMPTY_STEP}
-        currentStep={0}
-        progressLabel=""
-        hideProgress
-        footer={
-          // The design's footer buttons take a 16px inset; a create that cannot run yet is an
-          // outline on the control wash with its label in the tertiary ink, at full opacity.
-          <div className="flex items-center justify-end gap-4 [--button-padding-x-lg:1rem]">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => router.push(PAYMENT_REQUESTS_HREF)}
-            >
-              {t("DashboardPayments.requests.cancel")}
-            </Button>
-            <Button
-              type="button"
-              variant={canCreate ? "default" : "outline"}
-              disabled={!canCreate}
-              className={cn(!canCreate && "opacity-100 text-tertiary refresh:bg-fill")}
-              onClick={() => void create()}
-            >
-              {submitting
-                ? t("DashboardPayments.requests.creating")
-                : t("DashboardPayments.requests.createAndCopyLink")}
-            </Button>
-          </div>
-        }
+    <WizardFrame
+      steps={EMPTY_STEP}
+      currentStep={0}
+      progressLabel=""
+      hideProgress
+      footer={
+        // The design's footer buttons take a 16px inset; a create that cannot run yet is an
+        // outline on the control wash with its label in the tertiary ink, at full opacity.
+        <div className="flex items-center justify-end gap-4 [--button-padding-x-lg:1rem]">
+          <Button type="button" variant="ghost" onClick={() => router.push(PAYMENT_REQUESTS_HREF)}>
+            {t("DashboardPayments.requests.cancel")}
+          </Button>
+          <Button
+            type="button"
+            variant={canCreate ? "default" : "outline"}
+            disabled={!canCreate}
+            className={cn(!canCreate && "opacity-100 text-tertiary refresh:bg-fill")}
+            onClick={() => void create()}
+          >
+            {submitting
+              ? t("DashboardPayments.requests.creating")
+              : t("DashboardPayments.requests.createAndCopyLink")}
+          </Button>
+        </div>
+      }
+    >
+      {/* The design sets a single-page form 3px nearer the title than the frame's stepped
+          flows sit. */}
+      <form
+        className="-mt-0.75 flex flex-col gap-6"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void create();
+        }}
       >
-        {/* The design sets a single-page form 3px nearer the title than the frame's stepped
-            flows sit. */}
-        <form
-          className="-mt-0.75 flex flex-col gap-6"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void create();
-          }}
-        >
-          {walletsError ? (
-            <p role="alert" className="text-body text-error">
-              {walletsError}
-            </p>
-          ) : null}
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="payment-request-amount">
-                {t("DashboardPayments.requests.amount")}
-              </Label>
-              <Input
-                id="payment-request-amount"
-                size="xl"
-                inputMode="decimal"
-                autoComplete="off"
-                placeholder="0.00"
-                className="tabular-nums"
-                value={amount}
-                onChange={(event) => setAmount(event.currentTarget.value)}
-              />
-              {amount.trim() && !amountValid ? (
-                <p className="text-meta text-error">
-                  {t("DashboardPayments.requests.invalidAmount")}
-                </p>
-              ) : null}
-            </div>
-            <Combobox
-              label={t("DashboardPayments.requests.token")}
-              value={token ? token.mintAddress : null}
-              onChange={setPickedToken}
-              options={tokens.map((option) => ({
-                value: option.mintAddress,
-                label: option.symbol,
-              }))}
-              placeholder={t("DashboardPayments.requests.selectToken")}
-              searchable={false}
+        {walletsError ? (
+          <p role="alert" className="text-body text-error">
+            {walletsError}
+          </p>
+        ) : null}
+        <div className="grid gap-6 sm:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="payment-request-amount">{t("DashboardPayments.requests.amount")}</Label>
+            <Input
+              id="payment-request-amount"
+              size="xl"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="0.00"
+              className="tabular-nums"
+              value={amount}
+              onChange={(event) => setAmount(event.currentTarget.value)}
             />
-          </div>
-
-          <Combobox
-            label={t("DashboardPayments.requests.destinationWallet")}
-            labelAccessory={
-              <InfoHint
-                text={t("DashboardPayments.requests.destinationWalletHelp")}
-                className="-my-px text-secondary"
-              />
-            }
-            value={wallet ? wallet.walletId : null}
-            onChange={setPickedWallet}
-            options={wallets.map((option) => ({
-              value: option.walletId,
-              label: option.label ?? shortenAddress(option.publicKey),
-              description: shortenAddress(option.publicKey),
-            }))}
-            placeholder={t("DashboardPayments.requests.selectWallet")}
-            searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-            disabled={wallets.length === 0}
-          />
-
-          <div className="flex flex-col gap-1.5">
-            <Combobox
-              label={t("DashboardPayments.requests.from")}
-              value={contact ? contact.id : ANYONE}
-              onChange={setPickedFrom}
-              options={[
-                { value: ANYONE, label: t("DashboardPayments.requests.anyoneWithLink") },
-                ...contacts.map((option) => ({ value: option.id, label: option.displayName })),
-              ]}
-              searchable={contacts.length > FROM_SEARCH_THRESHOLD}
-              searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
-            />
-            {contact && contactHasNoAddress ? (
-              <FieldHint>
-                {t("DashboardPayments.requests.noAddressOnFile", { contact: contact.displayName })}{" "}
-                <button
-                  type="button"
-                  onClick={() => setAddingAddress(true)}
-                  className="inline-flex min-h-6 items-center rounded-sm text-primary underline underline-offset-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                >
-                  {t("DashboardPayments.requests.addAnAddress")}
-                </button>
-              </FieldHint>
+            {amount.trim() && !amountValid ? (
+              <p className="text-meta text-error">
+                {t("DashboardPayments.requests.invalidAmount")}
+              </p>
             ) : null}
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Combobox
-              label={t("DashboardPayments.requests.linkExpires")}
-              value={expiry}
-              onChange={setExpiry}
-              options={EXPIRY_OPTIONS.map((option) => ({
-                value: option.id,
-                label: t(option.labelKey),
-              }))}
-              searchable={false}
-            />
-            <FieldHint>
-              {expiresAt
-                ? t("DashboardPayments.requests.linkStopsWorking", {
-                    date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
-                  })
-                : t("DashboardPayments.requests.linkStaysLive")}
-            </FieldHint>
-          </div>
-
-          <ReadsAs
-            from={contact ? contact.displayName : null}
-            amount={
-              amountValid && token
-                ? `${formatDecimalAmount(amount.trim(), locale)} ${token.symbol}`
-                : null
-            }
-            wallet={walletName}
+          <Combobox
+            label={t("DashboardPayments.requests.token")}
+            value={token ? token.mintAddress : null}
+            onChange={setPickedToken}
+            options={tokens.map((option) => ({
+              value: option.mintAddress,
+              label: option.symbol,
+            }))}
+            placeholder={t("DashboardPayments.requests.selectToken")}
+            searchable={false}
           />
-        </form>
-      </WizardFrame>
+        </div>
 
-      {contact && addingAddress ? (
-        <AddExternalAccountDialog
-          isOpen
-          counterpartyId={contact.id}
-          onAdded={() => void mutateAccounts()}
-          onClose={() => setAddingAddress(false)}
+        <Combobox
+          label={t("DashboardPayments.requests.destinationWallet")}
+          labelAccessory={
+            <InfoHint
+              text={t("DashboardPayments.requests.destinationWalletHelp")}
+              className="-my-px text-secondary"
+            />
+          }
+          value={wallet ? wallet.walletId : null}
+          onChange={setPickedWallet}
+          options={wallets.map((option) => ({
+            value: option.walletId,
+            label: option.label ?? shortenAddress(option.publicKey),
+            description: shortenAddress(option.publicKey),
+          }))}
+          placeholder={t("DashboardPayments.requests.selectWallet")}
+          searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
+          disabled={wallets.length === 0}
         />
-      ) : null}
-    </>
+
+        <div className="flex flex-col gap-1.5">
+          <Combobox
+            label={t("DashboardPayments.requests.from")}
+            value={contact ? contact.id : ANYONE}
+            onChange={(next) => {
+              setPickedFrom(next);
+              setAddingAddress(false);
+            }}
+            options={[
+              { value: ANYONE, label: t("DashboardPayments.requests.anyoneWithLink") },
+              ...contacts.map((option) => ({ value: option.id, label: option.displayName })),
+            ]}
+            searchable={contacts.length > FROM_SEARCH_THRESHOLD}
+            searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
+          />
+          {contact && contactHasNoAddress && !addingAddress ? (
+            <FieldHint>
+              {t("DashboardPayments.requests.noAddressOnFile", { contact: contact.displayName })}{" "}
+              <button
+                type="button"
+                onClick={() => setAddingAddress(true)}
+                className="inline-flex min-h-6 items-center rounded-sm text-primary underline underline-offset-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {t("DashboardPayments.requests.addAnAddress")}
+              </button>
+            </FieldHint>
+          ) : null}
+          {contact && addingAddress ? (
+            // Opens under From, as the design does, in place of the hint that offered it.
+            <NewSolanaAddressForm
+              key={contact.id}
+              className="mt-2.5"
+              counterpartyId={contact.id}
+              idPrefix="request-add"
+              onAdded={() => {
+                setAddingAddress(false);
+                void mutateAccounts();
+              }}
+              onCancel={() => setAddingAddress(false)}
+            />
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Combobox
+            label={t("DashboardPayments.requests.linkExpires")}
+            value={expiry}
+            onChange={setExpiry}
+            options={EXPIRY_OPTIONS.map((option) => ({
+              value: option.id,
+              label: t(option.labelKey),
+            }))}
+            searchable={false}
+          />
+          <FieldHint>
+            {expiresAt
+              ? t("DashboardPayments.requests.linkStopsWorking", {
+                  date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
+                })
+              : t("DashboardPayments.requests.linkStaysLive")}
+          </FieldHint>
+        </div>
+
+        <ReadsAs
+          from={contact ? contact.displayName : null}
+          amount={
+            amountValid && token
+              ? `${formatDecimalAmount(amount.trim(), locale)} ${token.symbol}`
+              : null
+          }
+          wallet={walletName}
+        />
+      </form>
+    </WizardFrame>
   );
 }

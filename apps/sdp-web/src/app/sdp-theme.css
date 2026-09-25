@@ -144,7 +144,8 @@
   --table-cell-padding-x-edge: 12px;
 
   --select-popup-radius: var(--corner-card);
-  --select-item-radius: var(--corner-control-inner);
+  /* The design's list rows round at the control corner, 6px. */
+  --select-item-radius: var(--corner-control);
   --select-item-highlight-bg: var(--t4);
   --tooltip-radius: var(--corner-control);
 }

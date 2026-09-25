@@ -5,6 +5,7 @@ import * as Sentry from "@sentry/nextjs";
 import {
   BugIcon,
   ChevronsUpDownIcon,
+  LanguagesIcon,
   LibraryIcon,
   LogOutIcon,
   type LucideIcon,
@@ -19,25 +20,32 @@ import {
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
+import { localeDisplayName, useSelectLocale } from "@/components/language-picker";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { useNetworkDebug } from "@/contexts/network-debug-context";
 import { THEME_PREFERENCES, type ThemePreference, useTheme } from "@/contexts/theme-context";
+import { supportedLocales } from "@/i18n/config";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import { DASHBOARD_SIDE_NAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { clearStoredApiKeySecrets } from "@/lib/playground-api-keys";
 import { cn } from "@/lib/utils";
 
 // The sidebar footer: one profile row that carries the signed-in identity and
 // opens the account menu — feedback, API docs, settings, the API debug-log
-// switch, the colour theme, and the Clerk account actions the top-bar
+// switch, the colour theme, the language, and the Clerk account actions the top-bar
 // UserButton used to provide. The caller names the side the popover opens on,
 // because it knows its own geometry: the desktop sidebar has room to the
 // right, while the mobile More sheet spans the viewport and only has room above
@@ -120,6 +128,7 @@ export function SidebarUserMenu({
         ) : null}
         <NetworkDebugMenuItem />
         <ThemeMenuItem />
+        <LanguageMenuItem />
         <DropdownMenuSeparator />
         <DropdownMenuItem className="gap-2.5" onSelect={() => openUserProfile()}>
           <UserRoundIcon className="size-4 shrink-0 text-secondary" />
@@ -238,6 +247,39 @@ function ThemeMenuItem() {
         })}
       </span>
     </DropdownMenuItem>
+  );
+}
+
+// The interface language, beside the colour theme: the row names the current
+// one and opens the languages, each named in itself so a reader lost in the
+// wrong one can still find theirs.
+function LanguageMenuItem() {
+  const t = useTranslations();
+  const locale = useLocale();
+  const selectLocale = useSelectLocale();
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger className="gap-2.5">
+        <LanguagesIcon className="size-4 shrink-0 text-secondary" />
+        <span className="min-w-0 flex-1">{t("Shared.dashboardShell.language")}</span>
+        <span className="shrink-0 font-normal text-tertiary">
+          {localeDisplayName(locale, locale)}
+        </span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent sideOffset={6} className="w-48">
+        <DropdownMenuRadioGroup value={locale} onValueChange={selectLocale}>
+          {supportedLocales.map((option) => (
+            <DropdownMenuRadioItem key={option} value={option} lang={option}>
+              <span className="min-w-0 flex-1">{localeDisplayName(option, option)}</span>
+              <span className="shrink-0 text-xs font-normal tracking-wide text-tertiary uppercase">
+                {option}
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }
 

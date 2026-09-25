@@ -2,7 +2,7 @@ import { COUNTERPARTY_ENTITY_TYPES } from "@sdp/types";
 import { z } from "zod";
 
 /** A base58 Solana public key: 32 to 44 characters of the base58 alphabet. */
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+export const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 function optionalTrimmed<T extends z.ZodString>(inner: T) {
   return z

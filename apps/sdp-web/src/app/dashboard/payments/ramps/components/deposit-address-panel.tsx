@@ -5,14 +5,13 @@ import {
   type PaymentsDashboardWallet,
   type PaymentTransferSummary,
 } from "@sdp/types";
-import { ChevronDownIcon, CopyIcon, InfoIcon, PlayIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, InfoIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { type ReactNode, useState, useTransition } from "react";
+import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
-import { requestDevnetSolanaFaucetAction } from "@/app/dashboard/custody/actions";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -410,14 +409,9 @@ export function DepositAddressPanel({
     walletsError
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [simulating, startSimulate] = useTransition();
   const wallet = liveWallets.find((candidate) => candidate.id === selectedId) ?? liveWallets[0];
 
-  const {
-    data: deposits,
-    error: depositsError,
-    mutate,
-  } = useSWR(
+  const { data: deposits, error: depositsError } = useSWR(
     wallet ? paymentsQueryKeys.walletDeposits(wallet.id) : null,
     () =>
       fetchTransfers(
@@ -471,17 +465,6 @@ export function DepositAddressPanel({
     }
   };
 
-  const simulate = () =>
-    startSimulate(async () => {
-      const result = await requestDevnetSolanaFaucetAction(wallet.id, wallet.publicKey);
-      if (result.status === "error") {
-        toast.error(result.message, { position: "bottom-right" });
-        return;
-      }
-      toast.success(t("DashboardPayments.depositAddress.simulated"), { position: "bottom-right" });
-      void mutate();
-    });
-
   return (
     <div>
       <AddressCard
@@ -494,7 +477,9 @@ export function DepositAddressPanel({
       {/* 24px under the card. */}
       <DepositFacts />
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      {/* The row keeps the height of the design's "Simulate a deposit" button, left out for
+          now, so the line and the list under it stay where the design puts them. */}
+      <div className="mt-5 flex min-h-[var(--button-height-md)] items-center">
         <p className="flex min-w-0 items-center gap-2 text-body text-secondary" aria-live="polite">
           <span
             aria-hidden="true"
@@ -511,19 +496,6 @@ export function DepositAddressPanel({
             </span>
           </span>
         </p>
-        {cluster === "devnet" ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="-me-2.5"
-            iconLeft={<PlayIcon />}
-            disabled={simulating}
-            onClick={simulate}
-          >
-            {t("DashboardPayments.depositAddress.simulate")}
-          </Button>
-        ) : null}
       </div>
 
       <RecentDeposits

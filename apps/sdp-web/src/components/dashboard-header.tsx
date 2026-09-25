@@ -19,7 +19,6 @@ import { privateChannelsInstancePath } from "@/app/dashboard/integrations/privat
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
-import { LanguagePicker } from "@/components/language-picker";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
@@ -67,8 +66,6 @@ export type DashboardHeaderActionConfig = {
   /** Hidden from a viewer without this capability, whose click would only reach a refusal. */
   capability?: keyof DashboardCapabilities;
 };
-
-const TRAILING_CONTENT = <LanguagePicker />;
 
 /**
  * The title row's page action.
@@ -128,7 +125,7 @@ type DashboardTopBarProps = {
    * title's row. "base" keeps the bottom bar's layout.
    */
   layout?: "base" | "refresh";
-  /** Page-level controls beside the language picker (Payments puts its demo switch here). */
+  /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
   /** Shown before a refresh page's title, as a wallet's provider mark is. */
   mark?: ReactNode;
@@ -210,8 +207,8 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 
 /**
  * The refresh title block. On a phone it is the design's three rows: the navigation button
- * (with the language picker at the far right), the title 8px under it, then the page's action
- * 12px under that. From md the button goes and the action and picker sit on the title's row.
+ * (with any utilities at the far right), the title 8px under it, then the page's action 12px
+ * under that. From md the button goes and the action and utilities sit on the title's row.
  */
 export function StackedDashboardTopBar({
   navigation,
@@ -366,14 +363,7 @@ export function DashboardTopBar({
   utilities,
   mark,
 }: DashboardTopBarProps) {
-  const utilityContent = utilities ? (
-    <span className="flex items-center gap-2">
-      {utilities}
-      {TRAILING_CONTENT}
-    </span>
-  ) : (
-    TRAILING_CONTENT
-  );
+  const utilityContent = utilities ?? null;
   const trailingContent = action ? (
     <>
       {action}

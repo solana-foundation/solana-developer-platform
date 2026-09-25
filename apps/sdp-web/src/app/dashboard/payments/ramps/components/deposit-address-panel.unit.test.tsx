@@ -17,9 +17,6 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     sdpEnvironment: "sandbox",
   }),
 }));
-vi.mock("@/app/dashboard/custody/actions", () => ({
-  requestDevnetSolanaFaucetAction: vi.fn(),
-}));
 vi.mock("qrcode", () => ({
   default: { toDataURL: async () => "data:image/png;base64," },
 }));

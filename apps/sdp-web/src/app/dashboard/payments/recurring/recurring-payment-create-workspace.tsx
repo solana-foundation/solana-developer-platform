@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
+import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import {
   formatCurrencyAmount,
   formatTokenAmount,
@@ -148,24 +148,27 @@ function ContactFields({ form }: StepProps) {
       {accountsKnown && cryptoAccounts.length === 0 ? (
         <FieldHint tone="error">{t("DashboardPayments.payForm.noDestinations")}</FieldHint>
       ) : null}
-      {hasContact ? (
-        <>
-          <button
-            type="button"
-            disabled={accountsLoading}
-            onClick={() => setDestinationAccountDialogOpen(true)}
-            className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <PlusIcon className="size-4" aria-hidden="true" />
-            {t("DashboardPayments.payForm.addSolanaAddress")}
-          </button>
-          <AddExternalAccountDialog
-            isOpen={destinationAccountDialogOpen}
-            counterpartyId={fields.counterpartyId}
-            onAdded={handleDestinationAccountAdded}
-            onClose={() => setDestinationAccountDialogOpen(false)}
-          />
-        </>
+      {hasContact && destinationAccountDialogOpen ? (
+        // The new address opens under the contact, as the design does, in place of its button.
+        <NewSolanaAddressForm
+          key={fields.counterpartyId}
+          className="mt-4"
+          counterpartyId={fields.counterpartyId}
+          idPrefix="schedule-add"
+          onAdded={handleDestinationAccountAdded}
+          onCancel={() => setDestinationAccountDialogOpen(false)}
+        />
+      ) : null}
+      {hasContact && !destinationAccountDialogOpen ? (
+        <button
+          type="button"
+          disabled={accountsLoading}
+          onClick={() => setDestinationAccountDialogOpen(true)}
+          className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="size-4" aria-hidden="true" />
+          {t("DashboardPayments.payForm.addSolanaAddress")}
+        </button>
       ) : null}
     </div>
   );
