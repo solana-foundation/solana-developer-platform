@@ -966,7 +966,7 @@
       "invalidAmountFormat": "Enter a valid amount.",
       "intervalHours": "Interval in hours",
       "invalidInterval": "Enter a whole number of hours between 1 and 8760.",
-      "invalidFirstPayment": "Choose a future date and time.",
+      "invalidFirstPayment": "Choose a day after today.",
       "startAfterActivation": "Leave blank to start after activation.",
       "metadataUrl": "Metadata URL",
       "metadataUrlPlaceholder": "https://example.com/metadata.json",

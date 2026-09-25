@@ -2,11 +2,12 @@
 
 import { isDecimalString } from "@sdp/solana/amount";
 import { PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS } from "@sdp/types";
+import { startOfTomorrow } from "date-fns";
 import { PlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 import { Combobox } from "@/components/ui/combobox";
-import { DateTimePicker } from "@/components/ui/date-picker";
+import { DateField } from "@/components/ui/date-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -17,7 +18,7 @@ import {
   formatTokenAmount,
   shortenAddress,
 } from "../payments-overview.utils";
-import { formatDateTime } from "../payments-presentation";
+import { formatDate } from "../payments-presentation";
 import { ContactCombobox } from "../ramps/components/contact-combobox";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
@@ -338,12 +339,15 @@ function WhenStep({ form }: StepProps) {
           <Label htmlFor="recurring-payment-first-collection">
             {t("DashboardPayments.recurring.startsOn")}
           </Label>
-          <DateTimePicker
+          {/* The design asks for a day, not a time: the first run is due at the start of it,
+              in the viewer's time, so today (already begun) cannot be picked. */}
+          <DateField
             id="recurring-payment-first-collection"
-            value={fields.firstCollectionAt}
-            onChange={(value) => setField("firstCollectionAt", value)}
-            disablePast
-            size="xl"
+            label={t("DashboardPayments.recurring.startsOn")}
+            value={fields.firstCollectionAt.slice(0, 10)}
+            onChange={(day) => setField("firstCollectionAt", day ? `${day}T00:00` : "")}
+            minDate={startOfTomorrow()}
+            placeholder={t("Shared.SharedComponents.chooseDate")}
           />
           {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
             <FieldHint tone="error">
@@ -376,9 +380,9 @@ function ReviewStep({ form }: StepProps) {
   const scheduleLabel = resolveScheduleLabel(fields, t, schedulePresets);
   const assetLabel = selectedAsset?.label ?? resolvedToken;
   const reviewAmount = `${formatReviewAmount(fields.amount, locale)} ${assetLabel}`.trim();
-  // The first run is typed on the When step in the browser, so it is never formatted on the
-  // server; the shared formatter keeps it in the list's "Aug 5, 2026, 2:30 PM" form.
-  const firstRunDate = formatDateTime(fields.firstCollectionAt || null, locale);
+  // The first run is picked on the When step in the browser, so it is never formatted on the
+  // server; it is a day (its run is due at the start of it), in the list's "Aug 5, 2026" form.
+  const firstRunDate = formatDate(fields.firstCollectionAt || null, locale);
   const firstRunDetail = firstRunDate
     ? t("DashboardPayments.recurring.firstRun", { date: firstRunDate })
     : t("DashboardPayments.recurring.firstRunAfterActivation");
