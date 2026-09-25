@@ -514,6 +514,81 @@ describe("TokenService", () => {
       expect((await storedSupply("tok_cap_refresh_failed"))?.total_supply_cached).toBe("600000000");
     });
 
+    it("releases an unbroadcast mint's reservation and clears its pending row together", async () => {
+      // A preflight rejection proves the transaction never reached the network,
+      // so the reservation comes back at once — atomically with the row delete,
+      // so the two can never disagree about whether the headroom is free.
+      await insertCappedToken("tok_cap_release_unbroadcast", "0", "1000000000");
+      await tokenService.reserveMintSupply("tok_cap_release_unbroadcast", "600000000");
+      await insertMintTransaction("tok_cap_release_unbroadcast", "pending", {
+        prepared: false,
+        amount: "600",
+      });
+
+      await expect(
+        tokenService.releaseUnbroadcastMintReservation({
+          transactionId: "txn_tok_cap_release_unbroadcast_pending_executed_0",
+          tokenId: "tok_cap_release_unbroadcast",
+          deltaBaseUnits: "600000000",
+        })
+      ).resolves.toBe(true);
+
+      expect((await storedSupply("tok_cap_release_unbroadcast"))?.total_supply_cached).toBe("0");
+      await expect(
+        db
+          .prepare("SELECT id FROM issuance_transactions WHERE token_id = ?")
+          .bind("tok_cap_release_unbroadcast")
+          .first<{ id: string }>()
+      ).resolves.toBeNull();
+      // And the headroom is mintable again immediately.
+      await expect(
+        tokenService.reserveMintSupply("tok_cap_release_unbroadcast", "1000000000")
+      ).resolves.toBe("1000000000");
+    });
+
+    it("refuses to release a reservation whose row already left the unsent state", async () => {
+      // The guard in the reverse direction: a row that is no longer the unsigned,
+      // unsent mint the execute path leaves behind may have settled — releasing
+      // then would hand out headroom a landed mint already used.
+      await insertCappedToken("tok_cap_release_settled", "0", "1000000000");
+      await tokenService.reserveMintSupply("tok_cap_release_settled", "600000000");
+      await insertMintTransaction("tok_cap_release_settled", "pending", { prepared: true });
+
+      await expect(
+        tokenService.releaseUnbroadcastMintReservation({
+          transactionId: "txn_tok_cap_release_settled_pending_prepared_0",
+          tokenId: "tok_cap_release_settled",
+          deltaBaseUnits: "600000000",
+        })
+      ).resolves.toBe(false);
+
+      expect((await storedSupply("tok_cap_release_settled"))?.total_supply_cached).toBe(
+        "600000000"
+      );
+      await expect(
+        db
+          .prepare("SELECT id FROM issuance_transactions WHERE token_id = ?")
+          .bind("tok_cap_release_settled")
+          .first<{ id: string }>()
+      ).resolves.not.toBeNull();
+    });
+
+    it("refuses to release a reservation for a transaction it cannot find", async () => {
+      await insertCappedToken("tok_cap_release_missing", "600000000", "1000000000");
+
+      await expect(
+        tokenService.releaseUnbroadcastMintReservation({
+          transactionId: "txn_no_such_row",
+          tokenId: "tok_cap_release_missing",
+          deltaBaseUnits: "600000000",
+        })
+      ).resolves.toBe(false);
+
+      expect((await storedSupply("tok_cap_release_missing"))?.total_supply_cached).toBe(
+        "600000000"
+      );
+    });
+
     it("reconciles down once the mint can no longer land", async () => {
       // Past the blockhash's life the question is settled: the mint account is the
       // whole truth, so the headroom a never-submitted mint held comes back.

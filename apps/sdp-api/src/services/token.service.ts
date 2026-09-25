@@ -1410,6 +1410,65 @@ export class TokenService {
   }
 
   /**
+   * Undo a mint's cap reservation for a submission that provably never reached
+   * the network, and clear its pending row, atomically.
+   *
+   * The release has the same burden of proof in reverse as `reserveMintSupply`
+   * has going in: a reservation may only be handed back when nothing can land
+   * with it, which is why the guarded row delete gates the supply write inside
+   * one transaction. The row must still be the unsigned, unsent mint the
+   * execute path leaves behind — if anything settled it in the meantime
+   * (recovered from the audit trail, say), the mint may have landed and the
+   * record stands for `POST /supply/refresh` to reconcile. Returning false is
+   * the caller's signal to keep the retained-reservation posture.
+   *
+   * @returns whether the reservation was released and the row cleared.
+   */
+  async releaseUnbroadcastMintReservation(input: {
+    transactionId: string;
+    tokenId: string;
+    deltaBaseUnits: string;
+  }): Promise<boolean> {
+    const now = new Date().toISOString();
+    const tokenScope = this.tenantTokenScope("token");
+    return await this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .prepare(
+          `DELETE FROM issuance_transactions AS tx
+           USING issued_tokens AS token
+           WHERE tx.id = ?
+             AND tx.token_id = token.id${tokenScope.clause}
+             AND tx.token_id = ?
+             AND tx.type = 'mint'
+             AND tx.status = 'pending'
+             AND tx.signature IS NULL
+             AND tx.serialized_tx IS NULL
+           RETURNING tx.id`
+        )
+        .bind(input.transactionId, ...tokenScope.values, input.tokenId)
+        .first<{ id: string }>();
+      if (deleted?.id !== input.transactionId) {
+        return false;
+      }
+
+      const tenant = this.tenantMutationScope();
+      const released = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET total_supply_cached = GREATEST(
+                 COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                 0
+               )::text,
+               updated_at = ?
+           WHERE id = ?${tenant.clause}`
+        )
+        .bind(input.deltaBaseUnits, now, input.tokenId, ...tenant.values)
+        .run();
+      return released === 1;
+    });
+  }
+
+  /**
    * Record a supply change that has already settled on-chain — today, a burn.
    *
    * A cache write, not an admission check: the balance is enforced against the

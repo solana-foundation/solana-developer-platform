@@ -1,6 +1,11 @@
+import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
+import {
+  isSolanaError,
+  SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+} from "@solana/kit";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
@@ -635,6 +640,108 @@ async function recordPreSubmissionMintFailure(options: {
 }
 
 /**
+ * Whether a post-reservation mint failure proves the transaction was never
+ * broadcast, so its cap reservation can be handed back at once.
+ *
+ * Two verdicts carry that proof, and nothing else does:
+ *
+ * - The RPC's own preflight rejection (the paused Token-2022 mint shape):
+ *   `sendTransaction` simulates before forwarding, answers with the preflight
+ *   error, and never queues the transaction. `sendTransaction` never fails over
+ *   (`@sdp/rpc`), so no other node ever saw the bytes.
+ * - A structured sponsor refusal (`PROVIDER_REJECTED`/`SIGNING_FAILED`): the
+ *   same verdict the sponsorship budget already releases on — Kora signed and
+ *   sent nothing.
+ *
+ * Timeouts, transport errors, Kora network failures, and confirmation
+ * outcomes (including a settled on-chain failure) stay ambiguous: any of them
+ * can coexist with a transaction the cluster accepted, and handing that
+ * headroom back is how two mints end up above the cap.
+ */
+function isDefinitelyUnbroadcastMintRejection(error: unknown): boolean {
+  if (
+    isSolanaError(error, SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE)
+  ) {
+    return true;
+  }
+  return (
+    error instanceof FeePaymentError &&
+    (error.code === "PROVIDER_REJECTED" || error.code === "SIGNING_FAILED")
+  );
+}
+
+/**
+ * Record a mint failure the RPC proved never reached the network: complete the
+ * audit intent with the failure and atomically release the cap reservation
+ * plus clear the pending row. A release that cannot be completed is left to
+ * `POST /supply/refresh` — never forced, because forcing it is the
+ * above-the-cap failure mode this path exists to prevent.
+ */
+async function recordUnbroadcastMintFailure(options: {
+  c: AppContext;
+  auditService: AuditService;
+  auditIntent: AuditIntent;
+  tokenService: TokenService;
+  transactionId: string;
+  tokenId: string;
+  reservedBaseUnits: string;
+  error: unknown;
+}): Promise<void> {
+  const errorMessage = options.error instanceof Error ? options.error.message : "Unknown error";
+  try {
+    await options.auditService.completeCritical(options.c, options.auditIntent, {
+      status: "failure",
+      metadata: { error: errorMessage },
+    });
+    const released = await options.tokenService.releaseUnbroadcastMintReservation({
+      transactionId: options.transactionId,
+      tokenId: options.tokenId,
+      deltaBaseUnits: options.reservedBaseUnits,
+    });
+    if (!released) {
+      // The row settled concurrently, so the mint may have landed. Keep the
+      // retained-reservation posture and let supply reconciliation decide.
+      getLogger().warn(
+        {
+          event: "mint_supply_reservation_retained",
+          tokenId: options.tokenId,
+          transactionId: options.transactionId,
+          reservedBaseUnits: options.reservedBaseUnits,
+          error: errorMessage,
+        },
+        "Mint failed with a definite pre-broadcast rejection but its transaction row had already settled; the reservation is kept for supply reconciliation."
+      );
+      return;
+    }
+    getLogger().info(
+      {
+        event: "mint_supply_reservation_released",
+        tokenId: options.tokenId,
+        transactionId: options.transactionId,
+        releasedBaseUnits: options.reservedBaseUnits,
+        error: errorMessage,
+      },
+      "Mint failed with a definite pre-broadcast rejection; its supply reservation was released and the pending transaction row cleared."
+    );
+  } catch (cleanupError) {
+    // Fail safe: a reservation that cannot provably be released stands, and
+    // the original rejection keeps its HTTP contract.
+    getLogger().warn(
+      {
+        event: "mint_supply_reservation_retained",
+        tokenId: options.tokenId,
+        transactionId: options.transactionId,
+        reservedBaseUnits: options.reservedBaseUnits,
+        error: errorMessage,
+        cleanupError:
+          cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup error",
+      },
+      "Mint failed with a definite pre-broadcast rejection but its reservation could not be released; kept for supply reconciliation."
+    );
+  }
+}
+
+/**
  * Parse and resolve an execute-mint request into its wallet-operation policy candidate.
  *
  * @param c - Request context.
@@ -960,17 +1067,34 @@ export const executeMint = async (c: AppContext) => {
     // it. `POST /supply/refresh` reconciles from the mint account once the transaction
     // can no longer land — which is also what returns the headroom if it never did.
     if (reservedSupply !== null) {
-      getLogger().warn(
-        {
-          event: "mint_supply_reservation_retained",
-          tokenId,
+      if (isDefinitelyUnbroadcastMintRejection(error)) {
+        // The one exception the RPC proves: a preflight rejection (or a
+        // structured sponsor refusal) never reached the network, so the
+        // reservation is reclaimed at once instead of pinning the cached
+        // supply at the cap for the in-flight window.
+        await recordUnbroadcastMintFailure({
+          c,
+          auditService,
+          auditIntent,
+          tokenService,
           transactionId: tx.id,
+          tokenId,
           reservedBaseUnits: amountBaseUnits.toString(),
-          recordedSupplyBaseUnits: reservedSupply,
-          error: error instanceof Error ? error.message : "Unknown error",
-        },
-        "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
-      );
+          error,
+        });
+      } else {
+        getLogger().warn(
+          {
+            event: "mint_supply_reservation_retained",
+            tokenId,
+            transactionId: tx.id,
+            reservedBaseUnits: amountBaseUnits.toString(),
+            recordedSupplyBaseUnits: reservedSupply,
+            error: error instanceof Error ? error.message : "Unknown error",
+          },
+          "Mint failed after it was submitted and its supply reserved; the reservation is kept because the transaction may still land. Refresh the token's supply to reconcile."
+        );
+      }
     }
     throw error;
   }
