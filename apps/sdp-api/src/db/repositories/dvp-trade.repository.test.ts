@@ -12,6 +12,7 @@ import {
   seedDefaultProjects,
 } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { createPostgresDvpLegTransferRepository } from "./dvp-leg-transfer.repository";
 import type {
   DvpInboundScope,
   DvpTradeInsert,
@@ -626,7 +627,144 @@ describe("DvpTradeRepository (postgres)", () => {
 
     const listed = await repo.listOpenForReconciliation(10);
 
+    // dvp_closed_old carries no close signature, so there is nothing to
+    // backfill: it drops out like before, and the fresh closed trade keeps its
+    // seven days of late-deposit sweeps.
     expect(listed.map((trade) => trade.id).sort()).toEqual(["dvp_closed_recent", "dvp_open_old"]);
+  });
+
+  // The ledger backfills itself: a trade closed before the ledger existed (or
+  // whose close was never recorded into it) stays in the late-deposit lane
+  // until both legs' escrow histories have been read through completely. Once
+  // they have, later sweeps can only see newer transactions than the close,
+  // and the trade stops costing a turn.
+  it("drops a pre-ledger closed trade once both legs' histories are read", async () => {
+    const db = getDb(env);
+    await repo.create(tradeInsert({ id: "dvp_preledger_pending" }));
+    await repo.create(
+      tradeInsert({
+        id: "dvp_preledger_done",
+        swapDvp: address("SwapQ11111111111111111111111111111111111111"),
+      })
+    );
+    await db
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'settled', closed_at = CURRENT_TIMESTAMP - INTERVAL '30 days',
+                close_signature = ?
+          WHERE id IN ('dvp_preledger_pending', 'dvp_preledger_done')`
+      )
+      .bind(CLOSE_SIGNATURE)
+      .run();
+    const scans = createPostgresDvpLegTransferRepository(getDb(env));
+    for (const side of ["a", "b"] as const) {
+      await scans.saveScan("dvp_preledger_done", {
+        side,
+        cursor: null,
+        scannedAt: new Date().toISOString(),
+      });
+    }
+
+    const listed = await repo.listOpenForReconciliation(10);
+
+    // The pending trade is missing its close in the ledger and has never had a
+    // complete history read; the done one has, so it drops out.
+    expect(listed.map((trade) => trade.id)).toEqual(["dvp_preledger_pending"]);
+  });
+
+  it("keeps a pre-ledger closed trade whose ledger already holds the close", async () => {
+    await repo.create(tradeInsert({ id: "dvp_preledger_matched" }));
+    await getDb(env)
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'settled', closed_at = CURRENT_TIMESTAMP - INTERVAL '30 days',
+                close_signature = ?
+          WHERE id = 'dvp_preledger_matched'`
+      )
+      .bind(CLOSE_SIGNATURE)
+      .run();
+    const transfers = createPostgresDvpLegTransferRepository(getDb(env));
+    await transfers.record({
+      tradeId: "dvp_preledger_matched",
+      side: "a",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "1000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+    await transfers.record({
+      tradeId: "dvp_preledger_matched",
+      side: "b",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "2000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+
+    // The close is in the ledger, so there is nothing left to backfill even
+    // though neither leg has had a complete history read.
+    await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([]);
+  });
+
+  it("keeps a pre-ledger closed trade while one leg's scan is unfinished, even though the other leg recorded the close", async () => {
+    await repo.create(tradeInsert({ id: "dvp_preledger_halffilled" }));
+    await getDb(env)
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'settled', closed_at = CURRENT_TIMESTAMP - INTERVAL '30 days',
+                close_signature = ?
+          WHERE id = 'dvp_preledger_halffilled'`
+      )
+      .bind(CLOSE_SIGNATURE)
+      .run();
+    const transfers = createPostgresDvpLegTransferRepository(getDb(env));
+    const scans = createPostgresDvpLegTransferRepository(getDb(env));
+    // Side A: close recorded and history fully read.
+    await transfers.record({
+      tradeId: "dvp_preledger_halffilled",
+      side: "a",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "1000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+    await scans.saveScan("dvp_preledger_halffilled", {
+      side: "a",
+      cursor: null,
+      scannedAt: new Date().toISOString(),
+    });
+    // Side B: close not yet recorded, scan still outstanding.
+    await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([
+      expect.objectContaining({ id: "dvp_preledger_halffilled" }),
+    ]);
+
+    // Once side B's scan records its close row, the trade drops out.
+    await transfers.record({
+      tradeId: "dvp_preledger_halffilled",
+      side: "b",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "2000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+    await scans.saveScan("dvp_preledger_halffilled", {
+      side: "b",
+      cursor: null,
+      scannedAt: new Date().toISOString(),
+    });
+    await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([]);
   });
 
   /**

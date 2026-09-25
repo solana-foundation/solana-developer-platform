@@ -22,4 +22,16 @@ describe("unified transactions repeatable view", () => {
     expect(view).toContain("LEFT JOIN helius_rings_asset_allowlist al ON al.mint = o.asset_mint");
     expect(view).toContain("o.amount_raw::numeric / (10::numeric ^ al.decimals)");
   });
+
+  it("prices close rows from the matched ledger delta, never the peak", () => {
+    const view = renderUnifiedTransactionsView();
+    expect(view).toContain("close_transfer.signature = t.close_signature");
+    expect(view).toContain("trim_scale(close_transfer.amount::numeric");
+    // The close branch must not fall back to the escrow's historical peak; the
+    // fund branch keeps it.
+    expect(view).toContain(
+      "t.escrow_a_peak_amount WHEN 'b' THEN t.escrow_b_peak_amount END)::numeric /\n    (10::numeric ^ CASE c.side"
+    );
+    expect(view).not.toContain("WHEN side.value WHEN 'a' THEN t.escrow_a_peak_amount");
+  });
 });

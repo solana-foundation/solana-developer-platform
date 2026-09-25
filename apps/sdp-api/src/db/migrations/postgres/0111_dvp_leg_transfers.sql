@@ -11,8 +11,10 @@
 -- A row is recorded once its transaction is confirmed, and stays provisional
 -- until the reconciler sees it finalized. A confirmed transaction the cluster
 -- later drops is deleted on the next sweep: the ledger holds what landed.
--- History is read back no further than the trade's creation. Nothing is
--- backfilled: a trade gets a ledger only while the reconciler still sweeps it.
+-- History is read back no further than the trade's creation. The reconciler
+-- keeps sweeping a closed trade until both legs' histories have been read
+-- through, however old the trade, so a close the ledger never recorded (one
+-- that closed before the ledger existed) is backfilled by that read.
 --
 -- Written only by the reconciler, a system workload. Read by whoever can read
 -- the trade: its own organization, and a party named on it (0089). The escrow's
