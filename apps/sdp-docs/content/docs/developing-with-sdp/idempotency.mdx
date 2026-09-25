@@ -17,7 +17,7 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
 
-1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
+1. The first request creates the record — a transfer, a batch, a recurring-payment intent, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
 2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
 3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
 
@@ -33,6 +33,7 @@ Each domain claims keys in its own namespace, and the namespaces are scoped diff
 | --- | --- | --- |
 | Payments — transfers | `POST /v1/payments/transfers` | Per project |
 | Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
+| Payments — recurring payments | `POST /v1/payments/recurring-payments` | Per project |
 | Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
 | Custody | Provider credential submission (dashboard flow) | Required on every submission |
 

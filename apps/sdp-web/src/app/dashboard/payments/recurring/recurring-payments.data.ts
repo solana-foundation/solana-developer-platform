@@ -14,8 +14,10 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { getPaymentApiError, parsePaymentApiErrorText } from "../payment-api-errors";
+import { createPaymentIdempotencyStore } from "../payment-idempotency-store";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -242,24 +244,73 @@ export async function getRecurringPayment(
   return data.recurringPayment;
 }
 
+/**
+ * Browser-side durability for a recurring-payment create's IDEMPOTENCY KEY.
+ *
+ * Without a key, a lost response or double press creates a second
+ * `pending_activation` row, and activating both schedules duplicates every
+ * future debit. The store mints the key once per request fingerprint and
+ * replays it on retry — across double submits and tab reloads — so the API
+ * answers a retry with the original row instead of a second schedule.
+ */
+const recurringCreateIdempotencyStore = createPaymentIdempotencyStore(
+  "sdp:payments:recurring:create:idempotency:v1"
+);
+
+/**
+ * What makes two create submissions the SAME schedule: every economic field
+ * of the request. Change any one and it is a different schedule, not a retry.
+ */
+function recurringCreateFingerprint(input: CreatePaymentRecurringPaymentRequest): string {
+  return JSON.stringify([
+    input.sourceCustodyWalletId,
+    input.counterpartyId,
+    input.counterpartyAccountId,
+    input.token,
+    input.amount,
+    input.periodHours,
+    input.firstCollectionAt ?? null,
+    input.metadataUri ?? null,
+  ]);
+}
+
 export async function createRecurringPayment(
   input: CreatePaymentRecurringPaymentRequest,
   signal: AbortSignal | undefined,
   t: Translate
 ): Promise<PaymentRecurringPayment> {
+  const fingerprint = recurringCreateFingerprint(input);
+  const idempotencyKey = recurringCreateIdempotencyStore.claim(fingerprint);
   const response = await fetch("/api/dashboard/payments/recurring-payments", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      [IDEMPOTENCY_KEY_HEADER]: idempotencyKey,
+    },
     body: JSON.stringify(input),
     signal,
   });
-  const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
-    response,
-    dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.recurring.unableToCreate"),
-    t
-  );
-  return data.recurringPayment;
+  try {
+    const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
+      response,
+      dashboardRecurringPaymentEnvelopeSchema,
+      t("DashboardPayments.recurring.unableToCreate"),
+      t
+    );
+    // The row exists now, so the key is spent: the next identical submit is a
+    // new schedule rather than a replay of this one.
+    recurringCreateIdempotencyStore.release(fingerprint);
+    return data.recurringPayment;
+  } catch (error) {
+    // A definite 4xx refusal (other than a key conflict) recorded nothing, so
+    // the key is freed for a corrected resubmit. A 409, a 5xx, or an
+    // unreadable body stays ambiguous — the API may have recorded the create
+    // before the answer was lost — and keeps the key so a retry replays.
+    if (response.status >= 400 && response.status < 500 && response.status !== 409) {
+      recurringCreateIdempotencyStore.release(fingerprint);
+    }
+    throw error;
+  }
 }
 
 export async function updateRecurringPayment(

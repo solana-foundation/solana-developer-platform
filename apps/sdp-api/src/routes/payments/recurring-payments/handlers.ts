@@ -10,6 +10,7 @@ import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
 import { AppError, badRequestParams, badRequestQuery } from "@/lib/errors";
 import { created, success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getAllowedApiKeyWalletAuthorizationForPermissions } from "@/services/api-key-scope.service";
 import {
@@ -99,7 +100,7 @@ export const createRecurringPayment = async (
   const sourceWallet = resolveWalletByCustodyWalletId(scope.wallets, body.sourceCustodyWalletId);
   await assertFreshPaymentWalletAccess(c, sourceWallet, ["payments:write"]);
 
-  const recurringPayment = await createRecurringPaymentRecord({
+  const { recurringPayment, replayed } = await createRecurringPaymentRecord({
     env: c.env,
     organizationId: scope.auth.organizationId,
     projectId,
@@ -114,12 +115,13 @@ export const createRecurringPayment = async (
     createdBy: await resolveCreatorUserId(c),
     apiKeyId: scope.auth.apiKeyId,
     actor: walletOperationActorFromAuth(scope.auth),
+    idempotencyKey: c.req.header(IDEMPOTENCY_KEY_HEADER) ?? null,
   });
 
   const response: PaymentRecurringPaymentResponse = {
     recurringPayment: mapRecurringPayment(recurringPayment),
   };
-  return created(c, response);
+  return replayed ? success(c, response) : created(c, response);
 };
 
 export const updateRecurringPayment = async (

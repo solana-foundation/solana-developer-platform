@@ -189,6 +189,44 @@ function transferBatchFingerprint(
 export const buildTransferBatchFingerprint = (input: TransferBatchFingerprintInput): string =>
   transferBatchFingerprint(input, input.sourceCustodyWalletId);
 
+export interface RecurringPaymentFingerprintInput {
+  /** The `custody_wallets` row id that signs every collection. */
+  custodyWalletId: string;
+  counterpartyId: string;
+  counterpartyAccountId: string;
+  token: string;
+  amount: string;
+  periodHours: number;
+  firstCollectionAt: string | null;
+  metadataUri: string | null;
+}
+
+/**
+ * Fingerprint for a recurring-payment create.
+ *
+ * Every field changes WHAT MOVES on each future collection: the signing
+ * wallet, the counterparty account the debits land in, the token, the per-
+ * period amount, the period length, the first scheduled collection and the
+ * metadata URI. The counterparty is named by the ids the request carried
+ * rather than the address they resolve to, so the fingerprint judges the
+ * request, not a counterparty row that may be edited later. Decimal spelling
+ * is normalized without rounding, so `25` and `25.00` are one intent.
+ */
+export const buildRecurringPaymentFingerprint = (input: RecurringPaymentFingerprintInput): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "payment_recurring_payment",
+      custodyWalletId: input.custodyWalletId,
+      counterpartyId: input.counterpartyId,
+      counterpartyAccountId: input.counterpartyAccountId,
+      token: input.token,
+      amount: normalizeDecimalString(input.amount),
+      periodHours: input.periodHours,
+      firstCollectionAt: input.firstCollectionAt,
+      metadataUri: input.metadataUri,
+    })
+  );
+
 export interface EarnVaultDepositFingerprintInput {
   environment: string;
   provider: string;

@@ -106,6 +106,8 @@ const recurringPaymentRowSchema = z.object({
   authorization_signature: z.string().nullable(),
   status: z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES),
   metadata_uri: z.string().nullable(),
+  idempotency_key: z.string().nullable(),
+  idempotency_fingerprint: z.string().nullable(),
   created_by: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -420,10 +422,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
              period_hours,
              first_collection_at,
              metadata_uri,
+             idempotency_key,
+             idempotency_fingerprint,
              created_by,
              created_at,
              updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           input.id,
@@ -440,6 +444,8 @@ export function createPostgresPaymentRecurringPaymentsRepository(
           input.periodHours,
           input.firstCollectionAt,
           input.metadataUri,
+          input.idempotencyKey ?? null,
+          input.idempotencyFingerprint ?? null,
           input.createdBy,
           input.createdAt,
           input.updatedAt
@@ -451,6 +457,17 @@ export function createPostgresPaymentRecurringPaymentsRepository(
         organizationId: input.organizationId,
         projectId: input.projectId,
       });
+    },
+
+    async findRecurringPaymentByIdempotency({ organizationId, projectId, idempotencyKey }) {
+      const row = await db
+        .prepare(
+          `SELECT * FROM payment_recurring_payments
+           WHERE organization_id = ? AND project_id = ? AND idempotency_key = ?`
+        )
+        .bind(organizationId, projectId, idempotencyKey)
+        .first<Record<string, unknown>>();
+      return row ? mapRecurringPaymentRow(row) : null;
     },
 
     async updateRecurringPayment(input: UpdatePaymentRecurringPaymentInput) {

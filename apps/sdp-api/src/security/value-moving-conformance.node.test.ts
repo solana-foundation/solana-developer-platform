@@ -78,6 +78,16 @@ const contracts: ValueMovingContract[] = [
     },
     replay: [
       {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/payments.recurring.idempotency.test.ts",
+        evidence: "replays a recurring payment when the same Idempotency-Key + body is retried",
+      },
+      {
+        mode: "idempotency_fingerprint",
+        file: "apps/sdp-api/src/routes/payments.recurring.idempotency.test.ts",
+        evidence: "rejects the same Idempotency-Key with a different body",
+      },
+      {
         mode: "claimed_state_machine",
         file: "apps/sdp-api/src/routes/payments.recurring.test.ts",
         evidence:
