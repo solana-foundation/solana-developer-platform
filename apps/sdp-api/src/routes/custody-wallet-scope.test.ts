@@ -46,7 +46,7 @@ const actualCreateSigningService = signingServiceModule.createSigningService;
 const createRpcMock = vi.spyOn(solanaRpc, "createRpc");
 const createRpcFromTransportSpy = vi.spyOn(solanaRpc, "createRpcFromTransport");
 const getAccountInfoMock = vi.spyOn(solanaRpc, "getAccountInfo");
-const getMultipleAccountsLamportsMock = vi.spyOn(solanaRpc, "getMultipleAccountsLamports");
+const getBalanceLamportsMock = vi.spyOn(solanaRpc, "getBalanceLamports");
 const getSplTokenBalancesMock = vi.spyOn(tokenAccounts, "getSplTokenBalances");
 const createSigningServiceMock = vi.spyOn(signingServiceModule, "createSigningService");
 const resolveRpcTargetMock = vi.spyOn(rpcRelay, "resolveRpcTarget");
@@ -341,8 +341,12 @@ describe("Custody wallet scope routes", () => {
       lamports: 0n,
       owner: "11111111111111111111111111111111",
     } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>);
-    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
-      addresses.map(() => 0n)
+    getBalanceLamportsMock.mockImplementation(async (_rpc, asked) =>
+      asked === TEST_SOLANA_ADDRESSES.wallet2
+        ? 1_000_000_000n
+        : asked === TEST_SOLANA_ADDRESSES.wallet3
+          ? 2_000_000_000n
+          : 0n
     );
     getSplTokenBalancesMock.mockResolvedValue([
       {
@@ -410,7 +414,7 @@ describe("Custody wallet scope routes", () => {
     await clearKVStores(env);
     createSigningServiceMock.mockReset();
     getAccountInfoMock.mockReset();
-    getMultipleAccountsLamportsMock.mockReset();
+    getBalanceLamportsMock.mockReset();
     getSplTokenBalancesMock.mockReset();
   });
 
@@ -996,11 +1000,11 @@ describe("Custody wallet scope routes", () => {
 
     expect(body.data.wallets).toHaveLength(3);
     expect(body.data.wallets.every((wallet) => wallet.balances === undefined)).toBe(true);
-    expect(getMultipleAccountsLamportsMock).not.toHaveBeenCalled();
+    expect(getBalanceLamportsMock).not.toHaveBeenCalled();
     expect(getSplTokenBalancesMock).not.toHaveBeenCalled();
   });
 
-  it("reads SOL for every cache-missed wallet in one call", async () => {
+  it("reads SOL with one address-bound call per cache-missed wallet", async () => {
     clearWalletCaches();
 
     const response = await app.request(
@@ -1010,8 +1014,10 @@ describe("Custody wallet scope routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(getMultipleAccountsLamportsMock).toHaveBeenCalledTimes(1);
-    expect(getMultipleAccountsLamportsMock.mock.calls[0]?.[1]).toHaveLength(3);
+    expect(getBalanceLamportsMock).toHaveBeenCalledTimes(3);
+    expect(new Set(getBalanceLamportsMock.mock.calls.map(([, asked]) => asked))).toEqual(
+      new Set(Object.values(SEEDED_PUBLIC_KEYS))
+    );
     expect(getAccountInfoMock).not.toHaveBeenCalled();
   });
 
@@ -1151,15 +1157,6 @@ describe("Custody wallet scope routes", () => {
       ]);
     }
     getSplTokenBalancesMock.mockResolvedValue([]);
-    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
-      addresses.map((publicKey) =>
-        publicKey === TEST_SOLANA_ADDRESSES.wallet2
-          ? 1_000_000_000n
-          : publicKey === TEST_SOLANA_ADDRESSES.wallet3
-            ? 2_000_000_000n
-            : 0n
-      )
-    );
 
     const response = await app.request(
       "/v1/wallets/aggregate?includeAllProviders=true",

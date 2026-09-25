@@ -2,10 +2,12 @@
  * Live SOL and SPL balances for custody wallets, read from the chain.
  *
  * Home and DvP create ask for every wallet at once, often from several requests
- * together, so the read is shaped for that: SOL for every wallet the cache missed
- * comes from one `getMultipleAccounts` per 100 addresses, each wallet's token
- * programs are read side by side, and a read already running for a wallet is
- * joined rather than repeated.
+ * together, so the read is shaped for that: SOL for every cache-missed wallet
+ * comes from its own address-bound `getBalance` call — a batched answer could
+ * only be matched back to wallets by position, and a permuted same-length batch
+ * would attribute one wallet's SOL to another and cache it under its key — and
+ * each wallet's token programs are read side by side. A read already running
+ * for a wallet is joined rather than repeated.
  *
  * A wallet whose read failed is left out of the answer and not cached. Reporting
  * it as zero would be a guess, and caching that guess would keep showing it after
@@ -167,34 +169,24 @@ export async function readWalletBalances(
     }
   }
 
-  // One SOL read per chunk of addresses; a failed chunk fails only its own wallets.
-  const unreadEntries = [...unread.entries()];
-  for (
-    let start = 0;
-    start < unreadEntries.length;
-    start += solanaRpc.GET_MULTIPLE_ACCOUNTS_LIMIT
-  ) {
-    const chunk = unreadEntries.slice(start, start + solanaRpc.GET_MULTIPLE_ACCOUNTS_LIMIT);
-    const chunkRead = solanaRpc.getMultipleAccountsLamports(
+  // One address-bound SOL read per wallet; a failed read fails only its own
+  // wallet. Each call names one address, so its answer is bound to that wallet
+  // alone and a malicious or broken RPC cannot shuffle balances across wallets.
+  for (const [cacheKey, { wallet, walletAddress }] of unread) {
+    const read: WalletBalanceRead = readWalletBalance(
       rpc,
-      chunk.map(([, { walletAddress }]) => walletAddress)
-    );
-    chunk.forEach(([cacheKey, { wallet, walletAddress }], offset) => {
-      const read: WalletBalanceRead = readWalletBalance(
-        rpc,
-        wallet,
-        walletAddress,
-        cacheKey,
-        chunkRead.then((lamports) => lamports[offset]),
-        requestId
-      ).finally(() => {
-        if (walletBalanceReads.get(cacheKey) === read) {
-          walletBalanceReads.delete(cacheKey);
-        }
-      });
-      walletBalanceReads.set(cacheKey, read);
-      readsByKey.set(cacheKey, read);
+      wallet,
+      walletAddress,
+      cacheKey,
+      solanaRpc.getBalanceLamports(rpc, walletAddress),
+      requestId
+    ).finally(() => {
+      if (walletBalanceReads.get(cacheKey) === read) {
+        walletBalanceReads.delete(cacheKey);
+      }
     });
+    walletBalanceReads.set(cacheKey, read);
+    readsByKey.set(cacheKey, read);
   }
 
   const balancesByKey = new Map<string, CustodyWalletTokenBalance[] | null>();
