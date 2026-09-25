@@ -125,7 +125,7 @@ export async function createAndVerifyPrincipalAction(input: {
         // written until the user confirms the resume.
         return {
           ok: false,
-          message: t("DashboardPrivateChannels.members.resumePrompt"),
+          message: t("DashboardPrivateChannels.members.resumePrompt", { name }),
           resumeCandidates: resumable.map((candidate) => candidate.id),
         };
       } else if (sameNamed.length > 0) {

@@ -23,9 +23,56 @@ function shortKey(publicKey: string): string {
   return publicKey.length > 12 ? `${publicKey.slice(0, 4)}…${publicKey.slice(-4)}` : publicKey;
 }
 
+/**
+ * The resume choice after a lost response: the only place that may confirm
+ * resuming the surfaced principal. Shown instead of enabling the ordinary
+ * retry, which cannot establish the confirmation on its own.
+ */
+function ResumePromptCallout({
+  name,
+  pending,
+  onResume,
+  onStartOver,
+}: {
+  name: string;
+  pending: boolean;
+  onResume: () => void;
+  onStartOver: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <Callout variant="warning" live>
+      {t("DashboardPrivateChannels.members.resumePrompt", { name })}
+      <div className="mt-3 flex gap-2">
+        <Button type="button" size="sm" onClick={onResume} disabled={pending}>
+          {t("DashboardPrivateChannels.members.resumeAction")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={onStartOver}
+          disabled={pending}
+        >
+          {t("DashboardPrivateChannels.members.resumeStartOverAction")}
+        </Button>
+      </div>
+    </Callout>
+  );
+}
+
 function walletLabel(wallet: CustodyWalletSummary): string {
   const name = wallet.label ?? formatCustodyProviderName(wallet.provider ?? "wallet");
   return `${name} (${shortKey(wallet.publicKey)})`;
+}
+
+function canSubmitPrincipalCreation(
+  name: string,
+  walletId: string,
+  pending: boolean,
+  resumeCandidateId: string | null
+): boolean {
+  return name.trim().length >= 2 && walletId !== "" && !pending && resumeCandidateId === null;
 }
 
 export function PrincipalCreatePage({
@@ -144,7 +191,10 @@ export function PrincipalCreatePage({
           <Button
             type="button"
             onClick={submit}
-            disabled={name.trim().length < 2 || !walletId || pending}
+            // While the resume choice is pending this button must not double
+            // as the confirmation: only the callout's "Resume identity" may
+            // send the confirmed candidate.
+            disabled={!canSubmitPrincipalCreation(name, walletId, pending, resumeCandidateId)}
             iconLeft={pending ? <Loader2Icon className="animate-spin" /> : undefined}
           >
             {pending
@@ -198,26 +248,15 @@ export function PrincipalCreatePage({
         </div>
 
         {resumeCandidateId ? (
-          <Callout variant="warning" live>
-            {t("DashboardPrivateChannels.members.resumePrompt", { name: name.trim() })}
-            <div className="mt-3 flex gap-2">
-              <Button type="button" size="sm" onClick={submit} disabled={pending}>
-                {t("DashboardPrivateChannels.members.resumeAction")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => {
-                  setResumeCandidateId(null);
-                  setResponseLost(false);
-                }}
-                disabled={pending}
-              >
-                {t("DashboardPrivateChannels.members.resumeStartOverAction")}
-              </Button>
-            </div>
-          </Callout>
+          <ResumePromptCallout
+            name={name.trim()}
+            pending={pending}
+            onResume={submit}
+            onStartOver={() => {
+              setResumeCandidateId(null);
+              setResponseLost(false);
+            }}
+          />
         ) : null}
 
         {wallets.length === 0 ? (

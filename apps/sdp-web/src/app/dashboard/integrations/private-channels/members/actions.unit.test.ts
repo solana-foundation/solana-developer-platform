@@ -8,11 +8,12 @@ const mocks = vi.hoisted(() => ({
   createPrivateChannelPrincipal: vi.fn(),
   fetchPrivateChannelPrincipals: vi.fn(),
   verifyPrivateChannelWallet: vi.fn(),
+  t: vi.fn((key: string) => key),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/i18n/server", () => ({
-  getTranslations: vi.fn(async () => (key: string) => key),
+  getTranslations: vi.fn(async () => mocks.t),
 }));
 vi.mock("@/lib/private-channels", () => ({
   addPrincipalChannelMembership: vi.fn(),
@@ -267,6 +268,12 @@ describe("createAndVerifyPrincipalAction project binding", () => {
 
     expect(mocks.createPrivateChannelPrincipal).not.toHaveBeenCalled();
     expect(mocks.verifyPrivateChannelWallet).not.toHaveBeenCalled();
+    // The catalog's resumePrompt carries a {name} placeholder: translating it
+    // without the value throws, the candidates never reach the wizard, and
+    // the stranded principal becomes unresumable.
+    expect(mocks.t).toHaveBeenCalledWith("DashboardPrivateChannels.members.resumePrompt", {
+      name: "Mia",
+    });
   });
 
   it("resumes the same-named principal the user confirmed on an attested retry", async () => {
