@@ -672,6 +672,47 @@ function hasRecurringPaymentPersistedSubscriptionRecords(
   return recurringPayment.subscription_id !== null || recurringPayment.subscription_pda !== null;
 }
 
+/**
+ * A pending_activation cancel retry can finalize locally while an earlier
+ * uncertain cancellation attempt is still journalled as processing (its
+ * submitted cancellation landed and revoked the delegation). Recovery no
+ * longer selects a canceled payment, so close the attempt in the same
+ * transaction to keep the lifecycle journal coherent.
+ */
+async function closeInFlightCancelLifecycleAttempt(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  input: {
+    organizationId: string;
+    projectId: string;
+    recurringPaymentId: string;
+    finalizedAt: string;
+  }
+): Promise<void> {
+  const attempt = await recurringRepo.getLatestLifecycleAttempt({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    operation: "cancel",
+    statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  });
+  if (!attempt) {
+    return;
+  }
+  const closedAttempt = await recurringRepo.updateLifecycleAttempt({
+    attemptId: attempt.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "confirmed",
+    stage: "finalize",
+    signature: attempt.signature,
+    error: null,
+    updatedAt: input.finalizedAt,
+  });
+  if (!closedAttempt) {
+    throw conflict("Recurring payment lifecycle attempt changed concurrently");
+  }
+}
+
 async function finalizePendingActivationCancellationLocally(input: {
   env: Env;
   organizationId: string;
@@ -696,6 +737,12 @@ async function finalizePendingActivationCancellationLocally(input: {
       // update back instead of committing inconsistent records.
       throw conflict("Recurring payment status changed before it could be canceled");
     }
+    await closeInFlightCancelLifecycleAttempt(txRecurringRepo, {
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: input.recurringPayment.id,
+      finalizedAt,
+    });
     if (input.subscription) {
       await txSubscriptionsRepo.updateSubscription({
         subscriptionId: input.subscription.id,
@@ -777,6 +824,53 @@ async function cancelReconcilablePendingActivationRecurringPayment(input: {
   }
 
   if (!onChainDelegation.exists) {
+    // Activation broadcasts Subscribe before confirming it and can reset the
+    // row to pending_activation with the authorization signature retained
+    // (SOLA9-454). A submitted authorization that has not landed yet leaves no
+    // delegation for the read above, so resolve it before finalizing locally:
+    // finalizing first would report a cancellation that a later-landing
+    // authorization could survive with a live delegation.
+    const authorizationSignature = parseNullableStoredSignature(
+      input.recurringPayment.authorization_signature ?? subscription.authorization_signature
+    );
+    if (authorizationSignature) {
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          authorizationSignature,
+          "Recurring payment authorization failed on-chain"
+        );
+      } catch (error) {
+        if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+          // The authorization failed on-chain and can never create a
+          // delegation, so finalizing locally cannot leave one live.
+          return finalizePendingActivationCancellationLocally({ ...input, subscription });
+        }
+        // Chain state is unknown: keep the record recoverable instead of
+        // reporting a cancellation that may leave the delegation live.
+        throw error;
+      }
+      // The authorization landed: re-read the delegation in case an earlier
+      // submitted cancellation already revoked it.
+      const landedDelegation = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+        rpc,
+        subscriptionPda,
+        { commitment: "confirmed" }
+      );
+      if (landedDelegation.exists) {
+        return revokeLivePendingActivationDelegation({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          recurringPayment: input.recurringPayment,
+          recurringRepo,
+          subscriptionsRepo,
+          subscription,
+          subscriptionPda,
+        });
+      }
+    }
     return finalizePendingActivationCancellationLocally({ ...input, subscription });
   }
 
