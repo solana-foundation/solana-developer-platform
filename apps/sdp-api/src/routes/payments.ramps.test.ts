@@ -1942,8 +1942,11 @@ describe("Payments routes — ramps", () => {
       providerReference: "moneygram_session_advisory",
       type: "onramp",
       amount: "25",
-      providerData: {},
+      providerData: { moneygram: { transactionId: "moneygram_transaction_advisory" } },
     });
+    const findOwnedTransactionSpy = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.moneygram, "findOwnedTransaction")
+      .mockResolvedValue({ profileId: "mg_profile_advisory", transactionType: "cash-in" });
 
     const coinbase = await app.request(
       "/v1/payments/ramps/coinbase/events",
@@ -1985,6 +1988,8 @@ describe("Payments routes — ramps", () => {
       expect(row.status).toBe("pending");
       expect(row.provider_data).toMatchObject({ clientEvent: { advisory: true } });
     }
+
+    findOwnedTransactionSpy.mockRestore();
   });
 
   describe("MoneyGram custodial events", () => {
@@ -2539,6 +2544,185 @@ describe("Payments routes — ramps", () => {
         });
         expect(row.provider_data.moneygram).not.toHaveProperty("cryptoTransferId");
       }
+    });
+  });
+
+  describe("MoneyGram on-ramp completion binding", () => {
+    const sessionId = "mg_session_onramp_complete_1";
+    const transferId = "xfr_4a5b6c7d-8e9f-4a0b-1c2d-3e4f5a6b7c8d";
+    const pendingStatus = "pending" satisfies PaymentTransferStatus;
+    let counterpartyId: string;
+    const completionEvent = {
+      kind: "onramp_completed",
+      sessionId,
+      transactionId: "mg_tx_onramp_1",
+      status: "COMPLETED",
+      amount: 25,
+    } satisfies MoneygramRampEvent;
+
+    beforeEach(async () => {
+      counterpartyId = await seedRampEventTransfer({
+        id: transferId,
+        provider: "moneygram",
+        providerReference: sessionId,
+        type: "onramp",
+        amount: "25",
+        providerData: { moneygram: { transactionId: "mg_tx_onramp_1" } },
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.moneygram, "findOwnedTransaction").mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-in",
+      });
+    });
+
+    afterEach(() => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockRestore();
+    });
+
+    async function postEvent(event: MoneygramRampEvent): Promise<Response> {
+      return app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(event),
+        },
+        env
+      );
+    }
+
+    async function readTransfer(id: string): Promise<PaymentTransferRow> {
+      const row = await getDb(env)
+        .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+        .bind(id)
+        .first<PaymentTransferRow>();
+      if (row === null) {
+        throw new Error(`Missing seeded transfer ${id}`);
+      }
+      return row;
+    }
+
+    it("records a provider-verified completion as advisory without advancing the transfer", async () => {
+      const response = await postEvent(completionEvent);
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: completionEvent.transactionId,
+          customerIdentifier: counterpartyId,
+        }
+      );
+      const row = await readTransfer(transferId);
+      expect(row.status).toBe(pendingStatus);
+      expect(row.provider_data).toMatchObject({
+        clientEvent: {
+          advisory: true,
+          kind: "onramp_completed",
+          transactionId: "mg_tx_onramp_1",
+          amount: 25,
+          status: "COMPLETED",
+        },
+      });
+    });
+
+    it("quarantines a completion whose claimed amount does not match the quoted fiat amount", async () => {
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ ...completionEvent, amount: 2500 });
+
+      expect(response.status).toBe(409);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).not.toHaveBeenCalled();
+      expect(await readTransfer(transferId)).toEqual(before);
+      expect(before.provider_data).not.toHaveProperty("clientEvent");
+    });
+
+    it("rejects a completion for a session without a verified transaction pin", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_5b6c7d8e-9f0a-4b1c-2d3e-4f5a6b7c8d9e",
+        provider: "moneygram",
+        providerReference: "mg_session_onramp_complete_2",
+        type: "onramp",
+        amount: "25",
+        providerData: {},
+      });
+      const before = await readTransfer("xfr_5b6c7d8e-9f0a-4b1c-2d3e-4f5a6b7c8d9e");
+
+      const response = await postEvent({
+        ...completionEvent,
+        sessionId: "mg_session_onramp_complete_2",
+      });
+
+      expect(response.status).toBe(409);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).not.toHaveBeenCalled();
+      expect(await readTransfer("xfr_5b6c7d8e-9f0a-4b1c-2d3e-4f5a6b7c8d9e")).toEqual(before);
+      expect(before.provider_data).not.toHaveProperty("clientEvent");
+    });
+
+    it("rejects a completion naming a transaction other than the one the session pinned", async () => {
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ ...completionEvent, transactionId: "mg_tx_other" });
+
+      expect(response.status).toBe(409);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).not.toHaveBeenCalled();
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("rejects a completion after the session's quote binding has expired", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_6c7d8e9f-0a1b-4c2d-3e4f-5a6b7c8d9e0f",
+        provider: "moneygram",
+        providerReference: "mg_session_onramp_complete_3",
+        type: "onramp",
+        amount: "25",
+        providerData: {
+          moneygram: { transactionId: "mg_tx_onramp_1" },
+          rampQuote: { expiresAt: "2020-01-01T00:00:00.000Z" },
+        },
+      });
+      const before = await readTransfer("xfr_6c7d8e9f-0a1b-4c2d-3e4f-5a6b7c8d9e0f");
+
+      const response = await postEvent({
+        ...completionEvent,
+        sessionId: "mg_session_onramp_complete_3",
+      });
+
+      expect(response.status).toBe(409);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).not.toHaveBeenCalled();
+      expect(await readTransfer("xfr_6c7d8e9f-0a1b-4c2d-3e4f-5a6b7c8d9e0f")).toEqual(before);
+    });
+
+    it("rejects a completion when MoneyGram does not confirm the transaction under the secret key", async () => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue(null);
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent(completionEvent);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { message: "MoneyGram transaction does not belong to this session." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("rejects a cash-out completion for an on-ramp transfer", async () => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-out",
+      });
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent(completionEvent);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { message: "MoneyGram transaction direction does not match this transfer." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
     });
   });
 

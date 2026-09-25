@@ -1,4 +1,4 @@
-import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { compareDecimalAmounts, decimalStringFromNumber } from "@sdp/payments/decimal";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   isRampTransferType,
@@ -186,6 +186,8 @@ export async function recordMoneygramRampEvent(
       return pinMoneygramTransaction(c, transfer, moneygramData, event);
     case "deposit_address":
       return pinMoneygramDeposit(c, transfer, moneygramData);
+    case "onramp_completed":
+      return recordMoneygramOnrampCompletion(c, transfer, moneygramData, event);
     case "signed":
       break;
     default:
@@ -408,21 +410,74 @@ async function pinMoneygramDeposit(
   throw conflict("Off-ramp transfer changed while the deposit address was recorded.");
 }
 
+/**
+ * Accepts an on-ramp completion only once it is bound to server-owned facts:
+ * the widget may only complete the transaction the session pinned, the pinned
+ * transaction must still belong to this counterparty as a USDC-on-Solana
+ * cash-in under the secret key, and the claimed amount must equal the fiat
+ * amount the quote bound. Anything else is quarantined instead of recorded,
+ * and an expired session accepts nothing new. The record stays advisory:
+ * settlement facts are never derived from the browser.
+ */
+async function recordMoneygramOnrampCompletion(
+  c: AppContext,
+  transfer: PaymentTransferRow,
+  moneygramData: Record<string, unknown>,
+  event: Extract<MoneygramRampEvent, { kind: "onramp_completed" }>
+) {
+  if (moneygramData.transactionId !== event.transactionId) {
+    throw conflict("MoneyGram completion references a transaction this session has not verified.");
+  }
+  if (transfer.status !== "pending") {
+    throw conflict(`Cannot record a completion while the transfer is ${transfer.status}.`);
+  }
+  if (isRampQuoteBindingExpired(transfer)) {
+    throw conflict("MoneyGram session has expired; create a new quote before completing.");
+  }
+  if (transfer.fiat_amount === null) {
+    throw internalError("On-ramp transfer is missing its quoted fiat amount.");
+  }
+  if (compareDecimalAmounts(decimalStringFromNumber(event.amount), transfer.fiat_amount) !== 0) {
+    throw conflict(
+      "MoneyGram completion amount does not match the amount this on-ramp was quoted for."
+    );
+  }
+  const customerIdentifier = transfer.counterparty_id;
+  if (customerIdentifier === null) {
+    throw internalError("Ramp transfer is missing its counterparty.");
+  }
+  if (!isRampTransferType(transfer.type)) {
+    throw badRequest("MoneyGram events only apply to ramp transfers.");
+  }
+  const owned = await RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction(rampRuntime(c), {
+    transactionId: event.transactionId,
+    customerIdentifier,
+  });
+  if (!owned) {
+    throw conflict("MoneyGram transaction does not belong to this session.");
+  }
+  if (owned.transactionType !== MONEYGRAM_TRANSACTION_TYPE[transfer.type]) {
+    throw conflict("MoneyGram transaction direction does not match this transfer.");
+  }
+  return recordAdvisoryClientEvent(c, transfer, {
+    kind: event.kind,
+    transactionId: event.transactionId,
+    amount: event.amount,
+    status: event.status,
+    ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
+  });
+}
+
 async function recordMoneygramAdvisoryEvent(
   c: AppContext,
   transfer: PaymentTransferRow,
   moneygramData: Record<string, unknown>,
-  event: Exclude<MoneygramRampEvent, { kind: "signed" | "transaction_created" | "deposit_address" }>
+  event: Exclude<
+    MoneygramRampEvent,
+    { kind: "signed" | "transaction_created" | "deposit_address" | "onramp_completed" }
+  >
 ) {
   switch (event.kind) {
-    case "onramp_completed":
-      return recordAdvisoryClientEvent(c, transfer, {
-        kind: event.kind,
-        transactionId: event.transactionId,
-        amount: event.amount,
-        status: event.status,
-        ...(event.referenceNumber ? { referenceNumber: event.referenceNumber } : {}),
-      });
     case "completed": {
       if (transfer.status !== "pending" && transfer.status !== "settling") {
         throw conflict(`Cannot record a completed event while the transfer is ${transfer.status}.`);
