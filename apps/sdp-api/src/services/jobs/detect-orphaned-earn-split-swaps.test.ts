@@ -12,6 +12,7 @@ import { seedTestDatabase } from "@/test/mocks/db";
 
 const getBlockHeight = vi.hoisted(() => vi.fn());
 const readOwnerMintBalance = vi.hoisted(() => vi.fn());
+const ownerHoldsMintAccount = vi.hoisted(() => vi.fn());
 const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", () => ({
@@ -22,7 +23,10 @@ vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   assertClusterEndpoint: vi.fn(async () => {}),
   resolveClusterRpcUrl: () => "https://rpc.example.invalid",
 }));
-vi.mock("@/services/earn/owner-token-balance", () => ({ readOwnerMintBalance }));
+vi.mock("@/services/earn/owner-token-balance", () => ({
+  readOwnerMintBalance,
+  ownerHoldsMintAccount,
+}));
 vi.mock("@/runtime/money-path-events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/runtime/money-path-events")>()),
   logEvent,
@@ -48,6 +52,9 @@ const HOUR = 60 * MINUTE;
 beforeEach(async () => {
   await seedTestDatabase(env);
   vi.clearAllMocks();
+  // The independent account proof agrees to "no account" unless a test says
+  // otherwise, so supported unfunded resolutions keep resolving by default.
+  ownerHoldsMintAccount.mockResolvedValue(false);
   const db = getDb(env);
   await db.batch([
     db
@@ -200,7 +207,11 @@ async function movementCount(): Promise<number> {
 describe("detectOrphanedEarnSplitSwaps", () => {
   it("flags an owner whose balance rose by the swap floor with no follow-up deposit", async () => {
     const id = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
     const before = await movementCount();
 
     await detectOrphanedEarnSplitSwaps(env);
@@ -232,7 +243,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     // The owner still holds exactly the baseline: the swap never broadcast, or
     // the owner moved the tokens. Nothing sits swapped-but-undeposited.
     const id = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6, complete: true });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -245,9 +256,84 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     });
   });
 
+  it("resolves unfunded on a complete read without the corroborating account proof", async () => {
+    // A non-empty index response is account-level evidence already; the
+    // corroborating proof exists only for reads that saw no accounts at all.
+    const id = await seedAdvisory(2 * HOUR);
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6, complete: true });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(ownerHoldsMintAccount).not.toHaveBeenCalled();
+    expect(await advisoryRow(id)).toMatchObject({ resolution: "unfunded" });
+  });
+
+  it("keeps the advisory open when an empty index read is contradicted by independent account evidence", async () => {
+    // SOLA9-675: a successful `value: []` response cannot be distinguished
+    // from an incomplete index. When the independent account proof finds
+    // exactly the account the index missed, the zero is not conclusive: the
+    // advisory stays open and the tick fails loudly, so a landed swap is not
+    // terminally written off as unfunded.
+    const id = await seedAdvisory(2 * HOUR);
+    readOwnerMintBalance.mockResolvedValue({ atoms: 0n, decimals: null, complete: false });
+    ownerHoldsMintAccount.mockResolvedValue(true);
+
+    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 balance failures/);
+
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    expect(tick().level).toBe("error");
+    expect(tick().payload).toMatchObject({ unfunded: 0, balance_read_failures: 1 });
+    expect(await advisoryRow(id)).toMatchObject({ resolution: null, resolved_at: null });
+
+    // Recovery: the advisory was never resolved, so the next honest read —
+    // complete, showing the landed swap's floor — still flags the orphan.
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
+    await detectOrphanedEarnSplitSwaps(env);
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(1);
+    expect(await advisoryRow(id)).toMatchObject({ resolution: null, resolved_at: null });
+  });
+
+  it("still resolves unfunded on an empty read once the independent account proof agrees", async () => {
+    // The genuine no-swap negative control: the index says no accounts exist
+    // and an independent, finalized account proof agrees, so the zero is
+    // corroborated and the advisory can resolve.
+    const id = await seedAdvisory(2 * HOUR);
+    readOwnerMintBalance.mockResolvedValue({ atoms: 0n, decimals: null, complete: false });
+    ownerHoldsMintAccount.mockResolvedValue(false);
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({ unfunded: 1, balance_read_failures: 0 });
+    expect(await advisoryRow(id)).toMatchObject({
+      resolution: "unfunded",
+      resolved_by: "system",
+      last_observed_atoms: "0",
+    });
+  });
+
+  it("fails the tick when the corroborating account proof is unavailable", async () => {
+    // Completeness cannot be established, so nothing may resolve terminally.
+    const id = await seedAdvisory(2 * HOUR);
+    readOwnerMintBalance.mockResolvedValue({ atoms: 0n, decimals: null, complete: false });
+    ownerHoldsMintAccount.mockRejectedValue(new Error("rpc unavailable"));
+
+    await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/1 balance failures/);
+
+    expect(eventsNamed("sdp_api_earn_split_swap_orphaned")).toHaveLength(0);
+    expect(await advisoryRow(id)).toMatchObject({ resolution: null, resolved_at: null });
+  });
+
   it("keeps a partial rise open as indeterminate rather than judging it", async () => {
     const id = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR / 2n, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR / 2n,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -261,7 +347,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("failed");
     const observed = await seedFollowUpMovement("confirmed");
     // The swapped tokens went into the vault: the balance is back at baseline.
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6, complete: true });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -275,7 +361,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   it("does not let a failed follow-up alone discharge the advisory", async () => {
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("failed");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -288,7 +378,7 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const first = await seedAdvisory(3 * HOUR);
     const second = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("finalized");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6, complete: true });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -304,7 +394,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     // would be a persistent false alert on any wallet with other inflows.
     const id = await seedAdvisory(2 * HOUR);
     const followUp = await seedFollowUpMovement("confirmed");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -326,7 +420,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpMovement("confirmed", {
       vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     });
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -347,7 +445,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     const sibling = await seedFollowUpMovement("confirmed", {
       vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     });
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -368,7 +470,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   it("still flags an orphan when the only same-mint deposit is too small to be the follow-up", async () => {
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("confirmed", { amount: "1" });
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -379,7 +485,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   it("treats an in-flight follow-up deposit as pending, not orphaned", async () => {
     await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("requested");
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -392,7 +502,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     // minutes, and paging in that window would be a false positive.
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpBuild(5 * MINUTE);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -404,7 +518,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   it("stops crediting a follow-up build once it is older than the window", async () => {
     await seedAdvisory(3 * HOUR);
     await seedFollowUpBuild(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -416,7 +534,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedAdvisory(2 * HOUR, { swapLastValidBlockHeight: "20000" });
     // Young advisory: past the blockhash but inside the grace window.
     await seedAdvisory(5 * MINUTE);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
@@ -445,7 +567,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
 
   it("refuses to judge atoms of a different scale", async () => {
     await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 9 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 9,
+      complete: true,
+    });
 
     await expect(detectOrphanedEarnSplitSwaps(env)).rejects.toThrow(/balance failures/);
 
@@ -478,7 +604,11 @@ describe("detectOrphanedEarnSplitSwaps", () => {
   it("rotates the scan so a standing orphan cannot pin the head of the queue", async () => {
     const older = await seedAdvisory(3 * HOUR);
     const newer = await seedAdvisory(2 * HOUR);
-    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+    readOwnerMintBalance.mockResolvedValue({
+      atoms: BASELINE + FLOOR,
+      decimals: 6,
+      complete: true,
+    });
 
     await detectOrphanedEarnSplitSwaps(env);
 
