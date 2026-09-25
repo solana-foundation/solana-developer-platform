@@ -6,7 +6,6 @@ import { PlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { z } from "zod";
 import { Combobox } from "@/components/ui/combobox";
-import { DateTimePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -21,6 +20,7 @@ import { formatDateTime } from "../payments-presentation";
 import { ContactCombobox } from "../ramps/components/contact-combobox";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
+import { ScheduleStartPicker } from "./schedule-start-picker";
 import {
   amountErrorMessage,
   firstCollectionAtIsValid,
@@ -338,12 +338,11 @@ function WhenStep({ form }: StepProps) {
           <Label htmlFor="recurring-payment-first-collection">
             {t("DashboardPayments.recurring.startsOn")}
           </Label>
-          <DateTimePicker
+          <ScheduleStartPicker
             id="recurring-payment-first-collection"
             value={fields.firstCollectionAt}
             onChange={(value) => setField("firstCollectionAt", value)}
             disablePast
-            size="xl"
           />
           {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
             <FieldHint tone="error">

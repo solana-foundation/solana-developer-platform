@@ -505,4 +505,11 @@ export function DateRangePicker({
   );
 }
 
-export { displayRangeValue, displayValue, formatDateValue, parseDateValue };
+export {
+  displayRangeValue,
+  displayValue,
+  formatDateValue,
+  parseDateValue,
+  pickerLocale,
+  timeValue,
+};
