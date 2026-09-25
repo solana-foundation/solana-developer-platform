@@ -192,15 +192,22 @@ LEFT JOIN LATERAL (
   -- organization-level custody config is the fallback), and a project-scoped
   -- match wins over an org-level one. The same public key can be recorded on
   -- more than one custody wallet — a provisioning race leaves the loser behind,
-  -- and a rotated mapping does not migrate older trades — and picking among
-  -- them arbitrarily could name a wallet that never signed the close.
+  -- and a rotated mapping does not migrate older trades — so the wallet the
+  -- trade's own project maps as its settlement wallet (0079) wins first. That
+  -- mapping is the record the close flow itself resolves and requires to match
+  -- the trade's authority before signing, so within a project it cannot name a
+  -- wallet that never signed; the scan only breaks the tie, and stays the
+  -- fallback for a mapping that has since rotated to a different key.
   SELECT w.id
     FROM custody_wallets w
     JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+    LEFT JOIN dvp_settlement_wallets sw
+      ON sw.project_id = t.project_id AND sw.organization_id = t.organization_id
    WHERE w.public_key = t.settlement_authority
      AND cfg.organization_id = t.organization_id
      AND (cfg.project_id = t.project_id OR cfg.project_id IS NULL)
-   ORDER BY (cfg.project_id = t.project_id) DESC NULLS LAST
+   ORDER BY (w.id = sw.custody_wallet_id) DESC NULLS LAST,
+            (cfg.project_id = t.project_id) DESC NULLS LAST
    LIMIT 1
 ) authority ON TRUE
 WHERE t.close_signature IS NOT NULL

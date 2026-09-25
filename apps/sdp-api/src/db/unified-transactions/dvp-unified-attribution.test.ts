@@ -36,6 +36,7 @@ const WALLET_A_FUNDER = "cwlt_poc_dvp_a_funder";
 const WALLET_A_SETTLEMENT = "cwlt_poc_dvp_a_settlement";
 const WALLET_B_FUNDER = "cwlt_poc_dvp_b_funder";
 const WALLET_A_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_a_settlement_impostor";
+const WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT = "cwlt_poc_dvp_a_settlement_impostor_same";
 const WALLET_B_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_b_settlement_impostor";
 const SETTLEMENT_AUTHORITY = "PocDvpASettlement111";
 async function seedFixture(): Promise<void> {
@@ -130,6 +131,22 @@ async function seedFixture(): Promise<void> {
         "provider-a-settlement-impostor",
         SETTLEMENT_AUTHORITY,
         "A impostor"
+      ),
+    // A second impostor inside the trade's own project: the same public key can
+    // be recorded on more than one wallet in one project, and resolving the
+    // close's wallet by the address and tenant scope alone cannot tell them
+    // apart. The project's settlement-wallet mapping (0079) — the record the
+    // close flow itself resolves before signing — must win.
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, status)
+         VALUES (?, 'cfg_poc_dvp_a', ?, ?, ?, 'active')`
+      )
+      .bind(
+        WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT,
+        "provider-a-settlement-impostor-same",
+        SETTLEMENT_AUTHORITY,
+        "A impostor same project"
       ),
     db
       .prepare(
@@ -373,6 +390,26 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
       expect(row.custodyWalletId).toBe(WALLET_A_SETTLEMENT);
       expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_IMPOSTOR);
       expect(row.custodyWalletId).not.toBe(WALLET_B_SETTLEMENT_IMPOSTOR);
+    }
+  });
+
+  it("names the project's mapped settlement wallet when the same address is recorded on another wallet in the same project", async () => {
+    // The fixture seeds the settlement authority's address on a third wallet
+    // under the trade's own project's custody config. Two project-scoped
+    // wallets now share the address the close was signed with, and a scan
+    // scoped to the tenant cannot tell them apart; the project's settlement
+    // mapping — what the close flow resolved and required to match the trade's
+    // authority before it signed — is the record of which one did.
+    await insertTrade("dvp_poc_close_same_project", "settled", "sig_settlement_authority");
+
+    const orgAFeed = await listDvp({ organizationId: ORG_A, projectId: PROJECT_A });
+    const closeRows = orgAFeed.rows.filter(
+      (row) => row.moduleId === "dvp_poc_close_same_project" && row.kind === "close"
+    );
+    expect(closeRows).toHaveLength(2);
+    for (const row of closeRows) {
+      expect(row.custodyWalletId).toBe(WALLET_A_SETTLEMENT);
+      expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT);
     }
   });
 
