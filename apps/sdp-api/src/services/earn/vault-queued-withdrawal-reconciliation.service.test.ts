@@ -851,6 +851,40 @@ describe("queued withdrawal reconciliation", () => {
     expect(failed.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
   });
 
+  it("keeps an output-rent claim when the landed transaction omits a token-balance list", async () => {
+    const current = request({
+      mechanism: "operator_redemption",
+      intermediate_mint: INTERMEDIATE_MINT,
+      creates_output_accounts: true,
+      output_accounts_rent_funder: PAYER,
+      custody_wallet_id: null,
+      owner_address: OWNER,
+      nonce: "7",
+      status: "pending",
+    });
+    const ledger = fakeLedger(current);
+    // A successful landing without both balance lists is missing evidence,
+    // not evidence that nothing was created: the claim must survive.
+    await projectClosingEvent(
+      ledger,
+      transactionRpc({ meta: { err: null, logMessages: [] } }),
+      current,
+      fulfilledClosing()
+    );
+    expect(ledger.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+
+    const noPre = fakeLedger(current);
+    await projectClosingEvent(
+      noPre,
+      transactionRpc({
+        meta: { err: null, postTokenBalances: [{ mint: INTERMEDIATE_MINT, owner: OWNER }] },
+      }),
+      current,
+      fulfilledClosing()
+    );
+    expect(noPre.dropUnpaidOutputAccountsRentClaim).not.toHaveBeenCalled();
+  });
+
   it("leaves requests without an output-rent claim or owner address untouched", async () => {
     const unclaimed = request({ status: "pending", nonce: "7" });
     const unclaimedLedger = fakeLedger(unclaimed);

@@ -647,10 +647,11 @@ async function transactionObservation(
  * can become a refund source. A partially-landed claim (one account created,
  * the other lost the race) stays: the row names the funder the landed create
  * did charge, and a refund consumer re-verifies per account before paying.
- * An unreadable transaction keeps the claim untouched — the same documented
- * external-create residual the share-account projection accepts. Custody
- * requests (whose funder and refund path are both SDP-internal) also keep
- * their claim.
+ * An unreadable transaction — or one that landed but reported no
+ * token-balance lists — keeps the claim untouched: absent RPC evidence is
+ * not evidence of absence, and the same documented external-create residual
+ * the share-account projection accepts applies. Custody requests (whose
+ * funder and refund path are both SDP-internal) also keep their claim.
  *
  * One-directional by construction: the check can only retire a claim, never
  * invent or strengthen one.
@@ -683,10 +684,16 @@ async function retireUnpaidOutputRentClaim(
     return;
   }
   if (!transaction || transaction.meta === null || transaction.meta.err !== null) return;
+  // An omitted balance list is missing evidence, not empty evidence: without
+  // both lists the landing cannot be judged, and the claim stays.
+  const preTokenBalances = transaction.meta.preTokenBalances;
+  const postTokenBalances = transaction.meta.postTokenBalances;
+  if (preTokenBalances === undefined || preTokenBalances === null) return;
+  if (postTokenBalances === undefined || postTokenBalances === null) return;
   const balanceKey = (balance: RawTokenBalance): string => `${balance.mint}:${balance.owner ?? ""}`;
-  const preExisting = new Set((transaction.meta.preTokenBalances ?? []).map(balanceKey));
+  const preExisting = new Set(preTokenBalances.map(balanceKey));
   const createdMints = new Set(
-    (transaction.meta.postTokenBalances ?? [])
+    postTokenBalances
       .filter((balance) => !preExisting.has(balanceKey(balance)))
       .map((balance) => balance.mint)
   );
