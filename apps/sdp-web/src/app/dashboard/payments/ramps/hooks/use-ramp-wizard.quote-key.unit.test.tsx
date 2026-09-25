@@ -311,6 +311,27 @@ describe("useRampWizard quote operation key — lightspark offramp collected pay
     paymentInstructions: [],
   };
 
+  // Two active saved payout accounts in one corridor: picking either must put
+  // its id on the quote, so the API never guesses between them.
+  const SAVED_PAYOUT_TREE = {
+    countryRails: { US: [] },
+    railFields: {},
+    accounts: [
+      {
+        id: "cpa_us_primary",
+        destinationCountry: "US",
+        paymentRail: "ach",
+        status: "ACTIVE",
+      },
+      {
+        id: "cpa_us_secondary",
+        destinationCountry: "US",
+        paymentRail: "ach",
+        status: "ACTIVE",
+      },
+    ],
+  };
+
   const OFFRAMP_PROPS: UseRampWizardProps = {
     ...PROPS,
     enabledRampProviders: ["lightspark"],
@@ -528,5 +549,113 @@ describe("useRampWizard quote operation key — lightspark offramp collected pay
     expect(posts[0].key).toBeTruthy();
     expect(posts[1].key).not.toBe(posts[0].key);
     expect(posts[1].body.providerAccountId).toBe("cpa_us_secondary");
+  });
+
+  it("quotes the newly picked saved account when the retry skips the advance", async () => {
+    // Saved-account flow: the user picked cpa_us_primary, the ready advance
+    // resolved it, and the quote POST was lost. They then pick
+    // cpa_us_secondary for the same destination country and walk back to the
+    // transaction stage without re-advancing — the corridor's resolved account
+    // is gone, and the retry must quote the account the user picked, not an
+    // account-less payload the API would resolve (or reject) on its own.
+    let quotePostCalls = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === OFFRAMP_ENDPOINT && method === "POST") {
+        quotePostCalls += 1;
+        if (quotePostCalls === 1) {
+          return Promise.reject(new TypeError("network response lost"));
+        }
+        return Promise.resolve(
+          Response.json({ data: { quote: LIGHTSPARK_QUOTE, transferId: TRANSFER_ID_OFFRAMP } })
+        );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        if (method === "POST") {
+          const body = JSON.parse(String(init?.body)) as { providerAccountId?: string };
+          return Promise.resolve(
+            Response.json({
+              data: {
+                provider: "lightspark",
+                direction: "offramp",
+                status: "ready",
+                providerAccountId: body.providerAccountId ?? "cpa_us_primary",
+              },
+            })
+          );
+        }
+        return Promise.resolve(
+          Response.json({
+            data: {
+              provider: "lightspark",
+              direction: "offramp",
+              status: "collect_account",
+              payout: SAVED_PAYOUT_TREE,
+            },
+          })
+        );
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOfframpWizard(OFFRAMP_PROPS), { wrapper });
+    await act(async () => {});
+    act(() => rendered.result.current.selectProvider("lightspark"));
+    act(() => rendered.result.current.setField("amount", "100"));
+    act(() => rendered.result.current.setField("walletId", WALLET.id));
+    await waitFor(() => expect(rendered.result.current.payoutAccounts.length).toBeGreaterThan(0));
+    act(() => {
+      rendered.result.current.selectPayoutAccount(
+        rendered.result.current.payoutAccounts.find((account) => account.id === "cpa_us_primary") ??
+          null
+      );
+    });
+    for (let step = 0; step < 4; step += 1) {
+      await waitFor(() => expect(rendered.result.current.canProceed).toBe(true));
+      await act(async () => {
+        await rendered.result.current.handlePrimary();
+      });
+    }
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    // Pick the other saved account and reach the transaction stage without a
+    // fresh advance: back to the memo step, then forward again.
+    act(() => {
+      rendered.result.current.selectPayoutAccount(
+        rendered.result.current.payoutAccounts.find(
+          (account) => account.id === "cpa_us_secondary"
+        ) ?? null
+      );
+    });
+    await act(async () => {
+      rendered.result.current.handleSecondary();
+    });
+    await act(async () => {
+      await rendered.result.current.handlePrimary();
+    });
+
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID_OFFRAMP));
+
+    const posts = offrampQuotePosts();
+    expect(posts.length).toBe(2);
+    // The picked account is a NEW quote operation: a fresh key quoting the
+    // account the user selected, never a replay of the previous account's
+    // recorded quote and never an account-less request.
+    expect(posts[0].key).toBeTruthy();
+    expect(posts[1].key).not.toBe(posts[0].key);
+    expect(posts[0].body.providerAccountId).toBe("cpa_us_primary");
+    expect(posts[1].body.providerAccountId).toBe("cpa_us_secondary");
+    expect(posts[1].body.destinationCountry).toBe("US");
   });
 });
