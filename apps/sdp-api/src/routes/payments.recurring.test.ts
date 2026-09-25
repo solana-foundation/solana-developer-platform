@@ -911,6 +911,92 @@ describe("Payments routes — recurring", () => {
     expect(attempt).toEqual({ status: "failed" });
   });
 
+  it.each([
+    {
+      broadcast: "CreatePlan",
+      stage: "create_plan",
+      ambiguousSignature: testSignature(1),
+      stored: { plan_creation_signature: testSignature(1), authorization_signature: null },
+    },
+    {
+      broadcast: "Subscribe",
+      stage: "authorize_subscription",
+      ambiguousSignature: testSignature(2),
+      stored: {
+        plan_creation_signature: testSignature(1),
+        authorization_signature: testSignature(2),
+      },
+    },
+  ])(
+    "keeps the $broadcast signature through an ambiguous confirmation so recovery never re-broadcasts",
+    async ({ stage, ambiguousSignature, stored }) => {
+      const signAndSendMock = recurringExecution.signAndSendMock();
+      confirmTransactionMock.mockImplementation(async (_rpc, confirmedSignature) => {
+        if (confirmedSignature === ambiguousSignature) {
+          throw new AppError("SOLANA_RPC_ERROR", "Transaction confirmation timed out");
+        }
+        return {
+          signature: confirmedSignature,
+          slot: 100n,
+          confirmationStatus: "confirmed",
+          err: null,
+        };
+      });
+      const created = await createRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      const activatePath = `/v1/payments/recurring-payments/${created.id}/activate`;
+
+      const failedRes = await app.request(
+        activatePath,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(failedRes.status).toBe(502);
+      const payment = await getDb(env)
+        .prepare(
+          `SELECT status, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payments
+            WHERE id = ?`
+        )
+        .bind(created.id)
+        .first<Record<string, string | null>>();
+      expect(payment).toEqual({ status: "pending_activation", ...stored });
+      const attempt = await getDb(env)
+        .prepare(
+          `SELECT status, stage, plan_creation_signature, authorization_signature
+             FROM payment_recurring_payment_activation_attempts
+            WHERE recurring_payment_id = ?`
+        )
+        .bind(created.id)
+        .first<Record<string, string | null>>();
+      expect(attempt).toEqual({ status: "failed", stage, ...stored });
+
+      const retryRes = await app.request(
+        activatePath,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(retryRes.status).toBe(200);
+      expect((await parseRecurringResponse(retryRes)).data.recurringPayment).toMatchObject({
+        status: "active",
+        planCreationSignature: testSignature(1),
+        authorizationSignature: testSignature(2),
+      });
+      // CreatePlan and Subscribe each reached the chain exactly once.
+      expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("confirms each fresh activation broadcast exactly once", async () => {
+    await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    expect(confirmTransactionMock.mock.calls.map(([, confirmed]) => confirmed)).toEqual([
+      testSignature(1),
+      testSignature(2),
+    ]);
+  });
+
   it("seals setup, cancel, and failure audit outcomes for lifecycle broadcasts", async () => {
     // Setup broadcast: force the setup path by making the source token
     // account lookup miss so the ATA-create broadcast is admitted and sealed.
@@ -2080,6 +2166,44 @@ describe("Payments routes — recurring", () => {
         stage: "finalize",
         signature: submittedSignature,
       });
+    }
+  );
+
+  it.each(PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS)(
+    "confirms a fresh recurring payment %s broadcast exactly once",
+    async (operation) => {
+      const lifecycleSignature = signature(
+        "4rNhfL5s9hQfCjVxrTQDAZECJ5M99kzF8JRgWEzZEijj73D4Jsiz82cgwxUc71vWR9NBdk2zX9qQREx9UvP4QREe"
+      );
+      const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+      recurringExecution.signAndSendMock().mockResolvedValue(lifecycleSignature);
+      if (operation === "resume") {
+        const cancelResponse = await app.request(
+          `/v1/payments/recurring-payments/${activated.id}/cancel`,
+          { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+          env
+        );
+        expect(cancelResponse.status).toBe(200);
+      }
+      // A second check of the already-confirmed signature would time out.
+      confirmTransactionMock.mockClear();
+      confirmTransactionMock
+        .mockResolvedValueOnce({
+          signature: lifecycleSignature,
+          slot: 101n,
+          confirmationStatus: "confirmed",
+          err: null,
+        })
+        .mockRejectedValue(new AppError("SOLANA_RPC_ERROR", "Transaction confirmation timed out"));
+
+      const response = await app.request(
+        `/v1/payments/recurring-payments/${activated.id}/${operation}`,
+        { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      expect(confirmTransactionMock).toHaveBeenCalledOnce();
     }
   );
 

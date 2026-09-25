@@ -564,13 +564,14 @@ async function runRecurringPaymentLifecycle(input: {
         signature,
         metadata: { planPda, subscriptionPda },
       });
+    } else {
+      // Recovered attempt: confirm the signature a previous run stored.
+      await confirmSubscriptionSignature(
+        input.env,
+        signature,
+        lifecycleConfirmationMessage(input.operation)
+      );
     }
-
-    await confirmSubscriptionSignature(
-      input.env,
-      signature,
-      lifecycleConfirmationMessage(input.operation)
-    );
     confirmedOnChain = true;
 
     return finalizeRecurringPaymentLifecycle({
