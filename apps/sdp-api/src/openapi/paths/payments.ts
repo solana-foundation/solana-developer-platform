@@ -610,7 +610,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription plan creation",
     operationId: "preparePaymentSubscriptionPlanCreate",
     description:
-      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain.",
+      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain; preparing against an existing on-chain plan returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -625,7 +625,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan creation prepared",
         content: jsonContent(preparePaymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

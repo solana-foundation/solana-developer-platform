@@ -1642,7 +1642,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/prepare-create",
-            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain.",
+            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain; preparing against an existing on-chain plan returns 409.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"destinations\": [\n    \"\"\n  ],\n  \"pullers\": [\n    \"\"\n  ],\n  \"endTs\": \"1770000000\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
