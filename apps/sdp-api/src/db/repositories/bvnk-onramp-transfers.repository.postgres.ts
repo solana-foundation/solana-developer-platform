@@ -6,7 +6,6 @@ import type {
   ApplyBvnkOnrampPayinInput,
   BvnkOnrampTransferCandidateRow,
   BvnkOnrampTransfersRepository,
-  ClaimBvnkOnrampPayinSimulationInput,
   ClaimBvnkOnrampPayoutInput,
   FailBvnkOnrampPayoutInput,
   FailBvnkOnrampPayoutUnclaimedInput,
@@ -228,16 +227,6 @@ WHERE id = ?
   AND jsonb_exists(provider_data->'bvnk'->'payout','payoutId')
 RETURNING *, ${ONRAMP_KIND}`;
 
-const CLAIM_PAYIN_SIMULATION_SQL = `UPDATE payment_transfers
-SET provider_data = jsonb_set(provider_data, '{bvnk,simulation}', ?::jsonb),
-    updated_at = sdp_iso_now()
-WHERE id = ?
-  AND provider = 'bvnk'
-  AND type = 'onramp'
-  AND status = 'awaiting_payment'
-  AND NOT jsonb_exists(provider_data->'bvnk','simulation')
-RETURNING *, ${ONRAMP_KIND}`;
-
 function assertPositiveDecimalAmount(amount: string, label: string): string {
   const normalized = amount.trim();
   if (!isDecimalString(normalized) || compareDecimalAmounts(normalized, "0") <= 0) {
@@ -426,15 +415,6 @@ export function createPostgresBvnkOnrampTransfersRepository(
       const row = await db
         .prepare(TOUCH_PAYOUT_CANDIDATE_SQL)
         .bind(input.transferId)
-        .first<OnrampTransferProjectionRow>();
-
-      return row === null ? null : mapTransferRow(row);
-    },
-
-    async claimPayinSimulation(input: ClaimBvnkOnrampPayinSimulationInput) {
-      const row = await db
-        .prepare(CLAIM_PAYIN_SIMULATION_SQL)
-        .bind(JSON.stringify({ requestedAt: input.requestedAt }), input.transferId)
         .first<OnrampTransferProjectionRow>();
 
       return row === null ? null : mapTransferRow(row);

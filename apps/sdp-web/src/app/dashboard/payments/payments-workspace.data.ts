@@ -11,7 +11,6 @@ import type {
   ListProjectCounterpartyAccountsEnvelope,
   ListProjectCounterpartyAccountsResponse,
   MoneygramRampEvent,
-  MuralSandboxPayinCurrency,
   PaymentRampEstimateEnvelope,
   PaymentsWalletAggregateEnvelope,
   PaymentTransferBatch,
@@ -827,29 +826,7 @@ export async function fetchCounterpartyAccounts(
   return body.data?.accounts ?? [];
 }
 
-type SandboxTransferSimulationInput =
-  | {
-      provider: "lightspark";
-      payload: {
-        quoteId: string;
-        currencyCode?: "USD" | "USDC";
-        currencyAmount?: number;
-      };
-    }
-  | {
-      provider: "bvnk";
-      payload: {
-        transferId: string;
-      };
-    }
-  | {
-      provider: "mural";
-      payload: {
-        counterpartyId: string;
-        amount: number;
-        fiatCurrency: MuralSandboxPayinCurrency;
-      };
-    };
+type SandboxTransferSimulationInput = { transferId: string };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {

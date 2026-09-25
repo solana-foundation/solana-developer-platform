@@ -1,7 +1,6 @@
 import type { CounterpartyProviderData } from "@sdp/types";
 import { z } from "zod";
 import { internalError } from "../../../errors";
-import { readRecord } from "../../../json";
 
 export const MURAL_KYC_STATUSES = [
   "inactive",
@@ -46,26 +45,52 @@ const storedMuralOrganizationSchema = z.object({
   kycLink: z.string().min(1).optional(),
 });
 
+const muralProviderDataSchema = z.looseObject({
+  mural: z.record(z.string(), z.unknown()).optional(),
+});
+
+const muralOrganizationProviderDataSchema = z.looseObject({
+  mural: z.looseObject({ organization: storedMuralOrganizationSchema.optional() }).optional(),
+});
+
+const muralTransferProviderDataSchema = z.looseObject({
+  mural: z.looseObject({ accountId: z.string().min(1) }),
+});
+
 export function readMuralData(providerData: CounterpartyProviderData): Record<string, unknown> {
-  const mural = readRecord(providerData.mural);
-  if (mural === undefined) {
-    return {};
+  const parsed = muralProviderDataSchema.safeParse(providerData);
+  if (!parsed.success) {
+    throw internalError("Malformed Mural state in provider_data.");
   }
-  return mural;
+  return parsed.data.mural === undefined ? {} : parsed.data.mural;
 }
 
 export function readMuralOrganization(
   providerData: CounterpartyProviderData
 ): MuralOrganizationResolution {
-  const organization = readRecord(readMuralData(providerData).organization);
-  if (organization === undefined) {
-    return {};
-  }
-  const parsed = storedMuralOrganizationSchema.safeParse(organization);
+  const parsed = muralOrganizationProviderDataSchema.safeParse(providerData);
   if (!parsed.success) {
     throw internalError("Malformed Mural organization state in provider_data.");
   }
-  return parsed.data;
+  const mural = parsed.data.mural;
+  if (mural === undefined || mural.organization === undefined) {
+    return {};
+  }
+  return mural.organization;
+}
+
+/**
+ * Reads the Mural pay-in account id the on-ramp quote bound this transfer to.
+ *
+ * @param providerData - The transfer row's `provider_data` column.
+ * @returns The Mural account id written at quote time.
+ */
+export function readMuralTransferAccountId(providerData: Record<string, unknown>): string {
+  const parsed = muralTransferProviderDataSchema.safeParse(providerData);
+  if (!parsed.success) {
+    throw internalError("Mural on-ramp transfer has no bound pay-in account.");
+  }
+  return parsed.data.mural.accountId;
 }
 
 export function isMuralKycApproved(status: MuralKycStatus | undefined): boolean {

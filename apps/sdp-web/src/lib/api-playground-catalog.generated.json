@@ -5456,7 +5456,7 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"lightspark\",\n  \"payload\": {\n    \"quoteId\": \"quote_example\",\n    \"currencyCode\": \"USD\"\n  }\n}",
+            "defaultValue": "{\n  \"transferId\": \"xfr_example\"\n}",
             "required": true
           }
         ],

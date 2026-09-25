@@ -1798,10 +1798,18 @@ export const createOnrampQuoteRequestSchema = createOnrampQuoteSchemaBase
     },
   });
 
-export const simulateSandboxTransferRequestSchema = withOpenApi(simulateSandboxTransferSchemaBase, {
-  description:
-    "Sandbox-only helper to simulate provider-specific transfer completion flows. The payload is discriminated by provider.",
-});
+export const simulateSandboxTransferRequestSchema = simulateSandboxTransferSchemaBase
+  .extend({
+    transferId: withOpenApi(simulateSandboxTransferSchemaBase.shape.transferId, {
+      description:
+        "ID of an on-ramp transfer that is awaiting payment. The provider, quote reference, counterparty, and fiat amount are read from the transfer; each transfer can be simulated once.",
+      example: "xfr_example",
+    }),
+  })
+  .openapi({
+    description:
+      "Sandbox-only helper that simulates the fiat pay-in for a persisted on-ramp quote. Only the transfer ID is accepted; every provider-specific value is derived from the transfer.",
+  });
 
 export const paymentListTransfersQuerySchema = listTransfersQuerySchemaBase
   .extend({
