@@ -228,6 +228,35 @@ export async function resolveSourceTokenAccountOrAta(
 }
 
 /**
+ * Whether the wallet owns any token account for the mint, on either SPL token
+ * program. A zero-balance account still counts — the schedule can be funded
+ * later — but a wallet that has never held the token cannot.
+ */
+export async function walletHoldsTokenAccount(
+  rpc: ReturnType<typeof createRpc>,
+  owner: Address,
+  mint: Address
+): Promise<boolean> {
+  const responses = await Promise.all(
+    SPL_TOKEN_PROGRAM_IDS.map((programId) =>
+      rpc
+        .getTokenAccountsByOwner(
+          owner,
+          { programId },
+          { encoding: "jsonParsed", commitment: "confirmed" }
+        )
+        .send()
+    )
+  );
+
+  return responses.some((response) =>
+    response.value.some(
+      (account) => parseTokenAmountInfo(account.account.data.parsed.info).mint === mint
+    )
+  );
+}
+
+/**
  * Build the standard SPL transfer instruction pair: an idempotent ATA
  * creation for the destination (rent paid by `ataRentPayer`) followed by a
  * transferChecked from the authority's largest token account.

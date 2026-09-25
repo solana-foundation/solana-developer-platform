@@ -400,6 +400,44 @@ function RecurringPaymentLifecycleBand({
   return null;
 }
 
+/**
+ * Whether the selected currency may be persisted for the selected funding
+ * wallet. The balances feed omits zero-balance token accounts, but the API
+ * still accepts them (fund-later): the payment's own unchanged pair stays
+ * valid even when its token is missing from the balance-derived options.
+ */
+function selectedTokenIsHeldFor(
+  assetOptions: { value: string }[],
+  selectedToken: string,
+  payment: Pick<PaymentRecurringPayment, "token" | "sourceCustodyWalletId">,
+  selectedCustodyWalletId: string
+): boolean {
+  return (
+    assetOptions.some((asset) => asset.value === selectedToken) ||
+    (selectedToken === payment.token && selectedCustodyWalletId === payment.sourceCustodyWalletId)
+  );
+}
+
+/**
+ * The currency a funding-wallet switch binds next: the current one only
+ * survives if the target wallet can hold it; otherwise the selection is
+ * cleared (or restored to the payment's own persisted token when returning
+ * to its wallet, which that wallet holds regardless of the balances feed)
+ * and Save stays blocked until an explicit currency choice is made.
+ */
+function rebindTokenForWallet(
+  nextAssets: { value: string }[],
+  currentToken: string,
+  payment: Pick<PaymentRecurringPayment, "token" | "sourceCustodyWalletId">,
+  nextWalletId: string
+): string {
+  if (selectedTokenIsHeldFor(nextAssets, currentToken, payment, nextWalletId)) {
+    return currentToken;
+  }
+  return nextWalletId === payment.sourceCustodyWalletId ? payment.token : "";
+}
+
+/* react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing orchestration: the detail workspace keeps the editor modal, wallet/currency re-binding and lifecycle actions in one component */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
   wallet,
@@ -444,7 +482,15 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
-  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
+  // Currency options follow the mutable funding-wallet selection, so a
+  // replacement wallet never leaves the previous wallet's token selected.
+  const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? null, {}, t);
+  const selectedTokenIsHeld = selectedTokenIsHeldFor(
+    assetOptions,
+    selectedToken,
+    recurringPayment,
+    selectedCustodyWalletId
+  );
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -534,7 +580,9 @@ export function RecurringPaymentDetailWorkspace({
       setPaymentValidationError(t("DashboardPayments.recurring.invalidInterval"));
       return;
     }
-    if (!selectedToken) {
+    if (!selectedTokenIsHeld) {
+      // The persisted pair must come from the selected wallet's inventory, so a
+      // token that has fallen out of it cannot be saved implicitly.
       setPaymentValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
@@ -875,6 +923,11 @@ export function RecurringPaymentDetailWorkspace({
               value={selectedCustodyWalletId}
               onChange={(value) => {
                 setSelectedCustodyWalletId(value);
+                const nextWallet = liveWallets.find((entry) => entry.id === value) ?? null;
+                const nextAssets = recurringPaymentAssetOptions(nextWallet, {}, t);
+                setSelectedToken((current) =>
+                  rebindTokenForWallet(nextAssets, current, recurringPayment, value)
+                );
                 setPaymentValidationError(null);
               }}
               options={liveWallets.map((entry) => ({

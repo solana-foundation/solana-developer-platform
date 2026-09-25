@@ -48,6 +48,7 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPaymentTokenMint,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
@@ -633,6 +634,16 @@ export async function activateRecurringPayment(input: {
     });
     return input.recurringPayment;
   }
+
+  // Activation takes the stored wallet/token pair live, so the token must
+  // still be an eligible recurring-payment token before anything is claimed
+  // or signed on-chain.
+  await assertRecurringPaymentTokenMint(
+    input.recurringPayment.token,
+    input.organizationId,
+    input.projectId,
+    input.env
+  );
 
   await createSigningService(input.env).admitRuntimeExecution(
     input.organizationId,

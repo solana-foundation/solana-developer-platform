@@ -72,6 +72,7 @@ import {
 } from "./policy";
 import {
   assertRecurringPaymentSourceWallet,
+  assertRecurringPaymentSourceWalletTokenHeld,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
   parseNullableStoredSignature,
@@ -293,6 +294,18 @@ async function resolveRecurringPaymentUpdate(input: {
         })
       : { destinationAddress: input.recurringPayment.destination_address },
   ]);
+  if (
+    finalSourceWallet.id !== input.recurringPayment.source_custody_wallet_id ||
+    token !== input.recurringPayment.token
+  ) {
+    // A changed pair must stay one the source wallet can fund: a funding-wallet
+    // change may not silently retain a token the replacement never held.
+    await assertRecurringPaymentSourceWalletTokenHeld({
+      env: input.env,
+      sourceWallet: finalSourceWallet,
+      token,
+    });
+  }
   const amount =
     input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
   const periodHours =
