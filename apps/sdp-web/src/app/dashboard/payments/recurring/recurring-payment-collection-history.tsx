@@ -4,10 +4,10 @@ import type {
   PaymentSubscriptionCollectionAttempt,
   PaymentSubscriptionCollectionAttemptStatus,
 } from "@sdp/types";
-import { RepeatIcon } from "lucide-react";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ArrowUpRightIcon } from "lucide-react";
+import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -17,25 +17,24 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { explorerTxUrl } from "@/lib/explorer";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
-import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
-import {
-  CopyableValue,
-  ExplorerValue,
-  type RecurringPaymentWalletView,
-  resolveTokenLabel,
-} from "./recurring-payments-shared";
+import { shortenAddress } from "../payments-overview.utils";
+import { formatDate, formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 
-export const COLLECTION_STATUS_VARIANTS = {
-  pending: "warning",
-  processing: "info",
-  confirmed: "success",
-  failed: "danger",
-  skipped: "default",
-} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, BadgeVariant>;
+/** How each run reads: collected, still moving, waiting, went wrong, or passed over. */
+const RUN_STATUS_TONES = {
+  pending: "attention",
+  processing: "progress",
+  confirmed: "positive",
+  failed: "critical",
+  skipped: "neutral",
+} as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, StatusTone>;
 
-export const COLLECTION_STATUS_TRANSLATION_KEYS = {
+const RUN_STATUS_KEYS = {
   pending: "DashboardPayments.recurring.pending",
   processing: "DashboardPayments.recurring.processing",
   confirmed: "DashboardPayments.recurring.collected",
@@ -43,166 +42,146 @@ export const COLLECTION_STATUS_TRANSLATION_KEYS = {
   skipped: "DashboardPayments.recurring.skipped",
 } as const satisfies Record<PaymentSubscriptionCollectionAttemptStatus, MessageKey>;
 
-export const COLLECTION_ATTEMPTED_COLUMN_CLASS = "hidden lg:table-cell";
-export const COLLECTION_TRANSFER_COLUMN_CLASS = "hidden xl:table-cell";
-
-export function CollectionStatusBadge({
-  status,
-}: {
-  status: PaymentSubscriptionCollectionAttemptStatus;
-}) {
-  const t = useTranslations();
-  return (
-    <Badge variant={COLLECTION_STATUS_VARIANTS[status]}>
-      {t(COLLECTION_STATUS_TRANSLATION_KEYS[status])}
-    </Badge>
-  );
-}
-
-export function RecurringPaymentCollectionHistory({
+/**
+ * The runs a schedule has made, newest first as the API returns them, in the design's six
+ * columns: when it was due, when it was tried, the amount, the outcome with its reason under
+ * it, the transfer it made, and the transaction in Explorer.
+ */
+export function RecurringPaymentRunHistory({
   attempts,
-  total,
   error,
-  wallets,
-  className,
+  tokenLabel,
+  pendingActivation,
 }: {
-  className?: string;
   attempts: PaymentSubscriptionCollectionAttempt[];
-  total: number;
   error?: string;
-  wallets: RecurringPaymentWalletView[];
+  /** The schedule's token; every run pays in it. */
+  tokenLabel: string;
+  /** A schedule not yet activated has made no runs, and says when its first will be. */
+  pendingActivation: boolean;
 }) {
   const t = useTranslations();
-  const attemptsLabel =
-    total > attempts.length
-      ? t("DashboardPayments.recurring.showingAttempts", { shown: attempts.length, total })
-      : attempts.length === 1
-        ? t("DashboardPayments.recurring.oneAttempt")
-        : t("DashboardPayments.recurring.attempts", { count: attempts.length });
+  const locale = useLocale();
+  const cluster = useSolanaCluster();
+  const none = <span className="text-tertiary">{t("DashboardPayments.recurring.none")}</span>;
+
+  if (error) {
+    return (
+      <p role="alert" className="text-body text-error">
+        {t("DashboardPayments.recurring.runHistoryUnavailable", { error })}
+      </p>
+    );
+  }
+  if (attempts.length === 0) {
+    return (
+      <ListEmptyState
+        message={t("DashboardPayments.recurring.noRunsTitle")}
+        description={
+          pendingActivation
+            ? t("DashboardPayments.recurring.noRunsPendingBody")
+            : t("DashboardPayments.recurring.noRunsBody")
+        }
+      />
+    );
+  }
 
   return (
-    <Card
-      className={cn(
-        "flex flex-col gap-0 overflow-hidden rounded-lg border border-border-default bg-surface-raised py-0 shadow-none ring-0",
-        className
-      )}
-    >
-      <CardHeader className="flex flex-col gap-4 p-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1.5">
-          <CardTitle>{t("DashboardPayments.recurring.collectionHistory")}</CardTitle>
-          {attempts.length > 0 ? <CardDescription>{attemptsLabel}</CardDescription> : null}
-        </div>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col px-0">
-        {error ? (
-          <div
-            role="alert"
-            className="border border-error-border bg-error-bg p-4 text-sm text-error"
-          >
-            {t("DashboardPayments.recurring.unableToLoadCollectionHistory", { error })}
-          </div>
-        ) : attempts.length === 0 ? (
-          <ListEmptyState
-            icon={<RepeatIcon className="size-5" />}
-            message={t("DashboardPayments.recurring.noCollectionAttempts")}
-          />
-        ) : (
-          <>
-            <div className="divide-y divide-border-default md:hidden">
-              {attempts.map((attempt) => (
-                <div key={attempt.id} className="space-y-1.5 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <CollectionStatusBadge status={attempt.status} />
-                    <span className="truncate text-sm font-medium text-primary">
-                      {formatDisplayAmount(
-                        attempt.amount,
-                        resolveTokenLabel(attempt.token, wallets)
-                      )}
+    <div className="overflow-x-auto refresh:-mx-3">
+      <Table className="min-w-[820px] table-fixed rounded-none border-0" data-schedule-runs>
+        <colgroup>
+          <col className="w-[13%]" />
+          <col className="w-[17%]" />
+          <col className="w-[14%]" />
+          <col className="w-[26%]" />
+          <col className="w-[17%]" />
+          <col className="w-[13%]" />
+        </colgroup>
+        <TableHeader>
+          <TableRow>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.recurring.due")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.recurring.attempted")}
+            </TableHead>
+            <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
+              {t("DashboardPayments.recurring.amount")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>{t("DashboardPayments.status")}</TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.recurring.transfer")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.recurring.explorer")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {attempts.map((attempt) => (
+            // Rows grow with a reason, every cell on the first line's baseline.
+            <TableRow key={attempt.id} className="[--table-cell-padding-y:10px] [&>td]:align-top">
+              <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
+                {formatDate(attempt.dueAt, locale)}
+              </TableCell>
+              <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary tabular-nums")}>
+                {attempt.attemptedAt ? (
+                  formatDateTime(attempt.attemptedAt, locale)
+                ) : (
+                  <span className="text-tertiary">
+                    {t("DashboardPayments.recurring.notAttempted")}
+                  </span>
+                )}
+              </TableCell>
+              <TableCell
+                className={cn(PAYMENTS_TABLE_CELL, "text-right whitespace-nowrap tabular-nums")}
+              >
+                <span className="font-medium text-primary">
+                  {formatDecimalAmount(attempt.amount, locale)}
+                </span>
+                <span className="text-secondary"> {tokenLabel}</span>
+              </TableCell>
+              <TableCell className={cn(PAYMENTS_TABLE_CELL, "whitespace-normal")}>
+                <StatusText tone={RUN_STATUS_TONES[attempt.status]} className="block">
+                  {t(RUN_STATUS_KEYS[attempt.status])}
+                </StatusText>
+                {attempt.error ? (
+                  <span className="block break-words text-secondary">{attempt.error}</span>
+                ) : null}
+              </TableCell>
+              <TableCell className={PAYMENTS_TABLE_CELL}>
+                {attempt.transferId ? (
+                  <span className="-my-0.5 inline-flex max-w-full items-center gap-1.5">
+                    <span className="truncate text-primary tabular-nums" title={attempt.transferId}>
+                      {shortenAddress(attempt.transferId)}
                     </span>
-                  </div>
-                  <p className="truncate text-xs text-secondary">
-                    {formatTimestamp(attempt.dueAt, t)}
-                  </p>
-                  {attempt.error ? (
-                    <p className="truncate text-xs text-error">{attempt.error}</p>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            <Table className="hidden rounded-none border-0 w-full [&_table]:table-fixed md:block">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[26%] lg:w-[22%] xl:w-[18%]">
-                    {t("DashboardPayments.recurring.due")}
-                  </TableHead>
-                  <TableHead
-                    className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} lg:w-[20%] xl:w-[18%]`}
+                    <WalletMetadataCopyButton
+                      value={attempt.transferId}
+                      label={t("DashboardPayments.recurring.transfer")}
+                    />
+                  </span>
+                ) : (
+                  none
+                )}
+              </TableCell>
+              <TableCell className={PAYMENTS_TABLE_CELL}>
+                {attempt.signature ? (
+                  <a
+                    href={explorerTxUrl(attempt.signature, cluster)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-secondary hover:text-primary focus-visible:underline focus-visible:outline-none"
                   >
-                    {t("DashboardPayments.recurring.attempted")}
-                  </TableHead>
-                  <TableHead className="w-[26%] lg:w-[20%] xl:w-[16%]">
-                    {t("DashboardPayments.recurring.amount")}
-                  </TableHead>
-                  <TableHead className="w-[24%] lg:w-[20%] xl:w-[16%]">
-                    {t("DashboardPayments.status")}
-                  </TableHead>
-                  <TableHead className={`${COLLECTION_TRANSFER_COLUMN_CLASS} xl:w-[14%]`}>
-                    {t("DashboardPayments.recurring.transfer")}
-                  </TableHead>
-                  <TableHead className="w-[24%] lg:w-[18%] xl:w-[18%]">
-                    {t("DashboardPayments.recurring.explorer")}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {attempts.map((attempt) => (
-                  <TableRow key={attempt.id}>
-                    <TableCell className="whitespace-nowrap text-sm">
-                      <span className="block truncate">{formatTimestamp(attempt.dueAt, t)}</span>
-                    </TableCell>
-                    <TableCell
-                      className={`${COLLECTION_ATTEMPTED_COLUMN_CLASS} whitespace-nowrap text-sm text-secondary`}
-                    >
-                      <span className="block truncate">
-                        {attempt.attemptedAt
-                          ? formatTimestamp(attempt.attemptedAt, t)
-                          : t("DashboardPayments.recurring.notSet")}
-                      </span>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-sm font-medium">
-                      <span className="block truncate">
-                        {formatDisplayAmount(
-                          attempt.amount,
-                          resolveTokenLabel(attempt.token, wallets)
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <CollectionStatusBadge status={attempt.status} />
-                        {attempt.error ? (
-                          <p className="max-w-[14rem] truncate text-xs text-error">
-                            {attempt.error}
-                          </p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className={COLLECTION_TRANSFER_COLUMN_CLASS}>
-                      <CopyableValue
-                        value={attempt.transferId}
-                        label={attempt.transferId ? shortenAddress(attempt.transferId) : undefined}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <ExplorerValue value={attempt.signature} kind="tx" />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </>
-        )}
-      </CardContent>
-    </Card>
+                    {t("DashboardPayments.recurring.open")}
+                    <ArrowUpRightIcon className="size-3.5" aria-hidden="true" />
+                  </a>
+                ) : (
+                  none
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }

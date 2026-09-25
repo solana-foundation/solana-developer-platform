@@ -2,19 +2,33 @@ import type { ReactNode } from "react";
 import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 
-export type StateBandTone = "ok" | "warn" | "error" | "neutral";
+export type StateBandTone = "ok" | "warn" | "error" | "info" | "neutral";
 
+/** A tone's tint and its 2px rule; a neutral state (expired, canceled) is a plain tile. */
 const BAND_TONES: Record<StateBandTone, { band: string; word: string }> = {
-  ok: { band: "border-success bg-success/7 dark:bg-success/12", word: "text-success" },
-  warn: { band: "border-warning bg-warning/7 dark:bg-warning/12", word: "text-warning" },
-  error: { band: "border-error bg-error/7 dark:bg-error/12", word: "text-error" },
-  neutral: { band: "border-tertiary bg-surface-tile", word: "text-secondary" },
+  ok: {
+    band: "rounded-e-card border-s-2 border-success bg-success/7 dark:bg-success/12",
+    word: "text-success",
+  },
+  warn: {
+    band: "rounded-e-card border-s-2 border-warning bg-warning/7 dark:bg-warning/12",
+    word: "text-warning",
+  },
+  error: {
+    band: "rounded-e-card border-s-2 border-error bg-error/7 dark:bg-error/12",
+    word: "text-error",
+  },
+  info: {
+    band: "rounded-e-card border-s-2 border-info bg-info/7 dark:bg-info/12",
+    word: "text-info",
+  },
+  neutral: { band: "rounded-card bg-surface-tile", word: "text-secondary" },
 };
 
 /**
  * A record's state as the design heads it: an 18px word in its tone over a 15px line saying
- * what it means, on a tinted band with a 2px rule at its start, and the one action it asks for
- * at the end.
+ * what it means, on a tinted band with a 2px rule at its start (a plain tile when neutral), and
+ * the one action it asks for at the end.
  */
 export function StateBand({
   tone,
@@ -33,7 +47,7 @@ export function StateBand({
     <div
       data-state-band={tone}
       className={cn(
-        "flex flex-col items-start gap-3 rounded-e-card border-s-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-6",
+        "flex flex-col items-start gap-3 px-4 py-3 md:flex-row md:items-center md:justify-between md:gap-6",
         colors.band
       )}
     >
@@ -112,6 +126,21 @@ export function RecordRow({
         {hint ? <InfoHint text={hint} /> : null}
       </dt>
       <dd className="flex min-w-0 items-center justify-end gap-1.5 text-right text-body text-primary">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * A label in a 132px column and its value beside it, left-aligned, on one 44px rule: the
+ * design's plan rows ("Pays", "Repeats", "Next run"), 13px then 14px.
+ */
+export function RecordLine({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-3 border-b border-border-subtle py-3 last:border-b-0">
+      <dt className="w-33 shrink-0 text-meta leading-5 text-secondary">{label}</dt>
+      <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-body text-primary tabular-nums">
         {children}
       </dd>
     </div>

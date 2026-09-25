@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
-import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -78,28 +77,6 @@ const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonCo
     { id: "next-run", cellSkeletonClassName: "h-4 w-24" },
   ],
 };
-
-function WorkspaceCardHeaderSkeleton({
-  withAction = true,
-  stackActionOnMobile = false,
-}: {
-  withAction?: boolean;
-  stackActionOnMobile?: boolean;
-}) {
-  return (
-    <CardHeader className={stackActionOnMobile ? "flex min-w-0 flex-col gap-4 p-4 sm:grid" : "p-4"}>
-      <div className="min-w-0 space-y-2">
-        <SkeletonBlock className="h-6 w-52 max-w-full" />
-        <SkeletonBlock className="h-4 w-80 max-w-full" />
-      </div>
-      {withAction ? (
-        <CardAction>
-          <SkeletonBlock className="h-10 w-32 max-w-full rounded-[10px]" />
-        </CardAction>
-      ) : null}
-    </CardHeader>
-  );
-}
 
 function ListToolbarSkeleton() {
   return (
@@ -434,44 +411,36 @@ export function RecurringPaymentsPageSkeleton() {
   return <ListPageSkeleton layout="recurring-payments" />;
 }
 
+/**
+ * A schedule's page loading: the state band, the plan's rows in their label column, then the
+ * run history.
+ */
 export function RecurringPaymentDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel
       data-loading-layout="recurring-payment-detail"
       aria-busy="true"
     >
-      <div className="flex min-h-full w-full flex-col gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-4">
-          <div className="flex min-w-0 flex-wrap items-start gap-x-12 gap-y-4">
-            {["to", "amount", "frequency"].map((stat) => (
-              <div key={stat} className="space-y-2">
-                <SkeletonBlock className="h-4 w-16" />
-                <SkeletonBlock className="h-8 w-36" />
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2 rounded-card bg-surface-tile px-4 py-3">
+          <SkeletonBlock className="h-5 w-24" />
+          <SkeletonBlock className="h-4 w-80 max-w-full" />
+        </div>
+        <section className="flex flex-col gap-4">
+          <SkeletonBlock className="h-6 w-40" />
+          <div data-loading-detail-rows>
+            {DETAIL_ROW_IDS.slice(0, 7).map((id) => (
+              <div
+                key={id}
+                className="flex h-11 items-center gap-3 border-b border-border-subtle last:border-b-0"
+              >
+                <SkeletonBlock className="h-4 w-20 shrink-0 md:me-13" />
+                <SkeletonBlock className="h-4 w-40" />
               </div>
             ))}
           </div>
-          <SkeletonBlock className="h-9 w-28 rounded-[10px]" />
-        </div>
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          {["payment", "wallets"].map((section) => (
-            <section key={section} className="space-y-3">
-              <SkeletonBlock className="h-5 w-28" />
-              <div className="rounded-lg border border-border-default bg-surface-raised px-4">
-                <DetailRowsSkeleton count={6} />
-              </div>
-            </section>
-          ))}
-        </div>
-        <Card className="min-h-0 flex-1 gap-4 bg-surface-raised">
-          <WorkspaceCardHeaderSkeleton withAction={false} />
-          <CardContent>
-            <div className="space-y-3">
-              {TABLE_ROW_IDS.slice(0, 3).map((id) => (
-                <SkeletonBlock key={id} className="h-12 w-full" />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        </section>
+        <ContactBlockSkeleton rows={3} />
       </div>
     </DashboardWorkspaceOverviewPanel>
   );

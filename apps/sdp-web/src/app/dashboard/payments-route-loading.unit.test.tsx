@@ -96,7 +96,7 @@ describe("home and payments route loading states", () => {
     // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
     expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(4);
-    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
+    expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(3);
     expect(markup).toContain("lg:grid-cols-2");
     expect(markup).toContain("size-[208px]");
   });
@@ -215,7 +215,8 @@ describe("home and payments route loading states", () => {
   it("uses theme-aware surfaces for every authenticated loading state", () => {
     const markup = renderAuthenticatedLoadingStates();
 
-    expect(markup).toContain("bg-surface-raised");
+    // A schedule's band loads on the tile surface; the rest draw on the page.
+    expect(markup).toContain("bg-surface-tile");
     expect(markup).not.toContain("bg-white");
     expect(markup).not.toMatch(/\bbg-white\//);
   });
