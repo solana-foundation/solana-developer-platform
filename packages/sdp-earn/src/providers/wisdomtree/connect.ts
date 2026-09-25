@@ -571,17 +571,22 @@ function sameDecimalAmount(left: string, right: string): boolean {
  *
  * Authenticated correlation, fail-closed. The provider's own order book — read
  * with SDP's credentials — must name ALL of: this wallet, a Purchase, this
- * fund, this amount, a completed status, and a completion instant that is not
- * OLDER than this deposit's own record (`movementCreatedAt`, less a small
- * clock-skew tolerance), for the deposit's settlement to be demonstrated. The
- * temporal bound is what separates this deposit's order from an older
- * completed purchase of the same wallet, fund, and amount: without it, a new
- * deposit whose own order is still pending would be settled by that older
- * order, its claim would release, and a twin deposit could double-broadcast.
- * Anything less (a miss, a pending order, a match that cannot be bound in
- * time — no readable `completed_at` — a malformed feed, an unconfigured
- * credential) answers null and the row stays open — never a guess that closes
- * a claim on money already committed.
+ * fund, this amount, a completed status, a readable order identity, and a
+ * completion instant that is not OLDER than this deposit's own record
+ * (`movementCreatedAt`, less a small clock-skew tolerance), for the deposit's
+ * settlement to be demonstrated. The temporal bound is what separates this
+ * deposit's order from an older completed purchase of the same wallet, fund,
+ * and amount: without it, a new deposit whose own order is still pending would
+ * be settled by that older order, its claim would release, and a twin deposit
+ * could double-broadcast. The identity bound completes the separation: an
+ * order that cannot name itself cannot be shown to belong to THIS deposit
+ * rather than an older twin's, and one the ledger has already accepted
+ * (`excludedOrderReferences`) completed a DIFFERENT deposit — one order must
+ * never settle two. Anything less (a miss, a pending order, a match that
+ * cannot be bound in time — no readable `completed_at` — an order with no
+ * readable identity, a malformed feed, an unconfigured credential) answers
+ * null and the row stays open — never a guess that closes a claim on money
+ * already committed.
  *
  * UNVERIFIED field names throughout (`trade_type`, `wallet_address`, `fund`,
  * `amount`, `status`, `completed_at`, `id`): each is a single reader above, so
@@ -594,6 +599,7 @@ export async function readWisdomTreePurchaseOrderCompletion(
     fundExchangeCode: string;
     amountRequested: string;
     movementCreatedAt: string;
+    excludedOrderReferences: readonly string[];
   }
 ): Promise<WisdomTreePurchaseOrderCompletion | null> {
   const movementCreatedMs = Date.parse(input.movementCreatedAt);
@@ -613,6 +619,13 @@ export async function readWisdomTreePurchaseOrderCompletion(
     ) {
       continue;
     }
+    // The identity binding: an order with no readable id cannot be shown to
+    // belong to THIS deposit rather than an older twin purchase — and an
+    // identity the ledger already accepted completed a different deposit.
+    // Both stay open (null), retried on a later tick — never a guess that
+    // releases a claim on committed money.
+    if (order.orderId === null) continue;
+    if (input.excludedOrderReferences.includes(order.orderId)) continue;
     if (order.walletAddress?.toLowerCase() !== input.owner.toLowerCase()) continue;
     if (order.fund?.toUpperCase() !== input.fundExchangeCode.toUpperCase()) continue;
     // Both sides are decimal strings in the settlement currency; a numeric
@@ -638,7 +651,7 @@ export async function readWisdomTreePurchaseOrderCompletion(
       continue;
     }
     return {
-      orderReference: order.orderId ?? "unknown",
+      orderReference: order.orderId,
       completedAt: order.completedAt,
     };
   }

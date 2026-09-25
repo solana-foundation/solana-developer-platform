@@ -718,6 +718,7 @@ describe("depositIntoVault — idempotency", () => {
       movementId: first.movement.id,
       organizationId: ORG,
       completedAt: new Date().toISOString(),
+      orderReference: "order-first-deposit",
     });
 
     signVaultPlan.mockResolvedValue({

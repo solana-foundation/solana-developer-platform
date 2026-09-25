@@ -1079,7 +1079,12 @@ export interface EarnDepositEligibilityProvider extends EarnVaultProvider {
  * row on the settled surface and releases its cross-key deposit-intent claim.
  */
 export interface EarnProviderOrderCompletion {
-  /** The provider's own identity for the completed order — audit trail only. */
+  /**
+   * The provider's own identity for the completed order. More than an audit
+   * trail: the ledger binds the durable completion stamp to it, and its
+   * uniqueness (per provider) is what makes one order's completion settle at
+   * most one movement.
+   */
   orderReference: string;
   /**
    * When the provider reports the order completed, if it says. The durable
@@ -1107,6 +1112,16 @@ export interface EarnProviderOrderCompletionInput {
    * tolerate a small skew rather than comparing the instants exactly.
    */
   movementCreatedAt: string;
+  /**
+   * Order identities the ledger has ALREADY accepted completions from, for
+   * this provider. One order completes at most one movement: a candidate
+   * whose identity appears here settled a DIFFERENT deposit, so the read must
+   * skip it and keep looking for this deposit's own order — accepting it
+   * again would settle the twin while its own order is still pending,
+   * releasing its claim and double-depositing. A candidate that cannot name
+   * an identity at all is equally unbindable and must be refused outright.
+   */
+  excludedOrderReferences: readonly string[];
 }
 
 /**

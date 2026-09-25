@@ -194,6 +194,14 @@ export interface EarnMovementRow {
    * `settled_at` stamp.
    */
   provider_completed_at: string | null;
+  /**
+   * The provider's own identity for the order whose completion stamped
+   * `provider_completed_at` (migration 0121). The fact and the identity that
+   * justifies it move together, and the unique partial index on
+   * (provider, reference) makes one order's completion settle at most one
+   * movement — a twin deposit can never inherit another deposit's completion.
+   */
+  provider_completed_order_reference: string | null;
   /** Success-terminal: finalization (vault) or provider completion (custodial). */
   settled_at: string | null;
   /** `usd`, or the token mint — the unit every amount below is denominated in. */
@@ -745,16 +753,31 @@ export interface EarnMovementsRepository {
     retryBefore: string;
   }): Promise<EarnMovementRow[]>;
   /**
-   * Stamp the durable provider completion fact on a vault movement. Guarded to
-   * a non-terminal-chain vault row (confirmed or finalized) that has no fact
-   * yet, so a repeated correlation never overwrites the first stamp and a row
-   * the chain failed can never read as settled; null means neither held.
+   * Stamp the durable provider completion fact on a vault movement, bound to
+   * the order identity that justifies it. Guarded to a non-terminal-chain
+   * vault row (confirmed or finalized) that has no fact yet, so a repeated
+   * correlation never overwrites the first stamp and a row the chain failed
+   * can never read as settled. The unique partial index on
+   * (provider, `orderReference`) refuses a second movement claiming the SAME
+   * order's completion — null means the guard did not hold, the row moved on,
+   * or another movement already consumed that order.
    */
   recordVaultMovementProviderCompletion(input: {
     movementId: string;
     organizationId: string;
     completedAt: string;
+    orderReference: string;
   }): Promise<EarnMovementRow | null>;
+  /**
+   * The order identities the completion pass has ALREADY accepted, per
+   * provider, newest completions first. The completion reader skips these
+   * candidates: an order that completed one movement must never demonstrate
+   * another's settlement, so a twin deposit waits for its own order.
+   */
+  listCompletedProviderOrderReferences(params: {
+    providers: readonly string[];
+    limit: number;
+  }): Promise<{ provider: string; orderReference: string }[]>;
   /**
    * The sweep's first piece of evidence that a SUBMITTED vault movement did not
    * land (PRO-1904): its signature came back unknown after the blockhash window
@@ -1128,6 +1151,16 @@ function vaultSettlementFilter(
   };
 }
 
+/** A Postgres unique-violation error (`23505`), however the driver surfaces it. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
+}
+
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
     id: row.id as string,
@@ -1144,6 +1177,10 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     chain_finalized_at: row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
     provider_completed_at:
       row.provider_completed_at == null ? null : String(row.provider_completed_at),
+    provider_completed_order_reference:
+      row.provider_completed_order_reference == null
+        ? null
+        : String(row.provider_completed_order_reference),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
@@ -1251,6 +1288,7 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     // completion fact.
     deposit_intent_fingerprint: null,
     provider_completed_at: null,
+    provider_completed_order_reference: null,
   };
 }
 
@@ -2732,21 +2770,52 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     },
 
     async recordVaultMovementProviderCompletion(input) {
-      const row = await db
+      try {
+        const row = await db
+          .prepare(
+            `UPDATE earn_movements
+                SET provider_completed_at = ?,
+                    provider_completed_order_reference = ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ?
+                AND organization_id = ?
+                AND execution_model = 'vault_direct'
+                AND status IN ('confirmed', 'finalized')
+                AND provider_completed_at IS NULL
+              RETURNING *`
+          )
+          .bind(input.completedAt, input.orderReference, input.movementId, input.organizationId)
+          .first<Record<string, unknown>>();
+        return row ? mapMovementRow(row) : null;
+      } catch (error) {
+        // The unique partial index on (provider, order reference) is the
+        // arbiter a concurrent race cannot bypass: another movement stamped
+        // the SAME order's completion between this pass's read and this
+        // write. That is not a failure — one order settled exactly one
+        // movement, and this row keeps its own order's truth — so it reads as
+        // null, like any other guard that did not hold.
+        if (isUniqueViolation(error)) return null;
+        throw error;
+      }
+    },
+
+    async listCompletedProviderOrderReferences(params) {
+      if (params.providers.length === 0) return [];
+      const result = await db
         .prepare(
-          `UPDATE earn_movements
-              SET provider_completed_at = ?,
-                  updated_at = sdp_iso_now()
-            WHERE id = ?
-              AND organization_id = ?
-              AND execution_model = 'vault_direct'
-              AND status IN ('confirmed', 'finalized')
-              AND provider_completed_at IS NULL
-            RETURNING *`
+          `SELECT provider, provider_completed_order_reference
+             FROM earn_movements
+              WHERE provider = ANY (?::text[])
+                AND provider_completed_order_reference IS NOT NULL
+              ORDER BY provider_completed_at DESC, id DESC
+              LIMIT ?`
         )
-        .bind(input.completedAt, input.movementId, input.organizationId)
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
+        .bind([...params.providers], params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map((row) => ({
+        provider: String(row.provider),
+        orderReference: String(row.provider_completed_order_reference),
+      }));
     },
 
     async recordUnknownSignatureObservation(input) {

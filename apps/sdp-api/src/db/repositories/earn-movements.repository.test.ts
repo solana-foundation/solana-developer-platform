@@ -1274,20 +1274,28 @@ describe("Unified earn movement ledger (postgres)", () => {
       expect(later).toHaveLength(1);
     });
 
-    it("stamps the completion fact once, and never on a chain-failed row", async () => {
+    it("stamps the completion fact once, bound to the order that justifies it, and never on a chain-failed row", async () => {
       const movement = await chainFinalDeposit();
       const stamped = await ledger.recordVaultMovementProviderCompletion({
         movementId: movement.id,
         organizationId: ORG,
         completedAt: COMPLETED_AT,
+        orderReference: "order-1",
       });
       expect(stamped?.provider_completed_at).toBe(COMPLETED_AT);
+      expect(stamped?.provider_completed_order_reference).toBe("order-1");
+      const reread = await ledger.getMovementById({
+        movementId: movement.id,
+        organizationId: ORG,
+      });
+      expect(reread?.provider_completed_order_reference).toBe("order-1");
 
       // Idempotent: the first stamp wins, a repeated correlation is inert.
       const restamped = await ledger.recordVaultMovementProviderCompletion({
         movementId: movement.id,
         organizationId: ORG,
         completedAt: "2026-09-23T10:00:00.000Z",
+        orderReference: "order-1",
       });
       expect(restamped).toBeNull();
       const after = await ledger.getMovementById({ movementId: movement.id, organizationId: ORG });
@@ -1306,8 +1314,78 @@ describe("Unified earn movement ledger (postgres)", () => {
         movementId: failed.movement.id,
         organizationId: ORG,
         completedAt: COMPLETED_AT,
+        orderReference: "order-2",
       });
       expect(refused).toBeNull();
+    });
+
+    it("lets one order's completion settle at most one movement", async () => {
+      // The exact false-settle the order identity exists to close: two
+      // chain-final deposits of the same shape, one completed order. The
+      // first stamp takes it; the second movement's claim on the SAME order
+      // does not apply — the row stays open for its own order's truth.
+      const first = await chainFinalDeposit();
+      const second = await chainFinalDeposit();
+
+      const won = await ledger.recordVaultMovementProviderCompletion({
+        movementId: first.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-shared",
+      });
+      expect(won?.provider_completed_order_reference).toBe("order-shared");
+
+      const lost = await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-shared",
+      });
+      expect(lost).toBeNull();
+      await expect(
+        ledger.getMovementById({ movementId: second.id, organizationId: ORG })
+      ).resolves.toMatchObject({
+        provider_completed_at: null,
+        provider_completed_order_reference: null,
+      });
+
+      // The deposit's OWN order settles it, even after the twin's order was
+      // consumed first.
+      const own = await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-own",
+      });
+      expect(own?.provider_completed_order_reference).toBe("order-own");
+    });
+
+    it("feeds the completion reader the order identities the ledger already accepted", async () => {
+      const first = await chainFinalDeposit();
+      const second = await chainFinalDeposit();
+      await ledger.recordVaultMovementProviderCompletion({
+        movementId: first.id,
+        organizationId: ORG,
+        completedAt: "2026-09-22T10:00:00.000Z",
+        orderReference: "order-1",
+      });
+      await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: "2026-09-23T10:00:00.000Z",
+        orderReference: "order-2",
+      });
+
+      // Newest completions first, and only the providers asked for.
+      await expect(
+        ledger.listCompletedProviderOrderReferences({ providers: ["wisdomtree"], limit: 25 })
+      ).resolves.toEqual([
+        { provider: "wisdomtree", orderReference: "order-2" },
+        { provider: "wisdomtree", orderReference: "order-1" },
+      ]);
+      await expect(
+        ledger.listCompletedProviderOrderReferences({ providers: ["kamino"], limit: 25 })
+      ).resolves.toEqual([]);
     });
 
     it("releases the settled surface and the intent claim with the one fact", async () => {
@@ -1337,6 +1415,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         movementId: movement.id,
         organizationId: ORG,
         completedAt: COMPLETED_AT,
+        orderReference: "order-1",
       });
 
       // One fact, moved once: the claim releases AND the settled surface closes

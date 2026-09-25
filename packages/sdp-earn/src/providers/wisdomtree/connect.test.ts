@@ -33,6 +33,7 @@ const input = {
   fundExchangeCode: FUND,
   amountRequested: AMOUNT,
   movementCreatedAt: MOVEMENT_CREATED_AT,
+  excludedOrderReferences: [] as readonly string[],
 };
 
 const tokenReply = { access_token: "bearer-token", expires_in: 600 };
@@ -294,6 +295,77 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
       await readWisdomTreePurchaseOrderCompletion(ctx, {
         ...input,
         movementCreatedAt: "not-a-date",
+      }),
+      null
+    );
+  });
+
+  it("cannot bind an order with no readable identity to this deposit", async () => {
+    // An order that cannot name itself is indistinguishable from an older
+    // twin purchase's completion: settling this deposit from it would release
+    // the cross-key claim while this deposit's own order is still pending.
+    stubOrdersFeed([
+      {
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T10:00:00Z",
+      },
+    ]);
+    assert.equal(await readWisdomTreePurchaseOrderCompletion(ctx, input), null);
+  });
+
+  it("skips an order the ledger already accepted for another deposit", async () => {
+    // One order completes at most one movement: the identity the ledger has
+    // already stamped settled a DIFFERENT deposit, so this read keeps looking
+    // for this deposit's own order.
+    stubOrdersFeed([
+      {
+        id: "order-7",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T10:00:00Z",
+      },
+      {
+        id: "order-9",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T11:00:00Z",
+      },
+    ]);
+    assert.deepEqual(
+      await readWisdomTreePurchaseOrderCompletion(ctx, {
+        ...input,
+        excludedOrderReferences: ["order-7"],
+      }),
+      { orderReference: "order-9", completedAt: "2026-09-25T11:00:00Z" }
+    );
+  });
+
+  it("stays open when the only completed match was already consumed by another deposit", async () => {
+    stubOrdersFeed([
+      {
+        id: "order-7",
+        trade_type: "Purchase",
+        status: "completed",
+        wallet_address: OWNER,
+        fund: FUND,
+        amount: AMOUNT,
+        completed_at: "2026-09-25T10:00:00Z",
+      },
+    ]);
+    assert.equal(
+      await readWisdomTreePurchaseOrderCompletion(ctx, {
+        ...input,
+        excludedOrderReferences: ["order-7"],
       }),
       null
     );

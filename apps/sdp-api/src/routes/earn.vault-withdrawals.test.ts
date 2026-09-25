@@ -261,6 +261,7 @@ function movementRow(overrides: Partial<EarnMovementRow> = {}): EarnMovementRow 
     confirmed_at: null,
     chain_finalized_at: null,
     provider_completed_at: null,
+    provider_completed_order_reference: null,
     settled_at: null,
     denomination: SHARE_MINT,
     amount_requested: "10",

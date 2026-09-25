@@ -362,6 +362,7 @@ export class WisdomTreeVaultDirectClient
       fundExchangeCode: fund.exchangeCode,
       amountRequested: input.amountRequested,
       movementCreatedAt: input.movementCreatedAt,
+      excludedOrderReferences: input.excludedOrderReferences,
     });
     return completion === null
       ? null

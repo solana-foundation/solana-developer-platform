@@ -14,13 +14,18 @@ import type { Env } from "@/types/env";
  * to the provider's OWN completion record and stamps the durable fact
  * (`provider_completed_at`) that closes the row.
  *
- * One fact, moved once. Writing the stamp releases the provider-order row on
- * the `?settled=` surface and releases its cross-key deposit-intent claim with
- * it — both read the same settlement predicate — so a later same-amount
- * deposit with a fresh key finally starts a NEW movement instead of replaying
- * a completed one. Nothing else releases a provider-order row: chain finality
- * never does (the order may still be pending there), and a legacy `settled_at`
- * stamp never does.
+ * One fact, moved once, bound to the order that justifies it. Writing the
+ * stamp — the moment AND the provider's own order identity — releases the
+ * provider-order row on the `?settled=` surface and releases its cross-key
+ * deposit-intent claim with it — both read the same settlement predicate — so
+ * a later same-amount deposit with a fresh key finally starts a NEW movement
+ * instead of replaying a completed one. The identity is what keeps the
+ * correlation exclusive: the reader skips orders the ledger has already
+ * accepted, and the unique index on (provider, order reference) refuses a
+ * second movement claiming the same order's completion, so one order can
+ * never settle two deposits. Nothing else releases a provider-order row:
+ * chain finality never does (the order may still be pending there), and a
+ * legacy `settled_at` stamp never does.
  *
  * Fail closed, like every settlement claim: a row the provider cannot
  * demonstrably complete — unreachable feed, malformed record, ambiguous or
@@ -34,6 +39,13 @@ export const PROVIDER_ORDER_COMPLETION_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
 /** Minimum spacing between two completion attempts on the same movement. */
 export const PROVIDER_ORDER_COMPLETION_RETRY_MS = 15 * 60 * 1_000;
 const PROVIDER_ORDER_COMPLETION_BATCH_SIZE = 25;
+/**
+ * How many consumed order identities the pass feeds each completion reader.
+ * The reader needs only the orders that could still candidate for an open
+ * deposit — recent completions — so a bounded newest-first slice keeps the
+ * exclusion set small without letting an old consumed order resurface.
+ */
+const PROVIDER_ORDER_COMPLETION_EXCLUSION_LIMIT = 500;
 
 export interface ProviderOrderCompletionStats {
   claimed: number;
@@ -84,6 +96,23 @@ export async function completeProviderOrderDeposits(
   if (supported.size === 0) return stats;
 
   const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  // The order identities the ledger has already accepted, per provider: an
+  // order that completed one movement must never demonstrate another's
+  // settlement. The reader skips these candidates, and the unique index on
+  // (provider, order reference) closes the race for anything consumed after
+  // this read — a stamp that arrives second simply does not apply, and the
+  // row stays open for its own order on a later tick.
+  const consumed = await ledger.listCompletedProviderOrderReferences({
+    providers: [...supported.keys()],
+    limit: PROVIDER_ORDER_COMPLETION_EXCLUSION_LIMIT,
+  });
+  const consumedByProvider = new Map<string, string[]>();
+  for (const { provider, orderReference } of consumed) {
+    const references = consumedByProvider.get(provider);
+    if (references) references.push(orderReference);
+    else consumedByProvider.set(provider, [orderReference]);
+  }
+
   const movements = await ledger.claimUncompletedProviderOrderDeposits({
     limit,
     providers: [...supported.keys()],
@@ -115,6 +144,7 @@ export async function completeProviderOrderDeposits(
           // orders that cannot be OLDER than this deposit (an older completed
           // purchase of the same wallet, fund, and amount must never settle it).
           movementCreatedAt: movement.created_at,
+          excludedOrderReferences: consumedByProvider.get(movement.provider) ?? [],
         }
       );
       if (!completion) {
@@ -133,10 +163,26 @@ export async function completeProviderOrderDeposits(
         movementId: movement.id,
         organizationId: movement.organization_id,
         completedAt: completion.completedAt ?? new Date().toISOString(),
+        // The fact and the identity that justifies it move together: the
+        // stamp names the order, and the database refuses a second movement
+        // claiming the same one.
+        orderReference: completion.orderReference,
       });
-      // A null here means a concurrent writer stamped it first or the row
-      // moved on; either way the fact exists and this pass did its duty.
-      if (stamped) stats.completed += 1;
+      if (stamped) {
+        stats.completed += 1;
+      } else {
+        // A null means a concurrent writer stamped this row first, the row
+        // moved on, or another movement already consumed that order's
+        // completion (the unique arbiter). Re-reading tells them apart: a row
+        // still missing its fact was refused because the ORDER was someone
+        // else's — this pass's honest "not yet", retried with the consumed
+        // identity excluded so the deposit's own order can close it.
+        const current = await ledger.getMovementById({
+          movementId: movement.id,
+          organizationId: movement.organization_id,
+        });
+        if (current?.provider_completed_at == null) stats.unobserved += 1;
+      }
     } catch (error) {
       stats.errors += 1;
       getLogger().error(
