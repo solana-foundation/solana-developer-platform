@@ -47,6 +47,12 @@ import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.servi
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import {
+  beginRecurringPaymentAudit,
+  completeRecurringPaymentAudit,
+  concludeRecurringPaymentAuditOnError,
+  type RecurringPaymentAuditActor,
+} from "./lifecycle-audit";
+import {
   assertRecurringPaymentSourceWallet,
   canonicalAttemptSignature,
   confirmSubscriptionSignature,
@@ -527,6 +533,8 @@ async function prepareSubscriptionAuthorityForActivation(input: {
   attempt: PaymentRecurringPaymentActivationAttemptRow;
   organizationId: string;
   projectId: string;
+  recurringPaymentId: string;
+  auditActor: RecurringPaymentAuditActor;
   rpc: ReturnType<typeof solanaRpc.createRpc>;
   sourceWallet: CustodyWallet;
   sourceSigner: TransactionSigner;
@@ -544,6 +552,14 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     return input.subscriptionAuthority;
   }
 
+  // Fail-closed: the setup broadcast creates the source ATA and/or the
+  // subscription authority, so it is admitted into the sealed ledger first.
+  const setupIntent = await beginRecurringPaymentAudit(
+    input.env,
+    input.auditActor,
+    "activation_setup",
+    input.recurringPaymentId
+  );
   const payer = createNoopSigner(input.feePayer);
   const initAuthorityInstruction = input.subscriptionAuthority.exists
     ? null
@@ -563,17 +579,27 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
-  const initSignature = await sendSubscriptionInstructions({
-    env: input.env,
-    organizationId: input.organizationId,
-    projectId: input.projectId,
-    sourceWallet: input.sourceWallet,
-    sourceSigner: input.sourceSigner,
-    instructions: [
-      ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
-      ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
-    ],
-    feePayer: input.feePayer,
+  let initSignature: Signature;
+  try {
+    initSignature = await sendSubscriptionInstructions({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+      sourceSigner: input.sourceSigner,
+      instructions: [
+        ...(createSourceAtaInstruction ? [createSourceAtaInstruction] : []),
+        ...(initAuthorityInstruction ? [initAuthorityInstruction] : []),
+      ],
+      feePayer: input.feePayer,
+    });
+  } catch (error) {
+    await concludeRecurringPaymentAuditOnError(input.env, setupIntent, error);
+    throw error;
+  }
+  await completeRecurringPaymentAudit(input.env, setupIntent, {
+    signature: initSignature,
+    metadata: { subscriptionAuthorityAddress: input.subscriptionAuthorityAddress },
   });
   await input.recurringRepo.updateActivationAttempt({
     attemptId: input.attempt.id,
@@ -610,6 +636,8 @@ export async function activateRecurringPayment(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   createdBy: string | null;
+  /** Sealed-ledger attribution; cron callers pass their own correlation ID. */
+  auditActor: RecurringPaymentAuditActor;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -762,13 +790,31 @@ export async function activateRecurringPayment(input: {
           tokenProgram,
         }
       );
-      planCreationSignature = await sendSubscriptionInstructions({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [createPlanInstruction],
+      // Fail-closed: CreatePlan puts the plan on-chain, so the sealed ledger
+      // admits the broadcast before any bytes reach the chain.
+      const planIntent = await beginRecurringPaymentAudit(
+        input.env,
+        input.auditActor,
+        "create_plan",
+        claimed.id,
+        { planPda }
+      );
+      try {
+        planCreationSignature = await sendSubscriptionInstructions({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [createPlanInstruction],
+        });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, planIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, planIntent, {
+        signature: planCreationSignature,
+        metadata: { planPda, planId: plan.id },
       });
       const signatureUpdatedAt = new Date().toISOString();
       await getDb(input.env).transaction(async (tx) => {
@@ -892,6 +938,8 @@ export async function activateRecurringPayment(input: {
         attempt,
         organizationId: input.organizationId,
         projectId: input.projectId,
+        recurringPaymentId: claimed.id,
+        auditActor: input.auditActor,
         rpc,
         sourceWallet: input.sourceWallet,
         sourceSigner,
@@ -918,14 +966,36 @@ export async function activateRecurringPayment(input: {
         subscriber: sourceSigner,
         tokenMint: mint,
       });
-      authorizationSignature = await sendSubscriptionInstructions({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [subscribeInstruction],
-        feePayer,
+      // Fail-closed: Subscribe delegates collection authority on-chain, the
+      // irreversible effect that activates the recurring payment.
+      const subscribeIntent = await beginRecurringPaymentAudit(
+        input.env,
+        input.auditActor,
+        "subscribe",
+        claimed.id,
+        {
+          planPda,
+          subscriptionPda,
+          subscriptionAuthorityAddress,
+        }
+      );
+      try {
+        authorizationSignature = await sendSubscriptionInstructions({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [subscribeInstruction],
+          feePayer,
+        });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, subscribeIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, subscribeIntent, {
+        signature: authorizationSignature,
+        metadata: { planPda, subscriptionPda, subscriptionAuthorityAddress },
       });
       const signatureUpdatedAt = new Date().toISOString();
       await getDb(input.env).transaction(async (tx) => {

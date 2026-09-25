@@ -34,6 +34,12 @@ import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { recoverOrBlockLifecycleCollection } from "./collection";
 import {
+  beginRecurringPaymentAudit,
+  completeRecurringPaymentAudit,
+  concludeRecurringPaymentAuditOnError,
+  type RecurringPaymentAuditActor,
+} from "./lifecycle-audit";
+import {
   assertRecurringPaymentSourceWallet,
   assertRecurringPaymentTokenMint,
   confirmSubscriptionSignature,
@@ -338,6 +344,8 @@ async function runRecurringPaymentLifecycle(input: {
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
   operation: RecurringPaymentLifecycleOperation;
+  /** Sealed-ledger attribution; cron callers pass their own correlation ID. */
+  auditActor: RecurringPaymentAuditActor;
 }): Promise<PaymentRecurringPaymentRow> {
   const recurringRepo = createPaymentRecurringPaymentsRepository(
     input.env,
@@ -499,13 +507,32 @@ async function runRecurringPaymentLifecycle(input: {
         tokenMint,
       });
 
-      signature = await sendSubscriptionInstructions({
-        env: input.env,
-        organizationId: input.organizationId,
-        projectId: input.projectId,
-        sourceWallet: input.sourceWallet,
-        sourceSigner,
-        instructions: [instruction],
+      // Fail-closed: CancelSubscription/ResumeSubscription irreversibly move
+      // the on-chain subscription, so the sealed ledger admits the broadcast
+      // before any bytes reach the chain.
+      const lifecycleIntent = await beginRecurringPaymentAudit(
+        input.env,
+        input.auditActor,
+        input.operation === "cancel" ? "cancel_subscription" : "resume_subscription",
+        claimed.id,
+        { planPda, subscriptionPda }
+      );
+      try {
+        signature = await sendSubscriptionInstructions({
+          env: input.env,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          sourceWallet: input.sourceWallet,
+          sourceSigner,
+          instructions: [instruction],
+        });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, lifecycleIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, lifecycleIntent, {
+        signature,
+        metadata: { planPda, subscriptionPda },
       });
 
       const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
@@ -605,6 +632,8 @@ export async function cancelRecurringPayment(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
+  /** Sealed-ledger attribution; cron callers pass their own correlation ID. */
+  auditActor: RecurringPaymentAuditActor;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
     const recurringRepo = createPaymentRecurringPaymentsRepository(
@@ -633,6 +662,8 @@ export async function resumeRecurringPayment(input: {
   projectId: string;
   sourceWallet: CustodyWallet;
   recurringPayment: PaymentRecurringPaymentRow;
+  /** Sealed-ledger attribution; cron callers pass their own correlation ID. */
+  auditActor: RecurringPaymentAuditActor;
 }): Promise<PaymentRecurringPaymentRow> {
   return runRecurringPaymentLifecycle({ ...input, operation: "resume" });
 }

@@ -107,6 +107,9 @@ export type ResourceType =
   | "dvp_trade"
   | "payment_request"
   | "payment_transfer"
+  // Recurring-payment lifecycle broadcasts (activation, cancel, resume) are
+  // sealed intent/outcome pairs against the recurring payment row itself.
+  | "payment_recurring_payment"
   | "audit_ledger";
 
 export interface AuditLogEntry {
@@ -474,6 +477,8 @@ export class AuditService {
     const intentId = `aint_${crypto.randomUUID()}`;
     await this.logSystem({
       organizationId: entry.organizationId,
+      userId: entry.userId,
+      apiKeyId: entry.apiKeyId,
       requestId: entry.requestId,
       action: "maintenance",
       resourceType: "audit_ledger",

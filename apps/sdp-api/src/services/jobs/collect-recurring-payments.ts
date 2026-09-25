@@ -21,6 +21,7 @@ import {
   journalAutomatedCollectionFailure,
   resumeRecurringPayment,
 } from "@/services/payments/recurring-payments";
+import type { RecurringPaymentAuditActor } from "@/services/payments/recurring-payments/lifecycle-audit";
 import type { CustodyWallet } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 
@@ -157,6 +158,16 @@ async function recoverLifecycleRow(
     if (!sourceWallet) {
       return "failed";
     }
+    // No request actor exists on the cron path: the row's recorded creator is
+    // the only attribution, and a per-row durable correlation ID lets the
+    // sealed ledger's unresolved-intent evidence be reconciled against the
+    // exact recovery pass that retried it.
+    const auditActor: RecurringPaymentAuditActor = {
+      organizationId: row.organization_id,
+      userId: row.created_by,
+      apiKeyId: null,
+      requestId: `cron_recurring_recovery_${row.id}_${crypto.randomUUID()}`,
+    };
     if (isActivatingRecurringPaymentStatus(row.status)) {
       await activateRecurringPayment({
         env,
@@ -165,6 +176,7 @@ async function recoverLifecycleRow(
         sourceWallet,
         recurringPayment: row,
         createdBy: row.created_by,
+        auditActor,
       });
       return "ok";
     }
@@ -176,6 +188,7 @@ async function recoverLifecycleRow(
         projectId: row.project_id,
         sourceWallet,
         recurringPayment: row,
+        auditActor,
       });
       return "ok";
     }
@@ -186,6 +199,7 @@ async function recoverLifecycleRow(
         projectId: row.project_id,
         sourceWallet,
         recurringPayment: row,
+        auditActor,
       });
       return "ok";
     }

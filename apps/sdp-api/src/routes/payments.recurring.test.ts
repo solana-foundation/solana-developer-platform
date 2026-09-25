@@ -757,6 +757,98 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("seals an audit intent and outcome for each activation broadcast", async () => {
+    const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
+
+    // One intent/outcome pair per irreversible broadcast: the plan creation
+    // and the subscription delegation. The setup broadcast (ATA + authority
+    // init) is skipped in this fixture because the mocked authority exists
+    // and the source token account resolves.
+    // Intent rows are filed against the audit ledger itself (`audit_ledger` /
+    // `aint_*`) with the real target nested in metadata, while outcome rows
+    // inherit the target's action/resourceType/resourceId — the same
+    // convention as every other critical-intent writer.
+    const events = await getDb(env)
+      .prepare(
+        `SELECT action, resource_type, resource_id, user_id, api_key_id,
+                request_id, status, metadata
+           FROM audit_logs
+          WHERE organization_id = ?
+            AND (metadata::jsonb ->> 'auditPhase' IN ('intent', 'outcome')
+                 OR (metadata::jsonb ->> 'auditPhase') IS NULL
+                    AND resource_type = 'payment_recurring_payment'
+                    AND resource_id = ?
+                   )
+          ORDER BY ledger_sequence ASC`
+      )
+      .bind(TEST_ORG.id, activated.id)
+      .all<{
+        action: string;
+        resource_type: string;
+        resource_id: string;
+        user_id: string | null;
+        api_key_id: string | null;
+        request_id: string | null;
+        status: string;
+        metadata: string;
+      }>();
+    expect(events.results).toHaveLength(4);
+
+    const parsed = events.results.map((event) => ({
+      ...event,
+      metadata: JSON.parse(event.metadata) as Record<string, unknown>,
+    }));
+    for (const event of parsed) {
+      expect(event.status).toBe("success");
+      expect(event.api_key_id).toBe(TEST_API_KEY.id);
+      expect(event.user_id).toBeNull();
+      expect(event.request_id).toMatch(/^req_/);
+    }
+
+    const [planIntent, planOutcome, subscribeIntent, subscribeOutcome] = parsed;
+    // Intent rows: system admission for the target broadcast, filed on the
+    // ledger with the request's actor and correlation ID.
+    expect(planIntent.resource_id).toMatch(/^aint_/);
+    expect(planIntent.metadata.auditPhase).toBe("intent");
+    expect(planIntent.metadata.target).toMatchObject({
+      action: "submit",
+      resourceType: "payment_recurring_payment",
+      resourceId: activated.id,
+      metadata: {
+        recurringPaymentId: activated.id,
+        recurringPaymentOperation: "create_plan",
+      },
+    });
+    expect(planOutcome.metadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: planIntent.resource_id,
+      recurringPaymentOperation: "create_plan",
+      signature: activated.planCreationSignature,
+      planId: activated.planId,
+    });
+    expect(planOutcome.metadata.planPda).toBe(activated.planPda);
+
+    expect(subscribeIntent.resource_id).toMatch(/^aint_/);
+    expect(subscribeIntent.metadata.auditPhase).toBe("intent");
+    expect(subscribeIntent.metadata.target).toMatchObject({
+      action: "submit",
+      resourceType: "payment_recurring_payment",
+      resourceId: activated.id,
+      metadata: {
+        recurringPaymentId: activated.id,
+        recurringPaymentOperation: "subscribe",
+      },
+    });
+    expect(subscribeOutcome.metadata).toMatchObject({
+      auditPhase: "outcome",
+      auditIntentId: subscribeIntent.resource_id,
+      recurringPaymentOperation: "subscribe",
+      signature: activated.authorizationSignature,
+      planPda: activated.planPda,
+      subscriptionPda: activated.subscriptionPda,
+    });
+  });
+
   it("repairs a finalized activation attempt on replay", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
     const activated = await activateRecurringPaymentFixture(DEFAULT_RECURRING_FIXTURE);
