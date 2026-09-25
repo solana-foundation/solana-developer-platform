@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { providerUnavailable } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOnrampRemittance } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
@@ -1811,6 +1812,19 @@ describe("Payments routes — ramps", () => {
   });
   describe("sandbox pay-in simulation", () => {
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
+    const LIGHTSPARK_SIM_SEED = {
+      provider: "lightspark",
+      providerReference: "Quote:sim-1",
+      fiatCurrency: "USD",
+      fiatAmount: "250.00",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      providerData: {},
+      type: "onramp",
+    } as const satisfies Omit<
+      Parameters<typeof seedSimulatableTransfer>[0],
+      "id" | "counterpartyId"
+    >;
 
     async function seedSimulatableTransfer(input: {
       id: string;
@@ -1960,16 +1974,9 @@ describe("Payments routes — ramps", () => {
       const transferId = "xfr_lightspark_sim_1";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
         id: transferId,
-        provider: "lightspark",
-        providerReference: "Quote:sim-1",
-        fiatCurrency: "USD",
-        fiatAmount: "250.00",
         counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: {},
-        type: "onramp",
       });
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
@@ -1990,6 +1997,36 @@ describe("Payments routes — ramps", () => {
       expect(second.status).toBe(409);
       const body: { error: { message: string } } = await second.json();
       expect(body.error.message).toContain("already requested for this transfer");
+
+      simulateSpy.mockRestore();
+    });
+
+    it("releases the simulation slot when the provider call fails so the transfer can be retried", async () => {
+      const transferId = "xfr_lightspark_sim_release";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        counterpartyId,
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockRejectedValueOnce(providerUnavailable("Grid sandbox send failed"))
+        .mockResolvedValueOnce({ accepted: true });
+
+      const first = await simulateRequest(transferId);
+
+      expect(first.status).toBe(503);
+      const failedTransfer = await readSimulationTransfer(transferId);
+      expect(failedTransfer?.status).toBe("awaiting_payment");
+      expect(failedTransfer?.provider_data).not.toHaveProperty("sandboxSimulation");
+
+      const second = await simulateRequest(transferId);
+
+      expect(second.status).toBe(200);
+      expect(simulateSpy).toHaveBeenCalledTimes(2);
+      const retriedTransfer = await readSimulationTransfer(transferId);
+      expect(retriedTransfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
 
       simulateSpy.mockRestore();
     });
@@ -2083,16 +2120,12 @@ describe("Payments routes — ramps", () => {
         .bind("org_other_sim", "proj_other_sim", counterpartyId)
         .run();
       await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
         id: transferId,
-        provider: "lightspark",
         providerReference: "Quote:sim-other-tenant",
-        fiatCurrency: "USD",
-        fiatAmount: "250.00",
         counterpartyId,
-        providerData: {},
         organizationId: "org_other_sim",
         projectId: "proj_other_sim",
-        type: "onramp",
       });
       const before = await getDb(env)
         .prepare("SELECT * FROM payment_transfers WHERE id = ?")
@@ -2122,16 +2155,11 @@ describe("Payments routes — ramps", () => {
       const transferId = "xfr_coinbase_sim_1";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
         id: transferId,
         provider: "coinbase",
         providerReference: "Quote:coinbase-sim-1",
-        fiatCurrency: "USD",
-        fiatAmount: "250.00",
         counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: {},
-        type: "onramp",
       });
 
       const res = await simulateRequest(transferId);
@@ -2164,15 +2192,10 @@ describe("Payments routes — ramps", () => {
       const transferId = "xfr_lightspark_sim_offramp";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
         id: transferId,
-        provider: "lightspark",
         providerReference: "Quote:sim-offramp",
-        fiatCurrency: "USD",
-        fiatAmount: "250.00",
         counterpartyId,
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT.id,
-        providerData: {},
         type: "offramp",
       });
       const simulateSpy = vi

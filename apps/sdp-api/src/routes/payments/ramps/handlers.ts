@@ -19,7 +19,7 @@ import {
   isRampTransferType,
 } from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
-import { AppError, badRequest, conflict, internalError, notFound } from "@/lib/errors";
+import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
@@ -77,10 +77,7 @@ export async function simulateSandboxTransfer(
   c: ValidatedBodyContext<typeof simulateSandboxTransferSchema>
 ) {
   if (resolveSdpEnvironment(c) !== "sandbox") {
-    throw new AppError(
-      "FORBIDDEN",
-      "Sandbox transfer simulation is only available in sandbox mode"
-    );
+    throw forbidden("Sandbox transfer simulation is only available in sandbox mode");
   }
 
   const { transferId } = c.req.valid("json");
@@ -123,24 +120,14 @@ export async function simulateSandboxTransfer(
   if (!counterparty) {
     throw notFound("Counterparty");
   }
-  const row = {
-    id: transfer.id,
-    provider: transfer.provider,
-    providerReference: transfer.provider_reference,
-    providerData: transfer.provider_data,
-    counterpartyId: transfer.counterparty_id,
-    fiatAmount: transfer.fiat_amount,
-    fiatCurrency: transfer.fiat_currency,
-  };
-
   let simulate: () => Promise<unknown>;
-  switch (row.provider) {
+  switch (transfer.provider) {
     case "lightspark": {
-      const quoteId = row.providerReference;
+      const quoteId = transfer.provider_reference;
       if (quoteId === null) {
         throw internalError("Lightspark on-ramp transfer has no quote reference.");
       }
-      const payload = { quoteId, currencyCode: row.fiatCurrency };
+      const payload = { quoteId, currencyCode: transfer.fiat_currency };
       simulate = () => RAMP_PROVIDER_CLIENTS.lightspark.sandboxSend(rampRuntime(c), payload);
       break;
     }
@@ -150,7 +137,7 @@ export async function simulateSandboxTransfer(
       ).getAccountByKindAndCurrency({
         organizationId: scope.auth.organizationId,
         projectId,
-        counterpartyId: row.counterpartyId,
+        counterpartyId: transfer.counterparty_id,
         provider: "bvnk",
         kind: "funding_wallet",
         fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
@@ -160,11 +147,11 @@ export async function simulateSandboxTransfer(
       }
       const payload = {
         walletId: fundingRow.external_account_reference,
-        amount: toNumberAmount(row.fiatAmount),
-        currency: row.fiatCurrency,
+        amount: toNumberAmount(transfer.fiat_amount),
+        currency: transfer.fiat_currency,
         originatorName: counterparty.display_name,
-        remittanceInformation: bvnkOnrampRemittance(row.id),
-        idempotencyKey: row.id,
+        remittanceInformation: bvnkOnrampRemittance(transfer.id),
+        idempotencyKey: transfer.id,
       };
       simulate = () => RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), payload);
       break;
@@ -174,15 +161,15 @@ export async function simulateSandboxTransfer(
       if (!org.id) {
         throw internalError("Mural on-ramp counterparty has no organization.");
       }
-      const fiatCurrency = row.fiatCurrency;
+      const fiatCurrency = transfer.fiat_currency;
       if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
         throw badRequest(`Mural sandbox pay-in does not support ${fiatCurrency}.`);
       }
       const payload = {
         organizationId: org.id,
-        destinationAccountId: readMuralTransferAccountId(row.providerData),
+        destinationAccountId: readMuralTransferAccountId(transfer.provider_data),
         rail: MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY[fiatCurrency],
-        amountValue: String(parseDecimalAmount(row.fiatAmount, 2)),
+        amountValue: String(parseDecimalAmount(transfer.fiat_amount, 2)),
         currencySymbol: fiatCurrency,
       };
       simulate = () => RAMP_PROVIDER_CLIENTS.mural.simulatePayin(rampRuntime(c), payload);
@@ -192,27 +179,42 @@ export async function simulateSandboxTransfer(
     case "moneygram":
     case "coinbase":
     case "stripe":
-      throw badRequest(`Sandbox simulation is not available for provider: ${row.provider}.`);
+      throw badRequest(`Sandbox simulation is not available for provider: ${transfer.provider}.`);
     default: {
-      const exhaustive: never = row.provider;
+      const exhaustive: never = transfer.provider;
       throw internalError(`Unknown ramp provider: ${String(exhaustive)}`);
     }
   }
 
   const now = new Date().toISOString();
+  const claim = { requestedAt: now };
   const claimed = await repository.claimTransferProviderData({
-    transferId: row.id,
+    transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
     expectedStatus: "awaiting_payment",
     claimPath: ["sandboxSimulation"],
-    providerData: { sandboxSimulation: { requestedAt: now } },
+    providerData: { sandboxSimulation: claim },
     updatedAt: now,
   });
   if (claimed === null) {
     throw conflict("Sandbox simulation was already requested for this transfer.");
   }
 
-  const transaction = await simulate();
+  let transaction: unknown;
+  try {
+    transaction = await simulate();
+  } catch (error) {
+    await repository.releaseTransferProviderDataClaim({
+      transferId: transfer.id,
+      organizationId: scope.auth.organizationId,
+      projectId,
+      expectedStatus: "awaiting_payment",
+      claimPath: ["sandboxSimulation"],
+      claimValue: claim,
+      updatedAt: new Date().toISOString(),
+    });
+    throw error;
+  }
   return success(c, { transaction });
 }
