@@ -706,7 +706,12 @@ async function persistScanPositions(
   group: ReleaseGroup,
   vaultAta: Address,
   rawSweep: PrivateChannelReleaseScanCursor | null,
-  walk: { complete: boolean; deepestListed: PrivateChannelReleaseScanCursor | null },
+  walk: {
+    complete: boolean;
+    deepestListed: PrivateChannelReleaseScanCursor | null;
+    sweepResumed: boolean;
+    resumedBandLength: number;
+  },
   ordered: solanaRpc.SignatureInfo[],
   parsedSignatures: Set<string>
 ): Promise<void> {
@@ -737,8 +742,21 @@ async function persistScanPositions(
   if (!walk.complete || !groupComplete) {
     return;
   }
+
+  // Walk the fully-parsed prefix, oldest first. When the walk resumed below a
+  // sweep position, the prefix may only extend over the resumed band: it is
+  // the sole region listed contiguously down from the sweep position to the
+  // cursor. The tip band sits above an unlisted gap (between its floor and
+  // the sweep position) — advancing past the band would mark releases in that
+  // gap as parsed without ever examining them. Once the band is fully parsed
+  // the sweep is cleared instead: the next walk starts with no sweep, lists
+  // the whole region from the tip contiguously, and the frontier resumes
+  // marching through the former gap.
   let frontier: PrivateChannelReleaseScanCursor | null = null;
-  for (const entry of ordered) {
+  let resumedBandFullyParsed = walk.sweepResumed && walk.resumedBandLength === 0;
+  const frontierLimit = walk.sweepResumed ? walk.resumedBandLength : ordered.length;
+  for (let index = 0; index < frontierLimit; index += 1) {
+    const entry = ordered[index];
     const complete = entry.err !== null || parsedSignatures.has(entry.signature);
     if (!complete) {
       break;
@@ -747,6 +765,7 @@ async function persistScanPositions(
       signature: entry.signature,
       slot: entry.slot.toString(),
     };
+    resumedBandFullyParsed = walk.sweepResumed && index === walk.resumedBandLength - 1;
   }
   if (frontier) {
     await releaseScanRepo.advanceScan({
@@ -757,13 +776,26 @@ async function persistScanPositions(
     });
     // The frontier consumed the listed backlog — the sweep has nothing left
     // to resume and the next walk can target the frontier directly.
-    if (rawSweep && BigInt(frontier.slot) >= BigInt(rawSweep.slot)) {
+    if (walk.sweepResumed && resumedBandFullyParsed) {
+      await releaseScanRepo.clearSweep({
+        instanceId: group.instance.id,
+        mint: group.mint,
+        vaultAta,
+      });
+    } else if (!walk.sweepResumed && rawSweep && BigInt(frontier.slot) >= BigInt(rawSweep.slot)) {
       await releaseScanRepo.clearSweep({
         instanceId: group.instance.id,
         mint: group.mint,
         vaultAta,
       });
     }
+  } else if (walk.sweepResumed && resumedBandFullyParsed) {
+    // A resumed band that listed nothing is already behind the cursor.
+    await releaseScanRepo.clearSweep({
+      instanceId: group.instance.id,
+      mint: group.mint,
+      vaultAta,
+    });
   }
 }
 
@@ -800,6 +832,10 @@ async function walkReleaseHistory(
   entries: solanaRpc.SignatureInfo[];
   complete: boolean;
   deepestListed: PrivateChannelReleaseScanCursor | null;
+  /** Phase 2 ran below a persisted sweep position. */
+  sweepResumed: boolean;
+  /** How many of `entries` belong to the resumed deep band (contiguous with the cursor). */
+  resumedBandLength: number;
 }> {
   const entries: solanaRpc.SignatureInfo[] = [];
 
@@ -821,7 +857,11 @@ async function walkReleaseHistory(
         return { stoppedAt: "end", deepest };
       }
       for (const info of infos) {
-        if (cursor && info.signature === cursor.signature) {
+        if (
+          cursor &&
+          (info.signature === cursor.signature ||
+            (info.slot !== null && BigInt(info.slot) <= BigInt(cursor.slot)))
+        ) {
           return { stoppedAt: "cursor", deepest };
         }
         if (!cursor && info.blockTime !== null && Number(info.blockTime) * 1000 < lowerBoundMs) {
@@ -844,20 +884,38 @@ async function walkReleaseHistory(
     sweep ? RELEASE_SCAN_TIP_PAGES : RELEASE_SCAN_MAX_PAGES
   );
   if (tip.stoppedAt !== "cap") {
-    return { entries, complete: true, deepestListed: null };
+    return {
+      entries,
+      complete: true,
+      deepestListed: null,
+      sweepResumed: false,
+      resumedBandLength: 0,
+    };
   }
   if (!sweep) {
     // First capped walk: the tip band's deepest point is where a later tick
     // resumes listing.
-    return { entries, complete: false, deepestListed: tip.deepest };
+    return {
+      entries,
+      complete: false,
+      deepestListed: tip.deepest,
+      sweepResumed: false,
+      resumedBandLength: 0,
+    };
   }
   // Phase 2 — resume below the persisted sweep position toward the cursor.
+  // The band it lists is contiguous with the cursor; the region between the
+  // tip band's floor and the sweep position is NOT relisted this tick, so the
+  // frontier may only advance over the band (see persistScanPositions).
+  const bandStart = entries.length;
   const remaining = RELEASE_SCAN_MAX_PAGES - RELEASE_SCAN_TIP_PAGES;
   const resumed = await listBackward(sweep.signature, remaining);
   return {
     entries,
     complete: resumed.stoppedAt !== "cap",
     deepestListed: resumed.stoppedAt === "cap" ? resumed.deepest : null,
+    sweepResumed: true,
+    resumedBandLength: entries.length - bandStart,
   };
 }
 

@@ -1125,6 +1125,93 @@ describe("trackPendingWithdrawals", () => {
     });
   });
 
+  it("never advances the frontier across the unlisted gap above a resumed band", async () => {
+    // Sweep mode: the tip band covers the newest 2000 entries and the resumed
+    // band lists down to the cursor, but the region between them is not
+    // relisted this tick. Even with the whole band parsed, the frontier must
+    // stop at its top — a release sitting in the gap was never examined.
+    const tipPage = (start: number, count: number) =>
+      Array.from({ length: count }, (_, i) => {
+        const slot = start - i;
+        return { signature: `tip${slot}`, err: null, slot: BigInt(slot), blockTime: null };
+      });
+    const band = Array.from({ length: 100 }, (_, i) => {
+      const slot = 150 - i; // newest first: 150 down to 51
+      return { signature: `b${slot}`, err: null, slot: BigInt(slot), blockTime: null };
+    });
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "c50", slot: "50" },
+      sweep: { signature: "anchor151", slot: "151" },
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    getSignaturesForAddress.mockImplementation(
+      async (_rpc: unknown, _addr: unknown, options: { before?: string } = {}) => {
+        if (!options.before) return tipPage(2300, 1000);
+        if (options.before === "tip1301") return tipPage(1300, 1000);
+        if (options.before === "anchor151") return band;
+        return [];
+      }
+    );
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // The frontier stops at the band's top (just below the sweep position).
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "b150", slot: "150" },
+    });
+    // The band is fully parsed and consumed, so the sweep clears and the next
+    // tick lists the gap contiguously from the tip.
+    expect(releaseScanRepo.clearSweep).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+    });
+  });
+
+  it("advances the frontier through the former gap once the sweep cleared", async () => {
+    // Follow-up tick to the scenario above: the sweep is gone, so the walk
+    // lists the whole region from the tip contiguously and the frontier can
+    // cross the formerly unlisted gap.
+    const tipPage = (start: number, count: number) =>
+      Array.from({ length: count }, (_, i) => {
+        const slot = start - i;
+        return { signature: `tip${slot}`, err: null, slot: BigInt(slot), blockTime: null };
+      });
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "b150", slot: "150" },
+      sweep: null,
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    getSignaturesForAddress.mockImplementation(
+      async (_rpc: unknown, _addr: unknown, options: { before?: string } = {}) => {
+        if (!options.before) return tipPage(2300, 1000);
+        if (options.before === "tip1301") return tipPage(1300, 1000);
+        if (options.before === "tip301") return tipPage(300, 150); // 300..151, then history ends
+        return [];
+      }
+    );
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // Parsing walked oldest first, so the frontier sits 300 signatures above
+    // the cursor — across the gap, which is now listed contiguously.
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "tip450", slot: "450" },
+    });
+  });
+
   it("ignores a sweep position at or behind the parsed frontier", async () => {
     // A stale sweep (clear that lost a race) must not send the walk listing
     // already-consumed history.
