@@ -45,6 +45,13 @@ const PROFILE_BODY = {
   assetCategory: "generic",
   assetType: "generic",
 };
+// A second credential of the same project used to replay creations: a
+// repaired audit event must keep the original creator's attribution.
+const REPLAY_API_KEY = {
+  id: "key_replay99999999",
+  raw: "sk_test_replay_fixture",
+  prefix: "sk_test_rep",
+};
 
 async function countRows(query: string, ...bind: string[]): Promise<number> {
   const statement = getDb(env).prepare(query);
@@ -73,6 +80,16 @@ const profileAuditCount = (profileId: string) =>
     "SELECT COUNT(*)::int AS count FROM audit_logs WHERE resource_type = 'asset_profile' AND action = 'create' AND status = 'success' AND resource_id = ?",
     profileId
   );
+const profileAuditActor = async (profileId: string) => {
+  const row = await getDb(env)
+    .prepare(
+      "SELECT user_id, api_key_id FROM audit_logs WHERE resource_type = 'asset_profile' AND action = 'create' AND resource_id = ?"
+    )
+    .bind(profileId)
+    .first<{ user_id: string | null; api_key_id: string | null }>();
+  if (!row) throw new Error("Profile audit event not found");
+  return row;
+};
 
 describe("issuance creation: audit admission before effect + idempotent replay", () => {
   let apiKeyHash: string;
@@ -110,6 +127,22 @@ describe("issuance creation: audit admission before effect + idempotent replay",
       ...TEST_PROJECT_CACHED_KEY,
       permissions: ["tokens:write"],
     });
+
+    // A second credential of the same project drives replays in the audit
+    // repair tests: the repaired event must not adopt its identity.
+    const secondKeyHash = await seedProjectApiKey(db, env, {
+      key: REPLAY_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["tokens:write"],
+    });
+    await seedCachedApiKey(env, secondKeyHash, {
+      ...TEST_PROJECT_CACHED_KEY,
+      id: REPLAY_API_KEY.id,
+      permissions: ["tokens:write"],
+    });
   });
 
   beforeEach(async () => {
@@ -140,9 +173,9 @@ describe("issuance creation: audit admission before effect + idempotent replay",
     await kv.cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
   });
 
-  const headers = (idempotencyKey?: string) => ({
+  const headers = (idempotencyKey?: string, key = TEST_PROJECT_API_KEY) => ({
     "Content-Type": "application/json",
-    Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+    Authorization: `Bearer ${key.raw}`,
     ...(idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey }),
   });
 
@@ -398,6 +431,82 @@ describe("issuance creation: audit admission before effect + idempotent replay",
       expect(retryBody.data.assetProfile.id).toBe(firstBody.data.assetProfile.id);
       // The replay re-attempted the profile audit write instead of
       // returning the saved pair with its creation event still missing.
+      expect(await profileAuditCount(firstBody.data.assetProfile.id)).toBe(1);
+      expect(await tokenCount(TOKEN_BODY.name)).toBe(1);
+      expect(await profileCount(TOKEN_BODY.name)).toBe(1);
+    });
+
+    it("attributes a repaired profile audit event to the original creator, not the replaying credential", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-actor"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+
+      const db = getDb(env);
+      await db.prepare("TRUNCATE TABLE audit_logs, audit_ledger_anchors RESTART IDENTITY").run();
+      await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+      // A different key of the same project replays the creation; the
+      // fingerprint covers only the body, so the replay is allowed.
+      const retry = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-actor", REPLAY_API_KEY),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(retry.status).toBe(201);
+      // The repaired event names the key that created the pair, not the
+      // replaying one.
+      const actor = await profileAuditActor(firstBody.data.assetProfile.id);
+      expect(actor.api_key_id).toBe(TEST_PROJECT_API_KEY.id);
+      expect(actor.user_id).toBeNull();
+    });
+
+    it("writes a missing profile audit event exactly once under concurrent replays", async () => {
+      const first = await app.request(
+        "/v1/issuance/asset-profiles",
+        {
+          method: "POST",
+          headers: headers("profile-audit-race"),
+          body: JSON.stringify(PROFILE_BODY),
+        },
+        env
+      );
+      expect(first.status).toBe(201);
+      const firstBody = await first.json();
+
+      const db = getDb(env);
+      await db.prepare("TRUNCATE TABLE audit_logs, audit_ledger_anchors RESTART IDENTITY").run();
+      await createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+      // Concurrent replays all race the missing audit write; the ledger's
+      // serialized append must let exactly one of them write the event.
+      const replays = await Promise.all(
+        [0, 1, 2, 3].map(() =>
+          app.request(
+            "/v1/issuance/asset-profiles",
+            {
+              method: "POST",
+              headers: headers("profile-audit-race", REPLAY_API_KEY),
+              body: JSON.stringify(PROFILE_BODY),
+            },
+            env
+          )
+        )
+      );
+      for (const replay of replays) {
+        expect(replay.status).toBe(201);
+      }
       expect(await profileAuditCount(firstBody.data.assetProfile.id)).toBe(1);
       expect(await tokenCount(TOKEN_BODY.name)).toBe(1);
       expect(await profileCount(TOKEN_BODY.name)).toBe(1);

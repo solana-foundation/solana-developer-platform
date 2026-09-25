@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import { getAuth, requireProjectId } from "@/lib/auth";
-import { resolveCreatorUserId } from "@/lib/creator";
+import { resolveCreatorAuditActor, resolveCreatorUserId } from "@/lib/creator";
 import { badRequest, internalError, notFound } from "@/lib/errors";
 import {
   getSelectedSettings,
@@ -264,8 +264,7 @@ export const createTokenWithAssetProfile = async (
     });
     await completeProfileCreationAudit(c, auditService, {
       organizationId: orgId,
-      userId: auth.userId ?? undefined,
-      apiKeyId: auth.apiKeyId ?? undefined,
+      actor: { userId: auth.userId ?? undefined, apiKeyId: auth.apiKeyId ?? undefined },
       profileId: assetProfile.id,
       tokenId: token.id,
       assetCategory,
@@ -315,34 +314,27 @@ interface ReplayAuditContext {
  * transaction, so an audit-ledger outage at that moment returns 500 for a
  * creation that did commit — and because the committed idempotency record
  * makes every retry a replay, this repair on the replay path is the only
- * remaining chance to write the missing event.
+ * remaining chance to write the missing event. The write is guarded inside
+ * the serialized ledger append, so concurrent replays cannot duplicate the
+ * event, and the actor is the original creator's, never the replaying
+ * credential's.
  */
 async function completeProfileCreationAudit(
   c: ValidatedBodyContext<typeof createTokenWithAssetProfileSchema>,
   auditService: AuditService,
   entry: {
     organizationId: string;
-    userId?: string;
-    apiKeyId?: string;
+    actor: { userId?: string; apiKeyId?: string };
     profileId: string;
     tokenId: string;
     assetCategory: z.infer<typeof assetCategorySchema>;
     assetType: z.infer<typeof assetTypeSchema>;
   }
 ) {
-  const alreadyWritten = await auditService.hasEvent({
+  await auditService.logOnce(c, {
     organizationId: entry.organizationId,
-    action: "create",
-    resourceType: "asset_profile",
-    resourceId: entry.profileId,
-  });
-  if (alreadyWritten) {
-    return;
-  }
-  await auditService.log(c, {
-    organizationId: entry.organizationId,
-    userId: entry.userId,
-    apiKeyId: entry.apiKeyId,
+    userId: entry.actor.userId,
+    apiKeyId: entry.actor.apiKeyId,
     action: "create",
     resourceType: "asset_profile",
     resourceId: entry.profileId,
@@ -390,10 +382,11 @@ async function requireReplayPair(
     throw notFound("Asset profile");
   }
   const assetProfile = mapToAssetProfile(profileRow);
+  // The repaired event names the original creator — `created_by` stores the
+  // creating request's auth id — not whichever credential is replaying.
   await completeProfileCreationAudit(c, creation.auditService, {
     organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+    actor: await resolveCreatorAuditActor(getDb(c.env), token.createdBy),
     profileId: assetProfile.id,
     tokenId: token.id,
     assetCategory: creation.assetCategory,
