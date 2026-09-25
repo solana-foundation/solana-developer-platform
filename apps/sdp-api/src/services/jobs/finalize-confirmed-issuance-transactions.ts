@@ -131,11 +131,12 @@ export async function finalizeConfirmedIssuanceTransactions(
       ],
       updatedAt: now,
     });
-    // The poll stamps are committed, so the page rotates, but the tick still
-    // reports failure: an outage must show up as failed reconciliation runs
-    // instead of silently passing while rows wait. The read learned nothing
-    // about finality, so the rows' non-finalization backoff is untouched —
-    // they stay due and are re-checked as soon as RPC recovers.
+    // The page still rotated — a sustained outage cannot pin the same rows
+    // at the front of the queue while later rows wait — but the tick itself
+    // failed, so monitoring sees the reconciliation stall instead of a
+    // healthy pass. The read learned nothing about finality, so the rows'
+    // non-finalization backoff is untouched: they stay due (re-due at this
+    // poll's timestamp) and are re-checked as soon as RPC recovers.
     throw error;
   }
 

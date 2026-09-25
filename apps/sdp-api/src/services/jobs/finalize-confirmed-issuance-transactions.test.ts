@@ -224,18 +224,21 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
 
     await expect(finalizeConfirmedIssuanceTransactions(env)).rejects.toThrow("rpc unreachable");
 
-    // The page still rotated, so a sustained outage cannot pin rows at the
-    // front of the queue — but the tick itself failed, so monitoring sees the
-    // reconciliation stall instead of a healthy pass. The failed read learned
-    // nothing about finality, so the row's non-finalization backoff is
-    // untouched: it stays due and is re-checked as soon as RPC recovers
-    // instead of waiting out a deferral it never earned.
-    await expect(getTransaction("itx_fin_rpc")).resolves.toMatchObject({
+    // The page still rotated — the failed rows are re-due at this poll's
+    // timestamp, so the next tick checks the rows behind them instead of
+    // pinning the same page while the backlog waits — but the tick itself
+    // failed, so monitoring sees the reconciliation stall instead of a
+    // healthy pass. The failed read learned nothing about finality, so the
+    // row's non-finalization backoff is untouched: no deferral it never
+    // earned stands between it and a re-check once RPC recovers.
+    const failed = await getTransaction("itx_fin_rpc");
+    expect(failed).toMatchObject({
       status: "confirmed",
       finalization_last_polled_at: expect.any(String),
       finalization_poll_attempts: 0,
-      finalization_next_poll_at: null,
     });
+    const stampedAt = new Date(failed?.finalization_next_poll_at ?? "");
+    expect(Math.abs(stampedAt.getTime() - Date.now())).toBeLessThan(30 * 1000);
   });
 
   it("backs off repeated non-finalizing polls without dropping the recovery path", async () => {

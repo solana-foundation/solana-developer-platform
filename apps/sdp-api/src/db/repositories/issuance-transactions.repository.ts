@@ -26,7 +26,8 @@ export interface ConfirmedIssuanceTransactionVerdict {
   slot: number | null;
   /**
    * Whether this verdict came from a failed read rather than the chain: a
-   * failed read stamps the page as polled but never grows the
+   * failed read stamps the page as polled and re-dues it at the poll time —
+   * rotating it behind the rest of the due queue without growing the
    * non-finalization backoff, since nothing was learned about finality.
    */
   readFailed: boolean;
@@ -74,10 +75,12 @@ export interface IssuanceTransactionsRepository {
    * finalization_next_poll_at, which also orders the queue) grows only for
    * rows the chain actually reported provisional, and only while the row's
    * poll stamp is unchanged since the verdict's page was read — so a failed
-   * read (readFailed) leaves the deferral untouched, and overlapping ticks
-   * that selected the same due row do not double it. Finalization clears the
-   * deferral; finalized rows leave the queue with their status and
-   * provisional ones return to it later.
+   * read (readFailed) leaves the counter untouched and overlapping ticks
+   * that selected the same due row do not double it. A failed read still
+   * re-dues its page at the poll time, rotating it behind the rest of the
+   * due queue so a sustained outage cannot pin the same rows at the front.
+   * Finalization clears the deferral; finalized rows leave the queue with
+   * their status and provisional ones return to it later.
    *
    * @param params - The page's verdicts and the poll timestamp.
    * @returns The ids of the transactions this statement advanced.
