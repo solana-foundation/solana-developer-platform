@@ -6,6 +6,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";
@@ -130,6 +131,7 @@ function WithdrawalRequestItem({
 /** Durable recovery surface for queued requests that outlive their create modal. */
 export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () => void }) {
   const t = useTranslations();
+  const projectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const { withdrawalRequests, error, isLoading, refresh } = useEarnVaultWithdrawalRequests();
   const cancelKeys = useRef(new Map<string, string>());
   const observedOpenRequestIds = useRef<ReadonlySet<string> | null>(null);
@@ -178,7 +180,16 @@ export function EarnVaultWithdrawalRequestsCard({ onChanged }: { onChanged?: () 
       delete next[id];
       return next;
     });
-    const result = await cancelEarnVaultWithdrawalRequest(id, key);
+    // No rendered project, no cancellation: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!projectId) {
+      setCancelError((current) => ({
+        ...current,
+        [id]: t("DashboardEarn.deposit.vaultProjectScopeUnavailable"),
+      }));
+      return;
+    }
+    const result = await cancelEarnVaultWithdrawalRequest({ projectId }, id, key);
     setCancelling((current) => {
       const next = new Set(current);
       next.delete(id);

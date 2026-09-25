@@ -177,6 +177,7 @@ describe("EarnVaultParRedemptionModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() =>
       expect(mocks.fetchPreview).toHaveBeenCalledWith(
+        { projectId: "project_1" },
         {
           positionId: position.id,
           shares: "2500",
@@ -190,6 +191,7 @@ describe("EarnVaultParRedemptionModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
     expect(mocks.createRequest).toHaveBeenCalledWith(
+      { projectId: "project_1" },
       {
         positionId: position.id,
         shares: "2500",
@@ -215,7 +217,11 @@ describe("EarnVaultParRedemptionModal", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cancel and keep wYLDS" }));
 
     await waitFor(() =>
-      expect(mocks.cancelRequest).toHaveBeenCalledWith("request_1", IDEMPOTENCY_KEY)
+      expect(mocks.cancelRequest).toHaveBeenCalledWith(
+        { projectId: "project_1" },
+        "request_1",
+        IDEMPOTENCY_KEY
+      )
     );
     expect(await screen.findByText("Cancelling")).toBeTruthy();
   });

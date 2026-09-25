@@ -57,19 +57,27 @@ function autoRouteChoice(
  * guard discards its late answer rather than letting it win by outliving
  * newer state.
  */
-function useEarnVaultExitOptions(positionId: string) {
+function useEarnVaultExitOptions(projectId: string | null, positionId: string) {
   const [options, setOptions] = useState<ExitOptions>(undefined);
   const [attempt, setAttempt] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: attempt is a trigger-only dep — a retry bumps it to re-run this effect, whose cleanup aborts the attempt it supersedes.
   useEffect(() => {
+    // No rendered project, no route discovery: the request could not declare
+    // the scope it was mounted for, so the BFF could not honor it either.
+    if (!projectId) {
+      setOptions({ kind: "unavailable" });
+      return;
+    }
     const controller = new AbortController();
-    void fetchEarnVaultWithdrawalOptions(positionId, controller.signal).then((result) => {
-      if (controller.signal.aborted) return;
-      setOptions(result);
-    });
+    void fetchEarnVaultWithdrawalOptions({ projectId }, positionId, controller.signal).then(
+      (result) => {
+        if (controller.signal.aborted) return;
+        setOptions(result);
+      }
+    );
     return () => controller.abort();
-  }, [positionId, attempt]);
+  }, [projectId, positionId, attempt]);
 
   const retry = () => {
     setOptions(undefined);
@@ -227,7 +235,7 @@ function ExitRouteChooser({
  */
 export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
   const { position } = props;
-  const { options, retry } = useEarnVaultExitOptions(position.id);
+  const { options, retry } = useEarnVaultExitOptions(props.projectId, position.id);
   const [choice, setChoice] = useState<RouteChoice | null>(null);
   const ready = options?.kind === "ready" ? options.value : null;
   const asyncRoute = ready ? earnVaultAsyncWithdrawalRoute(ready) : null;

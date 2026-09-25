@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useModalFocus } from "@/lib/use-modal-focus";
@@ -581,6 +582,11 @@ export function EarnWithdrawModal({
     withdrawal: EarnPortfolioWithdrawal;
     token: EarnPortfolioToken;
   } | null>(null);
+  // The rendered project this modal was mounted for, asserted on every BFF
+  // request it makes (APE-777): another tab moving the shared selection cookie
+  // must turn this modal's reads and writes into refusals, never into another
+  // project's payout lane.
+  const requestScope = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
 
   // The provider's own ceiling for the selected lane, or `undefined` while it
   // is still being read (or if the read failed). Never a locally-derived
@@ -663,8 +669,19 @@ export function EarnWithdrawModal({
     // in flight — the token just changed and no stale response may un-blank it.
     const seq = ++dispatchSeqRef.current;
     commitLaneLiquidity(seq, { phase: "loading" });
+    // No rendered project, no lane read: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!requestScope) {
+      commitLaneLiquidity(seq, { phase: "error" });
+      return () => undefined;
+    }
     void (async () => {
-      const result = await previewEarnWithdrawal(programId, { token }, controller.signal);
+      const result = await previewEarnWithdrawal(
+        { projectId: requestScope },
+        programId,
+        { token },
+        controller.signal
+      );
       if (controller.signal.aborted) return;
       if (result.ok) {
         commitLaneLiquidity(seq, {
@@ -687,7 +704,7 @@ export function EarnWithdrawModal({
       );
     })();
     return () => controller.abort();
-  }, [programId, token, created, commitLaneLiquidity]);
+  }, [programId, token, created, requestScope, commitLaneLiquidity]);
 
   // The amount-specific preview — fee, resulting portfolio, processing window —
   // which needs only amount + token, so it refreshes as those settle. Every
@@ -700,11 +717,16 @@ export function EarnWithdrawModal({
     }
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
+      if (!requestScope) {
+        setPreview({ phase: "error" });
+        return;
+      }
       setPreview({ phase: "loading" });
       // Sequenced at REQUEST time, not at effect time: the debounce means this
       // dispatch is genuinely later than the on-open read it may overtake.
       const seq = ++dispatchSeqRef.current;
       const result = await previewEarnWithdrawal(
+        { projectId: requestScope },
         programId,
         { amountUsd: amount, token },
         controller.signal
@@ -731,14 +753,20 @@ export function EarnWithdrawModal({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [amount, amountValid, token, created, programId, commitLaneLiquidity]);
+  }, [amount, amountValid, token, created, programId, requestScope, commitLaneLiquidity]);
 
   const submit = async () => {
     if (submittingRef.current || token === undefined || !amountValid || !destinationValid) return;
+    // No rendered project, no submission: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!requestScope) {
+      setSubmitError(t("DashboardEarn.withdraw.projectScopeUnavailable"));
+      return;
+    }
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
-    const result = await createEarnWithdrawal(programId, {
+    const result = await createEarnWithdrawal({ projectId: requestScope }, programId, {
       requestId,
       amountUsd: amount,
       token,

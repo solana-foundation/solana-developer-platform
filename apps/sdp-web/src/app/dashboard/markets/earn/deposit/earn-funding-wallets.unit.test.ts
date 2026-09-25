@@ -29,17 +29,19 @@ function stubResponse(body: unknown) {
   );
 }
 
+const SCOPE = { projectId: "prj_scope" };
+
 describe("fetchFundingWallets", () => {
   it("fails closed when a successful response omits the wallet collection", async () => {
     stubResponse({ data: {} });
-    await expect(fetchFundingWallets()).rejects.toThrow("Invalid custody wallet response");
+    await expect(fetchFundingWallets(SCOPE)).rejects.toThrow("Invalid custody wallet response");
   });
 
   it("fails closed on a row missing the address a deposit is signed from", async () => {
     // The cast this replaced let such a row through as a complete wallet.
     const { publicKey: _omitted, ...incomplete } = wallet({ id: "active" });
     stubResponse({ data: { wallets: [incomplete] } });
-    await expect(fetchFundingWallets()).rejects.toThrow("Invalid custody wallet response");
+    await expect(fetchFundingWallets(SCOPE)).rejects.toThrow("Invalid custody wallet response");
   });
 
   it("returns only active wallets from the live response", async () => {
@@ -48,7 +50,7 @@ describe("fetchFundingWallets", () => {
       data: { wallets: [active, wallet({ id: "inactive", status: "inactive" })] },
     });
 
-    await expect(fetchFundingWallets()).resolves.toEqual([active]);
+    await expect(fetchFundingWallets(SCOPE)).resolves.toEqual([active]);
   });
 
   it("keeps same-address Connection owners and runtime-disabled wallets in inventory", async () => {
@@ -62,9 +64,10 @@ describe("fetchFundingWallets", () => {
     ];
     stubResponse({ data: { wallets } });
 
-    await expect(fetchFundingWallets()).resolves.toEqual(wallets);
+    await expect(fetchFundingWallets(SCOPE)).resolves.toEqual(wallets);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true"
+      "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true",
+      { headers: { "x-sdp-rendered-project-id": "prj_scope" } }
     );
   });
 });

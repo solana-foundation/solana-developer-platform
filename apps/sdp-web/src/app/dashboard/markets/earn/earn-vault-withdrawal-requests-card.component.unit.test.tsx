@@ -15,6 +15,10 @@ vi.mock("./earn-program-data", () => ({
   useEarnVaultWithdrawalRequests: mocks.useRequests,
 }));
 
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({ selectedProjectId: "project_1" }),
+}));
+
 import { EarnVaultWithdrawalRequestsCard } from "./earn-vault-withdrawal-requests-card";
 
 const IDEMPOTENCY_KEY = "11111111-1111-4111-8111-111111111111";
@@ -121,6 +125,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
       "Recovery temporarily unavailable"
     );
     expect(mocks.cancelRequest).toHaveBeenLastCalledWith(
+      { projectId: "project_1" },
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY
     );
@@ -131,6 +136,7 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     // The UUID source now mints a fresh value for every call, so a retry can
     // only arrive under the SAME key if the card memoized the original one.
     expect(mocks.cancelRequest.mock.calls[1]).toEqual([
+      { projectId: "project_1" },
       recoverable.withdrawalRequestId,
       IDEMPOTENCY_KEY,
     ]);

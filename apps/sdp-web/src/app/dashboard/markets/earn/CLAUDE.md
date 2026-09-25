@@ -207,6 +207,17 @@ nothing else; the program create still sends the body `requestId` form.
   the sections joined). Pure string building so the exact wire contract is
   unit-testable without rendering.
 - `earn-program-data.ts` — THE data seam, over the BFF proxies above.
+  **Every request declares the project the tab rendered with**
+  (`x-sdp-rendered-project-id`, APE-777): the BFF resolves request scope from
+  the shared `sdp_selected_project_id` cookie, which another tab can move at
+  any time, so the hook reads the rendered project from the workspace context,
+  puts it in every SWR key (see `earn-query-key.ts`), and rides it on every
+  request; `proxyToSdpApi` answers 409 when the cookie scope has moved on
+  under the tab. A workspace without a selected project issues no request —
+  an unscoped read must never be able to resolve a sibling project. Modals
+  take `projectId` as a prop and fail closed (no submit, translated error)
+  when it is null; `earn-program-data.unit.test.ts` and
+  `earn-stale-project-scope.unit.test.tsx` pin the contract.
   `useEarnStrategies()` is what this module's pages read today — it takes an
   optional `{ cluster }` (PRO-1742), the explicit opt-in that browses the
   mirrored mainnet shelf; the cluster is part of the SWR key. In sandbox,

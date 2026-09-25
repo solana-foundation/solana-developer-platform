@@ -115,7 +115,11 @@ describe("PrivyCredentialForm", () => {
             name="payments"
             fetcher={walletRead}
           />
-          <Inventory cacheKey={earnQueryKeys.fundingWallets()} name="earn" fetcher={walletRead} />
+          <Inventory
+            cacheKey={earnQueryKeys.fundingWallets({ projectId: "prj_scope" })}
+            name="earn"
+            fetcher={walletRead}
+          />
           <Inventory
             cacheKey={issuanceQueryKeys.authorityWallets({ tokenId: "token" })}
             name="issuance"

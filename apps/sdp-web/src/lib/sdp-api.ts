@@ -5,7 +5,11 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { resolveProjectFromList } from "./dashboard-project-selection";
-import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
+import {
+  PROJECT_COOKIE_NAME,
+  PROJECT_HEADER_NAME,
+  RENDERED_PROJECT_HEADER_NAME,
+} from "./project-cookie";
 import {
   createTimedTrace,
   logRouteResult,
@@ -464,6 +468,22 @@ export async function proxyToSdpApi({
   const projectId = await getSelectedProjectId();
   if (!projectId) {
     return proxyFailure(trace, 400, "Selected project required");
+  }
+
+  // A tab that rendered project A must never be served project B because
+  // another tab moved the shared selection cookie in between: the Earn data
+  // seam declares the project its tab rendered with on every request, and a
+  // declared scope that no longer matches the cookie-resolved request project
+  // is refused instead of answered with the other project's financial state.
+  // Requests that declare no rendered scope resolve from the cookie alone,
+  // exactly as before, so surfaces that do not send the header are unchanged.
+  const renderedProjectId = request.headers.get(RENDERED_PROJECT_HEADER_NAME);
+  if (renderedProjectId && renderedProjectId !== projectId) {
+    return proxyFailure(
+      trace,
+      409,
+      "Selected project no longer matches the rendered project; reload the page"
+    );
   }
 
   try {

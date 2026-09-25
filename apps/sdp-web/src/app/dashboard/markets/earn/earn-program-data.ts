@@ -44,11 +44,13 @@ import { useEffect, useEffectEvent, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { z } from "zod";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { type DashboardFetchResult, dashboardFetch } from "@/lib/dashboard-fetch";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
-import { earnQueryKeys } from "./earn-query-key";
+import { RENDERED_PROJECT_HEADER_NAME } from "@/lib/project-cookie";
+import { type EarnQueryScope, earnQueryKeys } from "./earn-query-key";
 import { isEarnVaultQueuedWithdrawalTerminal } from "./earn-vault-queued-withdrawal-presentation";
 
 export type {
@@ -95,8 +97,41 @@ export type EarnProgramsState =
   | { kind: "ready"; programs: readonly EarnProgram[] }
   | { kind: "unconfigured" };
 
-async function requestJson<T>(path: string): Promise<{ status: number; body: T | undefined }> {
-  const response = await fetch(path);
+/**
+ * The Dashboard Project the tab rendered with, asserted on every request this
+ * seam makes: the BFF resolves request scope from the shared selection cookie,
+ * which another tab can move at any time, so the rendered project rides the
+ * `x-sdp-rendered-project-id` header and a response whose resolved request
+ * project differs is refused instead of rendered (APE-777).
+ */
+export type EarnRequestScope = EarnQueryScope;
+
+/**
+ * The rendered-project header for one scope, merged into every BFF request.
+ * The BFF compares it against the cookie-resolved request project and answers
+ * 409 when another tab has moved the selection on.
+ */
+function scopeHeaders(scope: EarnRequestScope): Record<string, string> {
+  return { [RENDERED_PROJECT_HEADER_NAME]: scope.projectId };
+}
+
+/**
+ * The rendered project of the tab this hook runs in, straight from the same
+ * workspace state the surface renders as the project label and environment —
+ * not a second read of the cookie, which another tab can change without this
+ * tab re-rendering. `null` (no workspace, no selection) issues no request:
+ * failing quiet keeps an unscoped read from ever resolving a sibling project.
+ */
+function useEarnRequestScope(): EarnRequestScope | null {
+  const projectId = useOptionalDashboardWorkspace()?.selectedProjectId;
+  return projectId ? { projectId } : null;
+}
+
+async function requestJson<T>(
+  path: string,
+  scope: EarnRequestScope
+): Promise<{ status: number; body: T | undefined }> {
+  const response = await fetch(path, { headers: scopeHeaders(scope) });
   let body: T | undefined;
   try {
     body = (await response.json()) as T;
@@ -112,8 +147,8 @@ async function requestJson<T>(path: string): Promise<{ status: number; body: T |
  * partial result. (The programs read cannot use this — its 503 is an outcome,
  * not an error.)
  */
-async function requestJsonOk<T>(path: string): Promise<T> {
-  const { status, body } = await requestJson<T>(path);
+async function requestJsonOk<T>(path: string, scope: EarnRequestScope): Promise<T> {
+  const { status, body } = await requestJson<T>(path, scope);
   if (status < 200 || status >= 300 || !body) {
     throw new Error(errorMessage(body, status));
   }
@@ -167,7 +202,7 @@ const EARN_PAGE_LIMIT = 20;
  * window, and a hidden program is hidden MONEY — the totals under-report, its
  * card never renders, and its deep links stop resolving.
  */
-export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
+export async function fetchEarnProgramsState(scope: EarnRequestScope): Promise<EarnProgramsState> {
   const programs: EarnProgram[] = [];
 
   for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
@@ -184,7 +219,8 @@ export async function fetchEarnProgramsState(): Promise<EarnProgramsState> {
       // money at stake. Whenever the org DOES hold a program whose provider is
       // un-credentialed, the API still 503s the whole list (it gates per distinct
       // provider among the rows), so the notice still appears when it matters.
-      `/api/dashboard/markets/earn/programs?page=${page}&pageSize=${EARN_PAGE_SIZE}`
+      `/api/dashboard/markets/earn/programs?page=${page}&pageSize=${EARN_PAGE_SIZE}`,
+      scope
     );
     // Checked before the range test: a 503 carries no usable body and would
     // otherwise fall into the throw.
@@ -254,9 +290,10 @@ export function earnProgramsRefreshInterval(state: EarnProgramsState | undefined
 export const EARN_PROGRAM_DEDUPING_MS = 2_000;
 
 export function useEarnPrograms() {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.programs(),
-    () => fetchEarnProgramsState(),
+    scope ? earnQueryKeys.programs(scope) : null,
+    () => fetchEarnProgramsState(scope as EarnRequestScope),
     {
       refreshInterval: earnProgramsRefreshInterval,
       dedupingInterval: EARN_PROGRAM_DEDUPING_MS,
@@ -276,13 +313,17 @@ export function useEarnPrograms() {
  * sub-shelf — in practice the sandbox toggle reading the mirrored mainnet
  * catalogue, whose rows arrive `fundable: false`.
  */
-export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<EarnStrategy[]> {
+export async function fetchEarnStrategies(
+  scope: EarnRequestScope,
+  cluster?: SolanaCluster
+): Promise<EarnStrategy[]> {
   const strategies: EarnStrategy[] = [];
 
   for (let page = 1; page <= EARN_PAGE_LIMIT; page += 1) {
     const clusterParam = cluster ? `&cluster=${cluster}` : "";
     const body = await requestJsonOk<{ data: ListEarnStrategiesResponse }>(
-      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${EARN_PAGE_SIZE}${clusterParam}`
+      `/api/dashboard/markets/earn/strategies?page=${page}&pageSize=${EARN_PAGE_SIZE}${clusterParam}`,
+      scope
     );
 
     strategies.push(...body.data.strategies);
@@ -299,16 +340,24 @@ export async function fetchEarnStrategies(cluster?: SolanaCluster): Promise<Earn
 
 export function useEarnStrategies(options?: { cluster?: SolanaCluster }) {
   const cluster = options?.cluster;
+  const scope = useEarnRequestScope();
   // The cluster is part of the key: two views of different shelves must never
   // serve each other's cache entry, while the default view keeps deduping with
-  // every other default caller.
+  // every other default caller. The rendered project is part of it too, so a
+  // tab's catalogue can never be served from (or into) another project's cache
+  // entry — the environment the shelf answers with follows the project.
   //
   // keepPreviousData → a cluster-toggle key flip keeps the current rows on
   // screen while the full paged fetch reruns, instead of tearing the table to
   // skeletons (same pattern as activity-tab and wallet-card-balance-value).
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.strategies({ cluster: cluster ?? "environment-default" }),
-    () => fetchEarnStrategies(cluster),
+    scope
+      ? earnQueryKeys.strategies({
+          projectId: scope.projectId,
+          cluster: cluster ?? "environment-default",
+        })
+      : null,
+    () => fetchEarnStrategies(scope as EarnRequestScope, cluster),
     { keepPreviousData: true }
   );
   return { strategies: data, error, isLoading, refresh: () => void mutate() };
@@ -373,6 +422,7 @@ async function fetchAllCursorPages<T>(input: {
  * pager.
  */
 async function fetchAllPositionPages<Position>(
+  scope: EarnRequestScope,
   path: (query: URLSearchParams) => string,
   subject: string
 ): Promise<Position[]> {
@@ -383,7 +433,7 @@ async function fetchAllPositionPages<Position>(
       const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
       if (before) query.set("before", before);
 
-      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query), scope);
       return {
         items: body.data.positions,
         hasMore: body.data.hasMore,
@@ -398,8 +448,11 @@ async function fetchAllPositionPages<Position>(
  * opaque keyset cursor and hydrates balances live from chain, so cursor
  * progression — not row count — decides when the read is complete.
  */
-export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
+export async function fetchEarnVaultPositions(
+  scope: EarnRequestScope
+): Promise<EarnVaultPosition[]> {
   return fetchAllPositionPages<EarnVaultPosition>(
+    scope,
     (query) => `/api/dashboard/markets/earn/vault-positions?${query}`,
     "Vault positions"
   );
@@ -407,9 +460,10 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
 
 /** Live position values refresh while the surface is mounted. */
 export function useEarnVaultPositions() {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.vaultPositions(),
-    () => fetchEarnVaultPositions(),
+    scope ? earnQueryKeys.vaultPositions(scope) : null,
+    () => fetchEarnVaultPositions(scope as EarnRequestScope),
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   return { positions: data, error, isLoading, refresh: () => void mutate() };
@@ -420,9 +474,11 @@ export function useEarnVaultPositions() {
  * Kept at the strict dashboard boundary for the planned wallet drill-down.
  */
 export async function fetchEarnExternalWalletPositions(
+  scope: EarnRequestScope,
   ownerAddress: string
 ): Promise<EarnExternalWalletPosition[]> {
   return fetchAllPositionPages<EarnExternalWalletPosition>(
+    scope,
     (query) =>
       `/api/dashboard/markets/earn/external-wallet/positions/${encodeURIComponent(ownerAddress)}?${query}`,
     "External-wallet positions"
@@ -489,9 +545,12 @@ const earnExternalWalletSummaryResponseSchema = z.object({
   data: z.object({ summary: earnExternalWalletPositionSummarySchema }),
 });
 
-export async function fetchEarnExternalWalletPositionSummary(): Promise<EarnExternalWalletPositionSummary> {
+export async function fetchEarnExternalWalletPositionSummary(
+  scope: EarnRequestScope
+): Promise<EarnExternalWalletPositionSummary> {
   const body = await requestJsonOk<unknown>(
-    "/api/dashboard/markets/earn/external-wallet/positions/summary"
+    "/api/dashboard/markets/earn/external-wallet/positions/summary",
+    scope
   );
   const parsed = earnExternalWalletSummaryResponseSchema.safeParse(body);
   if (!parsed.success) {
@@ -514,9 +573,10 @@ export function useEarnExternalWalletPositionSummary({
 }: {
   detailsVisible?: boolean;
 } = {}) {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    "dashboard-earn-external-wallet-position-summary",
-    () => fetchEarnExternalWalletPositionSummary(),
+    scope ? earnQueryKeys.externalWalletSummary(scope) : null,
+    () => fetchEarnExternalWalletPositionSummary(scope as EarnRequestScope),
     {
       refreshInterval: earnExternalWalletSummaryRefreshInterval(detailsVisible),
     }
@@ -603,6 +663,7 @@ export type EarnVaultDepositOutcome = z.infer<typeof earnVaultDepositOutcomeSche
  * idempotency key is transport metadata and is never copied into the JSON body.
  */
 export async function createEarnVaultDeposit(
+  scope: EarnRequestScope,
   input: EarnVaultDepositRequest,
   idempotencyKey: string,
   signal?: AbortSignal
@@ -620,7 +681,7 @@ export async function createEarnVaultDeposit(
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-deposits", {
     method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    headers: { ...scopeHeaders(scope), [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body,
     signal,
   });
@@ -677,10 +738,12 @@ const earnVaultDepositResponseSchema = z.object({
  * as an outcome would announce a settlement the API never reported.
  */
 export async function fetchEarnVaultDeposit(
+  scope: EarnRequestScope,
   movementId: string
 ): Promise<EarnVaultDepositRecord | undefined> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-deposits/${encodeURIComponent(movementId)}`
+    `/api/dashboard/markets/earn/vault-deposits/${encodeURIComponent(movementId)}`,
+    { headers: scopeHeaders(scope) }
   );
   if (!result.ok) return undefined;
   const parsed = earnVaultDepositResponseSchema.safeParse(result.data);
@@ -702,6 +765,7 @@ interface VaultMovementPage<T> {
 }
 
 async function fetchAllVaultMovementPages<T>(input: {
+  scope: EarnRequestScope;
   resource: "deposits" | "withdrawals";
   settled?: boolean;
   parsePage: (value: unknown) => VaultMovementPage<T> | null;
@@ -715,7 +779,8 @@ async function fetchAllVaultMovementPages<T>(input: {
       if (before) query.set("before", before);
 
       const result = await dashboardFetch<unknown>(
-        `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`
+        `/api/dashboard/markets/earn/vault-${input.resource}?${query.toString()}`,
+        { headers: scopeHeaders(input.scope) }
       );
       if (!result.ok) throw new Error(result.error);
       const body = input.parsePage(result.data);
@@ -743,9 +808,11 @@ async function fetchAllVaultMovementPages<T>(input: {
  * exactly the case a single request got wrong.
  */
 export async function fetchEarnVaultDeposits(
+  scope: EarnRequestScope,
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultDepositRecord[]> {
   return fetchAllVaultMovementPages({
+    scope,
     resource: "deposits",
     settled: options.settled,
     parsePage(value) {
@@ -785,10 +852,12 @@ export type EarnVaultDepositByRequestId =
  * failed rather than the deposit being absent.
  */
 export async function fetchEarnVaultDepositByRequestId(
+  scope: EarnRequestScope,
   requestId: string
 ): Promise<EarnVaultDepositByRequestId> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-deposits?requestId=${encodeURIComponent(requestId)}`
+    `/api/dashboard/markets/earn/vault-deposits?requestId=${encodeURIComponent(requestId)}`,
+    { headers: scopeHeaders(scope) }
   );
   if (!result.ok) return { kind: "unavailable" };
   const parsed = earnVaultDepositsPageSchema.safeParse(result.data);
@@ -830,6 +899,7 @@ export type EarnVaultDepositPreviewResult =
  * arithmetic on the amount (which is only correct while the rate is 1:1).
  */
 export async function fetchEarnVaultDepositPreview(
+  scope: EarnRequestScope,
   input: { strategyId: string; amount: string },
   signal?: AbortSignal
 ): Promise<EarnVaultDepositPreviewResult> {
@@ -837,6 +907,7 @@ export async function fetchEarnVaultDepositPreview(
     "/api/dashboard/markets/earn/vault-deposit-previews",
     {
       method: "POST",
+      headers: scopeHeaders(scope),
       body: { strategyId: input.strategyId, amount: input.amount },
       signal,
     }
@@ -874,6 +945,7 @@ export type EarnVaultWithdrawalPreviewResult =
  * confirm rather than guessing a number.
  */
 export async function fetchEarnVaultWithdrawalPreview(
+  scope: EarnRequestScope,
   input: { positionId: string; shares: string },
   signal?: AbortSignal
 ): Promise<EarnVaultWithdrawalPreviewResult> {
@@ -881,6 +953,7 @@ export async function fetchEarnVaultWithdrawalPreview(
     "/api/dashboard/markets/earn/vault-withdrawal-previews",
     {
       method: "POST",
+      headers: scopeHeaders(scope),
       body: { positionId: input.positionId, shares: input.shares },
       signal,
     }
@@ -902,9 +975,10 @@ export async function fetchEarnVaultWithdrawalPreview(
  * browser state.
  */
 export function useEarnVaultDeposits() {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.vaultDepositsInFlight(),
-    () => fetchEarnVaultDeposits({ settled: false }),
+    scope ? earnQueryKeys.vaultDepositsInFlight(scope) : null,
+    () => fetchEarnVaultDeposits(scope as EarnRequestScope, { settled: false }),
     { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { deposits: data, error, isLoading, refresh: () => void mutate() };
@@ -977,7 +1051,7 @@ interface WatchableVaultMovement {
 
 function useEarnVaultMovementOutcome<Movement extends WatchableVaultMovement>(input: {
   movementId: string | undefined;
-  queryKey: readonly [string, string] | null;
+  queryKey: readonly string[] | null;
   fetchMovement: (movementId: string) => Promise<Movement | undefined>;
   isSettled: (movement: Movement) => boolean;
   onSettled?: (movement: Movement) => void;
@@ -1057,10 +1131,11 @@ export function useEarnVaultDepositOutcome(
   onSettled?: (deposit: EarnVaultDepositRecord) => void,
   onUpdated?: (deposit: EarnVaultDepositRecord) => void
 ): EarnVaultDepositRecord | undefined {
+  const scope = useEarnRequestScope();
   return useEarnVaultMovementOutcome({
     movementId,
-    queryKey: movementId ? earnQueryKeys.vaultDeposit({ movementId }) : null,
-    fetchMovement: fetchEarnVaultDeposit,
+    queryKey: scope && movementId ? earnQueryKeys.vaultDeposit({ ...scope, movementId }) : null,
+    fetchMovement: (watchedId) => fetchEarnVaultDeposit(scope as EarnRequestScope, watchedId),
     isSettled: isEarnVaultDepositSettled,
     onSettled,
     onUpdated,
@@ -1113,6 +1188,7 @@ export type EarnVaultWithdrawalOutcome = z.infer<typeof earnVaultWithdrawalOutco
  * accepted only on a 202.
  */
 export async function createEarnVaultWithdrawal(
+  scope: EarnRequestScope,
   input: EarnVaultWithdrawalRequest,
   idempotencyKey: string,
   signal?: AbortSignal
@@ -1124,7 +1200,7 @@ export async function createEarnVaultWithdrawal(
   };
   const result = await dashboardFetch<unknown>("/api/dashboard/markets/earn/vault-withdrawals", {
     method: "POST",
-    headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+    headers: { ...scopeHeaders(scope), [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
     body,
     signal,
   });
@@ -1155,10 +1231,12 @@ const earnVaultWithdrawalResponseSchema = z.object({
  * failed says nothing about whether the exit landed.
  */
 export async function fetchEarnVaultWithdrawal(
+  scope: EarnRequestScope,
   movementId: string
 ): Promise<EarnVaultWithdrawal | undefined> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-withdrawals/${encodeURIComponent(movementId)}`
+    `/api/dashboard/markets/earn/vault-withdrawals/${encodeURIComponent(movementId)}`,
+    { headers: scopeHeaders(scope) }
   );
   if (!result.ok) return undefined;
   const parsed = earnVaultWithdrawalResponseSchema.safeParse(result.data);
@@ -1179,9 +1257,11 @@ const earnVaultWithdrawalsPageSchema = z.object({
  * a silently short page here is an exit that stops being tracked.
  */
 export async function fetchEarnVaultWithdrawals(
+  scope: EarnRequestScope,
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawal[]> {
   return fetchAllVaultMovementPages({
+    scope,
     resource: "withdrawals",
     settled: options.settled,
     parsePage(value) {
@@ -1208,10 +1288,12 @@ export type EarnVaultWithdrawalsByRequestId =
   | { kind: "unavailable" };
 
 export async function fetchEarnVaultWithdrawalsByRequestId(
+  scope: EarnRequestScope,
   requestId: string
 ): Promise<EarnVaultWithdrawalsByRequestId> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-withdrawals?requestId=${encodeURIComponent(requestId)}`
+    `/api/dashboard/markets/earn/vault-withdrawals?requestId=${encodeURIComponent(requestId)}`,
+    { headers: scopeHeaders(scope) }
   );
   if (!result.ok) return { kind: "unavailable" };
   const parsed = earnVaultWithdrawalsPageSchema.safeParse(result.data);
@@ -1227,9 +1309,10 @@ export async function fetchEarnVaultWithdrawalsByRequestId(
  * visible (and watched) again.
  */
 export function useEarnVaultWithdrawals() {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.vaultWithdrawalsInFlight(),
-    () => fetchEarnVaultWithdrawals({ settled: false }),
+    scope ? earnQueryKeys.vaultWithdrawalsInFlight(scope) : null,
+    () => fetchEarnVaultWithdrawals(scope as EarnRequestScope, { settled: false }),
     { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawals: data, error, isLoading, refresh: () => void mutate() };
@@ -1281,10 +1364,11 @@ export function useEarnVaultWithdrawalOutcome(
   onSettled?: (withdrawal: EarnVaultWithdrawal) => void,
   onUpdated?: (withdrawal: EarnVaultWithdrawal) => void
 ): EarnVaultWithdrawal | undefined {
+  const scope = useEarnRequestScope();
   return useEarnVaultMovementOutcome({
     movementId,
-    queryKey: movementId ? earnQueryKeys.vaultWithdrawal({ movementId }) : null,
-    fetchMovement: fetchEarnVaultWithdrawal,
+    queryKey: scope && movementId ? earnQueryKeys.vaultWithdrawal({ ...scope, movementId }) : null,
+    fetchMovement: (watchedId) => fetchEarnVaultWithdrawal(scope as EarnRequestScope, watchedId),
     isSettled: isEarnVaultWithdrawalSettled,
     onSettled,
     onUpdated,
@@ -1408,12 +1492,13 @@ type QueuedReadResult<T> = { kind: "ready"; value: T } | { kind: "unavailable" }
 
 /** Read settlement routes independently. No client-side provider list chooses one. */
 export async function fetchEarnVaultWithdrawalOptions(
+  scope: EarnRequestScope,
   positionId: string,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultWithdrawalOptions>> {
   const result = await dashboardFetch<unknown>(
     "/api/dashboard/markets/earn/vault-withdrawal-options",
-    { method: "POST", body: { positionId }, signal }
+    { method: "POST", headers: scopeHeaders(scope), body: { positionId }, signal }
   );
   if (!result.ok) return { kind: "unavailable" };
   const parsed = z.object({ data: earnVaultWithdrawalOptionsSchema }).safeParse(result.data);
@@ -1421,12 +1506,13 @@ export async function fetchEarnVaultWithdrawalOptions(
 }
 
 export async function fetchEarnVaultQueuedWithdrawalPreview(
+  scope: EarnRequestScope,
   input: EarnVaultQueuedWithdrawalTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultQueuedWithdrawalPreview>> {
   const result = await dashboardFetch<unknown>(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    { method: "POST", headers: scopeHeaders(scope), body: input, signal }
   );
   if (!result.ok) return { kind: "unavailable" };
   const parsed = z.object({ data: earnVaultQueuedWithdrawalPreviewSchema }).safeParse(result.data);
@@ -1434,12 +1520,13 @@ export async function fetchEarnVaultQueuedWithdrawalPreview(
 }
 
 export async function fetchEarnVaultParRedemptionPreview(
+  scope: EarnRequestScope,
   input: EarnVaultParRedemptionTermsRequest,
   signal?: AbortSignal
 ): Promise<QueuedReadResult<EarnVaultParRedemptionPreview>> {
   const result = await dashboardFetch<unknown>(
     "/api/dashboard/markets/earn/vault-queued-withdrawal-previews",
-    { method: "POST", body: input, signal }
+    { method: "POST", headers: scopeHeaders(scope), body: input, signal }
   );
   if (!result.ok) return { kind: "unavailable" };
   const parsed = z.object({ data: earnVaultParRedemptionPreviewSchema }).safeParse(result.data);
@@ -1463,6 +1550,7 @@ export type EarnVaultQueuedWithdrawalOutcome = z.infer<
 >;
 
 export async function createEarnVaultWithdrawalRequest(
+  scope: EarnRequestScope,
   input: EarnVaultAsyncWithdrawalTermsRequest,
   idempotencyKey: string
 ): Promise<DashboardFetchResult<EarnVaultQueuedWithdrawalOutcome>> {
@@ -1484,7 +1572,7 @@ export async function createEarnVaultWithdrawalRequest(
     "/api/dashboard/markets/earn/vault-withdrawal-requests",
     {
       method: "POST",
-      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+      headers: { ...scopeHeaders(scope), [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
       body,
     }
   );
@@ -1524,6 +1612,7 @@ export async function createEarnVaultWithdrawalRequest(
 }
 
 export async function cancelEarnVaultWithdrawalRequest(
+  scope: EarnRequestScope,
   withdrawalRequestId: string,
   idempotencyKey: string
 ): Promise<DashboardFetchResult<EarnVaultWithdrawalRequestRecord>> {
@@ -1531,7 +1620,7 @@ export async function cancelEarnVaultWithdrawalRequest(
     `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}/cancel`,
     {
       method: "POST",
-      headers: { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
+      headers: { ...scopeHeaders(scope), [IDEMPOTENCY_KEY_HEADER]: idempotencyKey },
       body: {},
     }
   );
@@ -1549,10 +1638,12 @@ export async function cancelEarnVaultWithdrawalRequest(
 }
 
 export async function fetchEarnVaultWithdrawalRequest(
+  scope: EarnRequestScope,
   withdrawalRequestId: string
 ): Promise<EarnVaultWithdrawalRequestRecord | undefined> {
   const result = await dashboardFetch<unknown>(
-    `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`
+    `/api/dashboard/markets/earn/vault-withdrawal-requests/${encodeURIComponent(withdrawalRequestId)}`,
+    { headers: scopeHeaders(scope) }
   );
   if (!result.ok) return undefined;
   const parsed = queuedMutationEnvelopeSchema.safeParse(result.data);
@@ -1573,6 +1664,7 @@ const queuedRequestPageSchema = z.object({
  * a still-recoverable request that stops being surfaced.
  */
 export async function fetchEarnVaultWithdrawalRequests(
+  scope: EarnRequestScope,
   options: { settled?: boolean } = {}
 ): Promise<EarnVaultWithdrawalRequestRecord[]> {
   return fetchAllCursorPages<EarnVaultWithdrawalRequestRecord>({
@@ -1584,7 +1676,8 @@ export async function fetchEarnVaultWithdrawalRequests(
       if (options.settled !== undefined) query.set("settled", String(options.settled));
 
       const result = await dashboardFetch<unknown>(
-        `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`
+        `/api/dashboard/markets/earn/vault-withdrawal-requests?${query}`,
+        { headers: scopeHeaders(scope) }
       );
       if (!result.ok) throw new Error(result.error);
       const parsed = queuedRequestPageSchema.safeParse(result.data);
@@ -1605,12 +1698,13 @@ export function isEarnVaultWithdrawalRequestInFlight(
 }
 
 export function useEarnVaultWithdrawalRequests() {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    earnQueryKeys.vaultWithdrawalRequestsOpen(),
+    scope ? earnQueryKeys.vaultWithdrawalRequestsOpen(scope) : null,
     async () =>
-      (await fetchEarnVaultWithdrawalRequests({ settled: false })).filter(
-        isEarnVaultWithdrawalRequestInFlight
-      ),
+      (
+        await fetchEarnVaultWithdrawalRequests(scope as EarnRequestScope, { settled: false })
+      ).filter(isEarnVaultWithdrawalRequestInFlight),
     { refreshInterval: LEDGER_REFRESH_MS }
   );
   return { withdrawalRequests: data, error, isLoading, refresh: () => void mutate() };
@@ -1621,6 +1715,7 @@ export function useEarnVaultWithdrawalRequestOutcome(
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void,
   onUpdated?: (request: EarnVaultWithdrawalRequestRecord) => void
 ): EarnVaultWithdrawalRequestRecord | undefined {
+  const scope = useEarnRequestScope();
   const onSettledEvent = useEffectEvent((request: EarnVaultWithdrawalRequestRecord) =>
     onSettled?.(request)
   );
@@ -1629,8 +1724,10 @@ export function useEarnVaultWithdrawalRequestOutcome(
   );
   const reportedSettledId = useRef<string | null>(null);
   const { data } = useSWR(
-    withdrawalRequestId ? earnQueryKeys.vaultWithdrawalRequest({ withdrawalRequestId }) : null,
-    () => fetchEarnVaultWithdrawalRequest(withdrawalRequestId ?? ""),
+    scope && withdrawalRequestId
+      ? earnQueryKeys.vaultWithdrawalRequest({ ...scope, withdrawalRequestId })
+      : null,
+    () => fetchEarnVaultWithdrawalRequest(scope as EarnRequestScope, withdrawalRequestId ?? ""),
     {
       refreshInterval: (latest) =>
         latest && !isEarnVaultWithdrawalRequestInFlight(latest) ? 0 : 5_000,
@@ -1670,12 +1767,14 @@ export interface EarnWithdrawalPreviewInput {
 }
 
 export function previewEarnWithdrawal(
+  scope: EarnRequestScope,
   programId: string,
   input: EarnWithdrawalPreviewInput,
   signal?: AbortSignal
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalPreviewResponse }>> {
   return dashboardFetch(programPath(programId, "/withdrawal-preview"), {
     method: "POST",
+    headers: scopeHeaders(scope),
     body: input,
     signal,
   });
@@ -1688,18 +1787,25 @@ export interface EarnWithdrawalCreateInput extends EarnWithdrawalPreviewInput {
 }
 
 export function createEarnWithdrawal(
+  scope: EarnRequestScope,
   programId: string,
   input: EarnWithdrawalCreateInput
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
-  return dashboardFetch(programPath(programId, "/withdrawals"), { method: "POST", body: input });
+  return dashboardFetch(programPath(programId, "/withdrawals"), {
+    method: "POST",
+    headers: scopeHeaders(scope),
+    body: input,
+  });
 }
 
 export function fetchEarnWithdrawal(
+  scope: EarnRequestScope,
   programId: string,
   withdrawalRef: string
 ): Promise<DashboardFetchResult<{ data: EarnProgramWithdrawalResponse }>> {
   return dashboardFetch(
-    programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`)
+    programPath(programId, `/withdrawals/${encodeURIComponent(withdrawalRef)}`),
+    { headers: scopeHeaders(scope) }
   );
 }
 
@@ -1710,6 +1816,7 @@ export function fetchEarnWithdrawal(
  * the prefix collected so far.
  */
 export async function fetchEarnProgramWithdrawals(
+  scope: EarnRequestScope,
   programId: string
 ): Promise<EarnProgramWithdrawalRecord[]> {
   const withdrawals: EarnProgramWithdrawalRecord[] = [];
@@ -1720,7 +1827,8 @@ export async function fetchEarnProgramWithdrawals(
       pageSize: String(EARN_PAGE_SIZE),
     });
     const body = await requestJsonOk<{ data: ListEarnProgramWithdrawalsResponse }>(
-      `${programPath(programId, "/withdrawals")}?${query}`
+      `${programPath(programId, "/withdrawals")}?${query}`,
+      scope
     );
 
     const ledgerPage = body.data;
@@ -1746,9 +1854,10 @@ export async function fetchEarnProgramWithdrawals(
 
 /** Passing no program id issues no ledger request. */
 export function useEarnProgramWithdrawals(programId: string | undefined) {
+  const scope = useEarnRequestScope();
   const { data, error, isLoading, mutate } = useSWR(
-    programId ? earnQueryKeys.programWithdrawals({ programId }) : null,
-    () => fetchEarnProgramWithdrawals(programId as string),
+    scope && programId ? earnQueryKeys.programWithdrawals({ ...scope, programId }) : null,
+    () => fetchEarnProgramWithdrawals(scope as EarnRequestScope, programId as string),
     // Detect withdrawals created from another session while this dashboard is
     // open; the list is a cheap local-DB read and live outcome polling begins
     // only for provider-accepted nonterminal rows.
@@ -1802,14 +1911,21 @@ export function useEarnWithdrawalOutcomeToast(
   withdrawalRef: string | undefined,
   onSettled?: () => void
 ): void {
+  const scope = useEarnRequestScope();
   const t = useTranslations();
   const announced = useRef<string | undefined>(undefined);
   const notifySettled = useEffectEvent(() => onSettled?.());
 
   const { data } = useSWR(
-    programId && withdrawalRef ? earnQueryKeys.withdrawal({ programId, withdrawalRef }) : null,
+    scope && programId && withdrawalRef
+      ? earnQueryKeys.withdrawal({ ...scope, programId, withdrawalRef })
+      : null,
     async () => {
-      const result = await fetchEarnWithdrawal(programId as string, withdrawalRef as string);
+      const result = await fetchEarnWithdrawal(
+        scope as EarnRequestScope,
+        programId as string,
+        withdrawalRef as string
+      );
       return result.ok ? result.data.data.withdrawal : undefined;
     },
     {

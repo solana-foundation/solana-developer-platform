@@ -357,12 +357,13 @@ type ExpiredFloorVerdict = "still_satisfiable" | "floor_exceeded" | "quote_unava
  * chosen tolerance).
  */
 async function revalidateExpiredFloor(
+  scope: { projectId: string },
   strategyId: string,
   amount: string,
   floor: string,
   signal: AbortSignal
 ): Promise<ExpiredFloorVerdict> {
-  const fresh = await fetchEarnVaultDepositPreview({ strategyId, amount }, signal);
+  const fresh = await fetchEarnVaultDepositPreview(scope, { strategyId, amount }, signal);
   if (signal.aborted) return "aborted";
   if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
     return "quote_unavailable";
@@ -1226,6 +1227,11 @@ export function EarnVaultDepositModal({
   onMovementUpdated,
 }: EarnVaultDepositModalProps) {
   const t = useTranslations();
+  // The rendered project this modal was mounted for, asserted on every BFF
+  // request it makes (APE-777): another tab moving the shared selection cookie
+  // must turn this modal's reads and writes into refusals, never into another
+  // project's terms.
+  const requestScope = projectId ? { projectId } : null;
   const { wallets, error: walletsError, isLoading: walletsLoading } = useEarnFundingWallets();
   const [walletId, setWalletId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState("");
@@ -1342,7 +1348,13 @@ export function EarnVaultDepositModal({
   const rawQuote = useDebouncedVaultQuote<EarnVaultDepositPreview>(
     quoteKey,
     (signal) =>
-      fetchEarnVaultDepositPreview({ strategyId: strategy.id, amount: quoteAmount ?? "" }, signal),
+      requestScope
+        ? fetchEarnVaultDepositPreview(
+            requestScope,
+            { strategyId: strategy.id, amount: quoteAmount ?? "" },
+            signal
+          )
+        : Promise.resolve({ kind: "unavailable" } as const),
     quoteRefreshKey
   );
   const quote = quoteForKey(rawQuote, quoteKey);
@@ -1371,7 +1383,17 @@ export function EarnVaultDepositModal({
     floor: string | null
   ): Promise<boolean> {
     if (replay.kind !== "fresh" || floor === null || !isExpiredQuote(quote)) return true;
-    const verdict = await revalidateExpiredFloor(strategy.id, amount, floor, controller.signal);
+    if (!requestScope) {
+      setSubmitError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return false;
+    }
+    const verdict = await revalidateExpiredFloor(
+      requestScope,
+      strategy.id,
+      amount,
+      floor,
+      controller.signal
+    );
     if (verdict === "still_satisfiable") return true;
     if (verdict === "aborted") return false;
     if (verdict === "floor_exceeded") setSlippageOpen(true);
@@ -1385,6 +1407,7 @@ export function EarnVaultDepositModal({
   }
 
   async function submitResolvedIntent(
+    scope: { projectId: string },
     controller: AbortController,
     wallet: EarnFundingWallet,
     amount: string
@@ -1406,7 +1429,7 @@ export function EarnVaultDepositModal({
       vaultDepositIdempotencyKeyStore,
       fingerprint,
       controller.signal,
-      fetchEarnVaultDepositByRequestId
+      (key) => fetchEarnVaultDepositByRequestId(scope, key)
     );
     if (resolvedKey.kind === "aborted") return;
     if (resolvedKey.kind === "unavailable") {
@@ -1449,6 +1472,7 @@ export function EarnVaultDepositModal({
     // The controller still exists, but it gates the UI below, never the
     // request or the key bookkeeping.
     const result = await createEarnVaultDeposit(
+      scope,
       {
         strategyId: strategy.id,
         custodyWalletId: wallet.id,
@@ -1517,6 +1541,12 @@ export function EarnVaultDepositModal({
     ) {
       return;
     }
+    // No rendered project, no submission: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!requestScope) {
+      setSubmitError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
 
     const controller = new AbortController();
     requestControllerRef.current?.abort();
@@ -1528,7 +1558,12 @@ export function EarnVaultDepositModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, selectedWallet, amountValidation.canonicalAmount);
+      await submitResolvedIntent(
+        requestScope,
+        controller,
+        selectedWallet,
+        amountValidation.canonicalAmount
+      );
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(

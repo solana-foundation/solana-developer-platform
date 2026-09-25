@@ -590,6 +590,7 @@
       "createdDescription": "The withdrawal is processing. Funds settle to the destination address once the provider completes it.",
       "pendingApprovalDescription": "An authorized provider approver must complete this outside SDP. This dashboard cannot action the approval yet; do not resubmit the withdrawal.",
       "providerUnavailable": "SDP does not expose a Solana withdrawal lane for this provider, so this action is disabled.",
+      "projectScopeUnavailable": "SDP could not confirm which Dashboard Project this request belongs to, so nothing was submitted. Reload the page and try again.",
       "referenceLabel": "Reference",
       "statusProcessing": "Processing",
       "statusPendingApproval": "Awaiting approval",
@@ -827,7 +828,8 @@
       "vaultAbsorbedStatus": "Handled by approval",
       "vaultAbsorbedNote": "The details below are the approved deposit. If you intended a second deposit of the same amount, submit again.",
       "vaultHeldKeyUnavailable": "SDP could not check whether your earlier approved deposit already went through, so nothing was submitted. Try again in a moment.",
-      "vaultFloorUnavailable": "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment."
+      "vaultFloorUnavailable": "SDP could not confirm the exact terms this deposit's earlier attempt was submitted with, so nothing was sent. Check your position, then try again in a moment.",
+      "vaultProjectScopeUnavailable": "SDP could not confirm which Dashboard Project this request belongs to, so nothing was submitted. Reload the page and try again."
     },
     "vaultWithdraw": {
       "flowDetails": "Details",

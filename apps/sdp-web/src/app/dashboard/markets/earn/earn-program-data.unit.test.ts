@@ -29,6 +29,7 @@ import {
 } from "./earn-program-data";
 
 const TIMESTAMP = "2026-07-18T09:00:00.000Z";
+const SCOPE = { projectId: "prj_scope" };
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 function strategy(id: string): EarnStrategy {
@@ -158,7 +159,7 @@ describe("earnExternalWalletSummaryRefreshInterval", () => {
 describe("fetchEarnStrategies", () => {
   it("returns a single short page without asking for a second", async () => {
     const { calls } = stubCatalogue(12);
-    const strategies = await fetchEarnStrategies();
+    const strategies = await fetchEarnStrategies(SCOPE);
     expect(strategies).toHaveLength(12);
     expect(calls).toHaveLength(1);
   });
@@ -167,7 +168,7 @@ describe("fetchEarnStrategies", () => {
     // The regression this guards: one unpaged request dropped every strategy
     // past the first 100, with no error anywhere.
     const { calls } = stubCatalogue(250);
-    const strategies = await fetchEarnStrategies();
+    const strategies = await fetchEarnStrategies(SCOPE);
     expect(strategies).toHaveLength(250);
     expect(calls).toHaveLength(3);
     expect(calls[0]).toContain("page=1");
@@ -177,7 +178,7 @@ describe("fetchEarnStrategies", () => {
 
   it("stops on an exactly-full final page rather than fetching an empty one", async () => {
     const { calls } = stubCatalogue(200);
-    const strategies = await fetchEarnStrategies();
+    const strategies = await fetchEarnStrategies(SCOPE);
     expect(strategies).toHaveLength(200);
     expect(calls).toHaveLength(2);
   });
@@ -194,7 +195,7 @@ describe("fetchEarnStrategies", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnStrategies()).rejects.toThrow(
+    await expect(fetchEarnStrategies(SCOPE)).rejects.toThrow(
       "Earn strategies pagination ended before the reported total"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -219,7 +220,7 @@ describe("fetchEarnStrategies", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnStrategies()).rejects.toThrow(
+    await expect(fetchEarnStrategies(SCOPE)).rejects.toThrow(
       "Earn strategies pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
@@ -237,7 +238,7 @@ describe("fetchEarnStrategies", () => {
       })
     );
 
-    await expect(fetchEarnStrategies()).rejects.toThrow(
+    await expect(fetchEarnStrategies(SCOPE)).rejects.toThrow(
       "Kamino is not configured for sandbox mode."
     );
   });
@@ -261,6 +262,28 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
 }
 
 describe("fetchEarnVaultPositions", () => {
+  it("declares the rendered project on every paged request so the BFF can pin the scope", async () => {
+    // APE-777: the BFF resolves request scope from the shared selection cookie,
+    // so each request carries the project the tab rendered with; a response
+    // whose resolved request project differs is refused instead of rendered.
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            data: { positions: [vaultPosition("vault_1")], hasMore: false, nextCursor: null },
+          }),
+          { headers: { "Content-Type": "application/json" } }
+        )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchEarnVaultPositions(SCOPE);
+
+    for (const call of fetchMock.mock.calls) {
+      expect(new Headers(call[1]?.headers).get("x-sdp-rendered-project-id")).toBe("prj_scope");
+    }
+  });
+
   it("follows every live keyset page without filtering un-surfaced providers", async () => {
     // Pages that report more must be full, so the first page carries a whole
     // page of rows and only the final one is short.
@@ -286,7 +309,7 @@ describe("fetchEarnVaultPositions", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const positions = await fetchEarnVaultPositions();
+    const positions = await fetchEarnVaultPositions(SCOPE);
 
     expect(positions).toHaveLength(101);
     expect(new Set(positions.map((position) => position.provider))).toEqual(
@@ -313,7 +336,7 @@ describe("fetchEarnVaultPositions", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnVaultPositions()).rejects.toThrow(
+    await expect(fetchEarnVaultPositions(SCOPE)).rejects.toThrow(
       "Vault positions pagination did not advance"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -354,7 +377,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnExternalWalletPositions(SCOPE, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).resolves.toHaveLength(101);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -378,7 +401,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnExternalWalletPositions(SCOPE, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).rejects.toThrow("External-wallet positions pagination exceeded its safety limit");
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
@@ -405,7 +428,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnExternalWalletPositions(SCOPE, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).resolves.toHaveLength(20 * 100);
     expect(fetchMock).toHaveBeenCalledTimes(20);
   });
@@ -427,7 +450,7 @@ describe("external-wallet position reads", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      fetchEarnExternalWalletPositions("9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
+      fetchEarnExternalWalletPositions(SCOPE, "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")
     ).rejects.toThrow("External-wallet positions pagination did not advance");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -481,7 +504,7 @@ describe("external-wallet position reads", () => {
       )
     );
 
-    await expect(fetchEarnExternalWalletPositionSummary()).resolves.toMatchObject({
+    await expect(fetchEarnExternalWalletPositionSummary(SCOPE)).resolves.toMatchObject({
       walletCount: 2,
       positionCount: 3,
       totalsByStrategy: [{ provider: "kamino", positions: [{ id: "p1" }] }],
@@ -540,7 +563,7 @@ describe("external-wallet position reads", () => {
       )
     );
 
-    await expect(fetchEarnExternalWalletPositionSummary()).rejects.toThrow(
+    await expect(fetchEarnExternalWalletPositionSummary(SCOPE)).rejects.toThrow(
       "Invalid external-wallet position summary response"
     );
   });
@@ -579,7 +602,7 @@ describe("createEarnVaultDeposit", () => {
       requestId: "must-not-be-forwarded",
     } as EarnVaultDepositRequest & { requestId: string };
 
-    const result = await createEarnVaultDeposit(untypedInput, "deposit-key");
+    const result = await createEarnVaultDeposit(SCOPE, untypedInput, "deposit-key");
 
     expect(result).toEqual({
       ok: true,
@@ -589,6 +612,9 @@ describe("createEarnVaultDeposit", () => {
     const [, options] = fetchMock.mock.calls[0] ?? [];
     const headers = new Headers(options?.headers);
     expect(headers.get("Idempotency-Key")).toBe("deposit-key");
+    // The value-moving POST carries the rendered project too (APE-777): a tab
+    // whose cookie scope another tab moved on cannot move money either.
+    expect(headers.get("x-sdp-rendered-project-id")).toBe("prj_scope");
     expect(JSON.parse(String(options?.body))).toEqual({
       strategyId: "strategy_1",
       custodyWalletId: "cwlt_1",
@@ -614,6 +640,7 @@ describe("createEarnVaultDeposit", () => {
     );
 
     const result = await createEarnVaultDeposit(
+      SCOPE,
       { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
       "deposit-key"
     );
@@ -639,6 +666,7 @@ describe("createEarnVaultDeposit", () => {
     );
 
     const result = await createEarnVaultDeposit(
+      SCOPE,
       { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
       "deposit-key"
     );
@@ -668,6 +696,7 @@ describe("createEarnVaultDeposit", () => {
     );
 
     const result = await createEarnVaultDeposit(
+      SCOPE,
       { strategyId: "strategy_1", custodyWalletId: "cwlt_1", amount: "10" },
       "deposit-key"
     );
@@ -734,7 +763,7 @@ function programFixture(id: string, status = "ready") {
 describe("fetchEarnProgramsState", () => {
   it("maps an EMPTY list to no programs, not to an error", async () => {
     stubProgramsResponse(200, { data: { programs: [], total: 0 } });
-    const state = await fetchEarnProgramsState();
+    const state = await fetchEarnProgramsState(SCOPE);
     expect(state).toEqual({ kind: "ready", programs: [] });
   });
 
@@ -742,7 +771,7 @@ describe("fetchEarnProgramsState", () => {
     stubProgramsResponse(200, {
       data: { programs: [programFixture("p1"), programFixture("p2")], total: 2 },
     });
-    const state = await fetchEarnProgramsState();
+    const state = await fetchEarnProgramsState(SCOPE);
     if (state.kind !== "ready") throw new Error("expected ready");
     // Order is load-bearing: consumers that track one program across polls rely
     // on the head of this list being stable.
@@ -751,7 +780,7 @@ describe("fetchEarnProgramsState", () => {
 
   it("maps 503 to unconfigured so the quiet provider notice stays reachable", async () => {
     stubProgramsResponse(503, { error: { message: "provider not configured" } });
-    expect(await fetchEarnProgramsState()).toEqual({ kind: "unconfigured" });
+    expect(await fetchEarnProgramsState(SCOPE)).toEqual({ kind: "unconfigured" });
   });
 
   /**
@@ -761,12 +790,12 @@ describe("fetchEarnProgramsState", () => {
    */
   it("throws on 404 rather than reporting an empty portfolio", async () => {
     stubProgramsResponse(404, { error: { message: "not found" } });
-    await expect(fetchEarnProgramsState()).rejects.toThrow("not found");
+    await expect(fetchEarnProgramsState(SCOPE)).rejects.toThrow("not found");
   });
 
   it("throws on a server error", async () => {
     stubProgramsResponse(500, { error: { message: "boom" } });
-    await expect(fetchEarnProgramsState()).rejects.toThrow("boom");
+    await expect(fetchEarnProgramsState(SCOPE)).rejects.toThrow("boom");
   });
 });
 
@@ -781,7 +810,7 @@ describe("fetchEarnProgramsState pagination", () => {
     const all = Array.from({ length: 205 }, (_, index) => programFixture(`p${index}`));
     const { fetchMock } = stubProgramsPages(all);
 
-    const state = await fetchEarnProgramsState();
+    const state = await fetchEarnProgramsState(SCOPE);
     if (state.kind !== "ready") throw new Error("expected ready");
     expect(state.programs).toHaveLength(205);
     expect(state.programs[204]?.id).toBe("p204");
@@ -791,7 +820,7 @@ describe("fetchEarnProgramsState pagination", () => {
 
   it("stops after one request when a single page holds everything", async () => {
     const { fetchMock } = stubProgramsPages([programFixture("p0")]);
-    const state = await fetchEarnProgramsState();
+    const state = await fetchEarnProgramsState(SCOPE);
     if (state.kind !== "ready") throw new Error("expected ready");
     expect(state.programs).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -808,7 +837,7 @@ describe("fetchEarnProgramsState pagination", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnProgramsState()).rejects.toThrow(
+    await expect(fetchEarnProgramsState(SCOPE)).rejects.toThrow(
       "Earn programs pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
@@ -854,7 +883,7 @@ describe("fetchEarnProgramWithdrawals", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const withdrawals = await fetchEarnProgramWithdrawals("program/one");
+    const withdrawals = await fetchEarnProgramWithdrawals(SCOPE, "program/one");
 
     expect(withdrawals).toHaveLength(205);
     expect(withdrawals[204]?.withdrawalRef).toBe("w204-provider-ref");
@@ -882,7 +911,7 @@ describe("fetchEarnProgramWithdrawals", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnProgramWithdrawals("program_1")).rejects.toThrow(
+    await expect(fetchEarnProgramWithdrawals(SCOPE, "program_1")).rejects.toThrow(
       "Earn withdrawal ledger pagination ended before the reported total"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -902,7 +931,7 @@ describe("fetchEarnProgramWithdrawals", () => {
       })
     );
 
-    await expect(fetchEarnProgramWithdrawals("program_1")).rejects.toThrow(
+    await expect(fetchEarnProgramWithdrawals(SCOPE, "program_1")).rejects.toThrow(
       "Earn withdrawal ledger pagination did not match the requested page"
     );
   });
@@ -926,7 +955,7 @@ describe("fetchEarnProgramWithdrawals", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnProgramWithdrawals("program_1")).rejects.toThrow(
+    await expect(fetchEarnProgramWithdrawals(SCOPE, "program_1")).rejects.toThrow(
       "Earn withdrawal ledger pagination exceeded its safety limit"
     );
     expect(fetchMock).toHaveBeenCalledTimes(20);
@@ -1010,7 +1039,7 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const requests = await fetchEarnVaultWithdrawalRequests({ settled: false });
+    const requests = await fetchEarnVaultWithdrawalRequests(SCOPE, { settled: false });
 
     expect(requests).toHaveLength(101);
     expect(new Set(requests.map((request) => request.withdrawalRequestId))).toEqual(
@@ -1041,7 +1070,7 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchEarnVaultWithdrawalRequests({ settled: false })).rejects.toThrow(
+    await expect(fetchEarnVaultWithdrawalRequests(SCOPE, { settled: false })).rejects.toThrow(
       "Queued withdrawal requests pagination returned a short page while reporting more"
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1069,6 +1098,7 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     );
 
     const result = await createEarnVaultWithdrawalRequest(
+      SCOPE,
       { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
       "queued-request-key"
     );
@@ -1131,8 +1161,8 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
       mechanism: "operatorRedemption" as const,
     };
 
-    const preview = await fetchEarnVaultParRedemptionPreview(input);
-    const created = await createEarnVaultWithdrawalRequest(input, "par-request-key");
+    const preview = await fetchEarnVaultParRedemptionPreview(SCOPE, input);
+    const created = await createEarnVaultWithdrawalRequest(SCOPE, input, "par-request-key");
 
     expect(preview).toMatchObject({
       kind: "ready",
@@ -1157,6 +1187,7 @@ describe("fetchEarnVaultWithdrawalRequests", () => {
     );
 
     const result = await createEarnVaultWithdrawalRequest(
+      SCOPE,
       { positionId: "position_1", shares: "5", discountBps: 25, deadlineSeconds: 360 },
       "queued-request-key"
     );

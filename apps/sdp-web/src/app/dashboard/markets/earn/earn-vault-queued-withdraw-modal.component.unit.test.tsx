@@ -232,6 +232,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
 
     await openReview();
     expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      { projectId: "project_1" },
       {
         positionId: position.id,
         shares: "5",
@@ -244,13 +245,14 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(1));
     expect(mocks.createRequest).toHaveBeenLastCalledWith(
+      { projectId: "project_1" },
       expect.objectContaining({ shares: "5" }),
       FIRST_KEY
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
-    expect(mocks.createRequest.mock.calls[1]?.[1]).toBe(FIRST_KEY);
+    expect(mocks.createRequest.mock.calls[1]?.[2]).toBe(FIRST_KEY);
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Max" }));
@@ -259,6 +261,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(3));
     expect(mocks.createRequest.mock.calls[2]).toEqual([
+      { projectId: "project_1" },
       expect.objectContaining({ shares: "10" }),
       SECOND_KEY,
     ]);
@@ -293,6 +296,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await openReview();
 
     expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      { projectId: "project_1" },
       {
         positionId: position.id,
         shares: "5",
@@ -319,6 +323,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await openReview();
 
     expect(mocks.fetchPreview).toHaveBeenLastCalledWith(
+      { projectId: "project_1" },
       expect.objectContaining({ deadlineSeconds: 3_960 }),
       expect.any(AbortSignal)
     );
@@ -362,13 +367,21 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
 
     expect(await screen.findByText("Shares ready")).toBeTruthy();
-    expect(mocks.createRequest).toHaveBeenCalledWith(expect.any(Object), FIRST_KEY);
+    expect(mocks.createRequest).toHaveBeenCalledWith(
+      { projectId: "project_1" },
+      expect.any(Object),
+      FIRST_KEY
+    );
     expect(mocks.useRequestOutcome).toHaveBeenCalledWith(submitted.withdrawalRequestId, onSettled);
     expect(onRequested).toHaveBeenCalledWith(submitted);
 
     fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() =>
-      expect(mocks.cancelRequest).toHaveBeenCalledWith(submitted.withdrawalRequestId, SECOND_KEY)
+      expect(mocks.cancelRequest).toHaveBeenCalledWith(
+        { projectId: "project_1" },
+        submitted.withdrawalRequestId,
+        SECOND_KEY
+      )
     );
   });
 
@@ -494,7 +507,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     await screen.findByText("Shares ready");
     fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(1));
-    expect(mocks.cancelRequest.mock.calls[0]?.[1]).toBe(SECOND_KEY);
+    expect(mocks.cancelRequest.mock.calls[0]?.[2]).toBe(SECOND_KEY);
     expect(await screen.findByText("Returning shares")).toBeTruthy();
 
     mocks.useRequestOutcome.mockReturnValue(reopened);
@@ -504,7 +517,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Get shares back" }));
     await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(2));
-    expect(mocks.cancelRequest.mock.calls[1]?.[1]).toBe(THIRD_KEY);
+    expect(mocks.cancelRequest.mock.calls[1]?.[2]).toBe(THIRD_KEY);
   });
 
   it("renders a policy approval hold without claiming shares were escrowed", async () => {
@@ -553,7 +566,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Request withdrawal" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledTimes(2));
 
-    expect(mocks.createRequest.mock.calls[0]?.[1]).toBe(FIRST_KEY);
-    expect(mocks.createRequest.mock.calls[1]?.[1]).toBe(FIRST_KEY);
+    expect(mocks.createRequest.mock.calls[0]?.[2]).toBe(FIRST_KEY);
+    expect(mocks.createRequest.mock.calls[1]?.[2]).toBe(FIRST_KEY);
   });
 });

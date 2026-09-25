@@ -276,7 +276,7 @@ describe("EarnVaultExitModal", () => {
 
     await waitFor(() => expect(mocks.fetchOptions).toHaveBeenCalledTimes(2));
     const [firstSignal, secondSignal] = mocks.fetchOptions.mock.calls.map(
-      (call) => call[1] as AbortSignal
+      (call) => call[2] as AbortSignal
     );
     // The retry's cleanup aborted the superseded first attempt...
     expect(firstSignal.aborted).toBe(true);
