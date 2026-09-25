@@ -489,6 +489,60 @@ describe("ramp quote Idempotency-Key replay", () => {
     expect(rows[0]?.status).toBe("pending");
   });
 
+  // The MoonPay off-ramp flow shares the precreated-row semantics: an ambiguous
+  // provider failure must leave the keyed row pending so the retry conflicts
+  // instead of freeing the key and minting a second session and transfer.
+  it("keeps the keyed off-ramp row pending and conflicts the retry when the quote failed ambiguously", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({
+      externalId: "replay_quote_ambiguous_failure_offramp",
+    });
+    const createQuote = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "createOfframpQuote")
+      .mockRejectedValueOnce(new Error("moonpay session response lost after commit"));
+
+    const postQuote = () =>
+      app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "quote-retry-ambiguous-failure-offramp",
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "0.75",
+          }),
+        },
+        env
+      );
+
+    const failedResponse = await postQuote();
+    expect(failedResponse.status).toBe(500);
+
+    // The ambiguous failure never marks the keyed row failed: it stays
+    // pending with only the error recorded, so the key stays held.
+    const rowsAfterFailure = await counterpartyTransfers(counterpartyId);
+    expect(rowsAfterFailure).toHaveLength(1);
+    expect(rowsAfterFailure[0]?.status).toBe("pending");
+
+    // The retry with the same key conflicts: it can neither replay an outcome
+    // that was never recorded nor mint a second provider session.
+    const retryResponse = await postQuote();
+    expect(retryResponse.status).toBe(409);
+
+    expect(createQuote).toHaveBeenCalledTimes(1);
+    const rows = await counterpartyTransfers(counterpartyId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("pending");
+  });
+
   it("runs a fresh keyed quote when the provider definitively rejected and frees the key", async () => {
     await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
     const counterpartyId = await seedCounterparty({
