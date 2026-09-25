@@ -3,6 +3,7 @@ import {
   type CustodyWalletAggregate,
   type PaymentsDashboardWallet,
   type PaymentTransferSummary,
+  type TokenStatus,
 } from "@sdp/types";
 import { z } from "zod";
 import type { SdpApiClient } from "@/lib/sdp-api";
@@ -66,6 +67,19 @@ export interface PaymentsIssuedTokenSymbol {
   mintAddress: string;
   symbol: string;
   imageUrl: string | null;
+  /** Lifecycle status. Absent when the listing omits it or sends an unknown value. */
+  status?: TokenStatus;
+}
+
+const ISSUED_TOKEN_STATUSES = [
+  "pending",
+  "active",
+  "paused",
+  "revoked",
+] as const satisfies readonly TokenStatus[];
+
+function isIssuedTokenStatus(value: unknown): value is TokenStatus {
+  return ISSUED_TOKEN_STATUSES.some((status) => status === value);
 }
 
 export async function fetchPaymentsWallets(
@@ -478,6 +492,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
               mintAddress?: string | null;
               symbol?: string;
               imageUrl?: string | null;
+              status?: string;
             }>
           | {
               tokens?: Array<{
@@ -485,6 +500,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
                 mintAddress?: string | null;
                 symbol?: string;
                 imageUrl?: string | null;
+                status?: string;
               }>;
             };
         meta?: {
@@ -503,6 +519,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
               mintAddress: string;
               symbol?: string;
               imageUrl?: string | null;
+              status?: string;
             } => typeof token?.mintAddress === "string" && token.mintAddress.length > 0
           )
           .map((token) => ({
@@ -513,6 +530,7 @@ export async function fetchPaymentsIssuedTokenSymbols(
               typeof token.imageUrl === "string" && token.imageUrl.trim().length > 0
                 ? token.imageUrl
                 : null,
+            ...(isIssuedTokenStatus(token.status) ? { status: token.status } : {}),
           }))
       );
 

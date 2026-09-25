@@ -293,6 +293,29 @@ async function resolveRecurringPaymentUpdate(input: {
         })
       : { destinationAddress: input.recurringPayment.destination_address },
   ]);
+  // The final (wallet, token) pair is only valid when the wallet the payment
+  // will actually fund from can hold the token. A sparse PATCH that swaps the
+  // source wallet must not silently pair the new wallet with the old wallet's
+  // mint, and an explicit token must not pair the wallet with a mint it cannot
+  // hold. The check therefore runs whenever either side of the pair changes;
+  // edits that change neither skip the chain reads entirely.
+  const sourceWalletChanged =
+    finalSourceWallet.id !== input.recurringPayment.source_custody_wallet_id;
+  const tokenChanged = token !== input.recurringPayment.token;
+  if (sourceWalletChanged || tokenChanged) {
+    const rpc = solanaRpc.createRpc(input.env);
+    const mint = assertValidAddress(token, "token");
+    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
+      rpc,
+      assertValidAddress(finalSourceWallet.publicKey, "sourceAddress"),
+      mint,
+      tokenProgram
+    );
+    if (!sourceTokenAccount.exists) {
+      throw badRequest("Recurring payment token is not held by the requested source wallet");
+    }
+  }
   const amount =
     input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
   const periodHours =

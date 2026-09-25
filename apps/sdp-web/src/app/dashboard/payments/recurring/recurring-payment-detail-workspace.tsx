@@ -52,6 +52,11 @@ import {
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
+import {
+  eligibleRecurringPaymentAssets,
+  fallbackRecurringPaymentToken,
+  recurringPaymentCurrencyOptions,
+} from "./recurring-payment-assets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
@@ -416,6 +421,7 @@ export function RecurringPaymentDetailWorkspace({
   const router = useRouter();
   const workspace = useDashboardWorkspace();
   const custodyEnabled = workspace.flags.custody;
+  const sdpEnvironment = workspace.sdpEnvironment;
   const [pendingAction, setPendingAction] = useState<RecurringPaymentAction | null>(null);
   const [actionError, setActionError] = useState<DetailActionError | null>(null);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -444,7 +450,31 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
-  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    Object.values(issuedTokensByMint).map((token) => [token.mintAddress, token.symbol])
+  );
+  const resolvedToken = resolveTokenByMint(
+    recurringPayment.token,
+    issuedTokensByMint,
+    resolveTokenLabel(recurringPayment.token, wallets)
+  );
+  // Currency options follow the wallet the editor will actually fund from and
+  // list only mints the save accepts, so every visible choice sticks.
+  const editorAssetOptions = (entry: RecurringPaymentWalletView | null) =>
+    eligibleRecurringPaymentAssets(
+      recurringPaymentAssetOptions(entry, issuedTokenSymbolsByMint, t),
+      issuedTokensByMint,
+      sdpEnvironment
+    );
+  const assetOptions = recurringPaymentCurrencyOptions({
+    eligible: editorAssetOptions(selectedWallet ?? null),
+    selectedToken,
+    savedToken: {
+      value: recurringPayment.token,
+      label: resolvedToken.tokenName,
+      badge: t("Shared.SharedComponents.current"),
+    },
+  });
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -513,6 +543,15 @@ export function RecurringPaymentDetailWorkspace({
     setSelectedReceivingAccountId(recurringPayment.counterpartyAccountId);
     setPaymentValidationError(null);
     setEditingPayment(true);
+  };
+
+  // A funding-wallet switch can drop the retained token from the new wallet's
+  // eligible inventory; fall back instead of saving a mint it cannot fund.
+  const selectFundingWallet = (custodyWalletId: string) => {
+    const nextWallet = liveWallets.find((entry) => entry.id === custodyWalletId) ?? null;
+    setSelectedCustodyWalletId(custodyWalletId);
+    setSelectedToken(fallbackRecurringPaymentToken(selectedToken, editorAssetOptions(nextWallet)));
+    setPaymentValidationError(null);
   };
 
   const closePaymentEditor = () => {
@@ -594,12 +633,6 @@ export function RecurringPaymentDetailWorkspace({
       setSavingPayment(false);
     }
   };
-
-  const resolvedToken = resolveTokenByMint(
-    recurringPayment.token,
-    issuedTokensByMint,
-    resolveTokenLabel(recurringPayment.token, wallets)
-  );
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -873,10 +906,7 @@ export function RecurringPaymentDetailWorkspace({
             <Combobox
               label={t("DashboardPayments.recurring.fundingWallet")}
               value={selectedCustodyWalletId}
-              onChange={(value) => {
-                setSelectedCustodyWalletId(value);
-                setPaymentValidationError(null);
-              }}
+              onChange={selectFundingWallet}
               options={liveWallets.map((entry) => ({
                 value: entry.id,
                 label: walletLabel(entry, entry.walletId),
