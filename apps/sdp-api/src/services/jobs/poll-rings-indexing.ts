@@ -16,6 +16,7 @@
  * Ships dormant: early-returns unless the feature flag is on.
  */
 
+import type { SdpEnvironment } from "@sdp/types";
 import { getDb } from "@/db";
 import {
   createHeliusRingsOperationRepository,
@@ -23,7 +24,11 @@ import {
 } from "@/db/repositories";
 import { isHeliusRingsEnabled } from "@/lib/feature-flags";
 import { getLogger } from "@/runtime/logger";
-import { createHeliusRingsService, type HeliusRingsService } from "@/services/helius-rings";
+import {
+  createHeliusRingsService,
+  type HeliusRingsService,
+  type HeliusRingsTenant,
+} from "@/services/helius-rings";
 import {
   type RingsSignatureOutcome,
   readRingsBlockHeight,
@@ -88,7 +93,7 @@ async function chainForbidsFailure(
 
 type OperationRepository = ReturnType<typeof createHeliusRingsOperationRepository>;
 type Logger = ReturnType<typeof getLogger>;
-type ServiceFor = (tenant: { organizationId: string; projectId: string }) => HeliusRingsService;
+type ServiceFor = (tenant: HeliusRingsTenant) => HeliusRingsService;
 
 export interface PollRingsIndexingDependencies {
   /** Test seam: service per tenant; production builds the real one. */
@@ -114,10 +119,14 @@ export async function pollRingsIndexing(
 
   const createService: ServiceFor =
     dependencies.createService ?? ((tenant) => createHeliusRingsService(env, tenant));
+  // Every service the sweep builds is refused unless its project is sandbox,
+  // so production rows left by the pre-fence admission are never advanced.
+  const environments = await loadProjectEnvironments(env);
   const serviceFor = (operation: HeliusRingsOperationRow) =>
     createService({
       organizationId: operation.organization_id,
       projectId: operation.project_id,
+      environment: requireResolvableEnvironment(environments, operation.project_id),
     });
 
   const repository = createHeliusRingsOperationRepository(env);
@@ -150,6 +159,33 @@ export async function pollRingsIndexing(
 async function readDatabaseNow(env: Env): Promise<Date> {
   const row = await getDb(env).queryOne<{ now: string }>("SELECT sdp_iso_now() AS now");
   return new Date(row?.now ?? Date.now());
+}
+
+/**
+ * Every project's environment, one read per run.
+ *
+ * The Rings service refuses to build for anything but a sandbox project, so
+ * the sweep can neither advance nor fail a row whose project it cannot place
+ * in an environment — production rows left by the pre-fence admission are
+ * reported by the passes' per-operation logging and never touched again.
+ */
+async function loadProjectEnvironments(env: Env): Promise<Map<string, SdpEnvironment>> {
+  const rows = await getDb(env).queryMany<{ id: string; environment: SdpEnvironment }>(
+    "SELECT id, environment FROM projects"
+  );
+  return new Map(rows.map((row) => [row.id, row.environment]));
+}
+
+/** Fails closed: a project with no resolvable environment cannot be swept. */
+function requireResolvableEnvironment(
+  environments: Map<string, SdpEnvironment>,
+  projectId: string
+): SdpEnvironment {
+  const environment = environments.get(projectId);
+  if (environment === undefined) {
+    throw new Error(`project ${projectId} has no resolvable environment`);
+  }
+  return environment;
 }
 
 /** What the two passes that can give up on a signature need to consult the chain. */

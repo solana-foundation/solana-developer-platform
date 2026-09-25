@@ -32,3 +32,18 @@ export function resolveSdpEnvironment(c: Context<{ Bindings: Env }>): SdpEnviron
 
   throw internalError("Request environment could not be resolved");
 }
+
+/**
+ * The selected project's environment, set by `projectContextMiddleware`.
+ *
+ * The same fail-closed rule as `resolveSdpEnvironment`, for callers that need
+ * the project boundary specifically: a request that reached them without the
+ * middleware's resolution is a routing bug, not a sandbox project.
+ */
+export function requireProjectEnvironment(c: Context<{ Bindings: Env }>): SdpEnvironment {
+  const projectEnvironment = c.get("projectEnvironment");
+  if (!projectEnvironment) {
+    throw internalError("Request project environment could not be resolved");
+  }
+  return projectEnvironment;
+}

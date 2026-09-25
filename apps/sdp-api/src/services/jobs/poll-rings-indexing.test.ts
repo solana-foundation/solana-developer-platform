@@ -37,7 +37,11 @@ import {
 const TEST_PROJECT_ID = "prj_hr_job_test";
 const TEST_CONNECTION_ID = "hrconn_hr_job_test";
 const TEST_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
-const tenant = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+const tenant = {
+  organizationId: TEST_ORG.id,
+  projectId: TEST_PROJECT_ID,
+  environment: "sandbox",
+} as const;
 
 const allowPolicy = async () =>
   ({
