@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { WalletApprovalRequestSummary } from "@sdp/types";
+import type { WalletApprovalRequestSummary, WalletPolicyEvaluationDetail } from "@sdp/types";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Toaster, toast } from "sonner";
@@ -50,6 +50,90 @@ const pendingRequest: WalletApprovalRequestSummary = {
 
 const REVIEW_DESCRIPTION =
   "Confirm the policy context and operation details before making a decision.";
+
+const MINT_OWNER = "9wVmMF2GpxZMsJLxCv2xXWjDWVv8HtqTmKqnZxNKkYTz";
+const MINT_TOKEN_ACCOUNT = "5UrDkskM2sSxerPujeALvfzYryD8a8CVonZwu2cfNwdE";
+
+const mintRequest: WalletApprovalRequestSummary = {
+  ...pendingRequest,
+  operation: {
+    ...pendingRequest.operation,
+    operationFamily: "issuance",
+    operationType: "issuance_mint_execute",
+    amount: "5",
+    destination: MINT_OWNER,
+  },
+};
+
+const mintEvaluation: WalletPolicyEvaluationDetail = {
+  id: "pe_1",
+  walletOperation: {
+    id: "wop_1",
+    operationFamily: "issuance",
+    operationType: "issuance_mint_execute",
+    asset: null,
+    amount: "5",
+    destination: MINT_OWNER,
+    status: "pending_approval",
+    createdAt: "2026-09-11T00:00:00.000Z",
+    updatedAt: "2026-09-11T00:00:00.000Z",
+  },
+  policyRevisions: {
+    wallet: { evaluatedRevisionId: null, activeRevisionId: null },
+    apiKey: { evaluatedRevisionId: null, activeRevisionId: null },
+  },
+  decision: "approval_required",
+  reasonCode: "wallet_policy_match",
+  reason: "Approval required by policy",
+  matchedRules: [],
+  evaluationContext: {
+    walletPolicy: {
+      source: "customer_profile",
+      profileId: null,
+      revisionId: null,
+      defaultAction: "approval_required",
+      decision: "approval_required",
+      requiresApproval: true,
+    },
+    apiKeyPolicy: null,
+    operation: {
+      id: "wop_1",
+      organizationId: "org_1",
+      projectId: "prj_1",
+      custodyWalletId: "cwlt_1",
+      walletId: "wallet_1",
+      apiKeyId: null,
+      actor: null,
+      source: "api",
+      operationFamily: "issuance",
+      operationType: "issuance_mint_execute",
+      asset: null,
+      amount: "5",
+      destination: MINT_OWNER,
+      context: { destinationTokenAccount: MINT_TOKEN_ACCOUNT },
+      idempotencyKey: null,
+      createdAt: "2026-09-11T00:00:00.000Z",
+    },
+  },
+  requiresApproval: true,
+  approvalRequestId: "apr_1",
+  evaluatedAt: "2026-09-11T00:00:00.000Z",
+};
+
+function mintEvaluationWithContext(destinationTokenAccount: string): WalletPolicyEvaluationDetail {
+  const evaluationContext = mintEvaluation.evaluationContext;
+  if (!evaluationContext) throw new Error("fixture evaluation context is required");
+  return {
+    ...mintEvaluation,
+    evaluationContext: {
+      ...evaluationContext,
+      operation: {
+        ...evaluationContext.operation,
+        context: { destinationTokenAccount },
+      },
+    },
+  };
+}
 
 function approvedRequest(
   operation: Partial<WalletApprovalRequestSummary["operation"]>
@@ -377,6 +461,42 @@ describe("ApprovalRequestDetail", () => {
       screen.getByText("Provider quote/session reference has expired; create a new quote.")
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  describe("mint destination token account", () => {
+    function renderMint(evaluation: WalletPolicyEvaluationDetail | null) {
+      return render(
+        <I18nProvider locale="en" messages={getMessages("en")}>
+          <ApprovalRequestDetail
+            initialRequest={mintRequest}
+            evaluation={evaluation}
+            apiKeyNames={{}}
+            canDecide
+          />
+        </I18nProvider>
+      );
+    }
+
+    // The approved destination is the owner wallet; the MintTo credits the
+    // specific token account the request named, so the approver has to see it.
+    it("shows the exact account a token-account mint destination credits", () => {
+      renderMint(mintEvaluation);
+
+      expect(screen.getByText("Destination token account")).toBeTruthy();
+      expect(screen.getByText(MINT_TOKEN_ACCOUNT)).toBeTruthy();
+    });
+
+    it("does not show a token account row when the destination itself is credited", () => {
+      renderMint(mintEvaluationWithContext(MINT_OWNER));
+
+      expect(screen.queryByText("Destination token account")).toBeNull();
+    });
+
+    it("does not show a token account row when the evaluation names none", () => {
+      renderMint(null);
+
+      expect(screen.queryByText("Destination token account")).toBeNull();
+    });
   });
 
   // The API names the rule the caller did not meet; the role line was wrong

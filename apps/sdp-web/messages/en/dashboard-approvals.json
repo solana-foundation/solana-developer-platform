@@ -89,6 +89,7 @@
     "amount": "Amount",
     "asset": "Asset",
     "destination": "Destination",
+    "destinationTokenAccount": "Destination token account",
     "source": "Source",
     "noMatchedControls": "No matched controls were reported for this evaluation.",
     "matchedControl": "Matched control {number}",

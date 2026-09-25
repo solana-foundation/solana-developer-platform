@@ -148,6 +148,15 @@ export interface MintToOptions {
   amount: number;
   mintAuthority: Address;
   feePayer: Address;
+  /**
+   * Owner wallet the destination resolved to when the mint was authorized
+   * (the parsed owner for an existing token-account destination, otherwise
+   * the destination itself). When provided, transaction construction rejects
+   * the mint if the destination's owner has changed since then, so a policy
+   * evaluation can never be applied to an account that has moved to a
+   * different wallet.
+   */
+  expectedOwner?: Address;
 }
 
 /**

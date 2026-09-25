@@ -415,6 +415,19 @@ function ApprovalRequestSections({
 }) {
   const t = useTranslations();
   const { operation } = request;
+  // For an existing token-account mint destination the approved `destination`
+  // is the owner wallet, while the MintTo credits the specific account the
+  // request named. Show that account so the approver can tell which of the
+  // wallet's accounts receives the tokens; for a plain wallet destination it
+  // is the derived ATA and adds nothing.
+  const contextDestinationTokenAccount =
+    evaluation?.evaluationContext?.operation.context.destinationTokenAccount;
+  const mintTarget =
+    typeof contextDestinationTokenAccount === "string" &&
+    contextDestinationTokenAccount.trim() &&
+    contextDestinationTokenAccount !== operation.destination
+      ? contextDestinationTokenAccount
+      : null;
   return (
     <main className="min-w-0 lg:pr-8">
       <DetailSection title={t("DashboardApprovals.requestSection")}>
@@ -471,6 +484,14 @@ function ApprovalRequestSections({
             value={operation.destination ?? "-"}
             mono={Boolean(operation.destination)}
           />
+          {mintTarget ? (
+            <DetailValue
+              className="sm:col-span-2"
+              label={t("DashboardApprovals.destinationTokenAccount")}
+              value={mintTarget}
+              mono
+            />
+          ) : null}
           <DetailValue label={t("DashboardApprovals.source")} value={operation.source ?? "-"} />
         </DetailGrid>
       </DetailSection>
