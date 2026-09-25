@@ -311,11 +311,19 @@ export interface EarnMovementsRepository {
    * `(organization_id, request_id)` anchor above cannot see them. This read is
    * the answer: ownership is enforced IN THE QUERY (organization and exact
    * project bound, the detail read's own scoping rules), and the claim releases
-   * when the movement is terminal for its settlement model (`failed`, or
-   * success past the provider's atomic settlement boundary) — or, for a
-   * provider-order deposit whose settlement never arrives through this
-   * ledger, once its Solana leg is chain-final. Terminality is the ONLY
+   * exactly when the movement is terminal for its settlement model — the same
+   * settled predicate the `?settled=` list filter uses (`failed`, or success
+   * past the provider's atomic settlement boundary). Terminality is the ONLY
    * release: a still-open movement keeps the claim, whatever key holds it.
+   *
+   * For a provider-order deposit that keeps the claim past Solana finality,
+   * DELIBERATELY: finality proves only that the payment leg cannot be rolled
+   * back, not that the provider finished the order, so a claim released there
+   * lets a cross-key twin sign and broadcast a second deposit for an order
+   * still pending. The release point is the settled boundary itself, so the
+   * future authenticated provider reconciler that can finally close these rows
+   * (see `vaultSettlementFilter`) closes their claims with it — one completion
+   * fact, moved once, for the settled surface and this claim together.
    */
   findOpenVaultDepositIntentClaim(params: {
     organizationId: string;
@@ -1010,35 +1018,6 @@ function vaultSettlementFilter(
   };
 }
 
-/**
- * "Open" for the CROSS-KEY deposit-intent claim, at both of its sites (the
- * service preflight read and the write-side twin under the ledger lock).
- *
- * The settlement boundary alone cannot be the claim's release point: a
- * provider-order deposit never settles through this ledger (an authenticated
- * provider reconciler must introduce that completion fact first — see
- * `vaultSettlementFilter`), so keying the claim on settlement would hold a
- * successful WisdomTree deposit's claim forever and answer every later
- * same-amount deposit — forever — with the old movement. The claim therefore
- * also releases once the movement's Solana leg is chain-final
- * (`chain_finalized_at` stamped, the durable monotone fact the reconciliation
- * sweep records for exactly these rows). Past that moment the bytes can never
- * be un-done, so there is nothing left to double-sign: a fresh identical
- * submission is a new deposit by definition, not a two-tab twin. Atomic
- * providers keep releasing on their settlement statuses, which already imply
- * the landed transaction.
- */
-function vaultDepositClaimOpenFilter(): { clause: string; values: readonly unknown[] } {
-  const atomicProviders = [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.deposit];
-  const atomicStatuses = [...ATOMIC_SETTLED_STATUSES_BY_DIRECTION.deposit];
-  return {
-    clause: `AND status <> 'failed'
-             AND NOT (provider = ANY (?::text[]) AND status = ANY (?::text[]))
-             AND (provider = ANY (?::text[]) OR chain_finalized_at IS NULL)`,
-    values: [atomicProviders, atomicStatuses, atomicProviders],
-  };
-}
-
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
     id: row.id as string,
@@ -1250,12 +1229,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     },
 
     async findOpenVaultDepositIntentClaim(params) {
-      // "Open" is `vaultDepositClaimOpenFilter`'s predicate: not failed, not
-      // past the provider's atomic settlement boundary, and — for a
-      // provider-order deposit, whose settlement never arrives through this
-      // ledger — not chain-final yet. The chain-finality release is what keeps
-      // a successful WisdomTree deposit from holding its claim forever.
-      const open = vaultDepositClaimOpenFilter();
+      // The unsettled predicate of `listVaultMovements`' `?settled=true` —
+      // `failed`, or success past the provider's atomic settlement boundary —
+      // is the definition of "the prior movement is terminal" here. Reuse it
+      // rather than restating it: a settlement-boundary change must move the
+      // claim's release point with it. Chain finality is deliberately NOT a
+      // release point: for a provider-order deposit it coexists with an order
+      // the provider has not completed, and a cross-key twin released there
+      // would start a second sign/record/broadcast path for money already
+      // committed.
+      const settlement = vaultSettlementFilter("deposit", false);
       const row = await db
         .prepare(
           `SELECT * FROM earn_movements
@@ -1264,7 +1247,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND deposit_intent_fingerprint = ?
                AND direction = 'deposit'
                AND execution_model = 'vault_direct'
-               ${open.clause}
+               ${settlement.clause}
              ORDER BY created_at DESC, id DESC
              LIMIT 1`
         )
@@ -1272,7 +1255,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.organizationId,
           params.projectId,
           params.depositIntentFingerprint,
-          ...open.values
+          ...settlement.values
         )
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
@@ -2829,8 +2812,9 @@ async function findVaultMovementByRequest(
  * The vault write lock is already held by the caller, so the twin that
  * committed while this write waited is visible here: answering it is what
  * keeps two different keys from recording two movements for one unchanged
- * intent. Same open rule as the interface's claim read
- * (`vaultDepositClaimOpenFilter`), chain-finality release included.
+ * intent. Same terminality rule as the interface's claim read: the settled
+ * boundary, never chain finality (a provider order can still be pending
+ * there).
  */
 async function findOpenDepositIntentClaim(
   db: AppDb,
@@ -2840,7 +2824,7 @@ async function findOpenDepositIntentClaim(
     depositIntentFingerprint: string;
   }
 ): Promise<EarnMovementRow | null> {
-  const open = vaultDepositClaimOpenFilter();
+  const settlement = vaultSettlementFilter("deposit", false);
   const row = await db
     .prepare(
       `SELECT * FROM earn_movements
@@ -2849,11 +2833,16 @@ async function findOpenDepositIntentClaim(
           AND deposit_intent_fingerprint = ?
           AND direction = 'deposit'
           AND execution_model = 'vault_direct'
-          ${open.clause}
+          ${settlement.clause}
         ORDER BY created_at DESC, id DESC
         LIMIT 1`
     )
-    .bind(input.organizationId, input.projectId, input.depositIntentFingerprint, ...open.values)
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.depositIntentFingerprint,
+      ...settlement.values
+    )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
 }

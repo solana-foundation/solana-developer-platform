@@ -245,9 +245,12 @@ export async function depositIntoVault(
   // separates them without re-opening the hole this claim closes — so while
   // the prior movement is open it is answered as a replay, and the response
   // discloses the floor the signed transaction actually enforces. That window
-  // is the prior movement's own lifetime: the claim releases on terminality
-  // (failed, atomic-settled, or chain-final for a provider order), after which
-  // the same intent deposits again freely.
+  // is the prior movement's own lifetime: the claim releases on terminality —
+  // the same settled boundary the `?settled=` list filter uses — after which
+  // the same intent deposits again freely. For a provider-order deposit that
+  // boundary outlives Solana finality on purpose: finality proves the payment
+  // leg cannot be rolled back, not that the provider finished the order, and
+  // a twin released in between would double-broadcast it.
   const openClaim = await ledger.findOpenVaultDepositIntentClaim({
     organizationId: input.organizationId,
     projectId: input.projectId,

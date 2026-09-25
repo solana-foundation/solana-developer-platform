@@ -449,14 +449,16 @@ describe("depositIntoVault — idempotency", () => {
 
   /**
    * WisdomTree deposits are provider orders: the reconciliation sweep stamps
-   * `chain_finalized_at` but the row REMAINS `confirmed` — this ledger never
-   * records provider settlement (see the settlement filter), so a claim keyed
-   * on settlement alone would hold a successful deposit's intent forever and
-   * answer every later same-amount deposit with the old movement. Chain
-   * finality is the release: the signed bytes can never be un-done, so a fresh
-   * identical submission past it is a new deposit, not a two-tab twin.
+   * `chain_finalized_at` while the row REMAINS `confirmed` — this ledger never
+   * records provider settlement (see the settlement filter), and finality
+   * proves only that the payment leg cannot be rolled back, not that the
+   * provider finished the order. Releasing the cross-key claim there would let
+   * a twin tab sign and broadcast a second deposit for an order still pending,
+   * so the claim holds through finality and releases only at the settled
+   * boundary — the same predicate the `?settled=` list filter uses, which the
+   * future authenticated provider reconciler will move for both at once.
    */
-  it("releases the claim for a provider-order deposit once its chain leg is final", async () => {
+  it("keeps the claim for a provider-order deposit even after its chain leg is final", async () => {
     const repository = createPostgresEarnMovementsRepository(getDb(env));
     const first = await depositIntoVault(
       env,
@@ -468,6 +470,17 @@ describe("depositIntoVault — idempotency", () => {
       toStatus: "confirmed",
       confirmedAt: new Date().toISOString(),
     });
+
+    // Still reversible: merely confirmed.
+    const confirmedTwin = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+    expect(confirmedTwin).toMatchObject({ replayed: true });
+    expect(confirmedTwin.movement.id).toBe(first.movement.id);
+
+    // Chain-final: the sweep stamps `chain_finalized_at`, the row REMAINS
+    // `confirmed`, and the claim must hold all the same.
     const finalized = await repository.recordVaultMovementChainFinalization({
       movementId: first.movement.id,
       organizationId: ORG,
@@ -475,47 +488,13 @@ describe("depositIntoVault — idempotency", () => {
     });
     expect(finalized?.chain_finalized_at).not.toBeNull();
 
-    signVaultPlan.mockResolvedValue({
-      bytes: new Uint8Array([2]),
-      signature: "sig_provider_order_released",
-      lastValidBlockHeight: "12345",
-    });
-    const second = await depositIntoVault(
+    const finalizedTwin = await depositIntoVault(
       env,
-      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+      depositInput({ provider: "wisdomtree", requestId: "33333333-3333-4333-8333-333333333333" })
     );
 
-    expect(second).toMatchObject({ replayed: false });
-    expect(second.movement.id).not.toBe(first.movement.id);
-    expect(await tableCount("earn_movements")).toBe(2);
-    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
-  });
-
-  /**
-   * The chain-final release must be a PROVIDER-ORDER fact, not a license to
-   * drop the atomic settlement boundary: a wisdomtree row that is still
-   * reversible (no `chain_finalized_at`) keeps its claim exactly as before.
-   */
-  it("keeps the claim for a provider-order deposit whose chain leg is still reversible", async () => {
-    const repository = createPostgresEarnMovementsRepository(getDb(env));
-    const first = await depositIntoVault(
-      env,
-      depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
-    );
-    await repository.advanceVaultMovement({
-      movementId: first.movement.id,
-      organizationId: ORG,
-      toStatus: "confirmed",
-      confirmedAt: new Date().toISOString(),
-    });
-
-    const second = await depositIntoVault(
-      env,
-      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
-    );
-
-    expect(second).toMatchObject({ replayed: true });
-    expect(second.movement.id).toBe(first.movement.id);
+    expect(finalizedTwin).toMatchObject({ replayed: true });
+    expect(finalizedTwin.movement.id).toBe(first.movement.id);
     expect(await tableCount("earn_movements")).toBe(1);
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
