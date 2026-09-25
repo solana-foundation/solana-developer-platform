@@ -681,7 +681,7 @@ export function summarizeAuthorityControl({
   controlKnown: boolean;
   t: Translate;
 }): AuthorityControlSummary {
-  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  const metadataAuthority = getTokenMetadataAuthority(token);
   const statuses = getPermissionRows(token, metadataAuthority, t).map((row) =>
     classifyAuthorityControl(
       getDisplayedAuthorityAddress({
@@ -849,6 +849,20 @@ export function resolveAuthorityAddressForRole(
     case "permanentDelegate":
       return token.extensions?.permanentDelegate ?? null;
   }
+}
+
+/**
+ * Metadata authority as displayed. A settled revocation (`metadataAuthorityRevoked`)
+ * means "no metadata authority": it must never be reconstructed from the mint
+ * authority, which would report a revoked capability as owned by the mint
+ * signer. The mint fallback applies only to legacy rows that never stored a
+ * separate metadata authority.
+ */
+export function getTokenMetadataAuthority(token: Token): string | null {
+  if (token.metadataAuthorityRevoked) {
+    return null;
+  }
+  return token.metadataAuthority ?? token.mintAuthority;
 }
 
 export function getSignerSelectionForAction({

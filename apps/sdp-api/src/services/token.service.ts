@@ -282,6 +282,13 @@ interface TokenRow {
   mint_address: string | null;
   mint_authority: string | null;
   metadata_authority: string | null;
+  /**
+   * Durable tri-state for metadata authority: 1 records a settled
+   * `role=metadata,newAuthority=null` revocation, so ordinary reads can tell
+   * "revoked" apart from legacy rows that never stored a separate authority
+   * (which keep the mint-authority fallback). 0 means not revoked.
+   */
+  metadata_authority_revoked: number;
   freeze_authority: string | null;
   abl_list_address: string | null;
   name: string;
@@ -537,6 +544,7 @@ export class TokenService {
       signingWalletId: input.signingWalletId ?? null,
       mintAddress: null,
       mintAuthority: null,
+      metadataAuthorityRevoked: false,
       freezeAuthority: null,
       ablListAddress: null,
       name: input.name,
@@ -626,7 +634,7 @@ export class TokenService {
     }
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, metadata_authority_revoked, freeze_authority,
                 signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -654,7 +662,7 @@ export class TokenService {
       : [];
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, metadata_authority_revoked, freeze_authority,
                 signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -724,7 +732,7 @@ export class TokenService {
     const tenant = this.tenantTokenScope();
     const row = await this.db
       .prepare(
-        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+        `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, metadata_authority_revoked, freeze_authority,
                 signing_custody_wallet_id, signing_wallet_id,
                 abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                 total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -802,7 +810,7 @@ export class TokenService {
         .first<{ count: number }>(),
       this.db
         .prepare(
-          `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, freeze_authority,
+          `SELECT id, project_id, organization_id, mint_address, mint_authority, metadata_authority, metadata_authority_revoked, freeze_authority,
                   signing_custody_wallet_id, signing_wallet_id,
                   abl_list_address, name, symbol, decimals, description, uri, image_url, template,
                   total_supply_cached, total_supply_updated_at, max_supply, is_mintable,
@@ -1179,8 +1187,8 @@ export class TokenService {
     }
 
     if (updates.metadataAuthority !== undefined) {
-      fields.push("metadata_authority = ?");
-      values.push(updates.metadataAuthority);
+      fields.push("metadata_authority = ?", "metadata_authority_revoked = ?");
+      values.push(updates.metadataAuthority, updates.metadataAuthority === null ? 1 : 0);
     }
 
     if (updates.freezeAuthority !== undefined) {
@@ -1326,6 +1334,7 @@ export class TokenService {
           mint_address = ?,
           mint_authority = ?,
           metadata_authority = ?,
+          metadata_authority_revoked = 0,
           freeze_authority = ?,
           abl_list_address = ?,
           status = 'active',
@@ -1996,13 +2005,19 @@ export class TokenService {
     }
 
     if (role === "metadata") {
+      // An explicit settled revocation (newAuthority = null) is recorded
+      // separately from the column's NULL so ordinary reads can tell "revoked"
+      // apart from legacy rows that never stored a separate authority. Without
+      // this marker the reads fall back to the mint authority and report a
+      // revoked metadata capability as owned by the mint signer (SOLA9-574).
+      // Granting a new authority clears the marker again.
       const updated = await tx
         .prepare(
           `UPDATE issued_tokens
-           SET metadata_authority = ?, updated_at = ?
+           SET metadata_authority = ?, metadata_authority_revoked = ?, updated_at = ?
            WHERE id = ?${tokenMutation.clause}`
         )
-        .bind(newAuthority, now, tokenId, ...tokenMutation.values)
+        .bind(newAuthority, newAuthority === null ? 1 : 0, now, tokenId, ...tokenMutation.values)
         .run();
       if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
 
@@ -3468,8 +3483,15 @@ export class TokenService {
       signingWalletId: row.signing_wallet_id,
       mintAddress: row.mint_address,
       mintAuthority: row.mint_authority,
+      // A settled revocation must read back as "no metadata authority" — never
+      // as the mint authority, which would resurrect a capability that no
+      // longer exists. The mint fallback applies only to legacy rows that were
+      // never explicitly set (metadata_authority IS NULL, not revoked).
+      metadataAuthorityRevoked: row.metadata_authority_revoked === 1,
       metadataAuthority:
-        extensionState.metadataAuthority ?? row.metadata_authority ?? row.mint_authority,
+        row.metadata_authority_revoked === 1
+          ? null
+          : (extensionState.metadataAuthority ?? row.metadata_authority ?? row.mint_authority),
       freezeAuthority: row.freeze_authority,
       ablListAddress: row.abl_list_address,
       name: row.name,

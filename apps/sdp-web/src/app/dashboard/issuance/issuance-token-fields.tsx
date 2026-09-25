@@ -33,6 +33,7 @@ import {
   findWalletByPublicKey,
   formatDate as formatDateLong,
   getDisplayedAuthorityAddress,
+  getTokenMetadataAuthority,
 } from "./[tokenId]/token-management-workspace.utils";
 import { type AccessControlMode, getTokenAccessControlMode } from "./access-control.utils";
 import type { AuthorityControl, AuthorityGlyphRow } from "./asset-overview-hero";
@@ -328,7 +329,7 @@ export function buildAuthorityGlyphRows(
   controlKnown: boolean,
   t: Translate
 ): AuthorityGlyphRow[] {
-  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  const metadataAuthority = getTokenMetadataAuthority(token);
   return AUTHORITY_ROLES.map((role) => {
     const address = getDisplayedAuthorityAddress({
       token,
