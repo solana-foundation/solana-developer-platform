@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 
@@ -11,12 +11,13 @@ const mocks = vi.hoisted(() => ({
   createAndVerifyPrincipalAction: vi.fn(),
   routerPush: vi.fn(),
   routerRefresh: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mocks.routerPush, refresh: mocks.routerRefresh }),
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: mocks.toastError } }));
 vi.mock("../actions", () => ({
   createAndVerifyPrincipalAction: mocks.createAndVerifyPrincipalAction,
 }));
@@ -52,6 +53,15 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
 
 afterEach(cleanup);
 
+// The mocks are module-level, so without a reset each test would inherit the
+// previous test's calls and once-implementations.
+beforeEach(() => {
+  mocks.createAndVerifyPrincipalAction.mockReset();
+  mocks.routerPush.mockReset();
+  mocks.routerRefresh.mockReset();
+  mocks.toastError.mockReset();
+});
+
 describe("PrincipalCreatePage lost-response resume", () => {
   it("keeps the ordinary retry disabled while the resume choice waits for confirmation", async () => {
     const user = userEvent.setup();
@@ -82,6 +92,49 @@ describe("PrincipalCreatePage lost-response resume", () => {
         projectId: "project_rendered",
         resumePrincipalId: "pcp_lost",
       })
+    );
+  });
+
+  it("marks a lost first response and sends the attested retry before offering the resume", async () => {
+    const user = userEvent.setup();
+    mocks.createAndVerifyPrincipalAction
+      .mockRejectedValueOnce(new Error("connection lost"))
+      .mockResolvedValueOnce({
+        ok: false,
+        message: "Your previous attempt may have created identity “Mia”.",
+        resumeCandidates: ["pcp_lost"],
+      })
+      .mockResolvedValueOnce({ ok: true, wallet: { id: "pcvw_1", walletId: "wallet_1" } });
+    renderPage();
+
+    await fillAndSubmit(user);
+
+    // The first submission's response is lost outright: the wizard reports
+    // the interruption and marks the response lost so the retry attests it
+    // instead of silently creating a duplicate principal.
+    await screen.findByRole("button", { name: "Retry verification" });
+    expect(mocks.createAndVerifyPrincipalAction).toHaveBeenCalledTimes(1);
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "The connection was interrupted before the result arrived. Retry to finish creating this identity."
+    );
+
+    await user.click(screen.getByRole("button", { name: "Retry verification" }));
+    expect(mocks.createAndVerifyPrincipalAction).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ name: "Mia", walletId: "wallet_1", isRetry: true })
+    );
+
+    // The retry surfaces the resume choice and writes nothing: the ordinary
+    // retry is disabled and only the callout's "Resume identity" confirms.
+    await screen.findByRole("button", { name: "Resume identity" });
+    expect(
+      screen.getByRole("button", { name: "Retry verification" }).hasAttribute("disabled")
+    ).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Resume identity" }));
+    await waitFor(() => expect(mocks.routerPush).toHaveBeenCalled());
+    expect(mocks.createAndVerifyPrincipalAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ resumePrincipalId: "pcp_lost" })
     );
   });
 
