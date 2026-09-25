@@ -579,7 +579,25 @@ async function settleTransferExecutionFailure(
   const submitted = await recorder.submittedRow();
   if (submitted && !isDefiniteExecutionFailure(error)) {
     logSubmittedUnconfirmed(transfer, submitted.signature, error);
-    return success(c, toPayload(submitted));
+    // The cached submitted row is stale the moment a concurrent writer — the
+    // reconciliation job, a replayed submission — settles the transfer.
+    // Re-answer through the processing-guarded update: an unresolved transfer
+    // stays processing, and a transfer whose chain verdict already landed
+    // returns that fresh verdict row so the caller never acts on an older
+    // state than the authoritative record.
+    const probed = await updateTransferRecord(c, transfer, { status: "processing" });
+    if (probed.outcome === "settled_concurrently") {
+      const settled = resolveTransferUpdateResult(probed);
+      if (settled.status === "failed") {
+        // Reconciliation recorded an on-chain failure; surface it through the
+        // same error contract as the definite-failure settlement below so the
+        // audit ledger closes the intent with its failure outcome.
+        throw mapTransferExecutionError(error);
+      }
+      await onConcurrentChainVerdict?.(settled);
+      return success(c, toPayload(settled));
+    }
+    return success(c, toPayload(probed.row));
   }
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const settled = resolveTransferUpdateResult(
