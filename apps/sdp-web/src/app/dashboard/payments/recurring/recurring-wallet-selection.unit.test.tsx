@@ -463,4 +463,49 @@ describe("Recurring Payment exact source selection", () => {
       expect(within(editor).queryByText(/USDC/)).toBeNull();
     });
   });
+
+  it("shows a saved currency that is no longer eligible instead of an empty picker", async () => {
+    const pausedIssuedMint = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+    const holder = {
+      ...source,
+      balances: [
+        { token: "HALT", mint: pausedIssuedMint, amount: "5", uiAmount: "5", decimals: 6 },
+      ],
+    };
+    const saved = { ...recurring, token: pausedIssuedMint };
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      if (String(input).includes("/wallets?"))
+        return Response.json({ data: { wallets: [holder] } });
+      return Response.json({ data: { wallets: [holder], recurringPayment: saved } });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={saved}
+        wallet={holder}
+        wallets={[holder]}
+        issuedTokensByMint={{
+          [pausedIssuedMint]: {
+            id: "tok_halt",
+            mintAddress: pausedIssuedMint,
+            symbol: "HALT",
+            imageUrl: null,
+            status: "paused",
+          },
+        }}
+        counterpartyAccounts={[]}
+        counterpartyLabel="Receiver"
+        amountLabel="1 HALT"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    const editor = screen.getByRole("dialog", { name: "Edit payment" });
+
+    expect(within(editor).getByText("HALT")).toBeTruthy();
+    expect(within(editor).queryByText("Select a currency")).toBeNull();
+  });
 });

@@ -5,6 +5,7 @@ import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
   eligibleRecurringPaymentAssets,
   fallbackRecurringPaymentToken,
+  recurringPaymentCurrencyOptions,
 } from "./recurring-payment-assets";
 
 const DEVNET_USDC = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
@@ -63,5 +64,29 @@ describe("fallbackRecurringPaymentToken", () => {
 
   it("clears the token when nothing is offered", () => {
     expect(fallbackRecurringPaymentToken(DEVNET_USDC, [])).toBe("");
+  });
+});
+
+describe("recurringPaymentCurrencyOptions", () => {
+  const eligible = [option(DEVNET_USDC)];
+  const savedToken = { value: ISSUED_MINT, label: "ITT", badge: "Current" };
+
+  it("keeps a saved token that is no longer offered visible while it is selected", () => {
+    expect(
+      recurringPaymentCurrencyOptions({ eligible, selectedToken: ISSUED_MINT, savedToken })
+    ).toEqual([option(DEVNET_USDC), savedToken]);
+  });
+
+  it("drops the saved token once another currency is selected", () => {
+    expect(
+      recurringPaymentCurrencyOptions({ eligible, selectedToken: DEVNET_USDC, savedToken })
+    ).toEqual(eligible);
+  });
+
+  it("does not duplicate a saved token that is still offered", () => {
+    const offered = [option(DEVNET_USDC), option(ISSUED_MINT)];
+    expect(
+      recurringPaymentCurrencyOptions({ eligible: offered, selectedToken: ISSUED_MINT, savedToken })
+    ).toEqual(offered);
   });
 });

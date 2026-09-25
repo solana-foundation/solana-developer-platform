@@ -55,6 +55,7 @@ import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wal
 import {
   eligibleRecurringPaymentAssets,
   fallbackRecurringPaymentToken,
+  recurringPaymentCurrencyOptions,
 } from "./recurring-payment-assets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
 import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
@@ -452,6 +453,11 @@ export function RecurringPaymentDetailWorkspace({
   const issuedTokenSymbolsByMint = Object.fromEntries(
     Object.values(issuedTokensByMint).map((token) => [token.mintAddress, token.symbol])
   );
+  const resolvedToken = resolveTokenByMint(
+    recurringPayment.token,
+    issuedTokensByMint,
+    resolveTokenLabel(recurringPayment.token, wallets)
+  );
   // Currency options follow the wallet the editor will actually fund from and
   // list only mints the save accepts, so every visible choice sticks.
   const editorAssetOptions = (entry: RecurringPaymentWalletView | null) =>
@@ -460,7 +466,15 @@ export function RecurringPaymentDetailWorkspace({
       issuedTokensByMint,
       sdpEnvironment
     );
-  const assetOptions = editorAssetOptions(selectedWallet ?? null);
+  const assetOptions = recurringPaymentCurrencyOptions({
+    eligible: editorAssetOptions(selectedWallet ?? null),
+    selectedToken,
+    savedToken: {
+      value: recurringPayment.token,
+      label: resolvedToken.tokenName,
+      badge: t("Shared.SharedComponents.current"),
+    },
+  });
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -619,12 +633,6 @@ export function RecurringPaymentDetailWorkspace({
       setSavingPayment(false);
     }
   };
-
-  const resolvedToken = resolveTokenByMint(
-    recurringPayment.token,
-    issuedTokensByMint,
-    resolveTokenLabel(recurringPayment.token, wallets)
-  );
 
   return (
     <DashboardWorkspaceOverviewPanel>

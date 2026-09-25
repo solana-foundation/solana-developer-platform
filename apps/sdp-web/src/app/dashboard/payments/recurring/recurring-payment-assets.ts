@@ -35,3 +35,23 @@ export function eligibleRecurringPaymentAssets(
 export function fallbackRecurringPaymentToken(token: string, eligible: ComboboxOption[]): string {
   return eligible.some((asset) => asset.value === token) ? token : (eligible[0]?.value ?? "");
 }
+
+/**
+ * The eligible assets plus the payment's saved token while it is still selected,
+ * even if it is no longer offered, so an unrelated edit never hides the currency
+ * the payment keeps.
+ */
+export function recurringPaymentCurrencyOptions(input: {
+  eligible: ComboboxOption[];
+  selectedToken: string;
+  savedToken: ComboboxOption;
+}): ComboboxOption[] {
+  const { eligible, selectedToken, savedToken } = input;
+  if (
+    selectedToken !== savedToken.value ||
+    eligible.some((asset) => asset.value === selectedToken)
+  ) {
+    return eligible;
+  }
+  return [...eligible, savedToken];
+}
