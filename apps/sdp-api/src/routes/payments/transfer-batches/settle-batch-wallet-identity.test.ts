@@ -144,23 +144,12 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
     await clearKVStores(env);
   });
 
-  /**
-   * Seeds one linked processing batch/chunk pair through the real production
-   * writers, then applies `shape` to simulate a persisted legacy identity
-   * state (nulling custody ids reproduces pre-0068 ambiguous rows).
-   */
-  async function seedLinkedProcessingRows(params: {
-    label: string;
-    batchCustodyWalletId: string | null;
-    transferCustodyWalletId: string | null;
-    batchProviderWalletId: string;
-    batchSourceAddress: string;
-    transferProviderWalletId: string;
-    transferSourceAddress: string;
-  }): Promise<{ batchId: string; transferId: string }> {
+  async function seedCounterparty(
+    label: string
+  ): Promise<{ counterpartyId: string; accountId: string }> {
     const db = getDb(env);
-    const counterpartyId = `cpty_${params.label}`;
-    const accountId = `cpacct_${params.label}`;
+    const counterpartyId = `cpty_${label}`;
+    const accountId = `cpacct_${label}`;
     await db.batch([
       db
         .prepare(
@@ -169,7 +158,7 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
               display_name, provider_data, created_by)
            VALUES (?, ?, ?, ?, 'individual', ?, '{}'::jsonb, ?)`
         )
-        .bind(counterpartyId, organizationId, projectId, params.label, params.label, userId),
+        .bind(counterpartyId, organizationId, projectId, label, label, userId),
       db
         .prepare(
           `INSERT INTO counterparty_accounts
@@ -182,13 +171,28 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
           organizationId,
           projectId,
           counterpartyId,
-          params.label,
+          label,
           JSON.stringify({ network: "solana", address: destinationAddress })
         ),
     ]);
+    return { counterpartyId, accountId };
+  }
 
-    const batchRepository = createPostgresPaymentTransferBatchesRepository(db);
-    const { batch, recipients } = await batchRepository.createTransferBatchWithRecipients({
+  /**
+   * Seeds one processing batch with one recipient through the real production
+   * writer, then applies the persisted legacy identity shape (`null` batch
+   * custody id reproduces pre-0068 ambiguous rows).
+   */
+  async function createProcessingBatch(params: {
+    batchCustodyWalletId: string | null;
+    batchProviderWalletId: string;
+    batchSourceAddress: string;
+    counterpartyId: string;
+    accountId: string;
+  }): Promise<{ batchId: string; recipientId: string }> {
+    const { batch, recipients } = await createPostgresPaymentTransferBatchesRepository(
+      getDb(env)
+    ).createTransferBatchWithRecipients({
       batch: {
         organizationId,
         projectId,
@@ -207,8 +211,8 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
         {
           organizationId,
           projectId,
-          counterpartyId,
-          counterpartyAccountId: accountId,
+          counterpartyId: params.counterpartyId,
+          counterpartyAccountId: params.accountId,
           destinationAddress,
           amount: "1",
           status: "processing",
@@ -217,6 +221,27 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
       ],
     });
 
+    if (params.batchCustodyWalletId === null) {
+      await getDb(env)
+        .prepare(`UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?`)
+        .bind(batch.id)
+        .run();
+    }
+
+    return { batchId: batch.id, recipientId: recipients[0].id };
+  }
+
+  /**
+   * Seeds one processing chunk transfer through the real production writer,
+   * then applies the persisted legacy identity shape (`null` transfer custody
+   * id reproduces pre-0068 ambiguous rows).
+   */
+  async function createProcessingChunkTransfer(params: {
+    transferCustodyWalletId: string | null;
+    transferProviderWalletId: string;
+    transferSourceAddress: string;
+    counterpartyId: string | null;
+  }): Promise<string> {
     const transferId = generatePaymentTransferId();
     const transfer = await createPaymentsRepository(env, scope).createTransfer({
       id: transferId,
@@ -224,7 +249,7 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
       projectId,
       custodyWalletId: params.transferCustodyWalletId ?? transferWalletId,
       walletId: params.transferProviderWalletId,
-      counterpartyId,
+      counterpartyId: params.counterpartyId,
       sourceAddress: params.transferSourceAddress,
       destinationAddress,
       token: "SOL",
@@ -246,29 +271,59 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
     });
     expect(transfer?.id).toBe(transferId);
 
-    await batchRepository.updateTransferRecipientsStatus({
-      recipientIds: [recipients[0].id],
-      organizationId,
-      projectId,
-      transferId,
-      status: "processing",
-      error: null,
-    });
-
-    if (params.batchCustodyWalletId === null) {
-      await db
-        .prepare(`UPDATE payment_transfer_batches SET source_custody_wallet_id = NULL WHERE id = ?`)
-        .bind(batch.id)
-        .run();
-    }
     if (params.transferCustodyWalletId === null) {
-      await db
+      await getDb(env)
         .prepare(`UPDATE payment_transfers SET custody_wallet_id = NULL WHERE id = ?`)
         .bind(transferId)
         .run();
     }
 
-    return { batchId: batch.id, transferId };
+    return transferId;
+  }
+
+  async function linkRecipientToTransfer(recipientId: string, transferId: string): Promise<void> {
+    await createPostgresPaymentTransferBatchesRepository(getDb(env)).updateTransferRecipientsStatus(
+      {
+        recipientIds: [recipientId],
+        organizationId,
+        projectId,
+        transferId,
+        status: "processing",
+        error: null,
+      }
+    );
+  }
+
+  /**
+   * Seeds one linked processing batch/chunk pair through the real production
+   * writers, then applies the persisted legacy identity shape to either side.
+   */
+  async function seedLinkedProcessingRows(params: {
+    label: string;
+    batchCustodyWalletId: string | null;
+    transferCustodyWalletId: string | null;
+    batchProviderWalletId: string;
+    batchSourceAddress: string;
+    transferProviderWalletId: string;
+    transferSourceAddress: string;
+  }): Promise<{ batchId: string; transferId: string }> {
+    const { counterpartyId, accountId } = await seedCounterparty(params.label);
+    const batch = await createProcessingBatch({
+      batchCustodyWalletId: params.batchCustodyWalletId,
+      batchProviderWalletId: params.batchProviderWalletId,
+      batchSourceAddress: params.batchSourceAddress,
+      counterpartyId,
+      accountId,
+    });
+    const transferId = await createProcessingChunkTransfer({
+      transferCustodyWalletId: params.transferCustodyWalletId,
+      transferProviderWalletId: params.transferProviderWalletId,
+      transferSourceAddress: params.transferSourceAddress,
+      counterpartyId,
+    });
+    await linkRecipientToTransfer(batch.recipientId, transferId);
+
+    return { batchId: batch.batchId, transferId };
   }
 
   async function linkedRows(batchId: string) {
@@ -354,6 +409,102 @@ describe("settleTransferBatch custody-wallet identity fence", () => {
 
     const after = await linkedRows(mismatched.batchId);
     expect(after).toMatchObject({
+      batch_status: "processing",
+      recipient_status: "processing",
+      transfer_status: "processing",
+    });
+  });
+
+  it("refuses to settle a linked chunk whose batch source custody wallet is unresolved while the transfer's is pinned", async () => {
+    const oneSided = await seedLinkedProcessingRows({
+      label: "regression_batch_null",
+      batchCustodyWalletId: null,
+      transferCustodyWalletId: transferWalletId,
+      batchProviderWalletId: legacyNullProviderWalletId,
+      batchSourceAddress: legacyNullAddress,
+      transferProviderWalletId,
+      transferSourceAddress: transferAddress,
+    });
+
+    await expect(
+      settle({ transferId: oneSided.transferId, transferStatus: "confirmed" })
+    ).rejects.toThrow(
+      "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+    );
+
+    const after = await linkedRows(oneSided.batchId);
+    expect(after).toMatchObject({
+      source_custody_wallet_id: null,
+      batch_status: "processing",
+      recipient_status: "processing",
+      custody_wallet_id: transferWalletId,
+      transfer_status: "processing",
+    });
+  });
+
+  it("refuses to settle a linked chunk whose transfer custody wallet is unresolved while the batch source is pinned", async () => {
+    const oneSided = await seedLinkedProcessingRows({
+      label: "regression_transfer_null",
+      batchCustodyWalletId: parentWalletId,
+      transferCustodyWalletId: null,
+      batchProviderWalletId: parentProviderWalletId,
+      batchSourceAddress: parentAddress,
+      transferProviderWalletId: legacyNullProviderWalletId,
+      transferSourceAddress: legacyNullAddress,
+    });
+
+    await expect(
+      settle({ transferId: oneSided.transferId, transferStatus: "failed" })
+    ).rejects.toThrow(
+      "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+    );
+
+    const after = await linkedRows(oneSided.batchId);
+    expect(after).toMatchObject({
+      source_custody_wallet_id: parentWalletId,
+      batch_status: "processing",
+      recipient_status: "processing",
+      custody_wallet_id: null,
+      transfer_status: "processing",
+    });
+  });
+
+  it("refuses to settle a chunk transfer whose recipients span matched and mismatched batches", async () => {
+    const matchedCounterparty = await seedCounterparty("mixed_link_match");
+    const matchedBatch = await createProcessingBatch({
+      batchCustodyWalletId: matchedWalletId,
+      batchProviderWalletId: matchedProviderWalletId,
+      batchSourceAddress: matchedAddress,
+      counterpartyId: matchedCounterparty.counterpartyId,
+      accountId: matchedCounterparty.accountId,
+    });
+    const mismatchedCounterparty = await seedCounterparty("mixed_link_mismatch");
+    const mismatchedBatch = await createProcessingBatch({
+      batchCustodyWalletId: parentWalletId,
+      batchProviderWalletId: parentProviderWalletId,
+      batchSourceAddress: parentAddress,
+      counterpartyId: mismatchedCounterparty.counterpartyId,
+      accountId: mismatchedCounterparty.accountId,
+    });
+    const transferId = await createProcessingChunkTransfer({
+      transferCustodyWalletId: matchedWalletId,
+      transferProviderWalletId: matchedProviderWalletId,
+      transferSourceAddress: matchedAddress,
+      counterpartyId: matchedCounterparty.counterpartyId,
+    });
+    await linkRecipientToTransfer(matchedBatch.recipientId, transferId);
+    await linkRecipientToTransfer(mismatchedBatch.recipientId, transferId);
+
+    await expect(settle({ transferId, transferStatus: "confirmed" })).rejects.toThrow(
+      "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+    );
+
+    expect(await linkedRows(matchedBatch.batchId)).toMatchObject({
+      batch_status: "processing",
+      recipient_status: "processing",
+      transfer_status: "processing",
+    });
+    expect(await linkedRows(mismatchedBatch.batchId)).toMatchObject({
       batch_status: "processing",
       recipient_status: "processing",
       transfer_status: "processing",

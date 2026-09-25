@@ -804,6 +804,31 @@ export function createPostgresPaymentTransferBatchesRepository(
         }
         const transferCustodyWalletId = claimed.results[0].custody_wallet_id;
 
+        const mismatchedLink = await tx
+          .prepare(
+            `SELECT batch.id
+               FROM payment_transfer_recipients recipient
+               JOIN payment_transfer_batches batch
+                 ON batch.id = recipient.batch_id
+                AND batch.organization_id = recipient.organization_id
+                AND batch.project_id IS NOT DISTINCT FROM recipient.project_id
+              WHERE recipient.transfer_id = ?
+                AND recipient.organization_id = ?
+                AND recipient.project_id IS NOT DISTINCT FROM ?
+                AND recipient.status = 'processing'
+                AND batch.status <> 'archived'
+                AND batch.source_custody_wallet_id IS DISTINCT FROM ?
+              LIMIT 1`
+          )
+          .bind(input.transferId, input.organizationId, input.projectId, transferCustodyWalletId)
+          .first<{ id: string }>();
+
+        if (mismatchedLink) {
+          throw internalError(
+            "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+          );
+        }
+
         const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
         const recipients = await tx
           .prepare(
