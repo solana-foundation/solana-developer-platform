@@ -482,6 +482,9 @@ describe("provisionApiKeyWallet", () => {
     expect(createConfigWalletMock).toHaveBeenCalledWith(ORGANIZATION_ID, PROJECT_ID, {
       label: undefined,
       purpose: undefined,
+      auditContext: expect.anything(),
+      creationReason: "api_key",
+      reuseUnboundProvisionedWallet: true,
     });
     const body = (await response.json()) as { data: { apiKey: { id: string } } };
     expect(

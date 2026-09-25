@@ -54,6 +54,8 @@ import type { CustodyWalletPurpose } from "@sdp/types";
 export type WalletPurpose = CustodyWalletPurpose;
 
 export interface CreateWalletParams {
+  /** Pre-allocated custody wallet row id, so audit intents can name it before provider I/O. */
+  id?: string;
   walletId: string;
   publicKey: string;
   label?: string;
@@ -415,7 +417,7 @@ export class CustodyConfigStore implements SigningConfigStore {
    * Create a wallet record associated with a custody config.
    */
   async createWallet(configId: string, params: CreateWalletParams): Promise<CustodyConfigWallet> {
-    const id = `cwlt_${crypto.randomUUID()}`;
+    const id = params.id ?? `cwlt_${crypto.randomUUID()}`;
 
     const statements: PreparedStatement[] = [
       this.db

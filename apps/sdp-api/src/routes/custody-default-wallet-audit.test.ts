@@ -357,7 +357,7 @@ describe("default wallet audit admission", () => {
     });
   });
 
-  it("creates a Config wallet without setDefault and without an audit record", async () => {
+  it("creates a Config wallet without setDefault behind a custody_wallet audit intent and outcome", async () => {
     const response = await createConfigWallet({});
 
     expect(response.status).toBe(201);
@@ -384,7 +384,45 @@ describe("default wallet audit admission", () => {
       status: "active",
     });
     expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
-    expect(await readAuditRows()).toEqual([]);
+    const rows = await readAuditRows();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      api_key_id: apiKey,
+      action: "maintenance",
+      resource_type: "audit_ledger",
+      metadata: {
+        auditPhase: "intent",
+        target: {
+          action: "create",
+          resourceType: "custody_wallet",
+          resourceId: body.data.wallet.id,
+          metadata: {
+            event: "custody_wallet_created",
+            projectId: project,
+            provider: "privy",
+            custodyConfigId: config,
+            custodyWalletId: body.data.wallet.id,
+            creationReason: "wallet_api",
+            setDefault: false,
+          },
+        },
+      },
+    });
+    expect(rows[1]).toMatchObject({
+      api_key_id: apiKey,
+      action: "create",
+      resource_type: "custody_wallet",
+      resource_id: body.data.wallet.id,
+      status: "success",
+      metadata: {
+        auditPhase: "outcome",
+        auditIntentId: rows[0]?.resource_id,
+        event: "custody_wallet_created",
+        result: "created",
+        walletId: "privy_config_new",
+        publicKey: "SysvarRent111111111111111111111111111111111",
+      },
+    });
   });
 
   it("does not create or promote a Config wallet if audit admission fails", async () => {
