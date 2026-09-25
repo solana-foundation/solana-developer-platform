@@ -201,6 +201,34 @@ describe("useDvpCreateSubmit idempotency key", () => {
     expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
   });
 
+  // Restoring the terms of an unresolved create must find that request still
+  // pending: replaying it under its original key asks the server what became
+  // of it, while a fresh key would create a second copy of the same trade
+  // while the first may still be broadcasting.
+  it("replays the original key when the edited terms are restored while the first create is unresolved", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request({ amountA: "1500" }));
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(keyOf(fetchMock, 2)).toBe(keyOf(fetchMock, 0));
+    expect(keyOf(fetchMock, 1)).not.toBe(keyOf(fetchMock, 0));
+  });
+
   it("rotates the key once a trade was created, so identical terms make a second trade", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

@@ -59,30 +59,30 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One key per logical request. It rotates only once the create transaction
-  // is confirmed, so a second trade on the same terms is a new request rather
-  // than a replay of the first. Every other outcome keeps it: a throw or a
-  // server error may have left the first attempt broadcasting, and the retry
-  // has to replay it rather than draw a second trade at a second address; a
-  // rejection stored nothing, so the key is still free; and a replay of a
-  // create still in flight is that same logical request, not a finished one.
-  const idempotencyKey = useRef<string | null>(null);
-  // The exact body the current key was minted for, so a kept key stays bound to
-  // its own request: an unchanged retry replays the pending create, while
-  // edited terms are a new logical request. Sending edited terms under the old
-  // key would make the server refuse them as a payload conflict, dead-ending
-  // the retry the form just offered.
-  const keyRequestBody = useRef<string | null>(null);
-  // Minted on first use rather than as the ref's initial value, which would draw
-  // (and throw away) fresh random bytes on every render.
+  // One key per logical request, and a key rotates only once its create
+  // transaction is confirmed: a second trade on the same terms is then a new
+  // request rather than a replay of the first. Every other outcome keeps the
+  // key: a throw or a server error may have left the first attempt
+  // broadcasting, and the retry has to replay it rather than draw a second
+  // trade at a second address; a rejection stored nothing, so the key is
+  // still free; and a replay of a create still in flight is that same logical
+  // request, not a finished one.
+  const unresolvedKeys = useRef(new Map<string, string>());
+  // Keyed by the exact body, and kept per request rather than stored singly:
+  // edited terms are a new logical request (sending them under the old key
+  // would make the server refuse them as a payload conflict, dead-ending the
+  // retry the form just offered), but switching away and back must find the
+  // first request still unresolved — restoring the terms replays it under its
+  // original key instead of drawing a second copy of that trade.
+  // Minted on first use rather than eagerly, which would draw (and throw
+  // away) fresh random bytes on every render.
   function currentIdempotencyKey(body: string): string {
-    const existing = idempotencyKey.current;
-    if (existing !== null && keyRequestBody.current === body) {
+    const existing = unresolvedKeys.current.get(body);
+    if (existing !== undefined) {
       return existing;
     }
     const minted = freshDvpIdempotencyKey("dvp-create");
-    idempotencyKey.current = minted;
-    keyRequestBody.current = body;
+    unresolvedKeys.current.set(body, minted);
     return minted;
   }
 
@@ -159,9 +159,9 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         setError(t("DashboardMarkets.dvp.createPending"));
         return;
       }
-      // The next submit mints a new key: a second trade on the same terms is a new request.
-      idempotencyKey.current = null;
-      keyRequestBody.current = null;
+      // This create is resolved: its key is spent, and a repeat of the same
+      // terms is a new request.
+      unresolvedKeys.current.delete(body);
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement
