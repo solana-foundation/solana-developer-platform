@@ -1675,7 +1675,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
-            "description": "Updates mutable subscription plan fields and on-chain identifiers.",
+            "description": "Updates mutable subscription plan fields and on-chain identifiers. Once a plan has been prepared for on-chain creation, its destination and plan PDA are fixed; puller, metadata, and status edits are accepted only after the matching update is confirmed in the on-chain subscriptions program. Destination changes require a replacement plan.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
@@ -1804,7 +1804,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
-            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The receiver token account must be the associated token account of an on-chain plan destination, and the request is validated against the authoritative on-chain plan before the transaction is built. The transaction must still be signed and submitted by the collector/fee-payer flow.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",

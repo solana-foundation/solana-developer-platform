@@ -8,7 +8,7 @@ import type {
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
-import { getCreatePlanOverlayInstructionAsync } from "@solana/subscriptions";
+import { getCreatePlanOverlayInstructionAsync, PlanStatus } from "@solana/subscriptions";
 import { z } from "zod";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -21,7 +21,9 @@ import { normalizePaymentToken, parseU64String } from "@/services/payment-operat
 import {
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
+  fetchLiveSubscriptionPlan,
   resolvePlanRuntime,
+  subscriptionProgramMetadataUri,
 } from "@/services/payments/recurring-payments/shared";
 import {
   type AppContext,
@@ -282,6 +284,87 @@ export const prepareCreateSubscriptionPlan = async (
   return success(c, response);
 };
 
+/**
+ * A live plan (one prepared for on-chain creation) is bound to the consent the
+ * subscriptions program enforces on-chain. The program's UpdatePlan has no
+ * destination field and rejects term mismatches, so SDP may only persist an
+ * edit after the chain confirms it; destination changes require a replacement
+ * plan (SOLA9-634).
+ */
+async function assertLivePlanPatchMatchesChain(
+  c: AppContext,
+  existingPlan: PaymentSubscriptionPlanRow,
+  requested: {
+    planPda: string | null | undefined;
+    destinationAddress: string | null | undefined;
+    pullerAddress: string | null | undefined;
+    metadataUri: string | null | undefined;
+    status: string | undefined;
+  }
+): Promise<void> {
+  if (!existingPlan.plan_pda) {
+    // Draft plan: no on-chain consent exists yet, so every field stays editable.
+    return;
+  }
+
+  const planPda = assertValidAddress(existingPlan.plan_pda, "planPda");
+  if (requested.planPda !== undefined && requested.planPda !== existingPlan.plan_pda) {
+    throw badRequest("Subscription plan PDA is derived on-chain and cannot be reassigned");
+  }
+
+  if (
+    requested.destinationAddress !== undefined &&
+    requested.destinationAddress !== existingPlan.destination_address
+  ) {
+    throw badRequest(
+      "Subscription plan destination is fixed by the on-chain plan; create a replacement plan to collect at a new destination"
+    );
+  }
+
+  const statusChanged = requested.status !== undefined && requested.status !== existingPlan.status;
+  const pullerChanged =
+    requested.pullerAddress !== undefined &&
+    requested.pullerAddress !== existingPlan.puller_address;
+  const metadataChanged =
+    requested.metadataUri !== undefined && requested.metadataUri !== existingPlan.metadata_uri;
+  if (!statusChanged && !pullerChanged && !metadataChanged) {
+    return;
+  }
+
+  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, planPda);
+
+  if (statusChanged && requested.status === "active") {
+    if (!onChainPlan || onChainPlan.status !== PlanStatus.Active) {
+      throw badRequest(
+        "Subscription plan cannot be activated before its on-chain plan is confirmed active"
+      );
+    }
+  }
+
+  if (statusChanged && requested.status === "archived") {
+    if (onChainPlan && onChainPlan.status !== PlanStatus.Sunset) {
+      throw badRequest(
+        "Subscription plan cannot be archived while its on-chain plan is still active"
+      );
+    }
+  }
+
+  if (pullerChanged) {
+    // Collection executes as the configured puller, falling back to the owner.
+    const callerAfterUpdate = requested.pullerAddress ?? existingPlan.owner_address;
+    if (!onChainPlan?.data.pullers.includes(callerAfterUpdate as Address)) {
+      throw badRequest("Subscription plan puller must first be confirmed on the on-chain plan");
+    }
+  }
+
+  if (metadataChanged) {
+    const requestedMetadataUri = subscriptionProgramMetadataUri(requested.metadataUri ?? null);
+    if (!onChainPlan || onChainPlan.data.metadataUri !== requestedMetadataUri) {
+      throw badRequest("Subscription plan metadata must first be confirmed on the on-chain plan");
+    }
+  }
+}
+
 export const updateSubscriptionPlan = async (
   c: ValidatedBodyContext<typeof updateSubscriptionPlanSchema>
 ) => {
@@ -311,6 +394,13 @@ export const updateSubscriptionPlan = async (
   assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
+  await assertLivePlanPatchMatchesChain(c, existingPlan, {
+    planPda: body.planPda,
+    destinationAddress: body.destinationAddress,
+    pullerAddress: puller.pullerAddress,
+    metadataUri: body.metadataUri,
+    status: body.status,
+  });
   const updated = await repo.updatePlan({
     planId: params.data.planId,
     organizationId: auth.organizationId,

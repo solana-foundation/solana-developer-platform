@@ -656,7 +656,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
-    description: "Updates mutable subscription plan fields and on-chain identifiers.",
+    description:
+      "Updates mutable subscription plan fields and on-chain identifiers. Once a plan has been prepared for on-chain creation, its destination and plan PDA are fixed; puller, metadata, and status edits are accepted only after the matching update is confirmed in the on-chain subscriptions program. Destination changes require a replacement plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -806,7 +807,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
-      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The receiver token account must be the associated token account of an on-chain plan destination, and the request is validated against the authoritative on-chain plan before the transaction is built. The transaction must still be signed and submitted by the collector/fee-payer flow.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

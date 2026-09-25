@@ -64,7 +64,7 @@ export const createOrgSignerForCustodyWalletMock = vi.spyOn(
   "createOrgSignerForCustodyWallet"
 );
 
-const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
+export const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
 const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
   subscriptionsProgram,
@@ -558,12 +558,22 @@ export function installPaymentsRouteTestHooks(): void {
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
       data: {
+        discriminator: 0,
+        owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+        bump: 255,
         status: subscriptionsProgram.PlanStatus.Active,
         data: {
+          planId: 1n,
+          mint: address(DEVNET_USDC_MINT),
+          terms: {
+            amount: 25_000_000n,
+            periodHours: 720n,
+            createdAt: 1_770_000_000n,
+          },
           endTs: 0n,
-          metadataUri: "",
+          destinations: [address(TEST_SOLANA_ADDRESSES.wallet3)],
           pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
-          terms: { createdAt: 1_770_000_000n },
+          metadataUri: "",
         },
       },
     } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
