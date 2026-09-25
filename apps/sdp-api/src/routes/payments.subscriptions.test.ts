@@ -1,4 +1,6 @@
-import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
+import { address, getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
+import type * as subscriptionsProgram from "@solana/subscriptions";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresPaymentSubscriptionsRepository } from "@/db/repositories/payment-subscriptions.repository.postgres";
@@ -19,6 +21,8 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
+  fetchMaybePlanMock,
+  installDefaultFetchMaybePlanMock,
   installPaymentsRouteTestHooks,
   mockTokenSupplyDecimalsOnce,
   seedCachedKey,
@@ -32,6 +36,16 @@ const SUBSCRIPTION_HEADERS = {
   Authorization: "Bearer sk_test_payments_policy",
   "Content-Type": "application/json",
 };
+
+const SPL_TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+const TEST_DESTINATION_TOKEN_ACCOUNT = (
+  await findAssociatedTokenPda({
+    mint: address(DEVNET_USDC_MINT),
+    owner: address(TEST_SOLANA_ADDRESSES.wallet3),
+    tokenProgram: address(SPL_TOKEN_PROGRAM),
+  })
+)[0];
 
 const TEST_COUNTERPARTY_IDENTITY = {
   firstName: "Ada",
@@ -275,6 +289,11 @@ describe("Payments routes — subscriptions", () => {
     expect(draftPlansBody.data.subscriptionPlans.map((plan) => plan.id)).toContain(planId);
     expect(draftPlansBody.data.total).toBe(1);
 
+    // True draft: no plan exists yet at the PDA derived from the record.
+    fetchMaybePlanMock.mockResolvedValue({
+      exists: false,
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+
     const updatePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
       {
@@ -301,6 +320,9 @@ describe("Payments routes — subscriptions", () => {
       status: "active",
     });
 
+    // The remainder of the lifecycle reads the shared on-chain plan fixture.
+    installDefaultFetchMaybePlanMock();
+
     const getPlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
       {
@@ -319,6 +341,10 @@ describe("Payments routes — subscriptions", () => {
     });
 
     mockTokenSupplyDecimalsOnce();
+    // The create-plan transaction has not been submitted yet: nothing on-chain.
+    fetchMaybePlanMock.mockResolvedValue({
+      exists: false,
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
     const preparePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -345,6 +371,9 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet1,
       TEST_MOCK_FEE_PAYER,
     ]);
+
+    // The remainder of the lifecycle reads the shared on-chain plan fixture.
+    installDefaultFetchMaybePlanMock();
 
     const activePlansRes = await app.request(
       "/v1/payments/subscription-plans?status=active",
@@ -518,7 +547,7 @@ describe("Payments routes — subscriptions", () => {
         headers: SUBSCRIPTION_HEADERS,
         body: JSON.stringify({
           amount: "10.50",
-          receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3,
+          receiverTokenAccount: TEST_DESTINATION_TOKEN_ACCOUNT,
         }),
       },
       env
@@ -531,7 +560,7 @@ describe("Payments routes — subscriptions", () => {
       {
         method: "POST",
         headers: SUBSCRIPTION_HEADERS,
-        body: JSON.stringify({ receiverTokenAccount: TEST_SOLANA_ADDRESSES.wallet3 }),
+        body: JSON.stringify({ receiverTokenAccount: TEST_DESTINATION_TOKEN_ACCOUNT }),
       },
       env
     );

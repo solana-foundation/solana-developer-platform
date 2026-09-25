@@ -1618,7 +1618,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans",
-            "description": "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+            "description": "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan. A request that references an existing on-chain plan (an attached planPda, or a programPlanId whose derived plan already exists on-chain) is validated against the authoritative on-chain plan: the attached planPda must be the one derived from the owner and program plan ID, a destination is accepted only when the on-chain plan confirms it, active/archived status is accepted only when the on-chain plan confirms it, and the plan terms (token, amount, and period) must match the on-chain plan because they cannot be corrected afterward. Such a record is stored bound to the derived on-chain plan PDA.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"ownerWalletId\": \"wal_merchant\",\n  \"token\": \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\",\n  \"amount\": \"25.00\",\n  \"periodHours\": 720,\n  \"programPlanId\": \"17014118346046923173\",\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\",\n  \"status\": \"active\"\n}",
@@ -1642,7 +1642,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}/prepare-create",
-            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+            "description": "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain; preparing against an existing on-chain plan returns 409.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"destinations\": [\n    \"\"\n  ],\n  \"pullers\": [\n    \"\"\n  ],\n  \"endTs\": \"1770000000\",\n  \"metadataUri\": \"https://example.com/subscriptions/monthly-usdc.json\"\n}",
@@ -1675,7 +1675,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscription-plans/{{planId}}",
-            "description": "Updates mutable subscription plan fields and on-chain identifiers.",
+            "description": "Updates mutable subscription plan fields and on-chain identifiers. Once a plan has been prepared for on-chain creation, its destination and plan PDA are fixed; puller, metadata, and status edits are accepted only after the matching update is confirmed in the on-chain subscriptions program. Destination changes require a replacement plan.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"planPda\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\",\n  \"destinationAddress\": \"\",\n  \"pullerWalletId\": \"wal_collector\",\n  \"metadataUri\": \"https://example.com\",\n  \"status\": \"active\"\n}",
@@ -1804,7 +1804,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/subscriptions/{{subscriptionId}}/prepare-collection",
-            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+            "description": "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The receiver token account must be the associated token account of an on-chain plan destination, and the request is validated against the authoritative on-chain plan before the transaction is built. The transaction must still be signed and submitted by the collector/fee-payer flow.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"receiverTokenAccount\": \"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU\"\n}",

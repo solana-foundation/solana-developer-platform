@@ -20,7 +20,10 @@ import {
   getResumeSubscriptionOverlayInstructionAsync,
   getSubscribeOverlayInstructionAsync,
   getTransferSubscriptionOverlayInstructionAsync,
+  type Plan,
+  PlanStatus,
 } from "@solana/subscriptions";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { z } from "zod";
 import { createCounterpartiesRepository } from "@/db/repositories";
 import type {
@@ -39,6 +42,7 @@ import {
   assertSubscriptionTokenMint,
   buildPreparedSubscriptionTransaction,
   derivePlanAddresses,
+  fetchLiveSubscriptionPlan,
   resolvePlanRuntime,
 } from "@/services/payments/recurring-payments/shared";
 import {
@@ -440,6 +444,62 @@ export const prepareResumeSubscription = async (
   c: ValidatedBodyContext<typeof prepareSubscriptionLifecycleSchema>
 ) => prepareSubscriptionLifecycle(c, "resume");
 
+/**
+ * The subscriptions program is the source of truth for collection consent
+ * (SOLA9-634): a prepared transfer may only move funds the way the on-chain
+ * plan already allows, so the request must match authoritative chain state.
+ */
+async function assertCollectionMatchesOnChainPlan(input: {
+  plan: PaymentSubscriptionPlanRow;
+  onChainPlan: Plan;
+  amountBaseUnits: bigint;
+  caller: Address;
+  receiverAta: Address;
+  mint: Address;
+  tokenProgram: Address;
+  storedSubscriptionPda: Address | null;
+  derivedSubscriptionPda: Address;
+}): Promise<void> {
+  const { onChainPlan } = input;
+  if (onChainPlan.status !== PlanStatus.Active) {
+    throw badRequest("Subscription plan is not active on-chain");
+  }
+  if (onChainPlan.data.terms.amount !== input.amountBaseUnits) {
+    throw badRequest("Subscription plan amount does not match the on-chain plan");
+  }
+  if (onChainPlan.data.terms.periodHours !== BigInt(input.plan.period_hours)) {
+    throw badRequest("Subscription plan period does not match the on-chain plan");
+  }
+  if (!onChainPlan.data.pullers.includes(input.caller)) {
+    throw badRequest("Collection caller is not an authorized puller on the on-chain plan");
+  }
+
+  const destinationTokenAccounts = await Promise.all(
+    onChainPlan.data.destinations.map(
+      async (destination) =>
+        (
+          await findAssociatedTokenPda({
+            mint: input.mint,
+            owner: destination,
+            tokenProgram: input.tokenProgram,
+          })
+        )[0]
+    )
+  );
+  if (!destinationTokenAccounts.includes(input.receiverAta)) {
+    throw badRequest(
+      "Receiver token account is not an associated token account of an on-chain plan destination"
+    );
+  }
+
+  if (
+    input.storedSubscriptionPda !== null &&
+    input.storedSubscriptionPda !== input.derivedSubscriptionPda
+  ) {
+    throw badRequest("Subscription does not match the derived on-chain subscription address");
+  }
+}
+
 export const prepareSubscriptionCollection = async (
   c: ValidatedBodyContext<typeof prepareSubscriptionCollectionSchema>
 ) => {
@@ -467,11 +527,29 @@ export const prepareSubscriptionCollection = async (
   const { planPda } = await derivePlanAddresses(plan);
   const subscriber = assertValidAddress(subscription.subscriber_address, "subscriberAddress");
   const [derivedSubscriptionPda] = await findSubscriptionDelegationPda({ planPda, subscriber });
-  const subscriptionPda = subscription.subscription_pda
+  const storedSubscriptionPda = subscription.subscription_pda
     ? assertValidAddress(subscription.subscription_pda, "subscriptionPda")
-    : derivedSubscriptionPda;
+    : null;
+  const subscriptionPda = storedSubscriptionPda ?? derivedSubscriptionPda;
   const receiverAta = assertValidAddress(body.receiverTokenAccount, "receiverTokenAccount");
   const caller = assertValidAddress(callerWallet.publicKey, "caller");
+
+  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, planPda);
+  if (!onChainPlan) {
+    throw badRequest("Subscription plan was not found on-chain");
+  }
+  await assertCollectionMatchesOnChainPlan({
+    plan,
+    onChainPlan,
+    amountBaseUnits,
+    caller,
+    receiverAta,
+    mint,
+    tokenProgram,
+    storedSubscriptionPda,
+    derivedSubscriptionPda,
+  });
+
   const instruction = await getTransferSubscriptionOverlayInstructionAsync({
     amount: amountBaseUnits,
     caller: createNoopSigner(caller),

@@ -564,7 +564,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan. A request that references an existing on-chain plan (an attached planPda, or a programPlanId whose derived plan already exists on-chain) is validated against the authoritative on-chain plan: the attached planPda must be the one derived from the owner and program plan ID, a destination is accepted only when the on-chain plan confirms it, active/archived status is accepted only when the on-chain plan confirms it, and the plan terms (token, amount, and period) must match the on-chain plan because they cannot be corrected afterward. Such a record is stored bound to the derived on-chain plan PDA.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -610,7 +610,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription plan creation",
     operationId: "preparePaymentSubscriptionPlanCreate",
     description:
-      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction. The plan must not already exist on-chain; preparing against an existing on-chain plan returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -625,7 +625,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
         description: "Subscription plan creation prepared",
         content: jsonContent(preparePaymentSubscriptionPlanResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -656,7 +656,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Update subscription plan",
     operationId: "updatePaymentSubscriptionPlan",
-    description: "Updates mutable subscription plan fields and on-chain identifiers.",
+    description:
+      "Updates mutable subscription plan fields and on-chain identifiers. Once a plan has been prepared for on-chain creation, its destination and plan PDA are fixed; puller, metadata, and status edits are accepted only after the matching update is confirmed in the on-chain subscriptions program. Destination changes require a replacement plan.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -806,7 +807,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription collection",
     operationId: "preparePaymentSubscriptionCollection",
     description:
-      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The transaction must still be signed and submitted by the collector/fee-payer flow.",
+      "Prepares the collector-signed Solana subscriptions transfer transaction for an active subscription. The receiver token account must be the associated token account of an on-chain plan destination, and the request is validated against the authoritative on-chain plan before the transaction is built. The transaction must still be signed and submitted by the collector/fee-payer flow.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

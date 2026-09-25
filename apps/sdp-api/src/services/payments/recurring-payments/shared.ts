@@ -20,7 +20,7 @@ import {
   setTransactionMessageLifetimeUsingBlockhash,
   type TransactionSigner,
 } from "@solana/kit";
-import { findPlanPda } from "@solana/subscriptions";
+import { fetchMaybePlan, findPlanPda, type Plan } from "@solana/subscriptions";
 import type {
   PaymentRecurringPaymentRow,
   PaymentSubscriptionPlanRow,
@@ -106,6 +106,19 @@ export async function derivePlanAddresses(
   const [planPda] = await findPlanPda({ owner, planId });
 
   return { owner, planId, planPda };
+}
+
+/**
+ * Reads the authoritative on-chain plan state, or null when the plan account
+ * does not exist. The subscriptions program is the source of truth for a
+ * live plan's consent (SOLA9-634): SDP records may only describe state the
+ * chain already confirms.
+ */
+export async function fetchLiveSubscriptionPlan(env: Env, planPda: Address): Promise<Plan | null> {
+  const onChainPlan = await fetchMaybePlan(solanaRpc.createRpc(env), planPda, {
+    commitment: "confirmed",
+  });
+  return onChainPlan.exists ? onChainPlan.data : null;
 }
 
 export async function resolvePlanRuntime(
