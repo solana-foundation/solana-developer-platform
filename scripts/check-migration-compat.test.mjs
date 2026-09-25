@@ -162,6 +162,13 @@ test("statements inside DO blocks are checked", () => {
     ),
     ["rewrites rows"]
   );
+  assert.deepEqual(
+    reasons(
+      "DO $$\nBEGIN\n  CREATE TABLE accounts (id TEXT);\nEXCEPTION\n  WHEN duplicate_table THEN\n    DROP TABLE accounts;\nEND $$;\n" +
+        "DELETE FROM accounts WHERE id IS NULL;"
+    ),
+    ["drops a table", "rewrites rows"]
+  );
 });
 
 test("a flagged migration needs the breaking directive", () => {

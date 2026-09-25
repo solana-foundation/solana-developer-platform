@@ -127,6 +127,7 @@ const BRANCH = /\b(?:IF|ELSIF|ELSE|WHEN|LOOP|EXCEPTION)\b/i;
 function plpgsqlStatements(body) {
   const out = [];
   let branch = 0;
+  let handler = false;
   for (const fragment of splitSqlStatements(body)) {
     let current = fragment;
     let previous;
@@ -134,22 +135,25 @@ function plpgsqlStatements(body) {
       previous = current;
       current = current.replace(PLPGSQL_PREFIX, "").trim();
     } while (current && current !== previous);
-    if (BRANCH.test(fragment.slice(0, fragment.length - current.length))) branch++;
-    if (current) out.push({ text: current, branch });
+    const control = fragment.slice(0, fragment.length - current.length);
+    if (BRANCH.test(control)) branch++;
+    if (/\bEXCEPTION\b/i.test(control)) handler = true;
+    if (current) out.push({ text: current, branch, handler });
   }
-  return out;
+  const guarded = handler;
+  return out.map((entry) => ({ ...entry, guarded }));
 }
 
 function innerStatements(statement, index) {
   const inner = plpgsqlStatements(dollarBody(statement) ?? "");
-  return inner.map(({ text, branch }, k) => [
+  return inner.map(({ text, branch, handler, guarded }, k) => [
     text,
     index + (k + 1) / (inner.length + 1),
-    { block: index, branch },
+    { block: index, branch, handler, guarded },
   ]);
 }
 
-const TOP = { block: "top", branch: 0 };
+const TOP = { block: "top", branch: 0, handler: false, guarded: false };
 
 function collectAdditions(statements) {
   const created = new Set();
@@ -195,7 +199,8 @@ function collectAdditions(statements) {
 function tableIsNew(context, table, index, scope) {
   const entry = context.newTables.get(table);
   if (entry === undefined || entry.index >= index) return false;
-  return entry.branch === 0 || (entry.block === scope.block && entry.branch === scope.branch);
+  if (entry.branch === 0 && !entry.guarded) return true;
+  return entry.block === scope.block && entry.branch === scope.branch && !scope.handler;
 }
 
 function alterActionFindings(action, table, replacesConstraint, newTable, context) {
