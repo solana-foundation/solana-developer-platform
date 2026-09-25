@@ -140,11 +140,8 @@ export async function simulateSandboxTransfer(
       if (quoteId === null) {
         throw internalError("Lightspark on-ramp transfer has no quote reference.");
       }
-      simulate = () =>
-        RAMP_PROVIDER_CLIENTS.lightspark.sandboxSend(rampRuntime(c), {
-          quoteId,
-          currencyCode: row.fiatCurrency,
-        });
+      const payload = { quoteId, currencyCode: row.fiatCurrency };
+      simulate = () => RAMP_PROVIDER_CLIENTS.lightspark.sandboxSend(rampRuntime(c), payload);
       break;
     }
     case "bvnk": {
@@ -161,16 +158,15 @@ export async function simulateSandboxTransfer(
       if (fundingRow === null || fundingRow.external_account_reference === null) {
         throw internalError("BVNK on-ramp counterparty has no funding wallet.");
       }
-      const walletId = fundingRow.external_account_reference;
-      simulate = () =>
-        RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), {
-          walletId,
-          amount: toNumberAmount(row.fiatAmount),
-          currency: row.fiatCurrency,
-          originatorName: counterparty.display_name,
-          remittanceInformation: bvnkOnrampRemittance(row.id),
-          idempotencyKey: row.id,
-        });
+      const payload = {
+        walletId: fundingRow.external_account_reference,
+        amount: toNumberAmount(row.fiatAmount),
+        currency: row.fiatCurrency,
+        originatorName: counterparty.display_name,
+        remittanceInformation: bvnkOnrampRemittance(row.id),
+        idempotencyKey: row.id,
+      };
+      simulate = () => RAMP_PROVIDER_CLIENTS.bvnk.simulatePayin(rampRuntime(c), payload);
       break;
     }
     case "mural": {
@@ -178,20 +174,18 @@ export async function simulateSandboxTransfer(
       if (!org.id) {
         throw internalError("Mural on-ramp counterparty has no organization.");
       }
-      const organizationId = org.id;
       const fiatCurrency = row.fiatCurrency;
       if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
         throw badRequest(`Mural sandbox pay-in does not support ${fiatCurrency}.`);
       }
-      const destinationAccountId = readMuralTransferAccountId(row.providerData);
-      simulate = () =>
-        RAMP_PROVIDER_CLIENTS.mural.simulatePayin(rampRuntime(c), {
-          organizationId,
-          destinationAccountId,
-          rail: MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY[fiatCurrency],
-          amountValue: String(parseDecimalAmount(row.fiatAmount, 2)),
-          currencySymbol: fiatCurrency,
-        });
+      const payload = {
+        organizationId: org.id,
+        destinationAccountId: readMuralTransferAccountId(row.providerData),
+        rail: MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY[fiatCurrency],
+        amountValue: String(parseDecimalAmount(row.fiatAmount, 2)),
+        currencySymbol: fiatCurrency,
+      };
+      simulate = () => RAMP_PROVIDER_CLIENTS.mural.simulatePayin(rampRuntime(c), payload);
       break;
     }
     case "moonpay":
