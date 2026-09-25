@@ -22,6 +22,7 @@ import {
 import { success } from "@/lib/response";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { mapToCounterparty } from "@/routes/counterparties/handlers";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import { beginApprovedWalletOperationEffect } from "@/services/policy/approved-operation-replay";
 import { walletOperationActorFromAuth } from "@/services/policy/enforcement.service";
@@ -311,6 +312,20 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
       break;
     }
     case "coinbase": {
+      // The requirements endpoint says who Coinbase serves (individuals, on-ramp); the
+      // quote enforces the same decision so a direct API call cannot bypass it.
+      const requirements = RAMP_PROVIDER_CLIENTS.coinbase.validateCounterparty(
+        mapToCounterparty(counterparty),
+        { direction: "onramp", providerData: counterparty.provider_data }
+      );
+      if (requirements.status !== "ready") {
+        throw badRequest(
+          requirements.status === "unsupported"
+            ? requirements.reason
+            : "Counterparty is not ready for Coinbase Onramp.",
+          { provider: "coinbase", counterpartyId: counterparty.id, status: requirements.status }
+        );
+      }
       quote = await RAMP_PROVIDER_CLIENTS.coinbase.createOnrampQuote(rampRuntime(c), {
         assetRail: input.assetRail,
         fiatCurrency: input.fiatCurrency,
