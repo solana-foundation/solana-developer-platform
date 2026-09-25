@@ -1011,6 +1011,48 @@ describe("TokenService", () => {
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1500000000");
     });
 
+    it("does not subtract a settled burn a reading that left the figure unchanged absorbed", async () => {
+      // A settled burn and an off-platform mint of the same size can leave the
+      // chain total exactly where the cache had it. The refresh that reads that
+      // total has still re-observed the chain, and the burn is inside the
+      // reading it applied — the figure being unchanged is the hold's doing
+      // only when the reading is below it. Keeping the stamp on the burn's
+      // admission baseline here would make the burn subtract again and take
+      // the cache below the chain total, handing out mint headroom past the cap.
+      const tokenId = "tok_cap_unchanged_reading_burn";
+      const transactionId = "ttx_cap_unchanged_reading_burn";
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await insertCappedToken(tokenId, "1000000000", "2000000000");
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      // The reading observes the settled burn, and the off-platform mint that
+      // landed with it leaves the total where the cache already had it.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1000000000");
+      expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
+
+      // So the settled burn's bookkeeping leaves the already-absorbed burn alone.
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1000000000");
+    });
+
     it("does not replay an already-applied pause over a newer token state", async () => {
       const tokenId = "tok_historical_pause";
       const transactionId = "ttx_historical_pause";

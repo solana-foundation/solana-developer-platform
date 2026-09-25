@@ -2176,12 +2176,15 @@ export class TokenService {
    * chain total, once as its row); the floor is deliberately an upper bound, and
    * the excess falls away as rows settle or age out.
    *
-   * The stamp moves only when the reading actually changed the figure. A hold
-   * that leaves the figure as it was absorbed nothing — a burn admitted before
-   * the reading but settled after it still owes its decrement — while a figure
+   * The stamp stays put only while a hold keeps the figure above the raw
+   * reading: a figure SDP held in place absorbed nothing, so a burn admitted
+   * before the reading but settled after it still owes its decrement. A figure
    * that came down to the reading or the floor took the settled effects the
    * chain had already applied, including any burn whose bookkeeping had not run
-   * yet. Settled-burn bookkeeping reads that off `total_supply_updated_at`.
+   * yet — and so did a reading that leaves the figure unchanged, because the
+   * chain total matching the cache can be a settled burn cancelled out by an
+   * off-platform mint, which the reading absorbed all the same. Settled-burn
+   * bookkeeping reads that off `total_supply_updated_at`.
    */
   async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
@@ -2219,7 +2222,8 @@ export class TokenService {
                  ?::numeric + live.reserved
                )
              ) AS supply,
-             live.reserved AS reserved
+             live.reserved AS reserved,
+             ?::numeric AS reading
            FROM issued_tokens tok, live
            WHERE tok.id = ?${tenantRead.clause}
          )
@@ -2227,6 +2231,7 @@ export class TokenService {
          SET total_supply_cached = resolved.supply::text,
              total_supply_updated_at = CASE
                WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                 AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
                  THEN issued_tokens.total_supply_updated_at
                ELSE ?
              END,
@@ -2238,6 +2243,7 @@ export class TokenService {
       .bind(
         tokenId,
         since,
+        supplyBaseUnits,
         supplyBaseUnits,
         supplyBaseUnits,
         tokenId,
@@ -2259,13 +2265,16 @@ export class TokenService {
     }
 
     // Held above the reading, so the figure on screen is SDP's own count. The
-    // stamp only moves when the reading actually changed the figure: a hold
-    // that leaves the figure as it was absorbed nothing, and a burn admitted
-    // before the reading but settled after it must still subtract its own
-    // decrement. The stamp is what settled-burn bookkeeping trusts to mean the
-    // chain was re-observed — moving it on an unchanged hold would make that
-    // burn skip the one decrement the cache still owes, and the next refresh
-    // past the window would be the only thing that finished its reconciliation.
+    // stamp stays where it was only while that hold lasts: a figure the hold
+    // kept in place absorbed nothing, and a burn admitted before the reading
+    // but settled after it must still subtract its own decrement. A reading
+    // that leaves the figure unchanged is not a hold — the chain total meeting
+    // the cache can be a settled burn cancelled out by an off-platform mint —
+    // and it moves the stamp, because it re-observed the chain all the same.
+    // The stamp is what settled-burn bookkeeping trusts to mean the chain was
+    // re-observed; moving it on an unchanged hold would make such a burn skip
+    // the one decrement the cache still owes, and the next refresh past the
+    // window would be the only thing that finished its reconciliation.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {
