@@ -369,6 +369,16 @@ export type {
 } from "./private-channel-reference.repository";
 export { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 export type {
+  AdvanceReleaseScanInput,
+  ClearReleaseSweepInput,
+  DeepenReleaseSweepInput,
+  PrivateChannelReleaseScan,
+  PrivateChannelReleaseScanCursor,
+  PrivateChannelReleaseScanRepository,
+  PrivateChannelReleaseScanRepositoryContext,
+} from "./private-channel-release-scan.repository";
+export { createPostgresPrivateChannelReleaseScanRepository } from "./private-channel-release-scan.repository";
+export type {
   ClaimSettlementInput,
   PrivateChannelSettlementIntentKind,
   PrivateChannelSettlementObservationRepository,
@@ -462,6 +472,7 @@ export {
   createPrivateChannelEventRepository,
   createPrivateChannelInstanceRepository,
   createPrivateChannelReferenceRepository,
+  createPrivateChannelReleaseScanRepository,
   createPrivateChannelRepository,
   createPrivateChannelSettlementObservationRepository,
   createPrivateChannelTransferRepository,
