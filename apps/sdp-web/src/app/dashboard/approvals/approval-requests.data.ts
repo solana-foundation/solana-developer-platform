@@ -4,6 +4,7 @@ import {
   type WalletApprovalRequestSummary,
   type WalletOperationFamily,
 } from "@sdp/types";
+import { PROJECT_HEADER_NAME, PROJECT_SCOPE_ECHO_HEADER } from "@/lib/project-cookie";
 
 export const APPROVAL_INBOX_PAGE_SIZE = 25;
 
@@ -41,6 +42,133 @@ export function mergeApprovalRequests(
   ...requestGroups: WalletApprovalRequestSummary[][]
 ): WalletApprovalRequestSummary[] {
   return [...new Map(requestGroups.flat().map((request) => [request.id, request])).values()];
+}
+
+/**
+ * Whether a fetched batch may repaint an inbox bound to `projectId`. The API
+ * scopes the approval-request list strictly to the project the proxy sends,
+ * so rows naming another project (or none) mean the answer came from outside
+ * the mounted workspace — a shared selection cookie a sibling tab switched
+ * mid-refresh, or a proxy that predates the explicit binding — and the batch
+ * is dropped whole rather than partially applied.
+ *
+ * An empty batch is vacuously in scope: it carries no row contradicting the
+ * binding, and a legitimately empty result (a project with no pending
+ * approvals, say) must still apply. Whether an empty pair may repaint at all
+ * is `scopedApprovalBatch`'s call.
+ */
+export function approvalRequestsInProjectScope(
+  requests: WalletApprovalRequestSummary[],
+  projectId: string
+): boolean {
+  return requests.every((request) => request.projectId === projectId);
+}
+
+/**
+ * One refresh batch, plus the proxy's account of which project it answered
+ * for (`x-sdp-project-id`, or null when the proxy does not say — a build
+ * that predates the echo or the explicit binding).
+ */
+export interface ApprovalRequestBatch {
+  requests: WalletApprovalRequestSummary[];
+  scope: string | null;
+}
+
+/**
+ * Validates a refresh's pending and recent batches against the inbox's
+ * project binding and returns the rows to apply.
+ *
+ * A bound refresh (`projectId` set) is authoritative: the request named the
+ * mounted project explicitly and the answer is scoped to it, so empty batches
+ * mean the project genuinely has no requests and apply, clearing stale rows.
+ * A pair carrying rows must name the mounted project in every row of both
+ * batches.
+ *
+ * Rows prove their own project, but an empty batch proves nothing on its own:
+ * during a rolling deploy an older proxy can still answer the shared
+ * selection cookie, so an empty batch may repaint a bound inbox only when the
+ * response's `x-sdp-project-id` echo names the mounted project. An echoless
+ * empty answer establishes nothing — the mounted rows stand — and an echo
+ * naming another project is an answer that left the mounted scope outright.
+ *
+ * Without the binding the batches are scoped by the shared selection cookie,
+ * which a sibling tab can switch at any moment; an empty pair then establishes
+ * nothing about which project answered, so it returns `null` and the caller
+ * keeps the mounted rows instead of erasing them.
+ *
+ * @throws When a batch answers for another project, by row or by echo; the
+ * caller treats the whole refresh as failed rather than partially applying it.
+ */
+export function scopedApprovalBatch(
+  pending: ApprovalRequestBatch,
+  recent: ApprovalRequestBatch,
+  projectId: string | null
+): WalletApprovalRequestSummary[] | null {
+  if (projectId === null) {
+    if (pending.requests.length === 0 && recent.requests.length === 0) return null;
+    return mergeApprovalRequests(pending.requests, recent.requests);
+  }
+  if (
+    !approvalRequestsInProjectScope(pending.requests, projectId) ||
+    !approvalRequestsInProjectScope(recent.requests, projectId)
+  ) {
+    throw new Error("Approval reload left the mounted project");
+  }
+  let established = true;
+  for (const batch of [pending, recent]) {
+    if (batch.requests.length > 0) continue;
+    if (batch.scope === null) {
+      established = false;
+    } else if (batch.scope !== projectId) {
+      throw new Error("Approval reload left the mounted project");
+    }
+  }
+  if (!established) return null;
+  return mergeApprovalRequests(pending.requests, recent.requests);
+}
+
+/**
+ * Refetches an inbox's pending and recent batches under its project's
+ * explicit binding (`x-project-id`), so the proxy binds the response to that
+ * scope instead of resolving the shared selection cookie, which a sibling tab
+ * can change at any moment.
+ *
+ * @returns The scope-checked merged rows, or `null` when the batch pair
+ * establishes nothing (see `scopedApprovalBatch`).
+ * @throws When a fetch fails, a batch answers for another project, or the
+ * response body is not a readable approval-request list.
+ */
+export async function fetchApprovalRequests(
+  projectId: string | null
+): Promise<WalletApprovalRequestSummary[] | null> {
+  const projectHeaders = projectId ? { [PROJECT_HEADER_NAME]: projectId } : undefined;
+  const [pendingResponse, recentResponse] = await Promise.all([
+    fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
+      cache: "no-store",
+      headers: projectHeaders,
+    }),
+    fetch("/api/dashboard/approval-requests?limit=100", {
+      cache: "no-store",
+      headers: projectHeaders,
+    }),
+  ]);
+  const [pendingBody, recentBody] = (await Promise.all([
+    pendingResponse.json().catch(() => null),
+    recentResponse.json().catch(() => null),
+  ])) as Array<{ data?: { approvalRequests?: WalletApprovalRequestSummary[] } } | null>;
+  const pendingRequests = pendingBody?.data?.approvalRequests;
+  const recentRequests = recentBody?.data?.approvalRequests;
+  if (!pendingResponse.ok || !recentResponse.ok || !pendingRequests || !recentRequests) {
+    throw new Error("Approval reload failed");
+  }
+  // Defense in depth for the explicit binding: a batch answered for another
+  // project — an older proxy deploy still resolving the shared cookie, say —
+  // must not repaint this inbox.
+  return scopedApprovalBatch(
+    { requests: pendingRequests, scope: pendingResponse.headers.get(PROJECT_SCOPE_ECHO_HEADER) },
+    { requests: recentRequests, scope: recentResponse.headers.get(PROJECT_SCOPE_ECHO_HEADER) },
+    projectId
+  );
 }
 
 function localDateBoundary(value: string, endOfDay: boolean): number | null {

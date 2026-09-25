@@ -19,6 +19,7 @@ function renderInbox(overrides: Partial<Parameters<typeof ApprovalInbox>[0]> = {
   return renderToStaticMarkup(
     <I18nProvider locale="en" messages={getMessages("en")}>
       <ApprovalInbox
+        projectId={null}
         initialRequests={[]}
         apiKeyNames={{}}
         issuedTokensByMint={{}}

@@ -101,6 +101,7 @@ describe("ApprovalRequestDetail", () => {
       render(
         <I18nProvider locale="en" messages={getMessages("en")}>
           <ApprovalRequestDetail
+            projectId="prj_1"
             initialRequest={pendingRequest}
             evaluation={null}
             apiKeyNames={{}}
@@ -140,11 +141,116 @@ describe("ApprovalRequestDetail", () => {
       expect(await screen.findByText("Request approved")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
       expect(fetchResponse.mock.calls).toEqual([
-        ["/api/dashboard/approval-requests/apr_1/approve", { method: "POST" }],
-        ["/api/dashboard/approval-requests/apr_1/approve", { method: "POST" }],
+        [
+          "/api/dashboard/approval-requests/apr_1/approve",
+          { method: "POST", headers: { "x-project-id": "prj_1" } },
+        ],
+        [
+          "/api/dashboard/approval-requests/apr_1/approve",
+          { method: "POST", headers: { "x-project-id": "prj_1" } },
+        ],
       ]);
     }
   );
+
+  // The mounted page must never display another project's request, even when
+  // the proxy answers one: the response is dropped and the page refetches
+  // under its own binding instead.
+  it("ignores a decision response answered for another project", async () => {
+    const fetchResponse = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      Response.json({
+        data: { approvalRequest: { ...pendingRequest, projectId: "prj_other" } },
+      })
+    );
+    // The follow-up read confirms the mounted request is approved, so the
+    // page can report the decision it could verify.
+    fetchResponse.mockResolvedValueOnce(
+      Response.json({
+        data: {
+          approvalRequest: {
+            ...pendingRequest,
+            status: "approved",
+            operation: { ...pendingRequest.operation, status: "completed" },
+          },
+        },
+      })
+    );
+    vi.stubGlobal("fetch", fetchResponse);
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          projectId="prj_1"
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(await screen.findByText("Request approved")).toBeTruthy();
+    // The out-of-scope response never replaced the page's request.
+    expect(screen.getAllByText("Approved").length).toBeGreaterThan(0);
+    // The decision went through, then the page read the latest state back
+    // under its own project binding rather than trusting the foreign body.
+    expect(fetchResponse.mock.calls).toEqual([
+      [
+        "/api/dashboard/approval-requests/apr_1/approve",
+        { method: "POST", headers: { "x-project-id": "prj_1" } },
+      ],
+      [
+        "/api/dashboard/approval-requests/apr_1",
+        { cache: "no-store", headers: { "x-project-id": "prj_1" } },
+      ],
+    ]);
+  });
+
+  // A decision reply for another project plus a follow-up read that also
+  // cannot confirm the mounted request leaves the decision unverified: the
+  // page must not announce a success it cannot back up while the request may
+  // still be Pending.
+  it("warns instead of reporting success when a decision cannot be confirmed", async () => {
+    const fetchResponse = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        data: { approvalRequest: { ...pendingRequest, projectId: "prj_other" } },
+      })
+    );
+    vi.stubGlobal("fetch", fetchResponse);
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApprovalRequestDetail
+          projectId="prj_1"
+          initialRequest={pendingRequest}
+          evaluation={null}
+          apiKeyNames={{}}
+          canDecide
+        />
+        <Toaster theme="light" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Approve request" }));
+
+    expect(
+      await screen.findByText(
+        "The decision could not be confirmed on this request. Reload to see its latest status."
+      )
+    ).toBeTruthy();
+    // The request stays Pending on screen, and no success toast appeared.
+    expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
+    expect(
+      [...document.querySelectorAll("[data-sonner-toast]")].map((toast) => toast.textContent)
+    ).toEqual([
+      "The decision could not be confirmed on this request. Reload to see its latest status.",
+    ]);
+  });
 
   // The API refuses a decision from whoever raised the request, so offering
   // Approve or Reject to them only offers a 403.
@@ -152,6 +258,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           initialRequest={{ ...pendingRequest, viewerIsRequester: true, viewerCanDecide: false }}
           evaluation={null}
           apiKeyNames={{}}
@@ -179,6 +286,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           initialRequest={{ ...pendingRequest, approvalGroupId, viewerCanDecide: false }}
           evaluation={null}
           apiKeyNames={{}}
@@ -205,6 +313,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           // SAFETY: models a response from an API release that predates the viewer fields.
           initialRequest={olderApi as WalletApprovalRequestSummary}
           evaluation={null}
@@ -223,6 +332,7 @@ describe("ApprovalRequestDetail", () => {
     const { rerender } = render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           initialRequest={pendingRequest}
           evaluation={null}
           apiKeyNames={{}}
@@ -236,6 +346,7 @@ describe("ApprovalRequestDetail", () => {
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
           key="view-only"
+          projectId="prj_1"
           initialRequest={pendingRequest}
           evaluation={null}
           apiKeyNames={{}}
@@ -255,6 +366,7 @@ describe("ApprovalRequestDetail", () => {
       return render(
         <I18nProvider locale="en" messages={getMessages("en")}>
           <ApprovalRequestDetail
+            projectId="prj_1"
             initialRequest={approvedRequest(operation)}
             evaluation={null}
             apiKeyNames={{}}
@@ -320,6 +432,7 @@ describe("ApprovalRequestDetail", () => {
       render(
         <I18nProvider locale="en" messages={getMessages("en")}>
           <ApprovalRequestDetail
+            projectId="prj_1"
             initialRequest={{
               ...pendingRequest,
               status: "rejected",
@@ -356,6 +469,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           initialRequest={pendingRequest}
           evaluation={null}
           apiKeyNames={{}}
@@ -399,6 +513,7 @@ describe("ApprovalRequestDetail", () => {
     render(
       <I18nProvider locale="en" messages={getMessages("en")}>
         <ApprovalRequestDetail
+          projectId="prj_1"
           initialRequest={pendingRequest}
           evaluation={null}
           apiKeyNames={{}}

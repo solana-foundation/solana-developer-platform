@@ -1,3 +1,4 @@
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 const APPROVAL_STATUSES = new Set([
@@ -22,5 +23,8 @@ export async function GET(request: Request) {
     request,
     traceSource: "route.dashboard.approval-requests.list",
     path: `/v1/wallets/approval-requests${query.size > 0 ? `?${query}` : ""}`,
+    // The inbox binds refreshes to the project it rendered with; without the
+    // binding the proxy resolves the shared selection cookie, as before.
+    boundProjectId: request.headers.get(PROJECT_HEADER_NAME) ?? undefined,
   });
 }
