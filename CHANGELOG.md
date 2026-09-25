@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.81.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.80.0...v0.81.0) (2026-09-25)
+
+### Features
+
+* **earn:** restore Sentora PYUSD, format Earn money as dollars ([#2027](https://github.com/solana-foundation/solana-developer-platform/pull/2027)) ([0f9b26f](https://github.com/solana-foundation/solana-developer-platform/commit/0f9b26f295620f75c721803c45675f93f08fb7e1))
+
+### Bug Fixes
+
+* **treasury:** retire projected vault balances on a fresh read ([#2026](https://github.com/solana-foundation/solana-developer-platform/pull/2026)) ([4332a37](https://github.com/solana-foundation/solana-developer-platform/commit/4332a37a6d6d2d4aa885605c50c25c523d73329b))
+* **web:** match Clerk social buttons by their rendered Continue labels ([#2047](https://github.com/solana-foundation/solana-developer-platform/pull/2047)) ([5115a6c](https://github.com/solana-foundation/solana-developer-platform/commit/5115a6c383752562eca3e74702b95b32e83af45f))
+* implement APE-705 ([#2023](https://github.com/solana-foundation/solana-developer-platform/pull/2023)) ([1519110](https://github.com/solana-foundation/solana-developer-platform/commit/15191105232b5675013c2b4a2e6f9d02cece0d06))
+* implement APE-717 ([#2022](https://github.com/solana-foundation/solana-developer-platform/pull/2022)) ([04613f4](https://github.com/solana-foundation/solana-developer-platform/commit/04613f4230e61459e763e9ad013a33001e350453))
+* **earn:** redact the SDP-wide aggregate from vault exposure cap responses (SOLA9-9) ([#2018](https://github.com/solana-foundation/solana-developer-platform/pull/2018)) ([827aab4](https://github.com/solana-foundation/solana-developer-platform/commit/827aab441c6689ec7ef3c06d40d3d94aaabfe8a0))
+* **issuance:** use the client signer as fee payer for client-signed prepares ([#1996](https://github.com/solana-foundation/solana-developer-platform/pull/1996)) ([76ae1ec](https://github.com/solana-foundation/solana-developer-platform/commit/76ae1ec11ee6c1bfd198b2c009008f14f5658356))
+* **wallets:** audit default wallet changes made during wallet creation ([#1999](https://github.com/solana-foundation/solana-developer-platform/pull/1999)) ([a9d4f6b](https://github.com/solana-foundation/solana-developer-platform/commit/a9d4f6be9072ec7ac5a1178331e6cb5ff5ec86dd))
+
+### Refactors
+
+* **payments:** split ramps into routes/payments/ramps onramp, offramp and events sub-apps ([#2014](https://github.com/solana-foundation/solana-developer-platform/pull/2014)) ([7547e7b](https://github.com/solana-foundation/solana-developer-platform/commit/7547e7b0bd4441b47424f19d45c42e6ecef8ff34))
+* **payments:** move wallet balances and policies into a routes/payments/wallet-policies sub-app ([#2013](https://github.com/solana-foundation/solana-developer-platform/pull/2013)) ([b20baf7](https://github.com/solana-foundation/solana-developer-platform/commit/b20baf77c6da74835094a85157fea49ffe9675ab))
+* **payments:** move recurring payments into a routes/payments/recurring-payments sub-app ([#2012](https://github.com/solana-foundation/solana-developer-platform/pull/2012)) ([be84002](https://github.com/solana-foundation/solana-developer-platform/commit/be840022e3a2b52bc2958eb9525668724a3f16b8))
+* **payments:** move subscription plans and subscriptions into routes/payments sub-apps ([#2011](https://github.com/solana-foundation/solana-developer-platform/pull/2011)) ([4b7ee0d](https://github.com/solana-foundation/solana-developer-platform/commit/4b7ee0d75152f3160b4eb49a52961b4851369d4b))
+* **payments:** move payment requests into a routes/payments/payment-requests sub-app ([#2008](https://github.com/solana-foundation/solana-developer-platform/pull/2008)) ([58913a4](https://github.com/solana-foundation/solana-developer-platform/commit/58913a440e0d72f0cfe1d7d6b3455b512148341e))
+
+### Maintenance
+
+* **deploy:** post the deploy-start notice in green, matching trading infra ([#1978](https://github.com/solana-foundation/solana-developer-platform/pull/1978)) ([662f384](https://github.com/solana-foundation/solana-developer-platform/commit/662f384a0a9293b9ea2b5128a35d215e4782928e))
+* tighten remaining tautological and truthy-rejection assertions ([#2021](https://github.com/solana-foundation/solana-developer-platform/pull/2021)) ([a78f381](https://github.com/solana-foundation/solana-developer-platform/commit/a78f38134018302112c390c14b26db3494585c79))
+* **earn:** exercise real vault lookup-table failure handling ([#2007](https://github.com/solana-foundation/solana-developer-platform/pull/2007)) ([7d9b152](https://github.com/solana-foundation/solana-developer-platform/commit/7d9b1529e95cef38b15986cb552980c568939b8b))
+
 ## [0.80.0](https://github.com/solana-foundation/solana-developer-platform/compare/v0.79.0...v0.80.0) (2026-09-23)
 
 ### Features
