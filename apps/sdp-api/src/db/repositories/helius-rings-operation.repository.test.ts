@@ -59,14 +59,14 @@ async function setUpdatedAt(id: string, updatedAt: string): Promise<void> {
     .run();
 }
 
-async function insertRingsConnection(tag: string) {
+async function insertRingsConnection(tag: string, projectId: string = TEST_PROJECT_ID) {
   const db = getDb(env);
   const credentialId = `pcred_operation_${tag}`;
   const connectionId = `hrconn_operation_${tag}`;
   const credential = await new ProviderCredentialStore(db).insertCredential({
     id: credentialId,
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
+    projectId,
     provider: "helius_rings",
     label: tag,
     scope: "project",
@@ -85,7 +85,7 @@ async function insertRingsConnection(tag: string) {
   return new HeliusRingsConnectionStore(db).insert({
     id: connectionId,
     organizationId: TEST_ORG.id,
-    projectId: TEST_PROJECT_ID,
+    projectId,
     name: tag,
     providerCredentialId: credentialId,
     providerCredentialScopeKey: credential.scope_key,
@@ -719,6 +719,218 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
     });
   });
 
+  /**
+   * The sweep feeds return sandbox-project rows only. The poll can neither
+   * advance nor fail a row of any other tenant — the Rings service refuses to
+   * build for it — so a legacy production row that made it into a batch would
+   * be re-selected, oldest-first, on every tick, holding the batch limit shut
+   * against the eligible rows behind it. Excluding it before the limit is what
+   * keeps reconciliation moving.
+   */
+  describe("sandbox-only sweep feeds", () => {
+    let productionProjectId: string;
+    let productionConnectionId: string;
+
+    beforeEach(async () => {
+      productionProjectId = OTHER_PROJECT_ID;
+      const connection = await insertRingsConnection("production_sweep", productionProjectId);
+      if (!connection) throw new Error("production connection fixture was not created");
+      productionConnectionId = connection.id;
+    });
+
+    /** One wallet per row: a wallet may hold only one unsettled shield at a time. */
+    async function createWalletFor(projectId: string, tag: string): Promise<string> {
+      const wallet = await walletRepo.createWallet({
+        organizationId: TEST_ORG.id,
+        projectId,
+        sdpWalletId: `wal_sweep_${tag}`,
+        name: tag,
+        materialTag: "simulated",
+      });
+      if (!wallet) throw new Error(`wallet fixture ${tag} was not created`);
+      return wallet.id;
+    }
+
+    /** A stuck row attributed to the production project, older than everything else. */
+    async function insertLegacyRow(
+      id: string,
+      input: {
+        state: "submitted" | "indexing" | "failed";
+        updatedAt: string;
+        blockHeight?: string;
+        failureCode?: string;
+      }
+    ): Promise<void> {
+      const walletId = await createWalletFor(productionProjectId, id);
+      // The outbox CHECKs: signed bytes and an expiry exist together, and the
+      // signature is recorded alongside the bytes it was derived from. A
+      // failed row is always a signed failure; an expiry means bytes too.
+      const signed =
+        input.state === "failed" || input.blockHeight !== undefined ? "c2lnbmVk" : null;
+      const blockHeight = signed === null ? null : (input.blockHeight ?? "100");
+      const signature = signed === null ? null : `sig_${id}`;
+      if (input.state === "failed") {
+        await getDb(env)
+          .prepare(
+            `INSERT INTO helius_rings_operations
+               (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state,
+                intent_key, signed_transaction, last_valid_block_height, outer_tx_signature,
+                failure_code, failure_message, retryable, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, 'shield', 'failed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            id,
+            TEST_ORG.id,
+            productionProjectId,
+            productionConnectionId,
+            walletId,
+            `sha256:${id}`,
+            signed,
+            blockHeight,
+            signature,
+            input.failureCode ?? "submit_failed",
+            "rpc timed out",
+            false,
+            input.updatedAt,
+            input.updatedAt
+          )
+          .run();
+        return;
+      }
+      await getDb(env)
+        .prepare(
+          `INSERT INTO helius_rings_operations
+             (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state,
+              intent_key, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'shield', ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_ORG.id,
+          productionProjectId,
+          productionConnectionId,
+          walletId,
+          input.state,
+          `sha256:${id}`,
+          input.updatedAt,
+          input.updatedAt
+        )
+        .run();
+    }
+
+    /** The sandbox counterpart: eligible for the sweep, and newer than the legacy rows. */
+    async function insertSandboxRow(
+      id: string,
+      input: { state: "submitted" | "indexing" | "failed"; updatedAt: string }
+    ): Promise<void> {
+      const walletId = await createWalletFor(TEST_PROJECT_ID, id);
+      const failure = input.state === "failed" ? "submit_failed" : null;
+      await getDb(env)
+        .prepare(
+          `INSERT INTO helius_rings_operations
+             (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state,
+              intent_key, signed_transaction, last_valid_block_height, outer_tx_signature,
+              failure_code, failure_message, retryable, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'shield', ?, ?, ?, 100, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_ORG.id,
+          TEST_PROJECT_ID,
+          defaultConnectionId,
+          walletId,
+          input.state,
+          `sha256:${id}`,
+          "c2lnbmVk",
+          `sig_${id}`,
+          failure,
+          failure === null ? null : "rpc timed out",
+          failure === null ? null : false,
+          input.updatedAt,
+          input.updatedAt
+        )
+        .run();
+    }
+
+    it("keeps production rows out of the in-flight feed and its batch limit", async () => {
+      await insertLegacyRow("hro_sweep_prod_inflight_a", {
+        state: "indexing",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await insertLegacyRow("hro_sweep_prod_inflight_b", {
+        state: "indexing",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      await insertSandboxRow("hro_sweep_sbx_inflight", {
+        state: "indexing",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      });
+
+      const swept = await repo.listInFlightOperations({
+        staleBefore: "2026-06-01T00:00:00.000Z",
+        limit: 2,
+      });
+      expect(swept.map((row) => row.id)).toEqual(["hro_sweep_sbx_inflight"]);
+    });
+
+    it("keeps production rows out of the expired-submission feed and its batch limit", async () => {
+      await insertLegacyRow("hro_sweep_prod_expired_a", {
+        state: "submitted",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        blockHeight: "10",
+      });
+      await insertLegacyRow("hro_sweep_prod_expired_b", {
+        state: "submitted",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        blockHeight: "11",
+      });
+      await insertSandboxRow("hro_sweep_sbx_expired", {
+        state: "submitted",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      });
+
+      const swept = await repo.listExpiredSubmissions({ blockHeight: "5000", limit: 2 });
+      expect(swept.map((row) => row.id)).toEqual(["hro_sweep_sbx_expired"]);
+    });
+
+    it("keeps production rows out of the signed-failure feed and its batch limit", async () => {
+      await insertLegacyRow("hro_sweep_prod_failed_a", {
+        state: "failed",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      await insertLegacyRow("hro_sweep_prod_failed_b", {
+        state: "failed",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      });
+      await insertSandboxRow("hro_sweep_sbx_failed", {
+        state: "failed",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      });
+
+      const swept = await repo.listSignedFailures({ limit: 2 });
+      expect(swept.map((row) => row.id)).toEqual(["hro_sweep_sbx_failed"]);
+    });
+
+    it("keeps production rows out of the expired-signed-failure feed and its batch limit", async () => {
+      await insertLegacyRow("hro_sweep_prod_escalate_a", {
+        state: "failed",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        blockHeight: "10",
+      });
+      await insertLegacyRow("hro_sweep_prod_escalate_b", {
+        state: "failed",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        blockHeight: "11",
+      });
+      await insertSandboxRow("hro_sweep_sbx_escalate", {
+        state: "failed",
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      });
+
+      const swept = await repo.listExpiredSignedFailures({ blockHeight: "5000", limit: 2 });
+      expect(swept.map((row) => row.id)).toEqual(["hro_sweep_sbx_escalate"]);
+    });
+  });
   describe("timelocks", () => {
     async function reserveTimelock(key: string, unlockAt: string): Promise<string> {
       const result = await repo.reserveIntent(

@@ -387,12 +387,16 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listExpiredSubmissions(input: HeliusRingsExpiredSubmissionsInput) {
+      // Sandbox-project rows only: the sweep may act on no other tenant, and
+      // filtering before the limit keeps rows the service would refuse from
+      // filling the batch and starving the eligible ones behind them.
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
             WHERE signed_transaction IS NOT NULL
               AND last_valid_block_height < ?
               AND state IN ('submitted', 'indexing')
+              AND project_id IN (SELECT id FROM projects WHERE environment = 'sandbox')
             ORDER BY last_valid_block_height ASC
             LIMIT ?`
         )
@@ -472,11 +476,14 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listSignedFailures(input: { limit?: number }) {
+      // Sandbox-project rows only — same batch-starvation reasoning as the
+      // other sweep feeds.
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
             WHERE state = 'failed'
               AND signed_transaction IS NOT NULL
+              AND project_id IN (SELECT id FROM projects WHERE environment = 'sandbox')
             ORDER BY updated_at ASC
             LIMIT ?`
         )
@@ -498,6 +505,7 @@ export function createPostgresHeliusRingsOperationRepository(
               AND failure_code <> 'manual_reconciliation_required'
               AND last_valid_block_height IS NOT NULL
               AND last_valid_block_height < ?
+              AND project_id IN (SELECT id FROM projects WHERE environment = 'sandbox')
             ORDER BY last_valid_block_height ASC
             LIMIT ?`
         )
@@ -578,12 +586,16 @@ export function createPostgresHeliusRingsOperationRepository(
     },
 
     async listInFlightOperations(input: ListHeliusRingsInFlightOperationsInput) {
+      // Sandbox-project rows only: the sweep may act on no other tenant, and
+      // filtering before the limit keeps rows the service would refuse from
+      // filling the batch and starving the eligible ones behind them.
       const placeholders = IN_FLIGHT_STATES.map(() => "?").join(", ");
       const result = await db
         .prepare(
           `SELECT * FROM helius_rings_operations
             WHERE state IN (${placeholders})
               AND updated_at < ?
+              AND project_id IN (SELECT id FROM projects WHERE environment = 'sandbox')
             ORDER BY updated_at ASC, id ASC
             LIMIT ?`
         )
