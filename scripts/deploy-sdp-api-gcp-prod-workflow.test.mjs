@@ -256,7 +256,7 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   );
   assert.match(
     workflow,
-    /git diff --name-only --diff-filter=A "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
+    /if git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" "\$\{APPLIED_SCHEMA_SHA\}"; then\n\s+exit 0\n\s+fi\n\s+pending="\$\(git diff --name-only "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres\)"/
   );
   assert.match(
     workflow,

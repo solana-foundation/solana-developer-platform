@@ -141,6 +141,17 @@ test("statements inside DO blocks are checked", () => {
   assert.deepEqual(reasons("DO $$\nBEGIN\n  DROP TABLE a;\n  CREATE TABLE a (id TEXT);\nEND $$;"), [
     "drops a table",
   ]);
+  assert.deepEqual(
+    reasons(
+      "DO $$\nBEGIN\n  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'accounts') THEN\n" +
+        "    CREATE TABLE accounts (id TEXT);\n  ELSE\n    DROP TABLE accounts;\n  END IF;\nEND $$;"
+    ),
+    ["drops a table"]
+  );
+  assert.deepEqual(
+    reasons("DO $$\nBEGIN\n  CREATE TABLE t (id TEXT);\nEND $$;\nDELETE FROM t WHERE id IS NULL;"),
+    ["rewrites rows"]
+  );
 });
 
 test("a flagged migration needs the breaking directive", () => {

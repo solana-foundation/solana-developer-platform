@@ -122,8 +122,11 @@ function dollarBody(statement) {
   return end === -1 ? statement.slice(start) : statement.slice(start, end);
 }
 
+const BRANCH = /\b(?:IF|ELSIF|ELSE|WHEN|LOOP|EXCEPTION)\b/i;
+
 function plpgsqlStatements(body) {
   const out = [];
+  let branch = 0;
   for (const fragment of splitSqlStatements(body)) {
     let current = fragment;
     let previous;
@@ -131,9 +134,19 @@ function plpgsqlStatements(body) {
       previous = current;
       current = current.replace(PLPGSQL_PREFIX, "").trim();
     } while (current && current !== previous);
-    if (current) out.push(current);
+    if (BRANCH.test(fragment.slice(0, fragment.length - current.length))) branch++;
+    if (current) out.push({ text: current, branch });
   }
   return out;
+}
+
+function innerStatements(statement, index) {
+  const inner = plpgsqlStatements(dollarBody(statement) ?? "");
+  return inner.map(({ text, branch }, k) => [
+    text,
+    index + (k + 1) / (inner.length + 1),
+    `${index}:${branch}`,
+  ]);
 }
 
 function collectAdditions(statements) {
@@ -144,13 +157,13 @@ function collectAdditions(statements) {
     if (!newColumns.has(table)) newColumns.set(table, new Set());
     newColumns.get(table).add(column);
   };
-  const visit = (statement, index) => {
+  const visit = (statement, index, scope = "top") => {
     const create = statement.match(CREATE);
     if (create) {
       const name = normalize(create[3]);
       created.add(name);
       if (create[1].toUpperCase() === "TABLE" && !create[2] && !newTables.has(name)) {
-        newTables.set(name, index);
+        newTables.set(name, { index, scope });
       }
       return;
     }
@@ -166,14 +179,23 @@ function collectAdditions(statements) {
       return;
     }
     if (/^DO\b/i.test(statement)) {
-      for (const [inner, position] of innerStatements(statement, index)) visit(inner, position);
+      for (const [inner, position, scope] of innerStatements(statement, index)) {
+        visit(inner, position, scope);
+      }
     }
   };
-  statements.forEach(visit);
+  statements.forEach((statement, index) => {
+    visit(statement, index);
+  });
   return { created, newTables, newColumns };
 }
 
-function alterActionFindings(action, table, replacesConstraint, context) {
+function tableIsNew(context, table, index, scope) {
+  const entry = context.newTables.get(table);
+  return entry !== undefined && entry.scope === scope && entry.index < index;
+}
+
+function alterActionFindings(action, table, replacesConstraint, newTable, context) {
   const isNew = (column) => context.newColumns.get(table)?.has(column) ?? false;
   const dropConstraint = action.match(DROP_CONSTRAINT);
   if (dropConstraint) {
@@ -192,7 +214,7 @@ function alterActionFindings(action, table, replacesConstraint, context) {
   if (
     ADD_COLUMN.test(action) &&
     !ADD_CONSTRAINT.test(action) &&
-    !context.newTables.has(table) &&
+    !newTable &&
     /\bNOT\s+NULL\b/i.test(action) &&
     !/\b(?:DEFAULT|GENERATED|PRIMARY\s+KEY)\b/i.test(action)
   ) {
@@ -201,10 +223,11 @@ function alterActionFindings(action, table, replacesConstraint, context) {
   return null;
 }
 
-function statementFindings(statement, index, context) {
+function statementFindings(statement, index, context, scope = "top") {
   const findings = [];
   const { ctes, main } = unwrapCte(statement);
-  for (const cte of ctes) findings.push(...statementFindings(cte.trim(), index, context));
+  for (const cte of ctes) findings.push(...statementFindings(cte.trim(), index, context, scope));
+  const isNewTable = (table) => tableIsNew(context, table, index, scope);
 
   const alter = main.match(ALTER_TABLE);
   if (alter) {
@@ -212,7 +235,13 @@ function statementFindings(statement, index, context) {
     const actions = splitTopLevel(main.slice(alter[0].length));
     const replacesConstraint = actions.some((action) => ADD_CONSTRAINT.test(action));
     for (const action of actions) {
-      const finding = alterActionFindings(action, table, replacesConstraint, context);
+      const finding = alterActionFindings(
+        action,
+        table,
+        replacesConstraint,
+        isNewTable(table),
+        context
+      );
       if (finding) findings.push(finding);
     }
     return findings;
@@ -222,10 +251,7 @@ function statementFindings(statement, index, context) {
   if (drop) {
     const kind = drop[1].toLowerCase();
     const name = normalize(drop[2]);
-    const recreated =
-      kind === "table"
-        ? context.newTables.has(name) && context.newTables.get(name) < index
-        : context.created.has(name);
+    const recreated = kind === "table" ? isNewTable(name) : context.created.has(name);
     if (!recreated) findings.push(`drops a ${kind}`);
     return findings;
   }
@@ -238,7 +264,7 @@ function statementFindings(statement, index, context) {
     );
     const allowed = context.newColumns.get(table) ?? new Set();
     if (
-      !context.newTables.has(table) &&
+      !isNewTable(table) &&
       !targets.every((column) => column === "updated_at" || allowed.has(column))
     ) {
       findings.push("rewrites rows");
@@ -250,21 +276,16 @@ function statementFindings(statement, index, context) {
   if (rowTarget) {
     const isInsert = /^INSERT\b/i.test(main);
     const rewrites = !isInsert || /\bDO\s+UPDATE\b/i.test(main);
-    if (rewrites && !context.newTables.has(normalize(rowTarget[1]))) findings.push("rewrites rows");
+    if (rewrites && !isNewTable(normalize(rowTarget[1]))) findings.push("rewrites rows");
     return findings;
   }
 
   if (/^DO\b/i.test(main)) {
-    for (const [inner, position] of innerStatements(main, index)) {
-      findings.push(...statementFindings(inner, position, context));
+    for (const [inner, position, innerScope] of innerStatements(main, index)) {
+      findings.push(...statementFindings(inner, position, context, innerScope));
     }
   }
   return findings;
-}
-
-function innerStatements(statement, index) {
-  const inner = plpgsqlStatements(dollarBody(statement) ?? "");
-  return inner.map((text, k) => [text, index + (k + 1) / (inner.length + 1)]);
 }
 
 export function findBreakingStatements(sql) {

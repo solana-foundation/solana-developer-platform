@@ -198,10 +198,13 @@ jobs:
             fi
             exit 0
           fi
-          added="$(git diff --name-only --diff-filter=A "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
-          if [[ -n "${added}" ]]; then
-            printf '%s carries migrations prod has not applied:\n%s\nMigrations reach prod only through "Apply pending migrations to prod"; approve the held run for this commit first.\n' \
-              "${DEPLOY_IMAGE_SHA}" "${added}" >&2
+          if git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
+            exit 0
+          fi
+          pending="$(git diff --name-only "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres)"
+          if [[ -n "${pending}" ]]; then
+            printf '%s carries migration changes prod has not applied:\n%s\nMigrations reach prod only through "Apply pending migrations to prod"; approve the held run for this commit first.\n' \
+              "${DEPLOY_IMAGE_SHA}" "${pending}" >&2
             exit 1
           fi
 
