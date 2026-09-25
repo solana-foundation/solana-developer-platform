@@ -38,14 +38,19 @@ import type { Env } from "@/types/env";
  * 2. The swap's blockhash still live, or the advisory younger than the grace
  *    period -> pending. Past its last valid block height the swap either landed
  *    or never will, which is when a balance means something.
- * 3. THE INTENDED FOLLOW-UP IS DEFINITIVE. The split answer sizes the follow-up
- *    to exactly the swap floor into exactly this vault, so a `confirmed`/
- *    `finalized` deposit by this owner, after the advisory, into this vault for
- *    exactly `swap_min_out_atoms` is the follow-up and resolves the advisory
- *    `deposit_observed` whatever else the wallet holds: an unrelated same-mint
- *    credit that arrived in the meantime is not this swap's output. One
- *    movement discharges at most one advisory (UNIQUE resolving_movement_id),
- *    so a reused owner wallet cannot close several with one deposit.
+ * 3. THE INTENDED FOLLOW-UP IS DEFINITIVE — ONCE FINAL. The split answer sizes
+ *    the follow-up to exactly the swap floor into exactly this vault, so a
+ *    `finalized` deposit by this owner, after the advisory, into this vault
+ *    for exactly `swap_min_out_atoms` is the follow-up and resolves the
+ *    advisory `deposit_observed` whatever else the wallet holds: an unrelated
+ *    same-mint credit that arrived in the meantime is not this swap's output.
+ *    A merely `confirmed` follow-up is chain-committed but reversible — a fork
+ *    can still drop it — so it is not proof and cannot discharge the advisory;
+ *    it keeps the advisory pending until the ledger's reconciliation sweep
+ *    observes finality (or failure), and only a `finalized` covering deposit
+ *    may close the advisory later either. One movement discharges at most one
+ *    advisory (UNIQUE resolving_movement_id), so a reused owner wallet cannot
+ *    close several with one deposit.
  * 4. Otherwise the owner's deposit-token balance is read on the environment's
  *    cluster with the same call the build's baseline used, and the balance is
  *    the ground truth. The swap enforces `minOut` on chain, so a landed swap
@@ -66,7 +71,7 @@ import type { Env } from "@/types/env";
  *    escalated ambiguous event is the hook for a NON-PAGING alert that puts a
  *    human on it, and the human's answer is the `acknowledged` resolution.
  *    The paging orphan signal stays reserved for what the detector can prove.
- *    Once the rise is gone, such a deposit resolves
+ *    Once the rise is gone, a FINALIZED such deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
  *    never broadcast, or the owner moved the tokens themselves) and a partial
  *    rise is indeterminate and stays open for the next visit.
@@ -85,6 +90,12 @@ const FOLLOW_UP_WINDOW_MS = 30 * 60_000;
 /** Orphans older than this are escalated so the alert rule can key on it. */
 const ESCALATE_AFTER_MS = 60 * 60_000;
 
+/**
+ * Chain-committed statuses, usable as EVIDENCE of a deposit: `confirmed` is an
+ * optimistic commitment a fork can still drop, `finalized` is irreversible.
+ * Only `finalized` may CLOSE an advisory (SOLA9-68): closing on a confirmed
+ * movement loses the orphan signal if the commitment later rolls back.
+ */
 const OBSERVED_STATUSES = new Set(["confirmed", "finalized"]);
 const IN_FLIGHT_STATUSES = new Set(["requested", "submitted"]);
 
@@ -242,19 +253,49 @@ async function judgeAdvisory(
     return;
   }
 
-  // 3. The intended follow-up: same vault, exactly the floor, chain-committed.
-  //    Definitive whatever else the wallet holds, so it is judged before the
-  //    balance read (and spares the RPC call).
+  // 3. The intended follow-up: same vault, exactly the floor, FINALIZED.
+  //    Finality is what makes it definitive: `confirmed` is an optimistic
+  //    commitment a fork can still drop, so a confirmed follow-up cannot
+  //    discharge the advisory (it keeps it pending below instead). A finalized
+  //    follow-up is definitive whatever else the wallet holds, so it is judged
+  //    before the balance read (and spares the RPC call).
   const floor = BigInt(advisory.swap_min_out_atoms);
   const committed = deposits.filter((row) => OBSERVED_STATUSES.has(row.status));
-  const exactFollowUps = committed.filter(
+  const finalized = deposits.filter((row) => row.status === "finalized");
+  const exactFollowUps = finalized.filter(
     (row) =>
       row.vault_address === advisory.vault_address &&
       depositAtoms(row.amount_requested, advisory) === floor
   );
   if (await resolveWithMovement(advisories, advisory, exactFollowUps, null, stats)) return;
 
-  // 4. The balance is the ground truth: judge it against the build-time baseline.
+  // 4. A confirmed but not yet finalized follow-up: chain-committed, still
+  //    reversible. It proves the partner completed the follow-up, not that the
+  //    commitment will survive the chain, so no resolution is honest yet — not
+  //    `deposit_observed`, and not `unfunded` either (a wallet back at
+  //    baseline is exactly what a landed follow-up looks like, and a fork
+  //    rollback would then resurface the funds with the advisory closed and
+  //    the orphan signal lost). Leave the advisory open for the next visit:
+  //    the movement stays in the ledger's reconciliation queue, which drives
+  //    it to finality (or failure) and gives this judgement its proof.
+  const committedFollowUp = deposits.some(
+    (row) =>
+      row.status === "confirmed" &&
+      row.vault_address === advisory.vault_address &&
+      depositAtoms(row.amount_requested, advisory) === floor
+  );
+  if (committedFollowUp) {
+    stats.followUpPending += 1;
+    await advisories.recordObservation({
+      advisoryId: advisory.id,
+      observedAtoms: null,
+      followUpBuildAt,
+      flagged: false,
+    });
+    return;
+  }
+
+  // 5. The balance is the ground truth: judge it against the build-time baseline.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
     balance = await readOwnerMintBalance(
@@ -365,9 +406,15 @@ async function judgeAdvisory(
     return;
   }
 
-  // 5. The rise is gone, so a covering same-mint deposit may say where the
-  //    funds went (at least the floor, so a small unrelated one gets no credit).
-  if (await resolveWithMovement(advisories, advisory, coveringDeposits, observedAtoms, stats)) {
+  // 6. The rise is gone, so a covering same-mint deposit may say where the
+  //    funds went (at least the floor, so a small unrelated one gets no
+  //    credit). Only a FINALIZED covering deposit may close the advisory: a
+  //    confirmed one is still reversible, and the balance could resurface if
+  //    its commitment rolls back.
+  const finalizedCoverings = finalized.filter(
+    (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
+  );
+  if (await resolveWithMovement(advisories, advisory, finalizedCoverings, observedAtoms, stats)) {
     return;
   }
 
