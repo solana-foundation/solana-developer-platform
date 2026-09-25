@@ -14,7 +14,7 @@ import {
   earnClusterFor,
   resolveClusterRpcUrl,
 } from "@/services/earn/execution-registry";
-import { readOwnerMintBalance } from "@/services/earn/owner-token-balance";
+import { ownerHoldsMintAccount, readOwnerMintBalance } from "@/services/earn/owner-token-balance";
 import type { Env } from "@/types/env";
 
 /**
@@ -69,7 +69,14 @@ import type { Env } from "@/types/env";
  *    Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
  *    never broadcast, or the owner moved the tokens themselves) and a partial
- *    rise is indeterminate and stays open for the next visit.
+ *    rise is indeterminate and stays open for the next visit. A terminal
+ *    `unfunded` additionally requires a COMPLETE balance read — one that saw
+ *    at least one account entry — or, when the index returned a bare empty
+ *    list, an independent finalized account proof that agrees the owner holds
+ *    no token account for the mint (SOLA9-675): an empty list is
+ *    indistinguishable from an incomplete index, so an uncorroborated empty
+ *    read keeps the advisory open and fails the tick instead of writing a
+ *    landed swap off.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -372,6 +379,14 @@ async function judgeAdvisory(
   }
 
   if (delta <= 0n) {
+    // An empty index read is not zero evidence on its own: it is
+    // indistinguishable from an incomplete index that dropped the swap's
+    // account (SOLA9-675). Before this terminal resolution, an independent
+    // finalized account proof must agree the owner holds no token account for
+    // the mint; otherwise the advisory stays open for the next visit.
+    if (!balance.complete && !(await corroboratedZeroBalance(env, advisory, stats))) {
+      return;
+    }
     stats.unfunded += 1;
     await advisories.resolve({
       advisoryId: advisory.id,
@@ -391,6 +406,55 @@ async function judgeAdvisory(
     followUpBuildAt,
     flagged: false,
   });
+}
+
+/**
+ * Independent check that an EMPTY balance read really means zero: true when
+ * `ownerHoldsMintAccount` finds no token account for the deposit mint under
+ * either token program and neither derived ATA exists on chain. Any evidence
+ * of a held account, or any failure to gather the proof, counts a balance-read
+ * failure (so the tick fails loudly) and returns false — the advisory stays
+ * open and the judgement is retried on the next visit, never resolved from an
+ * uncorroborated empty list.
+ */
+async function corroboratedZeroBalance(
+  env: Env,
+  advisory: EarnSplitSwapAdvisoryRow,
+  stats: EarnSplitSwapDetectionStats
+): Promise<boolean> {
+  const failureContext = {
+    advisory_id: advisory.id,
+    environment: advisory.environment,
+    owner_address: advisory.owner_address,
+    deposit_token_mint: advisory.deposit_token_mint,
+  };
+  try {
+    const holds = await ownerHoldsMintAccount(
+      env,
+      advisory.environment,
+      advisory.owner_address,
+      advisory.deposit_token_mint
+    );
+    if (!holds) return true;
+    stats.balanceReadFailures += 1;
+    logEvent("error", {
+      event: "sdp_api_earn_split_swap_balance_read_failed",
+      ...failureContext,
+      error_name: "IncompleteBalanceRead",
+      error_message:
+        "the mint-filtered read returned no accounts while an independent finalized account proof shows the owner holds one",
+    });
+    return false;
+  } catch (error) {
+    stats.balanceReadFailures += 1;
+    logEvent("error", {
+      event: "sdp_api_earn_split_swap_balance_read_failed",
+      ...failureContext,
+      ...describeError(error),
+      error_message: errorMessage(error),
+    });
+    return false;
+  }
 }
 
 /** A movement's decimal deposit amount in the advisory's atoms, or null when unparseable. */
