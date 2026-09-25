@@ -14,8 +14,10 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { createAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { assertRequiredForDeployMetadata } from "@/lib/issuance/required-metadata";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -58,6 +60,36 @@ type DeployAuthorityWalletIds = Partial<
   Record<"metadata" | "freeze" | "permanentDelegate", string>
 >;
 const DEPLOY_AUTHORITY_ROLES = ["metadata", "freeze", "permanentDelegate"] as const;
+
+type DeployToken = NonNullable<Awaited<ReturnType<TokenService["getToken"]>>>;
+
+/**
+ * SOLA9-37: refuse to cross the deploy boundary while the token's active asset
+ * profile is missing registry-required issuance metadata (e.g. asset.issuerName
+ * / asset.pegCurrency for a fiat-backed stablecoin). Every deploy path — direct
+ * deploy, its policy-gate extraction, and the legacy prepare/confirm pair —
+ * calls this immediately after the pending-status checks. A token without an
+ * active profile has no declared requirements and still deploys; profile
+ * create/update enforce the same registry so the bad state cannot be persisted
+ * going forward, and existing rows must be completed via the profile PATCH
+ * before deploying.
+ */
+async function assertDeployableAssetProfile(c: AppContext, token: DeployToken): Promise<void> {
+  const repo = createAssetProfilesRepository(c.env, getRequestTenantScope(c));
+  const profile = await repo.getActiveAssetProfileByTokenId({
+    tokenId: token.id,
+    organizationId: token.organizationId,
+    projectId: token.projectId,
+  });
+  if (!profile) {
+    return;
+  }
+  assertRequiredForDeployMetadata(
+    profile.asset_category,
+    profile.asset_type,
+    profile.issuance_metadata
+  );
+}
 
 /**
  * Conservative floor (0.01 SOL) a signing wallet must hold for a wallet-paid
@@ -464,6 +496,8 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
     throw badRequest("Token already has a mint address");
   }
 
+  await assertDeployableAssetProfile(c, token);
+
   const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
   if (!requestedCustodyWalletId) {
     throw badRequest("signingCustodyWalletId is required to deploy this token");
@@ -802,6 +836,8 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     throw badRequest("Token already has a mint address");
   }
 
+  await assertDeployableAssetProfile(c, token);
+
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
     body.signingWalletId ?? token.signingWalletId,
@@ -980,6 +1016,10 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   if (token.mintAddress) {
     throw badRequest("Token already has a mint address");
   }
+
+  // Refuse before the claim: fixing the profile via the asset-profile PATCH is
+  // a supported remediation, and the confirm can then be retried.
+  await assertDeployableAssetProfile(c, token);
 
   // The read-time guards above only narrow the errors; the claim is what
   // serializes. Verification below spends several RPC round-trips, and during
@@ -1283,6 +1323,8 @@ export async function extractDeployPolicyCandidate(
   if (token.mintAddress) {
     throw badRequest("Token already has a mint address");
   }
+
+  await assertDeployableAssetProfile(c, token);
 
   const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
   if (!requestedCustodyWalletId) {

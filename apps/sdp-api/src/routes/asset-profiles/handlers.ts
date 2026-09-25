@@ -27,6 +27,7 @@ import {
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
+import { assertRequiredForDeployMetadata } from "@/lib/issuance/required-metadata";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
@@ -286,6 +287,9 @@ export const updateAssetProfile = async (
     if (buildErrors.length > 0) {
       throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
     }
+    // Registry gate: a patch may not retype the profile into, or strip the
+    // metadata of, a type whose requiredForDeploy fields are unmet (SOLA9-37).
+    assertRequiredForDeployMetadata(nextCategory, nextType, effectiveMetadata);
   }
 
   // Stamp version only on metadata we persist.

@@ -13,6 +13,7 @@ import {
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
+import { assertRequiredForDeployMetadata } from "@/lib/issuance/required-metadata";
 import { created } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -46,6 +47,11 @@ export const createTokenWithAssetProfile = async (
   if (settingErrors.length > 0) {
     throw badRequest("Invalid advanced settings", { errors: settingErrors });
   }
+
+  // Registry gate: never persist a profile whose type declares requiredForDeploy
+  // fields the caller did not supply (SOLA9-37). The dashboard sends these; API
+  // callers must too, so a durable token can't be created already un-deployable.
+  assertRequiredForDeployMetadata(assetCategory, assetType, issuanceMetadata);
 
   const signingWallet = tokenInput.signingCustodyWalletId
     ? await resolveIssuanceWallet({
