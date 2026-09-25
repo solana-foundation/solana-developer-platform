@@ -564,7 +564,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create subscription plan",
     operationId: "createPaymentSubscriptionPlan",
     description:
-      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan.",
+      "Creates a recurring-payment subscription plan record. This stores SDP backend state and Solana subscriptions program identifiers; it does not by itself create the on-chain plan. A request that references an existing on-chain plan (planPda) is validated against the authoritative on-chain plan: a destination is accepted only when the on-chain plan confirms it, and active/archived status is accepted only when the on-chain plan confirms it.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -610,7 +610,7 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Prepare subscription plan creation",
     operationId: "preparePaymentSubscriptionPlanCreate",
     description:
-      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA but does not submit the transaction.",
+      "Prepares an unsigned Solana subscriptions program create-plan transaction from an SDP subscription plan. This derives and stores the plan PDA and records the requested destination on the plan, but does not submit the transaction.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

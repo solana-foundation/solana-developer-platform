@@ -62,12 +62,20 @@ function mapPlan(row: PaymentSubscriptionPlanRow): PaymentSubscriptionPlan {
   };
 }
 
-async function persistPlanPda(
+/**
+ * Persists the identifiers of a prepared create-plan transaction. The
+ * destination is synced in the same write: the create instruction is the
+ * consent artifact for the plan's destinations, and once the plan PDA is
+ * stored the destination becomes uncorrectable, so the record must already
+ * describe what the chain will confirm (SOLA9-634).
+ */
+async function persistPreparedCreate(
   c: AppContext,
   plan: PaymentSubscriptionPlanRow,
-  planPda: Address
+  planPda: Address,
+  destinationAddress: string
 ): Promise<PaymentSubscriptionPlanRow> {
-  if (plan.plan_pda === planPda) {
+  if (plan.plan_pda === planPda && plan.destination_address === destinationAddress) {
     return plan;
   }
 
@@ -76,6 +84,7 @@ async function persistPlanPda(
     organizationId: plan.organization_id,
     projectId: plan.project_id,
     planPda,
+    destinationAddress,
     updatedAt: new Date().toISOString(),
   });
 
@@ -102,6 +111,46 @@ async function resolvePullerWalletAddress(
   return { pullerWalletId: wallet.walletId, pullerAddress: wallet.publicKey };
 }
 
+/**
+ * A create request that references an existing on-chain plan (planPda) claims
+ * consent the subscriptions program already enforces. As with updates, the
+ * stored record may only describe state the chain confirms (SOLA9-634).
+ */
+async function assertAttachedPlanMatchesChain(
+  c: AppContext,
+  planPda: Address,
+  requested: {
+    destinationAddress: string | null | undefined;
+    status: string;
+  }
+): Promise<void> {
+  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, planPda);
+
+  if (requested.destinationAddress) {
+    if (!onChainPlan?.data.destinations.includes(requested.destinationAddress as Address)) {
+      throw badRequest(
+        "Subscription plan destination must first be confirmed on the on-chain plan"
+      );
+    }
+  }
+
+  if (requested.status === "active") {
+    if (!onChainPlan || onChainPlan.status !== PlanStatus.Active) {
+      throw badRequest(
+        "Subscription plan cannot be created as active before its on-chain plan is confirmed active"
+      );
+    }
+  }
+
+  if (requested.status === "archived") {
+    if (onChainPlan && onChainPlan.status !== PlanStatus.Sunset) {
+      throw badRequest(
+        "Subscription plan cannot be created as archived while its on-chain plan is still active"
+      );
+    }
+  }
+}
+
 export const createSubscriptionPlan = async (
   c: ValidatedBodyContext<typeof createSubscriptionPlanSchema>
 ) => {
@@ -113,6 +162,12 @@ export const createSubscriptionPlan = async (
   assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
+  if (body.planPda) {
+    await assertAttachedPlanMatchesChain(c, assertValidAddress(body.planPda, "planPda"), {
+      destinationAddress: body.destinationAddress ?? null,
+      status: body.status,
+    });
+  }
   const now = new Date().toISOString();
   const id = `psp_${crypto.randomUUID()}`;
   const createdBy = await resolveCreatorUserId(c);
@@ -268,7 +323,7 @@ export const prepareCreateSubscriptionPlan = async (
     pullers,
     tokenProgram,
   });
-  const updatedPlan = await persistPlanPda(c, plan, planPda);
+  const updatedPlan = await persistPreparedCreate(c, plan, planPda, destinations[0]);
   const preparedTransaction = await buildPreparedSubscriptionTransaction(
     c.env,
     await getSponsoredFeePayer(c),

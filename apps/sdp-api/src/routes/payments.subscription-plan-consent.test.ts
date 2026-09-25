@@ -634,3 +634,130 @@ it("blocks the reported stale-consent exploit end to end", async () => {
   expect(transferData.data.transferData.amount).toBe(25_000_000n);
   expect(transferInstruction.accounts?.[4]?.address).toBe(consentedReceiver);
 });
+
+it("validates destination and status claims when a plan references an on-chain planPda", async () => {
+  const requestBody = {
+    ownerWalletId: TEST_WALLET_ID,
+    token: DEVNET_USDC_MINT,
+    amount: "25.00",
+    periodHours: 720,
+    planPda: OTHER_DESTINATION,
+  };
+  const createPlan = async (body: Record<string, unknown>) =>
+    app.request(
+      "/v1/payments/subscription-plans",
+      { method: "POST", headers: HEADERS, body: JSON.stringify(body) },
+      env
+    );
+
+  mockOnChainPlan({ exists: false });
+  const missingChainDestination = await createPlan({
+    ...requestBody,
+    destinationAddress: DESTINATION,
+  });
+  expect(missingChainDestination.status).toBe(400);
+
+  const missingChainActive = await createPlan({ ...requestBody, status: "active" });
+  expect(missingChainActive.status).toBe(400);
+
+  const pendingAttach = await createPlan(requestBody);
+  expect(pendingAttach.status).toBe(201);
+
+  mockOnChainPlan({ destinations: [OTHER_DESTINATION] });
+  const offChainDestination = await createPlan({
+    ...requestBody,
+    destinationAddress: DESTINATION,
+  });
+  expect(offChainDestination.status).toBe(400);
+
+  mockOnChainPlan({});
+  const archivedWhileActive = await createPlan({ ...requestBody, status: "archived" });
+  expect(archivedWhileActive.status).toBe(400);
+
+  mockOnChainPlan({ destinations: [DESTINATION] });
+  const attached = await createPlan({
+    ...requestBody,
+    planPda: TEST_SOLANA_ADDRESSES.mint,
+    destinationAddress: DESTINATION,
+  });
+  expect(attached.status).toBe(201);
+  const attachedPlan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await attached.json()
+  ).data.subscriptionPlan;
+  expect(attachedPlan).toMatchObject({
+    planPda: TEST_SOLANA_ADDRESSES.mint,
+    destinationAddress: DESTINATION,
+    status: "draft",
+  });
+
+  mockOnChainPlan({ destinations: [DESTINATION] });
+  const attachedActive = await createPlan({
+    ...requestBody,
+    planPda: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    status: "active",
+  });
+  expect(attachedActive.status).toBe(201);
+  const activePlan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await attachedActive.json()
+  ).data.subscriptionPlan;
+  expect(activePlan.status).toBe("active");
+});
+
+it("keeps the stored destination in sync with the destinations of the prepared create", async () => {
+  const planRes = await app.request(
+    "/v1/payments/subscription-plans",
+    {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify({
+        ownerWalletId: TEST_WALLET_ID,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        periodHours: 720,
+        destinationAddress: DESTINATION,
+      }),
+    },
+    env
+  );
+  expect(planRes.status).toBe(201);
+  const plan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await planRes.json()
+  ).data.subscriptionPlan;
+
+  mockTokenSupplyDecimalsOnce();
+  const preparedCreate = await app.request(
+    `/v1/payments/subscription-plans/${plan.id}/prepare-create`,
+    {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify({ destinations: [OTHER_DESTINATION, DESTINATION] }),
+    },
+    env
+  );
+  expect(preparedCreate.status).toBe(200);
+  const prepared = successResponseSchema(preparePaymentSubscriptionPlanResponseSchema).parse(
+    await preparedCreate.json()
+  ).data;
+
+  const createInstruction = requireSubscriptionInstruction(
+    instructionsFromPrepared(prepared.preparedTransaction.serialized)
+  );
+  const createData = subscriptionsProgram.parseCreatePlanInstruction(createInstruction);
+  expect(createData.data.planData.destinations[0]).toBe(OTHER_DESTINATION);
+
+  expect(prepared.subscriptionPlan.destinationAddress).toBe(OTHER_DESTINATION);
+  const persisted = await getPlan(plan.id);
+  expect(persisted.destinationAddress).toBe(OTHER_DESTINATION);
+  expect(persisted.planPda).toBe(prepared.planPda);
+
+  const destinationPatch = await app.request(
+    `/v1/payments/subscription-plans/${plan.id}`,
+    {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ destinationAddress: DESTINATION }),
+    },
+    env
+  );
+  expect(destinationPatch.status).toBe(400);
+});
