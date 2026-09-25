@@ -501,7 +501,7 @@ describe("HeliusRingsService", () => {
       const outage = new InMemoryRingsGateway();
       outage.provisionIdentity = () =>
         Promise.reject(new HeliusRingsError("gateway_unavailable", "controlled provider outage"));
-      await service({ gateway: outage })
+      const outageResult = await service({ gateway: outage })
         .provisionPrivateWallet({
           sdpWalletId: "wal_reissue_1",
           sdpAddress: "addrA",
@@ -510,8 +510,11 @@ describe("HeliusRingsService", () => {
         })
         .then(
           () => null,
-          () => undefined
+          (error: unknown) => error
         );
+      // The outage must actually reject, or the retry below would exercise an
+      // already-ready wallet instead of the pending-retry path under test.
+      expect(outageResult).toMatchObject({ code: "gateway_unavailable" });
 
       const pending = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
         ...tenant,
