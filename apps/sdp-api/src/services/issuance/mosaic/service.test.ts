@@ -9,7 +9,7 @@
  * tests, so this is the only place the fee-payer resolution is asserted.
  */
 
-import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { MosaicService, resolveMintDestination } from "@sdp/issuance/mosaic/service";
 import type { CreateTokenOptions } from "@sdp/issuance/mosaic/types";
 import type { FeePaymentPort } from "@sdp/payments/fee-payment/port";
 import * as RpcModule from "@sdp/rpc/solana";
@@ -18,8 +18,9 @@ import * as Kit from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as Signers from "@solana/signers";
 import { findMintConfigPda, parseSetAuthorityInstruction } from "@solana/token-acl-sdk";
+import { TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AppError, transactionFailed } from "@/lib/errors";
+import { AppError, badRequest, transactionFailed } from "@/lib/errors";
 import { env } from "@/test/helpers/env";
 
 // Sentinels — the SDK template builder is stubbed, so its concrete return value
@@ -567,6 +568,14 @@ describe("MosaicService mint and transfer — fee payer", () => {
     vi.spyOn(MosaicSdk, "resolveTokenAccount").mockResolvedValue({
       tokenAccount: destination,
     } as never);
+    // Destination resolution reads the destination account over RPC. Every
+    // destination in this describe is a plain wallet, so serve "no account
+    // exists" and let the real wallet branch derive the ATA.
+    (service as unknown as { rpc: unknown }).rpc = {
+      getAccountInfo: () => ({
+        send: async () => ({ context: { slot: 1n }, value: null }),
+      }),
+    };
     vi.spyOn(Kit, "compileTransaction").mockReturnValue({ __sentinel: "compiled" } as never);
     vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
     submitSpy = vi
@@ -657,5 +666,245 @@ describe("MosaicService mint and transfer — fee payer", () => {
     const [args] = transferSpy.mock.calls[0] as [{ feePayer: unknown }];
     expect(feePayerAddress(args.feePayer)).toBe(koraAddress);
     expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * SOLA9-224: an existing Token-2022 account submitted as a mint destination
+ * must stay the direct MintTo target while every compliance identity (the
+ * permissionless-thaw owner, and via the resolved owner the ABL membership)
+ * keys on the account's PARSED OWNER wallet — never on the raw account
+ * address the pinned SDK builder would hard-code.
+ */
+describe("MosaicService mint-to — existing token-account destinations", () => {
+  type CapturedInstruction = {
+    programAddress?: string;
+    accounts?: Array<{ address?: string }>;
+  };
+  type ResolutionRpc = Parameters<typeof resolveMintDestination>[0];
+
+  let signer: TransactionSigner;
+  let service: MosaicService;
+  let mint: Address;
+  let owner: Address;
+  let tokenAccount: Address;
+  let mintAuthority: Address;
+  let feePayer: Address;
+  let freezeAuthority: Address | null;
+  let tokenAccountMint: Address;
+  let tokenAccountState: string;
+  let mintExtensions: Array<{ extension: string; state?: Record<string, unknown> }>;
+  let capturedInstructions: CapturedInstruction[];
+  let thawSpy: ReturnType<typeof vi.spyOn>;
+  let sdkMintBuilderSpy: ReturnType<typeof vi.spyOn>;
+
+  const serveResolutionRpc = () => {
+    (service as unknown as { rpc: unknown }).rpc = {
+      getAccountInfo(account: Address) {
+        return {
+          send: async () => ({
+            context: { slot: 1n },
+            value:
+              account === tokenAccount
+                ? {
+                    executable: false,
+                    lamports: 1n,
+                    owner: TOKEN_2022_PROGRAM_ADDRESS,
+                    space: 165n,
+                    data: {
+                      parsed: {
+                        info: {
+                          mint: tokenAccountMint,
+                          owner,
+                          state: tokenAccountState,
+                          tokenAmount: {
+                            amount: "0",
+                            decimals: 6,
+                            uiAmount: 0,
+                            uiAmountString: "0",
+                          },
+                        },
+                        type: "account",
+                      },
+                      program: "spl-token-2022",
+                      space: 165,
+                    },
+                  }
+                : account === mint
+                  ? {
+                      executable: false,
+                      lamports: 1n,
+                      owner: TOKEN_2022_PROGRAM_ADDRESS,
+                      space: 82n,
+                      data: {
+                        parsed: {
+                          info: {
+                            decimals: 6,
+                            freezeAuthority,
+                            mintAuthority,
+                            extensions: mintExtensions,
+                          },
+                          type: "mint",
+                        },
+                        program: "spl-token-2022",
+                        space: 82,
+                      },
+                    }
+                  : freezeAuthority !== null && account === freezeAuthority
+                    ? {
+                        executable: false,
+                        lamports: 1n,
+                        owner: MosaicSdk.TOKEN_ACL_PROGRAM_ID,
+                        space: 0n,
+                        data: {
+                          parsed: { info: {} },
+                          program: "token-acl",
+                          space: 0,
+                        },
+                      }
+                    : null,
+          }),
+        };
+      },
+      getLatestBlockhash() {
+        return {
+          send: async () => ({
+            context: { slot: 1n },
+            value: {
+              blockhash: "11111111111111111111111111111111",
+              lastValidBlockHeight: 100n,
+            },
+          }),
+        };
+      },
+    };
+  };
+
+  beforeEach(async () => {
+    signer = await Kit.generateKeyPairSigner();
+    service = new MosaicService(
+      env as ConstructorParameters<typeof MosaicService>[0],
+      signer,
+      undefined,
+      {
+        transactionFailedError: transactionFailed,
+        invalidArgumentError: badRequest,
+      }
+    );
+    mint = (await Kit.generateKeyPairSigner()).address;
+    owner = (await Kit.generateKeyPairSigner()).address;
+    tokenAccount = (await Kit.generateKeyPairSigner()).address;
+    mintAuthority = (await Kit.generateKeyPairSigner()).address;
+    feePayer = (await Kit.generateKeyPairSigner()).address;
+    tokenAccountMint = mint;
+    tokenAccountState = "initialized";
+    mintExtensions = [];
+    freezeAuthority = null;
+    capturedInstructions = [];
+
+    serveResolutionRpc();
+    sdkMintBuilderSpy = vi
+      .spyOn(MosaicSdk, "createMintToTransaction")
+      .mockResolvedValue(FAKE_FULL_TX as never);
+    thawSpy = vi
+      .spyOn(MosaicSdk, "getThawPermissionlessInstructions")
+      .mockResolvedValue([] as never);
+    vi.spyOn(Kit, "compileTransaction").mockImplementation(((tx: {
+      instructions?: CapturedInstruction[];
+    }) => {
+      capturedInstructions = tx.instructions ?? [];
+      return { __sentinel: "compiled" };
+    }) as never);
+    vi.spyOn(Kit, "getBase64EncodedWireTransaction").mockReturnValue("base64-tx" as never);
+    vi.spyOn(
+      MosaicService.prototype as unknown as {
+        signAndSubmit: (fullTx: unknown) => Promise<{ signature: string; slot: bigint }>;
+      },
+      "signAndSubmit"
+    ).mockResolvedValue({ signature: "sig", slot: 1n });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("resolves the parsed owner wallet of an existing token-account destination", async () => {
+    const resolved = await resolveMintDestination(
+      (service as unknown as { rpc: unknown }).rpc as ResolutionRpc,
+      tokenAccount,
+      mint,
+      badRequest
+    );
+    expect(resolved).toEqual({
+      tokenAccount,
+      owner,
+      destinationIsTokenAccount: true,
+      tokenAccountFrozen: false,
+    });
+  });
+
+  it("rejects a token account held for a different mint", async () => {
+    tokenAccountMint = (await Kit.generateKeyPairSigner()).address;
+    const error = await resolveMintDestination(
+      (service as unknown as { rpc: unknown }).rpc as ResolutionRpc,
+      tokenAccount,
+      mint,
+      badRequest
+    ).then(
+      () => null,
+      (e: unknown) => e
+    );
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).code).toBe("BAD_REQUEST");
+  });
+
+  it("mints directly to the account without an ATA create keyed on the raw address", async () => {
+    const result = await service.prepareMintTo({
+      mint,
+      destination: tokenAccount,
+      amount: 5,
+      mintAuthority,
+      feePayer,
+    });
+
+    expect(result.tokenAccount).toBe(tokenAccount);
+    // The pinned SDK builder is bypassed entirely for this destination shape:
+    // it would emit an ATA create with owner = ata = the raw account, which
+    // the ATA program rejects and which keys the ABL identity on the account.
+    expect(sdkMintBuilderSpy).not.toHaveBeenCalled();
+
+    const malformedAtaCreate = capturedInstructions.filter(
+      (ix) =>
+        ix.accounts?.[1]?.address === tokenAccount && ix.accounts?.[2]?.address === tokenAccount
+    );
+    expect(malformedAtaCreate).toHaveLength(0);
+
+    const referencing = capturedInstructions.filter((ix) =>
+      ix.accounts?.some((account) => account.address === tokenAccount)
+    );
+    expect(referencing).toHaveLength(1);
+    expect(referencing[0].programAddress).toBe(TOKEN_2022_PROGRAM_ADDRESS);
+    expect(referencing[0].accounts?.some((account) => account.address === mint)).toBe(true);
+  });
+
+  it("derives the permissionless-thaw owner from the parsed owner wallet", async () => {
+    tokenAccountState = "frozen";
+    freezeAuthority = (await Kit.generateKeyPairSigner()).address;
+    mintExtensions = [{ extension: "defaultAccountState", state: { accountState: "frozen" } }];
+
+    await service.prepareMintTo({
+      mint,
+      destination: tokenAccount,
+      amount: 5,
+      mintAuthority,
+      feePayer,
+    });
+
+    expect(thawSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenAccount,
+        tokenAccountOwner: owner,
+      })
+    );
   });
 });

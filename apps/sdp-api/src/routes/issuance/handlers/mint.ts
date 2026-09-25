@@ -1,7 +1,7 @@
-import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
+import { resolveMintDestination } from "@sdp/issuance/mosaic/service";
+import { createRpc, createRpcForSdk, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
-import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
 import { getDb } from "@/db";
@@ -57,30 +57,25 @@ type MintOperationAmount = ReturnType<typeof resolveMintOperationAmount>;
 async function assertMintDestinationNotFrozen(params: {
   tokenService: TokenService;
   tokenId: string;
-  mintAddress: ReturnType<typeof assertValidAddress>;
   destination: ReturnType<typeof assertValidAddress>;
+  tokenAccount: ReturnType<typeof assertValidAddress>;
 }): Promise<void> {
   const destinationIsFrozen = await params.tokenService.isAccountFrozen(
     params.tokenId,
     params.destination
   );
-  const [associatedTokenAccount] = await findAssociatedTokenPda({
-    owner: params.destination,
-    mint: params.mintAddress,
-    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
-  });
-  const associatedAccountIsFrozen =
-    associatedTokenAccount === params.destination
+  const tokenAccountIsFrozen =
+    params.tokenAccount === params.destination
       ? destinationIsFrozen
-      : await params.tokenService.isAccountFrozen(params.tokenId, associatedTokenAccount);
+      : await params.tokenService.isAccountFrozen(params.tokenId, params.tokenAccount);
 
-  if (destinationIsFrozen || associatedAccountIsFrozen) {
+  if (destinationIsFrozen || tokenAccountIsFrozen) {
     throw new AppError(
       "ACCOUNT_FROZEN",
       "Cannot mint to a frozen token account. Unfreeze the destination before minting.",
       {
         field: "destination",
-        tokenAccount: destinationIsFrozen ? params.destination : associatedTokenAccount,
+        tokenAccount: destinationIsFrozen ? params.destination : params.tokenAccount,
       }
     );
   }
@@ -92,6 +87,13 @@ interface MintExecutionPolicyResolved {
   tokenService: TokenService;
   mintAddress: ReturnType<typeof assertValidAddress>;
   destination: ReturnType<typeof assertValidAddress>;
+  /**
+   * Wallet that owns `destination`: the parsed owner when the destination is
+   * an existing Token-2022 token account, otherwise the destination itself.
+   * Every allowlist membership check, database row, and on-chain ABL write
+   * keys on this wallet — never on a raw token-account address.
+   */
+  destinationOwner: ReturnType<typeof assertValidAddress>;
   mosaicAmount: MintOperationAmount["mosaicAmount"];
   amountBaseUnits: MintOperationAmount["amountBaseUnits"];
   ablListAddress: string | null;
@@ -372,14 +374,14 @@ async function syncDestinationToOnChainAllowlist(opts: {
   mosaic: ReturnType<typeof createIssuanceMosaicService>;
   tokenId: string;
   ablListAddress: string;
-  destinationRaw: string;
-  destination: ReturnType<typeof assertValidAddress>;
+  /** Parsed owner wallet of the mint destination; keys every membership write. */
+  destinationOwner: ReturnType<typeof assertValidAddress>;
   addedBy: string;
 }): Promise<boolean> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
   const dbArgs: AllowlistInsertArgs = {
     tokenId: opts.tokenId,
-    address: opts.destinationRaw,
+    address: opts.destinationOwner,
     addedBy: opts.addedBy,
   };
 
@@ -390,13 +392,13 @@ async function syncDestinationToOnChainAllowlist(opts: {
   // throws `DESTINATION_REVOKED` if the row is revoked at insert time.
   const existingStatus = await opts.tokenService.getAllowlistEntryStatusByAddress(
     opts.tokenId,
-    opts.destinationRaw
+    opts.destinationOwner
   );
   if (existingStatus === "revoked") {
     throw new AppError("DESTINATION_REVOKED");
   }
 
-  if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+  if (await opts.mosaic.isWalletOnList(listAddress, opts.destinationOwner)) {
     await ensureDbAllowlistRow(opts.tokenService, dbArgs);
     return false;
   }
@@ -419,7 +421,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
     await beginApprovedWalletOperationEffect(opts.c);
     await opts.mosaic.addToList({
       list: listAddress,
-      wallet: opts.destination,
+      wallet: opts.destinationOwner,
     });
   } catch (error) {
     // TOCTOU: a parallel request may have added the wallet on-chain between
@@ -427,7 +429,7 @@ async function syncDestinationToOnChainAllowlist(opts: {
     // transient RPC/confirmation error but the wallet is in fact on-chain).
     // If on-chain membership now holds, both layers are consistent — fall
     // through to the DB re-assert below.
-    if (await opts.mosaic.isWalletOnList(listAddress, opts.destination)) {
+    if (await opts.mosaic.isWalletOnList(listAddress, opts.destinationOwner)) {
       // fall through
     } else if (createdEntryId) {
       await rollbackCreatedAllowlistEntry(opts.tokenService, createdEntryId, error);
@@ -471,23 +473,34 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
     amountBaseUnits,
   } = resolveMintOperationAmount(token, body.mint.amount);
 
+  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
+  const destination = assertValidAddress(body.mint.destination, "destination");
+  // Resolve the destination against the mint once: a wallet destination
+  // credits its derived ATA, while an existing Token-2022 account keeps that
+  // account as the direct MintTo target and keys every membership check on
+  // its parsed owner wallet instead of the raw account address.
+  const resolvedDestination = await resolveMintDestination(
+    createRpcForSdk(c.env) as Parameters<typeof resolveMintDestination>[0],
+    destination,
+    mintAddress,
+    badRequest
+  );
+
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
-    const isOnControlList = await tokenService.isAddressAllowed(tokenId, body.mint.destination);
+    const isOnControlList = await tokenService.isAddressAllowed(tokenId, resolvedDestination.owner);
     assertDestinationAllowedByControlList({
       token,
-      destination: body.mint.destination,
+      destination: resolvedDestination.owner,
       isOnControlList,
     });
   }
 
-  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(body.mint.destination, "destination");
   await assertMintDestinationNotFrozen({
     tokenService,
     tokenId,
-    mintAddress,
     destination,
+    tokenAccount: resolvedDestination.tokenAccount,
   });
 
   const currentAuthority = await resolveCurrentAuthorityForRole(c.env, tokenService, token, "mint");
@@ -512,13 +525,13 @@ export const prepareMint = async (c: ValidatedBodyContext<typeof mintSchema>) =>
   if (ablListAddress) {
     const existingStatus = await tokenService.getAllowlistEntryStatusByAddress(
       tokenId,
-      body.mint.destination
+      resolvedDestination.owner
     );
     if (existingStatus === "revoked") {
       throw new AppError("DESTINATION_REVOKED");
     }
     const listAddress = assertValidAddress(ablListAddress, "ablListAddress");
-    if (!(await mosaic.isWalletOnList(listAddress, destination))) {
+    if (!(await mosaic.isWalletOnList(listAddress, resolvedDestination.owner))) {
       throw new AppError("NOT_ON_TOKEN_ALLOWLIST");
     }
   }
@@ -706,12 +719,25 @@ export async function extractMintPolicyCandidate(
     mosaicAmount,
     amountBaseUnits,
   } = resolveMintOperationAmount(token, input.mint.amount);
+  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
+  const destination = assertValidAddress(input.mint.destination, "destination");
+  // Resolve the destination against the mint once (same contract as the
+  // prepare route): the parsed owner wallet keys every membership check and
+  // the on-chain enrollment, while an existing token-account destination
+  // stays the direct MintTo target.
+  const resolvedDestination = await resolveMintDestination(
+    createRpcForSdk(c.env) as Parameters<typeof resolveMintDestination>[0],
+    destination,
+    mintAddress,
+    badRequest
+  );
+
   const ablListAddress = getOnChainAllowlistMutationForMint(token);
   if (!ablListAddress) {
-    const isOnControlList = await tokenService.isAddressAllowed(tokenId, input.mint.destination);
+    const isOnControlList = await tokenService.isAddressAllowed(tokenId, resolvedDestination.owner);
     assertDestinationAllowedByControlList({
       token,
-      destination: input.mint.destination,
+      destination: resolvedDestination.owner,
       isOnControlList,
     });
   }
@@ -733,13 +759,11 @@ export async function extractMintPolicyCandidate(
     currentAuthority,
     requiredWalletPermissions: ["tokens:write"],
   });
-  const mintAddress = assertValidAddress(mintAddressRaw, "mintAddress");
-  const destination = assertValidAddress(input.mint.destination, "destination");
   await assertMintDestinationNotFrozen({
     tokenService,
     tokenId,
-    mintAddress,
     destination,
+    tokenAccount: resolvedDestination.tokenAccount,
   });
 
   return {
@@ -750,7 +774,7 @@ export async function extractMintPolicyCandidate(
       walletId: providerWalletId,
       operationType: "issuance_mint_execute",
       amount: input.mint.amount,
-      destination: input.mint.destination,
+      destination: resolvedDestination.owner,
     }),
     legs: [],
     body: input,
@@ -760,6 +784,7 @@ export async function extractMintPolicyCandidate(
       tokenService,
       mintAddress,
       destination,
+      destinationOwner: resolvedDestination.owner,
       mosaicAmount,
       amountBaseUnits,
       ablListAddress,
@@ -801,6 +826,7 @@ export const executeMint = async (c: AppContext) => {
       tokenService,
       mintAddress,
       destination,
+      destinationOwner,
       mosaicAmount,
       amountBaseUnits,
       ablListAddress,
@@ -889,8 +915,7 @@ export const executeMint = async (c: AppContext) => {
           mosaic,
           tokenId,
           ablListAddress,
-          destinationRaw: input.mint.destination,
-          destination,
+          destinationOwner,
           addedBy: auth.id,
         })
       : false;

@@ -3,13 +3,14 @@
  */
 
 import * as Mosaic from "@sdp/issuance/mosaic";
+import * as IssuanceMosaicService from "@sdp/issuance/mosaic/service";
 import { MosaicService } from "@sdp/issuance/mosaic/service";
 import * as FeePaymentAdapters from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@sdp/solana/address";
 import type { CachedApiKey } from "@sdp/types";
-import { address, createNoopSigner, getBase58Decoder } from "@solana/kit";
+import { address, createNoopSigner, generateKeyPairSigner, getBase58Decoder } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
 import * as TokenAclSdk from "@solana/token-acl-sdk";
 import * as Token2022 from "@solana-program/token-2022";
@@ -421,6 +422,21 @@ describe("Issuance Routes", () => {
     vi.spyOn(MosaicSdk, "getListConfig").mockResolvedValue({
       authority: TEST_ACTIVE_TOKEN.mintAuthority,
     } as never);
+
+    // Mint destination resolution reads the destination account over RPC.
+    // Every destination in this suite is a plain wallet, so model the wallet
+    // branch (owner = destination, credit the derived ATA); tests that mint to
+    // an existing token account restore the real resolver against a mocked RPC.
+    vi.spyOn(IssuanceMosaicService, "resolveMintDestination").mockImplementation(
+      async (_rpc, destination, mint) => {
+        const [ata] = await findAssociatedTokenPda({
+          owner: destination,
+          tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+          mint,
+        });
+        return { tokenAccount: ata, owner: destination, destinationIsTokenAccount: false };
+      }
+    );
 
     vi.spyOn(SolanaServices, "createOrgSignerForCustodyWallet").mockImplementation(
       async (runtimeEnv, organizationId, projectId, custodyWalletId) => {
@@ -7577,12 +7593,403 @@ describe("Issuance Routes", () => {
         }
       });
 
+      // SOLA9-224: an existing Token-2022 account submitted as mint.destination
+      // must key every allowlist identity on its PARSED OWNER wallet. Enrolling
+      // the raw account address would let an unapproved wallet hold regulated
+      // tokens through a membership row the owner wallet never appears under.
+      it("keys mint auto-enrollment by the parsed owner of a token-account destination", async () => {
+        await seedAblListAddress();
+
+        const owner = await generateKeyPairSigner();
+        const tokenAccount = await generateKeyPairSigner();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(false);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+        // The handler resolves the destination against the mint over RPC; serve
+        // an existing Token-2022 account for the token's mint, owned by `owner`.
+        const resolutionRpc = {
+          getAccountInfo(account: Address) {
+            return {
+              send: async () => ({
+                context: { slot: 1n },
+                value:
+                  account === tokenAccount.address
+                    ? {
+                        executable: false,
+                        lamports: 1n,
+                        owner: TOKEN_2022_PROGRAM_ADDRESS,
+                        space: 165n,
+                        data: {
+                          parsed: {
+                            info: {
+                              mint: TEST_ALLOWLIST_TOKEN.mintAddress,
+                              owner: owner.address,
+                              state: "initialized",
+                              tokenAmount: {
+                                amount: "0",
+                                decimals: 9,
+                                uiAmount: 0,
+                                uiAmountString: "0",
+                              },
+                            },
+                            type: "account",
+                          },
+                          program: "spl-token-2022",
+                          space: 165,
+                        },
+                      }
+                    : null,
+              }),
+            };
+          },
+        };
+        const createRpcForSdkSpy = vi
+          .spyOn(SolanaRpc, "createRpcForSdk")
+          .mockReturnValue(resolutionRpc as never);
+        // Run the real destination resolution against the mocked RPC above:
+        // unwrap the suite's default wallet-only resolver for this test.
+        vi.spyOn(IssuanceMosaicService, "resolveMintDestination").mockRestore();
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: tokenAccount.address, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+
+          // The on-chain ABL enrollment keys the parsed owner wallet, never the
+          // raw token-account address.
+          expect(isWalletOnListSpy).toHaveBeenCalledWith(ablList, owner.address);
+          expect(addToListSpy.mock.calls[0][0]).toMatchObject({ wallet: owner.address });
+
+          // The DB mirror keys the same owner wallet; the raw account address
+          // must not gain its own membership row.
+          const ownerRow = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, owner.address)
+            .first<{ id: string }>();
+          expect(ownerRow).not.toBeNull();
+
+          const accountRow = await getDb(env)
+            .prepare("SELECT id FROM token_allowlists WHERE token_id = ? AND address = ?")
+            .bind(allowlistTokenId, tokenAccount.address)
+            .first<{ id: string }>();
+          expect(accountRow).toBeNull();
+
+          // The raw account stays the direct MintTo target the caller asked for.
+          expect(mintToSpy.mock.calls[0][0]).toMatchObject({
+            destination: tokenAccount.address,
+          });
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+          createRpcForSdkSpy.mockRestore();
+        }
+      });
+
+      // Negative controls for the token-account destination resolution: the
+      // parsed owner wallet gates membership, and a destination that cannot be
+      // resolved for the token's mint never reaches an allowlist write.
+      describe("token-account destination resolution negatives", () => {
+        const serveTokenAccountResolution = (args: {
+          tokenAccount: Address;
+          owner: Address;
+          parsedMint?: Address;
+          parsedState?: string;
+        }) => {
+          const resolutionRpc = {
+            getAccountInfo(account: Address) {
+              return {
+                send: async () => ({
+                  context: { slot: 1n },
+                  value:
+                    account === args.tokenAccount
+                      ? {
+                          executable: false,
+                          lamports: 1n,
+                          owner: TOKEN_2022_PROGRAM_ADDRESS,
+                          space: 165n,
+                          data: {
+                            parsed: {
+                              info: {
+                                mint: args.parsedMint ?? TEST_ALLOWLIST_TOKEN.mintAddress,
+                                owner: args.owner,
+                                state: args.parsedState ?? "initialized",
+                                tokenAmount: {
+                                  amount: "0",
+                                  decimals: 9,
+                                  uiAmount: 0,
+                                  uiAmountString: "0",
+                                },
+                              },
+                              type: "account",
+                            },
+                            program: "spl-token-2022",
+                            space: 165,
+                          },
+                        }
+                      : null,
+                }),
+              };
+            },
+          };
+          const createRpcForSdkSpy = vi
+            .spyOn(SolanaRpc, "createRpcForSdk")
+            .mockReturnValue(resolutionRpc as never);
+          // Run the real destination resolution against the mocked RPC above:
+          // unwrap the suite's default wallet-only resolver for this test.
+          vi.spyOn(IssuanceMosaicService, "resolveMintDestination").mockRestore();
+          return createRpcForSdkSpy;
+        };
+
+        const allowlistRows = async () => {
+          const result = await getDb(env)
+            .prepare("SELECT address, status FROM token_allowlists WHERE token_id = ?")
+            .bind(allowlistTokenId)
+            .all<{ address: string; status: string }>();
+          return result.rows;
+        };
+
+        it("rejects a token-account destination held for a different mint", async () => {
+          await seedAblListAddress();
+
+          const owner = await generateKeyPairSigner();
+          const tokenAccount = await generateKeyPairSigner();
+          const createOrgSignerSpy = vi
+            .spyOn(SolanaServices, "createOrgSigner")
+            .mockResolvedValueOnce({ address: signerAddress } as never);
+          const addToListSpy = vi
+            .spyOn(MosaicService.prototype, "addToList")
+            .mockResolvedValueOnce(undefined as never);
+          const createRpcForSdkSpy = serveTokenAccountResolution({
+            tokenAccount: tokenAccount.address,
+            owner: owner.address,
+            parsedMint: (await generateKeyPairSigner()).address,
+          });
+
+          try {
+            const res = await app.request(
+              `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({
+                  mint: { destination: tokenAccount.address, amount: "1" },
+                }),
+              },
+              env
+            );
+
+            expect(res.status).toBe(400);
+            expect(await res.json()).toMatchObject({ error: { code: "BAD_REQUEST" } });
+            expect(addToListSpy).not.toHaveBeenCalled();
+            expect(await allowlistRows()).toEqual([]);
+          } finally {
+            createOrgSignerSpy.mockRestore();
+            addToListSpy.mockRestore();
+            createRpcForSdkSpy.mockRestore();
+          }
+        });
+
+        it("refuses to reactivate a revoked owner wallet via a token-account destination", async () => {
+          await seedAblListAddress();
+
+          const owner = await generateKeyPairSigner();
+          const tokenAccount = await generateKeyPairSigner();
+          await getDb(env)
+            .prepare(
+              `INSERT INTO token_allowlists (
+                 id, token_id, address, label, status, added_by, created_at, revoked_at
+               ) VALUES ('tal_revoked_owner', ?, ?, NULL, 'revoked', ?, sdp_iso_now(), sdp_iso_now())`
+            )
+            .bind(allowlistTokenId, owner.address, TEST_PROJECT_API_KEY.id)
+            .run();
+
+          const createOrgSignerSpy = vi
+            .spyOn(SolanaServices, "createOrgSigner")
+            .mockResolvedValueOnce({ address: signerAddress } as never);
+          const addToListSpy = vi
+            .spyOn(MosaicService.prototype, "addToList")
+            .mockResolvedValueOnce(undefined as never);
+          const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+          const createRpcForSdkSpy = serveTokenAccountResolution({
+            tokenAccount: tokenAccount.address,
+            owner: owner.address,
+          });
+
+          try {
+            const res = await app.request(
+              `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({
+                  mint: { destination: tokenAccount.address, amount: "1" },
+                }),
+              },
+              env
+            );
+
+            expect(res.status).toBe(403);
+            expect(await res.json()).toMatchObject({ error: { code: "DESTINATION_REVOKED" } });
+            expect(addToListSpy).not.toHaveBeenCalled();
+            expect(mintToSpy).not.toHaveBeenCalled();
+            // The revoked row stays revoked; no fresh identity was enrolled.
+            expect(await allowlistRows()).toEqual([{ address: owner.address, status: "revoked" }]);
+          } finally {
+            createOrgSignerSpy.mockRestore();
+            addToListSpy.mockRestore();
+            mintToSpy.mockRestore();
+            createRpcForSdkSpy.mockRestore();
+          }
+        });
+
+        it("rejects a frozen token-account destination before any enrollment", async () => {
+          await seedAblListAddress();
+
+          const owner = await generateKeyPairSigner();
+          const tokenAccount = await generateKeyPairSigner();
+          await getDb(env)
+            .prepare(
+              `INSERT INTO frozen_accounts (
+                 id, token_id, account_address, reason, frozen_at, frozen_by
+               ) VALUES ('frz_token_account_destination', ?, ?, 'QA hold', sdp_iso_now(), ?)`
+            )
+            .bind(allowlistTokenId, tokenAccount.address, TEST_PROJECT_API_KEY.id)
+            .run();
+
+          const createOrgSignerSpy = vi
+            .spyOn(SolanaServices, "createOrgSigner")
+            .mockResolvedValueOnce({ address: signerAddress } as never);
+          const addToListSpy = vi
+            .spyOn(MosaicService.prototype, "addToList")
+            .mockResolvedValueOnce(undefined as never);
+          const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+          const createRpcForSdkSpy = serveTokenAccountResolution({
+            tokenAccount: tokenAccount.address,
+            owner: owner.address,
+          });
+
+          try {
+            const res = await app.request(
+              `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({
+                  mint: { destination: tokenAccount.address, amount: "1" },
+                }),
+              },
+              env
+            );
+
+            expect(res.status).toBe(400);
+            expect(await res.json()).toMatchObject({ error: { code: "ACCOUNT_FROZEN" } });
+            expect(addToListSpy).not.toHaveBeenCalled();
+            expect(mintToSpy).not.toHaveBeenCalled();
+            expect(await allowlistRows()).toEqual([]);
+          } finally {
+            createOrgSignerSpy.mockRestore();
+            addToListSpy.mockRestore();
+            mintToSpy.mockRestore();
+            createRpcForSdkSpy.mockRestore();
+          }
+        });
+
+        it("prepares without mutating allowlist state for a token-account destination that is not on-chain allowlisted", async () => {
+          await seedAblListAddress();
+
+          const owner = await generateKeyPairSigner();
+          const tokenAccount = await generateKeyPairSigner();
+          const createOrgSignerSpy = vi
+            .spyOn(SolanaServices, "createOrgSigner")
+            .mockResolvedValueOnce({ address: signerAddress } as never);
+          const isWalletOnListSpy = vi
+            .spyOn(MosaicService.prototype, "isWalletOnList")
+            .mockResolvedValueOnce(false);
+          const addToListSpy = vi
+            .spyOn(MosaicService.prototype, "addToList")
+            .mockResolvedValueOnce(undefined as never);
+          const prepareMintToSpy = vi
+            .spyOn(MosaicService.prototype, "prepareMintTo")
+            .mockResolvedValueOnce(mockPreparedMint as never);
+          const createRpcForSdkSpy = serveTokenAccountResolution({
+            tokenAccount: tokenAccount.address,
+            owner: owner.address,
+          });
+
+          try {
+            const res = await app.request(
+              `/v1/issuance/tokens/${allowlistTokenId}/mint/prepare`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+                },
+                body: JSON.stringify({
+                  mint: { destination: tokenAccount.address, amount: "1" },
+                }),
+              },
+              env
+            );
+
+            expect(res.status).toBe(403);
+            expect(await res.json()).toMatchObject({ error: { code: "NOT_ON_TOKEN_ALLOWLIST" } });
+            expect(addToListSpy).not.toHaveBeenCalled();
+            expect(prepareMintToSpy).not.toHaveBeenCalled();
+            // Neither the parsed owner nor the raw account gained a DB row.
+            expect(await allowlistRows()).toEqual([]);
+            expect(isWalletOnListSpy).toHaveBeenCalledWith(ablList, owner.address);
+          } finally {
+            createOrgSignerSpy.mockRestore();
+            isWalletOnListSpy.mockRestore();
+            addToListSpy.mockRestore();
+            prepareMintToSpy.mockRestore();
+            createRpcForSdkSpy.mockRestore();
+          }
+        });
+      });
+
       const storedSupply = (tokenId: string) =>
         getDb(env)
           .prepare("SELECT total_supply_cached FROM issued_tokens WHERE id = ?")
           .bind(tokenId)
           .first<{ total_supply_cached: string }>();
-
       const latestMintTransaction = (tokenId: string) =>
         getDb(env)
           .prepare(

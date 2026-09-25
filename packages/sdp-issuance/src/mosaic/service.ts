@@ -35,6 +35,7 @@ import {
   type Rpc,
   type Signature,
   type SolanaRpcApi,
+  setTransactionMessageFeePayer,
   setTransactionMessageFeePayerSigner,
   setTransactionMessageLifetimeUsingBlockhash,
   signTransactionMessageWithSigners,
@@ -53,6 +54,7 @@ import {
   createStablecoinInitTransaction,
   createTokenizedSecurityInitTransaction,
   createTransferTransaction,
+  decimalAmountToRaw,
   // Types
   type FullTransaction,
   // ABL wallet management (object input pattern)
@@ -60,21 +62,26 @@ import {
   // Token ACL freeze/thaw (object input pattern)
   getFreezeTransaction,
   getListConfigPda,
+  getMintDetails,
   getRemoveWalletTransaction,
+  getThawPermissionlessInstructions,
   getThawPermissionlessTransaction,
   getThawTransaction,
   getTokenMetadata,
   type getUpdateAuthorityTransaction,
-  resolveTokenAccount,
+  isDefaultAccountStateSetFrozen,
+  type resolveTokenAccount,
   TOKEN_ACL_PROGRAM_ID,
 } from "@solana/mosaic-sdk";
 import { partiallySignTransactionMessageWithSigners } from "@solana/signers";
 import { findWalletEntryPda } from "@solana/token-acl-gate-sdk";
 import { findMintConfigPda, getSetAuthorityInstruction } from "@solana/token-acl-sdk";
-import { getTransferSolInstruction } from "@solana-program/system";
+import { getTransferSolInstruction, SYSTEM_PROGRAM_ADDRESS } from "@solana-program/system";
 import {
   decodeMint,
+  findAssociatedTokenPda,
   getMintSize,
+  getMintToInstruction,
   getUpdateTokenMetadataFieldInstruction,
   TOKEN_2022_PROGRAM_ADDRESS,
 } from "@solana-program/token-2022";
@@ -154,6 +161,94 @@ function resolveMintAuthorityAddress(options: CreateTokenOptions): Address {
  */
 export async function deriveAblListAddress(authority: Address, mint: Address): Promise<Address> {
   return getListConfigPda({ authority, mint });
+}
+
+type JsonParsedTokenAccountInfo = {
+  mint?: string;
+  owner?: string;
+  state?: string;
+};
+
+export interface ResolvedMintDestination {
+  /**
+   * Address the mint transaction credits: the destination itself when it is
+   * already a Token-2022 token account, otherwise the destination wallet's
+   * derived ATA.
+   */
+  tokenAccount: Address;
+  /**
+   * Wallet that owns `tokenAccount`: the parsed owner for an existing
+   * token-account destination, otherwise the destination address itself.
+   * Allowlist membership, control-list checks, and permissionless-thaw owner
+   * arguments must key on this wallet — never on a raw token-account address,
+   * which would let an unapproved wallet hold tokens through a membership row
+   * the owner wallet itself never appears under.
+   */
+  owner: Address;
+  /** Whether the requested destination is an existing Token-2022 token account for the mint. */
+  destinationIsTokenAccount: boolean;
+  /**
+   * Whether the resolved token account is frozen on-chain. Present only when
+   * the destination itself is an existing token account; for a wallet
+   * destination the derived ATA may not exist yet and the transaction builder
+   * determines freezing itself.
+   */
+  tokenAccountFrozen?: boolean;
+}
+
+/**
+ * Resolve a mint destination against the mint exactly once.
+ *
+ * A destination is usually a wallet: the mint then credits its derived
+ * Token-2022 ATA, and every identity (ATA-create owner, permissionless-thaw
+ * owner, MintTo target) is the wallet itself. When the destination is an
+ * existing Token-2022 token account for this mint, that account stays the
+ * direct MintTo target while the parsed owner wallet becomes the identity
+ * every allowlist and freeze check must use.
+ *
+ * Throws the mapped invalid-argument error when the destination is a
+ * Token-2022 account for a different mint, or an account that can neither be
+ * parsed as a token account nor treated as a wallet.
+ */
+export async function resolveMintDestination(
+  rpc: Rpc<SolanaRpcApi>,
+  destination: Address,
+  mint: Address,
+  invalidArgumentError: (message: string) => Error = (message) => new Error(message)
+): Promise<ResolvedMintDestination> {
+  const accountInfo = await rpc.getAccountInfo(destination, { encoding: "jsonParsed" }).send();
+  const value = accountInfo.value;
+
+  if (value?.owner === TOKEN_2022_PROGRAM_ADDRESS) {
+    const parsed = (value.data as { parsed?: { info?: JsonParsedTokenAccountInfo } }).parsed?.info;
+    if (!parsed?.owner) {
+      throw invalidArgumentError(`Unable to parse token account data for ${destination}`);
+    }
+    if (parsed.mint !== mint) {
+      throw invalidArgumentError(
+        `Token account ${destination} is not for mint ${mint} but for ${parsed.mint}`
+      );
+    }
+    return {
+      tokenAccount: destination,
+      owner: parsed.owner as Address,
+      destinationIsTokenAccount: true,
+      tokenAccountFrozen: parsed.state === "frozen",
+    };
+  }
+
+  if (value && value.owner !== SYSTEM_PROGRAM_ADDRESS) {
+    throw invalidArgumentError(
+      `Token account ${destination} is not a valid account for mint ${mint}`
+    );
+  }
+
+  const [ata] = await findAssociatedTokenPda({
+    owner: destination,
+    tokenProgram: TOKEN_2022_PROGRAM_ADDRESS,
+    mint,
+  });
+  return { tokenAccount: ata, owner: destination, destinationIsTokenAccount: false };
 }
 
 export class MosaicService {
@@ -578,23 +673,18 @@ export class MosaicService {
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer, false);
 
-    // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer)
-    // Note: amount is decimal number, SDK converts using mint decimals
-    const fullTx = await createMintToTransaction(
-      this.rpc,
-      options.mint,
-      options.destination,
-      options.amount,
-      this.signer, // mintAuthority as TransactionSigner
-      feePayer
-    );
-
-    const tokenAccountInfo = await resolveTokenAccount(this.rpc, options.destination, options.mint);
+    const { fullTx, tokenAccount } = await this.buildMintToTransaction({
+      mint: options.mint,
+      destination: options.destination,
+      amount: options.amount,
+      mintAuthority: this.signer, // mint authority as TransactionSigner
+      feePayer,
+    });
     const result = await this.signAndSubmit(fullTx, onBeforeSubmit);
 
     return {
       ...result,
-      tokenAccount: tokenAccountInfo.tokenAccount,
+      tokenAccount,
     };
   }
 
@@ -608,21 +698,100 @@ export class MosaicService {
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
     const feePayer = await this.resolveFeePayer(fallbackFeePayer, true);
 
-    const fullTx = await createMintToTransaction(
-      this.rpc,
-      options.mint,
-      options.destination,
-      options.amount,
-      options.mintAuthority, // Just the address for prepare mode
-      feePayer
-    );
-
-    const tokenAccountInfo = await resolveTokenAccount(this.rpc, options.destination, options.mint);
+    const { fullTx, tokenAccount } = await this.buildMintToTransaction({
+      mint: options.mint,
+      destination: options.destination,
+      amount: options.amount,
+      mintAuthority: options.mintAuthority, // Just the address for prepare mode
+      feePayer,
+    });
 
     return {
       ...this.toMosaicTransaction(fullTx),
-      tokenAccount: tokenAccountInfo.tokenAccount,
+      tokenAccount,
     };
+  }
+
+  /**
+   * Build a mint-to transaction with explicit destination identities.
+   *
+   * Wallet destinations delegate to the pinned mosaic-sdk builder, which
+   * credits the derived ATA and derives every identity (ATA-create owner,
+   * permissionless-thaw owner, MintTo target) from the wallet itself. An
+   * existing token-account destination is built here instead: the SDK builder
+   * hard-codes the recipient as both the ATA-create owner and the
+   * permissionless-thaw owner, which would key the on-chain ABL check on the
+   * raw account address and emit an ATA create the ATA program rejects. The
+   * custom build thaws under the parsed owner wallet and mints directly to
+   * the account.
+   */
+  private async buildMintToTransaction(options: {
+    mint: Address;
+    destination: Address;
+    amount: MintToOptions["amount"];
+    mintAuthority: Address | TransactionSigner;
+    feePayer: Address | TransactionSigner;
+  }): Promise<{ fullTx: FullTransaction; tokenAccount: Address }> {
+    const resolved = await resolveMintDestination(
+      this.rpc,
+      options.destination,
+      options.mint,
+      this.invalidArgumentError
+    );
+
+    if (!resolved.destinationIsTokenAccount) {
+      const fullTx = await createMintToTransaction(
+        this.rpc,
+        options.mint,
+        resolved.owner,
+        options.amount,
+        options.mintAuthority,
+        options.feePayer
+      );
+      return { fullTx, tokenAccount: resolved.tokenAccount };
+    }
+
+    const tokenAccount = resolved.tokenAccount;
+    const feePayerSigner =
+      typeof options.feePayer === "string" ? createNoopSigner(options.feePayer) : options.feePayer;
+    const mintAuthoritySigner =
+      typeof options.mintAuthority === "string"
+        ? createNoopSigner(options.mintAuthority)
+        : options.mintAuthority;
+    const { decimals, extensions, usesTokenAcl } = await getMintDetails(this.rpc, options.mint);
+    const enableSrfc37 = usesTokenAcl && isDefaultAccountStateSetFrozen(extensions);
+    const isFrozen = resolved.tokenAccountFrozen === true;
+    const rawAmount = decimalAmountToRaw(options.amount, decimals);
+
+    const instructions = [
+      ...(isFrozen && enableSrfc37
+        ? await getThawPermissionlessInstructions({
+            authority: mintAuthoritySigner,
+            mint: options.mint,
+            tokenAccount,
+            tokenAccountOwner: resolved.owner,
+            rpc: this.rpc,
+          })
+        : []),
+      getMintToInstruction(
+        {
+          mint: options.mint,
+          mintAuthority: mintAuthoritySigner,
+          token: tokenAccount,
+          amount: rawAmount,
+        },
+        { programAddress: TOKEN_2022_PROGRAM_ADDRESS }
+      ),
+    ];
+
+    const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
+    const fullTx = pipe(
+      createTransactionMessage({ version: 0 }),
+      (message) => setTransactionMessageFeePayer(feePayerSigner.address, message),
+      (message) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, message),
+      (message) => appendTransactionMessageInstructions(instructions, message)
+    );
+    return { fullTx, tokenAccount };
   }
 
   /**
