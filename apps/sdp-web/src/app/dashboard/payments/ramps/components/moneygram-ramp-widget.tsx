@@ -188,6 +188,43 @@ export function MoneygramRampWidget({
         });
       });
 
+    // The API records an on-ramp completion only for a session whose
+    // provider-verified transaction pin has landed, so the widget waits for the
+    // created event to be accepted (re-posting it once if the first attempt
+    // failed) before reporting the completion. Posting the completion earlier
+    // would only be rejected as unverified and the advisory event would be lost.
+    const postOnrampCompletion = async (transaction: MoneygramTransactionRecord) => {
+      const created = transactionCreated;
+      if (!created) {
+        toast.error(t("DashboardPayments.ramps.moneygramTransactionUnreported"), {
+          position: "bottom-right",
+        });
+        return;
+      }
+      try {
+        if (!(await transactionCreatedPosted)) {
+          await postMoneygramRampEvent(created, t);
+        }
+      } catch (error) {
+        toast.error(t("DashboardPayments.ramps.moneygramEventFailed"), {
+          description:
+            error instanceof Error
+              ? error.message
+              : t("DashboardPayments.ramps.eventRequestFailed"),
+          position: "bottom-right",
+        });
+        return;
+      }
+      await post({
+        kind: "onramp_completed",
+        sessionId,
+        transactionId: transaction.id,
+        status: transaction.status,
+        amount: transaction.amount,
+        ...(transaction.referenceNumber ? { referenceNumber: transaction.referenceNumber } : {}),
+      });
+    };
+
     const fundingContext = {
       cryptoAsset,
       sessionId,
@@ -247,16 +284,7 @@ export function MoneygramRampWidget({
           },
           onComplete: (transaction) => {
             if (direction === "onramp") {
-              void post({
-                kind: "onramp_completed",
-                sessionId,
-                transactionId: transaction.id,
-                status: transaction.status,
-                amount: transaction.amount,
-                ...(transaction.referenceNumber
-                  ? { referenceNumber: transaction.referenceNumber }
-                  : {}),
-              });
+              void postOnrampCompletion(transaction);
               return;
             }
             const cryptoTransferId = signedTransferIdRef.current;
