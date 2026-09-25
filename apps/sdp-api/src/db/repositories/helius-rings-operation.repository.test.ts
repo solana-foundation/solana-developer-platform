@@ -797,12 +797,17 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
           .run();
         return;
       }
+      // Persist the signed bytes, expiry and signature the caller asked for:
+      // the expiry feeds exclude unsigned rows before they reach the sandbox
+      // filter, so a legacy row without them would make the exclusion below
+      // pass vacuously.
       await getDb(env)
         .prepare(
           `INSERT INTO helius_rings_operations
              (id, organization_id, project_id, rings_connection_id, wallet_id, op_type, state,
-              intent_key, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'shield', ?, ?, ?, ?)`
+              intent_key, signed_transaction, last_valid_block_height, outer_tx_signature,
+              created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'shield', ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           id,
@@ -812,6 +817,9 @@ describe("HeliusRingsOperationRepository (postgres)", () => {
           walletId,
           input.state,
           `sha256:${id}`,
+          signed,
+          blockHeight,
+          signature,
           input.updatedAt,
           input.updatedAt
         )
