@@ -45,9 +45,14 @@ export function PrincipalCreatePage({
   const [createdPrincipalId, setCreatedPrincipalId] = useState<string | null>(null);
   // Set when a submit ends without any response at all: the server may have
   // created the principal, but the wizard never learned its id. The next
-  // submit attests the lost response so the action can resume the same-named
-  // principal instead of reporting a duplicate-name conflict.
+  // submit attests the lost response so the action can surface the same-named
+  // principal for the user to confirm instead of reporting a duplicate-name
+  // conflict.
   const [responseLost, setResponseLost] = useState(false);
+  // Set when the action surfaced a resumable principal after a lost response:
+  // the retry flag cannot establish which principal the first attempt created,
+  // so the user confirms the resume explicitly before anything is written.
+  const [resumeCandidateId, setResumeCandidateId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
@@ -67,6 +72,7 @@ export function PrincipalCreatePage({
           projectId,
           principalId: createdPrincipalId ?? undefined,
           isRetry: responseLost || undefined,
+          resumePrincipalId: resumeCandidateId ?? undefined,
         });
         setResponseLost(false);
       } catch {
@@ -78,6 +84,17 @@ export function PrincipalCreatePage({
         return;
       }
       if (!result.ok) {
+        if (result.resumeCandidates?.length) {
+          // The previous attempt may have created this principal, but the
+          // retry flag cannot prove it — the user confirms the resume via
+          // the callout below.
+          setResumeCandidateId(result.resumeCandidates[0]);
+          return;
+        }
+        // A stale resume candidate must not survive a fresh failure: the
+        // wizard falls back to the id the action just returned, or unlocks
+        // the form so the user can rename.
+        setResumeCandidateId(null);
         if (result.principalId) {
           // The principal exists but is unverified; a retry re-runs only the
           // verification instead of creating a duplicate.
@@ -95,9 +112,10 @@ export function PrincipalCreatePage({
     });
   };
 
-  // An id-carrying retry or a lost-response retry re-runs the same submission,
-  // so the wizard shows the retry affordance and keeps the name locked.
-  const resuming = createdPrincipalId !== null || responseLost;
+  // An id-carrying retry, a lost-response retry, or a pending resume
+  // confirmation re-runs the same submission, so the wizard shows the retry
+  // affordance and keeps the name locked.
+  const resuming = createdPrincipalId !== null || responseLost || resumeCandidateId !== null;
 
   const steps = [
     {
@@ -178,6 +196,29 @@ export function PrincipalCreatePage({
             {t("DashboardPrivateChannels.members.walletDescription")}
           </p>
         </div>
+
+        {resumeCandidateId ? (
+          <Callout variant="warning" live>
+            {t("DashboardPrivateChannels.members.resumePrompt", { name: name.trim() })}
+            <div className="mt-3 flex gap-2">
+              <Button type="button" size="sm" onClick={submit} disabled={pending}>
+                {t("DashboardPrivateChannels.members.resumeAction")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setResumeCandidateId(null);
+                  setResponseLost(false);
+                }}
+                disabled={pending}
+              >
+                {t("DashboardPrivateChannels.members.resumeStartOverAction")}
+              </Button>
+            </div>
+          </Callout>
+        ) : null}
 
         {wallets.length === 0 ? (
           <Callout variant="info">
