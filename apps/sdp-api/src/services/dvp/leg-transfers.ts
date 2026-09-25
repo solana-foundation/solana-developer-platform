@@ -351,19 +351,23 @@ function historyFloor(leg: DvpLegEscrow): bigint {
 
 /**
  * The escrow's history after `until`, newest first, back no further than the
- * trade's creation. Null when it runs past the page cap, since resolving the
- * oldest of a truncated read would leave a gap behind it no later read fills.
- * `floorReached` says whether the listing ran past that creation: the read
- * then saw depth below every slot it lists, which is proof no later read has
- * to see again. `from` starts the walk below a signature instead of at the
- * top, which is how a bounded read reaches the region its bound excludes.
+ * trade's creation. `floorReached` says whether the listing ran past that
+ * creation: the read then saw depth below every slot it lists, which is proof
+ * no later read has to see again. `complete` says whether the walk reached its
+ * end — the bound, the floor, or the node running out of history. A walk the
+ * page cap cut off returns what it saw with `complete` false: resolving the
+ * oldest of a truncated read would leave a gap behind it no later read fills,
+ * so the caller of a read the position advances over drops the listing whole,
+ * while a read that only records what it finds may keep the truncated pages.
+ * `from` starts the walk below a signature instead of at the top, which is how
+ * a bounded read reaches the region its bound excludes.
  */
 async function readHistorySince(
   reader: DvpEscrowHistoryReader,
   leg: DvpLegEscrow,
   until: Signature | null,
   from: Signature | null = null
-): Promise<{ entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null> {
+): Promise<{ entries: DvpEscrowHistoryEntry[]; floorReached: boolean; complete: boolean }> {
   const floor = historyFloor(leg);
   const newestFirst: DvpEscrowHistoryEntry[] = [];
   let before: Signature | null = from;
@@ -373,17 +377,17 @@ async function readHistorySince(
     for (const entry of entries) {
       // Newest first, so everything after this one is older still.
       if (entry.blockTime !== null && entry.blockTime < floor) {
-        return { entries: newestFirst, floorReached: true };
+        return { entries: newestFirst, floorReached: true, complete: true };
       }
       newestFirst.push(entry);
     }
     const oldest = entries.at(-1);
     if (entries.length < HISTORY_PAGE_LIMIT || oldest === undefined) {
-      return { entries: newestFirst, floorReached: false };
+      return { entries: newestFirst, floorReached: false, complete: true };
     }
     before = oldest.signature;
   }
-  return null;
+  return { entries: newestFirst, floorReached: false, complete: false };
 }
 
 /**
@@ -392,9 +396,13 @@ async function readHistorySince(
  * region below it as well, because that is where the node's omission sits —
  * an omitted movement is served there once the node's index catches up, and a
  * walk bounded at the cursor alone would never list it. Null when even the
- * newer region exceeds the cap. `whole` says whether the region below the
- * cursor was read to the floor; a probe that the cap cut off has not seen
- * everything the node holds, so the sweep must not settle on it.
+ * newer region exceeds the cap. The two regions are listings of their own:
+ * `bounded` counts the entries the bounded read saw, so the sweep can tell
+ * them apart, and the probe's depth proves nothing about the bounded read
+ * above the cursor. `whole` says whether the probe reached its end; a probe
+ * the cap cut off has not seen everything the node holds, so the sweep must
+ * not settle on it — but what the probe saw is kept, because recording an
+ * omission it reached is the very thing it is read for.
  *
  * @param reader - The chain.
  * @param leg - The escrow to read.
@@ -406,23 +414,25 @@ async function readOnPastCap(
   cursor: { signature: Signature; slot: string }
 ): Promise<{
   read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean };
+  bounded: number;
   whole: boolean;
 } | null> {
   const newer = await readHistorySince(reader, leg, cursor.signature);
-  if (newer === null) {
+  if (!newer.complete) {
     return null;
   }
   const older = await readHistorySince(reader, leg, null, cursor.signature);
-  if (older === null) {
-    return { read: newer, whole: false };
-  }
-  // Newest first, so the region below the cursor follows the region above it.
   return {
     read: {
+      // Newest first, so the region below the cursor follows the region above
+      // it. The floor is the bounded read's own: the probe may have run past
+      // the trade's creation, but that is depth below the cursor, not proof
+      // of what the bounded read listed above it.
       entries: [...newer.entries, ...older.entries],
-      floorReached: newer.floorReached || older.floorReached,
+      floorReached: newer.floorReached,
     },
-    whole: true,
+    bounded: newer.entries.length,
+    whole: older.complete,
   };
 }
 
@@ -448,6 +458,36 @@ function watermarkFor(
     // numeric one the repository's own guard makes.
     newestFirst.some((listed) => BigInt(listed.slot) < BigInt(slot))
   );
+}
+
+/**
+ * The position over a resolved, finalized entry: forward onto it when the
+ * entry is one the read may advance over — the probe's findings behind the
+ * cursor never are — and the move would not be backward, with the watermark
+ * qualifying the new position; the position and its watermark as they were
+ * otherwise. The PostgreSQL repository would refuse a backward write in any
+ * case, and a same-slot step back is one its guard could not tell from a
+ * step forward, so the service keeps the position where it was.
+ */
+function advancedPosition(
+  cursor: { signature: Signature; slot: string } | null,
+  cursorSlotComplete: boolean,
+  entry: DvpEscrowHistoryEntry,
+  mayAdvance: boolean,
+  floorReached: boolean,
+  evidence: readonly DvpEscrowHistoryEntry[]
+): {
+  cursor: { signature: Signature; slot: string } | null;
+  cursorSlotComplete: boolean;
+} {
+  const slot = entry.slot.toString();
+  if (!mayAdvance || (cursor !== null && BigInt(slot) < BigInt(cursor.slot))) {
+    return { cursor, cursorSlotComplete };
+  }
+  return {
+    cursor: { signature: entry.signature, slot },
+    cursorSlotComplete: watermarkFor(cursor, cursorSlotComplete, slot, floorReached, evidence),
+  };
 }
 
 /** Resolves one listed signature: recorded, moving nothing, or unreadable and logged. */
@@ -648,15 +688,25 @@ export async function syncDvpLegTransfers(
   // what it can of a history the cap cut off, and a probe that could not reach
   // the floor leaves this false, so the leg stays due and asks again.
   let wholeHistory = true;
-  let read = await readHistorySince(reader, leg, since);
+  // How many of the read's entries the position may advance over; null unless
+  // the fallback stitched two listings together.
+  let bounded: number | null = null;
+  const walked = await readHistorySince(reader, leg, since);
+  // A walk that ran past the scan cap is dropped whole: resolving the oldest
+  // of a truncated read would leave a gap behind it no later read fills.
+  let read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null = walked.complete
+    ? walked
+    : null;
   if (read === null && stored !== null && since === null) {
     // The walk from the top ran past the scan cap. Resolving the oldest of a
     // truncated read would leave a gap behind it, but giving up here stalls
     // the leg on a read it can never finish — an unproven cursor un-bounds
     // every later sweep too. The saved cursor is the bound this leg read
-    // behind before the watermark existed, so the sweep reads on from there.
-    // The watermark keeps the next sweep asking for the whole history, and
-    // the audit keeps that ask alive for a proven one.
+    // behind before the watermark existed, so the sweep reads on from there,
+    // and probes the region below it, keeping what the probe saw: that is
+    // where the node's omission sits. The probe never moves the position nor
+    // proves it, and the watermark keeps the next sweep asking for the whole
+    // history; the audit keeps that ask alive for a proven one.
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
       "dvp transfers: escrow history from the top exceeds the scan cap; reading on from the saved cursor"
@@ -666,6 +716,7 @@ export async function syncDvpLegTransfers(
       read = null;
     } else {
       read = fallback.read;
+      bounded = fallback.bounded;
       wholeHistory = fallback.whole;
     }
   }
@@ -677,6 +728,12 @@ export async function syncDvpLegTransfers(
     return 0;
   }
   const newestFirst = read.entries;
+  // The listing an advance may be proven by: every entry of a single read,
+  // but in the fallback only the bounded read's own — the probe of the region
+  // below the cursor is a listing of its, and its depth says nothing about
+  // what the bounded read listed above the cursor.
+  const advancing = bounded ?? newestFirst.length;
+  const evidence = newestFirst.slice(0, advancing);
 
   const known = new Map(
     (await transfers.listForLeg(leg.tradeId, leg.side)).map((transfer) => [
@@ -691,7 +748,7 @@ export async function syncDvpLegTransfers(
   let finalizedSoFar = true;
   let complete = wholeHistory;
   let recorded = 0;
-  for (const entry of [...newestFirst].reverse()) {
+  for (const [position, entry] of [...newestFirst].reverse().entries()) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
     const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget);
     if (outcome.step === "stop") {
@@ -700,21 +757,14 @@ export async function syncDvpLegTransfers(
     }
     recorded += outcome.recorded ? 1 : 0;
     if (finalizedSoFar && entry.finalized) {
-      const slot = entry.slot.toString();
-      // The position only ever moves forward. The fallback's probe resolves
-      // what it finds behind the cursor, and the PostgreSQL repository would
-      // refuse the backward write in any case: the position stays where it
-      // was, still qualified by the watermark it arrived with.
-      if (cursor === null || BigInt(slot) >= BigInt(cursor.slot)) {
-        cursorSlotComplete = watermarkFor(
-          cursor,
-          cursorSlotComplete,
-          slot,
-          read.floorReached,
-          newestFirst
-        );
-        cursor = { signature: entry.signature, slot };
-      }
+      ({ cursor, cursorSlotComplete } = advancedPosition(
+        cursor,
+        cursorSlotComplete,
+        entry,
+        newestFirst.length - 1 - position < advancing,
+        read.floorReached,
+        evidence
+      ));
     } else {
       finalizedSoFar = false;
     }

@@ -593,6 +593,170 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
+  // The probe of the region below the cursor is a listing of its own. What
+  // it saw says nothing about the bounded read above the cursor, so its
+  // entries record their transfers but neither move the position nor prove
+  // its slot: a watermark from the probe's depth would qualify the cursor on
+  // evidence the bounded read never offered, fencing an omitted movement
+  // behind it out of every read that follows.
+  it("neither moves the position nor proves its slot on the probe's evidence", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(3_002)
+          ? history([3_003])
+          : [
+              // The probe failed transaction needs no read, and its slot sits
+              // below the bounded read's advance: under a watermark that read
+              // the two listings as one, it would prove the cursor's slot on
+              // the probe's say-so.
+              ...history([3_001], {
+                failed: true,
+                blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+              }),
+              // An hour before the row: a previous life of the address. The
+              // probe ran past the trade's creation; the bounded read above
+              // the cursor never saw that floor.
+              ...history([1], { blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS - 3_600)) }),
+            ]
+      );
+    served.set(sig(3_003), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(3_002), slot: "3002" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read's advance to slot 3003 is recorded, but unproven: the
+    // probe's depth and its earlier slot are not its listing.
+    expect(rows.has(sig(3_003))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(3_003), slot: "3003" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // A probe the cap cut off has still seen the newest of what lies below the
+  // cursor, and what it saw is recorded: discarding its entries would leave
+  // a movement the node omitted — the one thing the probe is read for —
+  // unrecorded for as long as the history stays over the cap.
+  it("records what the probe saw when the cap cut it off", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? [] : page.before === sig(7) ? probePage : fullPage
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The omitted movement was in the probe's first page and was recorded;
+    // the scan does not settle, because the probe did not reach its end.
+    expect(rows.has(sig(6))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
+  // The probe resolves what it finds behind the cursor and the position
+  // stays exactly where it was — even when the find sits in the cursor's own
+  // slot, where the PostgreSQL repository's guard could not tell a backward
+  // write from a forward one.
+  it("leaves the position and its watermark alone when the probe finds a same-slot movement", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const behind = {
+      ...history([1])[0],
+      slot: 420n,
+      blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+    };
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(2) ? [] : page.before === sig(2) ? [behind] : []
+      );
+    served.set(sig(1), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "420" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    expect(rows.has(sig(1))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "420" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
   it("records nothing and saves nothing when listing the history fails mid-page", async () => {
     listSignatures
       .mockResolvedValueOnce(history(Array.from({ length: HISTORY_PAGE_LIMIT }, (_, i) => 900 - i)))
