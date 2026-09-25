@@ -13,7 +13,7 @@ const ALTER_TABLE = new RegExp(
   "i"
 );
 const CREATE = new RegExp(
-  String.raw`^CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+|TEMP(?:ORARY)?\s+|UNLOGGED\s+|MATERIALIZED\s+)*(\w+)\s+(?:CONCURRENTLY\s+)?${IF_EXISTS}(${NAME})`,
+  String.raw`^CREATE\s+(?:OR\s+REPLACE\s+)?(?:UNIQUE\s+|TEMP(?:ORARY)?\s+|UNLOGGED\s+|MATERIALIZED\s+)*(\w+)\s+(?:CONCURRENTLY\s+)?(IF\s+NOT\s+EXISTS\s+)?(${NAME})`,
   "i"
 );
 const DROP = new RegExp(
@@ -138,18 +138,20 @@ function plpgsqlStatements(body) {
 
 function collectAdditions(statements) {
   const created = new Set();
-  const newTables = new Set();
+  const newTables = new Map();
   const newColumns = new Map();
-  const reconstrained = new Set();
   const addColumn = (table, column) => {
     if (!newColumns.has(table)) newColumns.set(table, new Set());
     newColumns.get(table).add(column);
   };
-  const visit = (statement) => {
+  const visit = (statement, index) => {
     const create = statement.match(CREATE);
     if (create) {
-      created.add(normalize(create[2]));
-      if (create[1].toUpperCase() === "TABLE") newTables.add(normalize(create[2]));
+      const name = normalize(create[3]);
+      created.add(name);
+      if (create[1].toUpperCase() === "TABLE" && !create[2] && !newTables.has(name)) {
+        newTables.set(name, index);
+      }
       return;
     }
     const alter = statement.match(ALTER_TABLE);
@@ -158,28 +160,24 @@ function collectAdditions(statements) {
       for (const action of splitTopLevel(statement.slice(alter[0].length))) {
         const constraint = action.match(ADD_CONSTRAINT);
         const column = !constraint && action.match(ADD_COLUMN);
-        if (constraint) {
-          created.add(normalize(constraint[1]));
-          reconstrained.add(table);
-        } else if (column) {
-          addColumn(table, normalize(column[1]));
-        }
+        if (constraint) created.add(normalize(constraint[1]));
+        else if (column) addColumn(table, normalize(column[1]));
       }
       return;
     }
     if (/^DO\b/i.test(statement)) {
-      for (const inner of plpgsqlStatements(dollarBody(statement) ?? "")) visit(inner);
+      for (const inner of plpgsqlStatements(dollarBody(statement) ?? "")) visit(inner, index);
     }
   };
   statements.forEach(visit);
-  return { created, newTables, newColumns, reconstrained };
+  return { created, newTables, newColumns };
 }
 
-function alterActionFindings(action, table, context) {
+function alterActionFindings(action, table, replacesConstraint, context) {
   const isNew = (column) => context.newColumns.get(table)?.has(column) ?? false;
   const dropConstraint = action.match(DROP_CONSTRAINT);
   if (dropConstraint) {
-    return context.created.has(normalize(dropConstraint[1])) || context.reconstrained.has(table)
+    return context.created.has(normalize(dropConstraint[1])) || replacesConstraint
       ? null
       : "drops a constraint";
   }
@@ -203,16 +201,18 @@ function alterActionFindings(action, table, context) {
   return null;
 }
 
-function statementFindings(statement, context) {
+function statementFindings(statement, index, context) {
   const findings = [];
   const { ctes, main } = unwrapCte(statement);
-  for (const cte of ctes) findings.push(...statementFindings(cte.trim(), context));
+  for (const cte of ctes) findings.push(...statementFindings(cte.trim(), index, context));
 
   const alter = main.match(ALTER_TABLE);
   if (alter) {
     const table = normalize(alter[1]);
-    for (const action of splitTopLevel(main.slice(alter[0].length))) {
-      const finding = alterActionFindings(action, table, context);
+    const actions = splitTopLevel(main.slice(alter[0].length));
+    const replacesConstraint = actions.some((action) => ADD_CONSTRAINT.test(action));
+    for (const action of actions) {
+      const finding = alterActionFindings(action, table, replacesConstraint, context);
       if (finding) findings.push(finding);
     }
     return findings;
@@ -220,7 +220,13 @@ function statementFindings(statement, context) {
 
   const drop = main.match(DROP);
   if (drop) {
-    if (!context.created.has(normalize(drop[2]))) findings.push(`drops a ${drop[1].toLowerCase()}`);
+    const kind = drop[1].toLowerCase();
+    const name = normalize(drop[2]);
+    const recreated =
+      kind === "table"
+        ? context.newTables.has(name) && context.newTables.get(name) < index
+        : context.created.has(name);
+    if (!recreated) findings.push(`drops a ${kind}`);
     return findings;
   }
 
@@ -250,7 +256,7 @@ function statementFindings(statement, context) {
 
   if (/^DO\b/i.test(main)) {
     for (const inner of plpgsqlStatements(dollarBody(main) ?? "")) {
-      findings.push(...statementFindings(inner, context));
+      findings.push(...statementFindings(inner, index, context));
     }
   }
   return findings;
@@ -259,8 +265,8 @@ function statementFindings(statement, context) {
 export function findBreakingStatements(sql) {
   const statements = splitSqlStatements(sql);
   const context = collectAdditions(statements);
-  return statements.flatMap((statement) =>
-    statementFindings(statement, context).map(
+  return statements.flatMap((statement, index) =>
+    statementFindings(statement, index, context).map(
       (finding) => `${finding}: ${statement.replace(/\s+/g, " ").slice(0, 100)}`
     )
   );

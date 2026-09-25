@@ -102,8 +102,24 @@ test("dropping something this file recreates is a replace, not a contraction", (
     "CREATE TRIGGER t BEFORE INSERT ON a FOR EACH ROW EXECUTE FUNCTION f();\n" +
     "CREATE OR REPLACE FUNCTION f() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql;\n" +
     "ALTER TABLE a ADD COLUMN tmp TEXT;\n" +
-    "ALTER TABLE a DROP COLUMN tmp;";
+    "ALTER TABLE a DROP COLUMN tmp;\n" +
+    "CREATE TABLE scratch (id TEXT);\n" +
+    "DROP TABLE scratch;";
   assert.deepEqual(findBreakingStatements(sql), []);
+});
+
+test("recreating an existing object does not launder its removal", () => {
+  assert.deepEqual(
+    reasons(
+      "DROP TABLE a;\n" +
+        "CREATE TABLE a (id TEXT PRIMARY KEY);\n" +
+        "CREATE TABLE IF NOT EXISTS b (id TEXT PRIMARY KEY);\n" +
+        "DELETE FROM b WHERE id = 'x';\n" +
+        "ALTER TABLE c DROP CONSTRAINT c_old_check;\n" +
+        "ALTER TABLE c ADD CONSTRAINT c_new_check CHECK (x > 0);"
+    ),
+    ["drops a table", "rewrites rows", "drops a constraint"]
+  );
 });
 
 test("statements inside DO blocks are checked", () => {
