@@ -32,19 +32,45 @@ ALTER TABLE issued_tokens
 -- settled transaction record when it applies. Until then the revocation reads
 -- as "no authority" rather than resurrecting the mint signer, which is the
 -- fail-closed side of the mirror's eventual consistency.
+--
+-- `operation_params` is unconstrained text, so the backfill must not cast it
+-- to jsonb unchecked: one malformed historical row would throw and roll the
+-- whole migration back, leaving the required column unapplied. The runtime
+-- guards the same parse (`parsePostgresJsonOr`) and falls back to "not a
+-- metadata update", so the backfill does the same through the session-local
+-- helper below — malformed rows are skipped, never fatal.
+CREATE OR REPLACE FUNCTION pg_temp.jsonb_or_null(value text)
+RETURNS jsonb
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN value::jsonb;
+EXCEPTION WHEN others THEN
+    RETURN NULL;
+END;
+$$;
+
 WITH bookkept_metadata_updates AS (
     SELECT
-        it.token_id,
-        it.operation_params::jsonb ->> 'newAuthority' AS new_authority,
+        token_id,
+        params ->> 'newAuthority' AS new_authority,
         ROW_NUMBER() OVER (
-            PARTITION BY it.token_id
-            ORDER BY it.slot DESC NULLS LAST, it.created_at DESC, it.id DESC
+            PARTITION BY token_id
+            ORDER BY slot DESC NULLS LAST, created_at DESC, id DESC
         ) AS recency
-    FROM issuance_transactions it
-    WHERE it.type = 'update_authority'
-      AND it.status = 'confirmed'
-      AND it.authority_bookkeeping_applied_at IS NOT NULL
-      AND it.operation_params::jsonb ->> 'role' = 'metadata'
+    FROM (
+        SELECT
+            it.token_id,
+            it.slot,
+            it.created_at,
+            it.id,
+            pg_temp.jsonb_or_null(it.operation_params) AS params
+        FROM issuance_transactions it
+        WHERE it.type = 'update_authority'
+          AND it.status = 'confirmed'
+          AND it.authority_bookkeeping_applied_at IS NOT NULL
+    ) parsed
+    WHERE parsed.params ->> 'role' = 'metadata'
 )
 UPDATE issued_tokens t
 SET metadata_authority_revoked = 1

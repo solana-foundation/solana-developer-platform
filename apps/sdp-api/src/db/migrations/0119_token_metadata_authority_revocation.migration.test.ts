@@ -304,6 +304,90 @@ describe("0119 token metadata authority revocation backfill", () => {
     expect(await revokedFlag("tok_0119_pending_grant")).toBe(1);
   });
 
+  it("skips a malformed operation_params row instead of aborting the migration", async () => {
+    const { organizationId, projectId, userId } = await seedOrgProject(client, "0119_malformed");
+    await insertToken({
+      id: "tok_0119_malformed_revoke",
+      projectId,
+      organizationId,
+      userId,
+      mintAddress: "mint_0119_malformed_revoke",
+      mintAuthority: "wallet_0119_mint",
+      metadataAuthority: null,
+    });
+    await client.query(
+      `INSERT INTO issuance_transactions (
+         id, token_id, organization_id, type, status, operation_params,
+         slot, created_at, updated_at, authority_bookkeeping_applied_at
+       ) VALUES ($1, $2, $3, 'update_authority', 'confirmed', $4, $5, $6, $6, $7)`,
+      [
+        "ttx_0119_malformed_revoke",
+        "tok_0119_malformed_revoke",
+        organizationId,
+        // Legacy/corrupt rows: operation_params is unconstrained text and the
+        // column cannot be cast to jsonb.
+        "not-json{",
+        100,
+        "2026-08-01T00:00:00.000Z",
+        "2026-08-01T00:05:00.000Z",
+      ]
+    );
+
+    // Must not throw: a malformed row rolls nothing back.
+    await client.query(migrationSql);
+
+    // The malformed row is not a readable metadata update, so nothing decides
+    // the flag for this token.
+    expect(await revokedFlag("tok_0119_malformed_revoke")).toBe(0);
+  });
+
+  it("lets the newest malformed row be ignored by an older bookkept revocation", async () => {
+    const { organizationId, projectId, userId } = await seedOrgProject(
+      client,
+      "0119_malformed_newer"
+    );
+    await insertToken({
+      id: "tok_0119_malformed_newer",
+      projectId,
+      organizationId,
+      userId,
+      mintAddress: "mint_0119_malformed_newer",
+      mintAuthority: "wallet_0119_mint",
+      metadataAuthority: null,
+    });
+    await insertSettledMetadataUpdate({
+      id: "ttx_0119_malformed_newer_revoke",
+      tokenId: "tok_0119_malformed_newer",
+      organizationId,
+      newAuthority: null,
+      slot: 100,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      bookkeptAt: "2026-08-01T00:05:00.000Z",
+    });
+    await client.query(
+      `INSERT INTO issuance_transactions (
+         id, token_id, organization_id, type, status, operation_params,
+         slot, created_at, updated_at, authority_bookkeeping_applied_at
+       ) VALUES ($1, $2, $3, 'update_authority', 'confirmed', $4, $5, $6, $6, $7)`,
+      [
+        "ttx_0119_malformed_newer_opaque",
+        "tok_0119_malformed_newer",
+        organizationId,
+        "not-json{",
+        101,
+        "2026-08-01T00:10:00.000Z",
+        "2026-08-01T00:15:00.000Z",
+      ]
+    );
+
+    await client.query(migrationSql);
+
+    // The malformed newer row cannot be read as a metadata update, so the
+    // newest readable bookkept revocation decides — matching how the runtime
+    // treats an unparseable params payload.
+    expect(await revokedFlag("tok_0119_malformed_newer")).toBe(1);
+  });
+
   it("leaves settled updates the runtime mirror has not bookkept yet", async () => {
     const { organizationId, projectId, userId } = await seedOrgProject(client, "0119_unapplied");
     await insertToken({
