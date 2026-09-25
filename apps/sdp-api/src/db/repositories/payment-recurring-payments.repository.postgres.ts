@@ -47,6 +47,7 @@ import type {
   UpdatePaymentRecurringPaymentLifecycleInput,
   UpdatePaymentRecurringPaymentUpdateAttemptInput,
 } from "./payment-recurring-payments.repository";
+import { RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY } from "./payment-recurring-payments.repository";
 
 type DatabaseBindValues = Parameters<ReturnType<DatabaseExecutor["prepare"]>["bind"]>;
 
@@ -925,10 +926,13 @@ export function createPostgresPaymentRecurringPaymentsRepository(
       organizationId: string;
       projectId: string;
       recurringPaymentId: string;
+      staleBefore: string;
     }) {
-      // An activation attempt that reached the authorization broadcast stage
-      // without journaling its signature proves a Subscribe was submitted
-      // whose outcome cannot be resolved from the journal.
+      // Activation marks an attempt right before broadcasting the Subscribe
+      // authorization and clears the mark when the signature is journalled,
+      // so a marked attempt with no journaled signature proves a broadcast
+      // whose outcome cannot be resolved from the journal. Attempts older
+      // than the staleness window can no longer have a broadcast in flight.
       const row = await db
         .prepare(
           `SELECT 1 AS matched
@@ -936,11 +940,12 @@ export function createPostgresPaymentRecurringPaymentsRepository(
             WHERE organization_id = ?
               AND project_id = ?
               AND recurring_payment_id = ?
-              AND stage IN ('authorize_subscription', 'finalize')
               AND authorization_signature IS NULL
+              AND metadata->>'${RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY}' = 'true'
+              AND updated_at >= ?
             LIMIT 1`
         )
-        .bind(input.organizationId, input.projectId, input.recurringPaymentId)
+        .bind(input.organizationId, input.projectId, input.recurringPaymentId, input.staleBefore)
         .first<Record<string, unknown>>();
       return row !== null;
     },

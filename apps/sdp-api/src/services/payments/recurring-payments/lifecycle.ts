@@ -943,14 +943,15 @@ async function cancelReconcilablePendingActivationRecurringPayment(input: {
     }
 
     // No retained authorization signature: the activation journal is the only
-    // evidence of a submitted Subscribe (SOLA9-454). An activation attempt
-    // that reached the authorization stage without journaling its signature
-    // leaves the submitted authorization unresolvable, so the record stays
-    // recoverable instead of finalizing a cancellation the authorization
-    // could survive. A journalled cancellation attempt carrying a signature is
-    // resolved on chain instead: a confirmed one revoked a delegation that
-    // must have existed, and a provably failed one left the absent delegation
-    // as proof the authorization never landed.
+    // evidence of a submitted Subscribe (SOLA9-454). Activation marks an
+    // attempt while its authorization broadcast is in flight and clears the
+    // mark when the signature is journalled, so a recent marked attempt with
+    // no journaled signature leaves the submitted authorization
+    // unresolvable, and the record stays recoverable instead of finalizing a
+    // cancellation the authorization could survive. A journalled cancellation
+    // attempt carrying a signature is resolved on chain instead: a confirmed
+    // one revoked a delegation that must have existed, and a provably failed
+    // one left the absent delegation as proof the authorization never landed.
     const inFlightAttemptOutcome = await resolveInFlightCancelLifecycleAttemptOutcome({
       env: input.env,
       organizationId: input.organizationId,
@@ -963,6 +964,7 @@ async function cancelReconcilablePendingActivationRecurringPayment(input: {
         organizationId: input.organizationId,
         projectId: input.projectId,
         recurringPaymentId: input.recurringPayment.id,
+        staleBefore: getRecurringPaymentOperationStaleBefore(new Date().toISOString()),
       }))
     ) {
       throw internalError(

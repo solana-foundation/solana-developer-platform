@@ -25,6 +25,7 @@ import {
   createPaymentSubscriptionsRepository,
   createPostgresPaymentRecurringPaymentsRepository,
   createPostgresPaymentSubscriptionsRepository,
+  RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY,
   type PaymentRecurringPaymentActivationAttemptRow,
   type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentRow,
@@ -918,6 +919,16 @@ export async function activateRecurringPayment(input: {
         subscriber: sourceSigner,
         tokenMint: mint,
       });
+      // Mark the attempt before broadcasting: if the journal write of the
+      // signature below fails, the pending-activation cancel path must treat
+      // the submitted authorization as unresolvable (SOLA9-454).
+      await recurringRepo.updateActivationAttempt({
+        attemptId: attempt.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        metadata: { [RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY]: true },
+        updatedAt: new Date().toISOString(),
+      });
       authorizationSignature = await sendSubscriptionInstructions({
         env: input.env,
         organizationId: input.organizationId,
@@ -946,6 +957,7 @@ export async function activateRecurringPayment(input: {
             organizationId: input.organizationId,
             projectId: input.projectId,
             authorizationSignature,
+            metadata: {},
             updatedAt: signatureUpdatedAt,
           })
         );
