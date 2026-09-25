@@ -44,7 +44,16 @@ CREATE TABLE IF NOT EXISTS dvp_leg_funding_receipts (
     -- shortfall it observed, so per-event amounts cannot be derived from the
     -- trade: the trade-level escrow peak is the leg's high-water mark, not what
     -- any one transfer moved. The feed shows this amount per receipt.
-    amount TEXT NOT NULL,
+    --
+    -- Nullable, but only ever NULL for a row the backfill below inserted: a
+    -- claim broadcast before this table existed has no recorded amount, and if
+    -- its trade's escrow peak was never populated (0092 added the peak columns
+    -- without a backfill) the deployed feed showed that fund row with a NULL
+    -- amount — the backfill must keep showing exactly that instead of aborting
+    -- the deploy over history the feed already showed. Every receipt written
+    -- at broadcast carries the transfer's amount, and from this migration
+    -- forward no NULL is ever written again.
+    amount TEXT,
 
     created_at TEXT NOT NULL DEFAULT (sdp_iso_now()),
 
@@ -65,7 +74,11 @@ CREATE INDEX IF NOT EXISTS idx_dvp_leg_funding_receipts_organization_created
 -- The backfilled amount is the side's escrow peak, which is exactly what the
 -- deployed feed showed for that row and what the claim alone can still tell
 -- about the transfer; per-event amounts are recorded from this migration
--- forward, at broadcast.
+-- forward, at broadcast. A trade whose peak was never populated (0092 added
+-- the columns without a backfill) showed that row with a NULL amount, so the
+-- insert keeps the NULL — requiring a value here would abort the whole deploy
+-- over one historical claim, and substituting a guess would change what the
+-- feed already showed.
 --
 -- A funding whose claim was already taken over by a reclaim before this
 -- migration ran has NO claim row left to backfill from: the takeover turned the
