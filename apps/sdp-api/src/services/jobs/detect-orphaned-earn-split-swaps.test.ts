@@ -407,6 +407,39 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 
+  it("keeps an aggregate recovery open when a covering deposit was already claimed", async () => {
+    // A floor-sized deposit discharged another advisory first, so the claim
+    // attempt cannot use it; the sub-floor deposits that jointly meet THIS
+    // advisory's floor are still committed evidence, and a terminal `unfunded`
+    // would drop them (SOLA9-355). The claimed deposit counts for the advisory
+    // that took it: it neither blocks the aggregate check nor adds to it.
+    const first = await seedAdvisory(3 * HOUR);
+    const second = await seedAdvisory(2 * HOUR);
+    const claimed = await seedFollowUpMovement("finalized");
+    const splitOne = await seedFollowUpMovement("finalized", { amount: "10" });
+    const splitTwo = await seedFollowUpMovement("finalized", { amount: "14.8" });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    // One deposit discharges at most one advisory: the older one takes the floor deposit.
+    expect(await advisoryRow(first)).toMatchObject({
+      resolution: "deposit_observed",
+      resolving_movement_id: claimed,
+    });
+    // The younger one cannot claim it, but the split evidence still holds it open.
+    expect(tick().payload).toMatchObject({ deposit_observed: 1, ambiguous: 1, unfunded: 0 });
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[1]).toMatchObject({
+      advisory_id: second,
+      escalated: true,
+      aggregate_deposit_atoms: FLOOR.toString(),
+      covering_deposit_ids: expect.arrayContaining([splitOne, splitTwo]),
+    });
+    expect(ambiguous?.[1].covering_deposit_ids).not.toContain(claimed);
+    expect(await advisoryRow(second)).toMatchObject({ resolved_at: null });
+  });
+
   it("holds an aggregate recovery open without escalating inside the grace period", async () => {
     const id = await seedAdvisory(45 * MINUTE);
     await seedFollowUpMovement("finalized", { amount: "10" });
