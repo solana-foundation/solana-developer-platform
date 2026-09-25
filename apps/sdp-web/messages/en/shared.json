@@ -226,7 +226,8 @@
     "playgroundKeyPlaceholder": "<your API key>",
     "exampleResponse": "Example response",
     "notRunYet": "Not run yet",
-    "running": "Running…"
+    "running": "Running…",
+    "openCalendarFor": "Open the calendar for {field}"
   },
   "dashboardShell": {
     "workspace": "Workspace",
