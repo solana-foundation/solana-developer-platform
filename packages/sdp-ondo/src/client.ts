@@ -18,8 +18,15 @@ import type {
   EarnVaultWithdrawQuoteProvider,
 } from "@sdp/earn/types";
 import { AmountError, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { CLUSTER_BY_SDP_ENVIRONMENT, type SolanaCluster } from "@sdp/types";
+import {
+  CLUSTER_BY_SDP_ENVIRONMENT,
+  type SolanaCluster,
+  SPL_TOKEN_PROGRAMS,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { type OndoDeployment, ondoDeployment, ondoDepositMints } from "@sdp/types/ondo-programs";
+import { address } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { SdpOndoError } from "./errors";
 import type { OndoRuntime, OndoSwapLeg, OndoSwapPort, OndoVaultOperationRunner } from "./types";
 
@@ -143,12 +150,45 @@ function canonicalAmount(value: string, label: string): { text: string; atoms: b
 
 interface RpcTokenAccountsResponse {
   value?: {
+    pubkey?: string;
     account?: {
       data?: {
         parsed?: { info?: { tokenAmount?: { amount?: string } } };
       };
     };
   }[];
+}
+
+/**
+ * The owner's associated token account for a mint, derived with the SAME
+ * owner/mint/token-program inputs the API's Jupiter boundary uses to pin a
+ * swap's source account (`requireEarnSwapMintMetadata` +
+ * `findAssociatedTokenPda` over the well-known token catalogue there).
+ *
+ * This identity is the read/execution contract (SOLA9-452): the admitted swap
+ * spends ONLY this account, so only this account's balance is executable
+ * position. An owner-controlled non-ATA account holds real USDY but is not
+ * spendable by this provider's exit, so it must never be reported as shares —
+ * a position the exit cannot execute is the appearance of an exit, not one.
+ * An unknown mint refuses: the swap boundary would refuse it too, and
+ * deriving an ATA through a guessed token program could match the wrong
+ * account.
+ */
+async function ownerAssociatedTokenAccount(owner: string, mint: string): Promise<string> {
+  const token = WELL_KNOWN_TOKEN_BY_MINT.get(mint);
+  if (!token) {
+    throw new SdpOndoError(
+      "POSITION_UNREADABLE",
+      `Mint ${mint} is not in the well-known token catalogue; the executable token account ` +
+        "cannot be derived without guessing the token program."
+    );
+  }
+  const [ata] = await findAssociatedTokenPda({
+    owner: address(owner),
+    mint: address(mint),
+    tokenProgram: address(SPL_TOKEN_PROGRAMS[token.tokenProgram]),
+  });
+  return ata;
 }
 
 export class OndoVaultDirectClient
@@ -507,9 +547,18 @@ export class OndoVaultDirectClient
 
   /**
    * Live positions: the owner's USDY balance, read from chain per call and
-   * never persisted. Balances are summed from the exact raw `amount` integer
-   * strings — never `uiAmount`, which is a JSON number and lossy above 2^53
-   * base units (the same rule the Kamino read follows).
+   * never persisted. The balance is the owner's DERIVED USDY ATA's exact raw
+   * `amount` integer string — the one account the admitted exit swap is
+   * allowed to spend (see `ownerAssociatedTokenAccount`) — never `uiAmount`,
+   * which is a JSON number and lossy above 2^53 base units (the same rule the
+   * Kamino read follows).
+   *
+   * USDY held in any other owner-controlled account is deliberately NOT
+   * reported: the withdrawal swap can spend only the derived source ATA, so
+   * advertising an owner-wide aggregate would show a full exit the admitted
+   * plan cannot execute (SOLA9-452). The vault-share reconciliation report,
+   * which reads whole-wallet SPL balances, remains the surface that surfaces
+   * such auxiliary holdings for triage.
    *
    * An empty reference list means the configured shelf, which for Ondo is the
    * single USDY instrument. The valuation is allowed to fail INDEPENDENTLY of
@@ -560,7 +609,8 @@ export class OndoVaultDirectClient
             owner: input.owner,
             cluster: runtime.cluster,
             shares,
-            // No lock: the whole balance is exitable on the open market.
+            // No lock: the whole executable (ATA) balance is exitable on the
+            // open market, and nothing outside that account is reported.
             withdrawableShares: shares,
             ...(tokenValue === undefined ? {} : { tokenValue }),
             tokenMint: config.depositMint,
@@ -586,20 +636,35 @@ export class OndoVaultDirectClient
     owner: string,
     mint: string
   ): Promise<bigint> {
+    // The executable position is the owner's derived ATA — the one account the
+    // Jupiter boundary admits as the swap's source (see
+    // `ownerAssociatedTokenAccount`). Balances in any other owner-controlled
+    // account are real holdings but not spendable by the admitted exit, so
+    // they are not shares. A missing ATA is an exact zero (the WisdomTree
+    // read's rule), and the raw amount keeps the exact-integer-string rule —
+    // never `uiAmount`, which is lossy above 2^53 base units.
+    const executableAccount = await ownerAssociatedTokenAccount(owner, mint);
     const accounts = await this.tokenAccounts(runtime, owner, mint);
-    let total = 0n;
     for (const entry of accounts) {
+      if (typeof entry.pubkey !== "string" || entry.pubkey.length === 0) {
+        throw new SdpOndoError(
+          "POSITION_UNREADABLE",
+          "A token account answer carried no address; refusing to judge the executable " +
+            "balance from a read that cannot name its accounts."
+        );
+      }
+      if (entry.pubkey !== executableAccount) continue;
       const raw = entry.account?.data?.parsed?.info?.tokenAmount?.amount;
       if (typeof raw !== "string" || !/^\d+$/.test(raw)) {
         throw new SdpOndoError(
           "POSITION_UNREADABLE",
-          `A token account for ${mint} returned no exact raw balance; refusing to report a ` +
-            "partial position."
+          `The executable token account for ${mint} returned no exact raw balance; refusing to ` +
+            "report a partial position."
         );
       }
-      total += BigInt(raw);
+      return BigInt(raw);
     }
-    return total;
+    return 0n;
   }
 
   private async tokenAccounts(

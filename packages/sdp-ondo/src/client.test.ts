@@ -1,6 +1,8 @@
 import type { EarnRuntimeContext } from "@sdp/earn/types";
-import { wellKnownMint } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, wellKnownMint } from "@sdp/types";
 import { ONDO_DEPLOYMENTS } from "@sdp/types/ondo-programs";
+import { address } from "@solana/kit";
+import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ONDO_SWAP_COMPUTE_UNIT_LIMIT, OndoVaultDirectClient } from "./client";
 import { SdpOndoError } from "./errors";
@@ -17,7 +19,18 @@ if (!MAINNET) throw new Error("test premise: mainnet deployment filled in");
 const USDY = MAINNET.usdyMint;
 const USDC = wellKnownMint("USDC", "mainnet-beta") as string;
 const OWNER = "C4XGF8r1gQP7p2PeKcRAFNwGAU1gCxiinRufqddY1m98";
+const NON_ATA = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 const CTX: EarnRuntimeContext = { env: {}, environment: "production" };
+
+/** The owner's USDY ATA, derived with the Jupiter boundary's exact inputs. */
+async function ownerUsdyAta(): Promise<string> {
+  const [ata] = await findAssociatedTokenPda({
+    owner: address(OWNER),
+    mint: address(USDY),
+    tokenProgram: address(SPL_TOKEN_PROGRAMS["spl-token"]),
+  });
+  return ata;
+}
 
 function leg(minOutAmount: string, quotedAmount = minOutAmount): OndoSwapLeg {
   return {
@@ -48,7 +61,7 @@ function makeClient(port: Partial<OndoSwapPort>) {
   );
 }
 
-function stubTokenAccounts(amounts: string[]) {
+function stubTokenAccounts(entries: (string | { pubkey: string; amount: string })[]) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
@@ -56,8 +69,17 @@ function stubTokenAccounts(amounts: string[]) {
         jsonrpc: "2.0",
         id: 1,
         result: {
-          value: amounts.map((amount) => ({
-            account: { data: { parsed: { info: { tokenAmount: { amount } } } } },
+          value: entries.map((entry) => ({
+            ...(typeof entry === "string" ? {} : { pubkey: entry.pubkey }),
+            account: {
+              data: {
+                parsed: {
+                  info: {
+                    tokenAmount: { amount: typeof entry === "string" ? entry : entry.amount },
+                  },
+                },
+              },
+            },
           })),
         },
       })
@@ -265,10 +287,18 @@ describe("quotes", () => {
 });
 
 describe("readVaultPositions", () => {
-  it("sums exact raw balances and values them through the exit quote", async () => {
-    stubTokenAccounts(["1000000", "2500000"]);
+  it("reports only the executable ATA balance, never the owner-wide aggregate", async () => {
+    // SOLA9-452 regression: 1 USDY in the derived ATA and 2.5 USDY in a
+    // separate owner-controlled account used to be summed into a 3.5 USDY
+    // position the admitted Jupiter plan (which spends only the derived ATA)
+    // could not execute. The position is the ATA's balance — the exact account
+    // identity the swap boundary pins as its source.
+    stubTokenAccounts([
+      { pubkey: await ownerUsdyAta(), amount: "1000000" },
+      { pubkey: NON_ATA, amount: "2500000" },
+    ]);
     const client = makeClient({
-      quoteSwap: async () => ({ outAmount: "4.006", priceImpactPct: "0" }),
+      quoteSwap: async () => ({ outAmount: "1.006", priceImpactPct: "0" }),
     });
 
     const positions = await client.readVaultPositions(CTX, {
@@ -281,17 +311,50 @@ describe("readVaultPositions", () => {
         providerReference: USDY,
         owner: OWNER,
         cluster: "mainnet-beta",
-        shares: "3.5",
-        withdrawableShares: "3.5",
-        tokenValue: "4.006",
+        shares: "1",
+        withdrawableShares: "1",
+        tokenValue: "1.006",
         tokenMint: USDC,
         shareMint: USDY,
       },
     ]);
   });
 
+  it("values and exits the ATA balance through the exit quote", async () => {
+    stubTokenAccounts([{ pubkey: await ownerUsdyAta(), amount: "1000000" }]);
+    const client = makeClient({
+      quoteSwap: async () => ({ outAmount: "4.006", priceImpactPct: "0" }),
+    });
+
+    const positions = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [],
+    });
+
+    expect(positions[0]?.shares).toBe("1");
+    expect(positions[0]?.withdrawableShares).toBe("1");
+    expect(positions[0]?.tokenValue).toBe("4.006");
+  });
+
+  it("treats a non-ATA-only holding as an exact zero, not an aggregate", async () => {
+    stubTokenAccounts([{ pubkey: NON_ATA, amount: "2500000" }]);
+    const client = makeClient({});
+
+    expect(await client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })).toEqual(
+      []
+    );
+
+    const explicit = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [USDY],
+    });
+    expect(explicit[0]?.shares).toBe("0");
+    expect(explicit[0]?.withdrawableShares).toBe("0");
+    expect(explicit[0]?.tokenValue).toBe("0");
+  });
+
   it("keeps the holding when the valuation fails", async () => {
-    stubTokenAccounts(["1000000"]);
+    stubTokenAccounts([{ pubkey: await ownerUsdyAta(), amount: "1000000" }]);
     const client = makeClient({
       quoteSwap: async () => {
         throw new Error("quote outage");
@@ -305,6 +368,7 @@ describe("readVaultPositions", () => {
 
     expect(positions).toHaveLength(1);
     expect(positions[0]?.shares).toBe("1");
+    expect(positions[0]?.withdrawableShares).toBe("1");
     expect(positions[0]?.tokenValue).toBeUndefined();
   });
 
@@ -331,7 +395,36 @@ describe("readVaultPositions", () => {
         Response.json({
           jsonrpc: "2.0",
           id: 1,
-          result: { value: [{ account: { data: { parsed: { info: { tokenAmount: {} } } } } }] },
+          result: {
+            value: [
+              {
+                pubkey: await ownerUsdyAta(),
+                account: { data: { parsed: { info: { tokenAmount: {} } } } },
+              },
+            ],
+          },
+        })
+      )
+    );
+    const client = makeClient({});
+    await expect(
+      client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [USDY] })
+    ).rejects.toMatchObject({ code: "POSITION_UNREADABLE" });
+  });
+
+  it("refuses a response whose accounts carry no address", async () => {
+    // The executable account is matched by pubkey; an answer that cannot name
+    // its accounts must not read as "no ATA" (a claim about someone's money a
+    // malformed read cannot support).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          jsonrpc: "2.0",
+          id: 1,
+          result: {
+            value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: "1" } } } } } }],
+          },
         })
       )
     );
