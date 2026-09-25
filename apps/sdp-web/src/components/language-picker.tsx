@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { type AppLocale, isAppLocale, localeCookieName, supportedLocales } from "@/i18n/config";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { cn } from "@/lib/utils";
 
 const localeCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
 
@@ -28,18 +27,18 @@ function getDisplayNames(displayLocale: AppLocale): Intl.DisplayNames {
   return dn;
 }
 
-function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string {
+/** A language named in itself: "English", "Français". */
+export function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string {
   const name = getDisplayNames(displayLocale).of(locale) ?? locale;
   return name.charAt(0).toLocaleUpperCase(displayLocale) + name.slice(1);
 }
 
-export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
+/** Switches the interface language: stores the choice for the server and re-renders in it. */
+export function useSelectLocale(): (value: string) => void {
   const locale = useLocale();
-  const t = useTranslations();
   const router = useRouter();
-  const isLanding = variant === "landing";
 
-  const selectLocale = (value: string) => {
+  return (value: string) => {
     if (!isAppLocale(value) || value === locale) return;
 
     // biome-ignore lint/suspicious/noDocumentCookie: The server locale resolver needs this preference on the next request.
@@ -47,6 +46,13 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
     document.documentElement.lang = value;
     router.refresh();
   };
+}
+
+/** The landing page's language button; in the dashboard the choice lives in the account menu. */
+export function LanguagePicker() {
+  const locale = useLocale();
+  const t = useTranslations();
+  const selectLocale = useSelectLocale();
 
   return (
     <DropdownMenu modal={false}>
@@ -55,17 +61,9 @@ export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "l
           type="button"
           title={t("Shared.dashboardShell.language")}
           aria-label={t("Shared.dashboardShell.language")}
-          className={cn(
-            "flex items-center justify-center outline-none transition-colors focus-visible:ring-2",
-            isLanding
-              ? "h-9 w-9 justify-center rounded-lg text-secondary hover:bg-fill-subtle hover:text-primary focus-visible:ring-border-strong"
-              : "h-8 w-8 rounded-lg text-text-medium hover:bg-border-light hover:text-text-extra-high focus-visible:ring-border-medium"
-          )}
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-secondary outline-none transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:ring-2 focus-visible:ring-border-strong"
         >
-          <LanguagesIcon
-            className={cn("shrink-0", isLanding ? "h-4 w-4" : "h-5 w-5")}
-            strokeWidth={1.9}
-          />
+          <LanguagesIcon className="h-4 w-4 shrink-0" strokeWidth={1.9} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-64 p-2">
