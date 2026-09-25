@@ -355,6 +355,14 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       // observes it whenever it is opened. The expiry is compared as a number,
       // not through to_timestamp, which throws on a u64 far-future expiry and
       // SQL does not promise to skip evaluating it for rows the OR has settled.
+      //
+      // A terminal trade past that seven days stays in the late-deposit lane
+      // while its closing signature has no ledger row yet and a leg scan is
+      // still outstanding: the sweep's escrow-history read is what records the
+      // close's own transfer, and without it a close the ledger never matched
+      // would report no amount forever. It drops out once both legs have read
+      // through to the newest signature — later reads can only add newer
+      // transactions than the close, so nothing left to read changes the row.
       const result = await db
         .prepare(
           `WITH laned AS (
@@ -370,9 +378,8 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                     END AS lane
                FROM dvp_trades t
               WHERE t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
-                 OR (t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
-                     AND t.closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days')
-           ), ranked AS (
+                 OR t.status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+             ), ranked AS (
              SELECT laned.*,
                     ROW_NUMBER() OVER (
                       PARTITION BY lane
@@ -380,12 +387,37 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                     ) AS lane_rank
                FROM laned
               WHERE lane <> 2
-                 OR status <> 'expired'
-                 OR expiry_timestamp::numeric >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '7 days')
-                 -- A close that went out but never confirmed still needs the
-                 -- sweep to read what landed and release its lock, however long
-                 -- ago the trade expired.
-                 OR close_claim_signature IS NOT NULL
+                 OR (status = 'expired'
+                     AND (expiry_timestamp::numeric >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '7 days')
+                          -- A close that went out but never confirmed still needs the
+                          -- sweep to read what landed and release its lock, however long
+                          -- ago the trade expired.
+                          OR close_claim_signature IS NOT NULL))
+                 -- A terminal trade keeps its place past the seven days while
+                 -- the closing signature has no ledger row yet and a leg
+                 -- history read is still outstanding: the sweep history read is
+                 -- what records the transfer of the close itself, and without
+                 -- it a close the ledger never matched would report no amount
+                 -- forever. The trade drops out once both legs have been read
+                 -- through to the newest signature, since later reads can only
+                 -- add newer transactions than the close. A missing scan row
+                 -- counts as outstanding, which is what makes a trade closed
+                 -- before the ledger existed selectable.
+                 OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
+                     AND (closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+                          OR (close_signature IS NOT NULL
+                              AND NOT EXISTS (SELECT 1
+                                                FROM dvp_leg_transfers x
+                                               WHERE x.trade_id = laned.id
+                                                 AND x.signature = laned.close_signature)
+                              AND (NOT EXISTS (SELECT 1
+                                                 FROM dvp_leg_transfer_scans s
+                                                WHERE s.trade_id = laned.id AND s.side = 'a'
+                                                  AND s.scanned_at IS NOT NULL)
+                                   OR NOT EXISTS (SELECT 1
+                                                    FROM dvp_leg_transfer_scans s
+                                                   WHERE s.trade_id = laned.id AND s.side = 'b'
+                                                     AND s.scanned_at IS NOT NULL)))))
            )
            SELECT ${SELECT_COLUMNS}
              FROM ranked

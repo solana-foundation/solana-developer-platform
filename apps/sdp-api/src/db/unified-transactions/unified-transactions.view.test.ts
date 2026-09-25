@@ -538,7 +538,7 @@ describe("unified_transactions view (postgres)", () => {
   it("reports a reclaimed-then-cancelled close as its own outflow, not the peak (SOLA9-579)", async () => {
     const tradeId = "dvp_reclaim_cancel";
     await seedClosedTrade(tradeId, "cancelled", "cancel-signature");
-    // A leg that funded to its 100-unit peak, was reclaimed in full, and was
+    // A leg that funded to its 100-unit peak, was partially reclaimed, and was
     // then cancelled with a 40-unit outflow (a partial reclaim the ledger
     // recorded against the closing signature).
     await seedLegTransfer(tradeId, "a", "fund-signature", "in", "1000000", "1");
