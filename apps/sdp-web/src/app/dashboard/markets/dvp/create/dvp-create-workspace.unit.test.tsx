@@ -25,12 +25,16 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
  */
 const workspaceMock = vi.hoisted(() => ({
   selectedProjectId: undefined as string | null | undefined,
+  selectProject: vi.fn(),
 }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useOptionalDashboardWorkspace: () =>
     workspaceMock.selectedProjectId === undefined
       ? undefined
-      : { selectedProjectId: workspaceMock.selectedProjectId },
+      : {
+          selectedProjectId: workspaceMock.selectedProjectId,
+          selectProject: workspaceMock.selectProject,
+        },
 }));
 
 const PARTY_B = "7WLcnnT1nnPuHiWaVnAY3Uz8Y2SgFy2VMg2t7GAoxnpg";
@@ -495,6 +499,20 @@ describe("DvpCreateWorkspace", () => {
     // No wizard stage remains to submit from.
     expect(screen.queryByRole("button", { name: /create trade/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /continue/i })).toBeNull();
+  });
+
+  // APE-693. The provider holds its selection from the mount, so it can be the
+  // stale side of the mismatch (a switch in another tab never reaches it). The
+  // recovery must therefore synchronize the selection to the project the page
+  // was just rendered for — a re-render alone would compare the same stale pair
+  // forever.
+  it("recovers by selecting the reviewed project, the one the page rendered under", () => {
+    workspaceMock.selectedProjectId = "project_b";
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: /review under the current project/i }));
+
+    expect(workspaceMock.selectProject).toHaveBeenCalledWith(REVIEWED_PROJECT);
   });
 
   it("keeps the wizard mounted while the selection still matches the reviewed project", () => {

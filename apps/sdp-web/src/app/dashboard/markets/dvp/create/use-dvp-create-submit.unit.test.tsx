@@ -281,6 +281,55 @@ describe("useDvpCreateSubmit confirmation", () => {
     expect(result.current.error).toBe("Request failed (502).");
   });
 
+  // A refusal the proxy names carries a code so the form can say it in the
+  // reader's language; relaying the message would show English to everyone.
+  it("names a project-changed refusal in the catalog's own words", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: async () => ({
+          error: {
+            message: "The selected project changed since this trade was reviewed.",
+            details: { reason: "dvp_create_reviewed_project_mismatch" },
+          },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The selected project changed since this trade was reviewed, so it can't be submitted. Review it under the current project and create it again."
+    );
+  });
+
+  // A refusal without a known code is relayed as sent — the codes are only for
+  // refusals this form can name.
+  it("relays an unnamed refusal's own message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: "Selected project required" } }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet", REVIEWED_PROJECT), {
+      wrapper: withI18n,
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe("Selected project required");
+  });
+
   // The create is SDP's own broadcast, so the toast reporting it links it.
   it("links the create transaction from the toast and opens the new trade", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);

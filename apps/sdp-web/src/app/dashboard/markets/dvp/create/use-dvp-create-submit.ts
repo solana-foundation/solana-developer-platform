@@ -8,10 +8,12 @@
  */
 
 import type { SolanaCluster } from "@sdp/types";
+import { DVP_CREATE_REFUSAL, type DvpCreateRefusalReason } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
@@ -54,6 +56,15 @@ const createdEnvelopeSchema = z.object({
     trade: z.object({ id: z.string().min(1), createSignature: z.string().nullable() }),
   }),
 });
+
+/** The proxy's refusal codes this form names in its own words. */
+const createRefusalReasonSchema = z.enum(DVP_CREATE_REFUSAL);
+
+/** The localized copy for each refusal the proxy can answer a create with. */
+const CREATE_REFUSAL_COPY = {
+  [DVP_CREATE_REFUSAL.reviewedProjectRequired]: "DashboardMarkets.dvp.projectReviewRequired",
+  [DVP_CREATE_REFUSAL.reviewedProjectMismatch]: "DashboardMarkets.dvp.projectChangedSubmit",
+} as const satisfies Record<DvpCreateRefusalReason, MessageKey>;
 
 export function useDvpCreateSubmit(
   cluster: SolanaCluster,
@@ -133,11 +144,14 @@ export function useDvpCreateSubmit(
       // a trade, and reading it as one would navigate to `undefined`.
       if (!response.ok) {
         const failure = dvpErrorEnvelopeSchema.safeParse(await response.json().catch(() => null));
-        setError(
-          failure.success
-            ? failure.data.error.message
-            : t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) })
-        );
+        if (!failure.success) {
+          setError(t("DashboardMarkets.dvp.actionFailed", { status: String(response.status) }));
+          return;
+        }
+        // A refusal the proxy named carries a code precisely so this form can
+        // say it in the reader's language; anything else is relayed as sent.
+        const reason = createRefusalReasonSchema.safeParse(failure.data.error.details?.reason);
+        setError(reason.success ? t(CREATE_REFUSAL_COPY[reason.data]) : failure.data.error.message);
         return;
       }
 

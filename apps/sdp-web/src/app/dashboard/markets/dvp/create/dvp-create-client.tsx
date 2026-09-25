@@ -24,6 +24,11 @@ export function DvpCreateClient({
 }) {
   return (
     <DvpCreateWorkspace
+      // Keyed by the reviewed project so a re-render under a moved selection
+      // starts a fresh draft: the terms were reviewed under one project, and
+      // carrying a draft's wallets and mints into a sibling's context would be
+      // a review of nothing (APE-693).
+      key={reviewedProjectId}
       cluster={useSolanaCluster()}
       context={context}
       reviewedProjectId={reviewedProjectId}

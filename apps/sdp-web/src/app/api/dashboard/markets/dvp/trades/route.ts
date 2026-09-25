@@ -1,8 +1,9 @@
+import { DVP_CREATE_REFUSAL } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { forwardedIdempotencyHeaders } from "@/lib/idempotency";
 import { REVIEWED_PROJECT_HEADER_NAME } from "@/lib/project-cookie";
-import { createTimedTrace, logRouteResult } from "@/lib/request-tracing";
-import { getSelectedProjectId, proxyToSdpApi } from "@/lib/sdp-api";
+import { createTimedTrace } from "@/lib/request-tracing";
+import { getSelectedProjectId, proxyFailure, proxyToSdpApi } from "@/lib/sdp-api";
 
 /**
  * The upstream list takes only `limit` (1..100). Validating here rather than
@@ -44,27 +45,17 @@ export async function GET(request: Request) {
 }
 
 /**
- * A refusal that never reaches the upstream API, with the same envelope and
- * headers `proxyToSdpApi` uses for its own local failures.
+ * A local refusal that never reaches the upstream API. `proxyFailure` carries
+ * the same envelope and headers `proxyToSdpApi` uses for its own local
+ * failures, and `reason` is a stable code the create form names in its own
+ * words (localized) instead of relaying this message.
  */
-function createRefusal(
-  request: Request,
-  traceSource: string,
-  status: number,
-  message: string
-): NextResponse {
-  const trace = createTimedTrace(traceSource, request);
-  logRouteResult(trace, status, { error: message });
-  return NextResponse.json(
-    { error: { message } },
-    {
-      status,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
-      },
-    }
+function refusal(request: Request, status: number, reason: string, message: string): NextResponse {
+  return proxyFailure(
+    createTimedTrace("route.dashboard.dvp.trades.create", request),
+    status,
+    message,
+    { reason }
   );
 }
 
@@ -84,27 +75,26 @@ function createRefusal(
 export async function POST(request: Request) {
   const reviewedProjectId = request.headers.get(REVIEWED_PROJECT_HEADER_NAME);
   if (!reviewedProjectId) {
-    return createRefusal(
+    return refusal(
       request,
-      "route.dashboard.dvp.trades.create",
       400,
+      DVP_CREATE_REFUSAL.reviewedProjectRequired,
       "Create must present the project it was reviewed under"
     );
   }
   const selectedProjectId = await getSelectedProjectId();
   if (!selectedProjectId) {
-    return createRefusal(
-      request,
-      "route.dashboard.dvp.trades.create",
+    return proxyFailure(
+      createTimedTrace("route.dashboard.dvp.trades.create", request),
       400,
       "Selected project required"
     );
   }
   if (reviewedProjectId !== selectedProjectId) {
-    return createRefusal(
+    return refusal(
       request,
-      "route.dashboard.dvp.trades.create",
       409,
+      DVP_CREATE_REFUSAL.reviewedProjectMismatch,
       "The selected project changed since this trade was reviewed. Review it under the current project and create it again."
     );
   }

@@ -91,16 +91,15 @@ function WizardFooter({
  * only way forward is re-rendering the page under the current project and
  * answering it again.
  */
-function ProjectChangedNotice() {
+function ProjectChangedNotice({ onReview }: { onReview: () => void }) {
   const t = useTranslations();
-  const router = useRouter();
 
   return (
     <Callout variant="warning">
       <div className="flex flex-col gap-3">
         <p>{t("DashboardMarkets.dvp.projectChangedBody")}</p>
         <div>
-          <Button onClick={() => router.refresh()} type="button" variant="secondary">
+          <Button onClick={onReview} type="button" variant="secondary">
             {t("DashboardMarkets.dvp.projectChangedAction")}
           </Button>
         </div>
@@ -154,8 +153,16 @@ export function DvpCreateWorkspace({
     />
   );
 
-  if (projectChanged) {
-    return <ProjectChangedNotice />;
+  if (projectChanged && workspace) {
+    // The recovery synchronizes the selection with the project the page was
+    // just rendered for: the provider holds its state from the mount (a switch
+    // in another tab never reaches it), so a mere re-render would compare the
+    // same stale pair forever. Going through `selectProject` updates the
+    // provider, rewrites the cookie to the same value the server read, and
+    // remounts this workspace (keyed by the reviewed project) with a fresh
+    // draft under the current one. The notice only shows for a known live
+    // selection, so the workspace is always mounted here.
+    return <ProjectChangedNotice onReview={() => workspace.selectProject(reviewedProjectId)} />;
   }
 
   return (

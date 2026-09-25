@@ -11,6 +11,7 @@
  * request and refuses to forward anything that does not match the current
  * selection.
  */
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -18,9 +19,13 @@ const mocks = vi.hoisted(() => ({
   getSelectedProjectId: vi.fn(),
 }));
 
+// Mirrors the real `proxyFailure` closely enough for the refusals' envelope:
+// status and body shape are what this route's contract is about.
 vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: mocks.proxyToSdpApi,
   getSelectedProjectId: mocks.getSelectedProjectId,
+  proxyFailure: (_trace: unknown, status: number, message: string, details?: { reason: string }) =>
+    NextResponse.json({ error: { message, ...(details ? { details } : {}) } }, { status }),
 }));
 
 vi.mock("@/lib/request-tracing", () => ({
@@ -62,8 +67,13 @@ describe("POST /api/dashboard/markets/dvp/trades", () => {
     );
 
     expect(response.status).toBe(409);
-    const body = (await response.json()) as { error?: { message?: string } };
+    const body = (await response.json()) as {
+      error?: { message?: string; details?: { reason?: string } };
+    };
     expect(body.error?.message).toBeTruthy();
+    // The form names this refusal in its own words from the code, so the
+    // message never has to be parsed.
+    expect(body.error?.details?.reason).toBe("dvp_create_reviewed_project_mismatch");
     // Nothing may reach the API: the trade would be recorded under project_b.
     expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
   });
@@ -74,6 +84,10 @@ describe("POST /api/dashboard/markets/dvp/trades", () => {
     const response = await POST(createRequest({ "Idempotency-Key": "dvp-create-abc" }));
 
     expect(response.status).toBe(400);
+    const body = (await response.json()) as {
+      error?: { message?: string; details?: { reason?: string } };
+    };
+    expect(body.error?.details?.reason).toBe("dvp_create_reviewed_project_required");
     expect(mocks.proxyToSdpApi).not.toHaveBeenCalled();
   });
 
