@@ -27,6 +27,7 @@ import {
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { freshIdempotencyKey, IDEMPOTENCY_KEY_HEADER } from "@/lib/idempotency";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import { DEFAULT_RAMP_PAIR, findRampPair, type RampPair, type SelectedRampPair } from "@/lib/ramps";
 import { useZodForm } from "@/lib/use-zod-form";
@@ -87,11 +88,15 @@ export interface RampWizardConfig<TId extends string = string> {
 async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
-  t: Translate
+  t: Translate,
+  idempotencyKey: string
 ): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      [IDEMPOTENCY_KEY_HEADER]: idempotencyKey,
+    },
     body: JSON.stringify(payload),
   });
   const body = (await response.json().catch(() => ({}))) as {
@@ -281,7 +286,8 @@ export function useRampWizard<TId extends string>(
   const isLastStep = stepIndex === steps.length - 1;
 
   const createQuoteForCurrentSelection = async (
-    providerAccountId: string | null
+    providerAccountId: string | null,
+    idempotencyKey: string
   ): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
@@ -302,15 +308,21 @@ export function useRampWizard<TId extends string>(
         selectedPayoutAccount: requirements.selectedPayoutAccount,
         rampsMemo: memoRowsToRecord(memoRows),
       }),
-      t
+      t,
+      idempotencyKey
     );
     setCreatedQuote(created);
     return created;
   };
 
+  // A deliberate quote refresh (e.g. an expiring provider session) is a NEW
+  // operation: it mints a fresh key per invocation.
   const refreshQuote = async () => {
     try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
+      await createQuoteForCurrentSelection(
+        requirements.selectedProviderAccountId,
+        freshIdempotencyKey("ramp-quote-refresh")
+      );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         description:
@@ -330,10 +342,21 @@ export function useRampWizard<TId extends string>(
   const [quoteCreationError, setQuoteCreationError] = useState<Error | null>(null);
   const [quoteCreationRetrying, setQuoteCreationRetrying] = useState(false);
   const quoteCreationAttempted = useRef(false);
+  // One stable operation key per committed quote selection: the first quote
+  // attempt mints it and every retry reuses it, so an ambiguous failure (a
+  // lost response, a JSON parse error, the explicit Try Again) replays the
+  // ORIGINAL provider session and transfer instead of minting a second one.
+  const quoteOperationKeyRef = useRef<string | null>(null);
+  const quoteOperationKey = () => {
+    if (quoteOperationKeyRef.current === null) {
+      quoteOperationKeyRef.current = freshIdempotencyKey("ramp-quote");
+    }
+    return quoteOperationKeyRef.current;
+  };
   const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(providerAccountId);
+      await createQuoteForCurrentSelection(providerAccountId, quoteOperationKey());
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));

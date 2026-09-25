@@ -72,6 +72,7 @@ import {
   rampQuoteCryptoDepositProviderData,
   rampQuoteExpiryProviderData,
 } from "./quote-binding";
+import { rampQuoteResponseProviderData } from "./quote-idempotency";
 
 type ScopedSubmitCounterpartyRequirementsInput = SubmitCounterpartyRequirementsInput & {
   counterparty: CounterpartyRow;
@@ -189,6 +190,14 @@ interface PersistRampQuoteTransferInput {
   fiatAmount: string | null;
   rampsMemo: Record<string, string> | undefined;
   providerData?: Record<string, unknown>;
+  /**
+   * The keyed quote's pre-provider reservation (`reserveKeyedRampQuoteTransfer`):
+   * when set, the quote finalizes THAT row instead of inserting a second one,
+   * so a keyed retry can never mint a second payment transfer.
+   */
+  reservedRow?: PaymentTransferRow | null;
+  /** The request's `Idempotency-Key`, present only on keyed quotes. */
+  idempotencyKey?: string | null;
 }
 
 /**
@@ -271,6 +280,43 @@ export async function persistRampQuoteTransfer(
       throw conflict("Provider quote/session reference has expired; create a new quote.");
     }
     return existing.id;
+  }
+
+  // A keyed quote finalizes its pre-provider reservation instead of inserting
+  // a second row, and records the verbatim quote response so a retried
+  // operation can replay the ORIGINAL provider session.
+  if (input.reservedRow) {
+    assertRampQuoteBindingMatches(input.reservedRow, binding);
+    try {
+      const finalized = await repository.updateTransfer({
+        transferId: input.reservedRow.id,
+        organizationId: binding.organizationId,
+        projectId: binding.projectId,
+        status: rampQuoteTransferStatus(input.quote),
+        providerReference: input.quote.id,
+        deliveryMode: input.quote.deliveryMode,
+        providerData: {
+          ...(input.providerData ?? {}),
+          ...rampQuoteExpiryProviderData(input.quote),
+          ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
+          ...(input.idempotencyKey ? rampQuoteResponseProviderData(input.quote) : {}),
+        },
+        updatedAt: new Date().toISOString(),
+      });
+      if (!finalized) {
+        throw new AppError("INTERNAL_ERROR", "Failed to complete ramp transfer record");
+      }
+      return finalized.id;
+    } catch (error) {
+      // The (provider, provider_reference) unique index spans all tenants: a
+      // reference already bound outside this tenant's scope surfaces here.
+      if (isPostgresUniqueViolation(error)) {
+        throw conflict(
+          "Provider quote/session reference is already bound to a different ramp transfer."
+        );
+      }
+      throw error;
+    }
   }
 
   const apiKey = c.get("apiKey");

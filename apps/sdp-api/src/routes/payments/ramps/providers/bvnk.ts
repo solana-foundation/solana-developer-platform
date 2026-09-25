@@ -76,6 +76,7 @@ import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
 import { rampQuoteCryptoDepositProviderData } from "../quote-binding";
+import { rampQuoteResponseProviderData } from "../quote-idempotency";
 
 const BVNK_UNRESOLVED_CONSENT_IP = "0.0.0.0";
 
@@ -160,6 +161,8 @@ export async function completePendingBvnkOfframpTransfer(
     cryptoAmount: string;
     status: PaymentTransferStatus;
     channel: { walletId: string; customerReference: string };
+    /** Keyed quotes record the verbatim quote response for idempotent replay. */
+    response?: PaymentRampQuote;
   }
 ): Promise<void> {
   const cryptoDeposit = rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount);
@@ -176,6 +179,7 @@ export async function completePendingBvnkOfframpTransfer(
     deliveryMode: input.quote.deliveryMode,
     providerData: {
       ...cryptoDeposit,
+      ...(input.response ? rampQuoteResponseProviderData(input.response) : {}),
       bvnk: {
         channel: {
           id: input.quote.id,

@@ -919,9 +919,10 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     summary: "Create on-ramp quote",
     operationId: "createPaymentOnrampQuote",
     description:
-      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions.",
+      "Creates a provider-specific on-ramp quote. Hosted providers return a hosted URL; instruction-based providers return manual funding instructions. Supply an Idempotency-Key to retry safely: an identical request returns the original quote without minting a second provider session or payment transfer, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createOnrampQuoteRequestSchema),
