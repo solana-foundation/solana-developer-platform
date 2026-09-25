@@ -116,6 +116,12 @@ export function DashboardWorkspaceProvider({
     !selectedProjectIsListed &&
     selectedProjectId !== initialSelectedProjectId
   ) {
+    // The scope-sync effect only clears stored playground API-key secrets after
+    // commit, so children would render under the repaired selection while the
+    // previous project's secret is still attached to the selection the selector
+    // reads. Clear it here — the same synchronous clear `selectProject` does —
+    // so the secret is gone before the reconciled render reaches children.
+    clearStoredApiKeySecrets();
     setSelectedProjectId(initialSelectedProjectId);
   }
   const sdpEnvironment: SdpEnvironment =

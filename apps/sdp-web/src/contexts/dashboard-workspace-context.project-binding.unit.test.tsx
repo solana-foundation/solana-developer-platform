@@ -13,6 +13,11 @@ import type { Project } from "@sdp/types";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
+import {
+  clearStoredApiKeySecrets,
+  peekStoredApiKeySecret,
+  storeApiKeySecret,
+} from "@/lib/playground-api-keys";
 import { DashboardWorkspaceProvider, useDashboardWorkspace } from "./dashboard-workspace-context";
 
 const mocks = vi.hoisted(() => ({
@@ -73,13 +78,16 @@ const flags = {
   privateChannels: false,
 };
 
-const observedRenders: { listed: string[]; selected: string | null }[] = [];
+const observedRenders: { listed: string[]; selected: string | null; secret: string | null }[] = [];
 
 function Probe() {
   const { projects, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
   observedRenders.push({
     listed: projects.map((project) => project.id),
     selected: selectedProjectId,
+    // What the playground selector's password field would read while rendering
+    // its input under this selection.
+    secret: peekStoredApiKeySecret({ apiKeyId: "key-production" }),
   });
   return (
     <output aria-label="workspace-binding">
@@ -112,12 +120,59 @@ describe("DashboardWorkspaceProvider project binding", () => {
   beforeEach(() => {
     cleanup();
     observedRenders.length = 0;
+    clearStoredApiKeySecrets();
     mocks.replace.mockReset();
     mocks.selectProjectAction.mockReset();
     mocks.selectProjectAction.mockResolvedValue(undefined);
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    clearStoredApiKeySecrets();
+  });
+
+  it("clears the previous project's stored secret before children render under the repaired selection", async () => {
+    // Runs first in this file so the secret store has never seen a scope: the
+    // scope-sync effect only clears on a scope change, and a scope left over
+    // from an earlier test would clear the store at mount and mask the window
+    // this guards.
+    // The playground selector reads its password field straight from the
+    // secret store while rendering. Attach a secret to the removed project so
+    // a repaired render that runs ahead of the scope-sync effect would put it
+    // on screen.
+    storeApiKeySecret({ value: "sk_test_production_secret", apiKeyId: "key-production" });
+
+    const view = render(<DashboardWorkspaceProvider {...workspaceProps()} />);
+    const renderCountBeforeRefresh = observedRenders.length;
+    expect(
+      observedRenders
+        .slice(renderCountBeforeRefresh)
+        .every((observed) => observed.secret === "sk_test_production_secret")
+    ).toBe(true);
+
+    view.rerender(
+      <DashboardWorkspaceProvider
+        {...workspaceProps({
+          projects: [sandbox],
+          initialSelectedProjectId: sandbox.id,
+          shouldRepairInitialProjectCookie: true,
+        })}
+      />
+    );
+
+    await waitFor(() => expect(mocks.selectProjectAction).toHaveBeenCalledWith(sandbox.id));
+    expect(peekStoredApiKeySecret({ apiKeyId: "key-production" })).toBeNull();
+
+    // Child renders happen before the post-commit scope-sync effect runs, so
+    // any render after the refresh that still observed the secret is exactly
+    // the brief exposure this guards against — under the stale selection as
+    // well as the repaired one.
+    const observedAfterRefresh = observedRenders.slice(renderCountBeforeRefresh);
+    expect(observedAfterRefresh.length).toBeGreaterThan(0);
+    for (const observed of observedAfterRefresh) {
+      expect(observed.secret).toBeNull();
+    }
+  });
 
   it("reconciles the mounted selection when the authoritative list removes the selected project", async () => {
     const view = render(<DashboardWorkspaceProvider {...workspaceProps()} />);
