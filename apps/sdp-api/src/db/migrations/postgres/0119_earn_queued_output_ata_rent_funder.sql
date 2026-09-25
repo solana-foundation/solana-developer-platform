@@ -3,21 +3,25 @@
 --
 -- ── What the two columns record ────────────────────────────────────────────
 -- A Hastra par-redemption request transaction prepares the owner's persistent
--- intermediate (wYLDS) and asset (USDC) token accounts with ATA creates — non-
--- idempotent for an account absent at build time, so the landed create either
--- charges the recorded funder or fails the request — so an operator settlement
--- can pay out later. Those creates charge the request's rentPayer — a partner
--- fee payer on the external-wallet flow — and the accounts outlive the
--- transaction: after settlement the owner can close them and reclaim the
--- rent. Until now the queued build/request rows kept only `fee_payer`, so the
--- ledger had no durable field from which to refund the partner.
+-- intermediate (wYLDS) and asset (USDC) token accounts with idempotent ATA
+-- creates so an operator settlement can pay out later. When an output account
+-- was absent at build time the create charges the request's rentPayer — a
+-- partner fee payer on the external-wallet flow; an account someone else
+-- creates in the race before the request lands turns the create into a no-op
+-- that charges nothing. The accounts outlive the transaction: after settlement
+-- the owner can close them and reclaim the rent. Until now the queued
+-- build/request rows kept only `fee_payer`, so the ledger had no durable field
+-- from which to refund the partner.
 --
 -- `creates_output_accounts` states whether the request's plan reported
 -- creating any persistent output token account at all.
 -- `output_accounts_rent_funder` names the address those creates charged: the
 -- partner fee payer when one was named, NULL when the owner funded its own
--- accounts. The pair is the durable refund source for the output accounts'
--- OWN rent, kept deliberately separate from the fulfillment movement's
+-- accounts. The pair is the builder's build-time observation — the creates
+-- are idempotent, so the reconciliation settles it from the LANDED request
+-- transaction and retires a claim whose creates charged the recorded funder
+-- nothing. It is the durable refund source for the output accounts' OWN rent,
+-- kept deliberately separate from the fulfillment movement's
 -- `(creates_share_account, share_ata_rent_funder)` claim: a queued redemption
 -- spends an existing holding and never creates the position's share account,
 -- so projecting the output funder into the share refund would make a later
