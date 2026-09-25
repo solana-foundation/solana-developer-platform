@@ -35,6 +35,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import type { DvpTradeRow } from "@/db/repositories";
 import type { AppError } from "@/lib/errors";
+import { AuditService } from "@/services/audit.service";
 import { getPrivyProviderAccountFingerprint } from "@/services/custody/privy-credential";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import type { SponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -954,5 +955,244 @@ describe("createDvpTrade", () => {
     const retried = await createDvpTrade(env, auditContext, input);
     expect(retried.status).toBe("creating");
     await expect(rowsInDb()).resolves.toHaveLength(2);
+  });
+
+  // SOLA9-614: a sponsor-funded create must leave an immutable, actor-attributed
+  // audit trail. The `dvp_trades` row is mutable state, so recovery and review
+  // prove the effect from the ledger entry, not from the row.
+  describe("create audit attribution", () => {
+    const AUDIT_REQUEST_ID = "req_dvp_create_audit";
+    const AUDIT_API_KEY_ID = "key_dvp_create_audit";
+
+    const auditEventSchema = z.object({
+      auditPhase: z.string(),
+      auditIntentId: z.string().optional(),
+      failureReason: z.string().optional(),
+      failureCode: z.string().optional(),
+      signature: z.string().optional(),
+      tradeStatus: z.string().optional(),
+      observed: z.boolean().optional(),
+      target: z
+        .object({
+          action: z.string(),
+          resourceType: z.string(),
+          resourceId: z.string(),
+          metadata: z.record(z.string(), z.unknown()),
+        })
+        .optional(),
+    });
+
+    interface CreateAuditRow {
+      action: string;
+      resource_type: string;
+      resource_id: string | null;
+      api_key_id: string | null;
+      user_id: string | null;
+      request_id: string | null;
+      status: string;
+      metadata: string | null;
+    }
+
+    function authenticatedContext(): Context<{ Bindings: Env }> {
+      const c = new Context<{ Bindings: Env }>(new Request("http://localhost/v1/dvp/trades"), {
+        env,
+      });
+      c.set("requestId", AUDIT_REQUEST_ID);
+      c.set("apiKey", {
+        id: AUDIT_API_KEY_ID,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      } as never);
+      return c;
+    }
+
+    /** The intent and outcome rows this suite's audit writes produce. */
+    async function createAuditRows(): Promise<CreateAuditRow[]> {
+      const result = await getDb(env)
+        .prepare(
+          `SELECT action, resource_type, resource_id, api_key_id, user_id, request_id, status, metadata
+             FROM audit_logs
+            WHERE (resource_type = 'audit_ledger' AND request_id = ?)
+               OR (action = 'create' AND resource_type = 'dvp_trade')
+            ORDER BY ledger_sequence`
+        )
+        .bind(AUDIT_REQUEST_ID)
+        .all<CreateAuditRow>();
+      return result.results ?? [];
+    }
+
+    function preflightRejection(): SolanaError {
+      return new SolanaError(
+        SOLANA_ERROR__JSON_RPC__SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
+        {
+          accounts: null,
+          fee: null,
+          loadedAccountsDataSize: 0,
+          loadedAddresses: null,
+          logs: [],
+          postBalances: null,
+          postTokenBalances: null,
+          preBalances: null,
+          preTokenBalances: null,
+          replacementBlockhash: null,
+          returnData: null,
+          unitsConsumed: 0n,
+        }
+      );
+    }
+
+    it("admits the broadcast with a sealed create intent and closes the outcome after observation", async () => {
+      const input = { ...tradeInput(), idempotencyKey: "audit-attributed" };
+      let ledgerAtSendTime: CreateAuditRow[] = [];
+      sendTransaction.mockImplementationOnce(async (_rpc: unknown, bytes: Uint8Array) => {
+        ledgerAtSendTime = await createAuditRows();
+        return getSignatureFromTransaction(getTransactionDecoder().decode(bytes));
+      });
+
+      const trade = await createDvpTrade(env, authenticatedContext(), input);
+
+      expect(sendTransaction).toHaveBeenCalledOnce();
+      // The intent is durable before the bytes go out, and the outcome cannot
+      // exist yet — that is what makes the intent an admission record.
+      expect(ledgerAtSendTime).toHaveLength(1);
+      expect(ledgerAtSendTime[0].resource_type).toBe("audit_ledger");
+
+      const [intent, outcome] = await createAuditRows();
+      assert(intent, "Expected a create audit intent row");
+      assert(outcome, "Expected a create audit outcome row");
+      expect(intent).toMatchObject({
+        action: "maintenance",
+        resource_type: "audit_ledger",
+        api_key_id: AUDIT_API_KEY_ID,
+        user_id: null,
+        request_id: AUDIT_REQUEST_ID,
+        status: "success",
+      });
+      expect(intent.resource_id).toBeTruthy();
+      const intentEvent = auditEventSchema.parse(JSON.parse(intent.metadata ?? "{}"));
+      expect(intentEvent.auditPhase).toBe("intent");
+      expect(intentEvent.target).toMatchObject({
+        action: "create",
+        resourceType: "dvp_trade",
+        resourceId: trade.id,
+        metadata: {
+          idempotencyKey: "audit-attributed",
+          swapDvp: trade.swapDvp,
+          settlementAuthority: trade.settlementAuthority,
+          userA: trade.userA,
+          userB: trade.userB,
+          mintA: trade.mintA,
+          mintB: trade.mintB,
+          nonce: trade.nonce,
+          escrowA: trade.escrowA,
+          escrowB: trade.escrowB,
+          sponsorFeePayer: sponsor.address,
+          settlementCustodyWalletId: "cwlt_settlement",
+        },
+      });
+
+      expect(outcome).toMatchObject({
+        action: "create",
+        resource_type: "dvp_trade",
+        resource_id: trade.id,
+        api_key_id: AUDIT_API_KEY_ID,
+        request_id: AUDIT_REQUEST_ID,
+        status: "success",
+      });
+      const outcomeEvent = auditEventSchema.parse(JSON.parse(outcome.metadata ?? "{}"));
+      expect(outcomeEvent.auditPhase).toBe("outcome");
+      expect(outcomeEvent.auditIntentId).toBe(intent.resource_id);
+      expect(outcomeEvent.signature).toBe(trade.createSignature);
+    });
+
+    it("closes the create intent as a definitive failure on a preflight rejection", async () => {
+      sendTransaction.mockRejectedValue(preflightRejection());
+
+      await expect(createDvpTrade(env, authenticatedContext(), tradeInput())).rejects.toMatchObject(
+        { code: "TRANSACTION_FAILED" }
+      );
+
+      const [intent, outcome] = await createAuditRows();
+      assert(intent, "Expected a create audit intent row");
+      assert(outcome, "Expected a create audit failure outcome row");
+      expect(outcome).toMatchObject({
+        action: "create",
+        resource_type: "dvp_trade",
+        api_key_id: AUDIT_API_KEY_ID,
+        status: "failure",
+      });
+      expect(outcome.resource_id).toBeTruthy();
+      const outcomeEvent = auditEventSchema.parse(JSON.parse(outcome.metadata ?? "{}"));
+      expect(outcomeEvent.auditPhase).toBe("outcome");
+      expect(outcomeEvent.auditIntentId).toBe(intent.resource_id);
+      expect(outcomeEvent.failureCode).toBe("TRANSACTION_FAILED");
+    });
+
+    it("leaves the create intent unresolved when the send fails ambiguously", async () => {
+      sendTransaction.mockRejectedValue(new Error("socket hang up"));
+
+      await expect(createDvpTrade(env, authenticatedContext(), tradeInput())).rejects.toThrow(
+        "socket hang up"
+      );
+
+      const rows = await createAuditRows();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].resource_type).toBe("audit_ledger");
+      const intentEvent = auditEventSchema.parse(JSON.parse(rows[0].metadata ?? "{}"));
+      expect(intentEvent.target).toMatchObject({
+        action: "create",
+        resourceType: "dvp_trade",
+      });
+    });
+
+    it("frees a keyed retry from a zombie creating row on the immutable failure outcome", async () => {
+      const input = { ...tradeInput(), idempotencyKey: "key-immutable-repair" };
+      sendTransaction.mockRejectedValueOnce(preflightRejection());
+      await expect(createDvpTrade(env, authenticatedContext(), input)).rejects.toThrow();
+      // The mutable resolution was lost after the outcome was sealed: the row
+      // claims `creating` while the immutable ledger says the create never
+      // landed. The ledger wins — the retry must be admitted.
+      await getDb(env).execute(
+        "UPDATE dvp_trades SET status = 'creating' WHERE idempotency_key = ?",
+        [input.idempotencyKey]
+      );
+      acceptSend();
+
+      const retried = await createDvpTrade(env, authenticatedContext(), input);
+
+      expect(retried.id).not.toBe(input.idempotencyKey);
+      expect(retried.status).toBe("creating");
+      expect(sendTransaction).toHaveBeenCalledTimes(2);
+      await expect(rowsInDb()).resolves.toHaveLength(2);
+    });
+
+    it("refuses the broadcast when the ledger cannot admit the create intent", async () => {
+      const admission = vi
+        .spyOn(AuditService.prototype, "beginCritical")
+        .mockRejectedValueOnce(new Error("audit ledger locked"));
+
+      try {
+        await expect(
+          createDvpTrade(env, authenticatedContext(), {
+            ...tradeInput(),
+            idempotencyKey: "key-audit-down",
+          })
+        ).rejects.toThrow("audit ledger locked");
+        expect(prepareOwnedSubmission).not.toHaveBeenCalled();
+        expect(sendTransaction).not.toHaveBeenCalled();
+        await expect(rowsInDb()).resolves.toMatchObject([{ status: "create_failed" }]);
+
+        // A healthy ledger admits the retry: the key was freed by the resolved
+        // claim, so the caller is not trapped by the outage.
+        acceptSend();
+        const retried = await createDvpTrade(env, authenticatedContext(), {
+          ...tradeInput(),
+          idempotencyKey: "key-audit-down",
+        });
+        expect(retried.status).toBe("creating");
+      } finally {
+        admission.mockRestore();
+      }
+    });
   });
 });

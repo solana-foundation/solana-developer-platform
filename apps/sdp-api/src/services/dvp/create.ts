@@ -51,6 +51,14 @@ import {
 } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import {
+  beginDvpCreateAudit,
+  completeDvpCreateAudit,
+  concludeDvpCreateAuditOnError,
+  dvpTradeAuditActorFromContext,
+  findDvpCreateAuditOutcome,
+} from "@/routes/dvp/trade-audit";
+import type { AuditIntent } from "@/services/audit.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -314,6 +322,20 @@ export async function createDvpTrade(
     if (replayed) {
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
+      } else if (
+        // SOLA9-614: the row is mutable, so a definitive failure whose row
+        // resolution was lost would wedge the key on a zombie `creating` row
+        // forever. The immutable ledger outcome is the tie-breaker; every
+        // other status has chain evidence a ledger read cannot add to.
+        replayed.status === "creating" &&
+        (await findDvpCreateAuditOutcome(env, input.organizationId, replayed.id)) === "failure"
+      ) {
+        // Reconcile the mutable row with the immutable record first: the
+        // keyed release below is guarded on `create_failed`, and a CAS the
+        // reconciler already outraced frees nothing — the replay falls back
+        // to whatever row won.
+        await repository.resolveCreate(replayed.id, "create_failed");
+        failedRowId = replayed.id;
       } else {
         return assertOwnReplay(replayed, fingerprint);
       }
@@ -472,6 +494,7 @@ export async function createDvpTrade(
   // Kora pays the fee and trade-account rent. Resolve sponsorship only after
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
+  let createAudit: AuditIntent | null = null;
   try {
     const feePayment = await createProjectSponsorshipFeePayment(env, {
       organizationId: input.organizationId,
@@ -479,6 +502,32 @@ export async function createDvpTrade(
       actor: { type: "wallet", id: settlement.custodyWalletId },
     });
     const sponsor = await feePayment.getFeePayer();
+
+    // SOLA9-614: the broadcast spends the project's sponsored budget, so it is
+    // admitted the way funding admits a deposit — a fail-closed intent that
+    // seals the authenticated actor, the request, the idempotency key, the PDA
+    // seed tuple, the escrow addresses and the sponsor before the sponsor
+    // signs. A ledger outage here refuses the create; the catch below frees
+    // the claimed key.
+    createAudit = await beginDvpCreateAudit(
+      auditContext,
+      dvpTradeAuditActorFromContext(auditContext),
+      id,
+      {
+        idempotencyKey: input.idempotencyKey,
+        swapDvp: recorded.swapDvp,
+        settlementAuthority: recorded.settlementAuthority,
+        userA: recorded.userA,
+        userB: recorded.userB,
+        mintA: recorded.mintA,
+        mintB: recorded.mintB,
+        nonce: recorded.nonce,
+        escrowA: recorded.escrowA,
+        escrowB: recorded.escrowB,
+        sponsorFeePayer: sponsor,
+        settlementCustodyWalletId: settlement.custodyWalletId,
+      }
+    );
 
     const instruction = getCreateDvpInstruction({
       payer: createNoopSigner(sponsor),
@@ -548,9 +597,15 @@ export async function createDvpTrade(
       },
     });
   } catch (error) {
-    if (!signed || isDefiniteSubmissionError(error)) {
+    // The same predicate that resolves the row: nothing was ever signed, or
+    // the send was a preflight rejection the RPC guarantees never reached the
+    // network. Anything else may be in flight, and the audit intent stays
+    // unresolved so chain reconciliation determines the outcome.
+    const definitive = !signed || isDefiniteSubmissionError(error);
+    if (definitive) {
       await repository.resolveCreate(id, "create_failed");
     }
+    await concludeDvpCreateAuditOnError(auditContext, createAudit, error, definitive);
     throw error;
   }
   const claimed = await repository.getById(
@@ -561,5 +616,10 @@ export async function createDvpTrade(
     throw new Error("DvP claim disappeared after sponsored submission");
   }
   const observed = await observeDvpTradeNow(env, claimed);
+  await completeDvpCreateAudit(auditContext, createAudit, {
+    signature: claimed.createSignature,
+    observed: observed !== null,
+    tradeStatus: (observed ?? claimed).status,
+  });
   return observed === null ? claimed : observed;
 }
