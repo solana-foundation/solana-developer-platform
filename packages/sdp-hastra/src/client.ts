@@ -3,6 +3,7 @@ import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { HastraEarnClient } from "@sdp/earn/providers/hastra/client";
 import type {
   EarnRuntimeContext,
+  EarnVaultCreatedOutputAta,
   EarnVaultDepositInput,
   EarnVaultDepositQuote,
   EarnVaultDepositQuoteInput,
@@ -2252,6 +2253,26 @@ export class HastraVaultDirectClient
           refundTo: rentPayer,
           amount: intermediateAtoms,
         });
+        // The two creates above are idempotent: they charge the rentPayer only
+        // when the chain read found the account absent. The output accounts
+        // outlive this transaction and an operator settles later, so the plan
+        // records per-account rent truth — the durable source a queued
+        // fulfillment's refund can cite instead of guessing from fee_payer.
+        const createdOutputAtas: EarnVaultCreatedOutputAta[] = [];
+        if (userWyldsAccount === null) {
+          createdOutputAtas.push({
+            mint: wylds.toBase58(),
+            address: userWylds.toBase58(),
+            rentFunder: rentPayer.toBase58(),
+          });
+        }
+        if (userUsdcAccount === null) {
+          createdOutputAtas.push({
+            mint: usdc.toBase58(),
+            address: userUsdc.toBase58(),
+            rentFunder: rentPayer.toBase58(),
+          });
+        }
 
         return {
           cluster: runtime.cluster,
@@ -2295,6 +2316,7 @@ export class HastraVaultDirectClient
             assetMint: config.depositMint,
             assets: intermediate,
           },
+          ...(createdOutputAtas.length === 0 ? {} : { createdOutputAtas }),
         };
       }
     );

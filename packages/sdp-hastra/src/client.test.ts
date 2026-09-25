@@ -624,6 +624,63 @@ describe("Hastra par redemption", () => {
     expect(plan.instructions[6]?.accounts[1]?.address).toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
   });
 
+  it("attributes each persistent output ATA's rent on the plan only when it is newly created", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
+    });
+    // The owner holds neither persistent output account, so both idempotent
+    // creates charge real rent to the sponsor and the plan must name each
+    // created account and its funder for the queued lifecycle to refund.
+    fixture.accounts.delete(ata(OWNER, USDC));
+    stubRpc(fixture.accounts);
+    const plan = await makeClient().buildParRedemptionRequest(CTX, {
+      providerReference: DEPLOYMENT.primeMint,
+      owner: OWNER,
+      shares: "1600",
+      rentPayer: PAYER,
+    });
+    expect(plan.createdOutputAtas).toEqual([
+      {
+        mint: DEPLOYMENT.wYldsMint,
+        address: ata(OWNER, DEPLOYMENT.wYldsMint),
+        rentFunder: PAYER,
+      },
+      { mint: USDC, address: ata(OWNER, USDC), rentFunder: PAYER },
+    ]);
+    // The charged creates build owner-owned persistent accounts, exactly the
+    // partner-funded state whose rent the queued lifecycle must attribute.
+    expect(plan.instructions[2]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    expect(plan.instructions[2]?.accounts[1]?.address).toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
+    expect(plan.instructions[2]?.accounts[2]?.address).toBe(OWNER);
+    expect(plan.instructions[3]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
+    expect(plan.instructions[3]?.accounts[1]?.address).toBe(ata(OWNER, USDC));
+    expect(plan.instructions[3]?.accounts[2]?.address).toBe(OWNER);
+  });
+
+  it("omits output-ATA attribution when both persistent output accounts already exist", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
+    });
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 1n),
+    });
+    stubRpc(fixture.accounts);
+    const plan = await makeClient().buildParRedemptionRequest(CTX, {
+      providerReference: DEPLOYMENT.primeMint,
+      owner: OWNER,
+      shares: "1600",
+      rentPayer: PAYER,
+    });
+    // Both idempotent creates are no-ops here, so no rent was charged and the
+    // plan must not claim an attribution that could route a false refund.
+    expect(plan.createdOutputAtas).toBeUndefined();
+  });
+
   it("charges a sponsored rent payer for the creates and pre-funds the owner's request rent", async () => {
     const fixture = fixtureState();
     fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {

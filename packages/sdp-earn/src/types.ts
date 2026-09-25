@@ -771,9 +771,36 @@ export interface EarnVaultParRedemptionExpectedRequest {
   assets: string;
 }
 
+/**
+ * One persistent output token account a plan CREATES, with the address its
+ * create charges for the rent-exemption minimum.
+ *
+ * A par-redemption request prepares the owner's intermediate and asset token
+ * accounts for an operator settlement that happens later, so those accounts
+ * outlive the transaction and whoever funded their rent must stay attributable
+ * after settlement. Like `createsShareAccount` this is reported rather than
+ * assumed: the create is idempotent, so emitting it proves nothing — only the
+ * builder, which read the chain, knows whether the account was absent.
+ */
+export interface EarnVaultCreatedOutputAta {
+  /** Mint whose owner ATA the plan creates. */
+  mint: string;
+  /** The created ATA's address (derived from the owner and the mint). */
+  address: string;
+  /** Address the create charges for the account's rent-exemption minimum. */
+  rentFunder: string;
+}
+
 export interface EarnVaultParRedemptionRequestPlan extends EarnVaultTransactionPlan {
   requestAddress: string;
   expectedRequest: EarnVaultParRedemptionExpectedRequest;
+  /**
+   * Persistent output ATAs this request transaction actually creates, each
+   * with the rent funder its create charges. Empty when every output account
+   * already existed and the request charges no persistent rent; absent means
+   * the builder reports no output-account creation at all.
+   */
+  createdOutputAtas?: readonly EarnVaultCreatedOutputAta[];
 }
 
 export interface EarnVaultParRedemptionCancelInput {

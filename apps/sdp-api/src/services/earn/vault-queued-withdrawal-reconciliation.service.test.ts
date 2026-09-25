@@ -69,6 +69,8 @@ function request(
     creation_timestamp: null,
     maturity_timestamp: "1700000060",
     deadline_timestamp: "1700000120",
+    creates_output_accounts: false,
+    output_accounts_rent_funder: null,
     client_request_id: "request-key",
     idempotency_fingerprint: "request-fingerprint",
     creation_signature: "request-signature",

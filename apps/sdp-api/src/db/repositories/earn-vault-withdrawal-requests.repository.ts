@@ -1,6 +1,9 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
-import { queuedFulfillmentMovementId } from "@/db/repositories/earn-movements.repository";
+import {
+  projectShareAccountRentFunder,
+  queuedFulfillmentMovementId,
+} from "@/db/repositories/earn-movements.repository";
 import { conflict } from "@/lib/errors";
 
 export type EarnVaultWithdrawalRequestStatus =
@@ -49,6 +52,15 @@ export interface EarnVaultWithdrawalRequestRow {
   creation_timestamp: string | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
+  /**
+   * Whether the request's plan reported creating persistent output token
+   * accounts (Hastra's wYLDS and USDC ATAs), and who those creates charged.
+   * NULL keeps the historical meaning — nothing was created, or the owner
+   * funded its own accounts — so the fulfillment movement's refund defaults
+   * back to the owner.
+   */
+  creates_output_accounts: boolean;
+  output_accounts_rent_funder: string | null;
   client_request_id: string;
   idempotency_fingerprint: string;
   creation_signature: string | null;
@@ -116,6 +128,9 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   discount_bps: number | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
+  /** Build-time output-ATA rent attribution, promoted onto the request at submit. */
+  creates_output_accounts: boolean;
+  output_accounts_rent_funder: string | null;
   fee_payer: string | null;
   unsigned_transaction: string;
   last_valid_block_height: string;
@@ -173,6 +188,14 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   discountBps?: number | null;
   maturityTimestamp?: string | null;
   deadlineTimestamp?: string | null;
+  /**
+   * Build-time attribution for persistent output ATAs the queued plan creates
+   * (SOLA9-228): whether any were created, and who the creates charged.
+   * Recorded on the request so the fulfillment movement can carry it into the
+   * ledger's rent-refund columns instead of relying on fee_payer alone.
+   */
+  createsOutputAccounts?: boolean;
+  outputAccountsRentFunder?: string | null;
   signature: string;
   signedTransaction: string;
   lastValidBlockHeight: string;
@@ -226,6 +249,9 @@ export interface CreateExternalWalletQueuedTransactionInput {
   intermediateMint?: string | null;
   intermediateAmount?: string | null;
   feePayer?: string | null;
+  /** Output-ATA rent attribution recorded at build time (SOLA9-228). */
+  createsOutputAccounts?: boolean;
+  outputAccountsRentFunder?: string | null;
   unsignedTransaction: string;
   lastValidBlockHeight: string;
   /** Confirmed height used to reap an abandoned build for this same PDA. */
@@ -608,6 +634,12 @@ async function promoteRequestAddressLease(
  * NULL — setting both would activate the external-wallet claim foreign key
  * against a custody position row that has no owner address. Either way the
  * payout's destination is recorded in destination_address.
+ *
+ * The request's output-ATA rent attribution (0119, SOLA9-228) rides onto the
+ * movement's existing `(creates_share_account, share_ata_rent_funder)` pair:
+ * the queued request transaction created the owner's persistent output token
+ * accounts and charged them to the recorded funder, and this is the refund
+ * machinery the settlement must feed instead of relying on fee_payer alone.
  */
 async function recordFulfilledQueueMovement(
   tx: DatabaseExecutor,
@@ -616,6 +648,7 @@ async function recordFulfilledQueueMovement(
   if (!request.closing_signature) return;
   const settledAt = request.fulfilled_at ?? request.updated_at;
   const ownerAddress = request.custody_wallet_id ? null : request.owner_address;
+  const createsOutputAccounts = request.creates_output_accounts === true;
   await tx
     .prepare(
       `INSERT INTO earn_movements (
@@ -638,7 +671,7 @@ async function recordFulfilledQueueMovement(
          ?, ?,
          ?, ?, ?::jsonb,
          ?, ?,
-         FALSE, NULL, NULL,
+         ?, ?, NULL,
          ?, ?
        )
        ON CONFLICT (id) DO NOTHING`
@@ -676,6 +709,8 @@ async function recordFulfilledQueueMovement(
       }),
       request.created_by,
       request.initiated_by_key_id,
+      createsOutputAccounts,
+      createsOutputAccounts ? (request.output_accounts_rent_funder ?? null) : null,
       settledAt,
       request.updated_at
     )
@@ -937,10 +972,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                request_address, status, mechanism, shares, quoted_assets,
                share_decimals, asset_decimals, intermediate_mint, intermediate_amount,
                discount_bps, maturity_timestamp, deadline_timestamp,
+               creates_output_accounts, output_accounts_rent_funder,
                client_request_id, idempotency_fingerprint, creation_signature,
                created_by, initiated_by_key_id
              ) VALUES (
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              )
              RETURNING *`
           )
@@ -967,6 +1003,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.discountBps ?? null,
             input.maturityTimestamp ?? null,
             input.deadlineTimestamp ?? null,
+            input.createsOutputAccounts === true,
+            input.createsOutputAccounts === true ? (input.outputAccountsRentFunder ?? null) : null,
             input.clientRequestId,
             input.idempotencyFingerprint,
             input.signature,
@@ -1376,6 +1414,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           // insert replays as a no-op; the closing signature is unique per
           // fulfillment via idx_earn_movements_signature.
           await recordFulfilledQueueMovement(tx, request);
+          // The fulfillment movement may carry the request's output-ATA rent
+          // attribution (0119). Feed it into the same position projection the
+          // direct intents use, so the recorded funder — never a fee_payer
+          // guess — drives the exit's refund (SOLA9-228).
+          await projectShareAccountRentFunder(tx, request.position_id, request.organization_id);
         }
         if (input.toStatus === "cancelled" && request.mechanism === "solver_queue") {
           // A cancellation can restore a full wallet balance after hydration
@@ -1682,9 +1725,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              share_mint, request_address, shares, quoted_assets, share_decimals,
              asset_decimals, intermediate_mint, intermediate_amount,
              discount_bps, maturity_timestamp, deadline_timestamp,
+             creates_output_accounts, output_accounts_rent_funder,
              fee_payer, unsigned_transaction, last_valid_block_height,
              created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING *`
           )
@@ -1712,6 +1756,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.discountBps ?? null,
             input.maturityTimestamp ?? null,
             input.deadlineTimestamp ?? null,
+            input.createsOutputAccounts === true,
+            input.createsOutputAccounts === true ? (input.outputAccountsRentFunder ?? null) : null,
             input.feePayer ?? null,
             input.unsignedTransaction,
             input.lastValidBlockHeight,

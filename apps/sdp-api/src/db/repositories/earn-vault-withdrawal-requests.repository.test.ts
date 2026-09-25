@@ -1066,6 +1066,173 @@ describe("Earn queued withdrawal repository", () => {
     });
   });
 
+  it("carries output-ATA rent attribution onto the fulfillment movement and its position", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const external = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+      mechanism: "operator_redemption",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: external.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "queued-fulfilled-partner-rent-signature",
+      assetsPaid: "10.25",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+
+    // The movement owns the ledger's rent-attribution pair, satisfied here by
+    // the request's output-ATA claim: the partner funded the persistent
+    // accounts the request created.
+    const movement = await getDb(env)
+      .prepare(
+        `SELECT creates_share_account, share_ata_rent_funder
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${external.request.id}`)
+      .first<{ creates_share_account: boolean; share_ata_rent_funder: string | null }>();
+    expect(movement).toEqual({ creates_share_account: true, share_ata_rent_funder: partner });
+
+    // And the projection the exit's refund reads must name the partner too —
+    // never a fee_payer-derived guess and never the owner.
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(EXTERNAL_POSITION)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBe(partner);
+  });
+
+  it("keeps an unattributed fulfillment movement and position projection at NULL", async () => {
+    const external = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: external.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "queued-fulfilled-owner-rent-signature",
+      assetsPaid: "9.8",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+    const movement = await getDb(env)
+      .prepare(
+        `SELECT creates_share_account, share_ata_rent_funder
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${external.request.id}`)
+      .first<{ creates_share_account: boolean; share_ata_rent_funder: string | null }>();
+    expect(movement).toEqual({ creates_share_account: false, share_ata_rent_funder: null });
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(EXTERNAL_POSITION)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBeNull();
+  });
+
+  it("persists output-ATA rent attribution on the durable build row", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const build = await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_output_rent",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      mechanism: "operator_redemption",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "OutputRentParRequestAddress1111111111111",
+      shares: "1",
+      quotedAssets: "1.25",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "1.25",
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+      feePayer: partner,
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "20000",
+      currentBlockHeight: "10000",
+    });
+    expect(build.creates_output_accounts).toBe(true);
+    expect(build.output_accounts_rent_funder).toBe(partner);
+    await expect(
+      repository.getExternalWalletTransaction({
+        organizationId: ORG,
+        transactionId: build.id,
+      })
+    ).resolves.toMatchObject({
+      creates_output_accounts: true,
+      output_accounts_rent_funder: partner,
+    });
+  });
+
+  it("refuses an output-ATA rent funder without a creation claim at the database boundary", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const created = await createRequest();
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_vault_withdrawal_requests
+              SET output_accounts_rent_funder = ?
+            WHERE id = ?`
+        )
+        .bind(partner, created.request.id)
+        .run()
+    ).rejects.toThrow(/output_rent_funder_shape_check/);
+
+    await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_rent_shape",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      mechanism: "operator_redemption",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "RentShapeParRequestAddress11111111111111",
+      shares: "1",
+      quotedAssets: "1.25",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "1.25",
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "20000",
+      currentBlockHeight: "10000",
+    });
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_external_wallet_withdrawal_request_transactions
+              SET output_accounts_rent_funder = ?
+            WHERE id = 'earn_external_wallet_withdrawal_request_transaction_rent_shape'`
+        )
+        .bind(partner)
+        .run()
+    ).rejects.toThrow(/output_rent_funder_shape_check/);
+  });
+
   it("returns the winner to concurrent identical cancellation submissions", async () => {
     const created = await createRequest();
     await repository.advanceRequest({
