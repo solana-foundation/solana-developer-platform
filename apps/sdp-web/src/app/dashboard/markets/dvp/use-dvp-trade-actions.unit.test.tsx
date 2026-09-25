@@ -513,6 +513,29 @@ describe("useDvpTradeActions", () => {
       expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
     });
 
+    // A 408 or 429 says the gateway gave up or shed load, not that the API
+    // recorded nothing: the close may already be recorded and able to land.
+    // The retry must carry the same key so it replays that record.
+    it.each([408, 429] as const)(
+      "reuses the key when a close is refused with %i",
+      async (status) => {
+        const fetchMock = vi.fn().mockResolvedValue({
+          ok: false,
+          status,
+          json: async () => ({ error: { message: "DvP trade dvp_1: gateway refused" } }),
+        });
+        global.fetch = fetchMock as never;
+        const { result } = renderHook(() => useDvpTradeActions("dvp_1", "devnet"), {
+          wrapper: withI18n,
+        });
+
+        await act(async () => await result.current.act("settle"));
+        await act(async () => await result.current.act("settle"));
+
+        expect(keyOf(fetchMock.mock.calls[1] ?? [])).toBe(keyOf(fetchMock.mock.calls[0] ?? []));
+      }
+    );
+
     it("reuses the key past the TTL while the key's own request is still running", async () => {
       vi.useFakeTimers();
       try {

@@ -265,10 +265,10 @@ function claimCloseKey(
  * is claimed, so only an answer that proves the close resolved lifts the pin:
  * a readable 2xx that says `confirmed: true`, or a refusal that provably
  * recorded nothing (`closeRefusalOutcome`). Anything ambiguous — a 202
- * approval hold, a transport failure, a 5xx, an unreadable answer, an
- * unconfirmed broadcast, a 409 while a close can still land — leaves the pin
- * alone, because the retry of this operation must replay the close the first
- * request sent (SOLA9-146). Leg actions have no key.
+ * approval hold, a transport failure, a 5xx, a 408 or 429, an unreadable
+ * answer, an unconfirmed broadcast, a 409 while a close can still land —
+ * leaves the pin alone, because the retry of this operation must replay the
+ * close the first request sent (SOLA9-146). Leg actions have no key.
  */
 function applyCloseKeyOutcome(
   close: { fingerprint: string } | null,
@@ -286,10 +286,13 @@ function applyCloseKeyOutcome(
  * lifts it, and the next press is a new operation. A 409 does not: with
  * `closeInProgress` the trade's close lock is held by a close that can still
  * land, and without a reason it is the key's OWN request still running, whose
- * recorded transaction may land too. A 5xx might have recorded and broadcast.
+ * recorded transaction may land too. A 408 or 429 does not either: a gateway
+ * timing out downstream, or shedding load after forwarding, leaves it unknown
+ * whether the API already recorded the close. A 5xx might have recorded and
+ * broadcast.
  */
 function closeRefusalOutcome(status: number, body: unknown): "refused" | "kept" {
-  if (status >= 500) {
+  if (status === 408 || status === 429 || status >= 500) {
     return "kept";
   }
   if (status !== 409) {
