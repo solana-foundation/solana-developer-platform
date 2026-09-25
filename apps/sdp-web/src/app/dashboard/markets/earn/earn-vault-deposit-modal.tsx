@@ -38,7 +38,7 @@ import {
 } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatTokenQuantity, formatUsd, shortenMarketAddress, tokenSymbol } from "./earn-format";
+import { formatTokenValue, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
@@ -494,7 +494,7 @@ function DepositWalletPicker({
               : balance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatUsd(balance, locale, 2),
+                    amount: formatTokenValue(balance, depositMint, locale),
                   })}
           </span>
         </label>
@@ -626,12 +626,12 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
 }
 
 function DepositMovementResult({
+  fundingMint,
   outcome,
-  symbol,
   onClose,
 }: {
+  fundingMint: string | undefined;
   outcome: DepositMovementOutcome;
-  symbol: string;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -674,7 +674,7 @@ function DepositMovementResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(outcome.amount, locale, symbol)}
+            {formatTokenValue(outcome.amount, fundingMint, locale)}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
@@ -697,18 +697,18 @@ function DepositMovementResult({
 }
 
 function DepositResult({
+  fundingMint,
   outcome,
-  symbol,
   onClose,
 }: {
+  fundingMint: string | undefined;
   outcome: DepositOutcome;
-  symbol: string;
   onClose: () => void;
 }) {
   if (outcome.kind === "approval_pending") {
     return <DepositApprovalResult onClose={onClose} outcome={outcome} />;
   }
-  return <DepositMovementResult onClose={onClose} outcome={outcome} symbol={symbol} />;
+  return <DepositMovementResult fundingMint={fundingMint} onClose={onClose} outcome={outcome} />;
 }
 
 export interface EarnVaultDepositModalProps {
@@ -900,6 +900,7 @@ function DepositSwapReviewNotice({
 function DepositReviewDetails({
   amount,
   backing,
+  fundingMint,
   fundingSymbol,
   minSharesOut,
   quote,
@@ -910,6 +911,7 @@ function DepositReviewDetails({
 }: {
   amount: string;
   backing: string | undefined;
+  fundingMint: string | undefined;
   fundingSymbol: string;
   minSharesOut: string | undefined;
   quote: VaultQuoteState<EarnVaultDepositPreview>;
@@ -925,7 +927,9 @@ function DepositReviewDetails({
     <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
       <div className="flex items-baseline justify-between gap-5">
         <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultAmount")}</dt>
-        <dd className="text-right tabular-nums text-primary">{formatUsd(amount, locale, 2)}</dd>
+        <dd className="text-right tabular-nums text-primary">
+          {formatTokenValue(amount, fundingMint, locale)}
+        </dd>
       </div>
       {selectedWallet ? (
         <div className="flex items-baseline justify-between gap-5">
@@ -1063,7 +1067,11 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
             ? selectedWalletBalance === undefined
               ? t("DashboardEarn.deposit.vaultBalanceUnknown")
               : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                  amount: formatUsd(selectedWalletBalance, locale, 2),
+                  amount: formatTokenValue(
+                    selectedWalletBalance,
+                    fundingToken?.mint ?? depositMint,
+                    locale
+                  ),
                 })
             : null}
         </div>
@@ -1091,6 +1099,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
 interface DepositReviewStepProps {
   amount: string;
   backing: string | undefined;
+  fundingMint: string | undefined;
   fundingSymbol: string;
   minSharesOut: string | undefined;
   onBack: () => void;
@@ -1116,6 +1125,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
   const {
     amount,
     backing,
+    fundingMint,
     fundingSymbol,
     minSharesOut,
     onBack,
@@ -1145,6 +1155,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
       <DepositReviewDetails
         amount={amount}
         backing={backing}
+        fundingMint={fundingMint}
         fundingSymbol={fundingSymbol}
         minSharesOut={minSharesOut}
         quote={quote}
@@ -1549,7 +1560,11 @@ export function EarnVaultDepositModal({
         <div className="p-6" ref={contentRef}>
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
-            <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
+            <DepositResult
+              fundingMint={fundingToken?.mint}
+              outcome={visibleOutcome}
+              onClose={onClose}
+            />
           </EarnFlowTransition>
         </div>
       </Modal>
@@ -1614,6 +1629,7 @@ export function EarnVaultDepositModal({
                 amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
               }
               backing={backing}
+              fundingMint={fundingToken?.mint}
               fundingSymbol={fundingSymbol}
               minSharesOut={minSharesOut}
               onBack={() => {
