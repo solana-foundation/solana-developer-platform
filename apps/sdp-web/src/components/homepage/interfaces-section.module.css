@@ -1,0 +1,152 @@
+/* The call and what answers it, on night; the one place on the page set in monospace. */
+.interfaces {
+  padding: 160px 0 104px;
+  --cell-line: var(--hp-night-line);
+  --cell-ink: var(--hp-night-ink);
+  --cell-muted: var(--hp-night-ink-3);
+}
+
+.title {
+  margin: 0;
+  color: var(--hp-night-ink);
+  font-size: clamp(30px, 3.6vw, 46px);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+}
+
+.lede {
+  max-width: 48ch;
+  margin: 0;
+  color: var(--hp-night-ink-2);
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 24px;
+  margin-top: 56px;
+}
+
+.request {
+  min-width: 0;
+  margin: 0;
+  padding: 24px 26px;
+  border: 1px solid #232329;
+  border-radius: 14px;
+  background: var(--hp-night-2);
+}
+
+.code {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--hp-night-ink-2);
+  font:
+    400 13px / 1.75 ui-monospace,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace;
+  white-space: pre;
+}
+
+.prompt {
+  color: #6e6a78;
+}
+
+.ok {
+  color: var(--hp-green);
+}
+
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  vertical-align: -2px;
+  background: var(--hp-night-ink-2);
+  /* A terminal caret, as in the design; reduced motion holds it solid (below). */
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.ways {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.ways ul {
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0;
+}
+
+/* The design's "ways": a smaller icon set inline before the name, lit steady. */
+.ways .way {
+  padding: 20px 0 22px;
+}
+
+.ways .wayIcon,
+.ways .way:hover .wayIcon {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin: 0 10px 0 0;
+  vertical-align: -4px;
+  color: var(--hp-night-ink-2);
+}
+
+.ways .wayName {
+  display: inline;
+  margin: 0;
+}
+
+.ways .wayNote {
+  margin-top: 8px;
+}
+
+.refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hp-night-line);
+  font-size: 14px;
+}
+
+.refs a {
+  color: var(--hp-night-ink-2);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.refs a:hover {
+  color: var(--hp-night-ink);
+}
+
+.refs a:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1000px) {
+  .interfaces {
+    padding: 96px 0 72px;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+}

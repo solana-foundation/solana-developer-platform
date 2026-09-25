@@ -1,0 +1,171 @@
+/*
+ * Meet the builders: the section is the scroll room, the stage stays pinned
+ * while the camera flies the ring. data-mode is "shot" (the pinned flight),
+ * "still" (reduced motion: one screen, one frame, both captions) or "plain"
+ * (no WebGL: the captions alone).
+ */
+.builders {
+  position: relative;
+  height: 220vh;
+}
+
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.stage canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 5;
+  height: 2px;
+  background: var(--hp-pink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+}
+
+.caption {
+  position: absolute;
+  left: 50%;
+  z-index: 4;
+  width: min(900px, 90vw);
+  text-align: center;
+  transform: translateX(-50%);
+  opacity: 0;
+  pointer-events: none;
+  /* The words can land over the stills (a still frame, a small screen); a soft shadow keeps them legible. */
+  text-shadow: 0 2px 18px rgba(8, 8, 10, 0.85);
+}
+
+.opening {
+  top: 12vh;
+}
+
+.closing {
+  bottom: 7vh;
+}
+
+.title {
+  margin: 0;
+  color: #fff;
+  font-size: var(--hp-display);
+  font-weight: 400;
+  line-height: 0.98;
+  letter-spacing: -0.03em;
+}
+
+.body {
+  max-width: 44ch;
+  margin: 16px auto 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: clamp(16px, 1.5vw, 22px);
+  line-height: 1.4;
+}
+
+.watch {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  margin-top: 26px;
+  padding: 0 17px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  pointer-events: auto;
+  transition: background 160ms var(--hp-micro);
+}
+
+.watch:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.watch:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+/* Reduced motion: one screen, the ring still, both captions shown. */
+.builders[data-mode="still"] {
+  height: 100vh;
+}
+
+.builders[data-mode="still"] .caption,
+.builders[data-mode="plain"] .caption {
+  opacity: 1;
+}
+
+.builders[data-mode="still"] .progress,
+.builders[data-mode="plain"] .progress {
+  display: none;
+}
+
+/* No WebGL: the captions alone, one above the other. */
+.builders[data-mode="plain"] {
+  height: auto;
+}
+
+.builders[data-mode="plain"] .stage {
+  position: relative;
+  height: auto;
+  padding: 120px 0;
+}
+
+.builders[data-mode="plain"] .caption {
+  position: relative;
+  left: auto;
+  top: auto;
+  bottom: auto;
+  margin: 0 auto 64px;
+  transform: none;
+}
+
+/* The interviewees, as the design lists them (comma-separated), each a link to their film. */
+.films {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 0;
+  list-style: none;
+}
+
+.films li:not(:last-child)::after {
+  content: ",\00a0";
+}
+
+.films li:last-child::after {
+  content: ".";
+}
+
+/* inline-flex, so the space before the hidden "opens in a new tab" does not show before the comma. */
+.films a {
+  display: inline-flex;
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+.films a:hover {
+  color: #fff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.films a:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}

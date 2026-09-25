@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import {
   ThemeProvider as NextThemeProvider,
   type ThemeProviderProps as NextThemeProviderProps,
@@ -56,13 +57,29 @@ export function resolvePreference(storedTheme: string | undefined): ThemePrefere
   return storedTheme === "light" || storedTheme === "dark" ? storedTheme : "system";
 }
 
+/**
+ * Pages that always paint in one theme, whatever the visitor chose; their
+ * choice still applies everywhere else and is left untouched. The homepage
+ * keeps every one of its dark styles, so deleting "/" here is the whole of
+ * letting it follow the theme again.
+ */
+const FORCED_THEMES: Readonly<Record<string, Theme>> = { "/": "light" };
+
+export function forcedThemeFor(pathname: string | null): Theme | undefined {
+  return pathname ? FORCED_THEMES[pathname] : undefined;
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  // Read on the client, not in the root layout: the layout does not re-render on client
+  // navigation, so a lock set there would follow the visitor off the page.
+  const forcedTheme = forcedThemeFor(usePathname());
   return (
     <NextThemeProviderWithChildren
       attribute="class"
       defaultTheme="system"
       enableColorScheme
       enableSystem
+      forcedTheme={forcedTheme}
       storageKey={THEME_STORAGE_KEY}
     >
       <ThemeProviderContext.Provider value>{children}</ThemeProviderContext.Provider>
@@ -72,13 +89,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
 export function useTheme(): ThemeContextValue {
   const hasThemeProvider = useContext(ThemeProviderContext);
-  const { resolvedTheme, setTheme: setNextTheme, theme: storedTheme } = useNextTheme();
+  const { forcedTheme, resolvedTheme, setTheme: setNextTheme, theme: storedTheme } = useNextTheme();
   const hydrated = useSyncExternalStore(
     subscribeToHydration,
     () => true,
     () => false
   );
-  const theme = hydrated ? resolveTheme(resolvedTheme) : "light";
+  // next-themes' resolvedTheme ignores a forced theme; what is painted is the forced one.
+  const theme = hydrated ? resolveTheme(forcedTheme ?? resolvedTheme) : "light";
   // Before hydration the stored choice is unreadable, so callers get the default
   // rather than a guess. Gate any rendering of it on `hydrated`.
   const preference = hydrated ? resolvePreference(storedTheme) : "system";

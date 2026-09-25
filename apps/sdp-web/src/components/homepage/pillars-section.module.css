@@ -1,0 +1,68 @@
+/* The three pillars: a scene, a name, a line, under a hairline that lights on hover. */
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 26px;
+  margin: 64px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pillar {
+  position: relative;
+  padding: 26px 0 40px;
+}
+
+.pillar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--hp-line);
+  transition: background 420ms var(--hp-ease);
+}
+
+.pillar:hover::before,
+.pillar:focus-within::before {
+  background: var(--hp-pink);
+}
+
+.scene {
+  height: 300px;
+  margin: 0 0 22px;
+}
+
+.name {
+  margin: 0;
+  color: var(--hp-ink);
+  font-size: clamp(24px, 2.3vw, 34px);
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.022em;
+}
+
+.body {
+  max-width: 34ch;
+  margin: 12px 0 0;
+  color: var(--hp-ink-3);
+  font-size: 15.5px;
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .pillars {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .scene {
+    height: 200px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pillar::before {
+    transition: none;
+  }
+}

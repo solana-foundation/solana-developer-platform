@@ -1,0 +1,59 @@
+/* The statement takes the screen, centred; the partners keep its floor. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 56px);
+  text-align: center;
+}
+
+.statement {
+  margin: auto;
+  padding: 24px 0;
+}
+
+.title {
+  max-width: 14ch;
+  margin: 0 auto;
+  color: var(--hp-ink);
+  font-size: var(--hp-display);
+  font-weight: 400;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
+}
+
+.sub {
+  max-width: 50ch;
+  margin: 24px auto 0;
+  color: var(--hp-ink-3);
+  font-size: clamp(16px, 1.4vw, 20px);
+  line-height: 1.5;
+}
+
+/* Partner APIs → SDP → Your Product */
+.flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 28px auto 0;
+  color: var(--hp-ink-3);
+  font-size: 17px;
+}
+
+.flow b {
+  color: var(--hp-ink);
+  font-weight: 400;
+}
+
+.product {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--hp-ink);
+  color: var(--hp-paper);
+  font-size: 15px;
+  font-weight: 500;
+}

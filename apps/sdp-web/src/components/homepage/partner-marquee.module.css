@@ -1,0 +1,116 @@
+/* The partners passing along the floor of the statement, fading out at both edges. */
+.marquee {
+  position: relative;
+  overflow: hidden;
+  padding: 30px 0;
+  border-top: 1px solid var(--hp-line);
+  border-bottom: 1px solid var(--hp-line);
+}
+
+.marquee::before,
+.marquee::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 120px;
+  pointer-events: none;
+}
+
+.marquee::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--hp-paper), transparent);
+}
+
+.marquee::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--hp-paper), transparent);
+}
+
+.track {
+  display: flex;
+  width: max-content;
+  animation: scroll 90s linear infinite;
+}
+
+.track[data-paused="true"] {
+  animation-play-state: paused;
+}
+
+.list {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.partner {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 30px;
+  color: var(--hp-ink-3);
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.partner img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+/* A small pink bead between one name and the next. */
+.partner::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--hp-pink);
+  transform: translate(50%, -50%);
+}
+
+/* The pause button (pause-button.tsx), held at the strip's right edge. */
+.toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  z-index: 3;
+  transform: translateY(-50%);
+}
+
+@keyframes scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Nothing moves: the list wraps in place, and the copy and the button go. */
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    width: auto;
+    animation: none;
+  }
+
+  .list {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 18px;
+  }
+
+  .list[aria-hidden="true"],
+  .marquee::before,
+  .marquee::after {
+    display: none;
+  }
+}

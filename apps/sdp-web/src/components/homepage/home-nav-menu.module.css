@@ -1,0 +1,263 @@
+.menu {
+  display: flex;
+  justify-content: center;
+  gap: 26px;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Keeps a hover-opened panel open across the gap under the bar. */
+.item::after {
+  content: "";
+  position: absolute;
+  left: -20px;
+  right: -20px;
+  top: 100%;
+  height: 12px;
+}
+
+.trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--hp-ink-3);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 160ms var(--hp-micro);
+}
+
+.trigger::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--hp-pink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 260ms var(--hp-ease);
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  color: var(--hp-ink);
+}
+
+.trigger[aria-expanded="true"]::after {
+  transform: scaleX(1);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+.chevron {
+  width: 12px;
+  height: 12px;
+  margin-top: 1px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 300ms var(--hp-ease);
+}
+
+.trigger[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+/* Hidden panels are visibility:hidden, so they are out of the tab order and the accessibility tree. */
+.panel {
+  position: fixed;
+  z-index: 49;
+  left: max(28px, calc((100vw - var(--hp-band)) / 2));
+  right: max(28px, calc((100vw - var(--hp-band)) / 2));
+  top: 64px;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 0 40px;
+  padding: 14px 28px 22px;
+  border: 1px solid var(--hp-line);
+  border-radius: 14px;
+  background: var(--hp-paper);
+  box-shadow: 0 30px 70px -24px rgba(15, 15, 19, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.25s,
+    transform 0.3s,
+    visibility 0s 0.3s;
+}
+
+.panel[data-open="true"] {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.25s,
+    transform 0.3s,
+    visibility 0s;
+}
+
+.features {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feature {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding: 15px 0 16px;
+  text-decoration: none;
+}
+
+/* A hairline between one feature and the next. */
+.features li + li .feature {
+  border-top: 1px solid var(--hp-line-2);
+}
+
+.feature::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -1px;
+  height: 1px;
+  background: var(--hp-pink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  transition: transform 260ms var(--hp-ease);
+}
+
+.feature:hover::before,
+.feature:focus-visible::before {
+  transform: scaleX(1);
+}
+
+.feature b {
+  color: var(--hp-ink);
+  font-size: 15.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.feature span {
+  color: var(--hp-ink-3);
+  font-size: 13.5px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 24px;
+  align-content: start;
+  padding-top: 8px;
+}
+
+.column {
+  display: grid;
+  align-content: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.column a {
+  display: block;
+  padding: 9px 0;
+  color: var(--hp-ink-3);
+  font-size: 14px;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+/* A hairline between one link and the next. */
+.column li + li a {
+  border-top: 1px solid var(--hp-line-2);
+}
+
+.column a:hover {
+  color: var(--hp-ink);
+}
+
+.feature:focus-visible,
+.column a:focus-visible {
+  outline: 2px solid var(--hp-purple);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .menu {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger,
+  .trigger::after,
+  .chevron,
+  .panel,
+  .panel[data-open="true"],
+  .feature::before {
+    transition: none;
+  }
+}
+
+/* Over a night band (the bar's data-ground) the groups and their panels go dark too. */
+[data-ground="night"] .trigger {
+  color: var(--hp-night-ink-2);
+}
+
+[data-ground="night"] .trigger:hover,
+[data-ground="night"] .trigger[aria-expanded="true"] {
+  color: var(--hp-night-ink);
+}
+
+[data-ground="night"] .panel {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--hp-night-2);
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.6);
+}
+
+[data-ground="night"] .features li + li .feature {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-ground="night"] .feature b {
+  color: var(--hp-night-ink);
+}
+
+[data-ground="night"] .feature span,
+[data-ground="night"] .column a {
+  color: var(--hp-night-ink-3);
+}
+
+[data-ground="night"] .column li + li a {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-ground="night"] .column a:hover {
+  color: var(--hp-night-ink);
+}
