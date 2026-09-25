@@ -47,7 +47,9 @@ describe("readOwnerMintBalance", () => {
     let wireCommitment: unknown;
     const rpcUrl = await serveRpcResponse({ context: { slot: 1 }, value: [] }, (body) => {
       if (body.method === "getTokenAccountsByOwner") {
-        const [, config] = body.params ?? [];
+        // params: [owner, filter, config] — the commitment lives in the
+        // config object, not the mint filter.
+        const [, , config] = body.params ?? [];
         wireCommitment = (config as { commitment?: unknown } | undefined)?.commitment;
       }
     });
