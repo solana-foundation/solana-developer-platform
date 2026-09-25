@@ -272,7 +272,10 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     // SOLA9-675: a successful response with an empty account list at a weak
     // commitment is indistinguishable from an incomplete one. The swap may
     // have landed while the RPC lagged; a zero baseline makes that read look
-    // exactly like "never funded". It must not resolve terminally.
+    // exactly like "never funded". It must not resolve terminally. The
+    // production reader pins `finalized` and never produces this shape, so
+    // this exercises the defense-in-depth guard for a future commitment
+    // change; the consumer contract is that incomplete reads fail closed.
     const id = await seedAdvisory(2 * HOUR);
     readOwnerMintBalance.mockResolvedValue({ atoms: 0n, decimals: null, complete: false });
 

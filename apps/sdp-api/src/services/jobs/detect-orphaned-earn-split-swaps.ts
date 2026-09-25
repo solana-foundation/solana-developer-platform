@@ -308,6 +308,12 @@ async function judgeAdvisory(
     // from an incomplete one — the swap may have landed while the RPC lagged
     // or dropped its accounts. Keep the advisory open and retry on a later
     // visit rather than resolving `unfunded` on unverified silence.
+    //
+    // Defense-in-depth: the reader pins `finalized`, where an empty response
+    // is conclusive, so in production `complete` is always true and this
+    // branch does not fire. It stays because `complete` is computed from the
+    // reader's commitment: relaxing that commitment retracts completeness
+    // from empty reads and this branch becomes live automatically.
     stats.balanceReadFailures += 1;
     logEvent("error", {
       event: "sdp_api_earn_split_swap_balance_read_failed",
