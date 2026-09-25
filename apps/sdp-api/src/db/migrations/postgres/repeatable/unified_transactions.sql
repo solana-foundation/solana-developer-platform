@@ -231,7 +231,7 @@ SELECT
   CASE module_status
     WHEN 'pending' THEN 'pending'
     WHEN 'processing' THEN 'pending'
-    WHEN 'confirmed' THEN 'succeeded'
+    WHEN 'confirmed' THEN 'pending'
     WHEN 'finalized' THEN 'succeeded'
     WHEN 'failed' THEN 'failed'
   END AS status

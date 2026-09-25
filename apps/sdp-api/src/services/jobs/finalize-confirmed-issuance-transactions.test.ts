@@ -1,0 +1,196 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getDb } from "@/db";
+import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
+import { env } from "@/test/helpers/env";
+import { seedDefaultProjects } from "@/test/helpers/projects";
+import { seedTestDatabase } from "@/test/mocks/db";
+
+const getSignatureStatusesMock = vi.hoisted(() => vi.fn());
+vi.mock("@sdp/rpc/solana", () => ({
+  createRpc: () => ({}),
+  getSignatureStatuses: getSignatureStatusesMock,
+}));
+
+const { finalizeConfirmedIssuanceTransactions } = await import(
+  "./finalize-confirmed-issuance-transactions"
+);
+
+const PROJECT_ID = "prj_issuance_finality_job";
+const TOKEN_ID = "tok_issuance_finality_job";
+/** A real base58 64-byte signature, so the job's validation accepts it. */
+const SIG =
+  "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy";
+
+/** Distinct valid signatures per row: issuance signatures carry a UNIQUE constraint. */
+const NEXT_SIG_CHAR = ["5", "6", "7", "8", "9", "A", "B", "C", "D", "E"].values();
+function signatureFor(_id: string): string {
+  const first = NEXT_SIG_CHAR.next().value ?? "F";
+  return `${first}${SIG.slice(1)}`;
+}
+
+type StatusInfo = { slot: bigint; confirmations: bigint; confirmationStatus: string; err: unknown };
+
+function statusOf(confirmationStatus: string, err: unknown = null): StatusInfo {
+  return { slot: 500n, confirmations: 1n, confirmationStatus, err };
+}
+
+function minutesAgo(n: number): string {
+  return new Date(Date.now() - n * 60 * 1000).toISOString();
+}
+
+async function seedConfirmedTransaction(params: {
+  id: string;
+  confirmedMinutesAgo: number;
+}): Promise<void> {
+  const confirmedAt = minutesAgo(params.confirmedMinutesAgo);
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issued_tokens
+         (id, project_id, organization_id, mint_address, name, symbol, decimals, created_by)
+       VALUES (?, ?, ?, 'FinalityJobMint1111111111111111111111111111111',
+               'Finality job', 'FNJ', 6, ?)
+       ON CONFLICT (id) DO NOTHING`
+    )
+    .bind(TOKEN_ID, PROJECT_ID, TEST_ORG.id, TEST_USER.id)
+    .run();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issuance_transactions
+         (id, token_id, organization_id, type, status, signature, slot,
+          operation_params, created_at, updated_at)
+       VALUES (?, ?, ?, 'mint', 'confirmed', ?, 123, '{}', ?, ?)`
+    )
+    .bind(params.id, TOKEN_ID, TEST_ORG.id, signatureFor(params.id), confirmedAt, confirmedAt)
+    .run();
+  await getDb(env)
+    .prepare(
+      `INSERT INTO issuance_transaction_statuses (id, transaction_id, status, changed_at)
+       VALUES (?, ?, 'confirmed', ?)`
+    )
+    .bind(`its_${params.id}`, params.id, confirmedAt)
+    .run();
+}
+
+async function getTransaction(id: string) {
+  return getDb(env)
+    .prepare(
+      `SELECT id, status, slot, finalization_last_polled_at FROM issuance_transactions WHERE id = ?`
+    )
+    .bind(id)
+    .first<{
+      id: string;
+      status: string;
+      slot: number | null;
+      finalization_last_polled_at: string | null;
+    }>();
+}
+
+describe("finalizeConfirmedIssuanceTransactions", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await getDb(env)
+      .prepare(
+        "INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, 'individual', 'active')"
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await getDb(env)
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(getDb(env), {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: PROJECT_ID, production: `${PROJECT_ID}_production` },
+    });
+    getSignatureStatusesMock.mockReset();
+    getSignatureStatusesMock.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => statusOf("confirmed"))
+    );
+  });
+
+  it("advances a confirmed transaction to finalized once the cluster reports finality", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_ok", confirmedMinutesAgo: 5 });
+    getSignatureStatusesMock.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => statusOf("finalized"))
+    );
+
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 1,
+    });
+
+    const row = await getTransaction("itx_fin_ok");
+    expect(row).toMatchObject({
+      status: "finalized",
+      // The transaction's slot never changes between the confirmed and
+      // finalized observations, so the recorded value is preserved.
+      slot: 123,
+      finalization_last_polled_at: expect.any(String),
+    });
+    const history = await getDb(env).queryMany<{ status: string }>(
+      `SELECT status FROM issuance_transaction_statuses WHERE transaction_id = ? ORDER BY changed_at`,
+      ["itx_fin_ok"]
+    );
+    expect(history.map((entry) => entry.status)).toEqual(["confirmed", "finalized"]);
+
+    // With the fixed projection, finality is what makes the unified ledger
+    // read the row as succeeded.
+    const unified = await getDb(env).queryOne<{ status: string }>(
+      `SELECT status FROM unified_transactions WHERE module = 'issuance' AND module_id = ?`,
+      ["itx_fin_ok"]
+    );
+    expect(unified?.status).toBe("succeeded");
+  });
+
+  it("keeps a confirmed transaction confirmed while finality is unobserved", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_pending", confirmedMinutesAgo: 5 });
+
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 0,
+    });
+
+    const row = await getTransaction("itx_fin_pending");
+    expect(row).toMatchObject({
+      status: "confirmed",
+      slot: 123,
+      finalization_last_polled_at: expect.any(String),
+    });
+    const unified = await getDb(env).queryOne<{ status: string }>(
+      `SELECT status FROM unified_transactions WHERE module = 'issuance' AND module_id = ?`,
+      ["itx_fin_pending"]
+    );
+    expect(unified?.status).toBe("pending");
+  });
+
+  it("never introduces a failure status for a confirmed transaction the chain reports as errored", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_err", confirmedMinutesAgo: 5 });
+    getSignatureStatusesMock.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => statusOf("confirmed", { InstructionError: [0, "Custom"] }))
+    );
+
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 0,
+    });
+
+    await expect(getTransaction("itx_fin_err")).resolves.toMatchObject({ status: "confirmed" });
+  });
+
+  it("leaves transactions beyond the finalization window unpolling", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_stale", confirmedMinutesAgo: 25 * 60 });
+    await seedConfirmedTransaction({ id: "itx_fin_fresh", confirmedMinutesAgo: 5 });
+
+    await finalizeConfirmedIssuanceTransactions(env);
+
+    expect(getSignatureStatusesMock).toHaveBeenCalledTimes(1);
+    const polledSignatures = getSignatureStatusesMock.mock.calls[0][1] as string[];
+    expect(polledSignatures).toHaveLength(1);
+    await expect(getTransaction("itx_fin_stale")).resolves.toMatchObject({
+      status: "confirmed",
+      finalization_last_polled_at: null,
+    });
+  });
+});

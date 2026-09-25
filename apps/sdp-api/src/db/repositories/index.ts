@@ -171,6 +171,12 @@ export {
 } from "./helius-rings-zone.repository";
 export { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
 export type {
+  ConfirmedIssuanceTransactionRow,
+  ConfirmedIssuanceTransactionVerdict,
+  IssuanceTransactionsRepository,
+} from "./issuance-transactions.repository";
+export { createPostgresIssuanceTransactionsRepository } from "./issuance-transactions.repository.postgres";
+export type {
   KycWalletRow,
   KycWalletsRepository,
   SetKycStatusByCounterpartyInput,
@@ -472,6 +478,7 @@ export {
   createSecretRetirementsRepository,
   createSystemAssetProfilesRepository,
   createSystemCounterpartiesRepository,
+  createSystemIssuanceTransactionsRepository,
   createSystemPaymentRequestsRepository,
   createSystemPaymentsRepository,
   createSystemPaymentTransferBatchesRepository,

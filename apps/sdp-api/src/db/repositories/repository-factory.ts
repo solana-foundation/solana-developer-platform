@@ -26,6 +26,8 @@ import type { HeliusRingsWalletRepository } from "./helius-rings-wallet.reposito
 import { createPostgresHeliusRingsWalletRepository } from "./helius-rings-wallet.repository.postgres";
 import type { HeliusRingsZoneRepository } from "./helius-rings-zone.repository";
 import { createPostgresHeliusRingsZoneRepository } from "./helius-rings-zone.repository.postgres";
+import type { IssuanceTransactionsRepository } from "./issuance-transactions.repository";
+import { createPostgresIssuanceTransactionsRepository } from "./issuance-transactions.repository.postgres";
 import type { KycWalletsRepository } from "./kyc-wallet.repository";
 import { createPostgresKycWalletsRepository } from "./kyc-wallet.repository.postgres";
 import type { PaymentRecurringPaymentsRepository } from "./payment-recurring-payments.repository";
@@ -213,6 +215,12 @@ export function createSystemAssetProfilesRepository(env: Env): AssetProfilesRepo
 
 export function createKycWalletsRepository(env: Env): KycWalletsRepository {
   return createPostgresKycWalletsRepository(getDb(env));
+}
+
+export function createSystemIssuanceTransactionsRepository(
+  env: Env
+): IssuanceTransactionsRepository {
+  return createPostgresIssuanceTransactionsRepository(getDb(env));
 }
 
 export function createWalletAssetEnrollmentsRepository(env: Env): WalletAssetEnrollmentsRepository {

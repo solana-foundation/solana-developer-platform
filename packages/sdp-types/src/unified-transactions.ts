@@ -112,7 +112,10 @@ export const UNIFIED_TRANSACTION_MODULE_CONTRACTS = {
     status: {
       pending: "pending",
       processing: "pending",
-      confirmed: "succeeded",
+      // Solana `confirmed` is a pre-finality observation: provisional in the
+      // unified ledger, never terminal. A finality-aware reconciler advances
+      // the row to `finalized`, the only status that reads as succeeded.
+      confirmed: "pending",
       finalized: "succeeded",
       failed: "failed",
     } as const satisfies Record<

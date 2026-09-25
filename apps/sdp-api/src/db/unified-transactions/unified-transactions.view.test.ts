@@ -310,6 +310,34 @@ describe("unified_transactions view (postgres)", () => {
     }
   });
 
+  it("keeps confirmed issuance provisional and reserves succeeded for finalized settlement", async () => {
+    const confirmedId = await seedIssuance("confirmed");
+    const finalizedId = await seedIssuance("finalized");
+    const pendingId = await seedIssuance("pending");
+
+    // Asserted against the projected column directly, not through the contract
+    // lookup, so a contract change alone cannot make this test pass: the view
+    // must agree with it. A pre-finality observation (Solana `confirmed`) is
+    // provisional and must never read as terminal success; only `finalized`
+    // settlement may.
+    const rows = await getDb(env).queryMany<{
+      id: string;
+      module_status: string;
+      status: string;
+    }>(
+      `SELECT id, module_status, status FROM unified_transactions
+       WHERE organization_id = ? AND project_id = ? AND module = 'issuance' AND id IN (?, ?, ?)
+       ORDER BY id`,
+      [TEST_ORG.id, PROJECT, confirmedId, finalizedId, pendingId]
+    );
+
+    expect(rows).toEqual([
+      { id: confirmedId, module_status: "confirmed", status: "pending" },
+      { id: finalizedId, module_status: "finalized", status: "succeeded" },
+      { id: pendingId, module_status: "pending", status: "pending" },
+    ]);
+  });
+
   async function seedVaultWithdrawal(id: string, tokenAmountSettled: string | null) {
     const positionId = "earn_position_vault_direct";
     await getDb(env).execute(

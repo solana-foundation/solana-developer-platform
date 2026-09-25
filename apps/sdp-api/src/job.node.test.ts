@@ -163,6 +163,14 @@ vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
   reconcileDvpTrades: vi.fn(async () => {}),
 }));
 
+vi.mock("@/cron/issuance-finality", () => ({
+  ISSUANCE_FINALITY_MONITOR: "sdp-api-issuance-finality",
+}));
+
+vi.mock("@/services/jobs/finalize-confirmed-issuance-transactions", () => ({
+  finalizeConfirmedIssuanceTransactions: vi.fn(async () => ({ polled: 0, finalized: 0 })),
+}));
+
 vi.mock("@/services/policy/approved-operation-replay", () => ({
   recoverApprovedWalletOperations: vi.fn(async () => {}),
 }));
@@ -572,6 +580,7 @@ describe("runCronJob", () => {
       "sdp-api-managed-cleanup-provider-credential-secrets",
       "sdp-api-managed-collect-recurring-payments",
       "sdp-api-managed-detect-orphaned-earn-split-swaps",
+      "sdp-api-managed-issuance-finality",
       "sdp-api-managed-poll-rings-indexing",
       "sdp-api-managed-reconcile-dvp-trades",
       "sdp-api-managed-reconcile-earn-vault-movements",
