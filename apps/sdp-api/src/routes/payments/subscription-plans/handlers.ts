@@ -340,6 +340,26 @@ export const prepareCreateSubscriptionPlan = async (
 };
 
 /**
+ * Resolves the plan PDA a patch is bound to, or null when the record is a
+ * true draft: no on-chain plan exists at the PDA derived from its owner and
+ * program plan ID. A record that maps to a live on-chain plan (e.g. one
+ * created with an existing programPlanId) is already bound to that plan's
+ * consent (SOLA9-634).
+ */
+async function resolveBoundPlanPda(
+  c: AppContext,
+  existingPlan: PaymentSubscriptionPlanRow
+): Promise<Address | null> {
+  if (existingPlan.plan_pda) {
+    return assertValidAddress(existingPlan.plan_pda, "planPda");
+  }
+
+  const { planPda: derivedPlanPda } = await derivePlanAddresses(existingPlan);
+  const derivedOnChainPlan = await fetchLiveSubscriptionPlan(c.env, derivedPlanPda);
+  return derivedOnChainPlan ? derivedPlanPda : null;
+}
+
+/**
  * A live plan (one prepared for on-chain creation) is bound to the consent the
  * subscriptions program enforces on-chain. The program's UpdatePlan has no
  * destination field and rejects term mismatches, so SDP may only persist an
@@ -357,13 +377,13 @@ async function assertLivePlanPatchMatchesChain(
     status: string | undefined;
   }
 ): Promise<void> {
-  if (!existingPlan.plan_pda) {
+  const boundPlanPda = await resolveBoundPlanPda(c, existingPlan);
+  if (!boundPlanPda) {
     // Draft plan: no on-chain consent exists yet, so every field stays editable.
     return;
   }
 
-  const planPda = assertValidAddress(existingPlan.plan_pda, "planPda");
-  if (requested.planPda !== undefined && requested.planPda !== existingPlan.plan_pda) {
+  if (requested.planPda !== undefined && requested.planPda !== boundPlanPda) {
     throw badRequest("Subscription plan PDA is derived on-chain and cannot be reassigned");
   }
 
@@ -386,7 +406,7 @@ async function assertLivePlanPatchMatchesChain(
     return;
   }
 
-  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, planPda);
+  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, boundPlanPda);
 
   if (statusChanged && requested.status === "active") {
     if (!onChainPlan || onChainPlan.status !== PlanStatus.Active) {

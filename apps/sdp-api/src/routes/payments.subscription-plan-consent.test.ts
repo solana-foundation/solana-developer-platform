@@ -703,6 +703,56 @@ it("validates destination and status claims when a plan references an on-chain p
   expect(activePlan.status).toBe("active");
 });
 
+it("binds a draft record to a live on-chain plan derived from its program plan id", async () => {
+  const planRes = await app.request(
+    "/v1/payments/subscription-plans",
+    {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify({
+        ownerWalletId: TEST_WALLET_ID,
+        token: DEVNET_USDC_MINT,
+        amount: "25.00",
+        periodHours: 720,
+        destinationAddress: DESTINATION,
+      }),
+    },
+    env
+  );
+  expect(planRes.status).toBe(201);
+  const plan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await planRes.json()
+  ).data.subscriptionPlan;
+  expect(plan.planPda).toBeNull();
+
+  mockOnChainPlan({});
+  const liveDestinationPatch = await app.request(
+    `/v1/payments/subscription-plans/${plan.id}`,
+    {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ destinationAddress: OTHER_DESTINATION }),
+    },
+    env
+  );
+  expect(liveDestinationPatch.status).toBe(400);
+  const liveDestinationError = errorResponseSchema.parse(await liveDestinationPatch.json());
+  expect(liveDestinationError.error.message).toContain("destination");
+
+  mockOnChainPlan({ exists: false });
+  const draftDestinationPatch = await app.request(
+    `/v1/payments/subscription-plans/${plan.id}`,
+    {
+      method: "PATCH",
+      headers: HEADERS,
+      body: JSON.stringify({ destinationAddress: OTHER_DESTINATION }),
+    },
+    env
+  );
+  expect(draftDestinationPatch.status).toBe(200);
+  expect((await getPlan(plan.id)).destinationAddress).toBe(OTHER_DESTINATION);
+});
+
 it("keeps the stored destination in sync with the destinations of the prepared create", async () => {
   const planRes = await app.request(
     "/v1/payments/subscription-plans",

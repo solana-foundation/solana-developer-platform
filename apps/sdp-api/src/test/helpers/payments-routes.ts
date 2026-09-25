@@ -66,6 +66,37 @@ export const createOrgSignerForCustodyWalletMock = vi.spyOn(
 
 export const fetchMaybePlanMock = vi.spyOn(subscriptionsProgram, "fetchMaybePlan");
 
+/**
+ * Restores the shared on-chain plan fixture: a live, active plan owned by
+ * wallet1 collecting at wallet3. Tests that exercise the true-draft paths
+ * override this with an absent plan and call this to restore the default.
+ */
+export function installDefaultFetchMaybePlanMock(): void {
+  fetchMaybePlanMock.mockResolvedValue({
+    exists: true,
+    address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    data: {
+      discriminator: 0,
+      owner: address(TEST_SOLANA_ADDRESSES.wallet1),
+      bump: 255,
+      status: subscriptionsProgram.PlanStatus.Active,
+      data: {
+        planId: 1n,
+        mint: address(DEVNET_USDC_MINT),
+        terms: {
+          amount: 25_000_000n,
+          periodHours: 720n,
+          createdAt: 1_770_000_000n,
+        },
+        endTs: 0n,
+        destinations: [address(TEST_SOLANA_ADDRESSES.wallet3)],
+        pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
+        metadataUri: "",
+      },
+    },
+  } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+}
+
 const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
   subscriptionsProgram,
   "fetchMaybeSubscriptionAuthority"
@@ -554,29 +585,7 @@ export function installPaymentsRouteTestHooks(): void {
     getSignaturesForAddressMock.mockResolvedValue([]);
     getSplTokenBalancesMock.mockResolvedValue([]);
     getSplTokenAccountAddressesMock.mockResolvedValue([]);
-    fetchMaybePlanMock.mockResolvedValue({
-      exists: true,
-      address: address(TEST_SOLANA_ADDRESSES.wallet3),
-      data: {
-        discriminator: 0,
-        owner: address(TEST_SOLANA_ADDRESSES.wallet1),
-        bump: 255,
-        status: subscriptionsProgram.PlanStatus.Active,
-        data: {
-          planId: 1n,
-          mint: address(DEVNET_USDC_MINT),
-          terms: {
-            amount: 25_000_000n,
-            periodHours: 720n,
-            createdAt: 1_770_000_000n,
-          },
-          endTs: 0n,
-          destinations: [address(TEST_SOLANA_ADDRESSES.wallet3)],
-          pullers: [address(TEST_SOLANA_ADDRESSES.wallet1)],
-          metadataUri: "",
-        },
-      },
-    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+    installDefaultFetchMaybePlanMock();
     fetchMaybeSubscriptionAuthorityMock.mockResolvedValue({
       exists: true,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),

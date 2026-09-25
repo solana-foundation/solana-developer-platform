@@ -1,4 +1,5 @@
 import { address, getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@solana/kit";
+import type * as subscriptionsProgram from "@solana/subscriptions";
 import { findAssociatedTokenPda } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 import { getDb } from "@/db";
@@ -20,6 +21,8 @@ import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";
 import {
   DEVNET_USDC_MINT,
+  fetchMaybePlanMock,
+  installDefaultFetchMaybePlanMock,
   installPaymentsRouteTestHooks,
   mockTokenSupplyDecimalsOnce,
   seedCachedKey,
@@ -286,6 +289,11 @@ describe("Payments routes — subscriptions", () => {
     expect(draftPlansBody.data.subscriptionPlans.map((plan) => plan.id)).toContain(planId);
     expect(draftPlansBody.data.total).toBe(1);
 
+    // True draft: no plan exists yet at the PDA derived from the record.
+    fetchMaybePlanMock.mockResolvedValue({
+      exists: false,
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
+
     const updatePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
       {
@@ -311,6 +319,9 @@ describe("Payments routes — subscriptions", () => {
       metadataUri: "https://sdp.dev/plan-active.json",
       status: "active",
     });
+
+    // The remainder of the lifecycle reads the shared on-chain plan fixture.
+    installDefaultFetchMaybePlanMock();
 
     const getPlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}`,
