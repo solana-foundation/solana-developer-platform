@@ -68,8 +68,11 @@ import type { Env } from "@/types/env";
  *    The paging orphan signal stays reserved for what the detector can prove.
  *    Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
- *    never broadcast, or the owner moved the tokens themselves) and a partial
- *    rise is indeterminate and stays open for the next visit.
+ *    never broadcast, or the owner moved the tokens themselves) — but only
+ *    when the balance read COMPLETELY covered the owner's balance
+ *    (SOLA9-675): a zero response with no observed account at a weaker
+ *    commitment is retried on a later visit, never resolved terminally. A
+ *    partial rise is indeterminate and stays open for the next visit.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -297,6 +300,26 @@ async function judgeAdvisory(
   const coveringDeposits = committed.filter(
     (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
   );
+
+  if (delta <= 0n && !balance.complete) {
+    // SOLA9-675: a zero or negative delta against an EMPTY baseline is only
+    // terminal when the read provably covered the owner's whole balance. A
+    // response with no accounts at a weak commitment is indistinguishable
+    // from an incomplete one — the swap may have landed while the RPC lagged
+    // or dropped its accounts. Keep the advisory open and retry on a later
+    // visit rather than resolving `unfunded` on unverified silence.
+    stats.balanceReadFailures += 1;
+    logEvent("error", {
+      event: "sdp_api_earn_split_swap_balance_read_failed",
+      advisory_id: advisory.id,
+      environment: advisory.environment,
+      owner_address: advisory.owner_address,
+      deposit_token_mint: advisory.deposit_token_mint,
+      error_name: "IncompleteBalanceRead",
+      error_message: "an empty mint-filtered balance response is not proof of a zero balance",
+    });
+    return;
+  }
 
   if (delta >= floor && coveringDeposits.length > 0) {
     // Conflicting evidence: the tokens are still here AND a same-mint deposit

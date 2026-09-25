@@ -31,6 +31,7 @@ describe("readOwnerMintBalance", () => {
     await expect(readBalance(rpcUrl)).resolves.toEqual({
       atoms: 18_014_398_509_481_988n,
       decimals: 6,
+      complete: true,
     });
   });
 
@@ -40,6 +41,7 @@ describe("readOwnerMintBalance", () => {
     await expect(readBalance(rpcUrl)).resolves.toEqual({
       atoms: 0n,
       decimals: null,
+      complete: true,
     });
   });
 

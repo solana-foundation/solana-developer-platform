@@ -33,6 +33,14 @@ export interface OwnerMintBalance {
   atoms: bigint;
   /** The mint's decimals as the RPC reports them, or null when no account exists. */
   decimals: number | null;
+  /**
+   * Whether the response provably covers the owner's whole balance of the
+   * mint: at least one mint-filtered account was observed, or a FINALIZED
+   * read reported none. An empty list at a weaker commitment (SOLA9-675) is
+   * indistinguishable from an RPC response that lagged or lost its accounts,
+   * so it reads as zero atoms but never as verified.
+   */
+  complete: boolean;
 }
 
 const mintFilteredTokenAccountsResponseSchema = z.object({
@@ -66,11 +74,15 @@ export async function readOwnerMintBalance(
   const cluster = earnClusterFor(environment);
   const rpcUrl = resolveClusterRpcUrl(env, cluster);
   await assertClusterEndpoint(env, cluster, rpcUrl);
+  // `finalized` is the commitment that certifies an empty account list: a
+  // confirmed read can lag the owner's own transaction, and `value: []` would
+  // otherwise read as zero through an incomplete response (SOLA9-675).
+  const commitment = "finalized" as const;
   const response = await createRpc(env, { rpcUrl })
     .getTokenAccountsByOwner(
       address(ownerAddress),
       { mint: address(mint) },
-      { encoding: "jsonParsed", commitment: "confirmed" }
+      { encoding: "jsonParsed", commitment }
     )
     .send();
   const parsed = mintFilteredTokenAccountsResponseSchema.safeParse(response);
@@ -95,5 +107,10 @@ export async function readOwnerMintBalance(
     atoms += BigInt(info.tokenAmount.amount);
     decimals = info.tokenAmount.decimals;
   }
-  return { atoms, decimals };
+  // The call filtered by mint, so any entry observed is provably in scope and
+  // the sum covers the owner's whole balance. An empty list at a weaker
+  // commitment is indistinguishable from an RPC response that lagged or lost
+  // its accounts, so only a finalized empty list certifies a zero balance.
+  const complete = parsed.data.value.length > 0 || commitment === "finalized";
+  return { atoms, decimals, complete };
 }
