@@ -11,7 +11,11 @@ import {
 } from "@sdp/payments/ramps/providers/mural/provider-data";
 import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
-import type { MuralPaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import type {
+  MuralPaymentRampInstruction,
+  MuralSandboxPayinCurrency,
+  PaymentRampQuote,
+} from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
@@ -20,6 +24,15 @@ import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { type AppContext, rampRuntime } from "../../context";
 
 const MURAL_HOSTED_LINK_TTL_SECONDS = 12 * 60 * 60;
+
+export type MuralSandboxPayinRail = "wire" | "spei" | "pix" | "cvu";
+
+export const MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY = {
+  USD: "wire",
+  MXN: "spei",
+  BRL: "pix",
+  ARS: "cvu",
+} as const satisfies Record<MuralSandboxPayinCurrency, MuralSandboxPayinRail>;
 
 async function mintOrReuseMuralLink(
   c: AppContext,

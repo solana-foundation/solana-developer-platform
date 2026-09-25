@@ -2,7 +2,6 @@
 
 import {
   getCryptoRailAssetLabel,
-  isMuralSandboxPayinCurrency,
   type PaymentOnrampQuoteRequest,
   type PaymentTransferSummary,
 } from "@sdp/types";
@@ -169,43 +168,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     });
 
     try {
-      if (quote.provider === "lightspark") {
-        await simulateSandboxTransfer(
-          {
-            provider: "lightspark",
-            payload: { quoteId: quote.id, currencyCode: "USD" },
-          },
-          t
-        );
-      } else if (quote.provider === "mural") {
-        const fiatCurrency = wizard.selectedRampPair.fiatCurrency;
-        if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
-          throw new Error(
-            t("DashboardPayments.ramps.muralSandboxCurrencyUnsupported", {
-              currency: fiatCurrency,
-            })
-          );
-        }
-        await simulateSandboxTransfer(
-          {
-            provider: "mural",
-            payload: {
-              counterpartyId: wizard.fields.counterpartyId,
-              amount: Number(wizard.fields.amount.trim()),
-              fiatCurrency,
-            },
-          },
-          t
-        );
-      } else {
-        await simulateSandboxTransfer(
-          {
-            provider: "bvnk",
-            payload: { transferId: wizard.quoteTransferId },
-          },
-          t
-        );
-      }
+      await simulateSandboxTransfer({ transferId: wizard.quoteTransferId }, t);
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,

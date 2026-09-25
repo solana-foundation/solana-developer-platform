@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { providerUnavailable } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOnrampRemittance } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
@@ -9,6 +10,8 @@ import {
   type MoneygramRampEvent,
   type PaymentRampQuote,
   type PaymentTransferStatus,
+  type PaymentTransferType,
+  type RampProviderId,
 } from "@sdp/types";
 import type { Address } from "@solana/addresses";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1807,13 +1810,85 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("awaiting_payment");
   });
-  describe("BVNK sandbox pay-in simulation", () => {
+  describe("sandbox pay-in simulation", () => {
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
-    async function seedBvnkSimulatableTransfer(overrides?: {
-      status?: PaymentTransferStatus;
-      custodyWalletId?: string;
-      providerData?: Record<string, unknown>;
-    }): Promise<string> {
+    const LIGHTSPARK_SIM_SEED = {
+      provider: "lightspark",
+      providerReference: "Quote:sim-1",
+      fiatCurrency: "USD",
+      fiatAmount: "250.00",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      providerData: {},
+      type: "onramp",
+    } as const satisfies Omit<
+      Parameters<typeof seedSimulatableTransfer>[0],
+      "id" | "counterpartyId"
+    >;
+
+    async function seedSimulatableTransfer(input: {
+      id: string;
+      provider: RampProviderId;
+      providerReference: string;
+      fiatCurrency: string;
+      fiatAmount: string;
+      counterpartyId: string;
+      providerData: Record<string, unknown>;
+      organizationId: string;
+      projectId: string;
+      type: PaymentTransferType;
+    }): Promise<void> {
+      const now = new Date().toISOString();
+      const status = "awaiting_payment" satisfies PaymentTransferStatus;
+      const type = input.type;
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, custody_wallet_id, source_address,
+             destination_address, token, amount, memo, type, direction, status, provider,
+             provider_reference, delivery_mode, fiat_currency, fiat_amount, counterparty_id,
+             provider_data, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)`
+        )
+        .bind(
+          input.id,
+          input.organizationId,
+          input.projectId,
+          TEST_WALLET_ID,
+          TEST_CUSTODY_WALLET_ID,
+          type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
+          type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
+          "USDC",
+          null,
+          null,
+          type,
+          type === "onramp" ? "inbound" : "outbound",
+          status,
+          input.provider,
+          input.providerReference,
+          "manual_instructions",
+          input.fiatCurrency,
+          input.fiatAmount,
+          input.counterpartyId,
+          input.providerData,
+          now,
+          now
+        )
+        .run();
+    }
+
+    function readSimulationTransfer(transferId: string) {
+      return getDb(env)
+        .prepare("SELECT status, provider_data, updated_at FROM payment_transfers WHERE id = ?")
+        .bind(transferId)
+        .first<{
+          status: PaymentTransferStatus;
+          provider_data: { sandboxSimulation?: { requestedAt: string } };
+          updated_at: string;
+        }>();
+    }
+
+    async function seedBvnkSimulatableTransfer(status: PaymentTransferStatus): Promise<string> {
       const counterpartyId = await seedCounterparty({ externalId: "d1b_simulate_bvnk" });
       await seedBvnkFundingWallet(getDb(env), {
         organizationId: TEST_ORG.id,
@@ -1826,19 +1901,18 @@ describe("Payments routes — ramps", () => {
       });
       await seedBvnkOnrampTransfer(getDb(env), {
         id: SIMULATE_TRANSFER_ID,
-        status: overrides?.status ?? "awaiting_payment",
+        status,
         counterpartyId,
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         fiatAmount: "120.50",
         destinationAddress: TEST_SOLANA_ADDRESSES.wallet2,
-        custodyWalletId: overrides?.custodyWalletId ?? TEST_CUSTODY_WALLET_ID,
-        providerData: overrides?.providerData,
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
       });
       return counterpartyId;
     }
 
-    function bvnkSimulateRequest(transferId: string) {
+    function simulateRequest(transferId: string) {
       return app.request(
         "/v1/payments/ramps/sandbox/simulate",
         {
@@ -1847,19 +1921,19 @@ describe("Payments routes — ramps", () => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${TEST_API_KEY.raw}`,
           },
-          body: JSON.stringify({ provider: "bvnk", payload: { transferId } }),
+          body: JSON.stringify({ transferId }),
         },
         env
       );
     }
 
     it("claims the simulation slot, sends the SDP-ONRAMP remittance, and uses the transfer id as the idempotency key", async () => {
-      await seedBvnkSimulatableTransfer();
+      await seedBvnkSimulatableTransfer("awaiting_payment");
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
 
-      const res = await bvnkSimulateRequest(SIMULATE_TRANSFER_ID);
+      const res = await simulateRequest(SIMULATE_TRANSFER_ID);
 
       expect(res.status).toBe(200);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
@@ -1873,50 +1947,266 @@ describe("Payments routes — ramps", () => {
           idempotencyKey: SIMULATE_TRANSFER_ID,
         })
       );
-      const transfer = await getDb(env)
-        .prepare("SELECT status, provider_data FROM payment_transfers WHERE id = ?")
-        .bind(SIMULATE_TRANSFER_ID)
-        .first<{
-          status: string;
-          provider_data: { bvnk?: { simulation?: { requestedAt: string } } };
-        }>();
+      const transfer = await readSimulationTransfer(SIMULATE_TRANSFER_ID);
       expect(transfer?.status).toBe("awaiting_payment");
-      expect(transfer?.provider_data.bvnk?.simulation?.requestedAt).toBeTruthy();
-
-      simulateSpy.mockRestore();
-    });
-
-    it("answers 409 without sending the request when the simulation slot is already claimed", async () => {
-      await seedBvnkSimulatableTransfer({
-        providerData: {
-          bvnk: { simulation: { requestedAt: "2026-09-18T00:00:00.000Z" } },
-        },
-      });
-      const simulateSpy = vi
-        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
-        .mockResolvedValue({ accepted: true });
-
-      const res = await bvnkSimulateRequest(SIMULATE_TRANSFER_ID);
-
-      expect(res.status).toBe(409);
-      const body = (await res.json()) as { error: { message: string } };
-      expect(body.error.message).toContain("already requested for this transfer");
-      expect(simulateSpy).not.toHaveBeenCalled();
+      expect(transfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
 
       simulateSpy.mockRestore();
     });
 
     it("requires the transfer to be awaiting payment", async () => {
-      await seedBvnkSimulatableTransfer({ status: "settling" });
+      await seedBvnkSimulatableTransfer("settling");
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "simulatePayin")
         .mockResolvedValue({ accepted: true });
 
-      const res = await bvnkSimulateRequest(SIMULATE_TRANSFER_ID);
+      const res = await simulateRequest(SIMULATE_TRANSFER_ID);
 
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { message: string } };
       expect(body.error.message).toContain("not awaiting payment");
+      expect(simulateSpy).not.toHaveBeenCalled();
+
+      simulateSpy.mockRestore();
+    });
+
+    it("derives the Lightspark payload from the transfer, claims the slot once, and answers 409 on repeat", async () => {
+      const transferId = "xfr_lightspark_sim_1";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        counterpartyId,
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockResolvedValue({ accepted: true });
+
+      const first = await simulateRequest(transferId);
+      const second = await simulateRequest(transferId);
+
+      expect(first.status).toBe(200);
+      expect(simulateSpy).toHaveBeenCalledTimes(1);
+      expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
+        quoteId: "Quote:sim-1",
+        currencyCode: "USD",
+      });
+      const transfer = await readSimulationTransfer(transferId);
+      expect(transfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+
+      expect(second.status).toBe(409);
+      const body: { error: { message: string } } = await second.json();
+      expect(body.error.message).toContain("already requested for this transfer");
+
+      simulateSpy.mockRestore();
+    });
+
+    it("releases the simulation slot when the provider call fails so the transfer can be retried", async () => {
+      const transferId = "xfr_lightspark_sim_release";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        counterpartyId,
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockRejectedValueOnce(providerUnavailable("Grid sandbox send failed"))
+        .mockResolvedValueOnce({ accepted: true });
+
+      const first = await simulateRequest(transferId);
+
+      expect(first.status).toBe(503);
+      const failedTransfer = await readSimulationTransfer(transferId);
+      expect(failedTransfer?.status).toBe("awaiting_payment");
+      expect(failedTransfer?.provider_data).not.toHaveProperty("sandboxSimulation");
+
+      const second = await simulateRequest(transferId);
+
+      expect(second.status).toBe(200);
+      expect(simulateSpy).toHaveBeenCalledTimes(2);
+      const retriedTransfer = await readSimulationTransfer(transferId);
+      expect(retriedTransfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+
+      simulateSpy.mockRestore();
+    });
+
+    it("derives the Mural account, rail, and amount in cents from the transfer", async () => {
+      const transferId = "xfr_mural_sim_1";
+      const counterpartyId = await seedCounterparty({
+        providerData: { mural: { organization: { id: "org_sim_1", kycStatus: "approved" } } },
+      });
+      await seedSimulatableTransfer({
+        id: transferId,
+        provider: "mural",
+        providerReference: "Quote:mural-sim-1",
+        fiatCurrency: "MXN",
+        fiatAmount: "1500.25",
+        counterpartyId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        providerData: { mural: { accountId: "acct_sim_1" } },
+        type: "onramp",
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin")
+        .mockResolvedValue({ accepted: true });
+
+      const res = await simulateRequest(transferId);
+
+      expect(res.status).toBe(200);
+      expect(simulateSpy).toHaveBeenCalledTimes(1);
+      expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
+        organizationId: "org_sim_1",
+        destinationAccountId: "acct_sim_1",
+        rail: "spei",
+        amountValue: "150025",
+        currencySymbol: "MXN",
+      });
+
+      simulateSpy.mockRestore();
+    });
+
+    it("rejects unsupported Mural currencies before claiming the simulation slot", async () => {
+      const transferId = "xfr_mural_sim_eur";
+      const counterpartyId = await seedCounterparty({
+        providerData: { mural: { organization: { id: "org_sim_1", kycStatus: "approved" } } },
+      });
+      await seedSimulatableTransfer({
+        id: transferId,
+        provider: "mural",
+        providerReference: "Quote:mural-sim-eur",
+        fiatCurrency: "EUR",
+        fiatAmount: "1500.25",
+        counterpartyId,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        providerData: { mural: { accountId: "acct_sim_1" } },
+        type: "onramp",
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.mural, "simulatePayin")
+        .mockResolvedValue({ accepted: true });
+
+      const res = await simulateRequest(transferId);
+
+      expect(res.status).toBe(400);
+      const body: { error: { message: string } } = await res.json();
+      expect(body.error.message).toContain("does not support EUR");
+      expect(simulateSpy).not.toHaveBeenCalled();
+      const transfer = await readSimulationTransfer(transferId);
+      expect(transfer?.status).toBe("awaiting_payment");
+      expect(transfer?.provider_data).not.toHaveProperty("sandboxSimulation");
+
+      simulateSpy.mockRestore();
+    });
+
+    it("hides another tenant's transfer without calling Lightspark or changing the row", async () => {
+      const transferId = "xfr_lightspark_sim_other_tenant";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind("org_other_sim", "Other Sim Tenant", "other-sim-tenant", "enterprise", "active")
+        .run();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO projects (id, organization_id, name, slug, environment, status, created_by)
+           VALUES (?, ?, ?, ?, 'sandbox', 'active', ?)`
+        )
+        .bind("proj_other_sim", "org_other_sim", "Other Sim Project", "other-sim", TEST_USER.id)
+        .run();
+      await getDb(env)
+        .prepare("UPDATE counterparties SET organization_id = ?, project_id = ? WHERE id = ?")
+        .bind("org_other_sim", "proj_other_sim", counterpartyId)
+        .run();
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        providerReference: "Quote:sim-other-tenant",
+        counterpartyId,
+        organizationId: "org_other_sim",
+        projectId: "proj_other_sim",
+      });
+      const before = await getDb(env)
+        .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+        .bind(transferId)
+        .first<PaymentTransferRow>();
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockResolvedValue({ accepted: true });
+
+      const res = await simulateRequest(transferId);
+
+      expect(res.status).toBe(404);
+      const body: { error: { code: string } } = await res.json();
+      expect(body.error.code).toBe("NOT_FOUND");
+      expect(simulateSpy).not.toHaveBeenCalled();
+      const after = await getDb(env)
+        .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+        .bind(transferId)
+        .first<PaymentTransferRow>();
+      expect(before).not.toBeNull();
+      expect(after).toEqual(before);
+
+      simulateSpy.mockRestore();
+    });
+
+    it("rejects sandbox simulation for Coinbase", async () => {
+      const transferId = "xfr_coinbase_sim_1";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        provider: "coinbase",
+        providerReference: "Quote:coinbase-sim-1",
+        counterpartyId,
+      });
+
+      const res = await simulateRequest(transferId);
+
+      expect(res.status).toBe(400);
+      const body: { error: { message: string } } = await res.json();
+      expect(body.error.message).toContain("not available for provider: coinbase");
+    });
+
+    it("rejects extra keys in the simulation request body", async () => {
+      const res = await app.request(
+        "/v1/payments/ramps/sandbox/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({ transferId: "xfr_x", provider: "bvnk" }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const body: { error: { message: string } } = await res.json();
+      expect(body.error.message).toContain('Unrecognized key: "provider"');
+    });
+
+    it("rejects off-ramp transfers before calling Lightspark", async () => {
+      const transferId = "xfr_lightspark_sim_offramp";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        providerReference: "Quote:sim-offramp",
+        counterpartyId,
+        type: "offramp",
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockResolvedValue({ accepted: true });
+
+      const res = await simulateRequest(transferId);
+
+      expect(res.status).toBe(400);
+      const body: { error: { message: string } } = await res.json();
+      expect(body.error.message).toContain("Only on-ramp transfers");
       expect(simulateSpy).not.toHaveBeenCalled();
 
       simulateSpy.mockRestore();
@@ -2710,8 +3000,7 @@ describe("Payments routes — ramps", () => {
     }
 
     const NONEXISTENT_MURAL_SIMULATE_BODY = {
-      provider: "mural",
-      payload: { counterpartyId: "cpty_does_not_exist", amount: 100, fiatCurrency: "USD" },
+      transferId: "xfr_does_not_exist",
     };
 
     it("refuses the sandbox simulator from a production-project session", async () => {

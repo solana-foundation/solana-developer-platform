@@ -122,9 +122,9 @@ export function bvnkPayoutPartyDetailsFromCustomer(
 /**
  * Typed `provider_data.bvnk` payload for BVNK on-ramp transfers. Every key is
  * absent until its flow step writes it: the prebook initializes the payload to
- * `{}`, the pay-in webhook writes `payin`, the reconciler writes `payout`, and
- * the sandbox simulate writes `simulation`. Keys are never JSON null; unknown
- * keys are rejected so a stray write can never be read as shaped state.
+ * `{}`, the pay-in webhook writes `payin`, and the reconciler writes `payout`.
+ * Keys are never JSON null; unknown keys are rejected so a stray write can
+ * never be read as shaped state.
  *
  * `payout.intent` is absent on one legitimate state: the definitive pre-create
  * rejection (unknown asset or dry-run refusal) writes `{claimedAt, attempts:
@@ -161,12 +161,6 @@ export const bvnkOnrampTransferDataSchema = z
         payoutId: z.string().min(1).optional(),
         lastError: z.string().min(1).optional(),
         lastPolledAt: z.string().min(1).optional(),
-      })
-      .strict()
-      .optional(),
-    simulation: z
-      .object({
-        requestedAt: z.string().min(1),
       })
       .strict()
       .optional(),

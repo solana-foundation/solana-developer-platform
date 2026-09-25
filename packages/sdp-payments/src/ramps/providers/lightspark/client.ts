@@ -1123,8 +1123,11 @@ export class LightsparkRampClient implements RampProvider {
     return this.toRampQuote(quote);
   }
 
-  async sandboxSend({ env, mode }: RampRuntimeContext, payload: unknown): Promise<unknown> {
-    return this.request<unknown, unknown>(readLightsparkConfig(env, mode), "sandbox/send", {
+  async sandboxSend(
+    { env, mode }: RampRuntimeContext,
+    payload: { quoteId: string; currencyCode: string }
+  ): Promise<unknown> {
+    return this.request<typeof payload, unknown>(readLightsparkConfig(env, mode), "sandbox/send", {
       method: "POST",
       body: payload,
     });
