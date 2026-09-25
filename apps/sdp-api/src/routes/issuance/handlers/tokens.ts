@@ -18,6 +18,7 @@ import {
 } from "@/services/policy/approved-operation-replay";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
+import { rebindProfilePublicMetadataToTokenDecimals } from "../../asset-profiles/rebind";
 import {
   createIssuanceMosaicService,
   getTenantTokenService,
@@ -445,10 +446,31 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
           signingWalletId: draftWallet.providerWalletId,
         }
       : body;
-    const token = await tokenService.updateToken(tokenId, tokenUpdate, {
-      status: existing.status,
-      mintAddress: existing.mintAddress,
-    });
+    // A decimals change rebinds the cached asset-profile projection inside the
+    // same transaction that writes the new scale (SOLA9-439): the profile edit
+    // path locks the token row while it projects, so a token edit and a profile
+    // edit cannot interleave into a cached public scale that disagrees with the
+    // token row (and the eventual deployment).
+    const decimalsChanged = body.decimals !== undefined && body.decimals !== existing.decimals;
+    const token = decimalsChanged
+      ? await getDb(c.env).transaction(async (tx) => {
+          const client = asTransactionalClient(tx);
+          const updated = await getTenantTokenService(c, client).updateToken(tokenId, tokenUpdate, {
+            status: existing.status,
+            mintAddress: existing.mintAddress,
+          });
+          await rebindProfilePublicMetadataToTokenDecimals(client, {
+            organizationId: orgId,
+            projectId,
+            tokenId,
+            tokenDecimals: updated.decimals,
+          });
+          return updated;
+        })
+      : await tokenService.updateToken(tokenId, tokenUpdate, {
+          status: existing.status,
+          mintAddress: existing.mintAddress,
+        });
     authoritativeEffectCompleted = true;
 
     await auditService.completeCritical(c, auditIntent, {

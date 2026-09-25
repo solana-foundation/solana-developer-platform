@@ -10,7 +10,8 @@ import {
   type ListAssetProfilesResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
@@ -295,13 +296,18 @@ export const updateAssetProfile = async (
       : undefined;
   const nextMetadata = persistedMetadata ?? current.issuance_metadata;
 
-  // Recompute public projection when inputs change.
-  const publicMetadata =
-    typeChanged || metadataChanged
-      ? projectPublicMetadata(nextCategory, nextType, nextMetadata)
-      : undefined;
-
-  const updated = await repo.updateAssetProfile({
+  // Recompute public projection when inputs change. The published
+  // `chain.decimals` is bound to the token row's scale, never the caller's
+  // metadata claim (SOLA9-439); the FK on asset_profiles.token_id guarantees
+  // the referenced token exists in this tenant, so a miss is unrecoverable
+  // corruption rather than a state the projection may guess through.
+  //
+  // The projection and the profile write share one transaction that locks the
+  // token row first: the token PATCH path rebinds this cache inside the same
+  // transaction that writes a new decimals value, so a concurrent token edit
+  // either commits before our locked read (we project the new scale) or waits
+  // on our lock and its own rebind overwrites ours with the same binding.
+  const updateInput = {
     profileId,
     organizationId: auth.organizationId,
     projectId,
@@ -309,8 +315,34 @@ export const updateAssetProfile = async (
     assetType: body.assetType,
     assetTypeVersion: typeChanged ? registryEntry.version : undefined,
     issuanceMetadata: persistedMetadata,
-    publicMetadata,
-  });
+  };
+  let updated: AssetProfileRow | null;
+  if (typeChanged || metadataChanged) {
+    updated = await getDb(c.env).transaction(async (tx) => {
+      const client = asTransactionalClient(tx);
+      const locked = await client
+        .prepare(
+          `SELECT decimals FROM issued_tokens
+            WHERE id = ?
+              AND organization_id = ?
+              AND project_id = ?
+            FOR UPDATE`
+        )
+        .bind(current.token_id, auth.organizationId, projectId)
+        .first<{ decimals: number }>();
+      if (!locked) {
+        throw internalError("Token referenced by asset profile not found");
+      }
+      return createPostgresAssetProfilesRepository(client).updateAssetProfile({
+        ...updateInput,
+        publicMetadata: projectPublicMetadata(nextCategory, nextType, nextMetadata, {
+          tokenDecimals: locked.decimals,
+        }),
+      });
+    });
+  } else {
+    updated = await repo.updateAssetProfile(updateInput);
+  }
 
   if (!updated) {
     throw notFound("Asset profile");
