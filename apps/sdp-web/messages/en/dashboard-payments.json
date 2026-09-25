@@ -168,7 +168,6 @@
       "quoteFundingSimulated": "Quote funding simulated.",
       "quoteSimulationFailed": "Quote simulation failed.",
       "sandboxSimulationFailed": "Sandbox simulation failed.",
-      "muralSandboxCurrencyUnsupported": "Mural sandbox payin does not support {currency}.",
       "transferSignatureMissing": "Transfer did not return a signature (status: {status}).",
       "transferHeldForApproval": "This wallet's policy needs this transfer approved before it's sent, so MoneyGram can't continue. Nothing has moved yet. If it shouldn't go out later, cancel the request in Approvals.",
       "transferApprovalPending": "Waiting for approval",
