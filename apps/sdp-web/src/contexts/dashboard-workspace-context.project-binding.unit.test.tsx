@@ -11,6 +11,7 @@
 
 import type { Project } from "@sdp/types";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import {
@@ -78,16 +79,24 @@ const flags = {
   privateChannels: false,
 };
 
-const observedRenders: { listed: string[]; selected: string | null; secret: string | null }[] = [];
+const observedRenders: {
+  listed: string[];
+  selected: string | null;
+  selectedPlaygroundApiKeyId: string | null;
+  secret: string | null;
+}[] = [];
 
 function Probe() {
-  const { projects, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
+  const { projects, selectedProjectId, sdpEnvironment, selectedPlaygroundApiKeyId } =
+    useDashboardWorkspace();
   observedRenders.push({
     listed: projects.map((project) => project.id),
     selected: selectedProjectId,
-    // What the playground selector's password field would read while rendering
-    // its input under this selection.
-    secret: peekStoredApiKeySecret({ apiKeyId: "key-production" }),
+    selectedPlaygroundApiKeyId,
+    // What the playground selector's password field reads while rendering its
+    // input under this selection: the stored secret for the selected key, or
+    // nothing when no key is selected.
+    secret: peekStoredApiKeySecret({ apiKeyId: selectedPlaygroundApiKeyId }),
   });
   return (
     <output aria-label="workspace-binding">
@@ -98,6 +107,22 @@ function Probe() {
       })}
     </output>
   );
+}
+
+/** Mirrors the playground identifying a pasted key: the selection moves into
+ * the provider and the field reads the stored secret for it. The key is
+ * identified once per session — a project switch never re-identifies the
+ * previous project's key material. */
+let identifiedApiKeySessionUsed = false;
+
+function AttachSelectedApiKey({ apiKeyId }: { apiKeyId: string }) {
+  const { setSelectedPlaygroundApiKeyId } = useDashboardWorkspace();
+  useEffect(() => {
+    if (identifiedApiKeySessionUsed) return;
+    identifiedApiKeySessionUsed = true;
+    setSelectedPlaygroundApiKeyId(apiKeyId);
+  }, [apiKeyId, setSelectedPlaygroundApiKeyId]);
+  return null;
 }
 
 function workspaceProps(
@@ -121,6 +146,7 @@ describe("DashboardWorkspaceProvider project binding", () => {
     cleanup();
     observedRenders.length = 0;
     clearStoredApiKeySecrets();
+    identifiedApiKeySessionUsed = false;
     mocks.replace.mockReset();
     mocks.selectProjectAction.mockReset();
     mocks.selectProjectAction.mockResolvedValue(undefined);
@@ -131,23 +157,32 @@ describe("DashboardWorkspaceProvider project binding", () => {
     clearStoredApiKeySecrets();
   });
 
-  it("clears the previous project's stored secret before children render under the repaired selection", async () => {
+  it("detaches the removed project's selected key before children render under the repaired selection", async () => {
     // Runs first in this file so the secret store has never seen a scope: the
     // scope-sync effect only clears on a scope change, and a scope left over
     // from an earlier test would clear the store at mount and mask the window
     // this guards.
-    // The playground selector reads its password field straight from the
-    // secret store while rendering. Attach a secret to the removed project so
-    // a repaired render that runs ahead of the scope-sync effect would put it
-    // on screen.
+    // The playground selector reads its password field straight from the secret
+    // store for the selected key while rendering. Attach a secret to the
+    // removed project and select it, so a repaired render that still pointed at
+    // that key would put the previous project's secret on screen.
     storeApiKeySecret({ value: "sk_test_production_secret", apiKeyId: "key-production" });
 
-    const view = render(<DashboardWorkspaceProvider {...workspaceProps()} />);
+    const view = render(
+      <DashboardWorkspaceProvider
+        {...workspaceProps({
+          children: (
+            <>
+              <Probe />
+              <AttachSelectedApiKey apiKeyId="key-production" />
+            </>
+          ),
+        })}
+      />
+    );
     const renderCountBeforeRefresh = observedRenders.length;
     expect(
-      observedRenders
-        .slice(renderCountBeforeRefresh)
-        .every((observed) => observed.secret === "sk_test_production_secret")
+      observedRenders.some((observed) => observed.secret === "sk_test_production_secret")
     ).toBe(true);
 
     view.rerender(
@@ -156,22 +191,34 @@ describe("DashboardWorkspaceProvider project binding", () => {
           projects: [sandbox],
           initialSelectedProjectId: sandbox.id,
           shouldRepairInitialProjectCookie: true,
+          children: (
+            <>
+              <Probe />
+              <AttachSelectedApiKey apiKeyId="key-production" />
+            </>
+          ),
         })}
       />
     );
 
     await waitFor(() => expect(mocks.selectProjectAction).toHaveBeenCalledWith(sandbox.id));
-    expect(peekStoredApiKeySecret({ apiKeyId: "key-production" })).toBeNull();
 
     // Child renders happen before the post-commit scope-sync effect runs, so
-    // any render after the refresh that still observed the secret is exactly
-    // the brief exposure this guards against — under the stale selection as
-    // well as the repaired one.
+    // any render after the refresh that still observed the previous project's
+    // key — or its secret through the selector's read path — is exactly the
+    // exposure this guards against. The render-time reconciliation must detach
+    // the key with render-phase state, which a superseded render discards
+    // together with the selection change instead of wiping the store outright;
+    // the store itself is only cleared once the change commits.
     const observedAfterRefresh = observedRenders.slice(renderCountBeforeRefresh);
     expect(observedAfterRefresh.length).toBeGreaterThan(0);
     for (const observed of observedAfterRefresh) {
+      expect(observed.selectedPlaygroundApiKeyId).not.toBe("key-production");
       expect(observed.secret).toBeNull();
     }
+    // The repaired selection did commit, so the store clear still happens —
+    // via the scope-sync effect after commit.
+    expect(peekStoredApiKeySecret({ apiKeyId: "key-production" })).toBeNull();
   });
 
   it("reconciles the mounted selection when the authoritative list removes the selected project", async () => {

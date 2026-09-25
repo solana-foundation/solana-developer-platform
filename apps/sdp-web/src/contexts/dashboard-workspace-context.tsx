@@ -102,6 +102,10 @@ export function DashboardWorkspaceProvider({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     initialSelectedProjectId
   );
+  const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
+    DashboardPlaygroundApiKeyOption[]
+  >([]);
+  const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
   // The mounted selection must stay a member of the authoritative project
   // list. When a refresh drops it (archived project, revoked entitlement) the
   // server resolves the repaired selection into `initialSelectedProjectId`
@@ -118,18 +122,17 @@ export function DashboardWorkspaceProvider({
   ) {
     // The scope-sync effect only clears stored playground API-key secrets after
     // commit, so children would render under the repaired selection while the
-    // previous project's secret is still attached to the selection the selector
-    // reads. Clear it here — the same synchronous clear `selectProject` does —
-    // so the secret is gone before the reconciled render reaches children.
-    clearStoredApiKeySecrets();
+    // selector still reads the previous project's secret for its password
+    // field. Detach the selected key identity here instead of clearing the
+    // store: a state update scheduled during render is discarded together with
+    // a superseded render, so a repair that never commits cannot wipe the
+    // store, and children render an empty field until the effect clears the
+    // store for the change that did take effect.
+    setSelectedPlaygroundApiKeyId(null);
     setSelectedProjectId(initialSelectedProjectId);
   }
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
-  const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
-    DashboardPlaygroundApiKeyOption[]
-  >([]);
-  const [selectedPlaygroundApiKeyId, setSelectedPlaygroundApiKeyId] = useState<string | null>(null);
   const liveDashboardCacheScope = useMemo<DashboardCacheScope>(
     () =>
       auth.isLoaded && auth.orgId && auth.userId
