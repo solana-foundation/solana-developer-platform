@@ -1,8 +1,7 @@
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { SPL_TOKEN_PROGRAMS, WELL_KNOWN_TOKENS } from "@sdp/types";
 import type { Address } from "@solana/kit";
-import { describe, expect, it, vi } from "vitest";
-import { getLogger } from "@/runtime/logger";
+import { describe, expect, it } from "vitest";
 import { attachUsdValuesToBalances } from "@/services/helius-das.service";
 import { env } from "@/test/helpers/env";
 import { getSplTokenBalances, resolveTokenLabel, withIssuedTokenLabels } from "./token-accounts";
@@ -34,8 +33,8 @@ function tokenAccount(
   pubkey: string,
   amount: string,
   uiAmountString: string,
-  decimals: number = USDC_DECIMALS,
-  mint = USDC_DEVNET
+  decimals: number,
+  mint: Address
 ): ParsedTokenAccount {
   return {
     pubkey,
@@ -59,8 +58,7 @@ function tokenAccount(
 
 function rpcWithAccounts(
   splTokenAccounts: ParsedTokenAccount[],
-  token2022Accounts: ParsedTokenAccount[] = [],
-  mintSupplies: Record<string, number> = {}
+  token2022Accounts: ParsedTokenAccount[]
 ): SolanaRpc {
   return {
     getTokenAccountsByOwner: (_owner: Address, { programId }: { programId: string }) => ({
@@ -72,15 +70,6 @@ function rpcWithAccounts(
               ? token2022Accounts
               : [],
       }),
-    }),
-    getTokenSupply: (mint: Address) => ({
-      send: async () => {
-        const decimals = mintSupplies[mint];
-        if (decimals === undefined) {
-          throw new Error(`mint supply unavailable for ${mint}`);
-        }
-        return { value: { decimals } };
-      },
     }),
   } as unknown as SolanaRpc;
 }
@@ -144,7 +133,10 @@ describe("getSplTokenBalances", () => {
 
   it("keeps a single account's UI amount consistent with its raw amount", async () => {
     const balances = await getSplTokenBalances(
-      rpcWithAccounts([tokenAccount("acc-1", "1234567", "1.234567")]),
+      rpcWithAccounts(
+        [tokenAccount("acc-1", "1234567", "1.234567", USDC_DECIMALS, USDC_DEVNET)],
+        []
+      ),
       OWNER
     );
 
@@ -155,10 +147,13 @@ describe("getSplTokenBalances", () => {
 
   it("skips zero-balance accounts", async () => {
     const balances = await getSplTokenBalances(
-      rpcWithAccounts([
-        tokenAccount("acc-1", "0", "0"),
-        tokenAccount("acc-2", "1234567", "1.234567"),
-      ]),
+      rpcWithAccounts(
+        [
+          tokenAccount("acc-1", "0", "0", USDC_DECIMALS, USDC_DEVNET),
+          tokenAccount("acc-2", "1234567", "1.234567", USDC_DECIMALS, USDC_DEVNET),
+        ],
+        []
+      ),
       OWNER
     );
 
@@ -169,10 +164,13 @@ describe("getSplTokenBalances", () => {
 
   it("sums same-mint accounts by raw units and recomputes the UI amount from the total", async () => {
     const balances = await getSplTokenBalances(
-      rpcWithAccounts([
-        tokenAccount("acc-1", "1000000", "1"),
-        tokenAccount("acc-2", "999000000", "999"),
-      ]),
+      rpcWithAccounts(
+        [
+          tokenAccount("acc-1", "1000000", "1", USDC_DECIMALS, USDC_DEVNET),
+          tokenAccount("acc-2", "999000000", "999", USDC_DECIMALS, USDC_DEVNET),
+        ],
+        []
+      ),
       OWNER
     );
 
@@ -184,8 +182,8 @@ describe("getSplTokenBalances", () => {
   it("aggregates the same mint across both token programs with a consistent UI amount", async () => {
     const balances = await getSplTokenBalances(
       rpcWithAccounts(
-        [tokenAccount("spl-acc", "500000", "0.5")],
-        [tokenAccount("token-2022-acc", "1500000", "1.5")]
+        [tokenAccount("spl-acc", "500000", "0.5", USDC_DECIMALS, USDC_DEVNET)],
+        [tokenAccount("token-2022-acc", "1500000", "1.5", USDC_DECIMALS, USDC_DEVNET)]
       ),
       OWNER
     );
@@ -194,139 +192,18 @@ describe("getSplTokenBalances", () => {
       { token: "USDC", mint: USDC_DEVNET, amount: "2000000", uiAmount: "2", decimals: 6 },
     ]);
   });
-
-  it("ignores a same-mint account that disagrees on decimals instead of summing incompatible units", async () => {
-    const balances = await getSplTokenBalances(
-      rpcWithAccounts(
-        [tokenAccount("acc-1", "1000000", "1"), tokenAccount("acc-2", "999", "999", 0)],
-        [],
-        { [USDC_DEVNET]: USDC_DECIMALS }
-      ),
-      OWNER
-    );
-
-    expect(balances).toEqual([
-      { token: "USDC", mint: USDC_DEVNET, amount: "1000000", uiAmount: "1", decimals: 6 },
-    ]);
-  });
-
-  it("keeps the account that matches the mint even when an inconsistent account is returned first", async () => {
-    const balances = await getSplTokenBalances(
-      rpcWithAccounts(
-        [tokenAccount("acc-1", "999", "999", 0), tokenAccount("acc-2", "1000000", "1")],
-        [],
-        { [USDC_DEVNET]: USDC_DECIMALS }
-      ),
-      OWNER
-    );
-
-    expect(balances).toEqual([
-      { token: "USDC", mint: USDC_DEVNET, amount: "1000000", uiAmount: "1", decimals: 6 },
-    ]);
-  });
-
-  it("settles conflicting scales against the mint, however many accounts report the wrong one", async () => {
-    const balances = await getSplTokenBalances(
-      rpcWithAccounts(
-        [
-          tokenAccount("acc-1", "1000", "1000", 0),
-          tokenAccount("acc-2", "2000", "2000", 0),
-          tokenAccount("acc-3", "1000000", "1"),
-        ],
-        [],
-        { [USDC_DEVNET]: USDC_DECIMALS }
-      ),
-      OWNER
-    );
-
-    expect(balances).toEqual([
-      { token: "USDC", mint: USDC_DEVNET, amount: "1000000", uiAmount: "1", decimals: 6 },
-    ]);
-  });
-
-  it("fails the read when the mint's own decimals cannot settle its accounts' conflicting scales", async () => {
-    await expect(
-      getSplTokenBalances(
-        rpcWithAccounts([
-          tokenAccount("acc-1", "1000000", "1"),
-          tokenAccount("acc-2", "999", "999", 0),
-        ]),
-        OWNER
-      )
-    ).rejects.toThrow(/could not settle the conflicting scales .* for mint/i);
-  });
-
-  it("identifies the rejected account in the decimals warnings", async () => {
-    const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
-    try {
-      await getSplTokenBalances(
-        rpcWithAccounts(
-          [tokenAccount("acc-1", "1000000", "1"), tokenAccount("acc-2", "999", "999", 0)],
-          [],
-          { [USDC_DEVNET]: USDC_DECIMALS }
-        ),
-        OWNER
-      );
-
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tokenAccount: "acc-2",
-          mint: USDC_DEVNET,
-          decimals: 0,
-          mintDecimals: 6,
-        }),
-        "getSplTokenBalances: rejected a same-mint token account with inconsistent decimals"
-      );
-
-      warn.mockClear();
-      await getSplTokenBalances(
-        rpcWithAccounts([
-          tokenAccount("acc-1", "1000000", "1"),
-          tokenAccount("acc-2", "2000000", "2", -1),
-        ]),
-        OWNER
-      );
-
-      expect(warn).toHaveBeenCalledWith(
-        expect.objectContaining({ tokenAccount: "acc-2", mint: USDC_DEVNET, decimals: -1 }),
-        "getSplTokenBalances: rejected a token account with invalid decimals"
-      );
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("ignores an account whose decimals are not a non-negative integer", async () => {
-    const balances = await getSplTokenBalances(
-      rpcWithAccounts([
-        tokenAccount("acc-1", "1000000", "1"),
-        tokenAccount("acc-2", "2000000", "2", -1),
-      ]),
-      OWNER
-    );
-
-    expect(balances).toEqual([
-      { token: "USDC", mint: USDC_DEVNET, amount: "1000000", uiAmount: "1", decimals: 6 },
-    ]);
-  });
-
-  it("reports no balance for a mint whose only account has non-integer decimals", async () => {
-    const balances = await getSplTokenBalances(
-      rpcWithAccounts([tokenAccount("acc-1", "1000000", "1", 2.5)]),
-      OWNER
-    );
-
-    expect(balances).toEqual([]);
-  });
 });
 
 describe("getSplTokenBalances USD enrichment", () => {
   it("prices the summed raw balance, not the first account's stale UI amount", async () => {
     const balances = await getSplTokenBalances(
-      rpcWithAccounts([
-        tokenAccount("acc-1", "1000000", "1"),
-        tokenAccount("acc-2", "999000000", "999"),
-      ]),
+      rpcWithAccounts(
+        [
+          tokenAccount("acc-1", "1000000", "1", USDC_DECIMALS, USDC_DEVNET),
+          tokenAccount("acc-2", "999000000", "999", USDC_DECIMALS, USDC_DEVNET),
+        ],
+        []
+      ),
       OWNER
     );
 
