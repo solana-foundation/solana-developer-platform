@@ -428,6 +428,7 @@ export function useRampWizard<TId extends string>(
   // at most one quote per wizard instance. A genuine network side effect on data
   // arrival — not derived state — hence the effect.
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
+  // react-doctor-disable-next-line no-fetch-in-effect no-set-state-after-await-in-effect -- deliberate single-fire quote trigger: the once-per-wizard ref guard makes the fetch unable to double-fire or race, so late state writes are its own completed attempt
   useEffect(() => {
     if (!isLastStep || onboardingStatus !== "ready") {
       return;
