@@ -65,49 +65,111 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
     repo = createPostgresPrivateChannelReleaseScanRepository(db);
   });
 
-  it("reads null before the first advance", async () => {
+  it("reads null before the first write", async () => {
     expect(await repo.getScan(INSTANCE, MINT, VAULT)).toBeNull();
   });
 
-  it("round-trips an advance and refuses to move the cursor back to a newer slot", async () => {
+  it("round-trips an advance and never moves the frontier back to an older slot", async () => {
     await repo.advanceScan({
       instanceId: INSTANCE,
       mint: MINT,
       vaultAta: VAULT,
-      cursor: cursor("sigDeep", "100"),
+      cursor: cursor("sigShallow", "100"),
     });
     expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
-      signature: "sigDeep",
+      cursor: { signature: "sigShallow", slot: "100" },
+      sweep: null,
+    });
+
+    // A deeper (older-slot) position — e.g. from a slower overlapping sweep
+    // that parsed less — must not undo the frontier's progress.
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("sigDeep", "50"),
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
+      signature: "sigShallow",
       slot: "100",
     });
 
-    // A shallower (newer-slot) position — e.g. from a slower overlapping sweep
-    // that parsed less — must not undo the deeper one.
+    // Newer positions keep advancing.
     await repo.advanceScan({
       instanceId: INSTANCE,
       mint: MINT,
       vaultAta: VAULT,
-      cursor: cursor("sigShallow", "200"),
+      cursor: cursor("sigNewer", "200"),
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
+      signature: "sigNewer",
+      slot: "200",
+    });
+  });
+
+  it("sets the cursor on a row that only carried a sweep", async () => {
+    await repo.deepenSweep({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      sweep: cursor("sweepSig", "10"),
     });
     expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
-      signature: "sigDeep",
+      cursor: null,
+      sweep: { signature: "sweepSig", slot: "10" },
+    });
+
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("frontierSig", "20"),
+    });
+    expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
+      cursor: { signature: "frontierSig", slot: "20" },
+      sweep: { signature: "sweepSig", slot: "10" },
+    });
+  });
+
+  it("only deepens the sweep and clears it in place", async () => {
+    await repo.deepenSweep({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      sweep: cursor("sweepDeep", "100"),
+    });
+    // A shallower (newer-slot) proposal must not regress the sweep.
+    await repo.deepenSweep({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      sweep: cursor("sweepShallow", "200"),
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.sweep).toEqual({
+      signature: "sweepDeep",
       slot: "100",
     });
 
     // Deeper positions keep advancing.
-    await repo.advanceScan({
+    await repo.deepenSweep({
       instanceId: INSTANCE,
       mint: MINT,
       vaultAta: VAULT,
-      cursor: cursor("sigDeeper", "50"),
+      sweep: cursor("sweepDeeper", "50"),
     });
-    expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
-      signature: "sigDeeper",
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.sweep).toEqual({
+      signature: "sweepDeeper",
       slot: "50",
+    });
+
+    await repo.clearSweep({ instanceId: INSTANCE, mint: MINT, vaultAta: VAULT });
+    expect(await repo.getScan(INSTANCE, MINT, VAULT)).toEqual({
+      cursor: null,
+      sweep: null,
     });
   });
 
-  it("discards the cursor wholesale when the escrow ATA rotated", async () => {
+  it("keeps per-escrow positions so a lagging poller cannot clobber a rotated escrow's cursor", async () => {
     await repo.advanceScan({
       instanceId: INSTANCE,
       mint: MINT,
@@ -123,16 +185,33 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       cursor: cursor("newEscrowSig", "9000"),
     });
 
-    // The rotated escrow's first position wins despite its newer slot, and the
-    // old escrow's position is gone rather than leaking across addresses.
+    // The rotated escrow reads as unwalked until its first advance — history
+    // on the new ATA has not been parsed — and the old escrow's position never
+    // leaks across addresses.
     expect(await repo.getScan(INSTANCE, MINT, rotated)).toEqual({
+      cursor: { signature: "newEscrowSig", slot: "9000" },
+      sweep: null,
+    });
+    expect((await repo.getScan(INSTANCE, MINT, VAULT))?.cursor).toEqual({
+      signature: "oldEscrowSig",
+      slot: "100",
+    });
+
+    // A lagging poller still holding the OLD escrow address advances late and
+    // must not clobber the rotated escrow's progress (or vice versa).
+    await repo.advanceScan({
+      instanceId: INSTANCE,
+      mint: MINT,
+      vaultAta: VAULT,
+      cursor: cursor("oldEscrowSig2", "150"),
+    });
+    expect((await repo.getScan(INSTANCE, MINT, rotated))?.cursor).toEqual({
       signature: "newEscrowSig",
       slot: "9000",
     });
-    expect(await repo.getScan(INSTANCE, MINT, VAULT)).toBeNull();
   });
 
-  it("scopes cursors per (instance, mint) pair", async () => {
+  it("scopes positions per (instance, mint) pair", async () => {
     await repo.advanceScan({
       instanceId: INSTANCE,
       mint: MINT,
@@ -146,12 +225,12 @@ describe("PrivateChannelReleaseScanRepository (postgres)", () => {
       cursor: cursor("sigB", "20"),
     });
     const firstScan = await repo.getScan(INSTANCE, MINT, VAULT);
-    expect(firstScan?.signature).toBe("sigA");
+    expect(firstScan?.cursor?.signature).toBe("sigA");
     const secondScan = await repo.getScan(
       INSTANCE,
       "MintOther2222222222222222222222222222222222",
       VAULT
     );
-    expect(secondScan?.signature).toBe("sigB");
+    expect(secondScan?.cursor?.signature).toBe("sigB");
   });
 });

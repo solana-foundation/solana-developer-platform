@@ -8,6 +8,7 @@ const { withdrawalRepo, instanceRepo, observationRepo, releaseScanRepo, mocks } 
     listNonTerminal: vi.fn(),
     updateWithdrawal: vi.fn(async (input: Record<string, unknown>) => ({ ...input })),
     patchContext: vi.fn(async () => undefined),
+    countNonTerminalByInstanceAndMint: vi.fn(async (_instanceId: string, _mint: string) => 0),
   };
   const instanceRepo = {
     getById: vi.fn(),
@@ -19,6 +20,8 @@ const { withdrawalRepo, instanceRepo, observationRepo, releaseScanRepo, mocks } 
   const releaseScanRepo = {
     getScan: vi.fn(async (): Promise<unknown> => null),
     advanceScan: vi.fn(async () => undefined),
+    deepenSweep: vi.fn(async () => undefined),
+    clearSweep: vi.fn(async () => undefined),
   };
   return {
     withdrawalRepo,
@@ -139,11 +142,29 @@ beforeEach(() => {
     ...withdrawalRow({}),
     ...input,
   }));
+  // Default: the batch holds every non-terminal withdrawal of the group —
+  // the group count equals the fixture's rows for that (instance, mint).
+  withdrawalRepo.countNonTerminalByInstanceAndMint.mockImplementation(
+    async (instanceId: string, mint: string) => {
+      const settled = withdrawalRepo.listNonTerminal.mock.settledResults[0];
+      const rows = (settled?.type === "fulfilled" ? settled.value : []) as Array<
+        Record<string, unknown>
+      >;
+      return rows.filter(
+        (r) =>
+          r.instance_id === instanceId &&
+          r.mint === mint &&
+          ["pending", "submitted", "confirmed"].includes(r.status as string)
+      ).length;
+    }
+  );
   instanceRepo.getById.mockResolvedValue(instanceRow());
   getSignaturesForAddress.mockResolvedValue([]);
   getTransaction.mockResolvedValue(null);
   releaseScanRepo.getScan.mockResolvedValue(null);
   releaseScanRepo.advanceScan.mockResolvedValue(undefined);
+  releaseScanRepo.deepenSweep.mockResolvedValue(undefined);
+  releaseScanRepo.clearSweep.mockResolvedValue(undefined);
   // Default: claim succeeds and returns a stub observation.
   observationRepo.claimSettlement.mockImplementation(async (input: Record<string, unknown>) => ({
     ...input,
@@ -637,7 +658,10 @@ describe("trackPendingWithdrawals", () => {
   });
 
   it("skips history at or behind the persisted cursor without re-parsing it", async () => {
-    releaseScanRepo.getScan.mockResolvedValue({ signature: "cursorSig", slot: "40" });
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "cursorSig", slot: "40" },
+      sweep: null,
+    });
     withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
       withdrawalRow({ id: "w1", status: "confirmed" }),
     ]);
@@ -675,12 +699,153 @@ describe("trackPendingWithdrawals", () => {
     expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
       expect.objectContaining({ id: "w1", status: "settled", settlementRef: "relNew" })
     );
+    // The frontier moves up over the parsed region (never backward).
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "relNew", slot: "60" },
+    });
   });
 
-  it("holds the cursor when the tick's batch was truncated at MAX_PER_RUN", async () => {
-    // One confirmed withdrawal plus enough submitted rows to fill the batch:
-    // the release is found and settled, but a truncated batch cannot prove the
-    // parsed release matches no absent withdrawal, so the cursor must not move.
+  it("holds the cursor when a submitted withdrawal shares the group — its release may already be on chain", async () => {
+    // The submitted withdrawal is not in the release group (only confirmed
+    // rows match), but its release can already exist: if the cursor advanced
+    // past a parsed-but-unmatched release, the submitted withdrawal could
+    // never claim it once it confirms.
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+      withdrawalRow({ id: "w2", status: "submitted", signature: "burnsig" }),
+    ]);
+    getSignatureStatuses.mockResolvedValueOnce([]);
+    getSignaturesForAddress.mockResolvedValueOnce([
+      {
+        signature: "relSig",
+        err: null,
+        slot: 7n,
+        blockTime: BigInt(Math.floor(Date.parse(NOW_ISO) / 1000) - 60),
+      },
+    ]);
+    getTransaction.mockResolvedValue({
+      slot: 1n,
+      err: null,
+      instructions: [
+        {
+          programId: "tok",
+          parsedType: "transfer",
+          info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
+        },
+      ],
+    });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // The confirmed withdrawal still settles.
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w1", status: "settled", settlementRef: "relSig" })
+    );
+    expect(releaseScanRepo.advanceScan).not.toHaveBeenCalled();
+  });
+
+  it("advances the cursor when unrelated groups fill the global batch but this group is complete", async () => {
+    // 100 non-terminal rows total (batch full), but the extra 99 belong to a
+    // different instance: this group's own unsettled set is fully in the
+    // batch, so unrelated volume must not hold its progress hostage.
+    const other = Array.from({ length: 99 }, (_, i) =>
+      withdrawalRow({ id: `wOther${i}`, instance_id: "inst-other", status: "confirmed" })
+    );
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+      ...other,
+    ]);
+    instanceRepo.getById.mockImplementation(async (id: string) =>
+      id === "inst-other"
+        ? instanceRow({ id: "inst-other", escrow_instance_addr: DESTINATION })
+        : instanceRow()
+    );
+    getSignaturesForAddress.mockImplementation(async (_rpc: unknown, vaultAta: string) =>
+      vaultAta === `ata:${ESCROW_INSTANCE}`
+        ? [
+            {
+              signature: "relSig",
+              err: null,
+              slot: 7n,
+              blockTime: BigInt(Math.floor(Date.parse(NOW_ISO) / 1000) - 60),
+            },
+          ]
+        : []
+    );
+    getTransaction.mockImplementation(async (_rpc: unknown, signature: string) => {
+      if (signature === "relSig") {
+        return {
+          slot: 1n,
+          err: null,
+          instructions: [
+            {
+              programId: "tok",
+              parsedType: "transfer",
+              info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
+            },
+          ],
+        };
+      }
+      return { slot: 1n, err: null, instructions: [] };
+    });
+
+    await trackPendingWithdrawals({} as Env);
+
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w1", status: "settled", settlementRef: "relSig" })
+    );
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "relSig", slot: "7" },
+    });
+  });
+
+  it("holds the cursor when the batch was truncated past this group's rows", async () => {
+    // One confirmed row made it into the batch, but the group has another
+    // non-terminal withdrawal beyond MAX_PER_RUN that could claim a parsed
+    // release — the cursor must not move.
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    withdrawalRepo.countNonTerminalByInstanceAndMint.mockResolvedValueOnce(2);
+    getSignaturesForAddress.mockResolvedValueOnce([
+      {
+        signature: "relSig",
+        err: null,
+        slot: 7n,
+        blockTime: BigInt(Math.floor(Date.parse(NOW_ISO) / 1000) - 60),
+      },
+    ]);
+    getTransaction.mockResolvedValue({
+      slot: 1n,
+      err: null,
+      instructions: [
+        {
+          programId: "tok",
+          parsedType: "transfer",
+          info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
+        },
+      ],
+    });
+
+    await trackPendingWithdrawals({} as Env);
+
+    expect(withdrawalRepo.updateWithdrawal).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "w1", status: "settled", settlementRef: "relSig" })
+    );
+    expect(releaseScanRepo.advanceScan).not.toHaveBeenCalled();
+  });
+
+  it("holds the cursor when the group's unsettled set exceeds the confirmed rows in the batch", async () => {
+    // One confirmed withdrawal plus enough submitted rows (same instance and
+    // mint) to fill the batch: the release is found and settled, but those
+    // submitted withdrawals could still claim a parsed-but-unmatched release,
+    // so the cursor must not move.
     const submitted = Array.from({ length: 99 }, (_, i) =>
       withdrawalRow({ id: `wSub${i}`, status: "submitted", signature: `burnsig${i}` })
     );
@@ -853,8 +1018,138 @@ describe("trackPendingWithdrawals", () => {
     // region below the walked window is unexplored and stays due.
     expect(getTransaction).toHaveBeenCalledTimes(300);
     expect(releaseScanRepo.advanceScan).not.toHaveBeenCalled();
+    // The walk's deepest listed point is persisted so the next tick can
+    // resume listing below it instead of re-reading the same band forever.
+    expect(releaseScanRepo.deepenSweep).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      sweep: { signature: "t19999", slot: "1001" },
+    });
     expect(withdrawalRepo.updateWithdrawal).not.toHaveBeenCalledWith(
       expect.objectContaining({ status: "settled" })
     );
+  });
+
+  it("resumes listing below the persisted sweep on the next tick and advances the frontier", async () => {
+    const PAGES = 21; // > RELEASE_SCAN_MAX_PAGES (20)
+    const history = Array.from({ length: PAGES * 1000 }, (_, i) => ({
+      signature: `t${i}`, // newest first
+      err: null,
+      slot: BigInt(PAGES * 1000 - i),
+      // All inside the created_at lower bound, so the page cap — not the time
+      // bound — is what stops the walk.
+      blockTime: BigInt(Math.floor(Date.parse(NOW_ISO) / 1000) - 10 - Math.floor(i / 1000)),
+    }));
+    getSignaturesForAddress.mockImplementation(
+      async (_rpc: unknown, _addr: unknown, options: { limit?: number; before?: string } = {}) => {
+        const start = options.before
+          ? history.findIndex((entry) => entry.signature === options.before) + 1
+          : 0;
+        return history.slice(start, start + (options.limit ?? 100));
+      }
+    );
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+    withdrawalRepo.listNonTerminal.mockResolvedValue([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    // The previous tick capped out here and persisted its deepest listed point.
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: null,
+      sweep: { signature: "t19999", slot: "1001" },
+    });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // Phase 1 listed the fresh tip band, then phase 2 resumed below the sweep
+    // position — the backlog is not re-read from the tip forever.
+    expect(getSignaturesForAddress).toHaveBeenCalledWith(
+      expect.anything(),
+      `ata:${ESCROW_INSTANCE}`,
+      expect.objectContaining({ before: "t19999" })
+    );
+    // The resumed walk reached history's end, so the listed region is
+    // contiguous down to a provable stopping point and the frontier advances
+    // over the parsed prefix (oldest first, budget-capped at 300).
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "t20700", slot: "300" },
+    });
+  });
+
+  it("clears the sweep once the frontier consumes the listed backlog", async () => {
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "cursorSig", slot: "500" },
+      sweep: { signature: "sweepSig", slot: "400" },
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    getSignaturesForAddress.mockResolvedValueOnce([
+      { signature: "relNew", err: null, slot: 600n, blockTime: null },
+      { signature: "cursorSig", err: null, slot: 500n, blockTime: null },
+    ]);
+    getTransaction.mockImplementation(async (_rpc: unknown, signature: string) => {
+      if (signature === "relNew") {
+        return {
+          slot: 1n,
+          err: null,
+          instructions: [
+            {
+              programId: "tok",
+              parsedType: "transfer",
+              info: { destination: `ata:${DESTINATION}`, amount: "10000000" },
+            },
+          ],
+        };
+      }
+      return { slot: 1n, err: null, instructions: [] };
+    });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // The frontier (slot 600) moved past the sweep position (slot 400):
+    // nothing is left to resume below it.
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "relNew", slot: "600" },
+    });
+    expect(releaseScanRepo.clearSweep).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+    });
+  });
+
+  it("ignores a sweep position at or behind the parsed frontier", async () => {
+    // A stale sweep (clear that lost a race) must not send the walk listing
+    // already-consumed history.
+    releaseScanRepo.getScan.mockResolvedValue({
+      cursor: { signature: "cursorSig", slot: "500" },
+      sweep: { signature: "staleSweepSig", slot: "500" },
+    });
+    withdrawalRepo.listNonTerminal.mockResolvedValueOnce([
+      withdrawalRow({ id: "w1", status: "confirmed" }),
+    ]);
+    getSignaturesForAddress.mockResolvedValueOnce([
+      { signature: "relNew", err: null, slot: 600n, blockTime: null },
+      { signature: "cursorSig", err: null, slot: 500n, blockTime: null },
+    ]);
+    getTransaction.mockResolvedValue({ slot: 1n, err: null, instructions: [] });
+
+    await trackPendingWithdrawals({} as Env);
+
+    // Tip band only — no sweep phase below the frontier.
+    expect(getSignaturesForAddress).toHaveBeenCalledTimes(1);
+    expect(releaseScanRepo.advanceScan).toHaveBeenCalledWith({
+      instanceId: "inst-X",
+      mint: MINT,
+      vaultAta: `ata:${ESCROW_INSTANCE}`,
+      cursor: { signature: "relNew", slot: "600" },
+    });
   });
 });

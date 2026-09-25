@@ -189,7 +189,7 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       const row = await db
         .prepare(
           `SELECT COUNT(*)::int AS count FROM private_channel_withdrawals
-             WHERE instance_id = ? AND status IN ('pending', 'submitted', 'confirmed')`
+              WHERE instance_id = ? AND status IN ('pending', 'submitted', 'confirmed')`
         )
         .bind(instanceId)
         .first<{ count: number }>();
@@ -197,6 +197,26 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       // read as "nothing in flight" and clear the way for a delete (HOO-1011).
       if (typeof row?.count !== "number") {
         throw new Error("private_channel_withdrawals in-flight count returned no numeric row");
+      }
+      return row.count;
+    },
+
+    async countNonTerminalByInstanceAndMint(instanceId: string, mint: string) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS count FROM private_channel_withdrawals
+              WHERE instance_id = ? AND mint = ?
+                AND status IN ('pending', 'submitted', 'confirmed')`
+        )
+        .bind(instanceId, mint)
+        .first<{ count: number }>();
+      // The release reconciler's cursor-safety gate reads this count; a
+      // missing or non-numeric row must not read as "group complete" and
+      // advance the cursor past an unclaimed release.
+      if (typeof row?.count !== "number") {
+        throw new Error(
+          "private_channel_withdrawals group in-flight count returned no numeric row"
+        );
       }
       return row.count;
     },

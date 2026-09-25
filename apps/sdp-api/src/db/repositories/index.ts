@@ -370,6 +370,9 @@ export type {
 export { createPostgresPrivateChannelReferenceRepository } from "./private-channel-reference.repository.postgres";
 export type {
   AdvanceReleaseScanInput,
+  ClearReleaseSweepInput,
+  DeepenReleaseSweepInput,
+  PrivateChannelReleaseScan,
   PrivateChannelReleaseScanCursor,
   PrivateChannelReleaseScanRepository,
   PrivateChannelReleaseScanRepositoryContext,

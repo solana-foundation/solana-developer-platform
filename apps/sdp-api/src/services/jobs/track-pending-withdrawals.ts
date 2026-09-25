@@ -25,15 +25,19 @@
  *     newest page (SOLA9-157): a permissionless payer can fill the newest page
  *     with transactions that merely reference the escrow ATA, which would
  *     otherwise evict a real release from every scan. Each (instance, mint)
- *     group persists how deep it has parsed in
- *     `private_channel_release_scans`; the cursor only moves deeper over fully
- *     parsed signatures, so progress accumulates across ticks and a release
- *     cannot be pushed permanently out of reach. Before the first cursor
- *     exists the walk is bounded below by the oldest unsettled withdrawal's
- *     `created_at` (a release always postdates the intent's creation), with a
- *     clock-skew margin. A walk that hits the page cap still parses the newest
+ *     group persists where it has reached in `private_channel_release_scans`:
+ *     a parsed frontier (the cursor — everything at or behind it was fully
+ *     parsed and matched, and it only moves toward newer slots) and, when a
+ *     walk hit the page cap before reaching the frontier, the deepest listed
+ *     signature (the sweep — a later tick resumes listing below it instead of
+ *     re-reading the same newest band forever). Progress therefore accumulates
+ *     across ticks and a release cannot be pushed permanently out of reach,
+ *     however deep the spam backlog. Before the first cursor exists the walk
+ *     is bounded below by the oldest unsettled withdrawal's `created_at` (a
+ *     release always postdates the intent's creation), with a clock-skew
+ *     margin. A walk that hits the page cap still parses the newest
  *     candidates but does not advance the cursor — the unexplored region below
- *     stays due, and the tick logs a warning.
+ *     stays due, the sweep position is persisted, and the tick logs a warning.
  *
  * The release reconciler resolves the project's CURRENT RPC connection each
  * tick, so provider changes and credential rotations apply to in-flight intents.
@@ -91,6 +95,13 @@ const RELEASE_SCAN_PAGE_LIMIT = 1000;
  */
 const RELEASE_SCAN_MAX_PAGES = 20;
 /**
+ * Page-fetch cap for the tip band while a sweep is pending (backlog mode).
+ * Every new entry passes through the newest band on arrival, so this stays
+ * the fresh-release window; the rest of the page budget goes to resuming the
+ * deep sweep below the persisted position.
+ */
+const RELEASE_SCAN_TIP_PAGES = 2;
+/**
  * getTransaction lookups per (instance, mint) group per tick. Parsing is
  * bounded independently of how much history the walk listed, so a flood of
  * referencing transactions cannot scale the reconciler's paid-RPC work.
@@ -114,11 +125,6 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
   if (pending.length === 0) {
     return;
   }
-  // Cursor advance requires knowing the group's COMPLETE unsettled set: a
-  // parsed release may only be skipped for good when every withdrawal that
-  // could claim it was in the batch. A batch cut off at MAX_PER_RUN may have
-  // left some out, so this tick settles but never advances cursors.
-  const batchComplete = pending.length < MAX_PER_RUN;
 
   const instances = new Map<string, PrivateChannelInstanceRow | null>();
   const projectRpcs = new Map<string, Promise<PrivateChannelProjectRpcClient>>();
@@ -290,8 +296,7 @@ export async function trackPendingWithdrawals(env: Env): Promise<void> {
           releaseScanRepo,
           group,
           await loadProjectRpc(group.instance),
-          now,
-          batchComplete
+          now
         );
       } catch (err) {
         getLogger().error(
@@ -480,13 +485,14 @@ async function applySubmittedVerdict(
 
 /**
  * confirmed → settled for one (instance, mint). Walks the instance escrow ATA's
- * devnet history backwards (SOLA9-157): pages with `before` until the persisted
- * scan cursor, the created_at lower bound, or history's end, parses release
+ * devnet history backwards (SOLA9-157): pages with `before` until the parsed
+ * frontier, the created_at lower bound, or history's end, parses release
  * candidates within a per-tick budget, and matches them against the batch's
  * (destinationAta, mint, amount). Claims the attribution via
  * `settlement_observations`, advances the intent, then — only when the walk
- * reached a provable stopping point and the batch was complete — moves the scan
- * cursor deeper over the fully parsed prefix. Stale unmatched → stuck-warning
+ * listed the region down to a provable stopping point and every non-terminal
+ * withdrawal of this (instance, mint) was in the batch — moves the parsed
+ * frontier up over the fully parsed prefix. Stale unmatched → stuck-warning
  * event, debounced via context.lastStuckWarningAt. NEVER auto-`failed` — the
  * burn is already confirmed.
  */
@@ -497,8 +503,7 @@ async function reconcileReleaseGroup(
   releaseScanRepo: PrivateChannelReleaseScanRepository,
   group: ReleaseGroup,
   projectRpc: PrivateChannelProjectRpcClient,
-  now: number,
-  batchComplete: boolean
+  now: number
 ): Promise<void> {
   const withdrawals = group.withdrawals;
   if (withdrawals.length === 0) {
@@ -525,9 +530,17 @@ async function reconcileReleaseGroup(
     tokenProgram,
   });
 
-  // A cursor recorded for a different escrow ATA (the instance's escrow can be
-  // rotated) reads as no cursor: history on this ATA has not been walked yet.
+  // Positions recorded for a different escrow ATA (the instance's escrow can
+  // be rotated) are never read: history on this ATA has not been walked yet.
   const scan = await releaseScanRepo.getScan(group.instance.id, group.mint, vaultAta);
+  const cursor = scan?.cursor ?? null;
+  const rawSweep = scan?.sweep ?? null;
+  let sweep = rawSweep;
+  // A sweep at or behind the parsed frontier is a leftover (e.g. a clear that
+  // lost a race): the listing it describes is already consumed.
+  if (sweep && cursor && BigInt(sweep.slot) <= BigInt(cursor.slot)) {
+    sweep = null;
+  }
 
   // A release always postdates its withdrawal's intent creation, so a
   // cursor-less first scan never needs history older than the oldest
@@ -537,24 +550,24 @@ async function reconcileReleaseGroup(
   const lowerBoundMs =
     Math.min(...withdrawals.map((w) => Date.parse(w.created_at))) - RELEASE_SCAN_TIME_MARGIN_MS;
 
-  const walk = await walkReleaseHistory(projectRpc.rpc, vaultAta, scan, lowerBoundMs);
+  const walk = await walkReleaseHistory(projectRpc.rpc, vaultAta, cursor, sweep, lowerBoundMs);
   if (!walk.complete) {
     getLogger().warn(
       {
         instanceId: group.instance.id,
         mint: group.mint,
-        pages: RELEASE_SCAN_MAX_PAGES,
+        pages: sweep ? RELEASE_SCAN_MAX_PAGES - RELEASE_SCAN_TIP_PAGES : RELEASE_SCAN_MAX_PAGES,
       },
       "trackPendingWithdrawals: escrow history walk hit the page cap before a stopping point; cursor held, region stays due"
     );
   }
 
   // Oldest first. With a complete walk this points parsing at the region just
-  // above the scan cursor, so the parsed prefix stays contiguous with
-  // everything already parsed and the cursor can advance. With a capped walk
-  // the newest candidates are the likeliest fresh releases, so parse in walk
-  // order instead. Failed on-chain transactions cannot contain a release and
-  // cost no lookup.
+  // above the parsed frontier (or the created_at bound), so the parsed prefix
+  // stays contiguous and the frontier can advance. With a capped walk the
+  // frontier cannot move anyway; the newest candidates are the likeliest fresh
+  // releases, so parse in walk order instead. Failed on-chain transactions
+  // cannot contain a release and cost no lookup.
   const ordered = [...walk.entries].reverse();
   const parseTargets = (walk.complete ? ordered : walk.entries)
     .filter((s) => s.err === null)
@@ -562,8 +575,48 @@ async function reconcileReleaseGroup(
 
   const { releases, parsedSignatures } = await collectReleases(projectRpc.rpc, parseTargets);
 
-  // Releases already claimed this tick, or found to be claimed by a prior tick
-  // via PK conflict. Skip them on subsequent lookups.
+  await settleWithdrawals(
+    env,
+    repo,
+    observationRepo,
+    mint,
+    tokenProgram,
+    decimals,
+    releases,
+    withdrawals,
+    now
+  );
+
+  await persistScanPositions(
+    repo,
+    releaseScanRepo,
+    group,
+    vaultAta,
+    rawSweep,
+    walk,
+    ordered,
+    parsedSignatures
+  );
+}
+
+/**
+ * Claim the batch's content-matching releases and advance the withdrawals to
+ * `settled`. Releases already claimed this tick, or found to be claimed by a
+ * prior tick via PK conflict, are skipped on subsequent lookups. Withdrawals
+ * with no matching release get a stuck-warning, debounced via
+ * context.lastStuckWarningAt.
+ */
+async function settleWithdrawals(
+  env: Env,
+  repo: PrivateChannelWithdrawalRepository,
+  observationRepo: PrivateChannelSettlementObservationRepository,
+  mintAddress: Address,
+  tokenProgram: Address,
+  decimals: number,
+  releases: ReleaseTransfer[],
+  withdrawals: PrivateChannelWithdrawalRow[],
+  now: number
+): Promise<void> {
   const claimedSignatures = new Set<string>();
   // Oldest first so concurrent same-content withdrawals settle FIFO.
   const orderedWithdrawals = [...withdrawals].sort((a, b) =>
@@ -572,7 +625,7 @@ async function reconcileReleaseGroup(
   for (const withdrawal of orderedWithdrawals) {
     const [destinationAta] = await findAssociatedTokenPda({
       owner: address(withdrawal.destination),
-      mint,
+      mint: mintAddress,
       tokenProgram,
     });
     const wantBaseUnits = parseDecimalAmount(withdrawal.amount, decimals);
@@ -622,34 +675,95 @@ async function reconcileReleaseGroup(
       await maybeEmitStuckWarning(env, repo, withdrawal, now);
     }
   }
+}
 
-  // Advance the cursor only after the claims above committed (a crash costs a
-  // re-parse, never a lost release), only over the contiguous fully-parsed
-  // prefix of the walked region, and only on a complete walk of a complete
-  // batch. A capped walk leaves the region below its window unexplored; a
-  // truncated batch may not contain every withdrawal that could claim a
-  // parsed-but-unmatched release.
-  if (!walk.complete || !batchComplete) {
+/**
+ * Persist the walk's listing progress and, when it is safe, the parsed
+ * frontier.
+ *
+ * The sweep is written first: it only records how deep the walk listed, which
+ * is matching-independent, and the repository only accepts deeper positions,
+ * so a shallow proposal (or a concurrent tick's) is a no-op.
+ *
+ * The frontier advances only after the claims committed (a crash costs a
+ * re-parse, never a lost release), only over the contiguous fully-parsed
+ * prefix of the walked region, only on a walk that listed the region down to
+ * a provable stopping point contiguous with the frontier, and only when this
+ * group's unsettled set was provably complete.
+ *
+ * Group-complete, not batch-complete: a parsed release may only be skipped
+ * for good when every withdrawal that could ever claim it was offered the
+ * match. That means (a) no pending/submitted withdrawal remains for this
+ * (instance, mint) — its release can already be on chain, and advancing past
+ * it would strand the withdrawal forever once it confirms — and (b) the batch
+ * was not truncated past this group's rows, and (c) unrelated groups filling
+ * the global batch cannot hold this group's progress hostage. The count is
+ * read per group and any failure holds the cursor.
+ */
+async function persistScanPositions(
+  repo: PrivateChannelWithdrawalRepository,
+  releaseScanRepo: PrivateChannelReleaseScanRepository,
+  group: ReleaseGroup,
+  vaultAta: Address,
+  rawSweep: PrivateChannelReleaseScanCursor | null,
+  walk: { complete: boolean; deepestListed: PrivateChannelReleaseScanCursor | null },
+  ordered: solanaRpc.SignatureInfo[],
+  parsedSignatures: Set<string>
+): Promise<void> {
+  if (walk.deepestListed) {
+    await releaseScanRepo.deepenSweep({
+      instanceId: group.instance.id,
+      mint: group.mint,
+      vaultAta,
+      sweep: walk.deepestListed,
+    });
+  }
+
+  let groupComplete: boolean;
+  try {
+    const nonTerminal = await repo.countNonTerminalByInstanceAndMint(group.instance.id, group.mint);
+    groupComplete = nonTerminal === group.withdrawals.length;
+  } catch (err) {
+    getLogger().error(
+      {
+        instanceId: group.instance.id,
+        mint: group.mint,
+        error: err instanceof Error ? err.message : String(err),
+      },
+      "trackPendingWithdrawals: group completeness check failed; cursor held"
+    );
+    groupComplete = false;
+  }
+  if (!walk.complete || !groupComplete) {
     return;
   }
-  let deepestParsed: PrivateChannelReleaseScanCursor | null = null;
+  let frontier: PrivateChannelReleaseScanCursor | null = null;
   for (const entry of ordered) {
     const complete = entry.err !== null || parsedSignatures.has(entry.signature);
     if (!complete) {
       break;
     }
-    deepestParsed = {
+    frontier = {
       signature: entry.signature,
       slot: entry.slot.toString(),
     };
   }
-  if (deepestParsed) {
+  if (frontier) {
     await releaseScanRepo.advanceScan({
       instanceId: group.instance.id,
       mint: group.mint,
       vaultAta,
-      cursor: deepestParsed,
+      cursor: frontier,
     });
+    // The frontier consumed the listed backlog — the sweep has nothing left
+    // to resume and the next walk can target the frontier directly.
+    if (rawSweep && BigInt(frontier.slot) >= BigInt(rawSweep.slot)) {
+      await releaseScanRepo.clearSweep({
+        instanceId: group.instance.id,
+        mint: group.mint,
+        vaultAta,
+      });
+    }
   }
 }
 
@@ -659,38 +773,92 @@ async function reconcileReleaseGroup(
  * was parsed on an earlier tick), the created_at lower bound (only checked
  * cursor-less — with a cursor the walk's job is exactly the unparsed region
  * above it, whatever its age), history's end, or the page cap.
+ *
+ * Two phases, so a backlog deeper than one tick's page cap still gets walked
+ * instead of being re-read from the tip forever:
+ *
+ * 1. Tip band — the newest entries, where fresh releases land. With a sweep
+ *    pending this is a small fixed budget; every entry passes through it on
+ *    arrival, and the deep region is the sweep's job.
+ * 2. Sweep — when a previous capped walk persisted where it stopped, resume
+ *    listing below that signature toward the cursor with the remaining page
+ *    budget. Each tick marches the sweep deeper, so the backlog is eventually
+ *    listed down to the cursor and the parsed frontier can consume it.
+ *
+ * `complete` reports whether the listed region reaches a provable stopping
+ * point contiguous with the frontier (or, cursor-less, the created_at bound or
+ * history's end) — the precondition for advancing the frontier. `deepestListed`
+ * carries where a capped walk stopped so it can be persisted as the sweep.
  */
 async function walkReleaseHistory(
   rpc: solanaRpc.SolanaRpc,
   vaultAta: Address,
-  scan: PrivateChannelReleaseScanCursor | null,
+  cursor: PrivateChannelReleaseScanCursor | null,
+  sweep: PrivateChannelReleaseScanCursor | null,
   lowerBoundMs: number
-): Promise<{ entries: solanaRpc.SignatureInfo[]; complete: boolean }> {
+): Promise<{
+  entries: solanaRpc.SignatureInfo[];
+  complete: boolean;
+  deepestListed: PrivateChannelReleaseScanCursor | null;
+}> {
   const entries: solanaRpc.SignatureInfo[] = [];
-  let before: Signature | undefined;
-  for (let page = 0; page < RELEASE_SCAN_MAX_PAGES; page += 1) {
-    const infos = await solanaRpc.getSignaturesForAddress(rpc, vaultAta, {
-      limit: RELEASE_SCAN_PAGE_LIMIT,
-      ...(before ? { before } : {}),
-    });
-    if (infos.length === 0) {
-      return { entries, complete: true };
-    }
-    for (const info of infos) {
-      if (scan && info.signature === scan.signature) {
-        return { entries, complete: true };
+
+  const listBackward = async (
+    startBefore: Signature | undefined,
+    maxPages: number
+  ): Promise<{
+    stoppedAt: "cursor" | "bound" | "end" | "cap";
+    deepest: PrivateChannelReleaseScanCursor | null;
+  }> => {
+    let before = startBefore;
+    let deepest: PrivateChannelReleaseScanCursor | null = null;
+    for (let page = 0; page < maxPages; page += 1) {
+      const infos = await solanaRpc.getSignaturesForAddress(rpc, vaultAta, {
+        limit: RELEASE_SCAN_PAGE_LIMIT,
+        ...(before ? { before } : {}),
+      });
+      if (infos.length === 0) {
+        return { stoppedAt: "end", deepest };
       }
-      if (!scan && info.blockTime !== null && Number(info.blockTime) * 1000 < lowerBoundMs) {
-        return { entries, complete: true };
+      for (const info of infos) {
+        if (cursor && info.signature === cursor.signature) {
+          return { stoppedAt: "cursor", deepest };
+        }
+        if (!cursor && info.blockTime !== null && Number(info.blockTime) * 1000 < lowerBoundMs) {
+          return { stoppedAt: "bound", deepest };
+        }
+        entries.push(info);
+        deepest = { signature: info.signature, slot: info.slot.toString() };
       }
-      entries.push(info);
+      if (infos.length < RELEASE_SCAN_PAGE_LIMIT) {
+        return { stoppedAt: "end", deepest };
+      }
+      before = infos[infos.length - 1].signature;
     }
-    if (infos.length < RELEASE_SCAN_PAGE_LIMIT) {
-      return { entries, complete: true };
-    }
-    before = infos[infos.length - 1].signature;
+    return { stoppedAt: "cap", deepest };
+  };
+
+  // Phase 1 — tip band.
+  const tip = await listBackward(
+    undefined,
+    sweep ? RELEASE_SCAN_TIP_PAGES : RELEASE_SCAN_MAX_PAGES
+  );
+  if (tip.stoppedAt !== "cap") {
+    return { entries, complete: true, deepestListed: null };
   }
-  return { entries, complete: false };
+  if (!sweep) {
+    // First capped walk: the tip band's deepest point is where a later tick
+    // resumes listing.
+    return { entries, complete: false, deepestListed: tip.deepest };
+  }
+  // Phase 2 — resume below the persisted sweep position toward the cursor.
+  const remaining = RELEASE_SCAN_MAX_PAGES - RELEASE_SCAN_TIP_PAGES;
+  const resumed = await listBackward(sweep.signature, remaining);
+  return {
+    entries,
+    complete: resumed.stoppedAt !== "cap",
+    deepestListed: resumed.stoppedAt === "cap" ? resumed.deepest : null,
+  };
 }
 
 async function advanceToSettled(

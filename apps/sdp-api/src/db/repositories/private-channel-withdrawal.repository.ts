@@ -109,6 +109,12 @@ export interface PrivateChannelWithdrawalRepository {
   listNonTerminal(limit: number): Promise<PrivateChannelWithdrawalRow[]>;
   /** Delete guard. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
+  /**
+   * Non-terminal withdrawals for one (instance, mint) group. The release
+   * reconciler uses it to prove a scan group is complete: every withdrawal
+   * that could claim a parsed release was in the tick's batch.
+   */
+  countNonTerminalByInstanceAndMint(instanceId: string, mint: string): Promise<number>;
   /** Merge `patch` into `context` JSONB atomically (see deposit repo). */
   patchContext(id: string, patch: PrivateChannelTransferContext): Promise<void>;
 }
