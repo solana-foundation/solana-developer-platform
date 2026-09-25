@@ -424,6 +424,7 @@ export function findRemovedViewColumns(baseSql, headSql) {
       findings.push(`drops the repeatable view ${view}`);
       continue;
     }
+    if ([...columns, ...current].some((column) => column.endsWith("*"))) continue;
     for (const column of columns) {
       if (!current.has(column)) findings.push(`removes column ${column} from view ${view}`);
     }

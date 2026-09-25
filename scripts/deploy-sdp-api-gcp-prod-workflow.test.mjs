@@ -308,6 +308,8 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   );
   assert.match(workflow, /if \[\[ "\$\{RUN_ATTEMPT\}" != "1" \]\]; then/);
   assert.match(workflow, /actions\/runs\/\$\{RUN_ID\}\/approvals/);
+  assert.match(workflow, /\[\.author\.login \/\/ "unlinked", \.committer\.login \/\/ "unlinked"\]/);
+  assert.match(workflow, /if grep -qx 'unlinked' <<<"\$\{authors\}"; then/);
   assert.match(
     workflow,
     /git log --format=%H "\$\{since\}\.\.\$\{DEPLOY_IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/

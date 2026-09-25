@@ -195,9 +195,13 @@ jobs:
           authors="$(
             for commit in $(git log --format=%H "${since}..${DEPLOY_IMAGE_SHA}" -- apps/sdp-api/src/db/migrations/postgres); do
               gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" \
-                --jq '[.author.login // empty, .committer.login // empty] | .[]'
+                --jq '[.author.login // "unlinked", .committer.login // "unlinked"] | .[]'
             done | grep -vx 'web-flow' | sort -u
           )"
+          if grep -qx 'unlinked' <<<"${authors}"; then
+            echo "A pending migration commit has no GitHub-linked author, so self-approval cannot be ruled out. Link the author's email or re-commit before approving." >&2
+            exit 1
+          fi
           for approver in ${approvers}; do
             if grep -qx "${approver}" <<<"${authors}"; then
               echo "${approver} authored a pending migration and approved it; a different foundation member must approve." >&2
