@@ -404,7 +404,6 @@
       "unknownToken": "Token không xác định",
       "tokenUnavailableOnNetwork": "{currency} không khả dụng trên mạng này.",
       "importExceedsMaximumRecipients": "Một batch tối đa {max} người nhận. Import này sẽ đưa tổng lên {total}.",
-      "importDuplicateWallet": "counterparty_wallet_id trùng lặp {id}: mỗi wallet chỉ được xuất hiện một lần trong mỗi lần nhập.",
       "submitting": "Đang gửi batch.",
       "someRecipientsDidNotReceiveFunds": "Một số người nhận không nhận được tiền.",
       "status": "Trạng thái: {status}",

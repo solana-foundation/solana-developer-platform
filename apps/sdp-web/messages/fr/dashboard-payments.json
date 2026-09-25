@@ -405,7 +405,6 @@
       "customToken": "Personnalisé Token",
       "tokenUnavailableOnNetwork": "{currency} n'est pas disponible sur ce réseau.",
       "importExceedsMaximumRecipients": "Un Batch peut avoir au plus des destinataires {max}. Cette importation porterait le total à {total}.",
-      "importDuplicateWallet": "counterparty_wallet_id dupliqué {id} : chaque wallet ne peut apparaître qu'une seule fois par import.",
       "submitting": "Soumission de Batch.",
       "someRecipientsDidNotReceiveFunds": "Certains bénéficiaires n'ont pas reçu de fonds.",
       "status": "Statut : {status}",

@@ -405,7 +405,6 @@
       "customToken": "Token personalizado",
       "tokenUnavailableOnNetwork": "{currency} no está disponible en esta red.",
       "importExceedsMaximumRecipients": "Un lote puede tener como máximo {max} destinatarios. Esta importación llevaría el total a {total}.",
-      "importDuplicateWallet": "counterparty_wallet_id duplicado {id}: cada wallet solo puede aparecer una vez por importación.",
       "submitting": "Enviando lote.",
       "someRecipientsDidNotReceiveFunds": "Algunos destinatarios no recibieron fondos.",
       "status": "Estado: {status}",

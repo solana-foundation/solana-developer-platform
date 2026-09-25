@@ -255,7 +255,13 @@ describe("batch send wizard bulk import duplicate rows", () => {
     ];
 
     const { valid, errors } = validateBulkRows(duplicateRows);
-    expect(errors).toEqual([{ row: 2, message: "Duplicate counterparty_wallet_id" }]);
+    expect(errors).toEqual([
+      {
+        row: 2,
+        message: "Duplicate counterparty_wallet_id",
+        duplicateAccountId: ACCOUNT_ID,
+      },
+    ]);
     expect(valid).toEqual([duplicateRows[0]]);
   });
 });

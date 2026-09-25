@@ -60,7 +60,15 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
   const handleImport = async () => {
     const { valid, errors: rowErrors } = validateBulkRows(rows);
     const messages = rowErrors.map((error) =>
-      t("DashboardPayments.batchSend.rowError", { row: error.row, message: error.message })
+      t("DashboardPayments.batchSend.rowError", {
+        row: error.row,
+        message:
+          error.duplicateAccountId === undefined
+            ? error.message
+            : t("DashboardPayments.batchSend.importDuplicateWallet", {
+                id: error.duplicateAccountId,
+              }),
+      })
     );
     if (valid.length === 0 && messages.length === 0) {
       setErrors([t("DashboardPayments.batchSend.addAtLeastOneRecipient")]);
