@@ -151,9 +151,10 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   }
 
   // A tab without a wizard frame lays out the same column the frame does: the shell's gutter,
-  // 36px under the tabs, the flow's width, and its own scrolling when it outgrows the viewport.
+  // 36px under the tabs (32px on a phone), the flow's width, and its own scrolling when it
+  // outgrows the viewport.
   const tabColumn = (children: ReactNode) => (
-    <div className="h-full min-h-0 overflow-y-auto px-4 pt-9 pb-16 md:px-6">
+    <div className="h-full min-h-0 overflow-y-auto px-4 pt-8 pb-16 md:px-6 md:pt-9">
       <div className="mx-auto w-full max-w-flow">{children}</div>
     </div>
   );

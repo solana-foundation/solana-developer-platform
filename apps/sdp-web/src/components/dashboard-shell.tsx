@@ -679,8 +679,10 @@ export function DashboardShell({
           </aside>
 
           {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
-            duplicate of every destination would otherwise sit behind the overlay. */}
-          {isMobileSidebarOpen || isMoreSheetOpen ? null : (
+            duplicate of every destination would otherwise sit behind the overlay. A refresh
+            route has no bar at all: the design's phone reaches the navigation through the
+            menu button over the title. */}
+          {isRefresh || isMobileSidebarOpen || isMoreSheetOpen ? null : (
             <DashboardBottomNav
               pathname={pathname}
               custodyEnabled={custodyEnabled}
@@ -712,7 +714,7 @@ export function DashboardShell({
                 className="absolute inset-0 bg-primary/30"
                 onClick={() => setMobileSidebarOpen(false)}
               />
-              <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg">
+              <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg refresh:shadow-none">
                 <DashboardSidebarContent
                   canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                   navSections={navSections}
@@ -735,8 +737,15 @@ export function DashboardShell({
           <section
             className={cn(
               "relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
+              // The locked layout clears the phone's bottom bar; a refresh route has none, so it
+              // keeps only the home indicator's inset.
               shouldLockViewportScroll
-                ? "flex min-h-0 flex-col overflow-hidden pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0"
+                ? [
+                    "flex min-h-0 flex-col overflow-hidden md:pb-0",
+                    isRefresh
+                      ? "pb-[env(safe-area-inset-bottom)]"
+                      : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
+                  ]
                 : isRefresh
                   ? "py-0"
                   : "px-3 py-5 md:p-6"
@@ -787,6 +796,7 @@ export function DashboardShell({
                       hasHeaderTabs={hasHeaderTabs}
                       action={headerAction}
                       above={stacksBackAboveTitle ? backAction : undefined}
+                      layout={isRefresh ? "refresh" : "base"}
                     />
                   </div>
 
@@ -798,7 +808,12 @@ export function DashboardShell({
                       )}
                     >
                       <div
-                        className={cn("flex items-end", !alignsHeaderWithContent && "px-3 md:px-6")}
+                        className={cn(
+                          "flex items-end",
+                          alignsHeaderWithContent
+                            ? "sdp-quiet-scroll min-w-0 overflow-x-auto"
+                            : "px-3 md:px-6"
+                        )}
                       >
                         <DashboardHeaderTabs {...headerTabs} />
                       </div>
@@ -835,8 +850,9 @@ export function DashboardShell({
                     "mx-auto min-w-0 w-full",
                     contentWidthClass,
                     // Clears the fixed mobile bottom bar so the last row of any page is
-                    // still reachable; the bar is md:hidden, so the padding is too.
-                    !shouldLockViewportScroll ? "pb-20 md:pb-0" : "",
+                    // still reachable; the bar is md:hidden, so the padding is too. A refresh
+                    // route has no bar.
+                    !shouldLockViewportScroll && !isRefresh ? "pb-20 md:pb-0" : "",
                     // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
                     // footer inside it would then pin to this box instead of the viewport.
                     shouldClipHorizontalOverflow && !shouldLockViewportScroll

@@ -630,7 +630,7 @@ export function PaymentRequestsWorkspace({
                   onClear: () => setQuery(""),
                 }}
                 placeholder={t("DashboardPayments.requests.searchPlaceholder")}
-                className="w-full sm:w-56"
+                className="min-w-0 flex-1 sm:w-56 sm:flex-none"
               />
             </ListToolbar>
             <DirectoryCapNotice count={requests.length} total={total} />

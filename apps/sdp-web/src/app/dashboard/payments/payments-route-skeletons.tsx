@@ -102,11 +102,14 @@ function WorkspaceCardHeaderSkeleton({
 
 function ListToolbarSkeleton() {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3" data-loading-list-toolbar>
-      <SkeletonBlock className="h-control-md w-24 rounded-control" />
-      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:flex-nowrap">
+    <div
+      className="flex items-center gap-3 sm:flex-wrap sm:justify-between"
+      data-loading-list-toolbar
+    >
+      <SkeletonBlock className="h-control-md w-24 shrink-0 rounded-control" />
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:justify-end">
         <SkeletonBlock className="h-control-md w-24 shrink-0 rounded-control" />
-        <SkeletonBlock className="h-control-md w-full rounded-control sm:w-56" />
+        <SkeletonBlock className="h-control-md min-w-0 flex-1 rounded-control sm:w-56 sm:flex-none" />
       </div>
     </div>
   );

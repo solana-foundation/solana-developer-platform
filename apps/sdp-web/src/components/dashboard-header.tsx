@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
+  MenuIcon,
   PanelRightIcon,
   PlusIcon,
 } from "lucide-react";
@@ -109,6 +110,12 @@ type DashboardTopBarProps = {
   action?: ReactNode;
   /** Set over a left title: a refresh action page's way back. */
   above?: ReactNode;
+  /**
+   * "refresh" is the design's phone header: a menu button that opens the navigation, the title
+   * under it, then the page's action; from md the sidebar is back and the action rejoins the
+   * title's row. "base" keeps the bottom bar's layout.
+   */
+  layout?: "base" | "refresh";
 };
 
 export function HeaderBackAction({
@@ -163,6 +170,72 @@ function SidebarToggle({
     >
       <PanelRightIcon className="h-4 w-4" />
     </button>
+  );
+}
+
+/**
+ * The refresh phone header's way into the navigation: the design's 20px menu glyph on a 36px
+ * target, pulled 4px into the gutter so the glyph's lines start where the title does. Gone
+ * from md, where the sidebar itself is on screen.
+ */
+function MobileNavButton({ onClick }: { onClick: () => void }) {
+  const t = useTranslations();
+  return (
+    <button
+      type="button"
+      aria-label={t("Shared.dashboardShell.openNavigation")}
+      onClick={onClick}
+      className="-ml-1 inline-flex size-9 items-center justify-center rounded-control text-secondary transition-colors hover:bg-fill-subtle hover:text-primary md:hidden"
+    >
+      <MenuIcon className="size-5" strokeWidth={1.5} aria-hidden="true" />
+    </button>
+  );
+}
+
+/**
+ * The refresh title block. On a phone it is the design's three rows: the navigation button
+ * (with the language picker at the far right), the title 8px under it, then the page's action
+ * 12px under that. From md the button goes and the action and picker sit on the title's row.
+ */
+export function StackedDashboardTopBar({
+  navigation,
+  title,
+  action,
+  trailingContent,
+  hideTitle = false,
+  above,
+}: {
+  navigation: ReactNode;
+  title: string;
+  action?: ReactNode;
+  trailingContent: ReactNode;
+  hideTitle?: boolean;
+  /** Set over the title in its column: a refresh action page's way back. */
+  above?: ReactNode;
+}) {
+  return (
+    <div
+      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_auto]"
+      data-dashboard-stacked-topbar
+    >
+      <div className="col-start-1 row-start-1 flex items-center md:hidden">{navigation}</div>
+      {hideTitle ? (
+        <h1 className="sr-only">{title}</h1>
+      ) : (
+        <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
+          {above ? <div className="mb-2">{above}</div> : null}
+          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+            {title}
+          </h1>
+        </div>
+      )}
+      {action ? (
+        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:ml-1">
+          {action}
+        </div>
+      ) : null}
+      <div className="col-start-3 row-start-1 flex items-center justify-end">{trailingContent}</div>
+    </div>
   );
 }
 
@@ -259,6 +332,7 @@ export function DashboardTopBar({
   hasHeaderTabs = false,
   action,
   above,
+  layout = "base",
 }: DashboardTopBarProps) {
   const trailingContent = action ? (
     <>
@@ -271,6 +345,32 @@ export function DashboardTopBar({
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
+  const isRefresh = layout === "refresh";
+  const openNavigation = () => setMobileSidebarOpen(true);
+
+  if (isRefresh && !centersPageTitle && !topBarLeadingContent) {
+    return (
+      <StackedDashboardTopBar
+        navigation={<MobileNavButton onClick={openNavigation} />}
+        title={title}
+        hideTitle={titleVisibility === "screen-reader-only"}
+        above={above}
+        action={action}
+        trailingContent={TRAILING_CONTENT}
+      />
+    );
+  }
+
+  // The refresh phone has no bottom bar, so a centred or back-linked title still needs the
+  // menu button; the base shell's toggle stays hidden behind the bar.
+  const sidebarToggle = isRefresh ? (
+    <MobileNavButton onClick={openNavigation} />
+  ) : (
+    <SidebarToggle
+      isMobileSidebarOpen={isMobileSidebarOpen}
+      setMobileSidebarOpen={setMobileSidebarOpen}
+    />
+  );
 
   if (centersPageTitle) {
     return (
@@ -279,10 +379,7 @@ export function DashboardTopBar({
         hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
-            <SidebarToggle
-              isMobileSidebarOpen={isMobileSidebarOpen}
-              setMobileSidebarOpen={setMobileSidebarOpen}
-            />
+            {sidebarToggle}
             {topBarLeadingContent}
           </>
         }
@@ -299,10 +396,7 @@ export function DashboardTopBar({
       above={above}
       leadingContent={
         <>
-          <SidebarToggle
-            isMobileSidebarOpen={isMobileSidebarOpen}
-            setMobileSidebarOpen={setMobileSidebarOpen}
-          />
+          {sidebarToggle}
           {topBarLeadingContent}
         </>
       }

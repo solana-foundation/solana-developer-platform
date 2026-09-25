@@ -33,6 +33,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { cn } from "@/lib/utils";
 import {
   resolveTransferTokenLabel,
   shortenAddress,
@@ -81,28 +82,38 @@ function walletName(wallet: PaymentsDashboardWallet): string {
   return wallet.label ?? shortenAddress(wallet.publicKey);
 }
 
-function AddressQr({ address }: { address: string }) {
+/**
+ * The address as a code. A phone shows it on the design's 176px white plate, dark modules in
+ * both themes; from sm it is the bare 128px code beside the text column, inverting with the
+ * theme.
+ */
+function AddressQr({ address, className }: { address: string; className?: string }) {
   const t = useTranslations();
   const { data } = useSWR(
     paymentsQueryKeys.walletAddressQr(address),
     () =>
       QRCode.toDataURL(address, {
         margin: 0,
-        width: 240,
+        width: 288,
         color: { dark: "#0f0f12", light: "#00000000" },
       }),
     { revalidateOnFocus: false, revalidateOnReconnect: false, revalidateIfStale: false }
   );
   return (
-    <div className="size-32 shrink-0">
+    <div
+      className={cn(
+        "size-44 shrink-0 rounded-control bg-white p-4 sm:size-32 sm:rounded-none sm:bg-transparent sm:p-0",
+        className
+      )}
+    >
       {data ? (
         <Image
           src={data}
           alt={t("DashboardPayments.ramps.walletAddressQrCode")}
-          width={128}
-          height={128}
+          width={144}
+          height={144}
           unoptimized
-          className="size-full dark:invert"
+          className="size-full sm:dark:invert"
         />
       ) : (
         <div className="size-full animate-pulse rounded-control bg-fill" />
@@ -195,9 +206,12 @@ export function DepositAddressPanel({
   return (
     <div>
       {/* The design's 160px card: a 128px code in a 16px inset; the wallet and its address at
-          the top of the text column, the network warning at its foot. */}
+          the top of the text column, the network warning at its foot. On a phone the card
+          stacks: the code first, centred on its plate, then the wallet, the address, a
+          full-width copy button and the warning as a 13px hint. */}
       <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
-        <div className="flex min-w-0 flex-1 flex-col justify-between gap-6 px-2 pt-2">
+        <AddressQr address={wallet.publicKey} className="self-center sm:order-last sm:self-auto" />
+        <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-6 sm:px-2 sm:pt-2">
           <div className="space-y-3">
             <DropdownMenu>
               <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -235,22 +249,35 @@ export function DepositAddressPanel({
               <p className="min-w-0 font-mono text-field break-all text-primary">
                 {wallet.publicKey}
               </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t("DashboardPayments.ramps.copyAddress")}
-                onClick={() => void copyAddress()}
-              >
-                <CopyIcon className="size-4" />
-              </Button>
+              {/* Wrapped, not classed: the design-system button sets its own display. */}
+              <span className="hidden sm:contents">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("DashboardPayments.ramps.copyAddress")}
+                  onClick={() => void copyAddress()}
+                >
+                  <CopyIcon className="size-4" />
+                </Button>
+              </span>
             </div>
           </div>
-          <p className="text-body text-secondary">
+          {/* The phone's copy control: the design's full-width 44px outline button, 20px under
+              the address. From sm the icon beside the address does it. */}
+          <Button
+            type="button"
+            variant="outline"
+            iconLeft={<CopyIcon />}
+            onClick={() => void copyAddress()}
+            className="mt-4 h-11 w-full text-field sm:hidden"
+          >
+            {t("DashboardPayments.ramps.copyAddress")}
+          </Button>
+          <p className="mt-4 text-meta text-secondary sm:mt-0 sm:text-body">
             {t("DashboardPayments.depositAddress.networkWarning", { network })}
           </p>
         </div>
-        <AddressQr address={wallet.publicKey} />
       </section>
 
       {/* 40px rows of 16px text over faint rules, 24px under the card. */}

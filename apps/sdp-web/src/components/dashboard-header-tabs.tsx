@@ -127,7 +127,9 @@ export function DashboardHeaderTabs({ tabs, hideOnMobile }: DashboardHeaderTabsC
         replaceSearchParams({ tab: value === defaultTabId ? null : value, page: null });
       }}
     >
-      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6">
+      {/* A refresh tab never wraps: the design's phone keeps "Card or bank through a provider"
+          on one line and lets the strip scroll if it must. */}
+      <TabList className="[&>span]:![translate:var(--active-tab-left)_0] [&>span]:!w-[var(--active-tab-width)] refresh:gap-6 refresh:[&_[role=tab]]:whitespace-nowrap">
         {tabs.map((tab) => (
           <Tab key={tab.id} value={tab.id}>
             {tab.id in headerTabCountByTabId

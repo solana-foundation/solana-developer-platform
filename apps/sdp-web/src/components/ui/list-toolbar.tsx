@@ -8,8 +8,9 @@ import { cn } from "@/lib/utils";
 export const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
 
 /**
- * A list's control row: filters on the left; page size and search on the right. Wraps to two
- * rows on narrow screens.
+ * A list's control row: filters on the left; page size and search on the right. On a phone it
+ * stays one row, as the design's does, with the search field taking what is left of the width
+ * (give it `min-w-0 flex-1 sm:w-56 sm:flex-none`).
  */
 export function ListToolbar({
   filters,
@@ -21,11 +22,9 @@ export function ListToolbar({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-3", className)}>
-      <div className="flex min-w-0 items-center gap-2">{filters}</div>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:flex-nowrap">
-        {children}
-      </div>
+    <div className={cn("flex items-center gap-3 sm:flex-wrap sm:justify-between", className)}>
+      <div className="flex shrink-0 items-center gap-2">{filters}</div>
+      <div className="flex min-w-0 flex-1 items-center gap-3 sm:justify-end">{children}</div>
     </div>
   );
 }

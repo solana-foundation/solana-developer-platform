@@ -12,9 +12,10 @@ import { cn } from "@/lib/utils";
 //
 // A refresh surface already sets the page in its own column, so the panel adds no inset and no
 // gutter: its content shares the title's left and right edges. The 36px top is the design's
-// distance from the title row (or the tabs) to the first content block; 64px closes the page.
+// distance from the title row (or the tabs) to the first content block (28px on a phone);
+// 64px closes the page.
 export const dashboardWorkspaceOverviewPanelClassName =
-  "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6 refresh:px-0 refresh:pt-9 refresh:pb-16 refresh:[scrollbar-gutter:auto] md:refresh:px-0 md:refresh:pb-16";
+  "h-full min-h-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-3 pt-6 pb-5 md:px-6 md:pb-6 refresh:px-0 refresh:pt-7 refresh:pb-16 refresh:[scrollbar-gutter:auto] md:refresh:px-0 md:refresh:pt-9 md:refresh:pb-16";
 
 /**
  * The standard playground/chrome panel: absolutely positioned to fill the

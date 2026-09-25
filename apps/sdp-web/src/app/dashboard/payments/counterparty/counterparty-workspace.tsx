@@ -170,7 +170,7 @@ function DirectoryToolbar({
           onClear: () => onQueryChange(""),
         }}
         placeholder={t("DashboardPayments.counterparty.searchPlaceholder")}
-        className="w-full sm:w-56"
+        className="min-w-0 flex-1 sm:w-56 sm:flex-none"
       />
     </ListToolbar>
   );

@@ -273,7 +273,7 @@ export function RecurringPaymentsWorkspace({
             onClear: () => setQuery(""),
           }}
           placeholder={t("DashboardPayments.recurring.searchPayments")}
-          className="w-full sm:w-56"
+          className="min-w-0 flex-1 sm:w-56 sm:flex-none"
         />
       </ListToolbar>
       {lookupError ? <p className="text-meta text-warning">{lookupError}</p> : null}
