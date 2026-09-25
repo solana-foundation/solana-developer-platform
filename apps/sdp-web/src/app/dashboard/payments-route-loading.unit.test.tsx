@@ -90,7 +90,8 @@ describe("home and payments route loading states", () => {
   it("preserves the responsive table, wizard, and detail geometry", () => {
     const markup = renderScopedLoadingStates();
 
-    expect(markup.match(/data-loading-table="true"/g)).toHaveLength(5);
+    // The four refresh Payments lists; the Overview loads its balance and charts, not a table.
+    expect(markup.match(/data-loading-table="true"/g)).toHaveLength(4);
     expect(markup.match(/data-loading-wizard/g)).toHaveLength(3);
     expect(markup.match(/data-loading-detail-rows/g)).toHaveLength(4);
     expect(markup).toContain("lg:grid-cols-2");
@@ -187,32 +188,16 @@ describe("home and payments route loading states", () => {
     expect(markup).not.toContain("overflow-hidden");
   });
 
-  it("matches the Home activity Card's settled responsive table geometry", () => {
+  it("mirrors the Overview: balance beside four tiles, then the network's four charts", () => {
     const markup = renderToStaticMarkup(<DashboardLoading />);
 
-    expect(markup.match(/data-loading-home-activity=/g)).toHaveLength(1);
-    expect(markup.match(/data-loading-home-activity-header=/g)).toHaveLength(1);
-    expect(markup.match(/data-loading-home-activity-table=/g)).toHaveLength(1);
-    expect(markup.match(/data-loading-home-activity-column=/g)).toHaveLength(6);
-    expect(markup.match(/data-loading-home-activity-row=/g)).toHaveLength(6);
-    expect(markup.match(/data-loading-home-mobile-activity=/g)).toHaveLength(6);
-    expect(markup.match(/min-w-0 md:hidden/g)).toHaveLength(6);
-    expect(markup.match(/mt-1 h-3/g)).toHaveLength(12);
-    expect(markup.match(/hidden md:table-cell/g)).toHaveLength(18);
-    expect(markup.match(/hidden pr-6 md:table-cell/g)).toHaveLength(7);
-    expect(markup).toMatch(
-      /data-loading-home-activity="true"[\s\S]*data-loading-home-activity-header="true"[\s\S]*data-loading-table="true"/
-    );
-    expect(markup).toContain(
-      "flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
-    );
-    expect(markup).toContain("min-w-0 [&amp;_table]:table-fixed");
-    expect(markup).toContain("w-[8rem] pl-6");
-    expect(markup).toContain("w-[calc(100%_-_8rem)] md:hidden");
-    expect(markup.match(/hidden w-\[12rem\] md:table-cell/g)).toHaveLength(2);
-    expect(markup).toContain("hidden w-[9rem] md:table-cell");
-    expect(markup).toContain("hidden pr-6 md:table-cell");
-    expect(markup).not.toContain('class="h-11 w-full"');
+    expect(markup.match(/data-loading-home-hero=/g)).toHaveLength(1);
+    expect(markup).toContain("lg:grid-cols-2 lg:gap-12");
+    expect(markup.match(/h-\[120px\] rounded-control/g)).toHaveLength(4);
+    expect(markup.match(/data-loading-home-network=/g)).toHaveLength(1);
+    expect(markup.match(/h-\[182px\] w-full rounded-control/g)).toHaveLength(4);
+    // The quick start and the approvals list only appear when they have something to say.
+    expect(markup).not.toContain("data-loading-table");
   });
 
   it("keeps the recurring list loader contained at a 390px viewport", () => {

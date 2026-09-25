@@ -1,7 +1,15 @@
 "use client";
 
 import type { SolanaCluster } from "@sdp/types";
-import { ChevronDown, Droplets, Ellipsis, ShieldCheck } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronDown,
+  Droplets,
+  Ellipsis,
+  EllipsisVertical,
+  ShieldCheck,
+} from "lucide-react";
+import Link from "next/link";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import {
@@ -27,8 +35,11 @@ interface WalletActionsMenuProps {
   walletLabel: string | null;
   supportsSignerCheck?: boolean;
   triggerLabel?: string;
-  triggerMode?: "button" | "icon";
+  /** `kebab` is the refresh wallet card's quiet vertical-dots trigger. */
+  triggerMode?: "button" | "icon" | "kebab";
   triggerClassName?: string;
+  /** Leads the menu with a link to the wallet, for surfaces that are not the wallet's own page. */
+  openHref?: string;
 }
 
 /**
@@ -54,6 +65,7 @@ export function WalletActionsMenu({
   triggerLabel,
   triggerMode = "icon",
   triggerClassName,
+  openHref,
 }: WalletActionsMenuProps) {
   const t = useTranslations();
   const { dashboardAccess, sandboxProject } = useDashboardWorkspace();
@@ -168,17 +180,32 @@ export function WalletActionsMenu({
         ) : (
           <Button
             type="button"
-            variant="outline"
+            variant={triggerMode === "kebab" ? "ghost" : "outline"}
             size="icon-sm"
             className={triggerClassName}
             aria-label={t("DashboardCustody.walletActionsFor", { wallet: resolvedWalletLabel })}
             disabled={isBusy}
           >
-            <Ellipsis className="h-4 w-4" />
+            {triggerMode === "kebab" ? (
+              <EllipsisVertical className="size-4.5" />
+            ) : (
+              <Ellipsis className="h-4 w-4" />
+            )}
           </Button>
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
+        {openHref ? (
+          <>
+            <DropdownMenuItem asChild>
+              <Link href={openHref}>
+                <ArrowUpRight className="h-4 w-4" />
+                {t("DashboardCustody.openWallet")}
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
         <DropdownMenuItem onSelect={runSignerCheck} disabled={isBusy || !canRunSignerCheck}>
           <ShieldCheck className="h-4 w-4" />
           {isBusy

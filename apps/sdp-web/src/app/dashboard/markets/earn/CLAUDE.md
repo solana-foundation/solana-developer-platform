@@ -644,7 +644,7 @@ browser pass on `/dashboard/markets/embedded-yield` and
   a truthful provider inventory. Do not reimplement either here: a client-side
   copy would drift, and a hidden row never reaches the browser to begin with.
 - Design system: SDP quiet-institutional (see `.claude/skills/sdp-ui-designer`).
-  Inter only — monospace is forbidden, including for addresses; use
+  The app's sans face only (`font-sans`, Season Sans) — monospace is forbidden, including for addresses; use
   `tabular-nums` for numeric alignment. The ONE exception is a genuine code
   surface: the integration guide's `ui/code-block`, which is mono by design. Selection
   state is `border-primary bg-fill-subtle` across the whole module. `Badge` is

@@ -235,17 +235,20 @@ test.describe("GCP dev dashboard read-only smoke", () => {
 
     await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
     expect((await activityResponse).status()).toBe(200);
-    await expect(page.getByText("Recent transactions", { exact: true })).toBeVisible();
-    const activityCard = page
-      .locator('[data-slot="card"]')
-      .filter({ has: page.getByText("Recent transactions", { exact: true }) });
-    const firstActivityRow = activityCard.locator("tbody tr").first();
-    const emptyActivity = activityCard.getByText(
-      /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
-    );
-    await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
-    if (await firstActivityRow.isVisible()) {
-      expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
+    // Before its first wallet an organization sees the wallet prompt instead of the list.
+    const activitySection = page.locator('[data-overview-section="activity"]');
+    const firstWalletPrompt = page.getByRole("heading", { name: "Start with a wallet" });
+    await expect(activitySection.or(firstWalletPrompt).first()).toBeVisible();
+    if (await activitySection.isVisible()) {
+      await expect(activitySection.getByText("Recent activity", { exact: true })).toBeVisible();
+      const firstActivityRow = activitySection.locator("tbody tr").first();
+      const emptyActivity = activitySection.getByText(
+        /No recent activity found yet\.|Create your first wallet to start tracking balances and activity\./
+      );
+      await expect(firstActivityRow.or(emptyActivity).first()).toBeVisible();
+      if (await firstActivityRow.isVisible()) {
+        expect((await firstActivityRow.innerText()).trim().length).toBeGreaterThan(0);
+      }
     }
     await assertExactIdentityAndProject(page, fixture);
     expect(activityRequests).toHaveLength(1);

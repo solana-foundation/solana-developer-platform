@@ -4,36 +4,60 @@
 
 :root {
   /* Clerk supports these native CSS variables, so its first paint follows the
-     pre-hydration .dark class without a theme-dependent React render. */
-  --clerk-color-primary: #1c1c1d;
-  --clerk-color-primary-foreground: #fcfcfa;
-  --clerk-color-foreground: #1c1c1d;
-  --clerk-color-muted-foreground: rgba(28, 28, 29, 0.64);
-  --clerk-color-neutral: #1c1c1d;
-  --clerk-color-background: #fcfcfa;
-  --clerk-color-input: #f0ede6;
-  --clerk-color-input-foreground: #1c1c1d;
+     pre-hydration .dark class without a theme-dependent React render. Literal sRGB values of
+     the palette in tokens.css (ink, papers, status hues), since Clerk derives its shades
+     from them. */
+  --clerk-color-primary: #0f0f13;
+  --clerk-color-primary-foreground: #fbfaf9;
+  --clerk-color-foreground: #0f0f13;
+  --clerk-color-muted-foreground: #4a4852;
+  --clerk-color-neutral: #0f0f13;
+  --clerk-color-background: #fbfaf9;
+  --clerk-color-input: #ffffff;
+  --clerk-color-input-foreground: #0f0f13;
   /* colorMuted must stay opaque: Clerk paints it as the sole background of the
      account-modal navbar, so any alpha lets the page bleed through. */
-  --clerk-color-muted: color-mix(in srgb, #fcfcfa, #1c1c1d 6%);
-  --clerk-color-border: rgba(28, 28, 29, 0.14);
-  --clerk-color-ring: rgba(28, 28, 29, 0.4);
-  --clerk-color-shimmer: rgba(28, 28, 29, 0.1);
+  --clerk-color-muted: color-mix(in srgb, #fbfaf9, #0f0f13 6%);
+  --clerk-color-border: rgba(15, 15, 19, 0.14);
+  --clerk-color-ring: rgba(15, 15, 19, 0.4);
+  --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
   --clerk-color-danger: #b91c1c;
   --clerk-color-success: #007a4e;
   --clerk-color-warning: #854d0e;
   --sdp-clerk-provider-icon-filter: none;
 }
 
-/* Point design-system runtime tokens at SDP's product palette. Re-declared on the refresh
-   scope so var() re-resolves there: a custom property computed at :root would otherwise
-   carry the base palette into a refresh subtree. */
-:root,
-[data-sdp-theme="refresh"] {
+/* The app's face and the design-system runtime tokens, on SDP's palette everywhere. The
+   package derives its text, border and button tokens from its own gray ramp, so each one the
+   palette changes is re-stated here to resolve against SDP's names. */
+:root {
+  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
+     which the browser matches to the Medium face, so every plain run came out heavy; body text is
+     the Regular face, drawn antialiased. A semibold or bold request takes the Medium face as it
+     is instead of a smeared synthetic bold. */
+  --font-weight-regular-base: 400;
+  font-weight: var(--font-weight-regular);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
   --sdp-shell-bg: var(--surface);
 
   --gray-1400: var(--emph-xh);
   --gray-1300: var(--emph-xh);
+
+  --text-extra-high: var(--emph-xh);
+  --text-high: var(--emph-m);
+  --text-medium: var(--emph-m);
+  --text-low: var(--emph-l);
+  --text-extra-low: var(--emph-xl);
+  --border-light: var(--border-l);
+
+  --button-primary-bg: var(--emph-xh);
+  --button-primary-bg-hover: var(--emph-xh);
+  --button-secondary-bg: var(--t8);
+  --button-secondary-bg-hover: var(--t12);
+  --button-secondary-text: var(--emph-xh);
 
   --status-success-text: var(--green-tx);
   --status-success-bg: var(--green-bg);
@@ -62,30 +86,10 @@
   --badge-info-dot: var(--blue-tx);
 }
 
-/* Refresh scope: the design-system component tokens the 2026 Payments design changes. The
-   package derives its text and component tokens from its gray ramp at :root, so each one the
-   design touches is re-stated here to resolve against the scope's palette. */
+/* Refresh scope: the design-system component treatments the 2026 design changes (control
+   radii, underline fields, tabs on the text, flat tables). The palette and faces are the same
+   inside and outside it; the redesigned routes and the sidebar carry it. */
 [data-sdp-theme="refresh"] {
-  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
-     which the browser matches to the Medium face, so every plain run came out heavy. The design's
-     body text is the Regular face, drawn antialiased. */
-  --font-weight-regular-base: 400;
-  font-weight: var(--font-weight-regular);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  --text-extra-high: var(--emph-xh);
-  --text-high: var(--emph-m);
-  --text-medium: var(--emph-m);
-  --text-low: var(--emph-l);
-  --text-extra-low: var(--emph-xl);
-  --border-light: var(--border-l);
-
-  --button-primary-bg: var(--emph-xh);
-  --button-primary-bg-hover: var(--emph-xh);
-  --button-secondary-bg: var(--t8);
-  --button-secondary-bg-hover: var(--t12);
-  --button-secondary-text: var(--emph-xh);
   --button-radius-xl: var(--corner-control);
   --button-radius-lg: var(--corner-control);
   --button-radius-md: var(--corner-control);
@@ -173,21 +177,21 @@
 :root.dark {
   color-scheme: dark;
 
-  --clerk-color-primary: #fcfcfa;
-  --clerk-color-primary-foreground: #1c1c1d;
-  --clerk-color-foreground: #fcfcfa;
-  --clerk-color-muted-foreground: rgba(252, 252, 250, 0.72);
-  --clerk-color-neutral: #fcfcfa;
-  --clerk-color-background: #343435;
-  --clerk-color-input: #1c1c1d;
-  --clerk-color-input-foreground: #fcfcfa;
-  --clerk-color-muted: color-mix(in srgb, #343435, #fcfcfa 8%);
-  --clerk-color-border: rgba(252, 252, 250, 0.16);
-  --clerk-color-ring: rgba(252, 252, 250, 0.56);
-  --clerk-color-shimmer: rgba(252, 252, 250, 0.1);
-  --clerk-color-danger: #fda4af;
-  --clerk-color-success: #6ee7b7;
-  --clerk-color-warning: #fcd34d;
+  --clerk-color-primary: #fbfaf9;
+  --clerk-color-primary-foreground: #08080a;
+  --clerk-color-foreground: #fbfaf9;
+  --clerk-color-muted-foreground: #b4b0be;
+  --clerk-color-neutral: #fbfaf9;
+  --clerk-color-background: #08080a;
+  --clerk-color-input: #0e0e11;
+  --clerk-color-input-foreground: #fbfaf9;
+  --clerk-color-muted: color-mix(in srgb, #08080a, #fbfaf9 8%);
+  --clerk-color-border: rgba(251, 250, 249, 0.16);
+  --clerk-color-ring: rgba(251, 250, 249, 0.56);
+  --clerk-color-shimmer: rgba(251, 250, 249, 0.1);
+  --clerk-color-danger: #d8584d;
+  --clerk-color-success: #4b9b73;
+  --clerk-color-warning: #a77446;
   --sdp-clerk-provider-icon-filter: grayscale(1) brightness(0) invert(1);
 }
 

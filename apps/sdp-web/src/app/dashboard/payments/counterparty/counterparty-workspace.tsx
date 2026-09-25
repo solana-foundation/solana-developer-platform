@@ -30,9 +30,18 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { dashboardFetch } from "@/lib/dashboard-fetch";
+import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDate } from "../payments-presentation";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
+
+/**
+ * The design's list type: 13px on a 20px line, so a row is the table's 44px, or 48px where a
+ * 24px copy button sits. Headings are 13px and regular; the design-system head reads its weight
+ * from `--font-weight-medium`, so the head re-points that rather than fight the class.
+ */
+const CELL_CLASS = "text-meta leading-5";
+const HEAD_CLASS = "text-meta [--font-weight-medium:var(--font-weight-regular)]";
 
 type AddressFilter = "with" | "without";
 type EntityType = Counterparty["entityType"];
@@ -197,18 +206,18 @@ function AddressCell({
     // biome-ignore lint/a11y/noStaticElementInteractions: Keeps copy clicks from opening the row.
     // biome-ignore lint/a11y/useKeyWithClickEvents: The copy button inside handles the keyboard.
     <span
-      className="inline-flex items-center gap-1.5 whitespace-nowrap text-primary"
+      className="inline-flex items-center gap-1.5 whitespace-nowrap text-primary [&_svg]:size-3.5"
       onClick={(event) => event.stopPropagation()}
     >
-      <span title={addresses[0]}>{shortenAddress(addresses[0])}</span>
+      <span title={addresses[0]} className="tabular-nums">
+        {shortenAddress(addresses[0])}
+      </span>
       <WalletMetadataCopyButton
         value={addresses[0]}
         label={t("DashboardPayments.counterparty.address")}
       />
       {addresses.length > 1 ? (
-        <span className="text-secondary">
-          {t("DashboardPayments.counterparty.andMore", { count: addresses.length - 1 })}
-        </span>
+        <span>{t("DashboardPayments.counterparty.andMore", { count: addresses.length - 1 })}</span>
       ) : null}
     </span>
   );
@@ -231,38 +240,44 @@ function CounterpartyRow({
   const href = counterpartyHref(counterparty.id);
   return (
     <TableRow className="cursor-pointer" onClick={() => router.push(href)}>
-      <TableCell className="max-w-64 text-body text-primary">
+      <TableCell className={cn(CELL_CLASS, "max-w-64")}>
         <Link
           href={href}
-          className="block truncate focus-visible:underline focus-visible:outline-none"
+          className="block truncate font-medium text-primary focus-visible:underline focus-visible:outline-none"
           onClick={(event) => event.stopPropagation()}
         >
           {counterparty.displayName}
         </Link>
       </TableCell>
-      <TableCell className="text-body text-secondary">
+      <TableCell className={cn(CELL_CLASS, "text-secondary")}>
         {typeLabel(t, counterparty.entityType)}
       </TableCell>
       <TableCell
-        className={counterparty.externalId ? "text-body text-primary" : "text-body text-tertiary"}
+        className={cn(
+          CELL_CLASS,
+          counterparty.externalId ? "text-secondary tabular-nums" : "text-tertiary"
+        )}
       >
         <span className="block max-w-48 truncate">
           {counterparty.externalId ?? t("Shared.SharedComponents.notSet")}
         </span>
       </TableCell>
-      <TableCell className="text-body">
+      <TableCell className={CELL_CLASS}>
         <AddressCell addresses={addresses} addressesLoaded={addressesLoaded} />
       </TableCell>
-      <TableCell className="text-body whitespace-nowrap text-secondary">
+      <TableCell className={cn(CELL_CLASS, "whitespace-nowrap text-secondary tabular-nums")}>
         {formatDate(counterparty.createdAt, locale)}
       </TableCell>
       <TableCell className="text-right">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
+            {/* 24px, the copy button's size, so the menu never makes a row taller than its
+                address does. */}
             <Button
               type="button"
               variant="ghost"
-              size="icon-sm"
+              size="icon-xs"
+              className="[&_svg]:size-3.5"
               aria-label={t("DashboardPayments.counterparty.counterpartyActions")}
               onClick={(event) => event.stopPropagation()}
             >
@@ -419,11 +434,21 @@ export function CounterpartyWorkspace({
           <Table className="min-w-[760px] rounded-none border-0" data-counterparty-directory-table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("DashboardPayments.counterparty.name")}</TableHead>
-                <TableHead>{t("DashboardPayments.counterparty.type")}</TableHead>
-                <TableHead>{t("DashboardPayments.counterparty.externalId")}</TableHead>
-                <TableHead>{t("DashboardPayments.counterparty.address")}</TableHead>
-                <TableHead>{t("DashboardPayments.recurring.created")}</TableHead>
+                <TableHead className={HEAD_CLASS}>
+                  {t("DashboardPayments.counterparty.name")}
+                </TableHead>
+                <TableHead className={HEAD_CLASS}>
+                  {t("DashboardPayments.counterparty.type")}
+                </TableHead>
+                <TableHead className={HEAD_CLASS}>
+                  {t("DashboardPayments.counterparty.externalId")}
+                </TableHead>
+                <TableHead className={HEAD_CLASS}>
+                  {t("DashboardPayments.counterparty.address")}
+                </TableHead>
+                <TableHead className={HEAD_CLASS}>
+                  {t("DashboardPayments.recurring.created")}
+                </TableHead>
                 <TableHead className="w-12">
                   <span className="sr-only">
                     {t("DashboardPayments.counterparty.counterpartyActions")}

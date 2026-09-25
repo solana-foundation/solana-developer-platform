@@ -62,8 +62,8 @@ export function FullscreenLoadingIndicator({
     >
       <div
         aria-hidden="true"
-        style={{ width: isSidebarOpen ? 296 : 64 }}
-        className="hidden shrink-0 flex-col gap-8 px-4 py-5 md:flex"
+        style={{ width: isSidebarOpen ? 272 : 64 }}
+        className="hidden shrink-0 flex-col gap-8 border-r border-border-default px-4 py-5 md:flex"
       >
         <div className="flex items-center gap-3">
           <SkeletonBlock className="size-8 shrink-0 rounded-lg" />
@@ -76,13 +76,13 @@ export function FullscreenLoadingIndicator({
         </div>
         <div className="space-y-2">
           {SIDEBAR_ROW_IDS.map((id) => (
-            <SkeletonBlock key={id} className="h-10 w-full rounded-[10px]" />
+            <SkeletonBlock key={id} className="h-10 w-full rounded-control" />
           ))}
         </div>
-        <SkeletonBlock className="mt-auto h-10 w-full rounded-[10px]" />
+        <SkeletonBlock className="mt-auto h-10 w-full rounded-control" />
       </div>
 
-      <section className="relative min-w-0 flex-1 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 px-3 py-5 md:p-6">
+      <section className="relative min-w-0 flex-1 bg-surface-raised px-3 py-5 md:p-6">
         <div aria-hidden="true" className="space-y-6">
           <div className="grid min-h-10 grid-cols-[1fr_auto] items-center gap-3 sm:grid-cols-[1fr_auto_1fr]">
             <SkeletonBlock className="size-8 rounded-lg md:invisible" />

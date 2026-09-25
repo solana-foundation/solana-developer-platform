@@ -21,6 +21,7 @@ import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs
 import { LanguagePicker } from "@/components/language-picker";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { PAYMENT_REQUEST_CREATE_PARAM } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
@@ -62,6 +63,8 @@ export type DashboardHeaderActionConfig = {
   withCurrentQuery?: boolean;
   /** A file download rather than a page: rendered as a plain anchor with `download`. */
   download?: boolean;
+  /** Hidden from a viewer without this capability, whose click would only reach a refusal. */
+  capability?: keyof DashboardCapabilities;
 };
 
 const TRAILING_CONTENT = <LanguagePicker />;
@@ -877,21 +880,30 @@ function getWalletSectionPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
+  // The list and the create flow are built on the refresh design: a left title over the
+  // design's 900px column with the page's one action beside it.
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
       headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("Shared.dashboardShell.createAWallet"),
+        href: "/dashboard/wallets/setup",
+        icon: "plus",
+        variant: "primary",
+        capability: "canManageCustody",
+      },
     };
   }
+  // The flow names itself in its step header, as the design draws it; the title stays for
+  // assistive tech and the footer's Cancel is the way back.
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
+      headerWidthClass: "max-w-flow",
     };
   }
   if (
@@ -1022,17 +1034,16 @@ export function getDashboardPageConfig(
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
-    // Home names itself: the sidebar marks it active and the page opens on a
-    // balance. A 36px "Home" above that spent a slice of the viewport saying
-    // nothing, so the workspace renders an sr-only heading instead.
+    // The Overview is built on the refresh design: a left title over the same 900px column
+    // as the Payments pages.
     return {
       title: t("Shared.dashboardShell.home"),
-      hideTitle: true,
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/tokens") {
-    // Reached from the home allocation card, so it carries a way back rather than
+    // Reached from the Overview's holdings, so it carries a way back rather than
     // relying on the sidebar, which does not list it.
     return {
       title: t("Shared.dashboardShell.holdings"),

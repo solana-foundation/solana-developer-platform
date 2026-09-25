@@ -13,7 +13,6 @@ import {
 import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
-import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
@@ -94,18 +93,10 @@ export default async function CustodyPage() {
     if (!projectClient) {
       throw new Error("Selected project required");
     }
-    const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
+    const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
-      trace.step("fetch_provider_access", () =>
-        onboarding.organization
-          ? settle(fetchProviderAvailability(projectClient.request, onboarding.organization.id))
-          : Promise.resolve({
-              ok: false as const,
-              error: new Error("Organization is not linked"),
-            })
-      ),
     ]);
 
     const connectedProviders: KnownCustodyProvider[] = configsResult.ok
@@ -126,15 +117,11 @@ export default async function CustodyPage() {
         ? walletsResult.error.message
         : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
-    const enabledProviders = providerAccessResult.ok
-      ? providerAccessResult.value.enabledCustodyProviders
-      : connectedProviders;
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      enabledProviderCount: enabledProviders.length,
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
       apiKeyCount: apiKeys.length,
     });
@@ -145,7 +132,6 @@ export default async function CustodyPage() {
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
-          enabledProviders={enabledProviders}
           configsError={configsError}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}

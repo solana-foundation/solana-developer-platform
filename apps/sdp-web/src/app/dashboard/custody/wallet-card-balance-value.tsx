@@ -100,12 +100,13 @@ async function fetchWalletBalance(walletId: string): Promise<CustodyWalletTokenB
   return balances;
 }
 
-export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
-  const t = useTranslations();
-  const { data: batchBalances, error: batchError } = usePersistedDashboardSWR<
-    Record<string, CustodyWalletTokenBalance[]>
-  >(
-    walletId ? "wallet-card-balances" : null,
+/**
+ * Every wallet's balances in one request, refreshed every 30 seconds. SWR shares the one read
+ * between the cards and the Wallets page's refresh control, which calls `mutate` to re-read now.
+ */
+export function useWalletCardBalances(enabled = true) {
+  return usePersistedDashboardSWR<Record<string, CustodyWalletTokenBalance[]>>(
+    enabled ? "wallet-card-balances" : null,
     fetchWalletBalances,
     {
       revalidateOnFocus: true,
@@ -120,6 +121,11 @@ export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCard
       version: 2,
     }
   );
+}
+
+export function WalletCardBalanceValue({ walletId, initialBalances }: WalletCardBalanceValueProps) {
+  const t = useTranslations();
+  const { data: batchBalances, error: batchError } = useWalletCardBalances(Boolean(walletId));
   const batchFailed =
     Boolean(batchError) || (batchBalances !== undefined && batchBalances[walletId] === undefined);
   const { data: fallbackBalances, error: fallbackError } = usePersistedDashboardSWR<

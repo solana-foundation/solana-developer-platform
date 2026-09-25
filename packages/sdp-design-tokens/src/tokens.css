@@ -5,109 +5,20 @@
   Three layers, all plain CSS custom properties so any consumer (the dashboard, a Storybook,
   a static prototype) can read them without Tailwind:
 
-    1. Base palette: the SDP product palette every dashboard screen uses today.
-    2. Refresh palette: the 2026 Payments design, light and dark, taken from the design's own
-       stylesheet (SDP prototype 0.3). Defined alongside the base palette so both can be
-       documented side by side.
-    3. Refresh scope: [data-sdp-theme="refresh"] re-points the base names at the refresh values
-       and switches the font. Everything inside a refresh surface, shared components included,
-       renders in the new design without per-component overrides. Payments and Privacy opt in
-       today; moving the attribute to <html> adopts it app-wide.
+    1. Palette: the 2026 design's papers, ink, washes, rules, status hues and faces, light and
+       dark, taken from the design's own stylesheet (SDP prototype 0.3).
+    2. Product names: the names utilities, components and @solana/design-system read
+       (--surface, --emph-*, --t*, --border-*, the status triples, --font-sans), each pointing
+       at the palette, so every screen renders in it.
+    3. Scale, radius and control tokens.
 
-  Scale, radius and control tokens are theme-independent. theme.css maps all of this onto
-  Tailwind utilities, and index.ts is the typed catalog a Storybook reads.
+  The refresh scope ([data-sdp-theme="refresh"] and the `refresh:` variant in theme.css) changes
+  component shapes and page layout only. Colour and type are the same inside and outside it.
+  theme.css maps all of this onto Tailwind utilities, and index.ts is the typed catalog a
+  Storybook reads.
 */
 
-/* ── 1. Base palette ─────────────────────────────────────────────────────── */
-
-:root {
-  --surface: #e9e7de;
-  --surface-sunken: #f0ede6;
-  --surface-raised: #fcfcfa;
-
-  --emph-xh: #1c1c1d;
-  --emph-m: rgba(28, 28, 29, 0.72);
-  --emph-l: rgba(28, 28, 29, 0.56);
-  --emph-xl: rgba(28, 28, 29, 0.44);
-  --on-primary: #fcfcfa;
-
-  --t4: rgba(28, 28, 29, 0.04);
-  --t8: rgba(28, 28, 29, 0.08);
-  --t12: rgba(28, 28, 29, 0.12);
-
-  --border-xl: rgba(28, 28, 29, 0.08);
-  --border-l: rgba(28, 28, 29, 0.12);
-  --border-m: rgba(28, 28, 29, 0.2);
-
-  --green-tx: #007a4e;
-  --green-bg: rgba(0, 160, 102, 0.08);
-  --green-brd: rgba(0, 160, 102, 0.2);
-  --amber-tx: #854d0e;
-  --amber-bg: rgba(234, 179, 8, 0.08);
-  --amber-brd: rgba(234, 179, 8, 0.2);
-  --red-tx: #b91c1c;
-  --red-bg: rgba(220, 38, 38, 0.08);
-  --red-brd: rgba(220, 38, 38, 0.2);
-  --blue-tx: #1d4ed8;
-  --blue-bg: rgba(37, 99, 235, 0.08);
-  --blue-brd: rgba(37, 99, 235, 0.2);
-
-  --crimson: #c71f37;
-  --crimson-strong: #9e2b38;
-  --crimson-strongest: #8a1f2a;
-  --crimson-bg: rgba(199, 31, 55, 0.08);
-  --crimson-brd: rgba(199, 31, 55, 0.2);
-
-  /* The base design's type. These are the names Tailwind's font-sans / font-mono utilities
-     and @solana/design-system read, so re-pointing them re-fonts a whole subtree. */
-  --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-:root.dark {
-  --surface: #1c1c1d;
-  --surface-sunken: color-mix(in oklab, #1c1c1d 94%, #fcfcfa);
-  --surface-raised: color-mix(in oklab, #1c1c1d 87%, #fcfcfa);
-
-  --emph-xh: #fcfcfa;
-  --emph-m: rgba(252, 252, 250, 0.84);
-  --emph-l: rgba(252, 252, 250, 0.72);
-  --emph-xl: rgba(252, 252, 250, 0.6);
-  --on-primary: #1c1c1d;
-
-  --t4: rgba(252, 252, 250, 0.04);
-  --t8: rgba(252, 252, 250, 0.08);
-  --t12: rgba(252, 252, 250, 0.12);
-
-  --border-xl: rgba(252, 252, 250, 0.08);
-  --border-l: rgba(252, 252, 250, 0.12);
-  --border-m: rgba(252, 252, 250, 0.2);
-
-  /* Dark status palette from @solana/design-system (text/border contrast-verified).
-     The *-bg fills are lifted from the DS default (L~0.21) to L~0.27 (amber a touch
-     higher at 0.28) so the tinted panels sit just above the page surface and read
-     calmer against the bright text. */
-  --green-tx: oklch(0.78 0.1 155);
-  --green-bg: oklch(0.27 0.04 155);
-  --green-brd: oklch(0.42 0.08 155);
-  --amber-tx: oklch(0.8 0.11 85);
-  --amber-bg: oklch(0.28 0.045 85);
-  --amber-brd: oklch(0.46 0.09 85);
-  --red-tx: oklch(0.8 0.12 25);
-  --red-bg: oklch(0.27 0.05 25);
-  --red-brd: oklch(0.45 0.1 25);
-  --blue-tx: oklch(0.79 0.1 250);
-  --blue-bg: oklch(0.27 0.045 250);
-  --blue-brd: oklch(0.43 0.08 250);
-
-  --crimson: oklch(0.72 0.16 25);
-  --crimson-strong: oklch(0.68 0.16 25);
-  --crimson-strongest: oklch(0.64 0.16 25);
-  --crimson-bg: oklch(0.21 0.04 25);
-  --crimson-brd: oklch(0.45 0.1 25);
-}
-
-/* ── 2. Refresh palette ──────────────────────────────────────────────────── */
+/* ── 1. Palette ──────────────────────────────────────────────────────────── */
 
 /* The design's light values, verbatim from its stylesheet. Papers are the three grounds
    (page, sidebar, card); the ink is opaque and slightly violet; every wash and rule is the ink
@@ -117,6 +28,9 @@
   --paper: oklch(98.56% 0.0017 67.8);
   --paper-side: oklch(96.41% 0.0041 91.45);
   --paper-card: oklch(100% 0 0);
+  /* Tiles and grouped lists set on the page (wallet cards, a provider list): the sidebar's
+     paper in light, a step above the card in dark. */
+  --paper-tile: oklch(96.41% 0.0041 91.45);
 
   --ink: oklch(17.03% 0.0083 285.49);
   --ink-secondary: oklch(40.73% 0.0167 294.82);
@@ -164,6 +78,7 @@
   --paper: oklch(13.54% 0.0047 285.76);
   --paper-side: oklch(11.56% 0.0032 285.88);
   --paper-card: oklch(16.52% 0.0062 285.7);
+  --paper-tile: oklch(18.86% 0.008 285.6);
 
   --ink: oklch(98.56% 0.0017 67.8);
   --ink-secondary: oklch(76.48% 0.0202 298.96);
@@ -195,12 +110,16 @@
   --critical-rule: color-mix(in oklab, var(--critical) 40%, transparent);
 }
 
-/* ── 3. Refresh scope ────────────────────────────────────────────────────── */
+/* ── 2. Product names ────────────────────────────────────────────────────── */
 
-[data-sdp-theme="refresh"] {
+/* What utilities and components read. Each points at the palette from :root, the element the
+   palette is declared on, so html.dark swaps the palette and these follow without a dark
+   block of their own. */
+:root {
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);
+  --surface-tile: var(--paper-tile);
 
   --emph-xh: var(--ink);
   --emph-m: var(--ink-secondary);
@@ -229,19 +148,28 @@
   --red-bg: var(--critical-wash);
   --red-brd: var(--critical-rule);
 
+  /* Tailwind's font-sans / font-mono utilities and @solana/design-system read these names, and
+     Tailwind's preflight sets the page's face from --font-sans. */
   --font-sans: var(--font-brand-sans);
   --font-mono: var(--font-brand-mono);
 
-  --page-title-size: var(--font-size-heading);
-  --page-title-line-height: var(--line-height-heading);
-  --page-title-letter-spacing: var(--letter-spacing-heading);
-
-  /* The one non-token declaration: text inside the scope inherits the design's face without
-     every element asking for it. Utilities (font-sans, font-mono) resolve to the same tokens. */
-  font-family: var(--font-sans);
+  /* The destructive action hue is SDP's own; the design's stylesheet has none. */
+  --crimson: #c71f37;
+  --crimson-strong: #9e2b38;
+  --crimson-strongest: #8a1f2a;
+  --crimson-bg: rgba(199, 31, 55, 0.08);
+  --crimson-brd: rgba(199, 31, 55, 0.2);
 }
 
-/* ── Scale, radius and control tokens (theme-independent) ────────────────── */
+:root.dark {
+  --crimson: oklch(0.72 0.16 25);
+  --crimson-strong: oklch(0.68 0.16 25);
+  --crimson-strongest: oklch(0.64 0.16 25);
+  --crimson-bg: oklch(0.21 0.04 25);
+  --crimson-brd: oklch(0.45 0.1 25);
+}
+
+/* ── 3. Scale, radius and control tokens ─────────────────────────────────── */
 
 :root {
   /* Type. Amount is the hero figure (balances, "send exactly"); heading is the page title
@@ -269,11 +197,10 @@
   --font-size-meta: 13px;
   --line-height-meta: 16px;
 
-  /* The shell's page title. Base keeps the current 36px; the refresh scope drops it to the
-     heading size. */
-  --page-title-size: 36px;
-  --page-title-line-height: 40px;
-  --page-title-letter-spacing: -0.3px;
+  /* The shell's page title: the heading size on every page. */
+  --page-title-size: var(--font-size-heading);
+  --page-title-line-height: var(--line-height-heading);
+  --page-title-letter-spacing: var(--letter-spacing-heading);
 
   /* Radius. Controls are buttons, tiles, segmented tracks and inputs; inner is a control
      nested in a control (a segmented item); card is framed content (address, provider,

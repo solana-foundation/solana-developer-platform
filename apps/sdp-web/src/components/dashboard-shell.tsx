@@ -5,6 +5,8 @@ import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucid
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -12,7 +14,10 @@ import {
   getDashboardPageConfig,
   HeaderBackAction,
 } from "@/components/dashboard-header";
-import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import {
+  DASHBOARD_HEADER_TABS_TRAILING_ID,
+  DashboardHeaderTabs,
+} from "@/components/dashboard-header-tabs";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
@@ -23,6 +28,7 @@ import {
   getNavSections,
   type NavItem,
   type NavSection,
+  type SubNavItem,
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
@@ -37,8 +43,9 @@ import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
-import { themeScopeAttributes } from "@/components/theme-scope";
+import { type ThemeScope, themeScopeAttributes } from "@/components/theme-scope";
 import { ThemeScopeProvider } from "@/components/theme-scope-provider";
+import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
@@ -51,6 +58,12 @@ import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
+import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
+
+// The sidebar is the refresh design's on every route, whatever the page beside it is built on:
+// its container carries the scope, and its menus re-stamp it through the provider when they
+// portal out.
+const SIDEBAR_THEME_SCOPE: ThemeScope = "refresh";
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
@@ -67,6 +80,20 @@ const childNavItemBase =
 const childNavItemActive = `${navItemActive} refresh:font-medium`;
 const childNavItemInactive =
   "text-secondary hover:bg-fill-strong hover:text-primary refresh:hover:bg-fill";
+
+/** A sub-item's artwork: its own leading mark (kept on the refresh sidebar), else its icon. */
+function SubNavItemLeading({ item }: { item: SubNavItem }) {
+  if (item.leading) {
+    return (
+      <span aria-hidden="true" className="inline-flex shrink-0">
+        {item.leading}
+      </span>
+    );
+  }
+  return item.icon ? (
+    <item.icon aria-hidden="true" className="size-4 shrink-0 refresh:hidden" />
+  ) : null;
+}
 
 function SidebarGroup({
   title,
@@ -221,13 +248,8 @@ function SidebarGroup({
                           <span
                             className={cn(childNavItemBase, "cursor-not-allowed text-tertiary")}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
@@ -239,13 +261,8 @@ function SidebarGroup({
                               childActive ? childNavItemActive : childNavItemInactive
                             )}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                           </Link>
                         )}
                       </div>
@@ -424,7 +441,8 @@ export function DashboardShell({
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
-      initial[key as DashboardSubnavKey] = pathname.startsWith(group.pathPrefix);
+      initial[key as DashboardSubnavKey] =
+        group.defaultOpen || pathname.startsWith(group.pathPrefix);
     }
     return initial;
   });
@@ -435,8 +453,8 @@ export function DashboardShell({
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname);
   const isRefresh = themeScope === "refresh";
-  // The design's sidebar is 272px (17rem) including its rule; the base shell keeps its 296.
-  const sidebarExpandedWidth = isRefresh ? 272 : 296;
+  // The design's sidebar is 272px (17rem) including its rule.
+  const sidebarExpandedWidth = 272;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
     pathname,
@@ -447,6 +465,19 @@ export function DashboardShell({
     paymentsEnabled,
     policiesEnabled
   );
+  const { favorites: walletFavorites } = useWalletFavorites();
+  const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
+    label: favorite.name,
+    href: `/dashboard/wallets/${encodeURIComponent(favorite.walletId)}`,
+    leading: (
+      <WalletProviderMark
+        provider={
+          favorite.provider && isKnownCustodyProvider(favorite.provider) ? favorite.provider : null
+        }
+        size="nav"
+      />
+    ),
+  }));
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     custodyEnabled,
@@ -459,6 +490,7 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    walletFavorites: walletFavoriteItems,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -488,9 +520,12 @@ export function DashboardShell({
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
   const { searchParams: urlSearchParams } = useDashboardUrlState();
-  const headerAction = pageConfig.headerAction ? (
-    <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
-  ) : null;
+  const headerAction =
+    pageConfig.headerAction &&
+    (!pageConfig.headerAction.capability ||
+      dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
+      <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
+    ) : null;
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the
   // design's 900px page column, or the flow's 660px when the page's content box is wider than
@@ -556,6 +591,19 @@ export function DashboardShell({
     setOpenSubnavs(next);
     persistSubnav(key, true);
   };
+
+  // Pinning a wallet promises it is in the sidebar under Wallets, so the group opens even if it
+  // was folded. The write sits outside the updater, which React may replay.
+  useEffect(
+    () =>
+      subscribeWalletFavoriteAdded(() => {
+        if (subnavHydratedRef.current) {
+          window.localStorage.setItem(dashboardSubnavStorageKey("wallets"), "true");
+        }
+        setOpenSubnavs((current) => withSubnavOpen(current, "wallets"));
+      }),
+    []
+  );
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -634,8 +682,9 @@ export function DashboardShell({
   }
 
   return (
-    // On a refresh route the whole screen carries the scope, sidebar included, so the shell
-    // renders in the design's papers and face. Other routes keep the base shell.
+    // On a refresh route the whole screen carries the scope, so its page renders in the design's
+    // component treatments and layout. Other routes keep the base page; the sidebar carries the
+    // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
       aria-busy={isWorkspaceSwitching}
@@ -656,25 +705,28 @@ export function DashboardShell({
             ].join(" ")}
           >
             <aside
+              {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
               style={{
                 width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
               }}
-              className="relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between refresh:border-r refresh:border-border-default"
+              className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
             >
-              <DashboardSidebarContent
-                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                navSections={navSections}
-                pathname={pathname}
-                onNavigate={undefined}
-                onClose={() => setSidebarOpen(false)}
-                isCollapsed={!isSidebarOpen}
-                variant="desktop"
-                showQuickStart={!isWorkspaceSwitching}
-                onOrganizationSwitchingChange={setOrganizationSwitching}
-                openSubnavs={openSubnavs}
-                onSubnavToggle={toggleSubnav}
-                onSubnavOpen={openSubnav}
-              />
+              <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
+                <DashboardSidebarContent
+                  canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                  navSections={navSections}
+                  pathname={pathname}
+                  onNavigate={undefined}
+                  onClose={() => setSidebarOpen(false)}
+                  isCollapsed={!isSidebarOpen}
+                  variant="desktop"
+                  showQuickStart={!isWorkspaceSwitching}
+                  onOrganizationSwitchingChange={setOrganizationSwitching}
+                  openSubnavs={openSubnavs}
+                  onSubnavToggle={toggleSubnav}
+                  onSubnavOpen={openSubnav}
+                />
+              </ThemeScopeProvider>
               <button
                 type="button"
                 onClick={() => setSidebarOpen(!isSidebarOpen)}
@@ -730,32 +782,37 @@ export function DashboardShell({
                   className="absolute inset-0 bg-primary/30"
                   onClick={() => setMobileSidebarOpen(false)}
                 />
-                <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg refresh:shadow-none">
-                  <DashboardSidebarContent
-                    canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                    navSections={navSections}
-                    pathname={pathname}
-                    onNavigate={() => setMobileSidebarOpen(false)}
-                    onClose={() => setMobileSidebarOpen(false)}
-                    isCollapsed={false}
-                    variant="mobile"
-                    showQuickStart={!isWorkspaceSwitching}
-                    onOrganizationSwitchingChange={setOrganizationSwitching}
-                    openSubnavs={openSubnavs}
-                    onSubnavToggle={toggleSubnav}
-                    onSubnavOpen={openSubnav}
-                  />
+                <div
+                  {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
+                  className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]"
+                >
+                  <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
+                    <DashboardSidebarContent
+                      canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                      navSections={navSections}
+                      pathname={pathname}
+                      onNavigate={() => setMobileSidebarOpen(false)}
+                      onClose={() => setMobileSidebarOpen(false)}
+                      isCollapsed={false}
+                      variant="mobile"
+                      showQuickStart={!isWorkspaceSwitching}
+                      onOrganizationSwitchingChange={setOrganizationSwitching}
+                      openSubnavs={openSubnavs}
+                      onSubnavToggle={toggleSubnav}
+                      onSubnavOpen={openSubnav}
+                    />
+                  </ThemeScopeProvider>
                 </div>
               </div>
             ) : null}
 
-            {/* The refresh page is flat: no card, no radius; the sidebar's rule separates it. The
-              `page` group lets the header react to the content (an empty state hiding the
+            {/* The page is flat on every route: no card, no radius; the sidebar's rule separates it.
+              The `page` group lets the header react to the content (an empty state hiding the
               header's action). On a refresh route it is also the work area's size container:
               the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
             <section
               className={cn(
-                "group/page relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
+                "group/page relative min-w-0 bg-surface-raised",
                 isRefresh && "@container",
                 // The locked layout clears the phone's bottom bar; a refresh route has none, so it
                 // keeps only the home indicator's inset.
@@ -830,13 +887,23 @@ export function DashboardShell({
                       >
                         <div
                           className={cn(
-                            "flex items-end",
-                            alignsHeaderWithContent
-                              ? "sdp-quiet-scroll min-w-0 overflow-x-auto"
-                              : "px-3 md:px-6"
+                            "flex items-end gap-4",
+                            !alignsHeaderWithContent && "px-3 md:px-6"
                           )}
                         >
-                          <DashboardHeaderTabs {...headerTabs} />
+                          <div
+                            className={cn(
+                              "flex min-w-0 items-end",
+                              alignsHeaderWithContent && "sdp-quiet-scroll overflow-x-auto"
+                            )}
+                          >
+                            <DashboardHeaderTabs {...headerTabs} />
+                          </div>
+                          {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
+                          <div
+                            id={DASHBOARD_HEADER_TABS_TRAILING_ID}
+                            className="ml-auto flex shrink-0 items-center gap-4 self-center empty:hidden"
+                          />
                         </div>
                       </div>
                     ) : null}
