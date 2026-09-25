@@ -47,6 +47,7 @@ import {
   derivedMinOut,
   floorToReplay,
   initialSlippageInput,
+  isExpiredQuote,
   isSlippageExceededRefusal,
   parseSlippageToleranceState,
   quoteForKey,
@@ -195,6 +196,31 @@ function withdrawalProgressStep(
       : 2;
   }
   return vaultMovementProgressStep(outcome, step, earnVaultWithdrawalUiState);
+}
+
+type ExpiredFloorVerdict = "still_satisfiable" | "floor_exceeded" | "quote_unavailable" | "aborted";
+
+/**
+ * EXPIRY BACKSTOP, the read half — the exit twin of the deposit's
+ * `revalidateExpiredFloor`: the floor on screen came from a quote that aged
+ * past the TTL, so ask the vault again before sending it. The floor the user
+ * REVIEWED is what a passing verdict submits, never a weaker floor re-derived
+ * from the fresh rate (that would accept up to double the chosen tolerance).
+ */
+async function revalidateExpiredFloor(
+  positionId: string,
+  shares: string,
+  floor: string,
+  signal: AbortSignal
+): Promise<ExpiredFloorVerdict> {
+  const fresh = await fetchEarnVaultWithdrawalPreview({ positionId, shares }, signal);
+  if (signal.aborted) return "aborted";
+  if (fresh.kind !== "quoted" || fresh.preview.blockingIssues.length > 0) {
+    return "quote_unavailable";
+  }
+  return compareUnsignedDecimals(fresh.preview.assetsOut, floor) === -1
+    ? "floor_exceeded"
+    : "still_satisfiable";
 }
 
 function deriveWithdrawalFormState(
@@ -949,6 +975,35 @@ export function EarnVaultWithdrawModal({
   );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
+  /**
+   * EXPIRY BACKSTOP, the state half: answer whether an expired fresh floor
+   * blocks THIS submission. A rate that moved beyond the reviewed floor stops
+   * it on THIS side of the API, through the same copy and control as a blown
+   * floor; an unreadable re-quote fails closed the same way. Either way the
+   * displayed quote re-syncs so the retry reviews the fresh floor. The caller
+   * evaluates the expiry gate (`isExpiredQuote`) WITHOUT an await, so a submit
+   * under a live quote never pays an extra microtask hop — only an expired
+   * fresh floor enters here, and a replayed floor (held or kept, which must go
+   * out verbatim) never does.
+   */
+  async function expiredFloorBlocksSubmit(
+    controller: AbortController,
+    shares: string,
+    floor: string
+  ): Promise<boolean> {
+    const verdict = await revalidateExpiredFloor(position.id, shares, floor, controller.signal);
+    if (verdict === "aborted") return true;
+    if (verdict === "still_satisfiable") return false;
+    if (verdict === "floor_exceeded") setSlippageOpen(true);
+    setQuoteRefreshKey((refresh) => refresh + 1);
+    setSubmitError(
+      verdict === "floor_exceeded"
+        ? t("DashboardEarn.vaultWithdraw.slippageExceeded")
+        : t("DashboardEarn.vaultWithdraw.quoteUnavailable")
+    );
+    return true;
+  }
+
   async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
@@ -986,6 +1041,19 @@ export function EarnVaultWithdrawModal({
     );
     if (replay.kind === "unavailable") {
       setSubmitError(t("DashboardEarn.vaultWithdraw.floorUnavailable"));
+      return;
+    }
+
+    // EXPIRY BACKSTOP, the state half — see `expiredFloorBlocksSubmit`. The
+    // gate short-circuits without an await: a live quote or a replayed floor
+    // proceeds exactly as before, and only an expired fresh floor pays the
+    // revalidation round trip before anything moves.
+    if (
+      replay.kind === "fresh" &&
+      replay.floor !== null &&
+      isExpiredQuote(quote) &&
+      (await expiredFloorBlocksSubmit(controller, shares, replay.floor))
+    ) {
       return;
     }
     rememberVaultWithdrawalFloor(fingerprint, replay.floor);
