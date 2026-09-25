@@ -541,6 +541,12 @@ export function ApiPlaygroundShell({
   const [copiedAction, setCopiedAction] = useState<"code" | "ai" | null>(null);
   const endpointsRef = useRef(endpoints);
   const endpointParam = searchParams.get("endpoint");
+  // A rendered response was produced with one project/API-key identity. When
+  // that identity changes (the parent workspace switches projects or keys),
+  // the prior response must not stay rendered, and an in-flight result from
+  // the old identity must be discarded instead of shown for the new one.
+  const responseApiKeyIdRef = useRef(apiKeyId);
+  const responseEpochRef = useRef(0);
 
   const activeEndpointId = endpoints.some((endpoint) => endpoint.id === endpointParam)
     ? (endpointParam ?? "")
@@ -589,6 +595,20 @@ export function ApiPlaygroundShell({
     setExecutionResult(null);
     setExecuteError(null);
   }, [activeEndpointId, preselectedFieldValues]);
+
+  useEffect(() => {
+    const previousApiKeyId = responseApiKeyIdRef.current;
+    responseApiKeyIdRef.current = apiKeyId;
+    if (previousApiKeyId === apiKeyId) {
+      return;
+    }
+
+    // Bumping the epoch also invalidates any in-flight request started under
+    // the previous identity, even if the identity is later switched back.
+    responseEpochRef.current += 1;
+    setExecutionResult(null);
+    setExecuteError(null);
+  }, [apiKeyId]);
 
   const requestBodyResult = useMemo(
     () => (activeEndpoint ? buildRequestBody(activeEndpoint.bodyFields, fieldValues) : null),
@@ -658,6 +678,9 @@ export function ApiPlaygroundShell({
   };
 
   const handleExecute = () => {
+    responseEpochRef.current += 1;
+    const requestEpoch = responseEpochRef.current;
+    const isStaleResponse = () => responseEpochRef.current !== requestEpoch;
     setExecuteError(null);
     setExecutionResult(null);
     void executePlaygroundRequest({
@@ -668,16 +691,25 @@ export function ApiPlaygroundShell({
       requestBodyResult,
       resolvedPath,
       onExecutionError: (message) => {
+        if (isStaleResponse()) {
+          return;
+        }
         setExecuteError(message);
         setMobileSection("output");
         setActivePanel("response");
       },
       onResult: (result) => {
+        if (isStaleResponse()) {
+          return;
+        }
         setExecutionResult(result);
         setMobileSection("output");
         setActivePanel("response");
       },
       onValidationError: (message) => {
+        if (isStaleResponse()) {
+          return;
+        }
         setExecuteError(message);
         setActivePanel("response");
       },

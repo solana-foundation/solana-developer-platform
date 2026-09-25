@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
@@ -61,5 +61,160 @@ describe("ApiPlaygroundShell secret redaction", () => {
 
     await waitFor(() => expect(view.container.textContent).toContain("Request execution failed."));
     expect(view.container.textContent).not.toContain(secret);
+  });
+});
+
+describe("ApiPlaygroundShell response identity isolation", () => {
+  beforeEach(() => {
+    clearStoredApiKeySecrets();
+    mocks.replaceSearchParams.mockReset();
+    mocks.searchParamGet.mockReset();
+    mocks.searchParamGet.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    cleanup();
+    clearStoredApiKeySecrets();
+    vi.unstubAllGlobals();
+  });
+
+  it("clears a response from a prior API-key identity when the key changes", async () => {
+    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          body: { project: "project-a", balance: "1000 SOL" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(view.container.textContent).toContain('"project": "project-a"'));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Same endpoint, same shell instance: only the project-derived key identity
+    // changes. The prior response must not remain rendered, and no request may
+    // be issued implicitly.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    expect(view.container.textContent).not.toContain('"project": "project-a"');
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards an in-flight response that resolves after the API-key identity changes", async () => {
+    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    let resolveResponse: (response: Response) => void = () => {};
+    const fetchMock = vi.fn().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    await act(async () => {
+      resolveResponse(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "1000 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    });
+
+    expect(view.container.textContent).not.toContain('"project": "project-a"');
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+    expect(view.container.textContent).not.toContain("200 OK");
+  });
+
+  it("executes subsequent requests with the new key identity after a change", async () => {
+    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "1000 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-b", balance: "42 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(view.container.textContent).toContain('"project": "project-a"'));
+
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(view.container.textContent).toContain('"project": "project-b"'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondRequest = JSON.parse((fetchMock.mock.calls[1]?.[1]?.body as string) ?? "{}") as {
+      apiKey?: string;
+    };
+    expect(secondRequest.apiKey).toBe("sk_test_project_b");
+    expect(view.container.textContent).not.toContain('"project": "project-a"');
   });
 });
