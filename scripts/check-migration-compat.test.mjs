@@ -169,6 +169,13 @@ test("statements inside DO blocks are checked", () => {
     ),
     ["drops a table", "rewrites rows"]
   );
+  assert.deepEqual(
+    findBreakingStatements(
+      "DO $$\nBEGIN\n  PERFORM 1;\nEXCEPTION\n  WHEN OTHERS THEN\n    CREATE TABLE scratch (id TEXT);\n" +
+        "    INSERT INTO scratch SELECT 1;\n    DROP TABLE scratch;\nEND $$;"
+    ),
+    []
+  );
 });
 
 test("a flagged migration needs the breaking directive", () => {

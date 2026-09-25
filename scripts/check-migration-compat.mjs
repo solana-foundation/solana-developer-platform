@@ -200,7 +200,9 @@ function tableIsNew(context, table, index, scope) {
   const entry = context.newTables.get(table);
   if (entry === undefined || entry.index >= index) return false;
   if (entry.branch === 0 && !entry.guarded) return true;
-  return entry.block === scope.block && entry.branch === scope.branch && !scope.handler;
+  return (
+    entry.block === scope.block && entry.branch === scope.branch && entry.handler === scope.handler
+  );
 }
 
 function alterActionFindings(action, table, replacesConstraint, newTable, context) {
