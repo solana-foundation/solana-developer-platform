@@ -59,12 +59,13 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
   const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One key per logical request. It rotates only once a trade was created, so
-  // a second trade on the same terms is a new request rather than a replay of
-  // the first. Every other outcome keeps it: a throw or a server error may have
-  // left the first attempt broadcasting, and the retry has to replay it rather
-  // than draw a second trade at a second address; a rejection stored nothing,
-  // so the key is still free.
+  // One key per logical request. It rotates only once the create transaction
+  // is confirmed, so a second trade on the same terms is a new request rather
+  // than a replay of the first. Every other outcome keeps it: a throw or a
+  // server error may have left the first attempt broadcasting, and the retry
+  // has to replay it rather than draw a second trade at a second address; a
+  // rejection stored nothing, so the key is still free; and a replay of a
+  // create still in flight is that same logical request, not a finished one.
   const idempotencyKey = useRef<string | null>(null);
   // Minted on first use rather than as the ref's initial value, which would draw
   // (and throw away) fresh random bytes on every render.
@@ -137,9 +138,21 @@ export function useDvpCreateSubmit(cluster: SolanaCluster): DvpCreateSubmit {
         setError(t("DashboardMarkets.dvp.createUnconfirmed"));
         return;
       }
+      const { id: createdId, createSignature } = created.data.data.trade;
+      // The signature is the create's receipt. A keyed replay of a create
+      // still in flight returns the recorded trade without one — the row
+      // exists, but nothing proves the transaction landed — and answering that
+      // as complete would toast a transaction that does not exist, navigate
+      // as though the trade were final, and clear the only key the replay
+      // answers to, letting the next press draw a second trade on the same
+      // terms. So an unreceived create stays unresolved: the key is kept, the
+      // form stays up, and the retry replays until the receipt arrives.
+      if (createSignature === null) {
+        setError(t("DashboardMarkets.dvp.createPending"));
+        return;
+      }
       // The next submit mints a new key: a second trade on the same terms is a new request.
       idempotencyKey.current = null;
-      const { id: createdId, createSignature } = created.data.data.trade;
       // Confirmed before the navigation, so the trade page opens with the
       // reason it opened already stated. Creating publishes two escrow
       // addresses and costs rent; arriving on a new page with no acknowledgement

@@ -167,6 +167,40 @@ describe("useDvpCreateSubmit idempotency key", () => {
     expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
   });
 
+  // A keyed replay of a create still in flight returns the recorded trade with
+  // no receipt: the row exists, but nothing on the wire proves the create
+  // transaction landed. That is not a completed create, so the key must
+  // survive it — rotating here would let the next press draw a second trade on
+  // the same terms while the first is still being broadcast.
+  it("reuses the key after an in-flight replay, so the retry replays the same trade", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+        }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_second", status: "creating", createSignature: "sig_second" } },
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(keyOf(fetchMock, 1)).toBe(keyOf(fetchMock, 0));
+  });
+
   it("rotates the key once a trade was created, so identical terms make a second trade", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -226,6 +260,61 @@ describe("useDvpCreateSubmit confirmation", () => {
     });
 
     expect(result.current.error).toBe("Request failed (502).");
+  });
+
+  // A keyed replay of a create still in flight is not a completed create: the
+  // toast would claim a transaction that does not exist yet, and navigating
+  // would present an unresolved trade as final. The form stays put and says so.
+  it("says an in-flight replay is unconfirmed, and stays on the form", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: async () => ({
+          data: { trade: { id: "dvp_inflight", status: "creating", createSignature: null } },
+        }),
+      })
+    );
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    expect(result.current.error).toBe(
+      "The trade exists, but its create transaction hasn't been confirmed yet. Press Create again to check on it; it won't create a second one."
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  // A fresh create whose same-request chain read lagged reports the trade as
+  // still `creating` — but its create transaction is recorded, and the receipt
+  // is on the wire. That IS a completed create: rotate, toast, navigate.
+  it("confirms a create whose transaction is recorded but not yet observed", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: { trade: { id: "dvp_1", status: "creating", createSignature: "sig_create" } },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { result } = renderHook(() => useDvpCreateSubmit("devnet"), { wrapper: withI18n });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+    await act(async () => {
+      await result.current.submit(request());
+    });
+
+    const firstInit = fetchMock.mock.calls[0][1] as { headers: Record<string, string> };
+    const secondInit = fetchMock.mock.calls[1][1] as { headers: Record<string, string> };
+    expect(secondInit.headers["Idempotency-Key"]).not.toBe(firstInit.headers["Idempotency-Key"]);
+    expect(toast.success).toHaveBeenCalledTimes(2);
+    expect(push).toHaveBeenCalledWith("/dashboard/markets/dvp/dvp_1");
+    open.mockRestore();
   });
 
   // The create is SDP's own broadcast, so the toast reporting it links it.

@@ -565,6 +565,7 @@
       "reclaimRefusedEmpty": "El escrow de este tramo ya está vacío.",
       "reclaimRefusedSignerChanged": "La Wallet de este lado ya no firma por él, así que no se envió nada.",
       "reclaimRefusedTransferHook": "Reclaim todavía no admite Tokens con transfer hook. No se envió nada.",
+      "createPending": "La operación existe, pero su transacción de creación aún no se ha confirmado. Presiona Crear de nuevo para comprobarla; no se creará una segunda.",
       "createUnconfirmed": "Es posible que la operación se haya creado, pero SDP no pudo leer la respuesta. Presiona Crear de nuevo para abrirla; no se creará una segunda.",
       "settleTooEarly": "Esta operación se puede liquidar a partir de {when}.",
       "statusFundedTooEarly": "Fondeado",
