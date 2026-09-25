@@ -256,10 +256,10 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect((await advisoryRow(id))?.resolved_at).toBeNull();
   });
 
-  it("resolves deposit_observed on a confirmed follow-up deposit once the funds have left the wallet", async () => {
+  it("resolves deposit_observed on a finalized follow-up deposit once the funds have left the wallet", async () => {
     const id = await seedAdvisory(2 * HOUR);
     await seedFollowUpMovement("failed");
-    const observed = await seedFollowUpMovement("confirmed");
+    const observed = await seedFollowUpMovement("finalized");
     // The swapped tokens went into the vault: the balance is back at baseline.
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
 
@@ -269,6 +269,118 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(await advisoryRow(id)).toMatchObject({
       resolution: "deposit_observed",
       resolving_movement_id: observed,
+    });
+  });
+
+  it("keeps the advisory open for a confirmed exact-floor follow-up until it finalizes", async () => {
+    // SOLA9-68: `confirmed` is an optimistic commitment a fork can drop, so it
+    // is not proof the deposit landed. The rollback shape below — the wallet
+    // back at baseline, which is exactly what a landed follow-up looks like —
+    // must leave the advisory open, and only finality may discharge it.
+    const id = await seedAdvisory(2 * HOUR);
+    const followUp = await seedFollowUpMovement("confirmed");
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({
+      follow_up_pending: 1,
+      deposit_observed: 0,
+      orphaned: 0,
+      unfunded: 0,
+    });
+    expect(await advisoryRow(id)).toMatchObject({
+      resolution: null,
+      resolved_at: null,
+      resolving_movement_id: null,
+    });
+
+    // The chain finalizes the same movement: now it is proof, and it
+    // discharges the advisory on the next visit.
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: followUp,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    const finalTickCall = eventsNamed("sdp_api_earn_split_swap_detection_tick").at(-1);
+    expect(finalTickCall?.[1]).toMatchObject({ deposit_observed: 1, follow_up_pending: 0 });
+    expect(await advisoryRow(id)).toMatchObject({
+      resolution: "deposit_observed",
+      resolving_movement_id: followUp,
+    });
+  });
+
+  it("does not let a dropped confirmed follow-up hold the advisory while the funds resurface", async () => {
+    // A fork drops the confirmed follow-up but the ledger's reconciliation
+    // leaves its movement `confirmed`. The wallet then shows the swapped funds
+    // again — a landed follow-up would have moved them into the vault — and
+    // the advisory must not sit `follow_up_pending` forever on that movement:
+    // the conflicting evidence escalates for a human instead.
+    const id = await seedAdvisory(2 * HOUR);
+    const followUp = await seedFollowUpMovement("confirmed");
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({
+      ambiguous: 1,
+      follow_up_pending: 0,
+      orphaned: 0,
+      deposit_observed: 0,
+      unfunded: 0,
+    });
+    const [ambiguous] = eventsNamed("sdp_api_earn_split_swap_ambiguous");
+    expect(ambiguous?.[1]).toMatchObject({
+      advisory_id: id,
+      escalated: true,
+      covering_deposit_ids: [followUp],
+    });
+    expect(await advisoryRow(id)).toMatchObject({ resolution: null, resolved_at: null });
+  });
+
+  it("does not close a confirmed covering deposit as unfunded before it finalizes", async () => {
+    // A covering deposit into a sibling vault (or larger than the floor)
+    // leaves the wallet back at baseline — indistinguishable from a landed
+    // follow-up. Resolving `unfunded` now would make a fork rollback lose the
+    // resurfaced funds their advisory; it waits for finality, which then
+    // discharges it.
+    const id = await seedAdvisory(2 * HOUR);
+    const sibling = await seedFollowUpMovement("confirmed", {
+      vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(tick().payload).toMatchObject({
+      follow_up_pending: 1,
+      unfunded: 0,
+      deposit_observed: 0,
+      orphaned: 0,
+    });
+    expect(await advisoryRow(id)).toMatchObject({ resolution: null, resolved_at: null });
+
+    // Finality discharges it on the next visit.
+    await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+      movementId: sibling,
+      organizationId: ORG,
+      toStatus: "finalized",
+      confirmedAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    const finalTickCall = eventsNamed("sdp_api_earn_split_swap_detection_tick").at(-1);
+    expect(finalTickCall?.[1]).toMatchObject({ deposit_observed: 1, follow_up_pending: 0 });
+    expect(await advisoryRow(id)).toMatchObject({
+      resolution: "deposit_observed",
+      resolving_movement_id: sibling,
     });
   });
 
@@ -298,12 +410,12 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     expect(tick().payload).toMatchObject({ deposit_observed: 1, unfunded: 1, orphaned: 0 });
   });
 
-  it("resolves on the intended follow-up even when an unrelated credit keeps the balance high", async () => {
-    // Same vault, exactly the floor, chain-committed: that IS the follow-up, and
+  it("resolves on the intended finalized follow-up even when an unrelated credit keeps the balance high", async () => {
+    // Same vault, exactly the floor, irreversible: that IS the follow-up, and
     // whatever else sits in the wallet is not this swap's output. Paging here
     // would be a persistent false alert on any wallet with other inflows.
     const id = await seedAdvisory(2 * HOUR);
-    const followUp = await seedFollowUpMovement("confirmed");
+    const followUp = await seedFollowUpMovement("finalized");
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
     await detectOrphanedEarnSplitSwaps(env);
