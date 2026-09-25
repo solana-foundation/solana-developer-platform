@@ -1063,7 +1063,162 @@ describe("Custody wallet scope routes", () => {
     expect(getSplTokenBalancesMock).toHaveBeenCalledTimes(4);
   });
 
+  it("sums one shared on-chain address once in the aggregate while the list keeps both records", async () => {
+    clearWalletCaches();
+    // An organization-level config and a project-level config can hold the same
+    // on-chain key as two active custody records (the project-level "local"
+    // config shares the org-level privy wallet's address here).
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted, encryption_version, status)
+           VALUES (?, ?, ?, 'local', 'test-config', 'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind("cust_cfg_scope_local_shared", TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+           VALUES (?, ?, ?, ?, 'Shared address', 'root', 'active')`
+        )
+        .bind(
+          "cwlt_scope_local_shared",
+          "cust_cfg_scope_local_shared",
+          "local_wallet_shared",
+          SEEDED_PUBLIC_KEYS.privyA
+        ),
+    ]);
+    getMultipleAccountsLamportsMock.mockImplementation(async (_rpc, addresses) =>
+      addresses.map((publicKey) =>
+        publicKey === SEEDED_PUBLIC_KEYS.privyA
+          ? 1_000n
+          : publicKey === SEEDED_PUBLIC_KEYS.privyB
+            ? 2n
+            : 3n
+      )
+    );
+    // Only the shared address holds tokens: a double-count of its records
+    // would double the aggregated USDC amount too.
+    getSplTokenBalancesMock.mockImplementation(async (_rpc, owner) =>
+      owner === SEEDED_PUBLIC_KEYS.privyA
+        ? [
+            {
+              token: "USDC",
+              mint: "usdc_mint",
+              amount: "5000000",
+              uiAmount: "5",
+              decimals: 6,
+            },
+          ]
+        : []
+    );
+
+    const list = await app.request(
+      "/v1/wallets?includeAllProviders=true&includeBalances=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as {
+      data: {
+        wallets: Array<{
+          id: string;
+          publicKey: string;
+          balances?: Array<{ token: string; amount: string }>;
+        }>;
+      };
+    };
+    const sharedRows = listBody.data.wallets.filter(
+      (wallet) => wallet.publicKey === SEEDED_PUBLIC_KEYS.privyA
+    );
+    expect(sharedRows).toHaveLength(2);
+    // Row-level fan-out is preserved: every record reports the live balances.
+    for (const row of sharedRows) {
+      expect(row.balances?.find((balance) => balance.token === "SOL")).toMatchObject({
+        amount: "1000",
+      });
+      expect(row.balances?.find((balance) => balance.token === "USDC")).toMatchObject({
+        amount: "5000000",
+      });
+    }
+
+    const aggregate = await app.request(
+      "/v1/wallets/aggregate?includeAllProviders=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(aggregate.status).toBe(200);
+    const aggregateBody = (await aggregate.json()) as {
+      data: {
+        aggregate: {
+          walletCount: number;
+          balances: Array<{ token: string; amount: string }>;
+        };
+      };
+    };
+    // One address contributes its balance once, not once per custody record.
+    expect(aggregateBody.data.aggregate.walletCount).toBe(3);
+    expect(
+      aggregateBody.data.aggregate.balances.find((balance) => balance.token === "SOL")
+    ).toMatchObject({ amount: "1005" });
+    // The shared address's tokens are also summed once ("5000000", not "10000000").
+    expect(
+      aggregateBody.data.aggregate.balances.find((balance) => balance.token === "USDC")
+    ).toMatchObject({ amount: "5000000", uiAmount: "5" });
+
+    // A least-privilege, wallet-scoped caller bound to both records of the
+    // shared address still has that address aggregated once.
+    await seedCachedKey({
+      walletBindings: [
+        { walletId: "privy_wallet_a", permissions: ["wallets:read"] },
+        { walletId: "local_wallet_shared", permissions: ["wallets:read"] },
+        { walletId: "privy_wallet_b", permissions: ["wallets:read"] },
+      ],
+    });
+
+    const scopedList = await app.request(
+      "/v1/wallets?includeAllProviders=true&includeBalances=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(scopedList.status).toBe(200);
+    const scopedListBody = (await scopedList.json()) as {
+      data: { wallets: Array<{ publicKey: string }> };
+    };
+    expect(
+      scopedListBody.data.wallets.filter((wallet) => wallet.publicKey === SEEDED_PUBLIC_KEYS.privyA)
+    ).toHaveLength(2);
+
+    const scopedAggregate = await app.request(
+      "/v1/wallets/aggregate?includeAllProviders=true",
+      { method: "GET", headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+      env
+    );
+    expect(scopedAggregate.status).toBe(200);
+    const scopedAggregateBody = (await scopedAggregate.json()) as {
+      data: {
+        aggregate: {
+          walletCount: number;
+          balances: Array<{ token: string; amount: string }>;
+        };
+      };
+    };
+    // Both shared records are visible, yet the shared address counts once
+    // (walletCount 2 = shared address + privyB, not 3 custody records).
+    expect(scopedAggregateBody.data.aggregate.walletCount).toBe(2);
+    expect(
+      scopedAggregateBody.data.aggregate.balances.find((balance) => balance.token === "SOL")
+    ).toMatchObject({ amount: "1002" });
+    expect(
+      scopedAggregateBody.data.aggregate.balances.find((balance) => balance.token === "USDC")
+    ).toMatchObject({ amount: "5000000" });
+
+    clearWalletCaches();
+  });
+
   it("filters aggregate wallets to the API key bindings", async () => {
+    clearWalletCaches();
     await seedCachedKey({
       walletBindings: [{ walletId: "privy_wallet_b", permissions: ["wallets:read"] }],
     });
@@ -1098,6 +1253,7 @@ describe("Custody wallet scope routes", () => {
   });
 
   it("keeps balances distinct when two Connections share a Provider wallet ID", async () => {
+    clearWalletCaches();
     const sharedWalletId = "privy_shared_provider_wallet";
     for (const [suffix, publicKey] of [
       ["a", TEST_SOLANA_ADDRESSES.wallet2],
