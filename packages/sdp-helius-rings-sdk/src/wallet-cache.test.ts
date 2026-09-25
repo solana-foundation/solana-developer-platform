@@ -3,6 +3,7 @@ import {
   clearWalletCache,
   getCachedWallet,
   invalidateCachedWallet,
+  invalidateCachedWalletIfUsed,
   setCachedWallet,
 } from "./wallet-cache.js";
 
@@ -37,6 +38,27 @@ describe("wallet-cache", () => {
   it("drops the entry on invalidate", () => {
     setCachedWallet("hrw_1", fakeWallet("first"), "fp");
     invalidateCachedWallet("hrw_1");
+    expect(getCachedWallet("hrw_1", "fp")).toBeUndefined();
+  });
+
+  it("drops the entry when the invalidated wallet is the cached one", () => {
+    const used = fakeWallet("used");
+    setCachedWallet("hrw_1", used, "fp");
+    invalidateCachedWalletIfUsed("hrw_1", used);
+    expect(getCachedWallet("hrw_1", "fp")).toBeUndefined();
+  });
+
+  it("leaves a newer entry alone when the invalidated wallet is not the cached one", () => {
+    // A concurrent hydration cached its own wallet while another sync was
+    // running on a private object: the newer entry must survive.
+    const concurrent = fakeWallet("concurrent");
+    setCachedWallet("hrw_1", concurrent, "fp");
+    invalidateCachedWalletIfUsed("hrw_1", fakeWallet("private"));
+    expect(getCachedWallet("hrw_1", "fp")).toBe(concurrent);
+  });
+
+  it("no-ops when nothing is cached", () => {
+    invalidateCachedWalletIfUsed("hrw_1", fakeWallet("ghost"));
     expect(getCachedWallet("hrw_1", "fp")).toBeUndefined();
   });
 

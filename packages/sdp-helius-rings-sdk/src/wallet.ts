@@ -4,7 +4,7 @@ import type { SyncReport as SdkSyncReport, ShieldedKeys } from "@heliuslabs/zola
 import { syncWallet } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { canonicalShieldedIdentity } from "./material.js";
-import { getCachedWallet, invalidateCachedWallet, setCachedWallet } from "./wallet-cache.js";
+import { getCachedWallet, invalidateCachedWalletIfUsed, setCachedWallet } from "./wallet-cache.js";
 
 export interface HydrateWalletInput {
   /** Cache key: same across sync and spend paths for one Rings identity. */
@@ -91,11 +91,16 @@ export async function hydrateWallet(input: HydrateWalletInput): Promise<Hydrated
   // instead; the in-memory object still answers the call in progress (reporting
   // stays degraded rather than failing), and the next hydration re-scans the
   // skipped range from the indexer's beginning. This holds for both paths: a
-  // refused strict read and a tolerated degraded read leave the cache empty
-  // alike, so neither can blind the other.
+  // refused strict read and a tolerated degraded read leave the cache without
+  // this sync's wallet alike, so neither can blind the other. The eviction is
+  // scoped to the entry this sync actually used: a concurrent hydration's clean
+  // result — or an older identity's entry under the same wallet id — holds
+  // cursors this sync never advanced and must survive it.
   const incomplete = committedPastIncompleteData(report);
   if (incomplete) {
-    invalidateCachedWallet(input.walletId);
+    if (cached !== undefined) {
+      invalidateCachedWalletIfUsed(input.walletId, cached);
+    }
   } else if (cached === undefined) {
     setCachedWallet(input.walletId, wallet, fingerprint);
   }
