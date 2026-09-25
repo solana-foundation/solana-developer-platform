@@ -313,57 +313,66 @@ describe("asset profile public chain.decimals binding across token edits", () =>
     });
     await locked;
 
-    const profileEdit = app.request(
-      `/v1/issuance/asset-profiles/${profileId}`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          issuanceMetadata: {
-            asset: { name: "Editable Scale USD" },
-            chain: { decimals: 18 },
+    try {
+      const profileEdit = app.request(
+        `/v1/issuance/asset-profiles/${profileId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
           },
-        }),
-      },
-      env
-    );
-
-    // The requests still have to cross the async middleware before reaching
-    // the database, so release the lock only once the profile edit's
-    // projection statement is actually waiting on the parked lock — otherwise
-    // the requests could slip past it (and each other) without ever
-    // contending, and the test would pass without covering the race.
-    const contentionDeadline = Date.now() + 10_000;
-    let contended = false;
-    while (Date.now() < contentionDeadline) {
-      const row = await getDb(env).queryOne<{ waiters: number }>(
-        `SELECT count(*)::int AS waiters
-           FROM pg_stat_activity
-          WHERE wait_event_type = 'Lock'
-            AND query LIKE '%issued_tokens%'
-            AND query LIKE '%FOR UPDATE%'`
+          body: JSON.stringify({
+            issuanceMetadata: {
+              asset: { name: "Editable Scale USD" },
+              chain: { decimals: 18 },
+            },
+          }),
+        },
+        env
       );
-      if ((row?.waiters ?? 0) > 0) {
-        contended = true;
-        break;
+
+      // The requests still have to cross the async middleware before reaching
+      // the database, so release the lock only once the profile edit's
+      // projection statement is actually waiting on the parked lock — otherwise
+      // the requests could slip past it (and each other) without ever
+      // contending, and the test would pass without covering the race.
+      const contentionDeadline = Date.now() + 10_000;
+      let contended = false;
+      while (Date.now() < contentionDeadline) {
+        const row = await getDb(env).queryOne<{ waiters: number }>(
+          `SELECT count(*)::int AS waiters
+             FROM pg_stat_activity
+            WHERE wait_event_type = 'Lock'
+              AND query LIKE '%issued_tokens%'
+              AND query LIKE '%FOR UPDATE%'`
+        );
+        if ((row?.waiters ?? 0) > 0) {
+          contended = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(contended).toBe(true);
+
+      const tokenEdit = patchToken(tokenId, { decimals: 9 });
+      releaseTokenRow();
+
+      const [profileResponse, tokenResponse] = await Promise.all([
+        profileEdit,
+        tokenEdit,
+        holdTokenRow,
+      ]);
+      expect(profileResponse.status).toBe(200);
+      expect(tokenResponse.status).toBe(200);
+    } finally {
+      // Release even on failure: a failed assertion must not leave the parked
+      // transaction holding its row lock and pool connection, or teardown
+      // hangs instead of reporting the failure. Idempotent on the success
+      // path, where the lock is released before the awaits above.
+      releaseTokenRow();
     }
-    expect(contended).toBe(true);
-
-    const tokenEdit = patchToken(tokenId, { decimals: 9 });
-    releaseTokenRow();
-
-    const [profileResponse, tokenResponse] = await Promise.all([
-      profileEdit,
-      tokenEdit,
-      holdTokenRow,
-    ]);
-    expect(profileResponse.status).toBe(200);
-    expect(tokenResponse.status).toBe(200);
+    await holdTokenRow;
 
     const stored = await loadPersistedDecimals(tokenId, profileId);
     expect(stored).toEqual({ token_decimals: 9, public_decimals: "9" });
