@@ -35,11 +35,16 @@ const WRITE_ONLY_KEY = {
 
 // Exactly the shipped self-hosted production posture: compose.yml resolves
 // ENVIRONMENT=production and SDP_DEPLOYMENT_MODE=self_hosted, and the flag
-// decides the opt-in.
-const selfHostedProduction = {
+// decides the opt-in. Omitting the flag entirely is the compose fallback
+// (`${SDP_FLAG_ASSET_PROFILES:-false}`), not an opt-in, so it must refuse
+// exactly like an explicit false.
+const selfHostedProductionFlagOmitted = {
   ...env,
   ENVIRONMENT: "production" as const,
   SDP_DEPLOYMENT_MODE: "self_hosted" as const,
+};
+const selfHostedProduction = {
+  ...selfHostedProductionFlagOmitted,
   SDP_FLAG_ASSET_PROFILES: "false",
 };
 const selfHostedOptedIn = { ...selfHostedProduction, SDP_FLAG_ASSET_PROFILES: "true" };
@@ -163,8 +168,55 @@ describe("Asset Profiles self-hosted production opt-in boundary", () => {
     );
     expect(getByToken.status).toBe(403);
 
+    const patch = await app.request(
+      "/v1/issuance/asset-profiles/prf_asset_profiles_gate_probe",
+      {
+        method: "PATCH",
+        headers: writeHeaders,
+        body: JSON.stringify({ assetCategory: "generic", assetType: "generic" }),
+      },
+      selfHostedProduction
+    );
+    expect(patch.status).toBe(403);
+
+    const archive = await app.request(
+      "/v1/issuance/asset-profiles/prf_asset_profiles_gate_probe",
+      { method: "DELETE", headers: writeHeaders },
+      selfHostedProduction
+    );
+    expect(archive.status).toBe(403);
+
     // The exploit's core: a minimal-permission key must not create durable
     // tenant state while the production flag is false.
+    expect(await assetProfileRowCount()).toBe(0);
+  });
+
+  it("refuses the omitted-flag compose fallback exactly like an explicit opt-out", async () => {
+    // compose.yml resolves SDP_FLAG_ASSET_PROFILES to false by omission, so a
+    // deployment that never mentions the variable is still opted out.
+    expect(isAssetProfilesEnabled(selfHostedProductionFlagOmitted)).toBe(false);
+
+    const list = await app.request(
+      "/v1/issuance/asset-profiles",
+      { headers: { Authorization: `Bearer ${READ_WRITE_KEY.raw}` } },
+      selfHostedProductionFlagOmitted
+    );
+    expect(list.status).toBe(403);
+
+    const create = await app.request(
+      "/v1/issuance/asset-profiles",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${WRITE_ONLY_KEY.raw}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(createBody),
+      },
+      selfHostedProductionFlagOmitted
+    );
+    expect(create.status).toBe(403);
+
     expect(await assetProfileRowCount()).toBe(0);
   });
 
