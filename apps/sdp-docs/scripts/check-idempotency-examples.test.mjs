@@ -424,6 +424,74 @@ test("checks a request against the target assigned before its call, not a later 
   ]);
 });
 
+test("reassignment before the call resolves to the new target without blank-line separators", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfers"]),
+    files: [
+      {
+        path: "reassigned.mdx",
+        source: [
+          "```typescript",
+          'let url = "https://api.solana.com/v1/payments/transfers";',
+          'url = "https://api.solana.com/v1/payments/transfers/tr_123";',
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});
+
+test("a reassignment after the call does not flag the earlier safe request", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfers"]),
+    files: [
+      {
+        path: "reassigned.mdx",
+        source: [
+          "```typescript",
+          'const url = "https://api.solana.com/v1/issuance/tokens";',
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          'url = "https://api.solana.com/v1/payments/transfers";',
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, []);
+});
+
+test("a live reassigned target is still flagged when the lines share one chunk", () => {
+  const violations = findMissingIdempotencyKeyExamples({
+    idempotencyPostPaths: new Set(["/v1/payments/transfers"]),
+    files: [
+      {
+        path: "reassigned.mdx",
+        source: [
+          "```typescript",
+          'let url = "https://api.solana.com/v1/issuance/tokens";',
+          'url = "https://api.solana.com/v1/payments/transfers";',
+          "await fetch(url, {",
+          '  method: "POST",',
+          '  headers: { Authorization: "Bearer sk_test_..." },',
+          "});",
+          "```",
+        ].join("\n"),
+      },
+    ],
+  });
+  assert.deepEqual(violations, [
+    { file: "reassigned.mdx", line: 4, endpoint: "/v1/payments/transfers" },
+  ]);
+});
+
 test("accepts a variable-target POST that shows the fence and ignores variable-target GETs", () => {
   const violations = findMissingIdempotencyKeyExamples({
     idempotencyPostPaths: new Set(["/v1/payments/transfers"]),

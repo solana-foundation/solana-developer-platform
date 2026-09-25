@@ -143,19 +143,26 @@ function requestTargetPath(value) {
   return value.startsWith("/") ? stripQueryString(value) : null;
 }
 
-function exampleRequestPaths(block) {
+// Scans the literal request targets of one request chunk. URL-variable
+// assignment lines are skipped: their targets are tracked separately and only
+// count when still current at the request call line, so a superseded or
+// later assignment cannot be mistaken for this request's endpoint.
+function exampleRequestPaths(request) {
   const found = [];
-  for (const match of block.content.matchAll(API_URL)) {
-    let pathname;
-    try {
-      pathname = new URL(match[0]).pathname;
-    } catch {
-      continue;
+  for (const line of request.content.split("\n")) {
+    if (URL_VARIABLE_ASSIGNMENT.test(line)) continue;
+    for (const match of line.matchAll(API_URL)) {
+      let pathname;
+      try {
+        pathname = new URL(match[0]).pathname;
+      } catch {
+        continue;
+      }
+      found.push(stripQueryString(pathname));
     }
-    found.push(stripQueryString(pathname));
-  }
-  for (const match of block.content.matchAll(RELATIVE_PATH)) {
-    found.push(stripQueryString(match[0]));
+    for (const match of line.matchAll(RELATIVE_PATH)) {
+      found.push(stripQueryString(match[0]));
+    }
   }
   return found;
 }
