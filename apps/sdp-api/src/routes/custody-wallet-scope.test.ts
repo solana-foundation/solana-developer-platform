@@ -1,3 +1,4 @@
+import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as rpcRelay from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -1904,6 +1905,100 @@ describe("Custody wallet scope routes", () => {
       );
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  // APE-893 (SOLA9-633): the route-local catch used to convert FeePaymentError
+  // into an AppError carrying the provider's own message, bypassing the global
+  // fixed-message fee mapper. Provider-selected diagnostics must stay on the
+  // scrubbed server-side telemetry path only.
+  describe("signer-check fee-error boundary", () => {
+    const PROVIDER_DIAGNOSTICS =
+      "ownerAddress=owner-sensitive-007 email=alice.customer@example.com wallet_owner_id=wlt-owner-007";
+
+    function rejectFeePayerWith(error: Error): void {
+      signerCheckMocks.createSponsorship.mockReturnValue({
+        providerId: "test",
+        getFeePayer: vi.fn().mockRejectedValue(error),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signerCheckMocks.signAndSend,
+      });
+    }
+
+    it("keeps provider-selected Kora diagnostics out of the signer-check error body", async () => {
+      await seedActiveConnectionWallet(
+        "fee_error",
+        "privy_fee_error",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(
+        new FeePaymentError(
+          `Failed to get fee payer address: RPC Error -32001: ${PROVIDER_DIAGNOSTICS}`,
+          "PROVIDER_REJECTED"
+        )
+      );
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_error" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(body.error.message).not.toContain("RPC Error -32001");
+      expect(response.status).toBe(422);
+      expect(body.error).toEqual({
+        code: "SIGNING_REJECTED",
+        message:
+          "The transaction fee sponsor rejected this transaction. Retrying will not help; check the transaction and sponsorship policy.",
+      });
+      expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
+    });
+
+    it("keeps rate-limited fee errors on the fixed sponsor copy", async () => {
+      await seedActiveConnectionWallet(
+        "fee_limit",
+        "privy_fee_limit",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(
+        new FeePaymentError(`Kora rate limit exceeded: ${PROVIDER_DIAGNOSTICS}`, "RATE_LIMITED")
+      );
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_limit" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(response.status).toBe(429);
+      expect(body.error).toEqual({
+        code: "RATE_LIMITED",
+        message: "The transaction fee sponsor is busy. Try again.",
+      });
+    });
+
+    it("keeps non-fee Kora failures on the fixed SOLANA_RPC_ERROR copy", async () => {
+      await seedActiveConnectionWallet(
+        "fee_plain",
+        "privy_fee_plain",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(new Error(`Kora transport exploded: ${PROVIDER_DIAGNOSTICS}`));
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_plain" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(response.status).toBe(502);
+      expect(body.error).toEqual({
+        code: "SOLANA_RPC_ERROR",
+        message: "Kora signer-check request failed. Verify Kora availability and credentials.",
+      });
     });
   });
 });

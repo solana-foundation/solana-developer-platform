@@ -49,6 +49,12 @@ describe("OpenAPI spec", () => {
     expect(operation?.responses).toHaveProperty("403");
     expect(operation?.responses).toHaveProperty("404");
     expect(operation?.responses).toHaveProperty("409");
+    // The fee-sponsor failure contract (mapFeePaymentError): structured
+    // rejection 422, rate limit 429, default 502, unavailability 503 (APE-893).
+    expect(operation?.responses).toHaveProperty("422");
+    expect(operation?.responses).toHaveProperty("429");
+    expect(operation?.responses).toHaveProperty("502");
+    expect(operation?.responses).toHaveProperty("503");
     const request = getJsonSchema(operation?.requestBody);
     expect(request.properties).toEqual({ walletId: expect.any(Object) });
     expect(request.required).toBeUndefined();

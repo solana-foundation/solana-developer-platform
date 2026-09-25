@@ -312,7 +312,10 @@ export function registerCustodyPaths(registry: OpenAPIRegistry) {
         description: "Signer check verified in simulation",
         content: jsonContent(custodySignerCheckResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 429, 500, 502]),
+      // 422/503: the fee sponsor's structured refusal (SIGNING_REJECTED) and
+      // unavailability (PROVIDER_UNAVAILABLE), per the shared mapFeePaymentError
+      // contract this route now defers to (APE-893).
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 422, 429, 500, 502, 503]),
     },
   });
 
