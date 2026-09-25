@@ -50,19 +50,26 @@ describe("unified issuance amount projection", () => {
 
     // Value-bearing kinds: handlers persist the exact decimal in
     // operation_params.amount (see mint.ts, burn.ts, seize.ts, force-burn.ts).
-    const rows = [
-      ["itx_amt_burn", "burn", { amount: "7" }],
-      ["itx_amt_force_burn", "force_burn", { amount: "9.5" }],
-      ["itx_amt_mint", "mint", { amount: "12.3456" }],
-      ["itx_amt_seize", "seize", { amount: "0.125" }],
+    // The string is bound verbatim so each row stores exactly what a handler
+    // would persist, including the malformed raw text below.
+    const rows: Array<[id: string, type: string, params: string]> = [
+      ["itx_amt_burn", "burn", JSON.stringify({ amount: "7" })],
+      ["itx_amt_force_burn", "force_burn", JSON.stringify({ amount: "9.5" })],
+      ["itx_amt_mint", "mint", JSON.stringify({ amount: "12.3456" })],
+      ["itx_amt_seize", "seize", JSON.stringify({ amount: "0.125" })],
+      // Leading/trailing-dot forms pass isDecimalString validation in the
+      // issuance routes, so the view must project them too.
+      ["itx_amt_mint_leading_dot", "mint", JSON.stringify({ amount: ".5" })],
+      ["itx_amt_burn_trailing_dot", "burn", JSON.stringify({ amount: "1." })],
       // Lifecycle-only kinds never carry an amount.
-      ["itx_lifecycle_deploy", "deploy", {}],
-      ["itx_lifecycle_freeze", "freeze", { accountAddress: "acc_1" }],
-      // Malformed JSON must stay nullable instead of breaking the view.
-      ["itx_malformed_mint", "mint", "not-json" as unknown as Record<string, unknown>],
+      ["itx_lifecycle_deploy", "deploy", JSON.stringify({})],
+      ["itx_lifecycle_freeze", "freeze", JSON.stringify({ accountAddress: "acc_1" })],
+      // Malformed JSON must stay nullable instead of breaking the view: raw
+      // invalid text is rejected by pg_input_is_valid before the cast.
+      ["itx_malformed_mint", "mint", "not-json"],
       // A non-numeric amount on a value-bearing kind must not project.
-      ["itx_nonnumeric_burn", "burn", { amount: "not-a-number" }],
-    ] as const;
+      ["itx_nonnumeric_burn", "burn", JSON.stringify({ amount: "not-a-number" })],
+    ];
     for (const [id, type, params] of rows) {
       await db
         .prepare(
@@ -71,16 +78,7 @@ describe("unified issuance amount projection", () => {
               created_at, updated_at)
            VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, ?)`
         )
-        .bind(
-          id,
-          TOKEN_ID,
-          TEST_ORG.id,
-          type,
-          JSON.stringify(params),
-          `sig_${id}`,
-          CREATED_AT,
-          CREATED_AT
-        )
+        .bind(id, TOKEN_ID, TEST_ORG.id, type, params, `sig_${id}`, CREATED_AT, CREATED_AT)
         .run();
     }
   });
@@ -93,7 +91,7 @@ describe("unified issuance amount projection", () => {
       projectId: PROJECT,
       modules: ["issuance"],
       module: "issuance",
-      limit: 10,
+      limit: 20,
     });
     const rows = result.rows
       .map((row) => ({ id: row.id, kind: row.kind, token: row.token, amount: row.amount }))
@@ -102,12 +100,24 @@ describe("unified issuance amount projection", () => {
     expect(rows).toEqual([
       { id: "itx_amt_burn", kind: "burn", token: "IssuanceAmountMint111", amount: "7" },
       {
+        id: "itx_amt_burn_trailing_dot",
+        kind: "burn",
+        token: "IssuanceAmountMint111",
+        amount: "1.",
+      },
+      {
         id: "itx_amt_force_burn",
         kind: "force_burn",
         token: "IssuanceAmountMint111",
         amount: "9.5",
       },
       { id: "itx_amt_mint", kind: "mint", token: "IssuanceAmountMint111", amount: "12.3456" },
+      {
+        id: "itx_amt_mint_leading_dot",
+        kind: "mint",
+        token: "IssuanceAmountMint111",
+        amount: ".5",
+      },
       { id: "itx_amt_seize", kind: "seize", token: "IssuanceAmountMint111", amount: "0.125" },
       { id: "itx_lifecycle_deploy", kind: "deploy", token: "IssuanceAmountMint111", amount: null },
       { id: "itx_lifecycle_freeze", kind: "freeze", token: "IssuanceAmountMint111", amount: null },

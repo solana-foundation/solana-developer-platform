@@ -54,17 +54,21 @@ async function runPreflight(): Promise<void> {
     : !env.KORA_RPC_URL && !!readEnv("PRIVATE_CHANNEL_GATEWAY_URL");
 
   if (!koraInScope && !spcInScope && !dvpInScope) {
-    // Nothing is configured and no suite was selected. Every test file in this
-    // package self-skips through `describe.skipIf` in that state, so the run
-    // would execute no tests; let it no-op cleanly instead of failing every
-    // file at import. Runs with any integration env (or an explicit
-    // `SDP_INTEGRATION_SUITE`) fall through to the strict validation below, so
-    // CI shards with a configured-but-broken service still fail fast.
-    // biome-ignore lint/security/noSecrets: environment variable names in a help message, not a secret.
-    const suites = "SDP_INTEGRATION_SUITE=kora|spc|dvp";
-    console.warn(
-      `Integration preflight: no suite in scope and no integration services configured; all integration tests will skip. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites} to run them.`
-    );
+    // No suite is in scope and none was inferred from configured env. The
+    // on-chain and DvP suites, however, run whenever Solana RPC and custody
+    // are configured — their `describe.skipIf` never consults the suite scope.
+    // So only no-op when those tests are actually disabled too; otherwise
+    // validate the on-chain dependencies upfront instead of letting every
+    // active test fail on its own later.
+    if (!onChainTestsEnabled()) {
+      // biome-ignore lint/security/noSecrets: environment variable names in a help message, not a secret.
+      const suites = "SDP_INTEGRATION_SUITE=kora|spc|dvp";
+      console.warn(
+        `Integration preflight: no suite in scope and no integration services configured; all integration tests will skip. Set KORA_RPC_URL or PRIVATE_CHANNEL_GATEWAY_URL, or select explicitly with ${suites} to run them.`
+      );
+      return;
+    }
+    await preflightOnChainSuite();
     return;
   }
 
@@ -80,6 +84,53 @@ async function runPreflight(): Promise<void> {
   if (dvpInScope) {
     await preflightDvpSuite();
   }
+}
+
+/**
+ * Whether the on-chain (and DvP) suites would actually execute: they skip
+ * through `describe.skipIf` unless Solana RPC and a custody signer are both
+ * configured, independent of the suite scope. Kora is deliberately absent —
+ * custody-signed flows pay their own fees and degrade gracefully without it.
+ */
+function onChainTestsEnabled(): boolean {
+  if (readEnv("RUN_INTEGRATION_TESTS") !== "true") {
+    return false;
+  }
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
+  const custodyConfigured =
+    integrationCustodyProvider === "local"
+      ? !!readEnv("CUSTODY_PRIVATE_KEY")
+      : !!readEnv("PRIVY_APP_ID") && !!readEnv("PRIVY_APP_SECRET");
+  return !!env.SOLANA_RPC_URL && custodyConfigured;
+}
+
+/**
+ * What an on-chain custody run actually needs: a Solana RPC endpoint and a
+ * custody signer. Mirrors the skipIf gates of the on-chain suites, so a run
+ * that reaches here fails fast on a missing or unreachable dependency instead
+ * of surfacing it per-test.
+ */
+async function preflightOnChainSuite(): Promise<void> {
+  const integrationCustodyProvider = getIntegrationCustodyProvider();
+  const missing: string[] = [];
+  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
+  if (integrationCustodyProvider === "local") {
+    if (!env.CUSTODY_PRIVATE_KEY) missing.push("CUSTODY_PRIVATE_KEY");
+  } else {
+    if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
+    if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Integration preflight (on-chain): missing ${missing.join(", ")}.`);
+  }
+
+  const solanaRpcUrl = env.SOLANA_RPC_URL;
+  if (!solanaRpcUrl) {
+    // Unreachable because of the `missing` check above.
+    throw new Error("Integration preflight internal error: SOLANA_RPC_URL was missing.");
+  }
+  await withLabel("Solana.getLatestBlockhash", () => assertSolanaRpcHealthy(solanaRpcUrl));
 }
 
 /**

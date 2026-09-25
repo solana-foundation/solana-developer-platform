@@ -248,7 +248,7 @@ SELECT
   CASE
     WHEN it.type IN ('mint', 'burn', 'seize', 'force_burn')
       AND pg_input_is_valid(it.operation_params, 'jsonb')
-      AND it.operation_params::jsonb ->> 'amount' ~ '^\d+(\.\d+)?$'
+      AND it.operation_params::jsonb ->> 'amount' ~ '^(\d+(\.\d*)?|\.\d+)$'
     THEN it.operation_params::jsonb ->> 'amount'
     ELSE NULL
   END AS amount,

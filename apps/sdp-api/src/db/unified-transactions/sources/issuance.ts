@@ -3,8 +3,10 @@ import type { UnifiedTransactionSource } from "./types";
 // Value-moving kinds (mint, burn, seize, force_burn) persist the exact decimal
 // in operation_params.amount; lifecycle-only kinds have none. operation_params
 // is TEXT, so the extraction is guarded: malformed or legacy rows project NULL
-// instead of aborting the unified view, and only plain unsigned decimals (the
-// same grammar the mint supply bookkeeping reads) are projected.
+// instead of aborting the unified view, and only plain unsigned decimals are
+// projected. The matcher mirrors isDecimalString (the grammar the issuance
+// routes validate amounts with): digits with at most one decimal point and at
+// least one digit, including leading-dot (".5") and trailing-dot ("1.") forms.
 export const issuanceUnifiedTransactionSource = {
   sql: () => `SELECT
   it.id,
@@ -18,7 +20,7 @@ export const issuanceUnifiedTransactionSource = {
   CASE
     WHEN it.type IN ('mint', 'burn', 'seize', 'force_burn')
       AND pg_input_is_valid(it.operation_params, 'jsonb')
-      AND it.operation_params::jsonb ->> 'amount' ~ '^\\d+(\\.\\d+)?$'
+      AND it.operation_params::jsonb ->> 'amount' ~ '^(\\d+(\\.\\d*)?|\\.\\d+)$'
     THEN it.operation_params::jsonb ->> 'amount'
     ELSE NULL
   END AS amount,
