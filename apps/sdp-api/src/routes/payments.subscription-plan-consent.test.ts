@@ -806,6 +806,19 @@ it("binds a create that references a live program plan id even without a planPda
   expect(mismatchedToken.status).toBe(400);
   expect(errorResponseSchema.parse(await mismatchedToken.json()).error.message).toContain("token");
 
+  // An amount with more decimal places than the mint supports is a 400: the
+  // mint's precision is only known once the bound create resolves it on-chain.
+  mockOnChainPlan({ destinations: [DESTINATION] });
+  const overpreciseAmount = await createPlan({
+    programPlanId: "328",
+    destinationAddress: DESTINATION,
+    amount: "25.0000001",
+  });
+  expect(overpreciseAmount.status).toBe(400);
+  expect(errorResponseSchema.parse(await overpreciseAmount.json()).error.message).toContain(
+    "decimal place"
+  );
+
   mockOnChainPlan({});
   const bound = await createPlan({ programPlanId: "324", destinationAddress: DESTINATION });
   expect(bound.status).toBe(201);

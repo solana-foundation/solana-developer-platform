@@ -1,7 +1,7 @@
 import { generateProgramPlanId } from "@sdp/payments/recurring-payment-lifecycle";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import { parseDecimalAmount } from "@sdp/solana/amount";
+import { AmountError, parseDecimalAmount } from "@sdp/solana/amount";
 import type {
   ListPaymentSubscriptionPlansResponse,
   PaymentSubscriptionPlan,
@@ -178,7 +178,21 @@ async function assertPlanConsentMatchesChain(
     throw badRequest("Subscription plan period does not match the on-chain plan");
   }
   const decimals = await resolveMintDecimals(solanaRpc.createRpc(c.env), mint);
-  if (onChainPlan.data.terms.amount !== parseDecimalAmount(requested.amount, decimals)) {
+  // The request schema validates the amount's grammar, not its precision: the
+  // mint's decimals are only known here, so an amount with more decimal places
+  // than the mint supports surfaces as a 400 instead of a 500 (SOLA9-634).
+  let requestedAmount: bigint;
+  try {
+    requestedAmount = parseDecimalAmount(requested.amount, decimals);
+  } catch (error) {
+    if (error instanceof AmountError) {
+      throw badRequest(
+        `Subscription plan amount is invalid for this token: ${error.message} (mint supports ${decimals} decimal place(s))`
+      );
+    }
+    throw error;
+  }
+  if (onChainPlan.data.terms.amount !== requestedAmount) {
     throw badRequest("Subscription plan amount does not match the on-chain plan");
   }
 }
