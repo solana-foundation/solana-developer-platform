@@ -181,7 +181,7 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
-  registerTransactionsPaths(registry);
+  registerTransactionsPaths(registry, { publishEarn });
   registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);
