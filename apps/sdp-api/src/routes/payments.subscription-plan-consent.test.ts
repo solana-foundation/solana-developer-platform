@@ -734,6 +734,62 @@ it("validates destination and status claims when a plan references an on-chain p
   expect(activePlan.status).toBe("active");
 });
 
+it("binds a create that references a live program plan id even without a planPda", async () => {
+  const createPlan = async (body: Record<string, unknown>) =>
+    app.request(
+      "/v1/payments/subscription-plans",
+      {
+        method: "POST",
+        headers: HEADERS,
+        body: JSON.stringify({
+          ownerWalletId: TEST_WALLET_ID,
+          token: DEVNET_USDC_MINT,
+          amount: "25.00",
+          periodHours: 720,
+          ...body,
+        }),
+      },
+      env
+    );
+
+  mockOnChainPlan({ destinations: [DESTINATION] });
+  const unconfirmedDestination = await createPlan({
+    programPlanId: "321",
+    destinationAddress: OTHER_DESTINATION,
+  });
+  expect(unconfirmedDestination.status).toBe(400);
+
+  mockOnChainPlan({ status: subscriptionsProgram.PlanStatus.Sunset });
+  const unconfirmedActivation = await createPlan({ programPlanId: "322", status: "active" });
+  expect(unconfirmedActivation.status).toBe(400);
+
+  mockOnChainPlan({ status: subscriptionsProgram.PlanStatus.Active });
+  const prematureArchive = await createPlan({ programPlanId: "323", status: "archived" });
+  expect(prematureArchive.status).toBe(400);
+
+  mockOnChainPlan({});
+  const bound = await createPlan({ programPlanId: "324", destinationAddress: DESTINATION });
+  expect(bound.status).toBe(201);
+  const [boundPda] = await subscriptionsProgram.findPlanPda({
+    owner: address(OWNER),
+    planId: 324n,
+  });
+  const boundPlan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await bound.json()
+  ).data.subscriptionPlan;
+  expect(boundPlan.planPda).toBe(boundPda);
+  expect(boundPlan.destinationAddress).toBe(DESTINATION);
+  expect(boundPlan.status).toBe("draft");
+
+  mockOnChainPlan({ exists: false });
+  const freshDraft = await createPlan({ programPlanId: "654" });
+  expect(freshDraft.status).toBe(201);
+  const freshPlan = successResponseSchema(paymentSubscriptionPlanResponseSchema).parse(
+    await freshDraft.json()
+  ).data.subscriptionPlan;
+  expect(freshPlan.planPda).toBeNull();
+});
+
 it("binds a draft record to a live on-chain plan derived from its program plan id", async () => {
   const planRes = await app.request(
     "/v1/payments/subscription-plans",

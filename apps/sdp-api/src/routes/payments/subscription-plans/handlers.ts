@@ -116,20 +116,18 @@ async function resolvePullerWalletAddress(
 }
 
 /**
- * A create request that references an existing on-chain plan (planPda) claims
- * consent the subscriptions program already enforces. As with updates, the
- * stored record may only describe state the chain confirms (SOLA9-634).
+ * A create request that references an existing on-chain plan claims consent
+ * the subscriptions program already enforces: an attached planPda, or a
+ * programPlanId whose derived plan already exists on-chain. As with updates,
+ * the stored record may only describe state the chain confirms (SOLA9-634).
  */
-async function assertAttachedPlanMatchesChain(
-  c: AppContext,
-  planPda: Address,
+async function assertPlanConsentMatchesChain(
+  onChainPlan: Awaited<ReturnType<typeof fetchLiveSubscriptionPlan>>,
   requested: {
     destinationAddress: string | null | undefined;
     status: string;
   }
 ): Promise<void> {
-  const onChainPlan = await fetchLiveSubscriptionPlan(c.env, planPda);
-
   if (requested.destinationAddress) {
     if (!onChainPlan?.data.destinations.includes(requested.destinationAddress as Address)) {
       throw badRequest(
@@ -167,21 +165,34 @@ export const createSubscriptionPlan = async (
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
   const programPlanId = body.programPlanId ?? generateProgramPlanId();
-  if (body.planPda) {
-    // Every flow derives the plan PDA from the owner and program plan ID, so
-    // an attached planPda must match that derivation (SOLA9-634).
-    const [derivedPlanPda] = await findPlanPda({
-      owner: assertValidAddress(ownerWallet.publicKey, "ownerAddress"),
-      planId: parseU64String(programPlanId, "programPlanId"),
-    });
-    if (body.planPda !== derivedPlanPda) {
-      throw badRequest("Subscription plan PDA does not match the owner and program plan ID");
-    }
-    await assertAttachedPlanMatchesChain(c, assertValidAddress(body.planPda, "planPda"), {
-      destinationAddress: body.destinationAddress ?? null,
-      status: body.status,
-    });
+  // Every flow derives the plan PDA from the owner and program plan ID, so an
+  // attached planPda must match that derivation (SOLA9-634).
+  const [derivedPlanPda] = await findPlanPda({
+    owner: assertValidAddress(ownerWallet.publicKey, "ownerAddress"),
+    planId: parseU64String(programPlanId, "programPlanId"),
+  });
+  if (body.planPda && body.planPda !== derivedPlanPda) {
+    throw badRequest("Subscription plan PDA does not match the owner and program plan ID");
   }
+
+  // A create that references an existing on-chain plan (an attached planPda,
+  // or a programPlanId whose derived plan already exists there) is bound to
+  // that plan's consent even without an attached planPda: it may only
+  // describe state the chain confirms (SOLA9-634).
+  let planPda: Address | null = null;
+  if (body.planPda || body.programPlanId) {
+    const onChainPlan = await fetchLiveSubscriptionPlan(c.env, derivedPlanPda);
+    if (onChainPlan || body.planPda) {
+      // An attached planPda claims a live plan, so its consent claims are
+      // validated even when the account is currently missing.
+      await assertPlanConsentMatchesChain(onChainPlan, {
+        destinationAddress: body.destinationAddress ?? null,
+        status: body.status,
+      });
+    }
+    planPda = onChainPlan || body.planPda ? derivedPlanPda : null;
+  }
+
   const now = new Date().toISOString();
   const id = `psp_${crypto.randomUUID()}`;
   const createdBy = await resolveCreatorUserId(c);
@@ -197,7 +208,7 @@ export const createSubscriptionPlan = async (
     amount: body.amount,
     periodHours: body.periodHours,
     programPlanId,
-    planPda: body.planPda ?? null,
+    planPda,
     destinationAddress: body.destinationAddress ?? null,
     pullerWalletId: puller.pullerWalletId ?? null,
     pullerAddress: puller.pullerAddress ?? null,
