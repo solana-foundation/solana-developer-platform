@@ -181,10 +181,12 @@ function useInboxRefresh(options: {
     const scope = options.scope;
     setReloading(true);
     try {
-      // `null` when the batch pair establishes nothing (both batches empty):
-      // an older proxy still resolving the shared cookie can answer like that
-      // for a sibling tab's empty project, so the mounted rows stand rather
-      // than being erased by an answer that proves nothing.
+      // `null` only when an unbound batch pair establishes nothing (both
+      // batches empty without the explicit binding): an older proxy still
+      // resolving the shared cookie can answer like that for a sibling tab's
+      // empty project, so the mounted rows stand rather than being erased by
+      // an answer that proves nothing. A bound empty pair applies, clearing
+      // rows the mounted project genuinely no longer has.
       const merged = await fetchApprovalRequests(options.projectId);
       // Functional so a response that resolves after the scope moved on is
       // dropped rather than written into the new scope's inbox.

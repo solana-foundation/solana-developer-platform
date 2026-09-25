@@ -224,11 +224,11 @@ describe("approvalRequestsInProjectScope", () => {
     expect(approvalRequestsInProjectScope(batch, "project-1")).toBe(false);
   });
 
-  // An empty batch carries no rows, so it proves nothing about which project
-  // answered: an older proxy still resolving the shared selection cookie can
-  // return one for a sibling tab's empty project.
-  it("never reads an empty batch as in scope", () => {
-    expect(approvalRequestsInProjectScope([], "project-1")).toBe(false);
+  // An empty batch carries no row contradicting the binding, and a
+  // legitimately empty result must still apply; whether an empty pair may
+  // repaint at all is `scopedApprovalBatch`'s call.
+  it("reads an empty batch as vacuously in scope", () => {
+    expect(approvalRequestsInProjectScope([], "project-1")).toBe(true);
   });
 });
 
@@ -239,8 +239,12 @@ describe("scopedApprovalBatch", () => {
     expect(scopedApprovalBatch(inScope, inScope, "project-1")).toEqual(inScope);
   });
 
-  it("skips the repaint when both batches are empty", () => {
-    expect(scopedApprovalBatch([], [], "project-1")).toBeNull();
+  it("applies a bound empty pair so stale rows clear", () => {
+    expect(scopedApprovalBatch([], [], "project-1")).toEqual([]);
+  });
+
+  it("skips the repaint when an unbound pair of batches is empty", () => {
+    expect(scopedApprovalBatch([], [], null)).toBeNull();
   });
 
   it("skips the scope check when the inbox has no project binding", () => {
@@ -256,5 +260,12 @@ describe("scopedApprovalBatch", () => {
       "Approval reload left the mounted project"
     );
     expect(() => scopedApprovalBatch([], [], "project-1")).not.toThrow();
+  });
+
+  it("applies an empty pending batch alongside in-scope rows", () => {
+    // A project with approval history but nothing pending: the pending query
+    // legitimately answers empty while the recent query returns rows.
+    expect(scopedApprovalBatch([], inScope, "project-1")).toEqual(inScope);
+    expect(scopedApprovalBatch(inScope, [], "project-1")).toEqual(inScope);
   });
 });

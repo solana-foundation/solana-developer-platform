@@ -10,11 +10,10 @@ import { ApprovalInbox } from "./approval-inbox";
 /**
  * Regression coverage for the inbox's project-scoped refresh edges:
  *
- * 1. An empty refresh (both batches empty) establishes nothing about scope —
- *    an older proxy still resolving the shared selection cookie answers like
- *    that for a sibling tab's empty project — so it must never erase the
- *    mounted rows, and it must not read as a load failure for a project that
- *    genuinely has no requests.
+ * 1. A bound empty refresh applies: the request named the mounted project
+ *    explicitly, so two empty batches mean the project genuinely has no
+ *    requests — stale rows must clear, and the refresh must not read as a
+ *    load failure.
  * 2. A project switch re-binds the inbox to the new scope's page props, so a
  *    new project whose initial load failed shows the error panel instead of
  *    an empty inbox hiding the failure.
@@ -99,11 +98,13 @@ describe("ApprovalInbox project-scoped refreshes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps the mounted rows when an empty refresh answers for an empty project", async () => {
-    // An older proxy still resolving the shared cookie can follow a sibling
-    // tab's switch to a project with no approval requests: both batches come
-    // back empty without a single row proving which project answered.
-    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(emptyBatchResponse()));
+  it("clears the mounted rows when a bound refresh answers an emptied project", async () => {
+    // Fresh Response per call: a body can only be read once, and the pending
+    // and recent fetches run in parallel.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse())
+    );
 
     renderInbox();
     expect(screen.getAllByText("Treasury").length).toBeGreaterThan(0);
@@ -112,9 +113,40 @@ describe("ApprovalInbox project-scoped refreshes", () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
 
-    // The unconfirmed empty answer did not erase the mounted rows…
-    expect(screen.getAllByText("Treasury").length).toBeGreaterThan(0);
+    // The bound empty answer applied, resolving the stale pending row…
+    expect(screen.queryByText("Treasury")).toBeNull();
+    expect(screen.getByText("No requests are waiting for approval")).toBeTruthy();
     // …and the refresh did not read as a failure either.
+    expect(screen.queryByText("Unable to load approval requests")).toBeNull();
+  });
+
+  it("applies a refresh whose pending batch is empty but whose recent batch has rows", async () => {
+    // A project with approval history but nothing pending: the pending query
+    // legitimately answers empty while the recent query returns rows, so the
+    // pair is in scope and must apply rather than fail the refresh.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async (input) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.includes("status=pending")) return emptyBatchResponse();
+        return Response.json({
+          data: { approvalRequests: [{ ...approvalRequest("project-a"), id: "apr_new" }] },
+        });
+      })
+    );
+
+    renderInbox();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    const hrefs = screen
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"))
+      .filter((href) => href?.startsWith("/dashboard/approvals/"));
+    expect(hrefs).toContain("/dashboard/approvals/apr_new");
+    expect(hrefs).not.toContain("/dashboard/approvals/apr_project-a");
     expect(screen.queryByText("Unable to load approval requests")).toBeNull();
   });
 

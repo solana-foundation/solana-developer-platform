@@ -52,26 +52,32 @@ export function mergeApprovalRequests(
  * mid-refresh, or a proxy that predates the explicit binding — and the batch
  * is dropped whole rather than partially applied.
  *
- * An empty batch is never in scope: with no rows it proves nothing about
- * which project answered, so it must not be read as "the mounted project has
- * no requests" either.
+ * An empty batch is vacuously in scope: it carries no row contradicting the
+ * binding, and a legitimately empty result (a project with no pending
+ * approvals, say) must still apply. Whether an empty pair may repaint at all
+ * is `scopedApprovalBatch`'s call.
  */
 export function approvalRequestsInProjectScope(
   requests: WalletApprovalRequestSummary[],
   projectId: string
 ): boolean {
-  return requests.length > 0 && requests.every((request) => request.projectId === projectId);
+  return requests.every((request) => request.projectId === projectId);
 }
 
 /**
  * Validates a refresh's pending and recent batches against the inbox's
  * project binding and returns the rows to apply.
  *
- * A pair where both batches are empty establishes nothing — an older proxy
- * still resolving the shared selection cookie answers like that for a sibling
- * tab's empty project — so it returns `null` and the caller keeps the mounted
- * rows instead of erasing them. A pair carrying rows must name the mounted
- * project in every row of both batches.
+ * A bound refresh (`projectId` set) is authoritative: the request named the
+ * mounted project explicitly and the answer is scoped to it, so empty batches
+ * mean the project genuinely has no requests and apply, clearing stale rows.
+ * A pair carrying rows must name the mounted project in every row of both
+ * batches.
+ *
+ * Without the binding the batches are scoped by the shared selection cookie,
+ * which a sibling tab can switch at any moment; an empty pair then establishes
+ * nothing about which project answered, so it returns `null` and the caller
+ * keeps the mounted rows instead of erasing them.
  *
  * @throws When a batch with rows answers for another project; the caller
  * treats the whole refresh as failed rather than partially applying it.
@@ -81,13 +87,15 @@ export function scopedApprovalBatch(
   recentRequests: WalletApprovalRequestSummary[],
   projectId: string | null
 ): WalletApprovalRequestSummary[] | null {
-  if (pendingRequests.length === 0 && recentRequests.length === 0) return null;
   if (
     projectId !== null &&
     (!approvalRequestsInProjectScope(pendingRequests, projectId) ||
       !approvalRequestsInProjectScope(recentRequests, projectId))
   ) {
     throw new Error("Approval reload left the mounted project");
+  }
+  if (projectId === null && pendingRequests.length === 0 && recentRequests.length === 0) {
+    return null;
   }
   return mergeApprovalRequests(pendingRequests, recentRequests);
 }
@@ -98,8 +106,8 @@ export function scopedApprovalBatch(
  * scope instead of resolving the shared selection cookie, which a sibling tab
  * can change at any moment.
  *
- * @returns The scope-checked merged rows, or `null` when the batch pair
- * establishes nothing (see `scopedApprovalBatch`).
+ * @returns The scope-checked merged rows, or `null` when an unbound batch
+ * pair establishes nothing (see `scopedApprovalBatch`).
  * @throws When a fetch fails, a batch carries another project's rows, or the
  * response body is not a readable approval-request list.
  */
