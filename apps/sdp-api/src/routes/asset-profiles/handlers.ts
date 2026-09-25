@@ -10,9 +10,13 @@ import {
   type ListAssetProfilesResponse,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
-import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import { asTransactionalClient, getDb } from "@/db";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories";
+import type {
+  AssetProfileRow,
+  AssetProfilesRepository,
+} from "@/db/repositories/asset-profile.repository";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import {
   AppError,
   badRequest,
@@ -27,6 +31,7 @@ import {
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
+import { assertRequiredForDeployMetadata } from "@/lib/issuance/required-metadata";
 import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
@@ -219,26 +224,26 @@ export const getAssetProfileByTokenId = async (c: AppContext) => {
   return success(c, response);
 };
 
-export const updateAssetProfile = async (
-  c: ValidatedBodyContext<typeof updateAssetProfileSchema>
-) => {
-  const auth = getAuth(c);
-  const projectId = requireProjectId(c);
-  const params = assetProfileIdParamsSchema.safeParse(c.req.param());
-
-  if (!params.success) {
-    throw badRequestParams();
+// Apply a validated profile patch to the locked row. Runs inside the caller's
+// transaction: the FOR UPDATE read at the top holds the row lock until commit,
+// so every gate below validates the committed row state a concurrent patch
+// cannot change between the read and the write (SOLA9-37).
+async function applyAssetProfilePatch(
+  repo: AssetProfilesRepository,
+  input: {
+    auth: ApiKeyContext;
+    projectId: string;
+    profileId: string;
+    body: z.infer<typeof updateAssetProfileSchema>;
   }
-
-  const body = c.req.valid("json");
-
-  const { profileId } = params.data;
-  const repo = getAssetProfilesRepository(c);
+): Promise<AssetProfileRow> {
+  const { auth, projectId, profileId, body } = input;
 
   const current = await repo.getAssetProfileById({
     profileId,
     organizationId: auth.organizationId,
     projectId,
+    lockForUpdate: true,
   });
   if (!current) {
     throw notFound("Asset profile");
@@ -286,6 +291,9 @@ export const updateAssetProfile = async (
     if (buildErrors.length > 0) {
       throw badRequest("Invalid advanced settings combination", { errors: buildErrors });
     }
+    // Registry gate: a patch may not retype the profile into, or strip the
+    // metadata of, a type whose requiredForDeploy fields are unmet (SOLA9-37).
+    assertRequiredForDeployMetadata(nextCategory, nextType, effectiveMetadata);
   }
 
   // Stamp version only on metadata we persist.
@@ -316,7 +324,39 @@ export const updateAssetProfile = async (
     throw notFound("Asset profile");
   }
 
-  const auditService = new AuditService(getDb(c.env));
+  return updated;
+}
+
+export const updateAssetProfile = async (
+  c: ValidatedBodyContext<typeof updateAssetProfileSchema>
+) => {
+  const auth = getAuth(c);
+  const projectId = requireProjectId(c);
+  const params = assetProfileIdParamsSchema.safeParse(c.req.param());
+
+  if (!params.success) {
+    throw badRequestParams();
+  }
+
+  const body = c.req.valid("json");
+
+  const { profileId } = params.data;
+  const db = getDb(c.env);
+
+  // Read, validate, and write in one transaction (see applyAssetProfilePatch):
+  // the row lock is held until commit, so every gate validates the committed
+  // row state a concurrent patch cannot change between the read and the write.
+  const updated = await db.transaction((tx) =>
+    applyAssetProfilePatch(createPostgresAssetProfilesRepository(asTransactionalClient(tx)), {
+      auth,
+      projectId,
+      profileId,
+      body,
+    })
+  );
+
+  // Audit outside transaction; audit failure must not roll back the committed profile.
+  const auditService = new AuditService(db);
   await auditService.log(c, {
     organizationId: auth.organizationId,
     userId: auth.userId ?? undefined,

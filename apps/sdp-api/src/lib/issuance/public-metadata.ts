@@ -14,6 +14,14 @@ function getByPath(source: unknown, path: string): unknown {
   }, source);
 }
 
+/**
+ * Read a dot-path (e.g. "asset.issuerName") out of issuance metadata. Shared by
+ * the public projection and the requiredForDeploy metadata gate.
+ */
+export function getMetadataValueByPath(source: unknown, path: string): unknown {
+  return getByPath(source, path);
+}
+
 function setByPath(target: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split(".");
   if (keys.length === 0) {

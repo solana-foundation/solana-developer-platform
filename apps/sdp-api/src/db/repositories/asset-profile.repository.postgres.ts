@@ -168,7 +168,7 @@ export function createPostgresAssetProfilesRepository(db: AppDb): AssetProfilesR
              WHERE id = ?
                AND organization_id = ?
                AND project_id = ?
-               AND status = 'active'`
+               AND status = 'active'${params.lockForUpdate ? " FOR UPDATE" : ""}`
         )
         .bind(params.profileId, params.organizationId, params.projectId)
         .first<Record<string, unknown>>();
