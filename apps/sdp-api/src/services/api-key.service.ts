@@ -631,8 +631,17 @@ export class ApiKeyService {
         // table — under READ COMMITTED an INSERT … SELECT would see rows
         // committed after the guard ran. Provisioned bindings keep their
         // exclusivity flag: a wallet provisioned for one key cannot serve a
-        // second key, so cloning such a key fails on the partial unique index
-        // instead of silently sharing the signing wallet.
+        // second key. Rotation replaces the same key identity, so its
+        // exclusivity transfers to the replacement below instead of failing
+        // the clone on the partial unique index.
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+           SET provisioned_binding = FALSE
+           WHERE api_key_id = ? AND provisioned_binding`
+          )
+          .bind(keyId)
+          .run();
         for (const row of bindingRows) {
           await tx
             .prepare(

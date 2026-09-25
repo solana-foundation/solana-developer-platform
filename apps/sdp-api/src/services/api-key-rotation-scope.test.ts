@@ -116,6 +116,54 @@ describe("rotateApiKey wallet-scope guard", () => {
     expect(replacement).toEqual({ count: 0 });
   });
 
+  it("transfers provisioned-binding exclusivity to the replacement key", async () => {
+    // A provisioned wallet is exclusive to the key it was provisioned for
+    // (partial unique index on provisioned bindings). Rotation replaces the
+    // same key identity, so the clone must succeed: exclusivity moves to the
+    // replacement and the old key's binding becomes a regular shareable one.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+         VALUES ('akw_rotation_scope_prov', ?, 'wallet_rotation_prov', '["tokens:read"]', TRUE)`
+      )
+      .bind(TARGET_KEY_ID)
+      .run();
+
+    const rotation = await new ApiKeyService(getDb(env), SCOPE).rotateApiKey(
+      TARGET_KEY_ID,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      24,
+      ["*"],
+      null,
+      "pepper"
+    );
+
+    expect(rotation).not.toBeNull();
+    if (!rotation || isApiKeyAlreadyRotated(rotation)) {
+      throw new Error("expected a replacement key");
+    }
+
+    const flags = await getDb(env).queryMany<{ api_key_id: string; provisioned_binding: boolean }>(
+      `SELECT api_key_id, provisioned_binding FROM api_key_wallet_permissions
+         WHERE wallet_id = 'wallet_rotation_prov' ORDER BY api_key_id ASC`
+    );
+    expect(flags).toHaveLength(2);
+    const replacementId = (
+      await getDb(env)
+        .prepare("SELECT id FROM api_keys WHERE rotated_from = ?")
+        .bind(TARGET_KEY_ID)
+        .first<{ id: string }>()
+    )?.id;
+    expect(replacementId).toBeDefined();
+    expect(new Map(flags.map((row) => [row.api_key_id, row.provisioned_binding]))).toEqual(
+      new Map([
+        [TARGET_KEY_ID, false],
+        [replacementId as string, true],
+      ])
+    );
+  });
+
   it("still rotates when no guard is supplied", async () => {
     const rotation = await new ApiKeyService(getDb(env), SCOPE).rotateApiKey(
       TARGET_KEY_ID,
