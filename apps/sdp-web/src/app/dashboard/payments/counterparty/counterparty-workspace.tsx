@@ -33,15 +33,8 @@ import { dashboardFetch } from "@/lib/dashboard-fetch";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDate } from "../payments-presentation";
+import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
-
-/**
- * The design's list type: 13px on a 20px line, so a row is the table's 44px, or 48px where a
- * 24px copy button sits. Headings are 13px and regular; the design-system head reads its weight
- * from `--font-weight-medium`, so the head re-points that rather than fight the class.
- */
-const CELL_CLASS = "text-meta leading-5";
-const HEAD_CLASS = "text-meta [--font-weight-medium:var(--font-weight-regular)]";
 
 type AddressFilter = "with" | "without";
 type EntityType = Counterparty["entityType"];
@@ -240,7 +233,7 @@ function CounterpartyRow({
   const href = counterpartyHref(counterparty.id);
   return (
     <TableRow className="cursor-pointer" onClick={() => router.push(href)}>
-      <TableCell className={cn(CELL_CLASS, "max-w-64")}>
+      <TableCell className={cn(PAYMENTS_TABLE_CELL, "max-w-64")}>
         <Link
           href={href}
           className="block truncate font-medium text-primary focus-visible:underline focus-visible:outline-none"
@@ -249,12 +242,12 @@ function CounterpartyRow({
           {counterparty.displayName}
         </Link>
       </TableCell>
-      <TableCell className={cn(CELL_CLASS, "text-secondary")}>
+      <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary")}>
         {typeLabel(t, counterparty.entityType)}
       </TableCell>
       <TableCell
         className={cn(
-          CELL_CLASS,
+          PAYMENTS_TABLE_CELL,
           counterparty.externalId ? "text-secondary tabular-nums" : "text-tertiary"
         )}
       >
@@ -262,10 +255,12 @@ function CounterpartyRow({
           {counterparty.externalId ?? t("Shared.SharedComponents.notSet")}
         </span>
       </TableCell>
-      <TableCell className={CELL_CLASS}>
+      <TableCell className={PAYMENTS_TABLE_CELL}>
         <AddressCell addresses={addresses} addressesLoaded={addressesLoaded} />
       </TableCell>
-      <TableCell className={cn(CELL_CLASS, "whitespace-nowrap text-secondary tabular-nums")}>
+      <TableCell
+        className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
+      >
         {formatDate(counterparty.createdAt, locale)}
       </TableCell>
       <TableCell className="text-right">
@@ -434,19 +429,19 @@ export function CounterpartyWorkspace({
           <Table className="min-w-[760px] rounded-none border-0" data-counterparty-directory-table>
             <TableHeader>
               <TableRow>
-                <TableHead className={HEAD_CLASS}>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
                   {t("DashboardPayments.counterparty.name")}
                 </TableHead>
-                <TableHead className={HEAD_CLASS}>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
                   {t("DashboardPayments.counterparty.type")}
                 </TableHead>
-                <TableHead className={HEAD_CLASS}>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
                   {t("DashboardPayments.counterparty.externalId")}
                 </TableHead>
-                <TableHead className={HEAD_CLASS}>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
                   {t("DashboardPayments.counterparty.address")}
                 </TableHead>
-                <TableHead className={HEAD_CLASS}>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
                   {t("DashboardPayments.recurring.created")}
                 </TableHead>
                 <TableHead className="w-12">

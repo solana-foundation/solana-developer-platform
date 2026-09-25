@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils";
 import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
 import { formatDisplayAmount, formatTimestamp, shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
 import {
   deriveTokenOptions,
@@ -121,10 +122,16 @@ const REQUEST_STATUS_TONE = {
   expired: "neutral",
 } as const satisfies Record<PaymentRequestStatus, StatusTone>;
 
-function StatusBadge({ status }: { status: PaymentRequestStatus }) {
+function StatusBadge({
+  status,
+  className = "text-body",
+}: {
+  status: PaymentRequestStatus;
+  className?: string;
+}) {
   const t = useTranslations();
   return (
-    <StatusText tone={REQUEST_STATUS_TONE[status]} className="text-body">
+    <StatusText tone={REQUEST_STATUS_TONE[status]} className={className}>
       {t(STATUS_TRANSLATION_KEYS[status])}
     </StatusText>
   );
@@ -479,11 +486,19 @@ function PaymentRequestsTable({
       <Table className="min-w-[760px] rounded-none border-0">
         <TableHeader>
           <TableRow>
-            <TableHead>{t("DashboardPayments.status")}</TableHead>
-            <TableHead className="text-right">{t("DashboardPayments.requests.amount")}</TableHead>
-            <TableHead>{t("DashboardPayments.requests.from")}</TableHead>
-            <TableHead>{t("DashboardPayments.requests.to")}</TableHead>
-            <TableHead>{t("DashboardPayments.recurring.created")}</TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>{t("DashboardPayments.status")}</TableHead>
+            <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
+              {t("DashboardPayments.requests.amount")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.requests.from")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.requests.to")}
+            </TableHead>
+            <TableHead className={PAYMENTS_TABLE_HEAD}>
+              {t("DashboardPayments.recurring.created")}
+            </TableHead>
             <TableHead className="w-px">
               <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>
             </TableHead>
@@ -504,24 +519,34 @@ function PaymentRequestsTable({
               }}
               className="cursor-pointer"
             >
-              <TableCell>
-                <StatusBadge status={request.status} />
+              <TableCell className={PAYMENTS_TABLE_CELL}>
+                <StatusBadge status={request.status} className={PAYMENTS_TABLE_CELL} />
               </TableCell>
-              <TableCell className="text-right text-body whitespace-nowrap text-primary tabular-nums">
+              <TableCell
+                className={cn(
+                  PAYMENTS_TABLE_CELL,
+                  "text-right font-medium whitespace-nowrap text-primary tabular-nums"
+                )}
+              >
                 {amountLabel(request)}
               </TableCell>
               <TableCell
                 className={cn(
-                  "max-w-56 truncate text-body",
+                  PAYMENTS_TABLE_CELL,
+                  "max-w-56 truncate",
                   request.counterpartyId ? "text-primary" : "text-tertiary"
                 )}
               >
                 {fromLabel(request.counterpartyId)}
               </TableCell>
-              <TableCell className="text-body whitespace-nowrap text-secondary">
+              <TableCell
+                className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
+              >
                 {shortenAddress(request.destinationAddress)}
               </TableCell>
-              <TableCell className="text-body whitespace-nowrap text-secondary">
+              <TableCell
+                className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary tabular-nums")}
+              >
                 {formatDateTime(request.createdAt, locale)}
               </TableCell>
               <TableCell className="text-right whitespace-nowrap">
