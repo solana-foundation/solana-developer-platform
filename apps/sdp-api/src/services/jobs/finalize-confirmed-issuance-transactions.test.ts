@@ -380,6 +380,53 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
     });
   });
 
+  it("does not overstate finalization when a concurrent tick already finalized the row", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_race", confirmedMinutesAgo: 5 });
+    const repo = createPostgresIssuanceTransactionsRepository(getDb(env));
+    const [row] = await repo.listConfirmedTransactionsToPoll({ limit: 10 });
+
+    // The first tick's guarded statement advances the row to finalized.
+    await repo.advanceConfirmedTransactions({
+      polled: [
+        {
+          id: row.id,
+          organizationId: row.organizationId,
+          finalized: true,
+          slot: 500,
+          readFailed: false,
+          observedLastPolledAt: row.lastPolledAt,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    });
+
+    // An overlapping tick whose page was read before that stamp still votes
+    // finalized — the guard makes its write a no-op, so its verdict must not
+    // be counted as a completed finalization and must not duplicate the
+    // terminal history entry.
+    await expect(
+      repo.advanceConfirmedTransactions({
+        polled: [
+          {
+            id: row.id,
+            organizationId: row.organizationId,
+            finalized: true,
+            slot: 500,
+            readFailed: false,
+            observedLastPolledAt: row.lastPolledAt,
+          },
+        ],
+        updatedAt: new Date().toISOString(),
+      })
+    ).resolves.toEqual({ advancedTransactionIds: [] });
+
+    const history = await getDb(env).queryMany<{ status: string }>(
+      `SELECT status FROM issuance_transaction_statuses WHERE transaction_id = ? ORDER BY changed_at`,
+      ["itx_fin_race"]
+    );
+    expect(history.map((entry) => entry.status)).toEqual(["confirmed", "finalized"]);
+  });
+
   it("preserves a newer tick's deferral when rotating a failed page", async () => {
     await seedConfirmedTransaction({ id: "itx_fin_stale_fail", confirmedMinutesAgo: 5 });
     const repo = createPostgresIssuanceTransactionsRepository(getDb(env));
