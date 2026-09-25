@@ -41,6 +41,7 @@ import {
   type CreateOnrampQuoteBody,
   estimateAcrossProviders,
   filterProviders,
+  isDefinitiveRampQuoteRejection,
   persistRampQuoteTransfer,
   providersFromPairs,
   type RampQuotePolicyResolved,
@@ -216,14 +217,30 @@ export async function createOnrampQuote(c: AppContext): Promise<Response> {
           throw internalError("Failed to complete MoonPay on-ramp transfer record");
         }
       } catch (error) {
-        await getPaymentsRepository(c).updateTransfer({
-          transferId: pendingTransfer.id,
-          organizationId: scope.auth.organizationId,
-          projectId,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          updatedAt: new Date().toISOString(),
-        });
+        // A definitive provider rejection provably minted no quote session, so
+        // the pre-created row may fail (a keyed retry then frees the key and
+        // runs fresh). An ambiguous failure may have minted a session whose
+        // response was lost: a keyed row stays pending with only the error
+        // recorded, so the retry conflicts instead of freeing the key and
+        // minting a second session and transfer.
+        if (idempotencyKey === null || isDefinitiveRampQuoteRejection(error)) {
+          await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        }
         throw error;
       }
       break;

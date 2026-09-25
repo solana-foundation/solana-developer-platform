@@ -136,6 +136,27 @@ export async function assertRampProviderAvailable(
 type RampQuoteDirection = "onramp" | "offramp";
 
 /**
+ * Whether a failed provider quote call provably minted nothing: definitive
+ * rejections (validation refusal, conflict, rate limit, missing configuration)
+ * are answered before the provider creates a session, so the pre-created keyed
+ * transfer row may be marked failed and a retry may free the key. Ambiguous
+ * failures (timeouts, provider outages, any unknown error) may have minted a
+ * session whose response was lost: the keyed row must keep its pending state —
+ * only its error is recorded — because the replay gate frees the key of a
+ * failed row with no recorded outcome, and a freed key would let the retry
+ * mint a second provider session and transfer for the same operation.
+ */
+export function isDefinitiveRampQuoteRejection(error: unknown): boolean {
+  return (
+    error instanceof SdpPaymentsError &&
+    (error.code === "BAD_REQUEST" ||
+      error.code === "CONFLICT" ||
+      error.code === "RATE_LIMITED" ||
+      error.code === "PROVIDER_NOT_CONFIGURED")
+  );
+}
+
+/**
  * Throws unless the committed corridor-support matrix (the same tables estimate
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the

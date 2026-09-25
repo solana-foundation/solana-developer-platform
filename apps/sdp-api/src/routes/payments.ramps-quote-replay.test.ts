@@ -10,6 +10,9 @@
  * exercised through the real public API endpoints.
  */
 
+import { SdpPaymentsError } from "@sdp/payments/errors";
+import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
+import type { PaymentRampQuote } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import app from "@/index";
@@ -426,5 +429,122 @@ describe("ramp quote Idempotency-Key replay", () => {
       "mg_replay_unrecorded_1",
       "mg_replay_unrecorded_2",
     ]);
+  });
+
+  // The precreated-row quote flows (MoonPay on-ramp, BVNK off-ramp) only mark
+  // the keyed row failed when the provider rejection is definitive — an
+  // ambiguous failure (lost response, timeout, outage) may have minted a
+  // session whose outcome was never recorded, and the replay gate frees the
+  // key of a failed row with no recorded outcome. Keeping such a row pending
+  // makes the keyed retry conflict instead of minting a second provider
+  // session and transfer for the same operation.
+  it("keeps the keyed row pending and conflicts the retry when the quote failed ambiguously", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({
+      externalId: "replay_quote_ambiguous_failure",
+    });
+    const createQuote = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "createOnrampQuote")
+      .mockRejectedValueOnce(new Error("moonpay session response lost after commit"));
+
+    const postQuote = () =>
+      app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "quote-retry-ambiguous-failure",
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "120.50",
+          }),
+        },
+        env
+      );
+
+    const failedResponse = await postQuote();
+    expect(failedResponse.status).toBe(500);
+
+    // The ambiguous failure never marks the keyed row failed: it stays
+    // pending with only the error recorded, so the key stays held.
+    const rowsAfterFailure = await counterpartyTransfers(counterpartyId);
+    expect(rowsAfterFailure).toHaveLength(1);
+    expect(rowsAfterFailure[0]?.status).toBe("pending");
+
+    // The retry with the same key conflicts: it can neither replay an outcome
+    // that was never recorded nor mint a second provider session.
+    const retryResponse = await postQuote();
+    expect(retryResponse.status).toBe(409);
+
+    expect(createQuote).toHaveBeenCalledTimes(1);
+    const rows = await counterpartyTransfers(counterpartyId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.status).toBe("pending");
+  });
+
+  it("runs a fresh keyed quote when the provider definitively rejected and frees the key", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({
+      externalId: "replay_quote_definitive_failure",
+    });
+    const createQuote = vi
+      .spyOn(RAMP_PROVIDER_CLIENTS.moonpay, "createOnrampQuote")
+      .mockRejectedValueOnce(new SdpPaymentsError("BAD_REQUEST", "MoonPay rejected the quote"))
+      .mockImplementationOnce(
+        async (_runtime, input): Promise<PaymentRampQuote> => ({
+          provider: "moonpay",
+          id: input.paymentTransferId ?? "xfr_retry_quote",
+          status: "pending",
+          deliveryMode: "hosted",
+          hostedUrl: "https://buy.moonpay.test/widget",
+        })
+      );
+
+    const postQuote = () =>
+      app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "quote-retry-definitive-failure",
+          },
+          body: JSON.stringify({
+            provider: "moonpay",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "sol.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "120.50",
+          }),
+        },
+        env
+      );
+
+    const failedResponse = await postQuote();
+    expect(failedResponse.status).toBe(400);
+
+    // A definitive rejection provably minted no provider session: the keyed
+    // row is marked failed, so the retry may free the key and run fresh.
+    const rowsAfterFailure = await counterpartyTransfers(counterpartyId);
+    expect(rowsAfterFailure).toHaveLength(1);
+    expect(rowsAfterFailure[0]?.status).toBe("failed");
+
+    const retryResponse = await postQuote();
+    expect(retryResponse.status).toBe(200);
+    const retryBody = (await retryResponse.json()) as { data: { transferId: string } };
+
+    expect(createQuote).toHaveBeenCalledTimes(2);
+    const rows = await counterpartyTransfers(counterpartyId);
+    expect(rows.map((row) => row.status)).toEqual(["pending", "failed"]);
+    expect(retryBody.data.transferId).not.toBe(rowsAfterFailure[0]?.id);
   });
 });

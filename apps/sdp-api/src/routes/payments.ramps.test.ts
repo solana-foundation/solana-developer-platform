@@ -1244,6 +1244,64 @@ describe("Payments routes — ramps", () => {
       getCustomerSpy.mockRestore();
       channelSpy.mockRestore();
     });
+    it("keeps a keyed prebooked transfer pending when the channel call fails ambiguously", async () => {
+      // An ambiguous channel failure (lost response, timeout, outage) may have
+      // minted the provider session: the keyed row must stay pending — only
+      // the error recorded — so a keyed retry conflicts instead of freeing the
+      // key and minting a second provider session and transfer. An unkeyed
+      // request has no replay to protect and still fails the row.
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_channel_error_keyed"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }));
+      const channelSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+        .mockRejectedValue(new Error("channel response lost"));
+
+      const res = await app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "offramp-quote-ambiguous-failure",
+          },
+          body: JSON.stringify({
+            provider: "bvnk",
+            counterpartyId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "75.25",
+          }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(500);
+
+      const transfer = await getDb(env)
+        .prepare("SELECT status, error FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ status: string; error: string | null }>();
+      expect(transfer?.status).toBe("pending");
+      expect(transfer?.error).toBe("channel response lost");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
   });
   describe("BVNK on-ramp quote (rules-free prebook)", () => {
     const BVNK_QUOTE_CUSTOMER = "bvnk_quote_customer_1";
