@@ -4,7 +4,7 @@ import type { SyncReport as SdkSyncReport, ShieldedKeys } from "@heliuslabs/zola
 import { syncWallet } from "@heliuslabs/zolana/wallet";
 import { HeliusRingsError } from "@sdp/helius-rings";
 import { canonicalShieldedIdentity } from "./material.js";
-import { getCachedWallet, setCachedWallet } from "./wallet-cache.js";
+import { getCachedWallet, invalidateCachedWallet, setCachedWallet } from "./wallet-cache.js";
 
 export interface HydrateWalletInput {
   /** Cache key: same across sync and spend paths for one Rings identity. */
@@ -52,6 +52,21 @@ export function hasSyncAnomalies(anomalies: SyncAnomalyCounts): boolean {
   return Object.values(anomalies).some((count) => count > 0);
 }
 
+/**
+ * Whether Zolana's sync committed cursors past events it never stored.
+ *
+ * Upstream stages a sync in a session and commits it whenever the scan itself
+ * does not throw — and `unparsedTransactions`/`undecryptableCandidates` are
+ * reported, not thrown. The commit therefore advances the per-tag cursors
+ * beyond events the indexer could not serve, and the wallet's rows for them
+ * do not exist. (`unknownAssetIds`/`unknownAssetFields` are different: upstream
+ * throws before committing when an asset stays unresolved, so those anomalies
+ * never advance anything.)
+ */
+export function committedPastIncompleteData(report: SdkSyncReport): boolean {
+  return report.unparsedTransactions > 0 || report.undecryptableCandidates > 0;
+}
+
 export async function hydrateWallet(input: HydrateWalletInput): Promise<HydratedWallet> {
   // Cache is the single point of entry: read and spend paths share one Wallet
   // per identity so cursors, decrypted state, and freshly-observed nullifiers
@@ -69,14 +84,28 @@ export async function hydrateWallet(input: HydrateWalletInput): Promise<Hydrated
   });
   const anomalies = syncAnomalyCounts(report);
 
+  // An incomplete scan commits cursors past the events the indexer could not
+  // serve, so this wallet can no longer be the shared resume point: keeping it
+  // cached would let the next hydration — a spend's strict validation included
+  // — continue beyond the skipped range and never revisit it. Drop the entry
+  // instead; the in-memory object still answers the call in progress (reporting
+  // stays degraded rather than failing), and the next hydration re-scans the
+  // skipped range from the indexer's beginning. This holds for both paths: a
+  // refused strict read and a tolerated degraded read leave the cache empty
+  // alike, so neither can blind the other.
+  const incomplete = committedPastIncompleteData(report);
+  if (incomplete) {
+    invalidateCachedWallet(input.walletId);
+  } else if (cached === undefined) {
+    setCachedWallet(input.walletId, wallet, fingerprint);
+  }
+
   if (input.requireComplete && hasSyncAnomalies(anomalies)) {
     throw new HeliusRingsError(
       "gateway_unavailable",
       `the wallet could not be read completely (${anomalies.unparsedTransactions} unparsed, ${anomalies.undecryptableCandidates} undecryptable, ${anomalies.unknownAssetIds} unknown asset ids, ${anomalies.unknownAssetFields} unknown asset fields); refusing to select notes`
     );
   }
-
-  if (cached === undefined) setCachedWallet(input.walletId, wallet, fingerprint);
 
   return { wallet, report };
 }
