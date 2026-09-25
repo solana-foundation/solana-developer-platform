@@ -46,9 +46,13 @@ import type { Env } from "@/types/env";
  *    same-mint credit that arrived in the meantime is not this swap's output.
  *    A merely `confirmed` follow-up is chain-committed but reversible — a fork
  *    can still drop it — so it is not proof and cannot discharge the advisory;
- *    it keeps the advisory pending until the ledger's reconciliation sweep
- *    observes finality (or failure), and only a `finalized` covering deposit
- *    may close the advisory later either. One movement discharges at most one
+ *    nor can it blind the sweep: the wallet balance is still read (4), because
+ *    a commitment that dropped would otherwise pin the advisory pending
+ *    forever while the swapped funds sit resurfaced with no signal. While the
+ *    wallet shows no rise, the confirmed follow-up keeps the advisory pending
+ *    until the ledger's reconciliation sweep observes finality (or failure),
+ *    and only a `finalized` covering deposit may close the advisory later
+ *    either. One movement discharges at most one
  *    advisory (UNIQUE resolving_movement_id), so a reused owner wallet cannot
  *    close several with one deposit.
  * 4. Otherwise the owner's deposit-token balance is read on the environment's
@@ -72,9 +76,13 @@ import type { Env } from "@/types/env";
  *    human on it, and the human's answer is the `acknowledged` resolution.
  *    The paging orphan signal stays reserved for what the detector can prove.
  *    Once the rise is gone, a FINALIZED such deposit resolves
- *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
- *    never broadcast, or the owner moved the tokens themselves) and a partial
- *    rise is indeterminate and stays open for the next visit.
+ *    `deposit_observed`; with none final, a CONFIRMED covering deposit — into
+ *    a sibling vault, or larger than the exact floor — still keeps the
+ *    advisory open, for the wallet back at baseline is exactly what a landed
+ *    follow-up looks like and the commitment can still drop; only with no
+ *    covering deposit of either kind left is no rise at all `unfunded` (the
+ *    swap never broadcast, or the owner moved the tokens themselves), and a
+ *    partial rise is indeterminate and stays open for the next visit.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -269,33 +277,11 @@ async function judgeAdvisory(
   );
   if (await resolveWithMovement(advisories, advisory, exactFollowUps, null, stats)) return;
 
-  // 4. A confirmed but not yet finalized follow-up: chain-committed, still
-  //    reversible. It proves the partner completed the follow-up, not that the
-  //    commitment will survive the chain, so no resolution is honest yet — not
-  //    `deposit_observed`, and not `unfunded` either (a wallet back at
-  //    baseline is exactly what a landed follow-up looks like, and a fork
-  //    rollback would then resurface the funds with the advisory closed and
-  //    the orphan signal lost). Leave the advisory open for the next visit:
-  //    the movement stays in the ledger's reconciliation queue, which drives
-  //    it to finality (or failure) and gives this judgement its proof.
-  const committedFollowUp = deposits.some(
-    (row) =>
-      row.status === "confirmed" &&
-      row.vault_address === advisory.vault_address &&
-      depositAtoms(row.amount_requested, advisory) === floor
-  );
-  if (committedFollowUp) {
-    stats.followUpPending += 1;
-    await advisories.recordObservation({
-      advisoryId: advisory.id,
-      observedAtoms: null,
-      followUpBuildAt,
-      flagged: false,
-    });
-    return;
-  }
-
-  // 5. The balance is the ground truth: judge it against the build-time baseline.
+  // 4. The balance is the ground truth: judge it against the build-time
+  //    baseline. The read happens even when a merely confirmed follow-up sits
+  //    in the ledger: that commitment is reversible, and one whose signature a
+  //    fork dropped must not hold the advisory pending forever while the
+  //    swapped funds sit resurfaced in the wallet with no signal raised.
   let balance: Awaited<ReturnType<typeof readOwnerMintBalance>>;
   try {
     balance = await readOwnerMintBalance(
@@ -406,15 +392,36 @@ async function judgeAdvisory(
     return;
   }
 
-  // 6. The rise is gone, so a covering same-mint deposit may say where the
-  //    funds went (at least the floor, so a small unrelated one gets no
-  //    credit). Only a FINALIZED covering deposit may close the advisory: a
-  //    confirmed one is still reversible, and the balance could resurface if
-  //    its commitment rolls back.
+  // 5. The rise is gone, so a FINALIZED covering same-mint deposit may say
+  //    where the funds went (at least the floor, so a small unrelated one gets
+  //    no credit).
   const finalizedCoverings = finalized.filter(
     (row) => (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
   );
   if (await resolveWithMovement(advisories, advisory, finalizedCoverings, observedAtoms, stats)) {
+    return;
+  }
+
+  // 6. A CONFIRMED covering deposit — this vault at exactly the floor, a
+  //    sibling vault, or larger than the floor — is still reversible: with the
+  //    wallet back at baseline it is indistinguishable from a landed
+  //    follow-up, and resolving `unfunded` now would close the advisory
+  //    against a commitment a fork can still drop, leaving resurfaced funds
+  //    no advisory to trip. Hold it open until the reconciliation sweep
+  //    observes finality (then branch 5 closes it) or failure (then the
+  //    balance judgement stands on its own).
+  const confirmedCoverings = committed.filter(
+    (row) =>
+      row.status === "confirmed" && (depositAtoms(row.amount_requested, advisory) ?? -1n) >= floor
+  );
+  if (delta <= 0n && confirmedCoverings.length > 0) {
+    stats.followUpPending += 1;
+    await advisories.recordObservation({
+      advisoryId: advisory.id,
+      observedAtoms,
+      followUpBuildAt,
+      flagged: false,
+    });
     return;
   }
 
@@ -429,8 +436,8 @@ async function judgeAdvisory(
     return;
   }
 
-  // A partial rise: the owner spent or moved part of it, or something else
-  // credited the account. Not provably an orphan, not provably clean; revisit.
+  // 7. A partial rise: the owner spent or moved part of it, or something else
+  //    credited the account. Not provably an orphan, not provably clean; revisit.
   stats.indeterminate += 1;
   await advisories.recordObservation({
     advisoryId: advisory.id,
