@@ -145,6 +145,7 @@ export { createPostgresHeliusRingsProjectRingRepository } from "./helius-rings-p
 export type {
   CreateHeliusRingsWalletInput,
   HeliusRingsProjectScope,
+  HeliusRingsWalletIdentity,
   HeliusRingsWalletRepository,
   HeliusRingsWalletRepositoryContext,
   HeliusRingsWalletRow,

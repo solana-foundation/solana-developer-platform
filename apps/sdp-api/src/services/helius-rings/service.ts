@@ -46,6 +46,7 @@ import {
   type HeliusRingsOperationRow,
   type HeliusRingsProjectRingRepository,
   type HeliusRingsProjectRingRow,
+  type HeliusRingsWalletIdentity,
   type HeliusRingsWalletRepository,
   type HeliusRingsWalletRow,
   mapHeliusRingsEventRow,
@@ -554,6 +555,20 @@ export class HeliusRingsService {
   }
 
   /**
+   * The wallet row's current identity, for guarding a late write against a
+   * re-key. Undefined for a row that never provisioned, where there is no
+   * identity to name and nothing to guard.
+   */
+  private async walletIdentityGuard(
+    walletId: string
+  ): Promise<HeliusRingsWalletIdentity | undefined> {
+    const wallet = await this.requireWallet(walletId);
+    return wallet.owner_address && wallet.shielded_address
+      ? { ownerAddress: wallet.owner_address, shieldedAddress: wallet.shielded_address }
+      : undefined;
+  }
+
+  /**
    * Adopts an identity the chain already publishes, without rotating anything.
    *
    * This is the tail of a rotation that landed but whose persistence did not —
@@ -1013,6 +1028,10 @@ export class HeliusRingsService {
       return this.toPrivateOperation(failed ?? (await this.requireOperation(operation.id)));
     }
     try {
+      // Pinned while this operation still blocks a re-key: it belongs to the
+      // identity it was built under, and its slot must not seed a replacement
+      // identity's read position if a re-key lands the moment it settles.
+      const guard = await this.walletIdentityGuard(operation.wallet_id);
       const indexed = await (
         await this.resolveGateway(operation.rings_connection_id)
       ).verifyIndexed(operation.outer_tx_signature);
@@ -1022,11 +1041,14 @@ export class HeliusRingsService {
       });
       if (completed) {
         // The wallet's state changed at this slot, so every later read of it
-        // has to reach here before it can be believed.
+        // has to reach here before it can be believed. A lost guard means the
+        // row was re-keyed in between; the abandoned identity's slot is then
+        // skipped rather than carried over, and the operation itself stands.
         await this.wallets.advanceIndexedSlot({
           ...this.tenant,
           id: operation.wallet_id,
           slot: indexed.slot,
+          ...(guard ? { expectedIdentity: guard } : {}),
         });
         await this.events.append({
           operationId: operation.id,
@@ -1111,11 +1133,15 @@ export class HeliusRingsService {
       );
     }
 
+    // Pinned before the Photon read, while this operation still pins the
+    // wallet's identity: its slot belongs to the identity it was built under.
+    const guard = await this.walletIdentityGuard(operation.wallet_id);
+
     const indexed = await (await this.resolveGateway(operation.rings_connection_id)).verifyIndexed(
       operation.outer_tx_signature
     );
     if (indexed) {
-      await this.settleReconciled(operation, indexed);
+      await this.settleReconciled(operation, indexed, guard);
       throw new HeliusRingsError(
         "conflict",
         `operation ${operation.id} settled on chain and has been completed; voiding is refused`
@@ -1186,18 +1212,23 @@ export class HeliusRingsService {
       return this.toPrivateOperation(operation);
     }
 
+    // Pinned before the Photon read, for the same reason `voidOperation` pins:
+    // a reconcile that races a re-key must not carry the old slot across.
+    const guard = await this.walletIdentityGuard(operation.wallet_id);
+
     const indexed = await (await this.resolveGateway(operation.rings_connection_id)).verifyIndexed(
       operation.outer_tx_signature
     );
     if (!indexed) return this.toPrivateOperation(operation);
 
-    return this.toPrivateOperation(await this.settleReconciled(operation, indexed));
+    return this.toPrivateOperation(await this.settleReconciled(operation, indexed, guard));
   }
 
   /** Same writes as the happy-path indexing hit; it is that fact arriving late. */
   private async settleReconciled(
     operation: HeliusRingsOperationRow,
-    indexed: VerifyIndexedResult
+    indexed: VerifyIndexedResult,
+    identityGuard?: HeliusRingsWalletIdentity
   ): Promise<HeliusRingsOperationRow> {
     const completed = await this.operations.completeFromFailed({
       ...this.tenant,
@@ -1206,10 +1237,14 @@ export class HeliusRingsService {
     });
     if (!completed) return this.requireOperation(operation.id);
 
+    // A lost guard means the row was re-keyed while this settled; the abandoned
+    // identity's slot is skipped rather than seeding the replacement's read
+    // position. The operation itself still completed.
     await this.wallets.advanceIndexedSlot({
       ...this.tenant,
       id: completed.wallet_id,
       slot: indexed.slot,
+      ...(identityGuard ? { expectedIdentity: identityGuard } : {}),
     });
     await this.events.append({
       operationId: completed.id,
@@ -1819,6 +1854,17 @@ export class HeliusRingsService {
       throw new HeliusRingsError("conflict", QUARANTINED_WALLET_MESSAGE);
     }
 
+    // The identity this read is for. A re-key rotates the row's identity and
+    // clears its read position in the same write, so completing the sync's
+    // writes against the row as it stands proves the result still describes
+    // this wallet. A lost guard means the read raced a re-key: the balances
+    // belong to keys the wallet has abandoned and must neither be returned as
+    // current nor repopulate the replacement's read position.
+    const identity = {
+      ownerAddress: wallet.owner_address,
+      shieldedAddress: wallet.shielded_address,
+    };
+
     const allowlist = await this.assets.listActive();
 
     const result = await this.readShieldedState({
@@ -1837,11 +1883,16 @@ export class HeliusRingsService {
       })),
     });
 
-    await this.wallets.updateSyncCursor({
+    const cursorWrite = await this.wallets.updateSyncCursor({
       ...this.tenant,
       id: wallet.id,
       syncCursor: result.observedAt,
+      expectedIdentity: identity,
     });
+    if (!cursorWrite) {
+      warnStaleSync(wallet.id);
+      throw staleSyncIdentityError();
+    }
 
     // A sync sees the whole history, so it can carry the read position further
     // than the last completed operation did — a note received from someone
@@ -1852,11 +1903,18 @@ export class HeliusRingsService {
     // it. Advancing on that would make the next read gate on a position this
     // wallet has not actually been read through, and report the result as fresh.
     if (result.observedSlot && !result.report.degraded) {
-      await this.wallets.advanceIndexedSlot({
+      const slotWrite = await this.wallets.advanceIndexedSlot({
         ...this.tenant,
         id: wallet.id,
         slot: result.observedSlot,
+        expectedIdentity: identity,
       });
+      if (!slotWrite) {
+        // The cursor write landed while the old identity was still current and
+        // the re-key's clearing overwrote it; nothing of this sync survives.
+        warnStaleSync(wallet.id);
+        throw staleSyncIdentityError();
+      }
     }
 
     return result;
@@ -1915,6 +1973,22 @@ function requiredOuterPolicyField(value: string | null): string {
     );
   }
   return value;
+}
+
+/** The sync's identity guard lost: the read raced a re-key and describes keys the wallet no longer has. */
+function staleSyncIdentityError(): HeliusRingsError {
+  return new HeliusRingsError(
+    "conflict",
+    "this rings wallet was re-keyed while its balances were being read; the result belongs to the abandoned identity, so sync the new one again"
+  );
+}
+
+/** Operational triage for the stale outcome above: rare, benign, and worth a line. */
+function warnStaleSync(walletId: string): void {
+  getLogger().warn(
+    { walletId },
+    "rings sync discarded: the wallet was re-keyed while its balances were being read"
+  );
 }
 
 /** Like {@link requiredOuterPolicyField}, for the op types whose ring pair is mandatory. */

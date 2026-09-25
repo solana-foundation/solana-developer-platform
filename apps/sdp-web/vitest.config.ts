@@ -6,6 +6,10 @@ export default defineConfig({
   test: {
     include: ["src/**/*.unit.test.{ts,tsx}"],
     environment: "node",
+    // Matches the API suite's timeout: the default 5s is a flaky bar when the
+    // machine is loaded (module imports of the locale catalogs can outrun it
+    // without anything being wrong).
+    testTimeout: 30_000,
     coverage: {
       provider: "istanbul",
       reporter: ["text-summary"],

@@ -55,7 +55,14 @@ export function WalletOverview({
   // known state into a generic read failure — and the refresh button would
   // invite an operator to keep asking.
   const readable = wallet.shieldedAddress !== null && wallet.status !== "paused";
-  const { state, refresh } = useRingsBalance(readable ? wallet.id : null, refreshTick);
+  // The shielded address rides along as the identity token: a re-key keeps the
+  // wallet's id and rotates the address, and the balance must then be read for
+  // the new identity rather than inherit the old one's result.
+  const { state, refresh } = useRingsBalance(
+    readable ? wallet.id : null,
+    refreshTick,
+    wallet.shieldedAddress
+  );
 
   const reading = state.name === "loading";
   const refreshLabel = t(

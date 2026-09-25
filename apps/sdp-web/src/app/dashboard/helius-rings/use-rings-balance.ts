@@ -10,12 +10,20 @@ export type RingsBalanceState =
 
 /**
  * Syncs a wallet's shielded balance on mount, on every `refreshTick` change,
- * and on demand via the returned `refresh`. A null `walletId` suppresses the
- * fetch — pass null while the wallet has no shielded identity yet.
+ * on every `identity` change, and on demand via the returned `refresh`. A null
+ * `walletId` suppresses the fetch — pass null while the wallet has no shielded
+ * identity yet.
+ *
+ * `identity` is the wallet's current shielded address. A re-key keeps the
+ * wallet's id and rotates that address, so keying the read on both means a
+ * re-keyed wallet is re-read for its new identity: the in-flight read for the
+ * old one is cancelled — its result can never render — and the old balance
+ * leaves the screen while the replacement is read.
  */
 export function useRingsBalance(
   walletId: string | null,
-  refreshTick?: number
+  refreshTick?: number,
+  identity?: string | null
 ): { state: RingsBalanceState; refresh: () => void } {
   const [manualTick, setManualTick] = useState(0);
   const [state, setState] = useState<RingsBalanceState>({ name: "loading" });
@@ -41,7 +49,7 @@ export function useRingsBalance(
     return () => {
       cancelled = true;
     };
-  }, [walletId, refreshTick, manualTick]);
+  }, [walletId, identity, refreshTick, manualTick]);
 
   const refresh = useCallback(() => setManualTick((current) => current + 1), []);
   return { state, refresh };

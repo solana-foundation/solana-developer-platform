@@ -141,10 +141,92 @@ describe("HeliusRingsWalletRepository (postgres)", () => {
 
   it("advances the sync cursor", async () => {
     const wallet = await createWallet("wal_1");
+    await repo.markProvisioned({
+      ...scope,
+      id: wallet.id,
+      shieldedAddress: "shielded-1",
+      ownerAddress: OWNER_ADDRESS,
+      materialTag: "live",
+      expectedStatus: "pending",
+    });
 
-    const updated = await repo.updateSyncCursor({ ...scope, id: wallet.id, syncCursor: "slot:42" });
+    const updated = await repo.updateSyncCursor({
+      ...scope,
+      id: wallet.id,
+      syncCursor: "slot:42",
+      expectedIdentity: { ownerAddress: OWNER_ADDRESS, shieldedAddress: "shielded-1" },
+    });
 
     expect(updated?.sync_cursor).toBe("slot:42");
+  });
+
+  it("refuses the sync cursor when the identity guard does not match", async () => {
+    const wallet = await createWallet("wal_1");
+    await repo.markProvisioned({
+      ...scope,
+      id: wallet.id,
+      shieldedAddress: "shielded-1",
+      ownerAddress: OWNER_ADDRESS,
+      materialTag: "live",
+      expectedStatus: "pending",
+    });
+
+    const stale = await repo.updateSyncCursor({
+      ...scope,
+      id: wallet.id,
+      syncCursor: "slot:42",
+      expectedIdentity: { ownerAddress: OWNER_ADDRESS, shieldedAddress: "rings1replaced" },
+    });
+
+    // A re-key cleared the read position; a sync that began under the abandoned
+    // identity must not repopulate it on the replacement.
+    expect(stale).toBeNull();
+    const current = await repo.getWalletById({ ...scope, id: wallet.id });
+    expect(current?.sync_cursor).toBeNull();
+  });
+
+  it("refuses the indexed slot when the identity guard does not match", async () => {
+    const wallet = await createWallet("wal_1");
+    await repo.markProvisioned({
+      ...scope,
+      id: wallet.id,
+      shieldedAddress: "shielded-1",
+      ownerAddress: OWNER_ADDRESS,
+      materialTag: "live",
+      expectedStatus: "pending",
+    });
+
+    const stale = await repo.advanceIndexedSlot({
+      ...scope,
+      id: wallet.id,
+      slot: "9001",
+      expectedIdentity: { ownerAddress: OWNER_ADDRESS, shieldedAddress: "rings1replaced" },
+    });
+
+    expect(stale).toBeNull();
+    const current = await repo.getWalletById({ ...scope, id: wallet.id });
+    expect(current?.last_indexed_slot).toBeNull();
+  });
+
+  it("advances the indexed slot when the identity guard matches", async () => {
+    const wallet = await createWallet("wal_1");
+    await repo.markProvisioned({
+      ...scope,
+      id: wallet.id,
+      shieldedAddress: "shielded-1",
+      ownerAddress: OWNER_ADDRESS,
+      materialTag: "live",
+      expectedStatus: "pending",
+    });
+
+    const advanced = await repo.advanceIndexedSlot({
+      ...scope,
+      id: wallet.id,
+      slot: "9001",
+      expectedIdentity: { ownerAddress: OWNER_ADDRESS, shieldedAddress: "shielded-1" },
+    });
+
+    expect(advanced?.last_indexed_slot).toBe("9001");
   });
 
   it("scopes reads and writes to the owning tenant", async () => {

@@ -5,6 +5,7 @@ import {
   DEFAULT_RINGS_WALLET_LIST_LIMIT,
   generateHeliusRingsWalletId,
   type HeliusRingsProjectScope,
+  type HeliusRingsWalletIdentity,
   type HeliusRingsWalletRepository,
   type HeliusRingsWalletRow,
   type ListHeliusRingsWalletsInput,
@@ -241,29 +242,61 @@ export function createPostgresHeliusRingsWalletRepository(db: AppDb): HeliusRing
       return row ? mapRow(row) : null;
     },
 
-    async advanceIndexedSlot(input: HeliusRingsProjectScope & { id: string; slot: string }) {
+    async advanceIndexedSlot(
+      input: HeliusRingsProjectScope & {
+        id: string;
+        slot: string;
+        expectedIdentity?: HeliusRingsWalletIdentity;
+      }
+    ) {
+      // The identity guard is optional because a completed operation reports no
+      // identity of its own until its caller pins one; a sync always does.
+      const identityGuard = input.expectedIdentity
+        ? " AND owner_address = ? AND shielded_address = ?"
+        : "";
       const row = await db
         .prepare(
           `UPDATE helius_rings_wallets
               SET last_indexed_slot = GREATEST(COALESCE(last_indexed_slot, 0), ?::numeric),
                   updated_at = sdp_iso_now()
-            WHERE id = ? AND organization_id = ? AND project_id = ?
+            WHERE id = ? AND organization_id = ? AND project_id = ?${identityGuard}
           RETURNING *`
         )
-        .bind(input.slot, input.id, input.organizationId, input.projectId)
+        .bind(
+          input.slot,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          ...(input.expectedIdentity
+            ? [input.expectedIdentity.ownerAddress, input.expectedIdentity.shieldedAddress]
+            : [])
+        )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
 
     async updateSyncCursor(input: UpdateHeliusRingsWalletSyncCursorInput) {
+      // Guarded on the identity the sync read: a re-key clears the read
+      // position precisely so the replacement identity starts with nothing
+      // carried over, and a sync that began under the abandoned identity must
+      // not repopulate it. A null return means the row moved on and the
+      // observation is stale.
       const row = await db
         .prepare(
           `UPDATE helius_rings_wallets
               SET sync_cursor = ?, updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND project_id = ?
+              AND owner_address = ? AND shielded_address = ?
           RETURNING *`
         )
-        .bind(input.syncCursor, input.id, input.organizationId, input.projectId)
+        .bind(
+          input.syncCursor,
+          input.id,
+          input.organizationId,
+          input.projectId,
+          input.expectedIdentity.ownerAddress,
+          input.expectedIdentity.shieldedAddress
+        )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
