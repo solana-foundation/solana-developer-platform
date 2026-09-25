@@ -156,7 +156,7 @@ jobs:
                 'stage' }}
           OUTCOME: >-
             ${{ (needs.deploy-api-stage.result == 'failure' || needs.schema.result == 'failure' || needs.deploy-api-prod.result == 'failure' || needs.request-schema-approval.result == 'failure') && 'FAILED' ||
-                (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
+                (needs.deploy-api-stage.result == 'cancelled' || needs.schema.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled' || needs.request-schema-approval.result == 'cancelled') && 'CANCELLED' ||
                 'SUCCESS' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

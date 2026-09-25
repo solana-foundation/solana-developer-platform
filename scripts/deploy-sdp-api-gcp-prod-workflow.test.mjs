@@ -248,7 +248,7 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOY_IMAGE_SHA\}" origin\/main/);
   assert.match(
     workflow,
-    /git merge-base --is-ancestor "\$\{APPLIED_SCHEMA_SHA\}" "\$\{DEPLOY_IMAGE_SHA\}"/
+    /floor="\$\{APPLIED_SCHEMA_SHA:-\$\(git describe --tags --abbrev=0 --match 'v\*' origin\/main\)\}"\n\s+if ! git merge-base --is-ancestor "\$\{floor\}" "\$\{DEPLOY_IMAGE_SHA\}"/
   );
   assert.match(
     workflow,
@@ -280,6 +280,9 @@ test("the approval workflow waits outside the deploy concurrency groups", () => 
   );
   assert.match(approval, /git merge-base --is-ancestor "\$\{IMAGE_SHA\}" origin\/main/);
   assert.match(approval, /git merge-base --is-ancestor "\$\{applied\}" "\$\{IMAGE_SHA\}"/);
+  const onMain = approval.indexOf("- name: Require a commit on main");
+  const gcpAuth = approval.indexOf("- name: Authenticate to GCP");
+  assert.ok(onMain !== -1 && onMain < gcpAuth);
   assert.match(
     approval,
     /git diff --name-only "\$\{applied\}\.\.\$\{IMAGE_SHA\}" -- apps\/sdp-api\/src\/db\/migrations\/postgres/
@@ -336,6 +339,10 @@ test("the orchestrator sends every continuous merge to prod", () => {
   assert.match(
     orchestrator,
     /needs\.schema\.result == 'failure' \|\| needs\.deploy-api-prod\.result == 'failure' \|\| needs\.request-schema-approval\.result == 'failure'\) && 'FAILED'/
+  );
+  assert.match(
+    orchestrator,
+    /needs\.schema\.result == 'cancelled' \|\| needs\.deploy-api-prod\.result == 'cancelled' \|\| needs\.request-schema-approval\.result == 'cancelled'\) && 'CANCELLED'/
   );
 });
 

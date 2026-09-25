@@ -179,8 +179,9 @@ jobs:
             echo "${DEPLOY_IMAGE_SHA} is not on main." >&2
             exit 1
           fi
-          if [[ -n "${APPLIED_SCHEMA_SHA}" ]] && ! git merge-base --is-ancestor "${APPLIED_SCHEMA_SHA}" "${DEPLOY_IMAGE_SHA}"; then
-            echo "Prod already applied ${APPLIED_SCHEMA_SHA}, which ${DEPLOY_IMAGE_SHA} does not include. Deploy a newer commit instead." >&2
+          floor="${APPLIED_SCHEMA_SHA:-$(git describe --tags --abbrev=0 --match 'v*' origin/main)}"
+          if ! git merge-base --is-ancestor "${floor}" "${DEPLOY_IMAGE_SHA}"; then
+            echo "Prod is at least at ${floor}, which ${DEPLOY_IMAGE_SHA} does not include. Deploy a newer commit instead." >&2
             exit 1
           fi
 
