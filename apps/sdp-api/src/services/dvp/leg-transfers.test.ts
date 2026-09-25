@@ -537,12 +537,15 @@ describe("syncDvpLegTransfers", () => {
       { remaining: 10 }
     );
 
-    // The probe found the omitted movement behind the cursor and recorded it.
+    // The probe found the omitted movement behind the cursor and recorded
+    // it. The position stays where it was: the cursor only ever moves
+    // forward, and the PostgreSQL repository refuses the backward write the
+    // probe's find would ask for.
     expect(rows.has(sig(6))).toBe(true);
     expect(saved).toEqual([
       {
         side: "a",
-        cursor: { signature: sig(6), slot: "6" },
+        cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         scannedAt: expect.any(String),
       },

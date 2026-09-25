@@ -428,6 +428,28 @@ async function readOnPastCap(
 
 type EntryStep = "resolved" | "stop";
 
+/**
+ * The watermark for the position's new slot: a move within the slot the
+ * position already sits on keeps that slot's proof, and any other advance is
+ * proven only by the listing continuing below the new slot — an entry at an
+ * earlier slot, or history past the trade's creation.
+ */
+function watermarkFor(
+  cursor: { signature: Signature; slot: string } | null,
+  cursorSlotComplete: boolean,
+  slot: string,
+  floorReached: boolean,
+  newestFirst: readonly DvpEscrowHistoryEntry[]
+): boolean {
+  return (
+    (cursor !== null && cursor.slot === slot && cursorSlotComplete) ||
+    floorReached ||
+    // Slots are numbers the ledger carries as strings; the comparison is the
+    // numeric one the repository's own guard makes.
+    newestFirst.some((listed) => BigInt(listed.slot) < BigInt(slot))
+  );
+}
+
 /** Resolves one listed signature: recorded, moving nothing, or unreadable and logged. */
 async function resolveEntry(
   reader: DvpEscrowHistoryReader,
@@ -679,16 +701,20 @@ export async function syncDvpLegTransfers(
     recorded += outcome.recorded ? 1 : 0;
     if (finalizedSoFar && entry.finalized) {
       const slot = entry.slot.toString();
-      // Moving the position within the slot it already sits on keeps that
-      // slot's proof: everything between the two signatures was listed by
-      // this very read. Any other advance is proven only by the listing
-      // continuing below the new slot — an entry at an earlier slot, or
-      // history past the trade's creation.
-      cursorSlotComplete =
-        (cursor !== null && cursor.slot === slot && cursorSlotComplete) ||
-        read.floorReached ||
-        newestFirst.some((listed) => listed.slot < entry.slot);
-      cursor = { signature: entry.signature, slot };
+      // The position only ever moves forward. The fallback's probe resolves
+      // what it finds behind the cursor, and the PostgreSQL repository would
+      // refuse the backward write in any case: the position stays where it
+      // was, still qualified by the watermark it arrived with.
+      if (cursor === null || BigInt(slot) >= BigInt(cursor.slot)) {
+        cursorSlotComplete = watermarkFor(
+          cursor,
+          cursorSlotComplete,
+          slot,
+          read.floorReached,
+          newestFirst
+        );
+        cursor = { signature: entry.signature, slot };
+      }
     } else {
       finalizedSoFar = false;
     }
