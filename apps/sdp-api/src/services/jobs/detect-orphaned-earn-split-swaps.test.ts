@@ -110,7 +110,7 @@ async function advisoryRow(id: string) {
 /** A follow-up deposit BUILD for the owner (what the partner requests after the swap). */
 async function seedFollowUpBuild(
   ageMs = 0,
-  shape: { vaultAddress?: string } = {}
+  shape: { vaultAddress?: string; amount?: string } = {}
 ): Promise<string> {
   const id = `earn_external_wallet_transaction_${crypto.randomUUID()}`;
   await createPostgresEarnExternalWalletTransactionsRepository(getDb(env)).create({
@@ -126,7 +126,7 @@ async function seedFollowUpBuild(
     shareMint: SHARE_MINT,
     label: "USDC Vault",
     denomination: USDC,
-    amountRequested: "24.8",
+    amountRequested: shape.amount ?? "24.8",
     createsShareAccount: false,
     unsignedTransaction: Buffer.from([7, 8, 9]).toString("base64"),
     lastValidBlockHeight: "100",
@@ -433,6 +433,22 @@ describe("detectOrphanedEarnSplitSwaps", () => {
     await seedFollowUpBuild(5 * MINUTE, {
       vaultAddress: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
     });
+    readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
+
+    await detectOrphanedEarnSplitSwaps(env);
+
+    expect(readOwnerMintBalance).toHaveBeenCalled();
+    expect(tick().payload).toMatchObject({ follow_up_pending: 0, orphaned: 1 });
+    expect((await advisoryRow(id))?.resolved_at).toBeNull();
+  });
+
+  it("does not let a non-floor own-vault follow-up BUILD hold the orphan judgement", async () => {
+    // The build leg binds to the floor as well as the vault: the follow-up is
+    // sized to exactly the swap floor (the movement check requires it too), so
+    // a build for this vault at any other amount is a different deposit and
+    // must not delay the orphan signal for a build window.
+    const id = await seedAdvisory(2 * HOUR);
+    await seedFollowUpBuild(5 * MINUTE, { amount: "30" });
     readOwnerMintBalance.mockResolvedValue({ atoms: BASELINE + FLOOR, decimals: 6 });
 
     await detectOrphanedEarnSplitSwaps(env);

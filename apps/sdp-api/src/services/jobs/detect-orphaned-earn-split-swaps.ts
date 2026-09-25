@@ -33,13 +33,14 @@ import type { Env } from "@/types/env";
  * 1. The partner is demonstrably still working -> pending. Either the intended
  *    follow-up deposit movement is in flight (`requested`/`submitted` — the
  *    advisory's own provider and vault, exactly the swap floor), or an
- *    unconsumed follow-up BUILD for the same provider and vault exists within
- *    the window: a build proves they are past the swap, and the movement only
- *    exists once they submit, which can take a human second signature and
- *    minutes. A same-token deposit for a sibling vault is not this advisory's
- *    leg and never short-circuits the judgement (SOLA9-485): it falls through
- *    to the balance, where a committed one is the ambiguity signal below and an
- *    in-flight one leaves the wallet's rise visible.
+ *    unconsumed follow-up BUILD for the same provider and vault, exactly the
+ *    swap floor as well, exists within the window: a build proves they are
+ *    past the swap, and the movement only exists once they submit, which can
+ *    take a human second signature and minutes. A same-token deposit for a
+ *    sibling vault is not this advisory's leg and never short-circuits the
+ *    judgement (SOLA9-485): it falls through to the balance, where a committed
+ *    one is the ambiguity signal below and an in-flight one leaves the wallet's
+ *    rise visible.
  * 2. The swap's blockhash still live, or the advisory younger than the grace
  *    period -> pending. Past its last valid block height the swap either landed
  *    or never will, which is when a balance means something.
@@ -225,7 +226,7 @@ async function judgeAdvisory(
 
   // 1. The partner is demonstrably still working: the intended follow-up
   //    deposit in flight, or a recent unconsumed follow-up build for the same
-  //    provider and vault.
+  //    provider and vault, sized to exactly the swap floor.
   const intendedFollowUpInFlight = deposits.some(
     (row) =>
       IN_FLIGHT_STATUSES.has(row.status) &&
@@ -247,6 +248,8 @@ async function judgeAdvisory(
     ...scope,
     provider: advisory.provider,
     vaultAddress: advisory.vault_address,
+    swapMinOutAtoms: advisory.swap_min_out_atoms,
+    depositTokenDecimals: advisory.deposit_token_decimals,
   });
   if (followUpBuildAt !== null && nowMs - Date.parse(followUpBuildAt) < FOLLOW_UP_WINDOW_MS) {
     stats.followUpPending += 1;

@@ -110,7 +110,11 @@ export interface EarnSplitSwapAdvisoriesRepository {
    * failed one must not keep the advisory pending. Bound to the advisory's
    * provider and vault so only a build for the intended leg can hold the
    * judgement (SOLA9-485); a sibling-vault build is not this advisory's
-   * still-working evidence.
+   * still-working evidence. Bound to the advisory's swap floor for the same
+   * reason: the follow-up is sized to exactly the floor (the movement check
+   * requires it too), so a build at any other amount is a different deposit,
+   * not this advisory's leg — an unrelated same-vault build must not delay
+   * the orphan signal for a build window.
    */
   findFollowUpBuildAt(params: {
     organizationId: string;
@@ -121,6 +125,8 @@ export interface EarnSplitSwapAdvisoriesRepository {
     createdAfter: string;
     provider: string;
     vaultAddress: string;
+    swapMinOutAtoms: string;
+    depositTokenDecimals: number;
   }): Promise<string | null>;
 }
 
@@ -286,6 +292,7 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
               AND token_mint = ?
               AND movement_id IS NULL
               AND created_at > ?
+              AND amount_requested::numeric * (10::numeric ^ ?::numeric) = ?::numeric
             ORDER BY created_at DESC
             LIMIT 1`
         )
@@ -297,7 +304,9 @@ export function createPostgresEarnSplitSwapAdvisoriesRepository(
           params.provider,
           params.vaultAddress,
           params.depositTokenMint,
-          params.createdAfter
+          params.createdAfter,
+          params.depositTokenDecimals,
+          params.swapMinOutAtoms
         )
         .first<{ created_at: string }>();
       return row?.created_at ?? null;
