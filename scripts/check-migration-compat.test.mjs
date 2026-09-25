@@ -284,7 +284,7 @@ test("repeatable views: removed output columns are contractions", () => {
   ];
   assert.deepEqual(findRemovedViewColumns(base, wildcard), unverifiable);
   assert.deepEqual(findRemovedViewColumns(wildcard, head), unverifiable);
-  assert.deepEqual(findRemovedViewColumns(wildcard, wildcard.replace("u.id", "u.id")), []);
+  assert.deepEqual(findRemovedViewColumns(wildcard, `${wildcard}\n`), []);
 
   const file = "apps/sdp-api/src/db/migrations/postgres/repeatable/unified_transactions.sql";
   assert.equal(
