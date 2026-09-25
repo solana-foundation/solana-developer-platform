@@ -63,6 +63,9 @@ test.describe("public auth entry e2e", () => {
     expect(clerkColors.input).not.toBe("");
     expect(clerkColors.background).not.toBe(clerkColors.input);
 
+    await expect(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
+
     const githubIcon = page.locator(".cl-socialButtonsProviderIcon__github");
     const googleIcon = page.locator(".cl-socialButtonsProviderIcon__google");
     await expect(githubIcon).not.toHaveCSS("filter", "none");
