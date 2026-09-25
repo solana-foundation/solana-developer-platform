@@ -296,7 +296,10 @@ async function expectRuntimeAdmissionDenialWithoutWrites(input: {
   }
 
   expect(await recurringExecutionSnapshot(input.recurringPaymentId)).toEqual(before);
-  expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  const afterCalls = recurringExecutionCallCounts();
+  // The pre-claim token-account validation reads mint/ATA account info without
+  // executing anything, so its read volume is not compared.
+  expect({ ...afterCalls, accountInfo: 0 }).toEqual({ ...executionCalls, accountInfo: 0 });
 }
 
 const UNBOUND_CUSTODY_WALLET_ID = "cwlt_recurring_unbound";
@@ -3972,5 +3975,67 @@ describe("Payments routes — recurring", () => {
     expect(responseBody.error.message).toBe("API key is not authorized for the requested wallet");
     expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
     expect(recurringExecutionCallCounts()).toEqual(executionCalls);
+  });
+
+  it("rejects a source change that retains a token the new wallet cannot hold", async () => {
+    const sourceSigner = await generateKeyPairSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_token_mismatch";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_token_mismatch', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_token_mismatch', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, TEST_WALLET_ID, sourceSigner.address),
+    ]);
+    const payment = await seedPendingRecurringPayment();
+    const before = await recurringExecutionSnapshot(payment.id);
+    const executionCalls = recurringExecutionCallCounts();
+
+    // The replacement wallet's USDC associated token account does not exist,
+    // so a sparse PATCH that keeps the payment's token must fail closed
+    // instead of persisting the mismatched wallet/token pair.
+    const [replacementAta] = await findAssociatedTokenPda({
+      owner: address(sourceSigner.address),
+      tokenProgram: address("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+      mint: address(DEVNET_USDC_MINT),
+    });
+    getAccountInfoMock.mockImplementation(async (_rpc, account) => {
+      if (account === replacementAta) return null;
+      return {
+        lamports: 4200000000n,
+        owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      } as Awaited<ReturnType<typeof solanaRpc.getAccountInfo>>;
+    });
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const responseBody = errorResponseSchema.parse(await response.json());
+    expect(responseBody.error.message).toBe(
+      "Recurring payment token is not held by the requested source wallet"
+    );
+    expect(await recurringExecutionSnapshot(payment.id)).toEqual(before);
+    // The token validation only reads mint/ATA account info; nothing else runs.
+    const afterCalls = recurringExecutionCallCounts();
+    expect({ ...afterCalls, accountInfo: 0 }).toEqual({ ...executionCalls, accountInfo: 0 });
   });
 });

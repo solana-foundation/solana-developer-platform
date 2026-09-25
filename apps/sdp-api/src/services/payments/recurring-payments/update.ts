@@ -293,6 +293,23 @@ async function resolveRecurringPaymentUpdate(input: {
         })
       : { destinationAddress: input.recurringPayment.destination_address },
   ]);
+  // A retained token is only valid when the wallet the payment will actually
+  // fund from can hold it. A sparse PATCH that swaps the source wallet must
+  // not silently pair the new wallet with the old wallet's mint.
+  if (input.request.token === undefined) {
+    const rpc = solanaRpc.createRpc(input.env);
+    const mint = assertValidAddress(token, "token");
+    const tokenProgram = await resolveMintTokenProgram(rpc, mint);
+    const sourceTokenAccount = await resolveSourceTokenAccountOrAta(
+      rpc,
+      assertValidAddress(finalSourceWallet.publicKey, "sourceAddress"),
+      mint,
+      tokenProgram
+    );
+    if (!sourceTokenAccount.exists) {
+      throw badRequest("Recurring payment token is not held by the requested source wallet");
+    }
+  }
   const amount =
     input.request.amount === undefined ? input.recurringPayment.amount : input.request.amount;
   const periodHours =

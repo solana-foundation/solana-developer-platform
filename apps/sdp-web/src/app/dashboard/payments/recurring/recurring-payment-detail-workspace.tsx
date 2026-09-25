@@ -24,7 +24,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -444,7 +444,17 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
-  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
+  const issuedTokenSymbolsByMint = Object.fromEntries(
+    Object.values(issuedTokensByMint).map((token) => [token.mintAddress, token.symbol])
+  );
+  // Currency options follow the wallet the editor will actually fund from, not
+  // the payment's original wallet, so a funding-wallet switch cannot save the
+  // old wallet's token.
+  const assetOptions = recurringPaymentAssetOptions(
+    selectedWallet ?? null,
+    issuedTokenSymbolsByMint,
+    t
+  );
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -514,6 +524,22 @@ export function RecurringPaymentDetailWorkspace({
     setPaymentValidationError(null);
     setEditingPayment(true);
   };
+
+  // A funding-wallet switch can drop the retained token from the new wallet's
+  // inventory; fall back to its first asset instead of submitting a stale
+  // mint the new wallet cannot fund.
+  useEffect(() => {
+    if (!editingPayment) {
+      return;
+    }
+    const nextToken = assetOptions.some((asset) => asset.value === selectedToken)
+      ? selectedToken
+      : (assetOptions[0]?.value ?? "");
+    if (nextToken === selectedToken) {
+      return;
+    }
+    setSelectedToken(nextToken);
+  }, [assetOptions, selectedToken, editingPayment]);
 
   const closePaymentEditor = () => {
     setPaymentValidationError(null);

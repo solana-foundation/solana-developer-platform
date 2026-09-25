@@ -6,7 +6,7 @@ import type {
   PaymentRecurringPayment,
   PaymentsDashboardWallet,
 } from "@sdp/types";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { SWRConfig } from "swr";
@@ -265,4 +265,60 @@ describe("Recurring Payment exact source selection", () => {
       await waitFor(() => expect(writes).toEqual([]));
     }
   );
+
+  it("resets the currency to the new wallet's inventory when switching funding wallets", async () => {
+    // A valid non-SOL mint that is neither USDC nor a well-known token.
+    const otherMint = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYC";
+    const replacement = {
+      ...source,
+      id: "cwlt_replacement",
+      label: "Replacement",
+      balances: [
+        {
+          token: "WOOF",
+          mint: otherMint,
+          amount: "5",
+          uiAmount: "5",
+          decimals: 6,
+        },
+      ],
+    };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?"))
+        return Response.json({ data: { wallets: [source, replacement] } });
+      if (init?.method === "PATCH") writes.push(JSON.parse(String(init.body)));
+      return Response.json({
+        data: { wallets: [source, replacement], recurringPayment: recurring },
+      });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source, replacement]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[]}
+        counterpartyLabel="Receiver"
+        amountLabel="1 USDC"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    const editor = screen.getByRole("dialog", { name: "Edit payment" });
+    expect(within(editor).getByText(/USDC/)).toBeTruthy();
+    await user.click(within(editor).getByRole("button", { name: "Funding wallet" }));
+    await user.click(screen.getByRole("button", { name: /Replacement/ }));
+    // The stale USDC mint is not in the replacement wallet's inventory, so the
+    // currency selection falls back to that wallet's first asset and the save
+    // payload can no longer pair the new wallet with the old token.
+    await waitFor(() => {
+      expect(within(editor).queryByText(/USDC/)).toBeNull();
+      expect(within(editor).getByText(/WOOF/)).toBeTruthy();
+    });
+  });
 });
