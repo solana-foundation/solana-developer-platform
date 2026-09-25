@@ -69,7 +69,13 @@ import type { Env } from "@/types/env";
  *    Once the rise is gone, such a deposit resolves
  *    `deposit_observed`; with none, no rise at all is `unfunded` (the swap
  *    never broadcast, or the owner moved the tokens themselves) and a partial
- *    rise is indeterminate and stays open for the next visit.
+ *    rise is indeterminate and stays open for the next visit. Sub-floor
+ *    deposits that only jointly reach the floor are not `unfunded` evidence:
+ *    their aggregate keeps the advisory open as ambiguous (the schema names
+ *    one resolving movement, so the recovery cannot be discharged by
+ *    machine), never dropping finalized evidence. A covering deposit another
+ *    advisory already claimed counts for that advisory alone: it neither
+ *    blocks the aggregate check nor adds to the aggregate.
  *
  * Failure posture matches the vault-movement sweep: a chain read that fails is
  * counted, emits its own error event, marks the tick error-level and THROWS so
@@ -367,11 +373,62 @@ async function judgeAdvisory(
 
   // 5. The rise is gone, so a covering same-mint deposit may say where the
   //    funds went (at least the floor, so a small unrelated one gets no credit).
+  //    A failed claim attempt here settles every covering deposit into some
+  //    other advisory: one movement discharges exactly one advisory, so none
+  //    of them is evidence for this one.
   if (await resolveWithMovement(advisories, advisory, coveringDeposits, observedAtoms, stats)) {
     return;
   }
 
   if (delta <= 0n) {
+    // Finalized deposits can each fall below the floor yet jointly meet it: a
+    // manual split of the follow-up, say. Their aggregate is committed
+    // evidence the follow-up landed, and a terminal `unfunded` here would
+    // drop that evidence and misrecord a recovered split as "the swap never
+    // broadcast" (SOLA9-355). The schema names ONE resolving movement per
+    // advisory, so a multi-movement recovery cannot be discharged cleanly;
+    // like the conflicting-evidence case above, the advisory stays open as
+    // ambiguous with the aggregate named in the event, for a human to
+    // acknowledge. The aggregate counts only what no other advisory claimed:
+    // the covering deposits all failed to claim above, and a floor-sized
+    // deposit already spent on another advisory is not this recovery's
+    // evidence either.
+    const claimedIds = new Set(coveringDeposits.map((row) => row.id));
+    const aggregateAtoms = committed.reduce(
+      (sum, row) =>
+        sum + (claimedIds.has(row.id) ? 0n : (depositAtoms(row.amount_requested, advisory) ?? 0n)),
+      0n
+    );
+    if (aggregateAtoms >= floor) {
+      const escalated = ageMs >= ESCALATE_AFTER_MS;
+      stats.ambiguous += 1;
+      await advisories.recordObservation({
+        advisoryId: advisory.id,
+        observedAtoms,
+        followUpBuildAt,
+        flagged: escalated,
+      });
+      logEvent("warn", {
+        event: "sdp_api_earn_split_swap_ambiguous",
+        escalated,
+        advisory_id: advisory.id,
+        organization_id: advisory.organization_id,
+        project_id: advisory.project_id,
+        environment: advisory.environment,
+        owner_address: advisory.owner_address,
+        deposit_token_mint: advisory.deposit_token_mint,
+        vault_address: advisory.vault_address,
+        delta_atoms: delta.toString(),
+        swap_min_out_atoms: advisory.swap_min_out_atoms,
+        covering_deposit_ids: committed
+          .filter((row) => !claimedIds.has(row.id))
+          .map((row) => row.id),
+        aggregate_deposit_atoms: aggregateAtoms.toString(),
+        age_seconds: Math.round(ageMs / 1000),
+        first_flagged_at: advisory.first_flagged_at,
+      });
+      return;
+    }
     stats.unfunded += 1;
     await advisories.resolve({
       advisoryId: advisory.id,
