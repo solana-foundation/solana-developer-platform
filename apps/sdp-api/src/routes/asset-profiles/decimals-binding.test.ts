@@ -190,3 +190,158 @@ describe("asset profile public chain.decimals binding", () => {
     expect(stored).toEqual({ token_decimals: 6, public_decimals: "6" });
   });
 });
+
+describe("asset profile public chain.decimals binding across token edits", () => {
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    const db = getDb(env);
+
+    await db
+      .prepare(
+        `INSERT INTO organizations
+            (id, name, slug, tier, status, settings)
+          VALUES (?, ?, ?, 'individual', 'active',
+                  '{"providerOverrides":{"custody":{"local":true}}}')`
+      )
+      .bind(TEST_ORG.id, TEST_ORG.name, TEST_ORG.slug)
+      .run();
+    await db
+      .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+      .bind(TEST_USER.id, TEST_USER.email)
+      .run();
+    await seedDefaultProjects(db, {
+      organizationId: TEST_ORG.id,
+      createdBy: TEST_USER.id,
+      members: [],
+      ids: { sandbox: TEST_PROJECT.id, production: TEST_PRODUCTION_PROJECT.id },
+    });
+
+    const keyHash = await seedProjectApiKey(db, env, {
+      key: TEST_PROJECT_API_KEY,
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      createdBy: TEST_USER.id,
+      role: "api_admin",
+      permissions: ["tokens:write", "tokens:read"],
+    });
+    await seedCachedApiKey(env, keyHash, TEST_PROJECT_CACHED_KEY);
+  });
+
+  // An arcade (generic-category) template keeps `decimals` editable pre-deploy,
+  // while the profile still publishes chain.decimals: the exact window in which
+  // a token edit can silently strand the cached projection on the old scale.
+  async function createEditableTokenProfile() {
+    const response = await app.request(
+      "/v1/issuance/asset-profiles",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          name: "Editable Scale Token",
+          symbol: "EST",
+          template: "arcade",
+          decimals: 6,
+          assetCategory: "stablecoin",
+          assetType: "generic",
+          issuanceMetadata: {
+            asset: { name: "Editable Scale USD" },
+            chain: { decimals: 18 },
+          },
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(201);
+    return (await response.json()) as {
+      data: { token: { id: string }; assetProfile: { id: string } };
+    };
+  }
+
+  async function patchToken(tokenId: string, body: Record<string, unknown>) {
+    return app.request(
+      `/v1/issuance/tokens/${tokenId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  it("rebinds the cached projection when the token's decimals change", async () => {
+    const created = await createEditableTokenProfile();
+    expect(
+      await loadPersistedDecimals(created.data.token.id, created.data.assetProfile.id)
+    ).toEqual({ token_decimals: 6, public_decimals: "6" });
+
+    const response = await patchToken(created.data.token.id, { decimals: 9 });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { token: { decimals: number } } };
+    expect(body.data.token.decimals).toBe(9);
+
+    const stored = await loadPersistedDecimals(created.data.token.id, created.data.assetProfile.id);
+    expect(stored).toEqual({ token_decimals: 9, public_decimals: "9" });
+  });
+
+  it("keeps the projection bound when a token edit races a profile edit", async () => {
+    const created = await createEditableTokenProfile();
+    const tokenId = created.data.token.id;
+    const profileId = created.data.assetProfile.id;
+
+    // Park a lock on the token row so both concurrent edits are forced into the
+    // serialized order the rebinding relies on: whichever write lands first,
+    // the last one to touch the cache must project the token row's scale.
+    let signalLocked: () => void = () => undefined;
+    let releaseTokenRow: () => void = () => undefined;
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseTokenRow = resolve;
+    });
+    const holdTokenRow = getDb(env).transaction(async (tx) => {
+      await tx.queryOne("SELECT id FROM issued_tokens WHERE id = ? FOR UPDATE", [tokenId]);
+      signalLocked();
+      await released;
+    });
+    await locked;
+
+    const profileEdit = app.request(
+      `/v1/issuance/asset-profiles/${profileId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+        },
+        body: JSON.stringify({
+          issuanceMetadata: {
+            asset: { name: "Editable Scale USD" },
+            chain: { decimals: 18 },
+          },
+        }),
+      },
+      env
+    );
+    const tokenEdit = patchToken(tokenId, { decimals: 9 });
+    releaseTokenRow();
+
+    const [profileResponse, tokenResponse] = await Promise.all([
+      profileEdit,
+      tokenEdit,
+      holdTokenRow,
+    ]);
+    expect(profileResponse.status).toBe(200);
+    expect(tokenResponse.status).toBe(200);
+
+    const stored = await loadPersistedDecimals(tokenId, profileId);
+    expect(stored).toEqual({ token_decimals: 9, public_decimals: "9" });
+  });
+});
