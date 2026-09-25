@@ -18,6 +18,10 @@ vi.mock("./earn-program-data", () => ({
   useEarnWithdrawalOutcomeToast: mocks.useEarnWithdrawalOutcomeToast,
 }));
 
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => ({ selectedProjectId: "prj_scope" }),
+}));
+
 // The shared registry ships every program-style lane closed, so every real
 // provider id fails the form closed and the submit path below is unreachable
 // in a test. Opening one lane here is what lets the lock itself be exercised.

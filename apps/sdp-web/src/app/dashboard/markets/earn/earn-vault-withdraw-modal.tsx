@@ -854,6 +854,11 @@ export function EarnVaultWithdrawModal({
   settlement = "atomic",
 }: EarnVaultWithdrawModalProps) {
   const t = useTranslations();
+  // The rendered project this modal was mounted for, asserted on every BFF
+  // request it makes (APE-777): another tab moving the shared selection cookie
+  // must turn this modal's reads and writes into refusals, never into another
+  // project's terms.
+  const requestScope = projectId ? { projectId } : null;
   const [amountInput, setAmountInput] = useState("");
   // Declared per provider in @sdp/types: non-null means this provider REQUIRES
   // an explicit exit floor derived from a live quote. Null renders no slippage
@@ -936,10 +941,13 @@ export function EarnVaultWithdrawModal({
   const rawQuote = useDebouncedVaultQuote<EarnVaultWithdrawalPreview>(
     quoteKey,
     (signal) =>
-      fetchEarnVaultWithdrawalPreview(
-        { positionId: position.id, shares: quoteShares ?? "" },
-        signal
-      ),
+      requestScope
+        ? fetchEarnVaultWithdrawalPreview(
+            requestScope,
+            { positionId: position.id, shares: quoteShares ?? "" },
+            signal
+          )
+        : Promise.resolve({ kind: "unavailable" } as const),
     quoteRefreshKey
   );
   const quote = quoteForKey(rawQuote, quoteKey);
@@ -951,7 +959,12 @@ export function EarnVaultWithdrawModal({
   );
   const submitBlocked = continueBlocked || (slippagePolicy !== null && minAmountOut === undefined);
 
-  async function submitResolvedIntent(controller: AbortController, shares: string, amount: string) {
+  async function submitResolvedIntent(
+    scope: { projectId: string },
+    controller: AbortController,
+    shares: string,
+    amount: string
+  ) {
     const fingerprint = vaultWithdrawalRequestFingerprint({
       projectId,
       positionId: position.id,
@@ -962,7 +975,7 @@ export function EarnVaultWithdrawModal({
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
       controller.signal,
-      fetchEarnVaultWithdrawalsByRequestId
+      (key) => fetchEarnVaultWithdrawalsByRequestId(scope, key)
     );
     if (resolvedKey.kind === "aborted") return;
     if (resolvedKey.kind === "unavailable") {
@@ -995,6 +1008,7 @@ export function EarnVaultWithdrawModal({
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
     const result = await createEarnVaultWithdrawal(
+      scope,
       {
         positionId: position.id,
         shares,
@@ -1052,6 +1066,12 @@ export function EarnVaultWithdrawModal({
     ) {
       return;
     }
+    // No rendered project, no submission: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!requestScope) {
+      setSubmitError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
 
     const controller = new AbortController();
     requestControllerRef.current?.abort();
@@ -1061,7 +1081,12 @@ export function EarnVaultWithdrawModal({
     setSubmitError(null);
 
     try {
-      await submitResolvedIntent(controller, sharesToRedeem, amountValidation.canonicalAmount);
+      await submitResolvedIntent(
+        requestScope,
+        controller,
+        sharesToRedeem,
+        amountValidation.canonicalAmount
+      );
     } catch (cause) {
       if (!controller.signal.aborted) {
         setSubmitError(

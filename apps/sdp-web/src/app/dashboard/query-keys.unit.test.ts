@@ -11,11 +11,11 @@ const plainKeys = [
   paymentsQueryKeys.counterpartyFieldOptions(),
   custodyQueryKeys.policyDestinationAccounts(),
   issuanceQueryKeys.createTokenSignerWallets(),
-  earnQueryKeys.programs(),
-  earnQueryKeys.vaultPositions(),
-  earnQueryKeys.vaultDepositsInFlight(),
-  earnQueryKeys.vaultWithdrawalsInFlight(),
-  earnQueryKeys.fundingWallets(),
+  earnQueryKeys.programs({ projectId: "prj_scope" }),
+  earnQueryKeys.vaultPositions({ projectId: "prj_scope" }),
+  earnQueryKeys.vaultDepositsInFlight({ projectId: "prj_scope" }),
+  earnQueryKeys.vaultWithdrawalsInFlight({ projectId: "prj_scope" }),
+  earnQueryKeys.fundingWallets({ projectId: "prj_scope" }),
 ];
 
 const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
@@ -42,11 +42,26 @@ const parameterizedKeys: [key: readonly unknown[], params: unknown[]][] = [
   [custodyQueryKeys.walletPolicyRevisions({ walletId: "wal_2" }), ["wal_2"]],
   [issuanceQueryKeys.tokens({ query: DEFAULT_ISSUANCE_LIST_QUERY }), [DEFAULT_ISSUANCE_LIST_QUERY]],
   [issuanceQueryKeys.authorityWallets({ tokenId: "token_1" }), ["token_1"]],
-  [earnQueryKeys.strategies({ cluster: "devnet" }), ["devnet"]],
-  [earnQueryKeys.vaultDeposit({ movementId: "mov_1" }), ["mov_1"]],
-  [earnQueryKeys.vaultWithdrawal({ movementId: "mov_2" }), ["mov_2"]],
-  [earnQueryKeys.programWithdrawals({ programId: "prg_2" }), ["prg_2"]],
-  [earnQueryKeys.withdrawal({ programId: "prg_3", withdrawalRef: "wd_1" }), ["prg_3", "wd_1"]],
+  [
+    earnQueryKeys.strategies({ projectId: "prj_scope", cluster: "devnet" }),
+    ["prj_scope", "devnet"],
+  ],
+  [
+    earnQueryKeys.vaultDeposit({ projectId: "prj_scope", movementId: "mov_1" }),
+    ["prj_scope", "mov_1"],
+  ],
+  [
+    earnQueryKeys.vaultWithdrawal({ projectId: "prj_scope", movementId: "mov_2" }),
+    ["prj_scope", "mov_2"],
+  ],
+  [
+    earnQueryKeys.programWithdrawals({ projectId: "prj_scope", programId: "prg_2" }),
+    ["prj_scope", "prg_2"],
+  ],
+  [
+    earnQueryKeys.withdrawal({ projectId: "prj_scope", programId: "prg_3", withdrawalRef: "wd_1" }),
+    ["prj_scope", "prg_3", "wd_1"],
+  ],
 ];
 
 describe("dashboard query-key factories", () => {

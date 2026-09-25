@@ -1,8 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import useSWR from "swr";
 import { z } from "zod";
-import { earnQueryKeys } from "../earn-query-key";
+import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import { RENDERED_PROJECT_HEADER_NAME } from "@/lib/project-cookie";
+import { type EarnQueryScope, earnQueryKeys } from "../earn-query-key";
 
 /**
  * Funding wallets for the deposit flow: the org's own SDP wallets, plus the
@@ -85,8 +88,16 @@ export type EarnFundingWallet = z.infer<typeof earnFundingWalletSchema>;
 const WALLETS_PATH =
   "/api/dashboard/wallets?view=summary&includeBalances=true&includeAllProviders=true";
 
-export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
-  const response = await fetch(WALLETS_PATH);
+/**
+ * The wallet inventory is resolved for the shared selection cookie's project,
+ * so the request declares the project the tab rendered with the same way every
+ * other Earn read does (APE-777): a stale tab is refused instead of served
+ * another project's wallets.
+ */
+export async function fetchFundingWallets(scope: EarnQueryScope): Promise<EarnFundingWallet[]> {
+  const response = await fetch(WALLETS_PATH, {
+    headers: { [RENDERED_PROJECT_HEADER_NAME]: scope.projectId },
+  });
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
   }
@@ -106,13 +117,20 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
  * vault movement settles: both the submit refresh and the settlement refresh
  * can otherwise land inside the same cache window and leave Treasury frozen
  * on the pre-transaction balance.
+ *
+ * The balance read declares the rendered project like every other Earn read
+ * (APE-777): the wallet ID is resolved against the cookie-selected project,
+ * so a stale tab revalidating after another tab moved the shared selection
+ * cookie must be refused rather than attach another project's balance to its
+ * own wallet row.
  */
 export async function fetchLiveFundingWalletBalance(
+  scope: EarnQueryScope,
   walletId: string
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
-    { cache: "no-store" }
+    { cache: "no-store", headers: { [RENDERED_PROJECT_HEADER_NAME]: scope.projectId } }
   );
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
@@ -131,12 +149,13 @@ export async function fetchLiveFundingWalletBalance(
  * from updating.
  */
 export async function refreshFundingWalletBalances(
+  scope: EarnQueryScope,
   wallets: readonly EarnFundingWallet[]
 ): Promise<EarnFundingWallet[]> {
   return Promise.all(
     wallets.map(async (wallet) => {
       try {
-        const balances = await fetchLiveFundingWalletBalance(wallet.walletId);
+        const balances = await fetchLiveFundingWalletBalance(scope, wallet.walletId);
         return { ...wallet, balances };
       } catch {
         return wallet;
@@ -146,8 +165,14 @@ export async function refreshFundingWalletBalances(
 }
 
 export function useEarnFundingWallets() {
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
-    fetchFundingWallets()
+  const { selectedProjectId } = useDashboardWorkspace();
+  const scope = useMemo(
+    () => (selectedProjectId ? { projectId: selectedProjectId } : null),
+    [selectedProjectId]
+  );
+  const { data, error, isLoading, mutate } = useSWR(
+    scope ? earnQueryKeys.fundingWallets(scope) : null,
+    () => fetchFundingWallets(scope as EarnQueryScope)
   );
   return {
     wallets: data,
@@ -155,9 +180,16 @@ export function useEarnFundingWallets() {
     isLoading,
     refresh: () => void mutate(),
     refreshBalances: () =>
-      void mutate(async () => refreshFundingWalletBalances(await fetchFundingWallets()), {
-        revalidate: false,
-      }),
+      void mutate(
+        async () =>
+          refreshFundingWalletBalances(
+            scope as EarnQueryScope,
+            await fetchFundingWallets(scope as EarnQueryScope)
+          ),
+        {
+          revalidate: false,
+        }
+      ),
   };
 }
 

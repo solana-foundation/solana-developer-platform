@@ -3,11 +3,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { floorToReplay } from "../app/dashboard/markets/earn/earn-vault-slippage";
 import {
+  applyIdempotencyKeyOutcome,
   createFloorMemo,
   createIdempotencyKeyStore,
   resetIdempotencyKeyStoresForTests,
   resolveHeldIdempotencyKey,
 } from "./idempotency-key-store";
+import { RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE } from "./project-cookie";
 
 describe("resolveHeldIdempotencyKey reuse reporting", () => {
   const store = createIdempotencyKeyStore("test:held-key-resolution:v1");
@@ -142,6 +144,73 @@ describe("resolveHeldIdempotencyKey reuse reporting", () => {
     );
 
     expect(resolution).toEqual({ kind: "aborted" });
+  });
+});
+
+describe("applyIdempotencyKeyOutcome scope refusals", () => {
+  const KEY_STORE_KEY = "test:earn:scope-refusal:v1";
+  const FINGERPRINT = '["project_1","strategy_1","wallet_1","10",10]';
+
+  let store: ReturnType<typeof createIdempotencyKeyStore>;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    resetIdempotencyKeyStoresForTests();
+    store = createIdempotencyKeyStore(KEY_STORE_KEY);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function scopeRefusal(status = 409) {
+    return {
+      ok: false as const,
+      status,
+      error: "Selected project no longer matches the rendered project; reload the page",
+      body: {
+        error: { code: RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE, message: "refused" },
+      },
+    };
+  }
+
+  it("keeps a key retained for an ambiguous attempt when the BFF refuses the scope", () => {
+    // An earlier attempt's outcome was never learned (a 5xx, a lost answer),
+    // so the key stays live in the store; the retry then hits the BFF's 409
+    // because another tab moved the selection cookie.
+    const key = store.claim(FINGERPRINT);
+
+    const disposition = applyIdempotencyKeyOutcome(store, FINGERPRINT, scopeRefusal());
+
+    // The refusal happened before the API: nothing was written and nothing was
+    // answered for, so retiring would mint a fresh key on the retry after
+    // switching back — a second movement for one intent.
+    expect(disposition).toBe("kept");
+    expect(store.claim(FINGERPRINT)).toBe(key);
+  });
+
+  it("keeps a HELD key on a scope refusal, the same as any other non-answer", () => {
+    store.claim(FINGERPRINT);
+    store.hold(FINGERPRINT);
+
+    const disposition = applyIdempotencyKeyOutcome(store, FINGERPRINT, scopeRefusal());
+
+    expect(disposition).toBe("kept");
+    expect(store.isHeld(FINGERPRINT)).toBe(true);
+  });
+
+  it("still retires on the API's own changed-request 409", () => {
+    store.claim(FINGERPRINT);
+
+    // The idempotency-conflict escape hatch: a 409 that IS an API answer —
+    // no scope-mismatch code in its envelope — retires the key.
+    const disposition = applyIdempotencyKeyOutcome(store, FINGERPRINT, {
+      ok: false,
+      status: 409,
+      body: { error: { message: "Idempotency key already used with a different request" } },
+    });
+
+    expect(disposition).toBe("retired");
   });
 });
 

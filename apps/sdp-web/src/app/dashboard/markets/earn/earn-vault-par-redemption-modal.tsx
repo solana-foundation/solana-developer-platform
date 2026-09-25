@@ -140,6 +140,7 @@ function freshCancelRecord(
 }
 
 function useParRedemptionPreview(
+  projectId: string | null,
   input: EarnVaultParRedemptionTermsRequest | null,
   active: boolean
 ) {
@@ -150,11 +151,18 @@ function useParRedemptionPreview(
 
   useEffect(() => {
     if (!active || !input) return;
+    // No rendered project, no preview: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!projectId) {
+      setPreview(null);
+      setError(t("DashboardEarn.parRedemption.previewError"));
+      return;
+    }
     const controller = new AbortController();
     setPreview(null);
     setLoading(true);
     setError(null);
-    void fetchEarnVaultParRedemptionPreview(input, controller.signal)
+    void fetchEarnVaultParRedemptionPreview({ projectId }, input, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
         if (result.kind === "ready") setPreview(result.value);
@@ -164,7 +172,7 @@ function useParRedemptionPreview(
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [active, input, t]);
+  }, [active, input, t, projectId]);
 
   return { preview, loading, error, setError };
 }
@@ -174,6 +182,7 @@ function useParRedemptionSubmission(options: {
   projectId: string | null;
   setError: (error: string | null) => void;
 }) {
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -182,6 +191,13 @@ function useParRedemptionSubmission(options: {
     preview: EarnVaultParRedemptionPreview | null
   ) {
     if (!input || !preview || preview.blockingIssues.length > 0) return;
+    // No rendered project, no submission: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    const scope = options.projectId ? { projectId: options.projectId } : null;
+    if (!scope) {
+      options.setError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
     setSubmitting(true);
     options.setError(null);
     try {
@@ -192,6 +208,7 @@ function useParRedemptionSubmission(options: {
         route: { kind: "operator_redemption" },
       });
       const result = await createEarnVaultWithdrawalRequest(
+        scope,
         input,
         vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
       );
@@ -218,22 +235,30 @@ function useParRedemptionSubmission(options: {
 function useParRedemptionRequestView(
   submitted: EarnVaultWithdrawalRequestRecord,
   observed: EarnVaultWithdrawalRequestRecord | undefined,
-  cancelAllowed: boolean
+  options: { cancelAllowed: boolean; projectId: string | null }
 ) {
+  const t = useTranslations();
   const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const cancelKey = useRef<string | null>(null);
   const request = freshCancelRecord(cancelResult, observed, submitted);
-  const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
+  const cancelable = options.cancelAllowed && isEarnVaultParRedemptionCancelable(request);
 
   async function cancel() {
     if (!cancelable || cancelling) return;
+    // No rendered project, no cancellation: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!options.projectId) {
+      setCancelError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
     setCancelling(true);
     setCancelError(null);
     cancelKey.current ??= crypto.randomUUID();
     try {
       const result = await cancelEarnVaultWithdrawalRequest(
+        { projectId: options.projectId },
         request.withdrawalRequestId,
         cancelKey.current
       );
@@ -298,12 +323,14 @@ function ParRedemptionResult({
   environment,
   onClose,
   onSettled,
+  projectId,
   submitted,
   terms,
 }: {
   environment: SdpEnvironment;
   onClose: () => void;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  projectId: string | null;
   submitted: EarnVaultWithdrawalRequestRecord;
   terms: EarnVaultParRedemptionTerms;
 }) {
@@ -312,7 +339,7 @@ function ParRedemptionResult({
   const { cancel, cancelError, cancelable, cancelling, request } = useParRedemptionRequestView(
     submitted,
     observed,
-    terms.cancelable
+    { cancelAllowed: terms.cancelable, projectId }
   );
   const presentation = earnVaultParRedemptionStatusPresentation(request.status);
   const terminal = isEarnVaultParRedemptionTerminal(request.status);
@@ -678,7 +705,11 @@ export function EarnVaultParRedemptionModal({
     () => parPreviewInput(position, amountState.shares, terms),
     [position, amountState.shares, terms]
   );
-  const { preview, loading, error, setError } = useParRedemptionPreview(input, step === "review");
+  const { preview, loading, error, setError } = useParRedemptionPreview(
+    projectId,
+    input,
+    step === "review"
+  );
   const { submitting, outcome, submit } = useParRedemptionSubmission({
     onRequested,
     projectId,
@@ -702,6 +733,7 @@ export function EarnVaultParRedemptionModal({
               environment={environment}
               onClose={onClose}
               onSettled={onSettled}
+              projectId={projectId}
               submitted={outcome.withdrawalRequest}
               terms={terms}
             />

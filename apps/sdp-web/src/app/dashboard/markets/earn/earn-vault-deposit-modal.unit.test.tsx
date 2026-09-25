@@ -420,6 +420,7 @@ describe("EarnVaultDepositModal", () => {
     await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      { projectId: PROJECT_ID },
       {
         strategyId: strategy.id,
         custodyWalletId: "wallet_1",
@@ -469,8 +470,8 @@ describe("EarnVaultDepositModal", () => {
     expect(onDeposited).not.toHaveBeenCalled();
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
 
-    const [firstInput, firstKey, firstSignal] = mocks.createEarnVaultDeposit.mock.calls[0];
-    const [secondInput, secondKey, secondSignal] = mocks.createEarnVaultDeposit.mock.calls[1];
+    const [, firstInput, firstKey, firstSignal] = mocks.createEarnVaultDeposit.mock.calls[0];
+    const [, secondInput, secondKey, secondSignal] = mocks.createEarnVaultDeposit.mock.calls[1];
     // No abort signal, DELIBERATELY: the POST moves value, so it must run to
     // completion and reach the key bookkeeping even if the modal unmounts.
     const expectedInput = {
@@ -508,8 +509,8 @@ describe("EarnVaultDepositModal", () => {
     await screen.findByRole("alert");
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -539,8 +540,8 @@ describe("EarnVaultDepositModal", () => {
       await user.click(screen.getByRole("button", { name: "Confirm deposit" }));
       await vi.waitFor(() => expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2));
 
-      const [, firstKey] = mocks.createEarnVaultDeposit.mock.calls[0];
-      const [, secondKey] = mocks.createEarnVaultDeposit.mock.calls[1];
+      const [, , firstKey] = mocks.createEarnVaultDeposit.mock.calls[0];
+      const [, , secondKey] = mocks.createEarnVaultDeposit.mock.calls[1];
       expect(secondKey === firstKey).toBe(expectReuse);
     }
   });
@@ -565,8 +566,8 @@ describe("EarnVaultDepositModal", () => {
     await enterDepositAmount();
     await screen.findByText("Approval required");
 
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -614,7 +615,7 @@ describe("EarnVaultDepositModal", () => {
     const held = entries.find((entry) => entry.id === fingerprint);
     expect(held?.expiresAt).toBeNull();
     expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -663,8 +664,8 @@ describe("EarnVaultDepositModal", () => {
     const progress = screen.getByRole("navigation", { name: "Progress" });
     expect(progress.querySelector('[aria-current="step"]')?.textContent).toBe("Complete");
     // The SAME held key was knowingly reused — no fresh key, no second approval.
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
     // The movement is real and may still be settling: refresh and watch it.
     expect(onDeposited).toHaveBeenCalledWith(
@@ -686,7 +687,7 @@ describe("EarnVaultDepositModal", () => {
       toleranceBps: null,
     });
     expect(vaultDepositIdempotencyKeyStore.claim(fingerprint)).not.toBe(
-      mocks.createEarnVaultDeposit.mock.calls[1][1]
+      mocks.createEarnVaultDeposit.mock.calls[1][2]
     );
   });
 
@@ -733,10 +734,11 @@ describe("EarnVaultDepositModal", () => {
     await screen.findByText("Approval required");
 
     expect(mocks.fetchEarnVaultDepositByRequestId).toHaveBeenCalledWith(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+      { projectId: PROJECT_ID },
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).not.toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -788,8 +790,8 @@ describe("EarnVaultDepositModal", () => {
 
     expect(mocks.fetchEarnVaultDepositByRequestId).not.toHaveBeenCalled();
     // Still the ambiguous-retry rule: a 5xx keeps the key.
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -811,8 +813,8 @@ describe("EarnVaultDepositModal", () => {
     await enterDepositAmount();
     await screen.findByText("Deposit submitted");
 
-    expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).not.toBe(
-      mocks.createEarnVaultDeposit.mock.calls[0][1]
+    expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).not.toBe(
+      mocks.createEarnVaultDeposit.mock.calls[0][2]
     );
   });
 
@@ -1059,6 +1061,7 @@ describe("EarnVaultDepositModal", () => {
     await user.click(await screen.findByRole("button", { name: "Confirm deposit" }));
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      { projectId: PROJECT_ID },
       {
         strategyId: strategy.id,
         custodyWalletId: "wallet_1",
@@ -1107,6 +1110,7 @@ describe("EarnVaultDepositModal", () => {
     await enterDepositAmount("1.000000");
 
     expect(mocks.createEarnVaultDeposit).toHaveBeenCalledWith(
+      { projectId: PROJECT_ID },
       { strategyId: strategy.id, custodyWalletId: "wallet_1", amount: "1" },
       IDEMPOTENCY_KEY
     );
@@ -1253,7 +1257,7 @@ describe("slippage-floored providers", () => {
     );
     await enterFlooredDepositAmount("1.000000");
     await screen.findByText("Deposit submitted");
-    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][1]).toEqual({
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
       amount: "1",
@@ -1317,10 +1321,11 @@ describe("slippage-floored providers", () => {
     await enterFlooredDepositAmount("1.000000");
     await screen.findByText("Deposit submitted");
     expect(mocks.fetchEarnVaultDepositPreview).toHaveBeenCalledWith(
+      { projectId: PROJECT_ID },
       { strategyId: flooredStrategy.id, amount: "1" },
       expect.anything()
     );
-    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][1]).toEqual({
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
       amount: "1",
@@ -1338,7 +1343,7 @@ describe("slippage-floored providers", () => {
     await enterDepositAmount();
     await screen.findByText("Deposit submitted");
     expect(mocks.fetchEarnVaultDepositPreview).not.toHaveBeenCalled();
-    expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+    expect(mocks.createEarnVaultDeposit.mock.calls[0][1]).toEqual({
       strategyId: strategy.id,
       custodyWalletId: "wallet_1",
       amount: "1",
@@ -1505,7 +1510,7 @@ describe("slippage-floored providers", () => {
       );
       // …and the floor sent is the one the user REVIEWED, freshly revalidated:
       // the still-satisfiable 0.999, never a weaker floor off the 0.9995 rate.
-      expect(mocks.createEarnVaultDeposit.mock.calls[0][0]).toEqual({
+      expect(mocks.createEarnVaultDeposit.mock.calls[0][1]).toEqual({
         strategyId: strategy.id,
         custodyWalletId: "wallet_1",
         amount: "1",
@@ -1583,11 +1588,11 @@ describe("slippage-floored providers", () => {
       // held 0.999 floor. It must not: an approval's replay carries the floor
       // its key was MINTED with, verbatim, or the hold is stranded.
       expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
-      expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toMatchObject({
         minSharesOut: "0.999",
       });
-      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][2]
       );
     });
 
@@ -1640,11 +1645,11 @@ describe("slippage-floored providers", () => {
       // (a 409), retire the key, and let the next submit deposit a second time
       // while the first attempt may already have executed.
       expect(mocks.createEarnVaultDeposit).toHaveBeenCalledTimes(2);
-      expect(mocks.createEarnVaultDeposit.mock.calls[1][0]).toMatchObject({
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toMatchObject({
         minSharesOut: "0.999",
       });
-      expect(mocks.createEarnVaultDeposit.mock.calls[1][1]).toBe(
-        mocks.createEarnVaultDeposit.mock.calls[0][1]
+      expect(mocks.createEarnVaultDeposit.mock.calls[1][2]).toBe(
+        mocks.createEarnVaultDeposit.mock.calls[0][2]
       );
     });
 

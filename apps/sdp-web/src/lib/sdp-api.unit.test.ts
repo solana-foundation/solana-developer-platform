@@ -13,6 +13,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
+import { RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE } from "./project-cookie";
 import {
   createProjectBoundSdpApiClient,
   createRequestScopedSdpApiClients,
@@ -299,6 +300,80 @@ describe("createRequestScopedSdpApiClients", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  // A tab that rendered project A must never be served project B because
+  // another tab moved the shared selection cookie (APE-777). The Earn data
+  // seam declares the project its tab rendered with on every request; the
+  // proxy refuses a declared scope that no longer matches the cookie-resolved
+  // request project, and forwards nothing upstream.
+  describe("rendered-project scope assertion", () => {
+    function scopedRequest(headers: Record<string, string>): Request {
+      return new Request("https://dashboard.example.test/api/vault-positions", { headers });
+    }
+
+    beforeEach(() => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+    });
+
+    it("refuses a rendered project that no longer matches the request project", async () => {
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await proxyToSdpApi({
+        request: scopedRequest({ "x-sdp-rendered-project-id": "project_sandbox" }),
+        traceSource: "test.proxy.scope",
+        path: "/v1/earn/vault-positions",
+      });
+
+      expect(response.status).toBe(409);
+      const body = (await response.json()) as { error: { code?: string; message: string } };
+      expect(body.error.message).toContain("no longer matches");
+      // Machine-readable so the client's idempotency machinery can tell this
+      // pre-API refusal apart from an answer the API gave.
+      expect(body.error.code).toBe(RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE);
+      // The mismatch never reaches the upstream API.
+      expect(callsTo(fetchMock, "/v1/earn/vault-positions")).toHaveLength(0);
+    });
+
+    it("forwards a matching rendered project without leaking the assertion header", async () => {
+      const fetchMock = apiFetchMock({ respond: () => new Response(null, { status: 204 }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await proxyToSdpApi({
+        request: scopedRequest({ "x-sdp-rendered-project-id": "project_test" }),
+        traceSource: "test.proxy.scope",
+        path: "/v1/earn/vault-positions",
+      });
+
+      expect(response.status).toBe(204);
+      const headers = headersOf(callsTo(fetchMock, "/v1/earn/vault-positions")[0]);
+      expect(headers.get("x-project-id")).toBe("project_test");
+      expect(headers.has("x-sdp-rendered-project-id")).toBe(false);
+    });
+
+    it("resolves from the cookie alone when no rendered project is declared", async () => {
+      const fetchMock = apiFetchMock({ respond: () => new Response(null, { status: 204 }) });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await proxyToSdpApi({
+        request: scopedRequest({}),
+        traceSource: "test.proxy.scope",
+        path: "/v1/earn/vault-positions",
+      });
+
+      // Surfaces that do not send the assertion header behave exactly as
+      // before; the Earn seam always sends it.
+      expect(response.status).toBe(204);
+      expect(headersOf(callsTo(fetchMock, "/v1/earn/vault-positions")[0]).get("x-project-id")).toBe(
+        "project_test"
+      );
+    });
   });
 });
 

@@ -150,6 +150,7 @@ describe("EarnVaultWithdrawModal", () => {
     await user.click(screen.getByRole("button", { name: "Confirm withdrawal" }));
 
     expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledWith(
+      { projectId: "prj_1" },
       { positionId: position.id, shares: exactShares },
       expect.any(String)
     );
@@ -449,11 +450,12 @@ describe("exit slippage floors (quote-derived)", () => {
 
     await screen.findByText("Withdrawal submitted");
     expect(mocks.fetchEarnVaultWithdrawalPreview).toHaveBeenCalledWith(
+      { projectId: "prj_1" },
       { positionId: vedaPosition.id, shares: "5" },
       expect.anything()
     );
     // 4.997 × (1 − 10 bps), floored to the token's six decimals.
-    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).toEqual({
       positionId: vedaPosition.id,
       shares: "5",
       minAmountOut: "4.992003",
@@ -558,11 +560,11 @@ describe("exit slippage floors (quote-derived)", () => {
     // (a 409), retire the key, and let the next submit exit a second time
     // while the first attempt may already have executed.
     expect(mocks.createEarnVaultWithdrawal).toHaveBeenCalledTimes(2);
-    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][0]).toMatchObject({
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toMatchObject({
       minAmountOut: "4.992003",
     });
-    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][1]).toBe(
-      mocks.createEarnVaultWithdrawal.mock.calls[0][1]
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[1][2]).toBe(
+      mocks.createEarnVaultWithdrawal.mock.calls[0][2]
     );
   });
 
@@ -634,7 +636,7 @@ describe("exit slippage floors (quote-derived)", () => {
 
     await screen.findByText("Withdrawal submitted");
     expect(mocks.fetchEarnVaultWithdrawalPreview).not.toHaveBeenCalled();
-    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][0]).toEqual({
+    expect(mocks.createEarnVaultWithdrawal.mock.calls[0][1]).toEqual({
       positionId: position.id,
       shares: "5",
     });

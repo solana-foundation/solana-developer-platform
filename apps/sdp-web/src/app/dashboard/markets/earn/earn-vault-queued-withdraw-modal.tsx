@@ -179,6 +179,7 @@ function queuedWithdrawalStepKey(outcome: EarnVaultQueuedWithdrawalOutcome | nul
  * errors share this hook's error state so the review view renders one message.
  */
 function useQueuedWithdrawalPreview(
+  projectId: string | null,
   previewInput: EarnVaultQueuedWithdrawalTermsRequest | null,
   active: boolean
 ) {
@@ -189,11 +190,18 @@ function useQueuedWithdrawalPreview(
 
   useEffect(() => {
     if (!active || !previewInput) return;
+    // No rendered project, no preview: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!projectId) {
+      setPreview(null);
+      setError(t("DashboardEarn.queuedWithdraw.previewError"));
+      return;
+    }
     const controller = new AbortController();
     setPreview(null);
     setPreviewLoading(true);
     setError(null);
-    void fetchEarnVaultQueuedWithdrawalPreview(previewInput, controller.signal)
+    void fetchEarnVaultQueuedWithdrawalPreview({ projectId }, previewInput, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
         if (result.kind === "ready") setPreview(result.value);
@@ -203,7 +211,7 @@ function useQueuedWithdrawalPreview(
         if (!controller.signal.aborted) setPreviewLoading(false);
       });
     return () => controller.abort();
-  }, [previewInput, active, t]);
+  }, [previewInput, active, t, projectId]);
 
   return { preview, previewLoading, error, setError };
 }
@@ -219,6 +227,7 @@ function useQueuedWithdrawalSubmission(options: {
   projectId: string | null;
   setError: (error: string | null) => void;
 }) {
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -227,6 +236,13 @@ function useQueuedWithdrawalSubmission(options: {
     preview: EarnVaultQueuedWithdrawalPreview | null
   ) {
     if (!previewInput || !preview || preview.blockingIssues.length > 0) return;
+    // No rendered project, no submission: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    const scope = options.projectId ? { projectId: options.projectId } : null;
+    if (!scope) {
+      options.setError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
     setSubmitting(true);
     options.setError(null);
     try {
@@ -241,6 +257,7 @@ function useQueuedWithdrawalSubmission(options: {
         },
       });
       const result = await createEarnVaultWithdrawalRequest(
+        scope,
         previewInput,
         vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
       );
@@ -268,8 +285,10 @@ function useQueuedWithdrawalSubmission(options: {
  */
 function useQueuedWithdrawalRequestView(
   submitted: EarnVaultWithdrawalRequestRecord,
-  observed: EarnVaultWithdrawalRequestRecord | undefined
+  observed: EarnVaultWithdrawalRequestRecord | undefined,
+  projectId: string | null
 ) {
+  const t = useTranslations();
   const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
@@ -286,11 +305,18 @@ function useQueuedWithdrawalRequestView(
 
   async function cancel() {
     if (cancelling || request.status !== "expiredCancelable") return;
+    // No rendered project, no cancellation: the request could not declare the
+    // scope it was mounted for, so the BFF could not honor it either.
+    if (!projectId) {
+      setCancelError(t("DashboardEarn.deposit.vaultProjectScopeUnavailable"));
+      return;
+    }
     setCancelling(true);
     setCancelError(null);
     cancelKey.current ??= crypto.randomUUID();
     try {
       const result = await cancelEarnVaultWithdrawalRequest(
+        { projectId },
         request.withdrawalRequestId,
         cancelKey.current
       );
@@ -320,11 +346,13 @@ function QueuedWithdrawalResult({
   environment,
   onClose,
   onSettled,
+  projectId,
   request: submitted,
 }: {
   environment: SdpEnvironment;
   onClose: () => void;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  projectId: string | null;
   request: EarnVaultWithdrawalRequestRecord;
 }) {
   const t = useTranslations();
@@ -332,7 +360,8 @@ function QueuedWithdrawalResult({
   const observed = useEarnVaultWithdrawalRequestOutcome(submitted.withdrawalRequestId, onSettled);
   const { cancel, cancelError, cancelling, request } = useQueuedWithdrawalRequestView(
     submitted,
-    observed
+    observed,
+    projectId
   );
   const presentation = earnVaultQueuedWithdrawalStatusPresentation(request.status);
   const terminal = isEarnVaultQueuedWithdrawalTerminal(request.status);
@@ -784,6 +813,7 @@ export function EarnVaultQueuedWithdrawModal({
     [deadlineSeconds, discountBps, position, shares, termsValid]
   );
   const { preview, previewLoading, error, setError } = useQueuedWithdrawalPreview(
+    projectId,
     previewInput,
     step === "review"
   );
@@ -816,6 +846,7 @@ export function EarnVaultQueuedWithdrawModal({
               environment={environment}
               onClose={onClose}
               onSettled={onSettled}
+              projectId={projectId}
               request={outcome.withdrawalRequest}
             />
           ) : (

@@ -1,6 +1,7 @@
 "use client";
 
 import { z } from "zod";
+import { RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE } from "./project-cookie";
 
 /**
  * Browser-side durability for a value-moving IDEMPOTENCY KEY, per request
@@ -354,7 +355,21 @@ export async function resolveHeldIdempotencyKey(
 
 type IdempotencyKeyOutcome =
   | { ok: true; status: number; data: { kind: string } }
-  | { ok: false; status: number | null };
+  // `body` carries the failure envelope when the caller has one, so the
+  // retire rule can tell refusals the API answered from refusals that never
+  // reached it (the BFF's rendered-project scope mismatch).
+  | { ok: false; status: number | null; body?: unknown };
+
+/**
+ * Whether this refusal is the BFF's rendered-project scope mismatch (APE-777)
+ * rather than an answer from the API. The refusal fires before the request
+ * reaches the API, so it can never answer for a key — see the retire rule.
+ */
+function isRenderedProjectScopeRefusal(result: IdempotencyKeyOutcome): boolean {
+  if (result.ok) return false;
+  const error = (result.body as { error?: { code?: unknown } } | null | undefined)?.error;
+  return error?.code === RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE;
+}
 
 /**
  * Whether the API has ANSWERED for an idempotency key, which is the only
@@ -369,8 +384,14 @@ type IdempotencyKeyOutcome =
  *   and is still keyed by this value — resubmitting under a fresh key would
  *   open a second approval request for the same intent. Not retiring; the
  *   caller pins it instead.
- * - Only a 4xx proves nothing was written; in the idempotency-conflict case
- *   releasing is also the escape hatch, or a collided key collides forever.
+ * - The BFF's rendered-project scope refusal is NOT an answer at all: it fires
+ *   before the request reaches the API, so nothing was written and nothing was
+ *   refused by the API. Retiring there would let the retry — after the tab
+ *   returns to the project it rendered with — mint a fresh key for an intent
+ *   an earlier ambiguous attempt may already have executed.
+ * - Only a 4xx from the API proves nothing was written; in the
+ *   idempotency-conflict case releasing is also the escape hatch, or a
+ *   collided key collides forever.
  * - Everything else might have written: `status === null` is a transport
  *   failure, a 2xx whose body did not parse is an answer nobody could read,
  *   and a 5xx is the dangerous one — a gateway timing out downstream of an API
@@ -378,6 +399,7 @@ type IdempotencyKeyOutcome =
  *   unavailable before it did.
  */
 function answerRetiresIdempotencyKey(result: IdempotencyKeyOutcome): boolean {
+  if (isRenderedProjectScopeRefusal(result)) return false;
   if (result.ok) {
     return result.data?.kind !== "approval_pending";
   }
