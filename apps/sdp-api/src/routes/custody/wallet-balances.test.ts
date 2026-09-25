@@ -94,8 +94,9 @@ describe("readWalletBalances", () => {
     const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
     await flush();
 
-    expect(new Set(balanceReads.map((read) => read.address))).toEqual(
-      new Set([ownerAddress(1), ownerAddress(2), ownerAddress(3)])
+    // Exact per-address counts: a set would still pass if a wallet were read twice.
+    expect(balanceReads.map((read) => read.address).sort()).toEqual(
+      [ownerAddress(1), ownerAddress(2), ownerAddress(3)].sort()
     );
     // Both programs are asked for every wallet before any answer arrives.
     expect(tokenReads).toHaveLength(6);
