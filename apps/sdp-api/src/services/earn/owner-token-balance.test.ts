@@ -12,6 +12,7 @@ const servers: Server[] = [];
 const rpcRequestSchema = z.object({
   id: z.union([z.string(), z.number()]),
   method: z.string(),
+  params: z.array(z.unknown()).optional(),
 });
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -31,7 +32,34 @@ describe("readOwnerMintBalance", () => {
     await expect(readBalance(rpcUrl)).resolves.toEqual({
       atoms: 18_014_398_509_481_988n,
       decimals: 6,
+      complete: true,
     });
+  });
+
+  it("never sends a weaker-than-finalized commitment for the account list", async () => {
+    // Kit strips an explicit `commitment: "finalized"` from the wire because
+    // it matches the HTTP server default, so the request arrives WITHOUT a
+    // commitment key and the node serves it at finalized. A weaker source
+    // commitment would instead be injected on the wire, where an empty
+    // response is indistinguishable from an incomplete one (SOLA9-675) and
+    // the `complete` signal the split-swap detector relies on would be
+    // retracted. Pin the wire contract so that change cannot slip through.
+    let wireCommitment: unknown;
+    const rpcUrl = await serveRpcResponse({ context: { slot: 1 }, value: [] }, (body) => {
+      if (body.method === "getTokenAccountsByOwner") {
+        // params: [owner, filter, config] — the commitment lives in the
+        // config object, not the mint filter.
+        const [, , config] = body.params ?? [];
+        wireCommitment = (config as { commitment?: unknown } | undefined)?.commitment;
+      }
+    });
+
+    await expect(readBalance(rpcUrl)).resolves.toEqual({
+      atoms: 0n,
+      decimals: null,
+      complete: true,
+    });
+    expect(wireCommitment === undefined || wireCommitment === "finalized").toBe(true);
   });
 
   it("accepts an empty account list as an exact zero balance", async () => {
@@ -40,6 +68,7 @@ describe("readOwnerMintBalance", () => {
     await expect(readBalance(rpcUrl)).resolves.toEqual({
       atoms: 0n,
       decimals: null,
+      complete: true,
     });
   });
 
@@ -120,11 +149,15 @@ function tokenAccount(
   };
 }
 
-async function serveRpcResponse(tokenAccountsResult: JsonValue): Promise<string> {
+async function serveRpcResponse(
+  tokenAccountsResult: JsonValue,
+  onRequest?: (body: { id: JsonValue; method: string; params?: unknown[] }) => void
+): Promise<string> {
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = rpcRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+    onRequest?.(body);
     const result =
       body.method === "getGenesisHash" ? GENESIS_HASH_BY_CLUSTER.devnet : tokenAccountsResult;
     response.setHeader("content-type", "application/json");
