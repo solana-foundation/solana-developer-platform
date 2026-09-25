@@ -102,6 +102,22 @@ export function DashboardWorkspaceProvider({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     initialSelectedProjectId
   );
+  // The mounted selection must stay a member of the authoritative project
+  // list. When a refresh drops it (archived project, revoked entitlement) the
+  // server resolves the repaired selection into `initialSelectedProjectId`
+  // while this state still holds the removed project, so `sdpEnvironment`,
+  // cache keys and project-scoped forms would keep rendering under a project
+  // the request scope no longer names. Reconcile during render — before
+  // mutation-capable children render — so they never observe the removed ID;
+  // a failed (empty, non-authoritative) list load leaves the state untouched.
+  const selectedProjectIsListed = projects.some((project) => project.id === selectedProjectId);
+  if (
+    projects.length > 0 &&
+    !selectedProjectIsListed &&
+    selectedProjectId !== initialSelectedProjectId
+  ) {
+    setSelectedProjectId(initialSelectedProjectId);
+  }
   const sdpEnvironment: SdpEnvironment =
     selectedProjectId && selectedProjectId === productionProject?.id ? "production" : "sandbox";
   const [playgroundApiKeys, setPlaygroundApiKeysState] = useState<
