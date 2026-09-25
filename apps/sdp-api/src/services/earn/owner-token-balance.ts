@@ -135,7 +135,8 @@ const ASSOCIATED_TOKEN_PROGRAM_ADDRESS = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsL
  *
  * Runs every read at `finalized` so the evidence cannot be unwound by a
  * reorganisation after it is acted on. Like `readOwnerMintBalance`, it proves
- * its cluster before reading and fails closed on a malformed response.
+ * its cluster before reading and fails closed on a malformed or incomplete
+ * response.
  */
 export async function ownerHoldsMintAccount(
   env: Env,
@@ -184,6 +185,10 @@ export async function ownerHoldsMintAccount(
 
   // The derived associated token accounts are raw chain state, independent of
   // any token-account index: one existing is proof the empty index read lied.
+  // The existence read must return one entry per requested address before
+  // `false` means anything: a truncated response (e.g. `value: []`) proves
+  // nothing about absence, so it fails closed like a malformed one rather than
+  // corroborating a zero it never observed.
   const addressEncoder = getAddressEncoder();
   const associatedAddresses = await Promise.all(
     TOKEN_PROGRAM_ADDRESSES.map(async (tokenProgram) => {
@@ -208,5 +213,8 @@ export async function ownerHoldsMintAccount(
       }
     )
     .send();
+  if (accounts.value.length !== associatedAddresses.length) {
+    throw new Error("Associated-token-account RPC response was incomplete");
+  }
   return accounts.value.some((account) => account !== null);
 }

@@ -171,6 +171,26 @@ describe("ownerHoldsMintAccount", () => {
     await expect(holdsAccount(rpcUrl)).resolves.toBe(false);
   });
 
+  it.each([
+    ["no entries", []],
+    ["one entry of two", [null]],
+    ["one existing entry of two", [existingAccount()]],
+  ] as Array<[string, JsonValue[]]>)(
+    "fails closed when an ATA existence response returns %s",
+    async (_label, value) => {
+      // A response that omits entries proves nothing about absence: treating
+      // a truncated list as "neither ATA exists" could corroborate an
+      // `unfunded` resolution the incomplete read never observed.
+      const rpcUrl = await serveRpcMethods(({ method }) =>
+        method === "getMultipleAccounts"
+          ? { context: { slot: 1 }, value }
+          : { context: { slot: 1 }, value: [] }
+      );
+
+      await expect(holdsAccount(rpcUrl)).rejects.toThrow(/associated-token-account RPC response/i);
+    }
+  );
+
   it("fails closed when a program-filtered response is malformed", async () => {
     const rpcUrl = await serveRpcMethods(
       ({ method }): JsonValue =>
