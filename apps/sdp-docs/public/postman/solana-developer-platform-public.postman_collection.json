@@ -719,7 +719,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/tokens",
-            "description": "Creates a token record that can later be deployed to Solana.",
+            "description": "Creates a token record that can later be deployed to Solana. Supply an Idempotency-Key to retry safely: an identical retried request returns the original token instead of creating a second draft, while reusing the key for a different request returns 409.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true\n}",
@@ -1987,7 +1987,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/asset-profiles",
-            "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
+            "description": "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Supply an Idempotency-Key to retry safely: an identical retried request returns the original token and profile instead of creating a second pair, while reusing the key for a different request returns 409. Requires the Asset Profiles feature to be enabled.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Example Token\",\n  \"symbol\": \"EXM\",\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"decimals\": 6,\n  \"description\": \"Example token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"maxSupply\": \"1000000\",\n  \"template\": \"stablecoin\",\n  \"overrides\": {\n    \"extensions\": {\n      \"transferFee\": {\n        \"basisPoints\": 50,\n        \"maxFee\": \"0.5\"\n      }\n    }\n  },\n  \"requiresAllowlist\": true,\n  \"isMintable\": true,\n  \"isFreezable\": true,\n  \"assetCategory\": \"stablecoin\",\n  \"assetType\": \"fiat_backed\",\n  \"issuanceMetadata\": {\n    \"asset\": {\n      \"name\": \"Acme USD\",\n      \"issuerName\": \"Acme Financial Inc.\",\n      \"pegCurrency\": \"USD\"\n    },\n    \"compliance\": {\n      \"transferRestrictions\": \"reg_d\"\n    },\n    \"chain\": {\n      \"decimals\": 6\n    },\n    \"custom\": {\n      \"customer\": {\n        \"internalDeskId\": \"FX-22\"\n      },\n      \"integration\": {}\n    }\n  }\n}",
