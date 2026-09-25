@@ -461,9 +461,9 @@ async function reconcileMovement(
  * the historical resolver bypasses only rollout admission, so disabling new
  * Hastra DEX builds cannot change how an already-recorded withdrawal settles.
  *
- * A future Connect order reconciler must correlate and authenticate provider
- * completion before the settled surface can close one of these rows — chain
- * finalization never does.
+ * Only the Connect order reconciler's authenticated completion fact
+ * (`provider_completed_at`, migration 0120) can close one of these rows on the
+ * settled surface — chain finalization never does.
  */
 function isKnownProviderOrderSettlement(env: Env, movement: EarnMovementRow): boolean {
   if (movement.direction === "deposit") {

@@ -2,6 +2,7 @@ import type {
   EarnDepositEligibilityProvider,
   EarnLiveMetricsProvider,
   EarnPortfolioWalletProvider,
+  EarnProviderOrderCompletionProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
   EarnVaultParRedemptionProvider,
@@ -258,6 +259,35 @@ export function supportsDepositEligibility(
     Record<(typeof DEPOSIT_ELIGIBILITY_METHODS)[number], unknown>
   >;
   return DEPOSIT_ELIGIBILITY_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const PROVIDER_ORDER_COMPLETION_METHODS = [
+  "readDepositOrderCompletion",
+] as const satisfies readonly Exclude<
+  keyof EarnProviderOrderCompletionProvider,
+  keyof EarnVaultProvider
+>[];
+
+/**
+ * Capability discovery for the authenticated provider-order completion read —
+ * same method-presence rule as the guards above.
+ *
+ * This is the capability the settled boundary has been waiting on: a provider
+ * whose deposits are orders (WisdomTree) can only close a row — releasing the
+ * `?settled=` surface and the cross-key deposit-intent claim together — through
+ * this read, never through a chain fact. A provider without it simply never
+ * completes: its rows stay open until a human reconciles, exactly the reviewed
+ * posture before this capability existed.
+ */
+export function supportsVaultProviderOrderCompletion(
+  client: EarnVaultProvider
+): client is EarnProviderOrderCompletionProvider {
+  const candidate = client as Partial<
+    Record<(typeof PROVIDER_ORDER_COMPLETION_METHODS)[number], unknown>
+  >;
+  return PROVIDER_ORDER_COMPLETION_METHODS.every(
+    (method) => typeof candidate[method] === "function"
+  );
 }
 
 const LIVE_METRICS_METHODS = ["listStrategyMetrics"] as const satisfies readonly Exclude<

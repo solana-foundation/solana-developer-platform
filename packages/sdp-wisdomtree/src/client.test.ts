@@ -1,6 +1,7 @@
 import {
   supportsDepositEligibility,
   supportsVaultDirect,
+  supportsVaultProviderOrderCompletion,
   supportsVaultProviderOrderWithdraw,
   supportsVaultWithdraw,
 } from "@sdp/earn/capabilities";
@@ -79,6 +80,9 @@ describe("capability shape", () => {
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
+    // The completion read is the authenticated reconciler's release point for
+    // provider-order deposits — a capability, not a provider-id check.
+    expect(supportsVaultProviderOrderCompletion(client)).toBe(true);
     expect(() => assertWisdomTreeNotPortfolioProvider(client)).not.toThrow();
   });
 

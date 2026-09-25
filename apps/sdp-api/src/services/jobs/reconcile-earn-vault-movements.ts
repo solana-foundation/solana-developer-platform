@@ -5,6 +5,7 @@ import {
   reconcileEarnVaultMovementBatch,
   repairUnvaluedWithdrawalPayouts,
 } from "@/services/earn/vault-movement-reconciliation.service";
+import { completeProviderOrderDeposits } from "@/services/earn/vault-provider-order-completion.service";
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import type { Env } from "@/types/env";
 
@@ -55,6 +56,7 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   let movements: Awaited<ReturnType<typeof ledger.claimUnsettledVaultMovements>>;
   let stats: Awaited<ReturnType<typeof reconcileEarnVaultMovementBatch>>;
   let payoutRepair: Awaited<ReturnType<typeof repairUnvaluedWithdrawalPayouts>>;
+  let providerCompletion: Awaited<ReturnType<typeof completeProviderOrderDeposits>>;
   let backlogStats: Awaited<ReturnType<typeof ledger.getUnsettledVaultMovementStats>>;
   try {
     ledger = createPostgresEarnMovementsRepository(getDb(env));
@@ -63,6 +65,10 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     // Second chance for withdrawal payouts the settlement could not observe;
     // a failed history read must not understate `totalWithdrawn` forever.
     payoutRepair = await repairUnvaluedWithdrawalPayouts(env);
+    // The authenticated provider reconciler: stamp the completion fact a
+    // provider-order deposit needs before the settled boundary can close it
+    // and release its cross-key intent claim (migration 0120).
+    providerCompletion = await completeProviderOrderDeposits(env);
     backlogStats = await ledger.getUnsettledVaultMovementStats();
   } catch (movementPipelineFailure) {
     const queuedWithdrawalFailure = await queuedRun;
@@ -86,7 +92,8 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     stats.statusReadFailures +
     stats.blockHeightReadFailures +
     stats.movementErrors +
-    payoutRepair.errors;
+    payoutRepair.errors +
+    providerCompletion.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
     claimed: stats.claimed,
@@ -115,13 +122,18 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     payout_repair_repaired: payoutRepair.repaired,
     payout_repair_unobserved: payoutRepair.unobserved,
     payout_repair_errors: payoutRepair.errors,
+    provider_completion_claimed: providerCompletion.claimed,
+    provider_completion_completed: providerCompletion.completed,
+    provider_completion_unobserved: providerCompletion.unobserved,
+    provider_completion_errors: providerCompletion.errors,
   });
 
   if (failures > 0) {
     const movementFailure = new Error(
       `Earn vault reconciliation failed ` +
         `(${stats.statusReadFailures} status-read, ${stats.blockHeightReadFailures} block-height, ` +
-        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair failures) ` +
+        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair ` +
+        `failures, ${providerCompletion.errors} provider-completion failures) ` +
         `over ${stats.claimed} claimed movements`
     );
     if (queuedWithdrawalFailure !== null) {

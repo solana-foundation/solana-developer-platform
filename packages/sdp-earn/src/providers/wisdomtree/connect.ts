@@ -482,3 +482,130 @@ export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<un
   }
   throw providerUnavailable("WisdomTree returned an orders response in an unrecognized shape");
 }
+
+export interface WisdomTreePurchaseOrderCompletion {
+  orderReference: string;
+  completedAt: string | null;
+}
+
+/**
+ * The order fields the completion correlation reads, one reader per field so
+ * the UNVERIFIED wire fix is one edit (see the module header). Absent means
+ * absent — a missing field can simply fail to match; a WRONG type is a
+ * malformed feed and throws, the same rule every reader in this module applies.
+ */
+interface WisdomTreeOrderRecord {
+  orderId: string | null;
+  tradeType: string | null;
+  status: string | null;
+  walletAddress: string | null;
+  fund: string | null;
+  amount: string | null;
+  completedAt: string | null;
+}
+
+function readWisdomTreeOrderRecord(value: unknown): WisdomTreeOrderRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw providerUnavailable("WisdomTree returned a malformed order entry");
+  }
+  const record = value as Record<string, unknown>;
+  const stringField = (field: string): string | null => {
+    const fieldValue = record[field];
+    if (fieldValue === undefined || fieldValue === null) return null;
+    if (typeof fieldValue !== "string") {
+      throw providerUnavailable(`WisdomTree returned an order with an invalid ${field}`);
+    }
+    const trimmed = fieldValue.trim();
+    return trimmed === "" ? null : trimmed;
+  };
+  return {
+    // The order's own identity: "id" is DRF's default primary key name.
+    orderId: stringField("id"),
+    tradeType: stringField("trade_type"),
+    status: stringField("status"),
+    // The investor wallet that funded the order — same field name the
+    // on-receipt-wallet route answers with.
+    walletAddress: stringField("wallet_address"),
+    fund: stringField("fund"),
+    amount: stringField("amount"),
+    completedAt: stringField("completed_at"),
+  };
+}
+
+/**
+ * The order statuses Connect reports for a completed purchase. Fail-closed on
+ * purpose: the docs type `status` as an open string and never enumerate it
+ * (same posture as the wallet-approval statuses), so anything not spelled here
+ * reads as "still working" until measured against a live tenant.
+ */
+const WISDOMTREE_COMPLETED_ORDER_STATUSES: ReadonlySet<string> = new Set(["completed"]);
+
+/** Unsigned decimal string, the shape every amount in this module compares. */
+const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
+
+/**
+ * Exact numeric equality of two unsigned decimal strings, with no float on the
+ * money path: "10.00" and "10" are the same order, "0.10" and "0.1" too.
+ * Scales both fractional halves to a common width and compares the integers.
+ */
+function sameDecimalAmount(left: string, right: string): boolean {
+  const [leftUnits, leftFraction = ""] = left.split(".");
+  const [rightUnits, rightFraction = ""] = right.split(".");
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const scaled = (units: string, fraction: string) => BigInt(units + fraction.padEnd(width, "0"));
+  return scaled(leftUnits, leftFraction) === scaled(rightUnits, rightFraction);
+}
+
+/**
+ * Has Connect completed a Purchase order that this deposit could have opened?
+ *
+ * Authenticated correlation, fail-closed. The provider's own order book — read
+ * with SDP's credentials — must name ALL of: this wallet, a Purchase, this
+ * fund, this amount, and a completed status, for the deposit's settlement to
+ * be demonstrated. Anything less (a miss, a pending order, a malformed feed,
+ * an unconfigured credential) answers null and the row stays open — never a
+ * guess that closes a claim on money already committed.
+ *
+ * UNVERIFIED field names throughout (`trade_type`, `wallet_address`, `fund`,
+ * `amount`, `status`, `completed_at`, `id`): each is a single reader above, so
+ * measuring the live tenant is one edit.
+ */
+export async function readWisdomTreePurchaseOrderCompletion(
+  ctx: EarnRuntimeContext,
+  input: {
+    owner: string;
+    fundExchangeCode: string;
+    amountRequested: string;
+  }
+): Promise<WisdomTreePurchaseOrderCompletion | null> {
+  const orders = await _listWisdomTreeOrders(ctx);
+  for (const entry of orders) {
+    const order = readWisdomTreeOrderRecord(entry);
+    if (order.tradeType !== "Purchase") continue;
+    // Same normalization rule as the wallet-approval statuses above: case and
+    // padding are serialization, not semantics.
+    if (
+      order.status === null ||
+      !WISDOMTREE_COMPLETED_ORDER_STATUSES.has(order.status.trim().toLowerCase())
+    ) {
+      continue;
+    }
+    if (order.walletAddress?.toLowerCase() !== input.owner.toLowerCase()) continue;
+    if (order.fund?.toUpperCase() !== input.fundExchangeCode.toUpperCase()) continue;
+    // Both sides are decimal strings in the settlement currency; a numeric
+    // comparison, never a string one — "10.00" and "10" are the same order.
+    if (
+      order.amount === null ||
+      !DECIMAL_STRING.test(order.amount) ||
+      !DECIMAL_STRING.test(input.amountRequested) ||
+      !sameDecimalAmount(order.amount, input.amountRequested)
+    ) {
+      continue;
+    }
+    return {
+      orderReference: order.orderId ?? "unknown",
+      completedAt: order.completedAt,
+    };
+  }
+  return null;
+}

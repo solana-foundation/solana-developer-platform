@@ -185,6 +185,15 @@ export interface EarnMovementRow {
   confirmed_at: string | null;
   /** Irreversible chain commitment for a provider-order leg; not provider settlement. */
   chain_finalized_at: string | null;
+  /**
+   * When an authenticated provider reconciler correlated this provider-order
+   * movement to the provider's own completion record (migration 0120). The ONE
+   * fact that settles a provider-order row: it releases the `?settled=`
+   * surface and the cross-key deposit-intent claim together. Never a chain
+   * fact — Solana finality does not set it, and neither does a legacy
+   * `settled_at` stamp.
+   */
+  provider_completed_at: string | null;
   /** Success-terminal: finalization (vault) or provider completion (custodial). */
   settled_at: string | null;
   /** `usd`, or the token mint — the unit every amount below is denominated in. */
@@ -218,6 +227,12 @@ export interface EarnMovementRow {
   last_valid_block_height: string | null;
   request_id: string;
   idempotency_fingerprint: string;
+  /**
+   * The CROSS-KEY intent claim's fingerprint (migration 0119), stamped beside
+   * the same-key `idempotency_fingerprint` on deposit writes. Historical rows
+   * keep NULL.
+   */
+  deposit_intent_fingerprint: string | null;
   provider_data: Record<string, unknown>;
   created_by: string | null;
   initiated_by_key_id: string | null;
@@ -717,6 +732,30 @@ export interface EarnMovementsRepository {
     observedAt: string;
   }): Promise<EarnMovementRow | null>;
   /**
+   * Provider-order DEPOSIT rows the completion pass still owes a fact:
+   * chain-final (their payment leg is irreversible) with no
+   * `provider_completed_at` yet, among the `providers` whose completion feed
+   * this deployment can authenticate, oldest attempt first, spaced by
+   * `retryBefore`. Stamps `reconciliation_attempted_at` on the claim so a
+   * provider outage retries on later ticks instead of monopolizing this one.
+   */
+  claimUncompletedProviderOrderDeposits(params: {
+    limit: number;
+    providers: readonly string[];
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
+  /**
+   * Stamp the durable provider completion fact on a vault movement. Guarded to
+   * a non-terminal-chain vault row (confirmed or finalized) that has no fact
+   * yet, so a repeated correlation never overwrites the first stamp and a row
+   * the chain failed can never read as settled; null means neither held.
+   */
+  recordVaultMovementProviderCompletion(input: {
+    movementId: string;
+    organizationId: string;
+    completedAt: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
    * The sweep's first piece of evidence that a SUBMITTED vault movement did not
    * land (PRO-1904): its signature came back unknown after the blockhash window
    * closed. Idempotent (COALESCE) and status-guarded, so a burst of ticks
@@ -1060,13 +1099,18 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
 
 /**
  * A failed movement is terminal for every provider. Success is terminal only
- * for a provider whose Solana leg is itself atomic. Provider orders (and
- * unknown historical providers) remain discoverable even if a legacy row says
- * finalized or carries a legacy `settled_at` stamp from the era when the sweep
- * recorded chain finality there — neither is a settlement fact. A future
- * authenticated provider reconciler must introduce its own durable completion
- * fact before this predicate can close those rows (chain finality alone —
- * `chain_finalized_at`, row still `confirmed` — never does).
+ * for a provider whose Solana leg is itself atomic — or, since migration 0120,
+ * for any row carrying the authenticated provider completion fact
+ * (`provider_completed_at`): the stamp the provider-order reconciler writes
+ * when the provider's own API correlates the movement to a completed order.
+ * That fact is the ONE release point for a provider-order row, shared by the
+ * `?settled=` surface and the cross-key intent claim, which read this same
+ * predicate. Chain finality is deliberately NOT a release point: for a
+ * provider-order deposit it coexists with an order the provider has not
+ * completed, and a cross-key twin released there would start a second
+ * sign/record/broadcast path for money already committed. A legacy
+ * `settled_at` stamp is not a release point either — it is a chain-era
+ * artifact, not a provider completion fact.
  */
 function vaultSettlementFilter(
   direction: EarnMovementDirection,
@@ -1074,7 +1118,7 @@ function vaultSettlementFilter(
 ): { clause: string; values: readonly unknown[] } {
   if (settled === undefined) return { clause: "", values: [] };
   const predicate =
-    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])) OR provider_completed_at IS NOT NULL)";
   return {
     clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
     values: [
@@ -1098,6 +1142,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     failure_reason: row.failure_reason as string | null,
     confirmed_at: row.confirmed_at as string | null,
     chain_finalized_at: row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
+    provider_completed_at:
+      row.provider_completed_at == null ? null : String(row.provider_completed_at),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
@@ -1118,6 +1164,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     last_valid_block_height: row.last_valid_block_height as string | null,
     request_id: row.request_id as string,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
+    deposit_intent_fingerprint:
+      row.deposit_intent_fingerprint == null ? null : String(row.deposit_intent_fingerprint),
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
     created_by: row.created_by as string | null,
     initiated_by_key_id: row.initiated_by_key_id as string | null,
@@ -1198,6 +1246,11 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     creates_share_account: false,
     share_ata_rent_funder: null,
     unknown_signature_observed_at: null,
+    // A fulfilled queued withdrawal is a completed provider settlement by
+    // definition; the synthetic projection carries no intent claim and no
+    // completion fact.
+    deposit_intent_fingerprint: null,
+    provider_completed_at: null,
   };
 }
 
@@ -1296,18 +1349,19 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
 
     async findOpenVaultDepositIntentClaim(params) {
       // The unsettled predicate of `listVaultMovements`' `?settled=true` —
-      // `failed`, or success past the provider's atomic settlement boundary —
-      // is the definition of "the prior movement is terminal" here. Reuse it
-      // rather than restating it: a settlement-boundary change must move the
-      // claim's release point with it. Chain finality is deliberately NOT a
-      // release point: for a provider-order deposit it coexists with an order
-      // the provider has not completed, and a cross-key twin released there
-      // would start a second sign/record/broadcast path for money already
-      // committed. A legacy `settled_at` stamp is not a release point either —
-      // it is a chain-era artifact, not a provider completion fact. The rank
-      // puts movements whose floor honors the request first (newest of
-      // those), recency second — so the row that comes back honors the
-      // request whenever ANY open movement does, and the floor rule
+      // `failed`, success past the provider's atomic settlement boundary, or a
+      // row carrying the authenticated provider completion fact — is the
+      // definition of "the prior movement is terminal" here. Reuse it rather
+      // than restating it: a settlement-boundary change must move the claim's
+      // release point with it. Chain finality is deliberately NOT a release
+      // point: for a provider-order deposit it coexists with an order the
+      // provider has not completed, and a cross-key twin released there would
+      // start a second sign/record/broadcast path for money already committed.
+      // A legacy `settled_at` stamp is not a release point either — it is a
+      // chain-era artifact, not a provider completion fact. The rank puts
+      // movements whose floor honors the request first (newest of those),
+      // recency second — so the row that comes back honors the request
+      // whenever ANY open movement does, and the floor rule
       // (`resolveDepositIntentReplayClaim`) refuses it otherwise.
       const settlement = vaultSettlementFilter("deposit", false);
       // `TRUE` (not a bare constant) because a bare integer in ORDER BY is a
@@ -2638,6 +2692,59 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
             RETURNING *`
         )
         .bind(input.observedAt, input.movementId, input.organizationId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async claimUncompletedProviderOrderDeposits(params) {
+      if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 256) {
+        throw new Error(
+          "claimUncompletedProviderOrderDeposits limit must be an integer from 1 to 256"
+        );
+      }
+      if (params.providers.length === 0) return [];
+      // The same fairness cursor the settled claim uses: retry spacing, oldest
+      // attempt first, so a provider outage rotates rows instead of starving.
+      const result = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET reconciliation_attempted_at = sdp_iso_now()
+            WHERE id IN (
+              SELECT id FROM earn_movements
+               WHERE execution_model = 'vault_direct'
+                 AND direction = 'deposit'
+                 AND status = 'confirmed'
+                 AND chain_finalized_at IS NOT NULL
+                 AND provider_completed_at IS NULL
+                 AND provider = ANY (?::text[])
+                 AND COALESCE(reconciliation_attempted_at, created_at) < ?
+               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                        created_at ASC,
+                        id ASC
+               LIMIT ?
+               FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *`
+        )
+        .bind([...params.providers], params.retryBefore, params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async recordVaultMovementProviderCompletion(input) {
+      const row = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET provider_completed_at = ?,
+                  updated_at = sdp_iso_now()
+            WHERE id = ?
+              AND organization_id = ?
+              AND execution_model = 'vault_direct'
+              AND status IN ('confirmed', 'finalized')
+              AND provider_completed_at IS NULL
+            RETURNING *`
+        )
+        .bind(input.completedAt, input.movementId, input.organizationId)
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },

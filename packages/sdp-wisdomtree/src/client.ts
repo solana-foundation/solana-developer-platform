@@ -1,8 +1,14 @@
 import { supportsPortfolioWallets } from "@sdp/earn/capabilities";
 import { badRequest } from "@sdp/earn/errors";
 import { WisdomTreeEarnClient } from "@sdp/earn/providers/wisdomtree/client";
-import { getWisdomTreeOnReceiptWallet } from "@sdp/earn/providers/wisdomtree/connect";
+import {
+  getWisdomTreeOnReceiptWallet,
+  readWisdomTreePurchaseOrderCompletion,
+} from "@sdp/earn/providers/wisdomtree/connect";
 import type {
+  EarnProviderOrderCompletion,
+  EarnProviderOrderCompletionInput,
+  EarnProviderOrderCompletionProvider,
   EarnRuntimeContext,
   EarnVaultDepositInput,
   EarnVaultInstruction,
@@ -76,7 +82,7 @@ export function toEarnVaultTransactionPlan(
  */
 export class WisdomTreeVaultDirectClient
   extends WisdomTreeEarnClient
-  implements EarnVaultProviderOrderWithdrawProvider
+  implements EarnVaultProviderOrderWithdrawProvider, EarnProviderOrderCompletionProvider
 {
   /** The redemption transaction transfers shares; WisdomTree pays USDC later. */
   readonly vaultWithdrawalSettlement = "provider_order" as const;
@@ -333,6 +339,32 @@ export class WisdomTreeVaultDirectClient
   /** Addresses stand in as noop signers so kit places the account correctly; no key ever reaches this package. */
   private participant(value: string) {
     return createNoopSigner(address(value));
+  }
+
+  /**
+   * The authenticated completion read the settled boundary has been waiting on
+   * (see `EarnProviderOrderCompletionProvider`): correlate the deposit to
+   * Connect's own order book and answer whether the Purchase completed.
+   *
+   * No chain I/O, so this runs outside the operation runner — the only runtime
+   * resolution it needs is the fund's exchange code, and an uncatalogued or
+   * wrong-cluster reference throws rather than answering a settlement question
+   * about an instrument this registry never listed.
+   */
+  async readDepositOrderCompletion(
+    ctx: EarnRuntimeContext,
+    input: EarnProviderOrderCompletionInput
+  ): Promise<EarnProviderOrderCompletion | null> {
+    const cluster = CLUSTER_BY_SDP_ENVIRONMENT[ctx.environment];
+    const fund = this.fundFor(input.providerReference, cluster);
+    const completion = await readWisdomTreePurchaseOrderCompletion(ctx, {
+      owner: input.owner,
+      fundExchangeCode: fund.exchangeCode,
+      amountRequested: input.amountRequested,
+    });
+    return completion === null
+      ? null
+      : { orderReference: completion.orderReference, completedAt: completion.completedAt };
   }
 }
 

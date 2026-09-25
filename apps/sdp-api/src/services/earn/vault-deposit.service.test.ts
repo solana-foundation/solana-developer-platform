@@ -619,7 +619,8 @@ describe("depositIntoVault — idempotency", () => {
    * a twin tab sign and broadcast a second deposit for an order still pending,
    * so the claim holds through finality and releases only at the settled
    * boundary — the same predicate the `?settled=` list filter uses, which the
-   * future authenticated provider reconciler will move for both at once.
+   * authenticated provider completion reconciler (migration 0120) moves for
+   * both at once.
    */
   it("keeps the claim for a provider-order deposit even after its chain leg is final", async () => {
     const repository = createPostgresEarnMovementsRepository(getDb(env));
@@ -687,16 +688,79 @@ describe("depositIntoVault — idempotency", () => {
   });
 
   /**
+   * The demonstrated release the review demanded (migration 0120): when the
+   * authenticated provider reconciler stamps the durable completion fact, the
+   * settled boundary closes the provider-order row and the cross-key claim
+   * releases WITH it — one fact, moved once. A later same-amount deposit with
+   * a fresh key then starts a genuinely NEW movement instead of replaying an
+   * order the provider has completed. Chain finality alone (the test above)
+   * still never gets here.
+   */
+  it("releases the provider-order claim once its provider completion fact lands", async () => {
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const first = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    await repository.advanceVaultMovement({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date().toISOString(),
+    });
+    await repository.recordVaultMovementChainFinalization({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      observedAt: new Date().toISOString(),
+    });
+    // The provider's own answer, correlated by the completion reconciler.
+    await repository.recordVaultMovementProviderCompletion({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      completedAt: new Date().toISOString(),
+    });
+
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([2]),
+      signature: "sig_after_completion",
+      lastValidBlockHeight: "12345",
+    });
+    const second = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(second).toMatchObject({ replayed: false });
+    expect(second.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+
+    // The same stamp closed the row on the settled surface.
+    const settledPage = await repository.listVaultMovements({
+      organizationId: ORG,
+      environment: "sandbox",
+      projectId: PROJECT,
+      custodyWalletIds: [WALLET_ROW_ID],
+      direction: "deposit",
+      limit: 10,
+      before: null,
+      settled: true,
+    });
+    expect(settledPage.rows.map((row) => row.id)).toEqual([first.movement.id]);
+  });
+
+  /**
    * A `settled_at` stamp on a provider-order row is a LEGACY chain-era
    * artifact — the old dual-write and the sweep recorded chain finality there
    * — not an authenticated provider completion fact, so it must not close the
    * row on the `?settled=` surface and must not release the cross-key claim
    * either: releasing on it would re-open the double-broadcast hole for every
    * legacy row the moment it was stamped at finality. The claim and the
-   * settled surface move together, one completion fact, when the future
-   * provider reconciler actually lands one (pinned here and by the settlement
-   * route tests). Until then the deliberate-duplicate flag is the only way a
-   * second same-amount deposit starts (pinned by the test above).
+   * settled surface move together, one completion fact, which only the
+   * provider reconciler's own stamp (`provider_completed_at`, migration 0120)
+   * writes (pinned here, by the settlement route tests, and by the release
+   * test above). Until that stamp the deliberate-duplicate flag is the only
+   * way a second same-amount deposit starts (pinned by the test above).
    */
   it("keeps a provider-order claim even when a legacy settled_at stamp marks the row", async () => {
     const repository = createPostgresEarnMovementsRepository(getDb(env));
