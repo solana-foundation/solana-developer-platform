@@ -49,6 +49,8 @@ const TEST_API_KEY = { id: "key_hr_route", raw: "sk_test_helius_rings", prefix: 
 const USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 /** Allowlisted by neither the asset catalogue nor the spend gate. */
 const OTHER_MINT = "E4KqM12ZDosJbV7gZ5iR8rK1T2mC3nF4pQ6sU8wX9yZa";
+/** Known scale, but neither stable nor well-known: only the price vendor covers it. */
+const PRICED_MINT = "H7xQm3vR9sT2wY5zA8cE1gK4nJ6pL0uB3dF8iM2oS5tV";
 
 const TEST_CACHED_API_KEY: CachedApiKey = {
   id: TEST_API_KEY.id,
@@ -802,9 +804,11 @@ describe("Helius Rings routes", () => {
 
     it("prices known scales and leaves a mint of unknown scale unpriced", async () => {
       await markProvisioned();
-      // A clean sync holding one allowlisted mint and one mint the allowlist
-      // never knew: the SDK reports the latter with `decimals: null`, since
-      // guessing a scale would misstate the amount's magnitude.
+      // A clean sync holding two known-scale mints — a stablecoin the price
+      // lookup answers for free, and a long-tail mint only the price vendor
+      // knows — and one mint the allowlist never knew: the SDK reports the
+      // latter with `decimals: null`, since guessing a scale would misstate
+      // the amount's magnitude.
       gatewayOverride.current = {
         syncPhoton: async () => ({
           balances: [
@@ -824,10 +828,18 @@ describe("Helius Rings routes", () => {
               ringProgramId: null,
               noteCount: 1,
             },
+            {
+              mint: PRICED_MINT,
+              symbol: "PRICED",
+              decimals: 6,
+              amountRaw: "2000000",
+              ringProgramId: null,
+              noteCount: 1,
+            },
           ],
           history: [],
           report: {
-            storedNotes: 2,
+            storedNotes: 3,
             unparsedTransactions: 0,
             undecryptableCandidates: 0,
             unknownAssetIds: 0,
@@ -839,14 +851,18 @@ describe("Helius Rings routes", () => {
         }),
       } as unknown as RingsGatewayPort;
 
-      // The pricing path answers, and answers for the unknown mint too: a live
-      // price can exist for a mint whose decimal scale we never learned. The
-      // balance must still not be valued — with the scale unknown, the raw
-      // amount cannot be converted, and pricing it reads base units as whole
-      // tokens.
-      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      // The vendor prices the long-tail mint — proving a fetched price lands
+      // on exactly that balance — and answers for the unknown mint too: a
+      // live price can exist for a mint whose decimal scale we never learned.
+      // The balance must still not be valued — with the scale unknown, the
+      // raw amount cannot be converted, and pricing it reads base units as
+      // whole tokens.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
         ok: true,
-        json: async () => ({ [OTHER_MINT]: { usdPrice: 2.5 } }),
+        json: async () => ({
+          [PRICED_MINT]: { usdPrice: 2.5 },
+          [OTHER_MINT]: { usdPrice: 99 },
+        }),
       } as Response);
 
       const res = await post(`/v1/helius-rings/wallets/${ringsWalletId}/sync`, {});
@@ -865,10 +881,17 @@ describe("Helius Rings routes", () => {
       };
 
       expect(body.data.degraded).toBe(false);
+
       const unknown = body.data.balances.find((balance) => balance.mint === OTHER_MINT);
       expect(unknown).toMatchObject({ decimals: null });
+      // Unpriced even though the vendor answered 99: the response row is only
+      // ever zipped onto a balance the request actually priced.
       expect(unknown?.usdPrice).toBeUndefined();
       expect(unknown?.usdValue).toBeUndefined();
+
+      const fetched = body.data.balances.find((balance) => balance.mint === PRICED_MINT);
+      expect(fetched?.usdPrice).toBe(2.5);
+      expect(fetched?.usdValue).toBe(5);
 
       const usdc = body.data.balances.find((balance) => balance.mint === USDC_MINT);
       expect(usdc?.usdPrice).toBe(1);
@@ -876,7 +899,14 @@ describe("Helius Rings routes", () => {
 
       // Only priced balances reach the total: the unknown-scale holding is
       // visible in `balances` but valued at nothing rather than a multiple.
-      expect(body.data.totalUsd).toBe(1);
+      expect(body.data.totalUsd).toBe(6);
+
+      // The one vendor call asked about the long-tail mint only: the
+      // unknown-scale mint was excluded before the request went out.
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const requested = String(fetchSpy.mock.calls[0]?.[0]);
+      expect(requested).toContain(PRICED_MINT);
+      expect(requested).not.toContain(OTHER_MINT);
     });
 
     it("404s an unknown wallet", async () => {
