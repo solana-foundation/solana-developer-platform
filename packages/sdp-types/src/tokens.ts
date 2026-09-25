@@ -216,6 +216,13 @@ export interface Token {
   mintAuthority: string | null;
   /** Metadata update authority public key (falls back to mint authority when omitted) */
   metadataAuthority?: string | null;
+  /**
+   * Whether a settled on-chain update explicitly revoked the metadata update
+   * authority. When true, `metadataAuthority` is null and must not be
+   * reconstructed from the mint authority; the mint fallback only applies to
+   * legacy rows that never stored a separate metadata authority.
+   */
+  metadataAuthorityRevoked?: boolean;
   /** Freeze authority public key */
   freezeAuthority: string | null;
   /** On-chain ABL list address (null until deployed) */

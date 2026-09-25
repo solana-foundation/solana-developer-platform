@@ -162,6 +162,11 @@ export const tokenSchema = z
       description: "Mint authority address, if set.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    metadataAuthorityRevoked: z.boolean().optional().openapi({
+      description:
+        "Whether a settled on-chain update explicitly revoked the metadata update authority. When true, metadata authority state is null and is not derived from the mint authority; the mint fallback only applies to legacy rows that never stored a separate metadata authority.",
+      example: false,
+    }),
     freezeAuthority: solanaAddressSchema.nullable().openapi({
       description: "Freeze authority address, if set.",
       example: "So11111111111111111111111111111111111111112",

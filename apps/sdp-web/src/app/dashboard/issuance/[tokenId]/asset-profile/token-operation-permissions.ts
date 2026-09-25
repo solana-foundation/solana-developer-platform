@@ -7,6 +7,7 @@ import {
   getPermissionRows,
   getSignerSelectionForAction,
   getTokenActionDisabledReasons,
+  getTokenMetadataAuthority,
   summarizeAuthorityControl,
 } from "../token-management-workspace.utils";
 
@@ -39,7 +40,7 @@ export function getTokenOperationPermissions({
     pauseDisabledReason,
     freezeDisabledReason,
   } = getTokenActionDisabledReasons(token, t, pauseAuthority);
-  const metadataAuthority = token.metadataAuthority ?? token.mintAuthority;
+  const metadataAuthority = getTokenMetadataAuthority(token);
 
   const withWalletLoadError = <T extends { unavailableReason: string | null }>(selection: T): T => {
     if (authorityWalletsLoading && selection.unavailableReason) {

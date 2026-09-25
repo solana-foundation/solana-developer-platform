@@ -198,7 +198,10 @@ export async function resolveMetadataAuthority(
   }
 
   if (!token.mintAddress) {
-    return token.metadataAuthority ?? token.mintAuthority;
+    // A recorded revocation means "no metadata authority": never reconstruct it
+    // from the mint authority. The fallback is only for legacy rows that never
+    // stored a separate authority.
+    return token.metadataAuthorityRevoked ? null : (token.metadataAuthority ?? token.mintAuthority);
   }
 
   try {
