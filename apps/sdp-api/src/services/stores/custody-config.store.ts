@@ -766,49 +766,57 @@ export class CustodyConfigStore implements SigningConfigStore {
   /**
    * Deactivate a wallet only when at least one other active wallet exists.
    * Returns an enum result to support race-safe last-wallet guards.
+   *
+   * The guard is evaluated inside a transaction that first takes a row lock on
+   * the custody config, serializing concurrent deletions per configuration: a
+   * second delete re-reads the active-wallet count only after the first one
+   * commits, so two concurrent deletes can never both pass the guard and leave
+   * zero active wallets (SOLA9-145). Locking the config row first also orders
+   * every wallet-row write after it, so this cannot deadlock with
+   * createDefaultWallet, which takes the same lock.
    */
   async deactivateWalletIfNotLast(
     configId: string,
     walletId: string
   ): Promise<DeactivateWalletResult> {
-    const result = await this.db
-      .prepare(
-        `UPDATE custody_wallets
-         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id = (
-           SELECT id
-           FROM custody_wallets
-           WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-           LIMIT 1
-         )
-         AND (
-           SELECT COUNT(*)
-           FROM custody_wallets
-           WHERE custody_config_id = ? AND status = 'active'
-         ) > 1`
-      )
-      .bind(configId, walletId, configId)
-      .run();
+    return this.db.transaction(async (tx) => {
+      const lockedConfig = await tx.queryOne<{ id: string }>(
+        `SELECT id FROM custody_configs WHERE id = ? FOR UPDATE`,
+        [configId]
+      );
+      if (!lockedConfig) {
+        return "wallet_not_found";
+      }
 
-    if (result > 0) {
-      return "deactivated";
-    }
-
-    const activeWallet = await this.db
-      .prepare(
+      const target = await tx.queryOne<{ id: string }>(
         `SELECT id
          FROM custody_wallets
          WHERE custody_config_id = ? AND wallet_id = ? AND status = 'active'
-         LIMIT 1`
-      )
-      .bind(configId, walletId)
-      .first<{ id: string }>();
+         LIMIT 1`,
+        [configId, walletId]
+      );
+      if (!target) {
+        return "wallet_not_found";
+      }
 
-    if (!activeWallet) {
-      return "wallet_not_found";
-    }
+      const active = await tx.queryOne<{ count: number }>(
+        `SELECT COUNT(*) AS count
+         FROM custody_wallets
+         WHERE custody_config_id = ? AND status = 'active'`,
+        [configId]
+      );
+      if (Number(active?.count ?? 0) <= 1) {
+        return "last_wallet";
+      }
 
-    return "last_wallet";
+      await tx.execute(
+        `UPDATE custody_wallets
+         SET status = 'inactive', updated_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id = ?`,
+        [target.id]
+      );
+      return "deactivated";
+    });
   }
 
   /**
