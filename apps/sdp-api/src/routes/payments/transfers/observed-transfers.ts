@@ -3,7 +3,7 @@ import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
-import { type Address, createSolanaRpc } from "@solana/kit";
+import type { Address } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
   amountToUiAmountForInterestBearingMintWithoutSimulation,
@@ -267,7 +267,10 @@ function readTokenAmountInfo(
  *
  * - `scaled` / `interest-bearing`: the on-chain program converts raw units
  *   through the extension, so a decimals-only amount would misreport the
- *   transfer while the row still claims to be confirmed.
+ *   transfer while the row still claims to be confirmed. Both carry enough
+ *   state to reconstruct the conversion at the confirming block's clock; a
+ *   scaled mint whose pending schedule postdates the transfer cannot be
+ *   reconstructed and is dropped instead.
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
  *   holder sees.
@@ -323,7 +326,7 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
 }
 
 async function fetchObservedMintAmountState(
-  rpc: ReturnType<typeof createSolanaRpc>,
+  rpc: solanaRpc.SolanaRpc,
   mint: Address
 ): Promise<ObservedMintAmountState> {
   try {
@@ -381,40 +384,30 @@ function resolveObservedTimestampSeconds(
  * amount (or decimals-only formatting); `ScaledUiAmountConfig` and
  * `InterestBearingConfig` mints are recomputed from the extension state and
  * the historical clock at confirmation, ignoring any decimals-only amount the
- * RPC reported for them. When the extension state is unresolved, a
- * Token-2022-labeled instruction is dropped (fail closed) while a
- * classic-labeled one keeps its decimals-only amount, since legacy SPL mints
- * cannot carry the extensions.
+ * RPC reported for them. When the extension state is unresolved the
+ * observation is dropped (fail closed): the parsed program label cannot prove
+ * the mint is legacy, because a Token-2022 instruction can carry a classic
+ * label, so the decimals-only fallback could misreport a scaled or
+ * interest-bearing mint.
  */
 function convertObservedTokenAmount(input: {
   rawAmount: bigint;
   decimals: number;
   rpcUiAmount: string | null;
   mint: string | null;
-  isToken2022Instruction: boolean;
   mintStates: Map<string, ObservedMintAmountState>;
   timestampSeconds: number | null;
 }): string | null {
-  const {
-    rawAmount,
-    decimals,
-    rpcUiAmount,
-    mint,
-    isToken2022Instruction,
-    mintStates,
-    timestampSeconds,
-  } = input;
+  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds } = input;
 
   const state = mint ? mintStates.get(mint) : undefined;
   if (!state || state.kind === "unresolved") {
-    // Legacy SPL mints cannot carry amount-mutating extensions, so a
-    // classic-labeled instruction keeps its decimals-only amount even when
-    // the mint account cannot be resolved. A Token-2022 label fails closed:
-    // the unresolved mint could be scaled or interest-bearing. A resolvable
-    // mint overrides the label through its owner program either way.
-    return isToken2022Instruction
-      ? null
-      : (rpcUiAmount ?? formatDecimalAmount(rawAmount, decimals));
+    // The mint account cannot be resolved, so an amount-mutating extension
+    // cannot be ruled out — and the parsed program label cannot prove
+    // otherwise, since a Token-2022 instruction can carry a classic
+    // "spl-token" label. Drop the observation instead of confirming a
+    // possibly-wrong decimals-only amount.
+    return null;
   }
 
   if (state.kind === "static") {
@@ -426,11 +419,22 @@ function convertObservedTokenAmount(input: {
   }
 
   if (state.kind === "scaled") {
-    const effectiveMultiplier =
+    // A schedule that had not matured when the transfer confirmed leaves the
+    // historical multiplier unrecoverable: whether this pending schedule (or
+    // an older one, since replaced) governed the confirming block cannot be
+    // distinguished from the current mint account. Drop the row instead of
+    // guessing.
+    if (
       state.newMultiplierEffectiveTimestamp !== 0n &&
-      BigInt(timestampSeconds) >= state.newMultiplierEffectiveTimestamp
-        ? state.newMultiplier
-        : state.multiplier;
+      BigInt(timestampSeconds) < state.newMultiplierEffectiveTimestamp
+    ) {
+      return null;
+    }
+
+    // At or after maturity (or with no schedule pending), the extension
+    // converts through the scheduled multiplier.
+    const effectiveMultiplier =
+      state.newMultiplierEffectiveTimestamp !== 0n ? state.newMultiplier : state.multiplier;
     return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
       rawAmount,
       decimals,
@@ -759,15 +763,34 @@ function collectObservedMintAddresses(parsedTransaction: ParsedTransaction): Add
 }
 
 /**
+ * A per-call resolver of mint extension states that shares one lookup per
+ * mint across every signature in the batch: repeated signatures over the same
+ * mint await the single in-flight read instead of re-billing it. The
+ * underlying fetch never rejects (failures resolve to `unresolved`), so a
+ * cached promise is always safe to share.
+ */
+function createMintAmountStateResolver(rpc: solanaRpc.SolanaRpc) {
+  const pending = new Map<string, Promise<ObservedMintAmountState>>();
+  return (mint: Address): Promise<ObservedMintAmountState> => {
+    let state = pending.get(mint);
+    if (!state) {
+      state = fetchObservedMintAmountState(rpc, mint);
+      pending.set(mint, state);
+    }
+    return state;
+  };
+}
+
+/**
  * Resolves every requested mint's extension state, coalescing repeated
  * requests for the same mint within one call.
  */
 async function resolveObservedMintAmountStates(
-  rpc: ReturnType<typeof createSolanaRpc>,
-  mints: Address[]
+  mints: Address[],
+  resolveMintAmountState: (mint: Address) => Promise<ObservedMintAmountState>
 ): Promise<Map<string, ObservedMintAmountState>> {
   const states = await Promise.all(
-    mints.map(async (mint) => [mint, await fetchObservedMintAmountState(rpc, mint)] as const)
+    mints.map(async (mint) => [mint, await resolveMintAmountState(mint)] as const)
   );
   return new Map(states);
 }
@@ -877,7 +900,6 @@ function buildObservedTransferRows(
     if (!normalizedProgram.includes("token")) {
       continue;
     }
-    const isToken2022Instruction = normalizedProgram.includes("token-2022");
 
     if (parsedType === "mintTo" || parsedType === "mintToChecked") {
       const destinationTokenAccount = readInstructionInfoString(info, "account");
@@ -915,7 +937,6 @@ function buildObservedTransferRows(
         decimals: resolvedDecimals,
         rpcUiAmount: tokenAmount?.uiAmountString ?? null,
         mint,
-        isToken2022Instruction,
         mintStates,
         timestampSeconds,
       });
@@ -1023,7 +1044,6 @@ function buildObservedTransferRows(
       decimals: resolvedDecimals,
       rpcUiAmount: tokenAmount?.uiAmountString ?? null,
       mint,
-      isToken2022Instruction,
       mintStates,
       timestampSeconds,
     });
@@ -1092,10 +1112,14 @@ export async function buildObservedTransfersForSignatures(
 
   // Bounded: the signature list is capped at historyLimit (200), and a bare
   // Promise.allSettled would open that many concurrent getTransaction calls
-  // against the billed RPC per request. Mint extension-state reads are
-  // memoized per mint for the whole call, so repeated signatures over the
-  // same mint cost one getAccountInfo.
-  const mintStateRpc = createSolanaRpc(resolveSignatureHistoryRpcUrl(env));
+  // against the billed RPC per request. Mint extension-state reads go through
+  // the shared deadline-wrapped RPC client and are shared per mint for the
+  // whole call (see createMintAmountStateResolver), so repeated signatures
+  // over the same mint cost one getAccountInfo.
+  const mintStateRpc = solanaRpc.createRpc(env, {
+    rpcUrl: resolveSignatureHistoryRpcUrl(env),
+  });
+  const resolveMintAmountState = createMintAmountStateResolver(mintStateRpc);
   const settled = await mapSettledWithConcurrency(
     signatures,
     SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
@@ -1115,8 +1139,8 @@ export async function buildObservedTransfersForSignatures(
         signatureInfo.blockTime ?? parsedTransaction?.blockTime
       );
       const mintStates = await resolveObservedMintAmountStates(
-        mintStateRpc,
-        parsedTransaction ? collectObservedMintAddresses(parsedTransaction) : []
+        parsedTransaction ? collectObservedMintAddresses(parsedTransaction) : [],
+        resolveMintAmountState
       );
       return buildObservedTransferRows(
         parsedTransaction,

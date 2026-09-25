@@ -378,7 +378,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
     }
   });
 
-  it("picks the scheduled multiplier by the transaction's historical clock", async () => {
+  it("converts with the scheduled multiplier once matured and drops the pre-maturity row", async () => {
     const mintAccount = scaledMintAccount(1, { multiplier: 3, effectiveTimestamp: 1_690_000_000n });
     const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
       mintAccountsByAddress: {
@@ -390,17 +390,19 @@ describe("observed Token-2022 transfer amount conversion", () => {
       const rows = await buildObservedRows(rpcServer, [
         // Confirmed after the new multiplier matured: it applies.
         signatureEntry({ signature: "sig_after_maturity" }),
-        // Confirmed before it matured: the old multiplier still governed.
+        // Confirmed before it matured: whether the pending schedule (or an
+        // older one since replaced) governed the confirming block cannot be
+        // established from the current mint account, so the row is dropped
+        // rather than confirmed with a possibly-wrong amount.
         signatureEntry({ signature: "sig_before_maturity", blockTime: 1_680_000_000n }),
       ]);
 
-      expect(rows.map((row) => row.amount).sort()).toEqual(
-        [
-          amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 3),
-          amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 1),
-        ].sort()
-      );
-      expect(rows.map((row) => row.amount).sort()).toEqual(["1", "3"].sort());
+      expect(rows.map((row) => row.amount)).toEqual([
+        amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 3),
+      ]);
+      // The shared batch-wide resolver reads the mint once for both
+      // signatures instead of once per signature.
+      expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
     } finally {
       await rpcServer.close();
     }
@@ -545,6 +547,24 @@ describe("observed Token-2022 transfer amount conversion", () => {
       const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
       expect(rows).toEqual([]);
       expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops the observation even behind a classic label when the mint cannot be resolved", async () => {
+    // A classic "spl-token" label cannot prove the mint is legacy: a
+    // Token-2022 instruction can carry one (as the owner-program conversion
+    // above shows). With the mint unreadable, a decimals-only fallback could
+    // confirm a wrong amount for a scaled or interest-bearing mint.
+    const rpcServer = await startTokenRpcServer({
+      ...plainTransfer(MINT_SCALED),
+      program: "spl-token",
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
     } finally {
       await rpcServer.close();
     }
