@@ -60,6 +60,22 @@ function earnTransactionFixture() {
   };
 }
 
+/**
+ * A minimal transaction of a published module (payments), in the same shape
+ * the unified view serves: the shared envelope plus the published module's
+ * module/kind/moduleStatus vocabulary.
+ */
+function paymentsTransactionFixture() {
+  return {
+    ...earnTransactionFixture(),
+    id: "txn_published_fixture",
+    moduleId: "module_published_fixture",
+    module: "payments",
+    kind: UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments.kinds[0],
+    moduleStatus: UNIFIED_TRANSACTION_MODULE_CONTRACTS.payments.moduleStatuses[0],
+  };
+}
+
 describe("unified transactions publication hold (schemas)", () => {
   it("rejects the held-back module in the published query schema", () => {
     const published = unifiedTransactionsQuerySchemaForModules(PUBLISHED_MODULES);
@@ -98,6 +114,46 @@ describe("unified transactions publication hold (schemas)", () => {
     expect(
       runtime.parse({ transactions: [earnTransactionFixture()], nextCursor: null }).transactions
     ).toHaveLength(1);
+  });
+  it("keeps the module-agnostic variant from absorbing published-module rows", () => {
+    const published = unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES, {
+      openUnpublished: true,
+    });
+
+    // A valid published row parses through its own named branch.
+    expect(
+      published.safeParse({ transactions: [paymentsTransactionFixture()], nextCursor: null })
+        .success
+    ).toBe(true);
+
+    // An invalid kind or moduleStatus on a published module cannot fall
+    // through to the module-agnostic variant: the union refuses it instead
+    // of accepting it with the variant's weakened validation.
+    expect(
+      published.safeParse({
+        transactions: [
+          {
+            ...paymentsTransactionFixture(),
+            kind: "not_a_payments_kind",
+            moduleStatus: "not_a_payments_status",
+          },
+        ],
+        nextCursor: null,
+      }).success
+    ).toBe(false);
+
+    // Rows of modules the union does not name — the held-back module, or one
+    // added to the runtime after publication — still parse through the
+    // variant.
+    expect(
+      published.safeParse({ transactions: [earnTransactionFixture()], nextCursor: null }).success
+    ).toBe(true);
+    expect(
+      published.safeParse({
+        transactions: [{ ...earnTransactionFixture(), module: "module_added_after_publication" }],
+        nextCursor: null,
+      }).success
+    ).toBe(true);
   });
 });
 

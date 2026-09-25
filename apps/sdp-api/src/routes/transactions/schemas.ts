@@ -146,11 +146,18 @@ export const unifiedTransactionSchema = unifiedTransactionSchemaForModules(
  * its vocabulary, so the published contract stays true (and parseable)
  * without leaking the held-back family. The OpenAPI layer appends it only
  * where the module selector omits modules (openapi/paths/transactions.ts).
+ *
+ * `namedModules` are the modules the union's other branches name (the
+ * published allowlist). The variant refuses them, so a published row can
+ * only parse through its own branch — an invalid `kind` or `moduleStatus`
+ * on a published module fails the union instead of being absorbed here —
+ * while rows of modules the selector does not name (held back, or added to
+ * the runtime later) still parse.
  */
-export function unpublishedModuleTransactionSchema() {
+export function unpublishedModuleTransactionSchema(namedModules: readonly string[]) {
   return z.object({
     ...commonFields,
-    module: z.string(),
+    module: z.string().refine((module) => !namedModules.includes(module)),
     kind: z.string(),
     moduleStatus: z.string(),
   });
@@ -162,7 +169,8 @@ export interface UnifiedTransactionsListResponseSchemaOptions {
    * only for publication-filtered documents, where the union's branches name
    * a subset of the modules the runtime can return: the open variant keeps
    * every response the endpoint can produce parseable for a client generated
-   * from the published document.
+   * from the published document, while refusing the modules the branches
+   * name so published rows only parse through their own branch.
    */
   openUnpublished?: boolean;
 }
@@ -189,7 +197,7 @@ export function unifiedTransactionsListResponseSchemaForModules<
   const variants = [
     moduleSchemas[headModule],
     ...tailModules.map((module) => moduleSchemas[module]),
-    unpublishedModuleTransactionSchema(),
+    unpublishedModuleTransactionSchema(modules),
   ];
   return z.object({
     transactions: z.array(z.union(variants)),
