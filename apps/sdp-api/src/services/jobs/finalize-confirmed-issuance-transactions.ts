@@ -15,14 +15,16 @@
  * Polls with searchTransactionHistory because a transaction typically
  * finalizes (~30s) and leaves the node's short recent-status cache before the
  * next tick on the managed five-minute cadence; without it every confirmed
- * row would read null forever. One page per tick as a least-recently-polled
- * queue (finalization_last_polled_at, never-polled first) over every
- * confirmed row — there is no age cutoff, because the queue is the only
- * finality-verified recovery path for rows confirmed before this reconciler
- * deployed or stranded by an outage, and the unified ledger reads them as
- * provisional until the cluster verifies finality. A failed RPC read rotates
- * the page and rethrows, so the tick reports failure instead of an outage
- * silently aging rows out of reconciliation.
+ * row would read null forever. One page per tick over every confirmed row —
+ * there is no age cutoff, because the queue is the only finality-verified
+ * recovery path for rows confirmed before this reconciler deployed or
+ * stranded by an outage, and the unified ledger reads them as provisional
+ * until the cluster verifies finality. Rows that keep coming back
+ * provisional are deferred longer on every poll (5m doubling, capped at
+ * 24h), so a signature that never finalizes — one lost to a fork — stops
+ * consuming RPC capacity every tick while the recovery path stays intact.
+ * A failed RPC read rotates the page and rethrows, so the tick reports
+ * failure instead of an outage silently aging rows out of reconciliation.
  */
 
 import { createRpc, getSignatureStatuses, type SignatureStatusInfo } from "@sdp/rpc/solana";

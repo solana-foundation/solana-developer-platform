@@ -74,7 +74,9 @@ async function seedConfirmedTransaction(params: {
 async function getTransaction(id: string) {
   return getDb(env)
     .prepare(
-      `SELECT id, status, slot, finalization_last_polled_at FROM issuance_transactions WHERE id = ?`
+      `SELECT id, status, slot, finalization_last_polled_at, finalization_poll_attempts,
+              finalization_next_poll_at
+       FROM issuance_transactions WHERE id = ?`
     )
     .bind(id)
     .first<{
@@ -82,6 +84,8 @@ async function getTransaction(id: string) {
       status: string;
       slot: number | null;
       finalization_last_polled_at: string | null;
+      finalization_poll_attempts: number;
+      finalization_next_poll_at: string | null;
     }>();
 }
 
@@ -226,5 +230,76 @@ describe("finalizeConfirmedIssuanceTransactions", () => {
       status: "confirmed",
       finalization_last_polled_at: expect.any(String),
     });
+  });
+
+  it("backs off repeated non-finalizing polls without dropping the recovery path", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_backoff", confirmedMinutesAgo: 5 });
+
+    // First tick: the row is provisional, so it is deferred instead of being
+    // re-polled on the next pass.
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 0,
+    });
+    const first = await getTransaction("itx_fin_backoff");
+    expect(first?.finalization_poll_attempts).toBe(1);
+    expect(first?.finalization_next_poll_at).not.toBeNull();
+
+    // The deferral keeps it out of the queue: a tick that runs before the
+    // backoff elapses must not spend an RPC history lookup on it again.
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 0,
+      finalized: 0,
+    });
+
+    // Once the deferral elapses the row returns to the queue — the
+    // finality-verified recovery path — and this time the cluster reports
+    // finality, which clears the deferral entirely.
+    await getDb(env)
+      .prepare(
+        `UPDATE issuance_transactions
+            SET finalization_next_poll_at = ?
+          WHERE id = 'itx_fin_backoff'`
+      )
+      .bind(minutesAgo(1))
+      .run();
+    getSignatureStatusesMock.mockImplementation(async (_rpc: unknown, signatures: string[]) =>
+      signatures.map(() => statusOf("finalized"))
+    );
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 1,
+    });
+    await expect(getTransaction("itx_fin_backoff")).resolves.toMatchObject({
+      status: "finalized",
+      finalization_poll_attempts: 0,
+      finalization_next_poll_at: null,
+    });
+  });
+
+  it("caps the non-finalizing deferral at 24 hours", async () => {
+    await seedConfirmedTransaction({ id: "itx_fin_cap", confirmedMinutesAgo: 5 });
+    // A row already deferred the maximum number of consecutive times.
+    await getDb(env)
+      .prepare(
+        `UPDATE issuance_transactions
+            SET finalization_poll_attempts = 17, finalization_next_poll_at = ?
+          WHERE id = 'itx_fin_cap'`
+      )
+      .bind(minutesAgo(1))
+      .run();
+
+    await expect(finalizeConfirmedIssuanceTransactions(env)).resolves.toEqual({
+      polled: 1,
+      finalized: 0,
+    });
+
+    const row = await getTransaction("itx_fin_cap");
+    expect(row?.finalization_poll_attempts).toBe(18);
+    const nextPollAt = new Date(row?.finalization_next_poll_at ?? "");
+    const hoursAhead = (nextPollAt.getTime() - Date.now()) / (60 * 1000);
+    // 24h minus test-clocks skew on either side.
+    expect(hoursAhead).toBeGreaterThan(60 * 23);
+    expect(hoursAhead).toBeLessThan(60 * 25);
   });
 });

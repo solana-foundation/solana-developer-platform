@@ -19,7 +19,9 @@ export function createPostgresIssuanceTransactionsRepository(
            FROM issuance_transactions it
            WHERE it.status = 'confirmed'
              AND it.signature IS NOT NULL
-           ORDER BY it.finalization_last_polled_at ASC NULLS FIRST, it.id ASC
+             AND (it.finalization_next_poll_at IS NULL
+                  OR it.finalization_next_poll_at <= sdp_iso_now())
+           ORDER BY it.finalization_next_poll_at ASC NULLS FIRST, it.id ASC
            LIMIT ?`
         )
         .bind(limit)
@@ -44,7 +46,12 @@ export function createPostgresIssuanceTransactionsRepository(
       // row the cluster still reports provisional only rotates its poll
       // stamp and never gains a false terminal history entry, and a
       // concurrent tick that already finalized a row makes this a no-op for
-      // it instead of duplicating its status history.
+      // it instead of duplicating its status history. A provisional poll
+      // also grows the row's backoff (finalization_poll_attempts, capped at
+      // one re-check per 24h), so a signature that never finalizes — one
+      // lost to a fork — stops consuming an RPC history lookup every tick
+      // while remaining queued: it is due again after
+      // 5m * 2^finalization_poll_attempts, and finalization clears both.
       const result = await db
         .prepare(
           `WITH advanced AS (
@@ -52,7 +59,21 @@ export function createPostgresIssuanceTransactionsRepository(
                 SET status = CASE WHEN v.finalized THEN 'finalized' ELSE it.status END,
                     slot = CASE WHEN v.finalized THEN COALESCE(it.slot, v.slot) ELSE it.slot END,
                     updated_at = CASE WHEN v.finalized THEN ? ELSE it.updated_at END,
-                    finalization_last_polled_at = ?
+                    finalization_last_polled_at = ?,
+                    finalization_poll_attempts = CASE
+                      WHEN v.finalized THEN 0
+                      ELSE it.finalization_poll_attempts + 1
+                    END,
+                    finalization_next_poll_at = CASE
+                      WHEN v.finalized THEN NULL
+                      ELSE to_char(
+                        timezone('UTC', ?::timestamptz + make_interval(secs => LEAST(
+                          86400,
+                          300 * POWER(2, LEAST(it.finalization_poll_attempts, 17))
+                        ))),
+                        'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'
+                      )
+                    END
                FROM jsonb_to_recordset(?::jsonb) AS v(id text, organization_id text, finalized boolean, slot bigint)
               WHERE it.id = v.id
                 AND it.organization_id = v.organization_id
@@ -66,6 +87,7 @@ export function createPostgresIssuanceTransactionsRepository(
            RETURNING transaction_id`
         )
         .bind(
+          updatedAt,
           updatedAt,
           updatedAt,
           JSON.stringify(
