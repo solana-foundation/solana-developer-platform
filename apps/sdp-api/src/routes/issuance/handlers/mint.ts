@@ -103,6 +103,7 @@ interface MintExecutionPolicyResolved {
   ablListAddress: string | null;
   currentAuthority: string;
   custodyWalletId: string;
+  mintWalletProviderId: string;
 }
 
 interface MintReplayPolicyResolved {
@@ -363,6 +364,12 @@ async function rollbackCreatedAllowlistEntry(
  * wallet that controls it — the same domain separation the allowlist routes
  * use — or fail closed when custody cannot bind that wallet, rather than
  * signing with a wallet the ABL program would reject.
+ *
+ * Either way the wallet that will sign the add is judged for the list
+ * mutation first: the mint policy gate evaluates the mint wallet for the mint
+ * only, so both the unrotated path (where the mint wallet also controls the
+ * list) and the rotated path (where a distinct list wallet does) evaluate the
+ * signer's allowlist-add policy exactly as the standalone allowlist routes do.
  */
 async function resolveOnChainListMosaic(opts: {
   c: AppContext;
@@ -373,6 +380,8 @@ async function resolveOnChainListMosaic(opts: {
   mintAuthority: string;
   mintAddress: ReturnType<typeof assertValidAddress>;
   destination: ReturnType<typeof assertValidAddress>;
+  mintCustodyWalletId: string;
+  mintWalletProviderId: string;
   mintMosaic: ReturnType<typeof createIssuanceMosaicService>;
 }): Promise<ReturnType<typeof createIssuanceMosaicService>> {
   const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
@@ -381,6 +390,24 @@ async function resolveOnChainListMosaic(opts: {
     opts.mintAddress
   );
   if (derivedFromMintSigner === listAddress) {
+    // The deploy-time derivation still holds: the mint wallet that is about
+    // to sign is also the live list authority. It is still a governed list
+    // signer — judge it for the allowlist add exactly as the standalone
+    // allowlist route would, so a mint honors the list wallet's policy
+    // whether or not the list authority has since been rotated.
+    await assertListWalletMayAddToAllowlist({
+      c: opts.c,
+      auth: opts.auth,
+      token: opts.token,
+      tokenService: opts.tokenService,
+      list: listAddress,
+      listAuthority: opts.mintAuthority,
+      listWallet: {
+        custodyWalletId: opts.mintCustodyWalletId,
+        providerWalletId: opts.mintWalletProviderId,
+      },
+      destination: opts.destination,
+    });
     return opts.mintMosaic;
   }
 
@@ -426,7 +453,7 @@ async function resolveOnChainListMosaic(opts: {
 }
 
 /**
- * Judge the list wallet for the allowlist add a governed mint is about to sign.
+ * Judge the wallet that is about to sign an allowlist add for a governed mint.
  *
  * The mint policy gate evaluates the mint-authority wallet only, so without
  * this check a list wallet whose own policy denies or gates allowlist changes
@@ -444,7 +471,7 @@ async function assertListWalletMayAddToAllowlist(opts: {
   tokenService: TokenService;
   list: ReturnType<typeof assertValidAddress>;
   listAuthority: string;
-  listWallet: ResolvedIssuanceWallet;
+  listWallet: Pick<ResolvedIssuanceWallet, "custodyWalletId" | "providerWalletId">;
   destination: ReturnType<typeof assertValidAddress>;
 }): Promise<void> {
   const candidate = buildIssuancePolicyCandidate({
@@ -912,6 +939,7 @@ export async function extractMintPolicyCandidate(
       ablListAddress,
       currentAuthority,
       custodyWalletId,
+      mintWalletProviderId: providerWalletId,
     },
     rawPayload: {
       tokenId: token.id,
@@ -954,6 +982,7 @@ export const executeMint = async (c: AppContext) => {
       ablListAddress,
       currentAuthority,
       custodyWalletId,
+      mintWalletProviderId,
     },
   } = gate;
 
@@ -1053,6 +1082,8 @@ export const executeMint = async (c: AppContext) => {
               mintAuthority: currentAuthority,
               mintAddress,
               destination,
+              mintCustodyWalletId: custodyWalletId,
+              mintWalletProviderId,
               mintMosaic,
             }),
           tokenId,

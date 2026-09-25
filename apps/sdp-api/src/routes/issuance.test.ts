@@ -7720,6 +7720,26 @@ describe("Issuance Routes", () => {
           .run();
       };
 
+      // Deploy-time state: the recorded list is the PDA derived from the
+      // current mint signer — no rotation has happened, so the mint wallet
+      // still controls the list.
+      const seedUnrotatedAblListAddress = async () => {
+        const mintAddress = TEST_ALLOWLIST_TOKEN.mintAddress;
+        const mintAuthority = TEST_ACTIVE_TOKEN.mintAuthority;
+        if (!mintAddress || !mintAuthority) {
+          throw new Error("Token fixtures must have a mint address and authority");
+        }
+        const derivedList = await Mosaic.deriveAblListAddress(
+          address(mintAuthority),
+          address(mintAddress)
+        );
+        await getDb(env)
+          .prepare("UPDATE issued_tokens SET abl_list_address = ? WHERE id = ?")
+          .bind(derivedList, allowlistTokenId)
+          .run();
+        return derivedList;
+      };
+
       it("rejects prepare mint without mutating an absent on-chain allowlist entry", async () => {
         await seedAblListAddress();
 
@@ -8460,6 +8480,143 @@ describe("Issuance Routes", () => {
           expect(entry).toBeNull();
         } finally {
           listConfigSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("refuses a mint whose mint wallet's list-add policy denies the sync on an unrotated token", async () => {
+        // Deploy-time state: the recorded ABL list is still the PDA derived
+        // from the current mint signer, so the mint wallet IS the live list
+        // authority. Its allowlist-add policy must still be judged — the same
+        // policy the standalone allowlist route is judged on — even though no
+        // rotation ever happened.
+        const derivedList = await seedUnrotatedAblListAddress();
+
+        const policyResponse = await app.request(
+          `/v1/payments/wallets/${DEFAULT_ISSUANCE_PROVIDER_WALLET_ID}/policies`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              defaultAction: "allow",
+              rules: [
+                {
+                  id: "deny-allowlist-add",
+                  kind: "operation_type",
+                  operationTypes: ["issuance_allowlist_add_execute"],
+                  action: "deny",
+                },
+              ],
+            }),
+          },
+          env
+        );
+        expect(policyResponse.status, JSON.stringify(await policyResponse.json())).toBe(200);
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(false);
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(403);
+          const body = (await res.json()) as {
+            error: { code: string; details: Record<string, unknown> };
+          };
+          expect(body.error.code).toBe("FORBIDDEN");
+          expect(body.error.details).toMatchObject({
+            list: derivedList,
+            listAuthority: TEST_ACTIVE_TOKEN.mintAuthority,
+            custodyWalletId: DEFAULT_ISSUANCE_CUSTODY_WALLET_ID,
+            policyDecision: "deny",
+          });
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry).toBeNull();
+        } finally {
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("auto-adds on an unrotated token when the mint wallet's list-add policy allows", async () => {
+        // Same deploy-time derivation, but no deny rule: the unrotated path
+        // keeps auto-adding once the signing wallet's list-add policy allows.
+        const derivedList = await seedUnrotatedAblListAddress();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: TEST_ACTIVE_TOKEN.mintAuthority } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(false);
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockResolvedValueOnce(undefined as never);
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockResolvedValueOnce(mockMintResult as never);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status, JSON.stringify(await res.clone().json())).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          expect(addToListSpy).toHaveBeenCalledWith({
+            list: derivedList,
+            wallet: freshDestination,
+          });
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry?.id).toMatch(/^tal_/);
+        } finally {
+          createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();
