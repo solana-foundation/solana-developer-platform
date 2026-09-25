@@ -94,6 +94,18 @@ export interface AssetProfilesRepository {
     organizationId: string;
     projectId: string;
   }): Promise<AssetProfileRow | null>;
+  /**
+   * Read a token's profile regardless of its current status. Profiles are
+   * only created alongside their token, so this returns the recorded pair
+   * even after the profile was archived (GET /by-token keeps surfacing only
+   * active ones). ORDER BY is a deterministic tiebreak should more rows per
+   * token ever exist: the earliest row is the one recorded at creation.
+   */
+  getAssetProfileByTokenId(params: {
+    tokenId: string;
+    organizationId: string;
+    projectId: string;
+  }): Promise<AssetProfileRow | null>;
   // Used by the public, unauthenticated canonical token metadata URI
   // (/v1/issuance/tokens/:tokenId/metadata.json). Keyed by tokenId alone:
   // token_id is the PK of issued_tokens (globally unique). Returns the cached public_metadata.

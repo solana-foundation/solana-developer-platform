@@ -376,40 +376,70 @@ export class AuditService {
   ) {}
 
   async log(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<void> {
-    // Resolve the actor from whichever auth context is present. Dashboard
-    // requests carry a Clerk/session context (a user), API requests carry an
-    // apiKey context; earlier this only read `apiKey`, so dashboard-driven
-    // events were written with a null organization_id/user_id and became
-    // invisible to org-scoped queries.
+    await this.persist(
+      entry,
+      this.resolveRequestActor(c, entry),
+      this.checkpointStore ?? createKVStoreSet(c.env).cache
+    );
+  }
+
+  /**
+   * Append an event only when no event exists yet for its exact
+   * (organization, action, resource type, resource id) tuple. The existence
+   * check runs inside the same serialized ledger write as the insert, so
+   * concurrent repair writers cannot both pass the check and duplicate an
+   * immutable event. Returns whether this call wrote the event.
+   *
+   * When the entry names its actor (a repair rebuilding the original
+   * creator), that naming is exact: the other identity field stays null
+   * instead of being backfilled from the requesting credential.
+   */
+  async logOnce(c: Context<{ Bindings: Env }>, entry: AuditLogEntry): Promise<boolean> {
+    if (!entry.resourceId) {
+      throw new Error("logOnce requires a resourceId to guard against duplicates");
+    }
+    const actor = this.resolveRequestActor(c, entry);
+    if (entry.userId || entry.apiKeyId) {
+      // The caller named the actor (an audit repair rebuilding the original
+      // creator from the committed rows): pin both identity fields. Without
+      // this, a cross-mode replay — a dashboard session repairing an
+      // API-key creation, or an API key repairing a dashboard creation —
+      // would backfill the idle identity field from the replaying
+      // request's credential and misattribute the immutable event.
+      actor.userId = entry.userId ?? null;
+      actor.apiKeyId = entry.apiKeyId ?? null;
+    }
+    return this.persist(entry, actor, this.checkpointStore ?? createKVStoreSet(c.env).cache, {
+      skipIfPresent: true,
+    });
+  }
+
+  /**
+   * Resolve the actor from whichever auth context is present. Dashboard
+   * requests carry a Clerk/session context (a user), API requests carry an
+   * apiKey context; earlier this only read `apiKey`, so dashboard-driven
+   * events were written with a null organization_id/user_id and became
+   * invisible to org-scoped queries.
+   */
+  private resolveRequestActor(c: Context<{ Bindings: Env }>, entry: AuditLogEntry) {
     const auth = c.get("apiKey");
     const clerk = c.get("clerk");
     const session = c.get("session");
     const requestId = c.get("requestId");
 
-    const organizationId =
-      entry.organizationId ||
-      auth?.organizationId ||
-      clerk?.organizationId ||
-      session?.organizationId ||
-      null;
-    const userId = entry.userId || clerk?.userId || session?.userId || null;
-    const apiKeyId = entry.apiKeyId || auth?.id || null;
-
-    const ipAddress = getClientIp(c);
-    const userAgent = c.req.header("user-agent") || null;
-
-    await this.persist(
-      entry,
-      {
-        organizationId,
-        userId,
-        apiKeyId,
-        ipAddress,
-        userAgent,
-        requestId,
-      },
-      this.checkpointStore ?? createKVStoreSet(c.env).cache
-    );
+    return {
+      organizationId:
+        entry.organizationId ||
+        auth?.organizationId ||
+        clerk?.organizationId ||
+        session?.organizationId ||
+        null,
+      userId: entry.userId || clerk?.userId || session?.userId || null,
+      apiKeyId: entry.apiKeyId || auth?.id || null,
+      ipAddress: getClientIp(c),
+      userAgent: c.req.header("user-agent") || null,
+      requestId,
+    };
   }
 
   /**
@@ -667,8 +697,9 @@ export class AuditService {
       userAgent: string | null;
       requestId: string | null;
     },
-    checkpointStore: KVStore
-  ): Promise<void> {
+    checkpointStore: KVStore,
+    options?: { skipIfPresent?: boolean }
+  ): Promise<boolean> {
     const id = `aud_${crypto.randomUUID()}`;
     // The scrubbing boundary for the ledger. Applied before the row is hashed,
     // so what the chain commits to is exactly what a reviewer can read back.
@@ -684,7 +715,7 @@ export class AuditService {
     // regardless of which tenant's request is being audited. The row itself
     // still records the tenant attribution in its columns.
     return runWithSystemDatabaseIdentity("audit-ledger", () =>
-      this.persistAsLedger(entry, actor, checkpointStore, id, metadata)
+      this.persistAsLedger(entry, actor, checkpointStore, id, metadata, options)
     );
   }
 
@@ -700,8 +731,9 @@ export class AuditService {
     },
     checkpointStore: KVStore,
     id: string,
-    metadata: Record<string, unknown> | null
-  ): Promise<void> {
+    metadata: Record<string, unknown> | null,
+    options?: { skipIfPresent?: boolean }
+  ): Promise<boolean> {
     try {
       const lockedTransactionWithPostCommit = this.db.lockedTransactionWithPostCommit?.bind(
         this.db
@@ -710,9 +742,28 @@ export class AuditService {
         throw new Error("Database client cannot serialize post-commit audit checkpoints");
       }
 
-      await lockedTransactionWithPostCommit(
+      const outcome = await lockedTransactionWithPostCommit(
         AUDIT_LEDGER_SESSION_LOCK_KEY,
         async (tx) => {
+          if (options?.skipIfPresent) {
+            // Deduplicate inside the serialized write: a concurrent repair
+            // that already inserted this event either committed before the
+            // lock was granted or waits behind this transaction, so exactly
+            // one writer ever passes this check.
+            const present = await tx.queryOne<{ present: number }>(
+              `SELECT 1 AS present
+                 FROM audit_logs
+                WHERE organization_id = ?
+                  AND action = ?
+                  AND resource_type = ?
+                  AND resource_id = ?
+                LIMIT 1`,
+              [actor.organizationId, entry.action, entry.resourceType, entry.resourceId || null]
+            );
+            if (present) {
+              return null;
+            }
+          }
           const currentHead = await tx.queryOne<AuditLedgerHead>(
             `SELECT ledger.ledger_sequence,
                     encode(ledger.previous_entry_hash, 'hex') AS previous_entry_hash,
@@ -811,7 +862,9 @@ export class AuditService {
 
           return { expectedCheckpoint, pendingCheckpoint, nextCheckpoint };
         },
-        async ({ pendingCheckpoint, nextCheckpoint }) => {
+        async (result) => {
+          if (result === null) return;
+          const { pendingCheckpoint, nextCheckpoint } = result;
           const advanced = await checkpointStore.compareAndSet(
             AUDIT_LEDGER_CHECKPOINT_KEY,
             pendingCheckpoint,
@@ -823,7 +876,9 @@ export class AuditService {
             );
           }
         },
-        async ({ expectedCheckpoint, pendingCheckpoint }) => {
+        async (result) => {
+          if (result === null) return;
+          const { expectedCheckpoint, pendingCheckpoint } = result;
           const restored =
             expectedCheckpoint === null
               ? await checkpointStore.compareAndDelete(
@@ -845,6 +900,7 @@ export class AuditService {
           }
         }
       );
+      return outcome !== null;
     } catch (err) {
       getLogger().error({ error: err }, "Failed to write audit log");
       throw err instanceof AuditPersistenceError ? err : new AuditPersistenceError({ cause: err });

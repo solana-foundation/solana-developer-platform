@@ -9,6 +9,7 @@ import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
+import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
@@ -41,6 +42,13 @@ import {
   resolveMetadataAuthority,
   resolvePauseAuthority,
 } from "./authority-resolution";
+import {
+  buildIssuanceCreateFingerprint,
+  completeFailedIssuanceCreate,
+  ISSUANCE_CREATE_IDEMPOTENCY_SCOPES,
+  reserveIssuanceCreateRecord,
+  resolveIssuanceCreateReplay,
+} from "./idempotency";
 import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
@@ -128,6 +136,24 @@ async function resolveMetadataUpdate(params: {
   return { authority, patch: params.patch };
 }
 
+/**
+ * Load the token a replayed creation returns. The idempotency record carries
+ * the token id under the caller's tenant scope, and the record itself is
+ * cascade-deleted with the token, so a missing row here is a broken record.
+ */
+async function requireReplayToken(c: AppContext, tokenId: string): Promise<TokenRecord> {
+  const { projectId, orgId } = requireProjectScope(c);
+  const token = await getTenantTokenService(c).getToken({
+    tokenId,
+    organizationId: orgId,
+    projectId,
+  });
+  if (!token) {
+    throw notFound("Token");
+  }
+  return token;
+}
+
 export const createToken = async (c: ValidatedBodyContext<typeof createTokenSchema>) => {
   const { auth, projectId, orgId } = requireProjectScope(c);
 
@@ -157,58 +183,128 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
     : null;
 
   const db = getDb(c.env);
-  const token = await db.transaction(async (tx) => {
-    const client = asTransactionalClient(tx);
-    const tokenService = getTenantTokenService(c, client);
-    const assetProfiles = createPostgresAssetProfilesRepository(client);
+  // The middleware already validated the shape; an absent header keeps the
+  // legacy keyless behavior where every request is a new draft.
+  const idempotencyKey = c.req.header(IDEMPOTENCY_KEY_HEADER);
 
-    const token = await tokenService.createToken({
-      projectId,
-      organizationId: orgId,
-      createdBy: auth.id,
-      signingCustodyWalletId: signingWallet?.custodyWalletId,
-      signingWalletId: signingWallet?.providerWalletId,
-      name: body.name,
-      symbol: body.symbol,
-      decimals: resolved.decimals,
-      description: body.description,
-      uri: body.uri,
-      imageUrl: body.imageUrl,
-      template: resolved.template,
-      extensions: resolved.extensions ?? undefined,
-      maxSupply: body.maxSupply,
-      isMintable: body.isMintable,
-      isFreezable: body.isFreezable,
-      requiresAllowlist: resolved.requiresAllowlist,
-    });
-    const profile = buildDefaultAssetProfile(token);
-    const createdProfile = await assetProfiles.createAssetProfile({
+  const replayParams = {
+    scope: ISSUANCE_CREATE_IDEMPOTENCY_SCOPES.tokenCreate,
+    organizationId: orgId,
+    projectId,
+    idempotencyKey: idempotencyKey as string,
+    fingerprint: buildIssuanceCreateFingerprint({
+      scope: ISSUANCE_CREATE_IDEMPOTENCY_SCOPES.tokenCreate,
       organizationId: orgId,
       projectId,
-      tokenId: token.id,
-      ...profile,
-      createdBy: auth.id,
-    });
-    if (!createdProfile) {
-      throw internalError("Failed to create the token asset profile");
+      body,
+    }),
+  };
+
+  if (idempotencyKey) {
+    const replayTokenId = await resolveIssuanceCreateReplay(db, replayParams);
+    if (replayTokenId) {
+      return created(c, { token: toPublicToken(await requireReplayToken(c, replayTokenId)) });
     }
-
-    return token;
-  });
+  }
 
   const auditService = new AuditService(db);
-  await auditService.log(c, {
-    action: "create",
-    resourceType: "token",
-    resourceId: token.id,
-    metadata: {
-      name: token.name,
-      symbol: token.symbol,
-      template: resolved.template,
-    },
-  });
+  let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
+  let creationCommitted = false;
 
-  return created(c, { token: toPublicToken(token) });
+  try {
+    // Admit BEFORE the effect (SOLA9-195): an audit-ledger outage must fail
+    // closed and leave no committed token + profile pair behind.
+    auditIntent = await auditService.beginCritical(c, {
+      action: "create",
+      resourceType: "token",
+      metadata: {
+        name: body.name,
+        symbol: body.symbol,
+        template: resolved.template,
+      },
+    });
+
+    const token = await db.transaction(async (tx) => {
+      const client = asTransactionalClient(tx);
+      const tokenService = getTenantTokenService(c, client);
+      const assetProfiles = createPostgresAssetProfilesRepository(client);
+
+      const token = await tokenService.createToken({
+        projectId,
+        organizationId: orgId,
+        createdBy: auth.id,
+        signingCustodyWalletId: signingWallet?.custodyWalletId,
+        signingWalletId: signingWallet?.providerWalletId,
+        name: body.name,
+        symbol: body.symbol,
+        decimals: resolved.decimals,
+        description: body.description,
+        uri: body.uri,
+        imageUrl: body.imageUrl,
+        template: resolved.template,
+        extensions: resolved.extensions ?? undefined,
+        maxSupply: body.maxSupply,
+        isMintable: body.isMintable,
+        isFreezable: body.isFreezable,
+        requiresAllowlist: resolved.requiresAllowlist,
+      });
+      if (idempotencyKey) {
+        // Same transaction as the token insert: a retry of a committed
+        // admission can only replay it, never create a second draft.
+        await reserveIssuanceCreateRecord(client, {
+          ...replayParams,
+          tokenId: token.id,
+        });
+      }
+      const profile = buildDefaultAssetProfile(token);
+      const createdProfile = await assetProfiles.createAssetProfile({
+        organizationId: orgId,
+        projectId,
+        tokenId: token.id,
+        ...profile,
+        createdBy: auth.id,
+      });
+      if (!createdProfile) {
+        throw internalError("Failed to create the token asset profile");
+      }
+
+      return token;
+    });
+    creationCommitted = true;
+
+    await auditService.completeCritical(c, auditIntent, {
+      action: "create",
+      resourceType: "token",
+      resourceId: token.id,
+      metadata: {
+        name: token.name,
+        symbol: token.symbol,
+        template: resolved.template,
+      },
+    });
+
+    return created(c, { token: toPublicToken(token) });
+  } catch (error) {
+    if (auditIntent && !creationCommitted) {
+      // This attempt did not produce the effect: resolve the admitted intent
+      // so the ledger carries an outcome, not an unresolved intent.
+      const superseded = await completeFailedIssuanceCreate({
+        c,
+        auditService,
+        auditIntent,
+        error,
+      });
+      if (superseded && idempotencyKey) {
+        // A concurrent identical request won the key and rolled us back; its
+        // committed record replays (or 409s on a different payload).
+        const replayTokenId = await resolveIssuanceCreateReplay(db, replayParams);
+        if (replayTokenId) {
+          return created(c, { token: toPublicToken(await requireReplayToken(c, replayTokenId)) });
+        }
+      }
+    }
+    throw error;
+  }
 };
 
 export const listTokens = async (c: AppContext) => {

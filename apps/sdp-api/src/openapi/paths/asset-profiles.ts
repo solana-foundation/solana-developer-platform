@@ -9,7 +9,12 @@ import {
   tokenIdParamSchema,
   updateAssetProfileRequestSchema,
 } from "../schemas";
-import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
+import {
+  errorResponses,
+  jsonContent,
+  projectScopeHeaders,
+  projectScopeWithIdempotencyHeaders,
+} from "./helpers";
 import {
   assetProfileFieldOptionsResponse,
   assetProfileResponse,
@@ -67,10 +72,10 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     summary: "Create token with asset profile",
     operationId: "createTokenWithAssetProfile",
     description:
-      "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Requires the Asset Profiles feature to be enabled.",
+      "Creates an issued token and its asset profile atomically in a single transaction: if either write fails, both roll back, so a token is never persisted without a profile. Supply an Idempotency-Key to retry safely: an identical retried request returns the original token and profile instead of creating a second pair, while reusing the key for a different request returns 409. Requires the Asset Profiles feature to be enabled.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTokenWithAssetProfileRequestSchema),
@@ -78,10 +83,11 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     },
     responses: {
       201: {
-        description: "Token and asset profile created",
+        description:
+          "Token and asset profile created (or replayed from an identical earlier request)",
         content: jsonContent(tokenWithAssetProfileResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 500]),
     },
   });
 

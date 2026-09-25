@@ -140,10 +140,11 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     tags: ["Issuance"],
     summary: "Create token",
     operationId: "createToken",
-    description: "Creates a token record that can later be deployed to Solana.",
+    description:
+      "Creates a token record that can later be deployed to Solana. Supply an Idempotency-Key to retry safely: an identical retried request returns the original token instead of creating a second draft, while reusing the key for a different request returns 409.",
     security: [{ apiKeyAuth: [] }],
     request: {
-      headers: projectScopeHeaders,
+      headers: projectScopeWithIdempotencyHeaders,
       body: {
         required: true,
         content: jsonContent(createTokenRequestSchema),
@@ -151,10 +152,10 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     },
     responses: {
       201: {
-        description: "Token created",
+        description: "Token created (or replayed from an identical earlier request)",
         content: jsonContent(tokenResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 422, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 409, 422, 500]),
     },
   });
 

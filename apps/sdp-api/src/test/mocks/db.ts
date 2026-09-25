@@ -69,6 +69,7 @@ const POSTGRES_TEST_TABLES = [
   "token_allowlists",
   "issuance_transaction_statuses",
   "issuance_transactions",
+  "issuance_create_idempotency",
   "issued_token_extensions",
   "issued_tokens",
   "counterparty_accounts",
