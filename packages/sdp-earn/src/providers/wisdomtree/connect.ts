@@ -207,6 +207,37 @@ async function getWisdomTreeAccessToken(
   return { token, baseUrl: config.baseUrl, cacheKey };
 }
 
+interface CachedOrdersFeed {
+  orders: unknown[];
+  expiresAtMs: number;
+}
+
+/**
+ * Orders-feed cache, keyed by the same SHA-256 credential digest as the
+ * bearer token: the feed is scoped by that token, so two environments — or
+ * any rotated credential field — can never share entries, and plaintext
+ * secrets stay out of any dump or log of the map.
+ *
+ * The completion correlator is the caller that re-reads this feed in a tight
+ * loop: a refused stamp walks the exclusion set forward and reads again (see
+ * the provider-order completion service), so one deposit's settlement can
+ * legitimately issue several reads within seconds, and a pass over many
+ * deposits re-reads the same tenant's feed throughout. Serving those repeats
+ * from one short-TTL snapshot keeps the provider's order book from bearing
+ * the walk's full weight. The TTL stays far below the completion pass's
+ * retry spacing, and the correlation's fail-closed bindings are unchanged:
+ * a cached feed can only DELAY a demonstrated completion to a later read —
+ * it can never fabricate one.
+ */
+const ordersFeedCache = new Map<string, CachedOrdersFeed>();
+
+/** Test seam: forget the cached orders feed. */
+export function resetWisdomTreeOrdersFeedCache(): void {
+  ordersFeedCache.clear();
+}
+
+const ORDERS_FEED_TTL_MS = 30_000;
+
 async function connectGetJson<TResponse>(
   ctx: EarnRuntimeContext,
   path: string,
@@ -474,7 +505,18 @@ export async function checkWisdomTreeDepositEligibility(
  * this route's envelope. UNVERIFIED.
  */
 export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<unknown[]> {
+  const cacheKey = (await getWisdomTreeAccessToken(ctx)).cacheKey;
+  const cached = ordersFeedCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.orders;
   const response = await connectGetJson<unknown>(ctx, "/api/orders/all");
+  const orders = readWisdomTreeOrdersResponse(response);
+  ordersFeedCache.set(cacheKey, { orders, expiresAtMs: Date.now() + ORDERS_FEED_TTL_MS });
+  return orders;
+}
+
+/** Accepts both the bare-array and wrapped shapes because the spec never
+ * prints this route's envelope. UNVERIFIED. */
+function readWisdomTreeOrdersResponse(response: unknown): unknown[] {
   if (Array.isArray(response)) return response;
   if (response && typeof response === "object") {
     const wrapped = (response as { orders?: unknown }).orders;

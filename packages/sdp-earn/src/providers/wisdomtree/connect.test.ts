@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
 import { SdpEarnError } from "../../errors";
 import type { EarnRuntimeContext } from "../../types";
-import { readWisdomTreePurchaseOrderCompletion, resetWisdomTreeTokenCache } from "./connect";
+import {
+  readWisdomTreePurchaseOrderCompletion,
+  resetWisdomTreeOrdersFeedCache,
+  resetWisdomTreeTokenCache,
+} from "./connect";
 
 /**
  * The completion correlation's no-network harness, same rule as client.test.ts:
@@ -49,7 +53,10 @@ function stubOrdersFeed(orders: unknown) {
   });
 }
 
-beforeEach(() => resetWisdomTreeTokenCache());
+beforeEach(() => {
+  resetWisdomTreeTokenCache();
+  resetWisdomTreeOrdersFeedCache();
+});
 afterEach(() => mock.restoreAll());
 
 describe("readWisdomTreePurchaseOrderCompletion", () => {
@@ -391,5 +398,65 @@ describe("readWisdomTreePurchaseOrderCompletion", () => {
       readWisdomTreePurchaseOrderCompletion(ctx, input),
       (error: unknown) => error instanceof SdpEarnError
     );
+  });
+
+  it("serves a refusal walk's repeated reads from one orders fetch", async () => {
+    // The completion walk re-reads with a grown exclusion set after every
+    // refused stamp (see the provider-order completion service). Each re-read
+    // must come from the cached snapshot, not a fresh full-feed request — one
+    // deposit's settlement can otherwise cost the provider its feed once per
+    // refused order, per movement, per pass.
+    let feedRequests = 0;
+    mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/o/token/")) {
+        return new Response(JSON.stringify(tokenReply), { status: 200 });
+      }
+      feedRequests += 1;
+      return new Response(
+        JSON.stringify({
+          orders: [
+            {
+              id: "order-7",
+              trade_type: "Purchase",
+              status: "completed",
+              wallet_address: OWNER,
+              fund: FUND,
+              amount: AMOUNT,
+              completed_at: "2026-09-25T10:00:00Z",
+            },
+            {
+              id: "order-9",
+              trade_type: "Purchase",
+              status: "completed",
+              wallet_address: OWNER,
+              fund: FUND,
+              amount: AMOUNT,
+              completed_at: "2026-09-25T11:00:00Z",
+            },
+          ],
+        }),
+        { status: 200 }
+      );
+    });
+    assert.deepEqual(await readWisdomTreePurchaseOrderCompletion(ctx, input), {
+      orderReference: "order-7",
+      completedAt: "2026-09-25T10:00:00Z",
+    });
+    assert.deepEqual(
+      await readWisdomTreePurchaseOrderCompletion(ctx, {
+        ...input,
+        excludedOrderReferences: ["order-7"],
+      }),
+      { orderReference: "order-9", completedAt: "2026-09-25T11:00:00Z" }
+    );
+    assert.equal(
+      await readWisdomTreePurchaseOrderCompletion(ctx, {
+        ...input,
+        excludedOrderReferences: ["order-7", "order-9"],
+      }),
+      null
+    );
+    assert.equal(feedRequests, 1);
   });
 });
