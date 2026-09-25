@@ -25,7 +25,6 @@ import {
   createPaymentSubscriptionsRepository,
   createPostgresPaymentRecurringPaymentsRepository,
   createPostgresPaymentSubscriptionsRepository,
-  RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY,
   type PaymentRecurringPaymentActivationAttemptRow,
   type PaymentRecurringPaymentActivationAttemptStage,
   type PaymentRecurringPaymentRow,
@@ -33,6 +32,7 @@ import {
   type PaymentSubscriptionPlanRow,
   type PaymentSubscriptionRow,
   type PaymentSubscriptionsRepository,
+  RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY,
 } from "@/db/repositories";
 import { AppError, badRequest, conflict, internalError, transactionFailed } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";

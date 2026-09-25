@@ -1,5 +1,5 @@
-import type * as solanaRpc from "@sdp/rpc/solana";
 import { RECURRING_PAYMENT_OPERATION_STALE_AFTER_MS } from "@sdp/payments/recurring-payment-lifecycle";
+import type * as solanaRpc from "@sdp/rpc/solana";
 import {
   isCollectableRecurringPaymentStatus,
   PAYMENT_RECURRING_PAYMENT_LIFECYCLE_OPERATIONS,
@@ -43,8 +43,8 @@ import {
   createOrgSignerForCustodyWalletMock,
   createOrgSignerMock,
   DEVNET_USDC_MINT,
-  fetchMaybeSubscriptionDelegationMock,
   fetchMaybeSubscriptionAuthorityMock,
+  fetchMaybeSubscriptionDelegationMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
   getTransactionMock,
