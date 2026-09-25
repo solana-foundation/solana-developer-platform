@@ -250,10 +250,13 @@ export function rampQuoteIdempotencyFingerprint(
  * a recorded quote with the same fingerprint returns the recorded outcome, so
  * the handler — and the provider session mint inside it — never runs again.
  *
- * A key held by a provably failed quote is freed (CAS) and the request runs
- * fresh; a key held by a live quote whose bound session expired conflicts until
- * the caller moves to a new key. A fingerprint mismatch conflicts, so a key can
- * never silently answer for a different request.
+ * A stored recorded outcome answers the retry whatever the row's current
+ * status: even a quote marked failed after the client lost the response replays
+ * its recorded quote rather than minting a second provider session. A key with
+ * no replayable outcome that a provably failed quote holds is freed (CAS) and
+ * the request runs fresh; a key held by a quote whose bound session expired
+ * conflicts until the caller moves to a new key. A fingerprint mismatch
+ * conflicts, so a key can never silently answer for a different request.
  *
  * @param direction - Which quote route the hook guards.
  * @returns The gate's `findIdempotentKeyReplay` hook.
@@ -280,7 +283,22 @@ export function findRampQuoteIdempotentKeyReplay(
       return null;
     }
 
+    // The recorded outcome answers the retry whatever the row's current status:
+    // the key's one operation already minted its provider session, so the retry
+    // must return that outcome instead of minting a second session and row —
+    // including when the row was marked failed after the client lost the
+    // response.
+    const quote = readRampQuoteReplay(existing);
+    if (quote) {
+      if (isRampQuoteBindingExpired(existing)) {
+        throw conflict("Provider quote/session reference has expired; create a new quote.");
+      }
+      return success(c, { quote, transferId: existing.id });
+    }
+
     if (existing.status === "failed") {
+      // Provably fruitless — no stored outcome to replay — so the key is freed
+      // (CAS) and the request runs fresh instead of dead-locking on the key.
       const freed = await repository.clearTransferIdempotencyKey({
         transferId: existing.id,
         organizationId: scope.auth.organizationId,
@@ -300,13 +318,9 @@ export function findRampQuoteIdempotentKeyReplay(
       throw conflict("Provider quote/session reference has expired; create a new quote.");
     }
 
-    const quote = readRampQuoteReplay(existing);
-    if (!quote) {
-      throw conflict(
-        "Idempotency key matches an existing ramp quote that cannot be replayed; create a new quote with a new key."
-      );
-    }
-    return success(c, { quote, transferId: existing.id });
+    throw conflict(
+      "Idempotency key matches an existing ramp quote that cannot be replayed; create a new quote with a new key."
+    );
   };
 }
 

@@ -98,20 +98,22 @@ async function createRampQuote(
     },
     body: JSON.stringify(payload),
   });
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote; transferId?: string };
-    error?: { message?: string };
-  };
 
   if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string };
+    };
     throw new Error(
       getApiError(
-        body,
+        errorBody,
         t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
       )
     );
   }
 
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: { quote?: PaymentRampQuote; transferId?: string };
+  };
   if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
@@ -284,6 +286,27 @@ export function useRampWizard<TId extends string>(
 
   const isLastStep = stepIndex === steps.length - 1;
 
+  /** The quote request body for the current selection, or null while the
+   * selection is not yet a valid committed quote operation. */
+  const currentQuotePayload = (
+    providerAccountId: string | null
+  ): Record<string, unknown> | null => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+      return null;
+    }
+    return config.buildQuotePayload({
+      fields,
+      selectedWallet,
+      provider: fields.provider,
+      selectedRampPair,
+      assetRail: selectedRampPair.assetRail,
+      collectedData: requirements.collectedData,
+      selectedProviderAccountId: providerAccountId,
+      selectedPayoutAccount: requirements.selectedPayoutAccount,
+      rampsMemo: memoRowsToRecord(memoRows),
+    });
+  };
+
   const createQuoteForCurrentSelection = async (
     providerAccountId: string | null,
     idempotencyKey: string | null
@@ -291,25 +314,11 @@ export function useRampWizard<TId extends string>(
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+    const payload = currentQuotePayload(providerAccountId);
+    if (payload === null) {
       return null;
     }
-    const created = await createRampQuote(
-      config.quoteEndpoint,
-      config.buildQuotePayload({
-        fields,
-        selectedWallet,
-        provider: fields.provider,
-        selectedRampPair,
-        assetRail: selectedRampPair.assetRail,
-        collectedData: requirements.collectedData,
-        selectedProviderAccountId: providerAccountId,
-        selectedPayoutAccount: requirements.selectedPayoutAccount,
-        rampsMemo: memoRowsToRecord(memoRows),
-      }),
-      idempotencyKey,
-      t
-    );
+    const created = await createRampQuote(config.quoteEndpoint, payload, idempotencyKey, t);
     setCreatedQuote(created);
     return created;
   };
@@ -318,19 +327,25 @@ export function useRampWizard<TId extends string>(
   // response loss, a malformed response, and the explicit Try Again: the API
   // replays a keyed quote instead of minting a second provider session and
   // transfer row for the same operation. A deliberate re-quote (an expiring
-  // provider session) is a NEW operation and mints a fresh key.
+  // provider session) is a NEW operation and mints a fresh key. The key also
+  // rotates when the selection is edited after a failed attempt: the retained
+  // key answers only for the payload it minted, and the API conflicts a keyed
+  // replay whose fingerprint differs instead of quoting the edited request.
   const quoteOperationKeyRef = useRef<string | null>(null);
-  const mintQuoteOperationKey = () => {
+  const quoteOperationPayloadRef = useRef<string | null>(null);
+  const mintQuoteOperationKey = (serializedPayload: string | null) => {
     const key = `ramp-quote-${crypto.randomUUID()}`;
     quoteOperationKeyRef.current = key;
+    quoteOperationPayloadRef.current = serializedPayload;
     return key;
   };
 
   const refreshQuote = async () => {
     try {
+      const payload = currentQuotePayload(requirements.selectedProviderAccountId);
       await createQuoteForCurrentSelection(
         requirements.selectedProviderAccountId,
-        mintQuoteOperationKey()
+        mintQuoteOperationKey(payload === null ? null : JSON.stringify(payload))
       );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
@@ -354,12 +369,24 @@ export function useRampWizard<TId extends string>(
   const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(
-        providerAccountId,
-        // Retries of the committed selection reuse the operation key the first
-        // attempt minted; only the very first attempt mints one.
-        quoteOperationKeyRef.current ?? mintQuoteOperationKey()
-      );
+      // A retry of the committed selection reuses the operation key the first
+      // attempt minted; an edited selection after a failed attempt is a NEW
+      // operation and mints a fresh key, since the API rejects a keyed replay
+      // whose fingerprint differs instead of quoting the edited request.
+      const payload = currentQuotePayload(providerAccountId);
+      if (payload !== null) {
+        const serialized = JSON.stringify(payload);
+        if (
+          quoteOperationKeyRef.current !== null &&
+          quoteOperationPayloadRef.current !== serialized
+        ) {
+          quoteOperationKeyRef.current = null;
+        }
+        if (quoteOperationKeyRef.current === null) {
+          mintQuoteOperationKey(serialized);
+        }
+      }
+      await createQuoteForCurrentSelection(providerAccountId, quoteOperationKeyRef.current);
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));

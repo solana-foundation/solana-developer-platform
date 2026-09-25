@@ -216,6 +216,58 @@ describe("useRampWizard quote operation key (SOLA9-302)", () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
+  it("mints a fresh operation key when the selection is edited after a failed attempt", async () => {
+    let quotePostCalls = 0;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === QUOTE_ENDPOINT && method === "POST") {
+        quotePostCalls += 1;
+        if (quotePostCalls === 1) {
+          // The ambiguous failure: the request went out, the response never
+          // came back (network loss after the server committed its work).
+          return Promise.reject(new TypeError("network response lost"));
+        }
+        return Promise.resolve(
+          Response.json({ data: { quote: BVNK_QUOTE, transferId: TRANSFER_ID } })
+        );
+      }
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty?page=")) {
+        return Promise.resolve(Response.json({ data: { counterparties: [], total: 0 } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        return Promise.resolve(Response.json({ data: REQUIREMENTS_READY }));
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await driveToQuote(rendered);
+    await waitFor(() => expect(rendered.result.current.quoteCreationError).not.toBeNull());
+
+    // The user edits the committed selection (amount, wallet, provider, or
+    // memo) and retries: the edited request is a NEW quote operation, so the
+    // retry must carry a fresh key — the retained key's fingerprint covers the
+    // original payload and the API would conflict instead of quoting the edit.
+    await act(async () => {
+      rendered.result.current.setField("amount", "250");
+    });
+    await act(async () => {
+      rendered.result.current.retryQuoteCreation();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(rendered.result.current.quoteTransferId).toBe(TRANSFER_ID));
+
+    const keys = quoteKeysFromFetchCalls();
+    expect(keys.length).toBe(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[1]).toBeTruthy();
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+
   it("mints a fresh operation key when an expiring session deliberately re-quotes", async () => {
     const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
     await driveToQuote(rendered);

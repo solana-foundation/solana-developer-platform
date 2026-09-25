@@ -305,4 +305,126 @@ describe("ramp quote Idempotency-Key replay", () => {
     expect(rows[0]?.provider_reference).toBe("mg_replay_after_failure");
     expect(rows[0]?.status).toBe("pending");
   });
+
+  it("replays the recorded quote when the transfer was marked failed after the response was lost", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({ externalId: "replay_quote_marked_failed" });
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(moneygramSessionResponse("mg_replay_marked_failed_1"))
+      .mockResolvedValueOnce(moneygramSessionResponse("mg_replay_marked_failed_2"));
+
+    const postQuote = () =>
+      app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "quote-retry-marked-failed",
+          },
+          body: JSON.stringify({
+            provider: "moneygram",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "25",
+          }),
+        },
+        env
+      );
+
+    const firstResponse = await postQuote();
+    expect(firstResponse.status).toBe(200);
+    const firstBody = (await firstResponse.json()) as {
+      data: { quote: { id: string }; transferId: string };
+    };
+
+    // A provider webhook or reconciliation marks the successfully quoted
+    // transfer failed after the client lost the response: the recorded quote
+    // outcome still exists, so a keyed retry must replay it instead of freeing
+    // the key and minting a second provider session and transfer.
+    await getDb(env)
+      .prepare(`UPDATE payment_transfers SET status = 'failed', updated_at = ? WHERE id = ?`)
+      .bind(new Date().toISOString(), firstBody.data.transferId)
+      .run();
+
+    const retryResponse = await postQuote();
+    expect(retryResponse.status).toBe(200);
+    const retryBody = (await retryResponse.json()) as {
+      data: { quote: { id: string }; transferId: string };
+    };
+    expect(retryBody.data.transferId).toBe(firstBody.data.transferId);
+    expect(retryBody.data.quote.id).toBe(firstBody.data.quote.id);
+
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+    const rows = await counterpartyTransfers(counterpartyId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.provider_reference).toBe("mg_replay_marked_failed_1");
+  });
+
+  it("frees the key and runs fresh when the failed quote recorded no replayable outcome", async () => {
+    await seedCachedKey({ permissions: ["payments:write", "wallets:read"] });
+    const counterpartyId = await seedCounterparty({ externalId: "replay_quote_failed_unrecorded" });
+    const providerFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(moneygramSessionResponse("mg_replay_unrecorded_1"))
+      .mockResolvedValueOnce(moneygramSessionResponse("mg_replay_unrecorded_2"));
+
+    const postQuote = () =>
+      app.request(
+        "/v1/payments/ramps/onramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Idempotency-Key": "quote-retry-unrecorded-failure",
+          },
+          body: JSON.stringify({
+            provider: "moneygram",
+            counterpartyId,
+            destinationCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            fiatAmount: "25",
+          }),
+        },
+        env
+      );
+
+    const firstResponse = await postQuote();
+    expect(firstResponse.status).toBe(200);
+    const firstBody = (await firstResponse.json()) as { data: { transferId: string } };
+
+    // A failure with no reconstructable recorded outcome (a pre-upgrade or
+    // precreate row) is provably fruitless: the key is freed and the retry
+    // runs a fresh quote operation.
+    await getDb(env)
+      .prepare(
+        `UPDATE payment_transfers
+            SET status = 'failed',
+                provider_data = provider_data - 'rampQuoteReplay',
+                updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(new Date().toISOString(), firstBody.data.transferId)
+      .run();
+
+    const retryResponse = await postQuote();
+    expect(retryResponse.status).toBe(200);
+    const retryBody = (await retryResponse.json()) as {
+      data: { quote: { id: string }; transferId: string };
+    };
+    expect(retryBody.data.transferId).not.toBe(firstBody.data.transferId);
+
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+    const rows = await counterpartyTransfers(counterpartyId);
+    expect(rows.map((row) => row.provider_reference)).toEqual([
+      "mg_replay_unrecorded_1",
+      "mg_replay_unrecorded_2",
+    ]);
+  });
 });
