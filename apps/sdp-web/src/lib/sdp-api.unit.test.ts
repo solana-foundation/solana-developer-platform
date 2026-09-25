@@ -13,6 +13,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   auth: mocks.auth,
 }));
 
+import { RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE } from "./project-cookie";
 import {
   createProjectBoundSdpApiClient,
   createRequestScopedSdpApiClients,
@@ -331,8 +332,11 @@ describe("createRequestScopedSdpApiClients", () => {
       });
 
       expect(response.status).toBe(409);
-      const body = (await response.json()) as { error: { message: string } };
+      const body = (await response.json()) as { error: { code?: string; message: string } };
       expect(body.error.message).toContain("no longer matches");
+      // Machine-readable so the client's idempotency machinery can tell this
+      // pre-API refusal apart from an answer the API gave.
+      expect(body.error.code).toBe(RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE);
       // The mismatch never reaches the upstream API.
       expect(callsTo(fetchMock, "/v1/earn/vault-positions")).toHaveLength(0);
     });

@@ -9,6 +9,7 @@ import {
   PROJECT_COOKIE_NAME,
   PROJECT_HEADER_NAME,
   RENDERED_PROJECT_HEADER_NAME,
+  RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE,
 } from "./project-cookie";
 import {
   createTimedTrace,
@@ -418,11 +419,13 @@ export async function createOrgSdpApiClient(traceContext?: TraceContext): Promis
 export function proxyFailure(
   trace: ReturnType<typeof createTimedTrace>,
   status: number,
-  message: string
+  message: string,
+  /** Machine-readable code for refusals a client must branch on, e.g. the rendered-project scope mismatch (APE-777). */
+  code?: string
 ): NextResponse {
   logRouteResult(trace, status, { error: message });
   return NextResponse.json(
-    { error: { message } },
+    { error: code ? { code, message } : { message } },
     {
       status,
       headers: {
@@ -479,10 +482,14 @@ export async function proxyToSdpApi({
   // exactly as before, so surfaces that do not send the header are unchanged.
   const renderedProjectId = request.headers.get(RENDERED_PROJECT_HEADER_NAME);
   if (renderedProjectId && renderedProjectId !== projectId) {
+    // The machine-readable code lets the client's idempotency machinery tell
+    // this pre-API refusal apart from an API answer: a scope refusal must
+    // never retire a key retained for an ambiguous earlier attempt.
     return proxyFailure(
       trace,
       409,
-      "Selected project no longer matches the rendered project; reload the page"
+      "Selected project no longer matches the rendered project; reload the page",
+      RENDERED_PROJECT_SCOPE_MISMATCH_ERROR_CODE
     );
   }
 

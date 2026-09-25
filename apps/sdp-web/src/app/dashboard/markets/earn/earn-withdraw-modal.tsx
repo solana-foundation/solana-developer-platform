@@ -545,6 +545,7 @@ interface EarnWithdrawModalProps {
  * processing window) precedes confirmation; the accepted withdrawal stays on
  * screen in its processing state.
  */
+/* react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing modal orchestration; the APE-777 scope guard added one branch to an already-threshold function */
 export function EarnWithdrawModal({
   programId,
   provider,

@@ -117,13 +117,20 @@ export async function fetchFundingWallets(scope: EarnQueryScope): Promise<EarnFu
  * vault movement settles: both the submit refresh and the settlement refresh
  * can otherwise land inside the same cache window and leave Treasury frozen
  * on the pre-transaction balance.
+ *
+ * The balance read declares the rendered project like every other Earn read
+ * (APE-777): the wallet ID is resolved against the cookie-selected project,
+ * so a stale tab revalidating after another tab moved the shared selection
+ * cookie must be refused rather than attach another project's balance to its
+ * own wallet row.
  */
 export async function fetchLiveFundingWalletBalance(
+  scope: EarnQueryScope,
   walletId: string
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
   const response = await fetch(
     `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
-    { cache: "no-store" }
+    { cache: "no-store", headers: { [RENDERED_PROJECT_HEADER_NAME]: scope.projectId } }
   );
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
@@ -142,12 +149,13 @@ export async function fetchLiveFundingWalletBalance(
  * from updating.
  */
 export async function refreshFundingWalletBalances(
+  scope: EarnQueryScope,
   wallets: readonly EarnFundingWallet[]
 ): Promise<EarnFundingWallet[]> {
   return Promise.all(
     wallets.map(async (wallet) => {
       try {
-        const balances = await fetchLiveFundingWalletBalance(wallet.walletId);
+        const balances = await fetchLiveFundingWalletBalance(scope, wallet.walletId);
         return { ...wallet, balances };
       } catch {
         return wallet;
@@ -174,7 +182,10 @@ export function useEarnFundingWallets() {
     refreshBalances: () =>
       void mutate(
         async () =>
-          refreshFundingWalletBalances(await fetchFundingWallets(scope as EarnQueryScope)),
+          refreshFundingWalletBalances(
+            scope as EarnQueryScope,
+            await fetchFundingWallets(scope as EarnQueryScope)
+          ),
         {
           revalidate: false,
         }

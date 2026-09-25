@@ -86,10 +86,10 @@ describe("live funding wallet balances", () => {
     const fetchMock = vi.fn(async () => Response.json({ data: { walletBalances: { balances } } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchLiveFundingWalletBalance("wallet/live")).resolves.toEqual(balances);
+    await expect(fetchLiveFundingWalletBalance(SCOPE, "wallet/live")).resolves.toEqual(balances);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/dashboard/payments/wallets/wallet%2Flive/balances",
-      { cache: "no-store" }
+      { cache: "no-store", headers: { "x-sdp-rendered-project-id": "prj_scope" } }
     );
   });
 
@@ -131,7 +131,7 @@ describe("live funding wallet balances", () => {
       })
     );
 
-    const refreshed = await refreshFundingWalletBalances([first, unavailable]);
+    const refreshed = await refreshFundingWalletBalances(SCOPE, [first, unavailable]);
     expect(refreshed[0]?.balances?.[0]?.uiAmount).toBe("0.5");
     expect(refreshed[1]).toBe(unavailable);
     expect(refreshed[1]?.balances).toBeUndefined();

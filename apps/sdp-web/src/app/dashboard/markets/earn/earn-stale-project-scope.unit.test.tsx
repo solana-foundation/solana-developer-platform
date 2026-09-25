@@ -93,7 +93,10 @@ describe("Earn stale project scope", () => {
       if (!resolvedProject) {
         response.writeHead(409, { "content-type": "application/json" }).end(
           JSON.stringify({
-            error: { message: "Request project no longer matches the rendered project" },
+            error: {
+              code: "rendered_project_scope_mismatch",
+              message: "Request project no longer matches the rendered project",
+            },
           })
         );
         return;

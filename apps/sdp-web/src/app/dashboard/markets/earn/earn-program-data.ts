@@ -131,6 +131,11 @@ async function requestJson<T>(
   path: string,
   scope: EarnRequestScope
 ): Promise<{ status: number; body: T | undefined }> {
+  // The status IS the check. The body is read at every status deliberately:
+  // non-2xx answers carry the API's `{ error: { message } }` envelope, which
+  // `errorMessage` and the 503-unconfigured branch need, and every caller
+  // gates on the returned status before trusting the body.
+  // react-doctor-disable-next-line no-fetch-response-used-without-status-check -- the error envelope IS part of the payload here; the status is returned beside the body and checked by every caller
   const response = await fetch(path, { headers: scopeHeaders(scope) });
   let body: T | undefined;
   try {
