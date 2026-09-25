@@ -296,7 +296,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       await beginApprovedWalletOperationEffect(c);
       throw conflict("Approved burn execution is incomplete and requires manual reconciliation");
     }
-    if (transaction.status === "confirmed") {
+    if (transaction.status === "confirmed" || transaction.status === "finalized") {
       await tokenService.applySettledBurnSupply(transaction.id, tokenId, body.burn.amount);
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });
@@ -360,7 +360,7 @@ export const executeBurn = async (c: ValidatedBodyContext<typeof burnSchema>) =>
       await beginApprovedWalletOperationEffect(c);
       throw conflict("Approved burn execution is incomplete and requires manual reconciliation");
     }
-    if (transaction.status === "confirmed") {
+    if (transaction.status === "confirmed" || transaction.status === "finalized") {
       await tokenService.applySettledBurnSupply(tx.id, tokenId, body.burn.amount);
     }
     return success(c, { transaction: toPublicTokenTransaction(transaction) });

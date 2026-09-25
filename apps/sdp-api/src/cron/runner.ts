@@ -37,6 +37,7 @@ import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
+import { ISSUANCE_FINALITY_CRON, runIssuanceFinalityReconciliation } from "./issuance-finality";
 import {
   PENDING_DEPOSITS_CRON,
   PENDING_DEPOSITS_MONITOR,
@@ -309,6 +310,19 @@ export function startCron(deps: CronDeps): CronHandle | null {
   // so a bare tick would read zero open trades, find no funding, and go on
   // reporting success while a counterparty's escrowed deposit sat unnoticed.
   tasks.push(scheduleSystemTask(DVP_TRADES_CRON, "cron:dvp-trades", runDvpTradeReconciliation));
+
+  // Unconditional: a confirmed issuance operation is an outbox row the unified
+  // ledger reports as provisional, and only this tick's finality observation
+  // can ever let it read as succeeded. Registered through scheduleSystemTask
+  // like every sweep — reconciliation is cross-tenant and issuance rows carry
+  // forced row-level security.
+  tasks.push(
+    scheduleSystemTask(
+      ISSUANCE_FINALITY_CRON,
+      "cron:issuance-finality",
+      runIssuanceFinalityReconciliation
+    )
+  );
 
   // Orphaned split-swap detection (PRO-1864). Advisory and read-only against
   // the ledger, but cross-tenant like every sweep, so it takes the system

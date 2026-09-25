@@ -87,7 +87,7 @@ async function recoverFreezeAccountReplay(options: {
   }
 
   const frozenAccount =
-    transaction.status === "confirmed"
+    transaction.status === "confirmed" || transaction.status === "finalized"
       ? await options.tokenService.applySettledAccountFreezeState({
           transactionId: transaction.id,
           tokenId: options.tokenId,
@@ -122,7 +122,7 @@ async function recoverUnfreezeAccountReplay(options: {
   }
 
   const frozenAccount =
-    transaction.status === "confirmed"
+    transaction.status === "confirmed" || transaction.status === "finalized"
       ? await options.tokenService.applySettledAccountFreezeState({
           transactionId: transaction.id,
           tokenId: options.tokenId,

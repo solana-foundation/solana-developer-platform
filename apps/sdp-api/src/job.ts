@@ -10,6 +10,7 @@ import {
 } from "@/cron/earn-metrics-refresh";
 import { EARN_SPLIT_SWAPS_MONITOR } from "@/cron/earn-split-swaps";
 import { EARN_VAULT_MOVEMENTS_MONITOR } from "@/cron/earn-vault-movements";
+import { ISSUANCE_FINALITY_MONITOR } from "@/cron/issuance-finality";
 import { PENDING_DEPOSITS_MONITOR } from "@/cron/pending-deposits";
 import { PENDING_TRANSFERS_MONITOR } from "@/cron/pending-transfers";
 import { PENDING_WITHDRAWALS_MONITOR } from "@/cron/pending-withdrawals";
@@ -30,6 +31,7 @@ import { cleanupRetiredProviderCredentialSecrets } from "@/services/jobs/cleanup
 import { collectDueRecurringPayments } from "@/services/jobs/collect-recurring-payments";
 import { detectOrphanedEarnSplitSwaps } from "@/services/jobs/detect-orphaned-earn-split-swaps";
 import { waitForEgress } from "@/services/jobs/egress-warmup";
+import { finalizeConfirmedIssuanceTransactions } from "@/services/jobs/finalize-confirmed-issuance-transactions";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
@@ -221,6 +223,11 @@ export async function runCronJob(): Promise<void> {
         await monitored(DVP_TRADES_MONITOR, () => reconcileDvpTrades(env)).catch(() => undefined);
         // Keep advisory detection after vault reconciliation and collect its failures.
         await collect(monitored(EARN_SPLIT_SWAPS_MONITOR, () => detectOrphanedEarnSplitSwaps(env)));
+        // Upgrade confirmed issuance rows once finality is observed: the only
+        // path that lets the unified ledger read them as succeeded.
+        await collect(
+          monitored(ISSUANCE_FINALITY_MONITOR, () => finalizeConfirmedIssuanceTransactions(env))
+        );
         await monitored(SECRET_RETIREMENTS_MONITOR, () => retireOrphanedSecrets(env)).catch(
           () => undefined
         );

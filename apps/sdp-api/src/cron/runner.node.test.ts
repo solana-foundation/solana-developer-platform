@@ -16,6 +16,7 @@ import {
   EARN_VAULT_MOVEMENTS_CRON,
   runEarnVaultMovementsReconciliation,
 } from "./earn-vault-movements";
+import { ISSUANCE_FINALITY_CRON } from "./issuance-finality";
 import {
   PENDING_DEPOSITS_CRON,
   PENDING_DEPOSITS_MONITOR,
@@ -84,6 +85,13 @@ vi.mock("./earn-vault-movements", () => ({
 vi.mock("./dvp-trades", () => ({
   DVP_TRADES_CRON: "* * * * *",
   runDvpTradeReconciliation: vi.fn(),
+}));
+
+// The issuance finality tick pulls the repositories (and through them the db
+// client); mocked like the wrappers above.
+vi.mock("./issuance-finality", () => ({
+  ISSUANCE_FINALITY_CRON: "* * * * *",
+  runIssuanceFinalityReconciliation: vi.fn(),
 }));
 
 vi.mock("./earn-split-swaps", () => ({
@@ -185,10 +193,10 @@ describe("startCron", () => {
   // in every count below too — including the ones where asset profiles is off.
   //
   // Feature-gated ticks whose flag is off are still scheduled as sdp_cron_run
-  // proof-of-life no-ops, so every configuration schedules all 15 tasks. What a
+  // proof-of-life no-ops, so every configuration schedules all 16 tasks. What a
   // flag changes is whether the tick does real work, asserted by firing it.
   const SELF_HOSTED_NO_PROFILES = { SDP_DEPLOYMENT_MODE: "self_hosted" } as Env;
-  const ALL_TASKS = 14;
+  const ALL_TASKS = 15;
 
   it("returns null and does not schedule when DISABLE_CRON=true", () => {
     const result = startCron({ env: { DISABLE_CRON: "true" } as Env, bg: makeBg() });
@@ -219,6 +227,7 @@ describe("startCron", () => {
     expect(scheduleMock.mock.calls[11][0]).toBe(EARN_VAULT_MOVEMENTS_CRON);
     expect(scheduleMock.mock.calls[12][0]).toBe(DVP_TRADES_CRON);
     expect(scheduleMock.mock.calls[13][0]).toBe(EARN_SPLIT_SWAPS_CRON);
+    expect(scheduleMock.mock.calls[14][0]).toBe(ISSUANCE_FINALITY_CRON);
   });
 
   it("always schedules revoked API key cache reconciliation", () => {
