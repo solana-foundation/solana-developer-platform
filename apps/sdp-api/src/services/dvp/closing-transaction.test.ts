@@ -111,6 +111,7 @@ describe("resolveDvpClose", () => {
     });
     expect(getSignaturesForAddress).toHaveBeenNthCalledWith(2, RPC, SWAP, {
       limit: 100,
+      commitment: "finalized",
       before: SIGNATURE,
     });
   });
@@ -145,6 +146,7 @@ describe("resolveDvpClose", () => {
     expect(getSignaturesForAddress).toHaveBeenCalledTimes(1);
     expect(getSignaturesForAddress).toHaveBeenCalledWith(RPC, SWAP, {
       limit: 100,
+      commitment: "finalized",
       until: SIGNATURE,
     });
   });
@@ -152,7 +154,25 @@ describe("resolveDvpClose", () => {
   it("omits until without a create signature", async () => {
     getTransaction.mockResolvedValue(transaction(0));
     await resolveDvpClose(RPC, SWAP, null, CREATED_AT);
-    expect(getSignaturesForAddress).toHaveBeenCalledWith(RPC, SWAP, { limit: 100 });
+    expect(getSignaturesForAddress).toHaveBeenCalledWith(RPC, SWAP, {
+      limit: 100,
+      commitment: "finalized",
+    });
+  });
+
+  it("reads close history and candidate transactions only at finalized commitment (SOLA9-115)", async () => {
+    // A close visible only at `confirmed` sits in a forkable block, so terminal
+    // evidence must come from finalized reads on both RPC calls: history and
+    // the candidate transaction. Anything less lets a pre-finality fork leave
+    // the row with terminal status, close signature and closed timestamp for a
+    // close that never finalized.
+    getTransaction.mockResolvedValue(transaction(2));
+    await resolveDvpClose(RPC, SWAP, null, CREATED_AT);
+    expect(getSignaturesForAddress).toHaveBeenCalledWith(RPC, SWAP, {
+      limit: 100,
+      commitment: "finalized",
+    });
+    expect(getTransaction).toHaveBeenCalledWith(RPC, SIGNATURE, "finalized");
   });
 
   it("stops before reading a transaction older than the created-at floor", async () => {

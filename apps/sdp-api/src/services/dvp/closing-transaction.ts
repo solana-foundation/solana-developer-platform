@@ -127,7 +127,7 @@ async function firstCloseOnPage(
       const entry = candidates[cursor];
       cursor += 1;
       lookups.push(
-        getTransaction(rpc, entry.signature).then(
+        getTransaction(rpc, entry.signature, CLOSE_COMMITMENT).then(
           (value): TransactionLookup => ({ status: "fulfilled", value }),
           (reason): TransactionLookup => ({ status: "rejected", reason })
         )
@@ -156,6 +156,21 @@ async function firstCloseOnPage(
 }
 
 /**
+ * Reads close history at, and candidate transactions through, `finalized`
+ * commitment.
+ *
+ * A close visible only at `confirmed` sits in a block a fork can still drop:
+ * treating it as terminal and persisting status, close signature and closed-at
+ * would leave a false record nothing later reopens, because a stored close
+ * short-circuits every later lookup. Finalized blocks are permanent, so only
+ * finality makes the absence of the trade account terminal. Until the close
+ * finalizes the resolver reports `absent`, the row stays `closed_unknown`, and
+ * the next sweep asks again — the same provisional-until-finalized rule the
+ * leg transfer ledger applies (`leg-transfers.ts`).
+ */
+const CLOSE_COMMITMENT = "finalized" as const;
+
+/**
  * Finds and decodes the transaction that closed a vanished DvP account.
  *
  * `createSignature` bounds the history walk: SDP inserts the row before broadcasting create, and the PDA is only derivable
@@ -173,6 +188,7 @@ export async function resolveDvpClose(
   for (let page = 0; page < HISTORY_PAGE_CAP; page += 1) {
     const history = await getSignaturesForAddress(rpc, swapDvp, {
       limit: HISTORY_PAGE_LIMIT,
+      commitment: CLOSE_COMMITMENT,
       ...(before === undefined ? {} : { before }),
       ...(createSignature === null ? {} : { until: createSignature }),
     });
