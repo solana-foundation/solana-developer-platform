@@ -293,17 +293,32 @@ describe("Payments routes — signed submission", () => {
       // The failed chain verdict is an error, not a stale-looking success.
       expect(res.status).toBeGreaterThanOrEqual(400);
       expect(await countTransferRows()).toBe(1);
-      expect((await listTransferRows())[0]).toMatchObject({ status: "failed", slot: 200 });
+      const failedRow = (await listTransferRows())[0];
+      expect(failedRow).toMatchObject({ status: "failed", slot: 200 });
 
-      // The audit intent closes with its failure outcome.
+      // The response reports the authoritative on-chain failure, never the
+      // transport error that raced reconciliation.
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+      expect(body.error.message).toContain("InstructionError");
+      expect(body.error.message).not.toContain("confirmation transport failed");
+
+      // The audit intent closes with its failure outcome, carrying the
+      // verdict's reason, signature, and slot.
       const outcome = await getDb(env)
         .prepare(
-          `SELECT status FROM audit_logs
+          `SELECT metadata, status FROM audit_logs
            WHERE action = 'transfer' AND resource_type = 'payment_transfer' AND resource_id = ?`
         )
-        .bind((await listTransferRows())[0].id)
-        .first<{ status: string }>();
+        .bind(failedRow.id)
+        .first<{ metadata: string; status: string }>();
       expect(outcome?.status).toBe("failure");
+      expect(JSON.parse(outcome?.metadata ?? "{}")).toMatchObject({
+        auditPhase: "outcome",
+        error: failedRow.error,
+        signature: failedRow.signature,
+        slot: "200",
+      });
     });
 
     it("returns the durable processing transfer when its first broadcast is ambiguous", async () => {

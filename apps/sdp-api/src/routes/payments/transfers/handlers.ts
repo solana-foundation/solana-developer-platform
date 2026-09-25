@@ -591,8 +591,9 @@ async function settleTransferExecutionFailure(
       if (settled.status === "failed") {
         // Reconciliation recorded an on-chain failure; surface it through the
         // same error contract as the definite-failure settlement below so the
-        // audit ledger closes the intent with its failure outcome.
-        throw mapTransferExecutionError(error);
+        // audit ledger closes the intent with its failure outcome. The verdict,
+        // not the transport error that raced it, is the authoritative reason.
+        throw concurrentChainFailureError(settled);
       }
       await onConcurrentChainVerdict?.(settled);
       return success(c, toPayload(settled));
@@ -633,6 +634,42 @@ export function mapTransferExecutionError(error: unknown): AppError {
   const message = error instanceof Error ? error.message : "Unknown transfer error";
   const programErrorCode = /custom program error: (0x[0-9a-f]+)/i.exec(message)?.[1].toLowerCase();
   return programErrorCode === "0x11" ? accountFrozen(message) : solanaRpcError(message);
+}
+
+/**
+ * The AppError for an on-chain failure a concurrent writer (reconciliation, a
+ * replayed submission) already recorded durably: the verdict, not the transport
+ * error that raced it, is the authoritative reason. The response maps the
+ * verdict's recorded error through the same contract as the definite-failure
+ * settlement, and the details carry the verdict's signature and slot so the
+ * route's failure audit outcome closes from the authoritative state.
+ */
+function concurrentChainFailureError(settled: TransferRow): AppError {
+  const mapped = mapTransferExecutionError(new Error(settled.error ?? "Transfer failed on chain"));
+  return new AppError(mapped.code, mapped.message, {
+    ...mapped.details,
+    chainFailureVerdict: {
+      signature: settled.signature,
+      slot: settled.slot,
+    },
+  });
+}
+
+/**
+ * Audit metadata for an AppError thrown by concurrentChainFailureError: the
+ * concurrently settled chain verdict, not the transport error that raced it,
+ * is the authoritative failure record for the ledger outcome.
+ */
+function chainFailureVerdictMetadata(error: unknown): Record<string, unknown> {
+  if (!(error instanceof AppError)) return {};
+  const verdict = error.details?.chainFailureVerdict;
+  if (typeof verdict !== "object" || verdict === null) return {};
+  const { signature, slot } = verdict as { signature?: string | null; slot?: number | null };
+  return {
+    error: error.message,
+    signature: signature ?? null,
+    slot: typeof slot === "number" ? String(slot) : null,
+  };
 }
 
 async function executeSponsoredTransfer(
@@ -943,7 +980,10 @@ export async function createTransfer(c: AppContext) {
     } catch (settledError) {
       await auditService.completeCritical(c, auditIntent, {
         status: "failure",
-        metadata: { error: error instanceof Error ? error.message : "Unknown transfer error" },
+        metadata: {
+          error: error instanceof Error ? error.message : "Unknown transfer error",
+          ...chainFailureVerdictMetadata(settledError),
+        },
       });
       throw settledError;
     }
