@@ -15,17 +15,18 @@ import {
  *
  * The public OpenAPI document narrows `/v1/transactions` to the
  * published-module allowlist (openapi/paths/transactions.ts), and the
- * runtime's UNFILTERED default narrows with it (handlers.ts, via
+ * runtime's unfiltered API-KEY default narrows with it (handlers.ts, via
  * publication.ts): a response built without an explicit module filter never
  * carries a row the published response schema does not describe, so a client
  * generated from the public document only ever parses what it was built for.
  * The hold still never narrows an explicitly requested module — the runtime
  * permission matrix admits `module=earn` for an authorized `earn:read` key
- * exactly as before. These tests pin both halves of that split — the
+ * exactly as before — and dashboard callers (Clerk/session) keep the full
+ * internal contract. These tests pin both halves of that split — the
  * published schema refuses the held-back module while explicit authorized
- * reads still reach it, and the unfiltered default stays inside the published
- * contract — so neither the document nor the runtime can silently regress
- * into the other's shape.
+ * reads still reach it, and the unfiltered key default stays inside the
+ * published contract — so neither the document nor the runtime can silently
+ * regress into the other's shape.
  */
 
 const ALL_MODULES = ["payments", "earn", "dvp", "private_channels", "issuance", "rings"] as const;
@@ -234,10 +235,11 @@ describe("unified transactions publication hold (unfiltered default)", () => {
     ).toBe(true);
   });
 
-  it("answers an unfiltered read that can only ever see held-back modules with INSUFFICIENT_PERMISSIONS", async () => {
-    // An earn:read-only key has no published module to fall back to, so its
-    // unfiltered read is refused like any other zero-module caller instead of
-    // answering with a body the published contract cannot describe.
+  it("answers an unfiltered read that can only ever see held-back modules with an empty published page", async () => {
+    // An earn:read-only key names no published module, so its unfiltered
+    // default view is the empty page the published contract can describe —
+    // an authorized but empty read, not a permission failure and not a body
+    // a public-contract client cannot parse.
     const response = await app.request(
       "/v1/transactions",
       {
@@ -248,7 +250,16 @@ describe("unified transactions publication hold (unfiltered default)", () => {
       },
       env
     );
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data?: { transactions?: Array<{ module?: string }>; nextCursor?: string | null };
+    };
+    expect(body.data?.transactions).toEqual([]);
+    expect(body.data?.nextCursor).toBeNull();
+    expect(
+      unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES).safeParse(body.data)
+        .success
+    ).toBe(true);
 
     // The explicit read keeps working for the same key.
     const explicitResponse = await app.request(
@@ -262,5 +273,34 @@ describe("unified transactions publication hold (unfiltered default)", () => {
       env
     );
     expect(explicitResponse.status).toBe(200);
+  });
+
+  it("keeps the dashboard's unfiltered view on the full internal contract", async () => {
+    // The dashboard authenticates with a session, not an API key, and runs
+    // under the internal contract: its unfiltered "All" view keeps returning
+    // the held-back module's rows. Only the published contract's audience
+    // (API-key callers) gets the narrowed default.
+    const dashboardResponse = await app.request(
+      "/v1/transactions",
+      {
+        headers: {
+          Cookie: `sdp_session=${tenant.sessionId}`,
+          "x-project-id": tenant.project.id,
+          "x-forwarded-for": "10.0.0.105",
+        },
+      },
+      env
+    );
+    expect(dashboardResponse.status).toBe(200);
+    const dashboardBody = (await dashboardResponse.json()) as {
+      data?: { transactions?: Array<{ module?: string }> };
+    };
+    expect(
+      (dashboardBody.data?.transactions ?? []).map((transaction) => transaction.module)
+    ).toContain("earn");
+    expect(
+      unifiedTransactionsListResponseSchemaForModules(ALL_MODULES).safeParse(dashboardBody.data)
+        .success
+    ).toBe(true);
   });
 });

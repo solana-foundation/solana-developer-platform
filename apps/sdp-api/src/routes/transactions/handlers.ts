@@ -28,21 +28,27 @@ export async function listUnifiedTransactions(
   ) {
     throw insufficientPermissions();
   }
-  // An unfiltered query covers only published modules: while the hold is
-  // active its default response must never carry a row the published
-  // response schema does not describe, or a client generated from the public
-  // document receives transactions it cannot parse (SOLA9-85). An explicitly
-  // requested module bypasses the hold — the permission matrix decides that
-  // path exactly as before.
+  // An unfiltered API-key read covers only published modules: the public
+  // document authenticates with apiKeyAuth, so while the hold is active its
+  // default response must never carry a row the published response schema
+  // does not describe — a client generated from the public document would
+  // receive transactions it cannot parse (SOLA9-85). Dashboard callers
+  // (Clerk/session) run under the internal contract and keep the full
+  // unfiltered default. An explicitly requested module bypasses the hold for
+  // every caller — the permission matrix decides that path exactly as
+  // before.
   const publishedModules: readonly UnifiedTransactionModule[] = publishedTransactionModules(
     EARN_PUBLIC_SURFACE_PUBLISHED
   );
   const queryModules =
-    query.module === undefined
+    auth.authType === "api_key" && query.module === undefined
       ? permittedModules.filter((module) => publishedModules.includes(module))
       : permittedModules;
   if (queryModules.length === 0) {
-    throw insufficientPermissions();
+    // The caller's credentials name no published module, so the unfiltered
+    // default view is the empty published-contract page — an authorized but
+    // empty read, not a permission failure.
+    return success(c, { transactions: [], nextCursor: null });
   }
   const moduleWalletScopes = queryModules.flatMap((module) => {
     const authorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
