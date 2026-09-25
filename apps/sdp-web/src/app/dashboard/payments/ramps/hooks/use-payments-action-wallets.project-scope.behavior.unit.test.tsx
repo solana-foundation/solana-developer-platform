@@ -21,9 +21,10 @@
 import type { PaymentsDashboardWallet, Project } from "@sdp/types";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { SWRConfig, useSWRConfig } from "swr";
+import { SWRConfig } from "swr";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getWallets } from "@/app/api/dashboard/wallets/route";
+import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
 import { usePaymentsActionWallets } from "@/app/dashboard/payments/ramps/hooks/use-payments-action-wallets";
 import {
   DashboardWorkspaceProvider,
@@ -120,7 +121,7 @@ const cookieStore = {
 function WalletProbe({ initialWallets }: { initialWallets: PaymentsDashboardWallet[] }) {
   const { selectedProjectId } = useDashboardWorkspace();
   const { liveWallets } = usePaymentsActionWallets(initialWallets, null);
-  const { mutate } = useSWRConfig();
+  const refreshWalletInventory = useWalletInventoryRefresh();
   const wallet = liveWallets[0] ?? null;
 
   return (
@@ -128,21 +129,7 @@ function WalletProbe({ initialWallets }: { initialWallets: PaymentsDashboardWall
       <output data-testid="rendered-project">{selectedProjectId}</output>
       <output data-testid="wallet-label">{wallet?.label ?? "none"}</output>
       <output data-testid="wallet-balance">{wallet?.balances?.[0]?.uiAmount ?? "none"}</output>
-      <button
-        type="button"
-        onClick={() =>
-          // The same predicate-style inventory refresh the custody wallet
-          // refresh button performs; it must revalidate the hook's wallet key
-          // whatever shape the mounted workspace binds it to.
-          void mutate(
-            (key: unknown) =>
-              key === "payments-action-wallets" ||
-              (Array.isArray(key) && key[0] === "payments-action-wallets"),
-            undefined,
-            { revalidate: true }
-          )
-        }
-      >
+      <button type="button" onClick={() => refreshWalletInventory()}>
         Revalidate wallet inventory
       </button>
     </section>
@@ -255,10 +242,17 @@ describe("rendered workspace keeps its own project's wallet inventory", () => {
     expect(state.cookieProject).toBe("project-b");
 
     // The still-mounted A workspace refreshes its wallet inventory while the
-    // shared cookie already names B.
+    // shared cookie already names B. The button discards the refresh promise,
+    // so wait for the new upstream wallet read it triggers before asserting
+    // which project that read was bound to; if the post-switch refresh never
+    // runs, this wait times out instead of passing on the initial request.
+    const upstreamReadsBeforeRefresh = state.upstreamWalletProjects.length;
     await act(async () => {
-      await screen.getByRole("button", { name: "Revalidate wallet inventory" }).click();
+      screen.getByRole("button", { name: "Revalidate wallet inventory" }).click();
     });
+    await waitFor(() =>
+      expect(state.upstreamWalletProjects.length).toBeGreaterThan(upstreamReadsBeforeRefresh)
+    );
 
     // Secure behavior: A keeps consuming A's wallet inventory and balances.
     expect(screen.getByTestId("rendered-project").textContent).toBe("project-a");
