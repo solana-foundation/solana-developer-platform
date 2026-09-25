@@ -55,6 +55,7 @@ function captureOrderRequest(response: Response): { body: () => Record<string, u
 const orderResponse = {
   order: {
     orderId: "order_123",
+    createdAt: "2026-09-25T12:00:00Z",
     status: "PENDING",
     paymentCurrency: "USD",
     paymentSubtotal: "100.00",
@@ -97,6 +98,45 @@ describe("CoinbaseRampClient.createOnrampQuote (embedded mode)", () => {
     });
   });
 
+  it("sends a stored userAuthToken so a returning buyer skips the one-time codes", async () => {
+    const request = captureOrderRequest(respond(orderResponse));
+
+    await new CoinbaseRampClient().createOnrampOrder(sandbox, {
+      ...quoteInput,
+      coinbaseUserAuthToken: "uat_returning_buyer",
+    });
+
+    assert.equal(request.body().userAuthToken, "uat_returning_buyer");
+  });
+
+  it("hands the userAuthToken an embedded order returns back beside the quote", async () => {
+    captureOrderRequest(respond({ ...orderResponse, userAuthToken: "uat_new_buyer" }));
+
+    const order = await new CoinbaseRampClient().createOnrampOrder(sandbox, quoteInput);
+
+    assert.equal(order.userAuthToken, "uat_new_buyer");
+    assert.equal(order.orderCreatedAt, "2026-09-25T12:00:00Z");
+    assert.equal(order.quote.id, "order_123");
+    assert.equal("userAuthToken" in order.quote, false);
+  });
+
+  it("reports no token when the response carries none", async () => {
+    const { userAuthToken: _omitted, ...withoutToken } = orderResponse;
+    captureOrderRequest(respond(withoutToken));
+    assert.equal(
+      (await new CoinbaseRampClient().createOnrampOrder(sandbox, quoteInput)).userAuthToken,
+      null
+    );
+  });
+
+  it("refuses a malformed order response, including an empty userAuthToken", async () => {
+    captureOrderRequest(respond({ ...orderResponse, userAuthToken: "" }));
+    await assert.rejects(
+      () => new CoinbaseRampClient().createOnrampOrder(sandbox, quoteInput),
+      (error: unknown) => error instanceof SdpPaymentsError && /malformed/.test(error.message)
+    );
+  });
+
   it("forwards the embedding domain when the caller supplies one", async () => {
     const request = captureOrderRequest(respond(orderResponse));
 
@@ -121,7 +161,7 @@ describe("CoinbaseRampClient.createOnrampQuote (embedded mode)", () => {
     }
   });
 
-  it("neither returns nor logs the userAuthToken Coinbase sends back", async () => {
+  it("keeps the userAuthToken out of the quote and out of the log", async () => {
     captureOrderRequest(respond(orderResponse));
     const log = mock.method(console, "log", () => undefined);
 

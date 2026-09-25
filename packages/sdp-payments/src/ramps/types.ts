@@ -254,6 +254,11 @@ export interface RampOnrampQuoteInput {
   bvnkCompliance?: BvnkComplianceInput;
   /** Browser origin host the Coinbase payment link renders on; must be a CDP-registered domain. */
   domain?: string;
+  /**
+   * Coinbase's reusable token from an earlier embedded order for this buyer. Sent on the
+   * order so a returning buyer skips the one-time codes; absent for a first-time buyer.
+   */
+  coinbaseUserAuthToken?: string;
   /** End-user IP forwarded for the provider's geo/fraud checks (Stripe). */
   customerIpAddress?: string;
   /** Identity pre-fill for the embedded on-ramp widget (Stripe). */

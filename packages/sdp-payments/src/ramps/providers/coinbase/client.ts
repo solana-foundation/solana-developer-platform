@@ -167,28 +167,29 @@ interface CoinbaseBuyQuoteResponse {
   network_fee: CoinbaseAmount;
 }
 
-interface CoinbaseOrderFee {
-  amount: string;
-  currency: string;
-  type: string;
-}
-
-interface CoinbaseCreateOrderResponse {
-  order: {
-    orderId: string;
-    status: string;
-    paymentCurrency: string;
-    paymentSubtotal: string;
-    paymentTotal: string;
-    purchaseCurrency: string;
-    purchaseAmount: string;
-    exchangeRate: string;
-    fees: CoinbaseOrderFee[];
-  };
-  paymentLink: { url: string; paymentLinkType: string };
-  // Embedded orders also return `userAuthToken`; it is intentionally not modelled so nothing
-  // can read, log or persist it (see createOnrampQuote).
-}
+/**
+ * The create-order body Coinbase returns, parsed at the boundary. `userAuthToken` is the
+ * reusable per-buyer token embedded orders carry; `createOnrampOrder` hands it back out of
+ * band for the handler to store, and it is never logged and never part of a quote. Coinbase
+ * either sends it non-empty or omits it, so an empty one is a malformed response.
+ */
+const createOrderResponseSchema = z.object({
+  order: z.object({
+    orderId: z.string().min(1),
+    // Coinbase's own creation time; orders concurrent token writes for one buyer.
+    createdAt: z.string().datetime(),
+    status: z.string(),
+    paymentCurrency: z.string(),
+    paymentSubtotal: z.string(),
+    paymentTotal: z.string(),
+    purchaseCurrency: z.string(),
+    purchaseAmount: z.string(),
+    exchangeRate: z.string(),
+    fees: z.array(z.object({ amount: z.string(), currency: z.string(), type: z.string() })),
+  }),
+  paymentLink: z.object({ url: z.string(), paymentLinkType: z.string() }),
+  userAuthToken: z.string().min(1).optional(),
+});
 
 /**
  * Hosts Coinbase will never allow-list. Embedding the payment link on a local page is
@@ -210,6 +211,21 @@ type CoinbaseCreateOrderRequest = {
   paymentAmount: string;
   partnerUserRef: string;
   domain?: string;
+  /** A stored token from an earlier order for this buyer; skips the one-time codes. */
+  userAuthToken?: string;
+};
+
+/** What an embedded order hands back: the public quote and the token only the handler may keep. */
+export type CoinbaseOnrampOrder = {
+  quote: PaymentRampQuote;
+  /** Coinbase's reusable token for this buyer, or null when the response carried none. */
+  userAuthToken: string | null;
+  /**
+   * Coinbase's creation time for the order (ISO 8601, from the response). Coinbase mints the
+   * token with the order and the newest supersedes older ones, so this, not our clock, orders
+   * concurrent token writes for one buyer.
+   */
+  orderCreatedAt: string;
 };
 
 export class CoinbaseRampClient implements RampProvider {
@@ -327,16 +343,29 @@ export class CoinbaseRampClient implements RampProvider {
    * CDP-portal-registered host and rejects `localhost` in any form with "Domain is not
    * allow listed", so local hostnames are dropped and registered previews and prod pass theirs.
    *
-   * Coinbase also returns a reusable `userAuthToken` on embedded orders. It is deliberately
-   * ignored here: never logged, never returned, never stored (decision 2026-09-08), so a
-   * returning buyer re-verifies each order.
+   * Coinbase also returns a reusable `userAuthToken` on embedded orders (valid 60 days, one
+   * per buyer, the newest replacing older). `createOnrampOrder` hands it back beside the
+   * quote so the handler can keep it on the counterparty and send it on the next order,
+   * where it lets the buyer skip the one-time codes. The `RampProvider` entry point,
+   * `createOnrampQuote`, drops it, so nothing that only knows the quote can see it. This
+   * reverses the 2026-09-08 decision to ignore the token, at Zach's direction on
+   * 2026-09-25 after Coinbase recommended the embedded flow with the reusable token.
    *
    * @see https://docs.cdp.coinbase.com/onramp/headless-onramp/overview
    */
   async createOnrampQuote(
-    { env, mode }: RampRuntimeContext,
+    ctx: RampRuntimeContext,
     input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
+    const { quote } = await this.createOnrampOrder(ctx, input);
+    return quote;
+  }
+
+  /** Creates the embedded order and returns the quote with the buyer's reusable token beside it. */
+  async createOnrampOrder(
+    { env, mode }: RampRuntimeContext,
+    input: RampOnrampQuoteInput
+  ): Promise<CoinbaseOnrampOrder> {
     if (mode !== "sandbox") {
       throw providerUnavailable(
         "Coinbase Onramp production orders need the registered embedding domain and a real Apple Pay run, which are not done yet.",
@@ -359,13 +388,20 @@ export class CoinbaseRampClient implements RampProvider {
     if (input.domain !== undefined && !isLocalHost(input.domain)) {
       orderRequest.domain = input.domain;
     }
+    if (input.coinbaseUserAuthToken !== undefined) {
+      orderRequest.userAuthToken = input.coinbaseUserAuthToken;
+    }
 
-    const { order, paymentLink } = await this.request<CoinbaseCreateOrderResponse>(
-      env,
-      "POST",
-      CDP_V2_ORDERS_URL,
-      orderRequest
+    const parsedResponse = createOrderResponseSchema.safeParse(
+      await this.request<unknown>(env, "POST", CDP_V2_ORDERS_URL, orderRequest)
     );
+    if (!parsedResponse.success) {
+      throw providerUnavailable("Coinbase create-order response is malformed.", {
+        provider: this.id,
+        issues: parsedResponse.error.issues.map((issue) => issue.path.join(".")),
+      });
+    }
+    const { order, paymentLink, userAuthToken } = parsedResponse.data;
     // Logged before any rejection below: the order exists at Coinbase from here on, so its
     // id must be in the record even when this quote fails. The payment link URL is a
     // signed, time-limited credential and is never logged.
@@ -395,7 +431,7 @@ export class CoinbaseRampClient implements RampProvider {
     const hostedUrl = destination.url;
     hostedUrl.searchParams.set("useApplePaySandbox", "true");
 
-    return {
+    const quote: PaymentRampQuote = {
       provider: this.id,
       id: order.orderId,
       status: "pending",
@@ -412,6 +448,11 @@ export class CoinbaseRampClient implements RampProvider {
         feeCurrency: fee.currency,
         feeType: fee.type,
       })),
+    };
+    return {
+      quote,
+      userAuthToken: userAuthToken ?? null,
+      orderCreatedAt: order.createdAt,
     };
   }
 

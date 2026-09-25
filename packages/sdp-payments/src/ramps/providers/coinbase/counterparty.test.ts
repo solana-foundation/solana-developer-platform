@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Counterparty } from "@sdp/types";
-import { coinbaseCounterpartyRequirements } from "./counterparty";
+import {
+  coinbaseCounterpartyRequirements,
+  coinbaseCustomerLinkMetadataSchema,
+} from "./counterparty";
 
 const INDIVIDUAL: Counterparty = {
   id: "cpty_123",
@@ -55,6 +58,40 @@ describe("coinbaseCounterpartyRequirements", () => {
         status: "unsupported",
         reason: "Coinbase Onramp supports on-ramp only.",
       }
+    );
+  });
+});
+
+describe("coinbaseCustomerLinkMetadataSchema", () => {
+  it("accepts an empty link and a token with its expiry", () => {
+    assert.equal(coinbaseCustomerLinkMetadataSchema.safeParse({}).success, true);
+    assert.equal(
+      coinbaseCustomerLinkMetadataSchema.safeParse({
+        userAuthTokenCiphertext: "v2:abc",
+        userAuthTokenExpiresAt: "2026-11-24T00:00:00.000Z",
+      }).success,
+      true
+    );
+  });
+
+  it("refuses a token without its expiry, an expiry without its token, and anything else", () => {
+    assert.equal(
+      coinbaseCustomerLinkMetadataSchema.safeParse({ userAuthTokenCiphertext: "v2:abc" }).success,
+      false
+    );
+    assert.equal(
+      coinbaseCustomerLinkMetadataSchema.safeParse({
+        userAuthTokenExpiresAt: "2026-11-24T00:00:00.000Z",
+      }).success,
+      false
+    );
+    assert.equal(
+      coinbaseCustomerLinkMetadataSchema.safeParse({
+        userAuthTokenCiphertext: "v2:abc",
+        userAuthTokenExpiresAt: "2026-11-24T00:00:00.000Z",
+        email: "buyer@example.com",
+      }).success,
+      false
     );
   });
 });
