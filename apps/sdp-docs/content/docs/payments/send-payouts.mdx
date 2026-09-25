@@ -3,13 +3,19 @@ title: Payouts and disbursements
 description: Run batched outbound transfers, deduplicate retries, and reconcile a payout batch with SDP.
 ---
 
-A payout run is a batch of outbound transfers — marketplace seller payouts, payroll, affiliate disbursements, royalty distributions. Use `POST /v1/payments/transfer-batches` when recipients are registered counterparty accounts. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient and reconcile the returned transfer IDs.
+A payout run is a batch of outbound transfers. Marketplace seller payouts, payroll, affiliate
+disbursements, and royalty distributions are all payout runs.
+
+Use `POST /v1/payments/transfer-batches` when every recipient is a registered counterparty
+account. For arbitrary Solana addresses, call `POST /v1/payments/transfers` once per recipient, and
+reconcile the transfer IDs that it returns.
 
 ## Native transfer batches
 
-One request creates a durable batch, chunks its recipients into Solana transactions, and returns the batch, recipient, and transfer records:
+One request creates a durable batch. SDP splits the recipients into Solana transactions, and
+returns the batch record, the recipient records, and the transfer records.
 
-```bash
+```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
@@ -29,32 +35,49 @@ curl -X POST https://api.solana.com/v1/payments/transfer-batches \
   }'
 ```
 
-Reuse the same `Idempotency-Key` for retries of that exact request. Use `GET /v1/payments/transfer-batches/{batchId}` to inspect recipient and chunk outcomes. `externalId` is a correlation field, not an idempotency key.
+Reuse the same `Idempotency-Key` when you retry that exact request. Call
+`GET /v1/payments/transfer-batches/{batchId}` to inspect the recipient outcomes and the chunk
+outcomes. `externalId` is a correlation field. It is not an idempotency key.
 
-The rest of this page covers the per-recipient alternative for destinations that are not registered counterparty accounts.
+The rest of this page covers the per-recipient alternative, for destinations that are not
+registered counterparty accounts.
 
 ## Designing a payout run
 
-A typical pattern:
+A typical run works like this.
 
-1. **Resolve recipients** in your application — list (or stream) the rows to be paid, with destination address and amount per row.
-2. **Pick a batch identifier** you control (`payout_2026-05-14_marketplace_sellers`).
-3. **Iterate** — for each recipient, call `POST /v1/payments/transfers` with the destination, amount, token, and a memo that encodes the batch ID and a per-row identifier (`payout_2026-05-14_marketplace_sellers/row_4837`).
-4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID alongside the recipient row so you can re-poll status later.
-5. **Reconcile** — once the batch is fully submitted, run `GET /v1/payments/transfers?direction=outbound&from=…&to=…` and confirm every row in your application has a matching `finalized` transfer.
+1. **Resolve the recipients** in your application. List or stream the rows to be paid. Each row
+   carries a destination address and an amount.
+2. **Pick a batch identifier** that you control, such as
+   `payout_2026-05-14_marketplace_sellers`.
+3. **Iterate.** For each recipient, call `POST /v1/payments/transfers` with the destination, the
+   amount, the token, and a memo. Encode the batch ID and a per-row identifier in the memo, as in
+   `payout_2026-05-14_marketplace_sellers/row_4837`.
+4. **Capture** the returned `Transfer.id` and `Transfer.status`. Persist the SDP transfer ID next
+   to the recipient row, so that you can poll the status again later.
+5. **Reconcile.** Once you have submitted the whole batch, call
+   `GET /v1/payments/transfers?direction=outbound&from=…&to=…`. Confirm that every row in your
+   application has a matching `finalized` transfer.
 
-Send transfers sequentially or in modest concurrency (4–8 in flight); high concurrency increases the chance of priority-fee contention and blockhash expiry without much throughput gain.
+Send the transfers one at a time, or with modest concurrency of 4 to 8 in flight. High concurrency
+raises the chance of priority-fee contention and blockhash expiry, and it adds little throughput.
 
 ## Dedup and retries
 
-Two layers protect you against double-spends if a worker dies mid-run:
+Two layers protect you against a double spend if a worker dies part-way through a run.
 
-1. **Idempotency keys** — generate one stable `Idempotency-Key` per recipient row and reuse it for retries. An identical request for the same exact source wallet returns the original transfer; reusing the key for a different request returns `409`.
-2. **Application mapping** — persist the SDP transfer ID for each recipient row before moving to the next row. On restart, replay with the same idempotency key or skip rows that already have an associated `Transfer.id`.
+1. **Idempotency keys.** Generate one stable `Idempotency-Key` for each recipient row, and reuse
+   it for retries. An identical request for the same exact source wallet returns the original
+   transfer. If you reuse the key for a different request, the API returns `409`.
+2. **Application mapping.** Persist the SDP transfer ID for each recipient row before you move to
+   the next row. On restart, replay the row with the same idempotency key, or skip any row that
+   already has a `Transfer.id`.
 
-The on-chain `signature` is unique across SDP transfers once populated. Use it as a cross-indexer integrity check, not as the retry mechanism.
+The onchain `signature` is unique across SDP transfers once SDP sets it. Use it as a
+cross-indexer integrity check, not as the retry mechanism.
 
-Using a fresh idempotency key creates a new transfer intent, even if the payload is otherwise identical.
+A fresh idempotency key creates a new transfer intent, even when the payload is otherwise
+identical.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -125,7 +148,8 @@ HttpRequest request = HttpRequest.newBuilder()
 
 ## Reconciling a run
 
-After the loop finishes, list all outbound transfers in the run's time window and tally against your recipient table:
+After the loop finishes, list every outbound transfer in the time window of the run. Then tally
+the list against your recipient table.
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
@@ -159,20 +183,32 @@ async function* listOutboundTransfers(from: string, to: string) {
 </Tab>
 </Tabs>
 
-Filter the returned transfers on `memo.startsWith(batchId)` (or whatever convention you chose) to scope to the batch. Cross-reference each recipient row by SDP `Transfer.id`.
+Scope the result to the batch by filtering on `memo.startsWith(batchId)`, or on whatever
+convention you chose. Then cross-reference each recipient row by its SDP `Transfer.id`.
 
 ## Failure modes
 
-Per-transfer outcomes you should expect to handle:
+Expect to handle these per-transfer outcomes.
 
-- **`failed`** — the transaction was built and submitted but the network rejected it (insufficient funds, frozen account, expired blockhash). The `error` field on the transfer record explains what reached the chain. The recipient was not paid; you can retry by submitting a new transfer.
-- **`pending` past the expected confirmation window** — usually a backend or RPC hiccup. Re-poll with `GET /v1/payments/transfers/{id}` rather than re-submitting; you only want a new transfer if `status` settles to `failed`.
-- **Mid-run worker crash** — resume with each row's original `Idempotency-Key`; persist the returned `Transfer.id` before advancing.
-- **Source wallet runs out of SOL for fees** — submissions start failing with fee-related errors. If SDP is configured to sponsor fees this won't happen; otherwise top up the source wallet's SOL balance before continuing.
+- **`failed`.** SDP built and submitted the transaction, and the network rejected it. Common
+  causes are insufficient funds, a frozen account, and an expired blockhash. The `error` field on
+  the transfer record explains what reached the chain. The recipient was not paid. You can retry
+  by submitting a new transfer.
+- **`pending` past the expected confirmation window.** This is usually a backend or RPC problem.
+  Poll `GET /v1/payments/transfers/{id}` again rather than submitting again. Create a new transfer
+  only if the status settles to `failed`.
+- **A worker crash part-way through the run.** Resume with each row's original `Idempotency-Key`.
+  Persist the returned `Transfer.id` before you advance to the next row.
+- **The source wallet runs out of SOL for fees.** Submissions start to fail with fee-related
+  errors. This does not happen when SDP is configured to sponsor fees. Otherwise, top up the SOL
+  balance of the source wallet before you continue.
 
 ## Related
 
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
-- [Payment with memo](/docs/payments/send-payment-with-memo) — the memo field used above to tag a batch.
-- [Indexing and reconciliation](/docs/payments/accept-indexing) — the same list endpoint, used inbound.
-- [Wallet policies](/docs/wallet-operations/policies) — destination allowlist and daily-limit guardrails for payout wallets.
+- [Basic payment](/docs/payments/send-basic-payment). The underlying transfer endpoint.
+- [Payment with memo](/docs/payments/send-payment-with-memo). The memo field used above to tag a
+  batch.
+- [Indexing and reconciliation](/docs/payments/accept-indexing). The same list endpoint, used
+  inbound.
+- [Wallet policies](/docs/wallet-operations/policies). Destination allowlists and daily limits for
+  a payout wallet.

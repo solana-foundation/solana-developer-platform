@@ -1,21 +1,33 @@
 ---
 title: Ramps
-description: Fiat on-ramps and off-ramps — discover corridors, price a Ramp Quote just-in-time, and hand off to the provider's own execution flow.
+description: Discover corridors, price a Ramp Quote, and hand the user to the ramp provider's own flow.
 ---
 
-SDP wraps ramp providers behind a single pricing step: a **Ramp Quote**, priced just-in-time against the provider. There is no execute endpoint — SDP quotes the ramp and hands the end-user to the provider's own flow (hosted redirect or funding instructions) to complete it.
+SDP puts every ramp provider behind a single pricing step called a **Ramp Quote**. SDP prices the
+quote against the provider at the moment you request it.
 
-Every quote is tied to a **Counterparty** — the KYC subject for the ramp — and a custody wallet you control. For per-provider configuration, see [Ramp providers](/docs/payments/ramps-providers).
+There is no execute endpoint. SDP creates the quote and hands the end user to the provider's own
+flow, either a hosted redirect or a set of funding instructions.
+
+Every quote is tied to a **Counterparty** and to a custody wallet you control. The counterparty is
+the KYC subject for the ramp. For per-provider configuration, see
+[Ramp providers](/docs/payments/ramps-providers).
 
 ## Prerequisites
 
-1. **A Counterparty.** Create one with `POST /v1/counterparties` before requesting a quote.
-2. **Provider Requirements satisfied**, if the provider needs them. Some providers require KYC or bank details collected against the counterparty before they will price or accept a quote. Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…` and submit collected fields with `POST` to the same path until `status` reads `ready`.
-3. **A custody wallet you control**, used as the crypto leg — the onramp destination or the offramp source.
+1. **A counterparty.** Create one with `POST /v1/counterparties` before you request a quote.
+2. **Provider requirements satisfied**, when the provider needs them. Some providers require KYC
+   details or bank details collected against the counterparty before they price or accept a quote.
+   Check `GET /v1/counterparties/{counterpartyId}/requirements?provider=…&direction=…`. Submit the
+   collected fields with `POST` to the same path until `status` reads `ready`.
+3. **A custody wallet you control.** It is the crypto leg: the onramp destination, or the offramp
+   source.
 
 ## Discovering corridors
 
-`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` list the fiat/crypto pairs SDP supports and which providers cover each one — the **Corridor** dimensions (currency, country coverage, entity type).
+`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` list the
+fiat and crypto pairs that SDP supports, and which providers cover each pair. They return the
+corridor dimensions: currency, country coverage, and entity type.
 
 <Tabs items={["curl"]}>
 <Tab value="curl">
@@ -28,15 +40,21 @@ curl "https://api.solana.com/v1/payments/ramps/onramp/currency?source=USD&dest=u
 
 | Query param | Notes |
 | --- | --- |
-| `source` | Onramp: fiat currency (ISO code). Offramp: crypto rail (`usdc.solana`, `sol.solana`, …). |
-| `dest` | Onramp: crypto rail. Offramp: fiat currency. |
-| `provider` | Narrow to one provider. |
+| `source` | Onramp: the fiat currency, as an ISO code. Offramp: the asset rail, such as `usdc.solana` or `sol.solana`. |
+| `dest` | Onramp: the asset rail. Offramp: the fiat currency. |
+| `provider` | Narrow the result to one provider. |
 
-The response's `pairs` list which providers cover each source/dest combination; `providerDetails` gives each provider's country coverage and supported entity types for the direction.
+The `pairs` list in the response says which providers cover each source and destination
+combination. The `providerDetails` object gives each provider's country coverage and its supported
+entity types for that direction.
 
 ## Estimating a rate
 
-`POST /v1/payments/ramps/onramp/estimate` and `.../offramp/estimate` return a rate preview without creating anything — no counterparty or wallet required. SDP calls every provider on the corridor concurrently and returns one result per provider: `ok` (with the estimate), `unsupported`, or `error`.
+`POST /v1/payments/ramps/onramp/estimate` and `POST /v1/payments/ramps/offramp/estimate` return a
+rate preview. They create nothing, and they need no counterparty and no wallet.
+
+SDP calls every provider on the corridor at the same time, and returns one result per provider.
+Each result is `ok` and carries the estimate, or it is `unsupported`, or it is `error`.
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
@@ -74,11 +92,17 @@ const { data } = await response.json();
 </Tab>
 </Tabs>
 
-Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate`, and `fees` when `status` is `ok`. Use this to show the user a rate before they commit to a quote.
+Each entry under `estimates` carries `fiatAmount`, `cryptoAmount`, `exchangeRate`, and `fees` when
+its `status` is `ok`. Use it to show the user a rate before they commit to a quote.
 
 ## Requesting a quote
 
-`POST /v1/payments/ramps/onramp/quote` (fiat → crypto) and `POST /v1/payments/ramps/offramp/quote` (crypto → fiat) create the actual **Ramp Quote** against the named provider. This is the step that talks to the provider and, for most providers, produces a provider-side record — unlike estimate, it requires a resolved counterparty and wallet.
+`POST /v1/payments/ramps/onramp/quote` goes from fiat to crypto.
+`POST /v1/payments/ramps/offramp/quote` goes from crypto to fiat. Both create the actual **Ramp
+Quote** against the provider you name.
+
+This is the step that talks to the provider. For most providers it also creates a record on the
+provider's side. Unlike an estimate, it requires a resolved counterparty and a resolved wallet.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -144,35 +168,41 @@ HttpRequest request = HttpRequest.newBuilder()
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. |
-| `counterpartyId` | yes | An existing Counterparty. Provider-side customer and payout-account state is resolved server-side from it, not passed on the request. Counterparties do not store identity or email fields. |
-| `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control — its `id` (the `id` returned by `GET /v1/wallets`), resolved against your API key's wallet scope. Same shape for every provider. |
-| `assetRail` | yes | Canonical SDP crypto asset rail (`usdc.solana`, `usdt.solana`, `sol.solana`, …). |
-| `fiatCurrency` | onramp: yes; offramp: conditional | Required for onramp and for Lightspark/BVNK offramp; providers that resolve fiat currency during their own flow (MoneyGram) can omit it on offramp. |
-| `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | Decimal string greater than zero. |
-| `rampsMemo` | no | Up to 20 key/value string pairs stored on the resulting transfer for your own correlation. |
+| `provider` | yes | One of `moonpay`, `lightspark`, `bvnk`, `moneygram`, `coinbase`, `mural`, `stripe`. `moneygram` works in sandbox only. `coinbase` accepts a quote in sandbox only. |
+| `counterpartyId` | yes | An existing counterparty. SDP resolves the provider-side customer and payout-account state from it on the server. You do not pass that state on the request. A counterparty stores no identity fields and no email field. |
+| `destinationCustodyWalletId` (onramp) / `sourceCustodyWalletId` (offramp) | yes | A custody wallet you control, given by the `id` that `GET /v1/wallets` returns. SDP resolves it against the wallet scope of your API key. The shape is the same for every provider. |
+| `assetRail` | yes | The canonical SDP asset rail, such as `usdc.solana`, `usdt.solana`, or `sol.solana`. |
+| `fiatCurrency` | onramp: yes; offramp: conditional | Required for every onramp, and for a Lightspark or BVNK offramp. A provider that resolves the fiat currency inside its own flow, such as MoneyGram, can omit it on an offramp. |
+| `fiatAmount` (onramp) / `cryptoAmount` (offramp) | yes | A decimal string greater than zero. |
+| `rampsMemo` | no | Up to 20 key and value string pairs. SDP stores them on the resulting transfer for your own correlation. |
 
-The quote also creates the underlying **Payment Transfer** record for the ramp; log the returned `quote.id` (the transfer's `providerReference`) for your own records.
+The quote also creates the underlying **Payment Transfer** record for the ramp. Log the returned
+`quote.id`, which is the transfer's `providerReference`, for your own records.
 
 ### Delivery mode
 
-`quote.deliveryMode` tells you how to complete the flow with the named provider:
+`quote.deliveryMode` tells you how to complete the flow with the provider you named.
 
 | Provider | `deliveryMode` | What to do |
 | --- | --- | --- |
 | MoonPay | `hosted` | Redirect the user to `quote.hostedUrl`. |
-| Lightspark | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions` (bank or wallet details to send fiat to). |
-| BVNK | `manual_instructions` | Same — display `quote.paymentInstructions`. |
-| MoneyGram | `session_widget` | Mount `quote.widgetUrl` using `quote.sessionToken`. Onramp and offramp both. |
-| Coinbase | `hosted` | Redirect the user to `quote.hostedUrl`. Onramp only; quote creation is sandbox-only today. |
+| Lightspark | `manual_instructions` | Display the funding instructions in `quote.paymentInstructions`. They hold the bank or wallet details to send fiat to. |
+| BVNK | `manual_instructions` | Display `quote.paymentInstructions`, as with Lightspark. |
+| MoneyGram | `session_widget` | Mount `quote.widgetUrl` with `quote.sessionToken`. Onramp and offramp both work this way, in sandbox only. |
+| Coinbase | `hosted` | Redirect the user to `quote.hostedUrl`. Onramp only, and quote creation works in sandbox only today. |
 | Mural | `manual_instructions` | Display `quote.paymentInstructions`. Onramp only. |
 | Stripe | `session_widget` | Mount the session with `quote.clientSecret` and `quote.publishableKey`. Onramp only. |
 
-There is no further SDP endpoint to call after this — the provider owns settlement from here. Watch for the resulting on-chain transfer on the destination wallet via [`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing), or watch the provider's own side (dashboard or their webhook) for offramp payout confirmation.
+There is no further SDP endpoint to call after this step. The provider owns settlement from here.
+
+Watch for the resulting onchain transfer on the destination wallet with
+[`GET /v1/payments/transfers?direction=inbound`](/docs/payments/accept-indexing). For an offramp
+payout, watch the provider's own dashboard or webhook for the settlement confirmation.
 
 ## Canceling a quote
 
-`POST /v1/payments/ramps/transfers/cancel` cancels the transfer behind a quote while it is still `pending` or `awaiting_payment` — before the provider has moved money.
+`POST /v1/payments/ramps/transfers/cancel` cancels the transfer behind a quote while that transfer
+is still `pending` or `awaiting_payment`, which means before the provider has moved money.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
@@ -184,35 +214,51 @@ curl -X POST https://api.solana.com/v1/payments/ramps/transfers/cancel \
   }'
 ```
 
-A transfer past that window (already funded or settling) returns an error instead of canceling.
+A transfer past that window, one that is already funded or settling, returns an error instead of
+canceling.
 
 ## Status field
 
-`quote.status` is one of `pending`, `processing`, `completed`, `failed`, reflecting the provider's reported state **at the moment the quote is created** — SDP does not subsequently poll the provider to refresh it, and there is no dedicated read endpoint for the quote itself. For the on-chain side of a successful onramp, observe the resulting **inbound transfer** on the destination wallet, surfaced via [Accept payments](/docs/payments/accept-overview).
+`quote.status` is one of `pending`, `processing`, `completed`, and `failed`. It reflects the state
+that the provider reported at the moment SDP created the quote.
+
+SDP does not poll the provider afterwards to refresh that value, and there is no read endpoint for
+the quote itself. For the onchain side of a successful onramp, observe the resulting inbound
+transfer on the destination wallet. See [Accept payments](/docs/payments/accept-overview).
 
 ## Rate limits
 
-Estimate and quote calls carry fail-closed quotas: estimate fans out one live call per provider on the corridor, quote creates a provider-side record.
+Estimate calls and quote calls carry fail-closed quotas. An estimate fans out one live call per
+provider on the corridor, and a quote creates a record on the provider's side.
 
-| Endpoint | Per-key limit | Per-org limit |
+| Endpoint | Per-key limit | Per-organization limit |
 | --- | --- | --- |
 | `.../estimate` | 30 / minute | 120 / minute |
 | `.../quote` | 20 / minute | 60 / minute |
 
 ## Provider selection
 
-You always pass `provider` explicitly; SDP does not auto-select. Choose based on:
+You always pass `provider` explicitly. SDP does not choose one for you. Choose on three points.
 
-- **Coverage** — which providers your org has [Provider Availability](/docs/payments/ramps-providers#provider-gating) for.
-- **Corridor** — currency, country, and entity type; check with the currency-discovery endpoints above.
-- **Sandbox needs** — sandbox vs production is chosen per request from the calling API key's environment (see [Sandbox vs production](/docs/payments/ramps-providers#sandbox-vs-production-selection)).
+- **Coverage.** Which providers your organization can use. See
+  [Provider gating](/docs/payments/ramps-providers#provider-gating).
+- **Corridor.** The currency, the country, and the entity type. Check them with the
+  currency-discovery endpoints above.
+- **Sandbox needs.** SDP chooses sandbox or production per request, from the environment of the
+  calling API key. See
+  [Sandbox vs production selection](/docs/payments/ramps-providers#sandbox-vs-production-selection).
 
 ## Fiat currency support
 
-Fiat currency support is corridor-specific, not a fixed allowlist — use `GET /v1/payments/ramps/onramp/currency` and `.../offramp/currency` to see which fiat currencies a given provider covers for a given crypto rail.
+Fiat currency support is specific to a corridor. It is not a fixed allowlist. Call
+`GET /v1/payments/ramps/onramp/currency` and `GET /v1/payments/ramps/offramp/currency` to see
+which fiat currencies a given provider covers for a given asset rail.
 
 ## Related
 
-- [Ramp providers](/docs/payments/ramps-providers) — per-provider configuration and capability matrix.
-- [Accept overview](/docs/payments/accept-overview) — how onramp deliveries show up as inbound transfers.
-- [Provider onboarding](/docs/reference/provider-onboarding) — how providers are activated for an organization.
+- [Ramp providers](/docs/payments/ramps-providers). Per-provider configuration and the capability
+  matrix.
+- [Accept payments](/docs/payments/accept-overview). How an onramp delivery appears as an inbound
+  transfer.
+- [Provider onboarding](/docs/reference/provider-onboarding) — how providers are activated for an
+  organization.

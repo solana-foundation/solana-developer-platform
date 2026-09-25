@@ -1,15 +1,21 @@
 ---
-title: End-to-end Payment Flow
-description: A high-level payment flow from quote to settlement.
+title: End-to-end payment flow
+description: The stages of an SDP payment, from the funding wallet to reconciliation in your ledger.
 ---
 
-This walkthrough covers a typical payment integration lifecycle:
+This page lists the stages of a payment integration in order. It does not contain code or endpoint
+details. Use it as a checklist, then follow the API reference links below for each call.
 
-1. Create or resolve the funding wallet.
-2. Build and validate transfer intent (amount, destination, token).
-3. Submit the transfer — SDP builds the transaction, signs with the source custody wallet, and submits it.
-4. Capture the returned identifiers for observability.
-5. Query transfer status until finalization.
-6. Reconcile with your product ledger and user-facing state.
+1. Create the funding wallet, or look up an existing one.
+2. Choose the amount, the destination address, and the token for the transfer.
+3. Validate those three values against your own rules.
+4. Submit the transfer.
+5. Store the identifiers that the response returns.
+6. Poll the transfer status until the transfer is finalized.
+7. Reconcile the finalized transfer with your product ledger.
+8. Update the state that your users see.
+
+When you submit the transfer, SDP builds the transaction, signs it with the source custody wallet,
+and submits it to the Solana cluster.
 
 Use the [Payments API reference](/docs/reference/api/payments) and [Wallets API reference](/docs/reference/api/wallets) for endpoint-level request and response details.

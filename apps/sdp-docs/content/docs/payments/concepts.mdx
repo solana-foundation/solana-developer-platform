@@ -1,58 +1,122 @@
 ---
 title: How payments work on SDP
-description: Wallets, tokens, server-side signing, fees, and the data model that backs SDP payments.
+description: The wallets, tokens, signing, fees, and records behind an SDP payment.
 ---
 
-SDP payments move value between Solana accounts: a custody wallet sends tokens to a destination address and SDP records the resulting transfer. This page introduces the building blocks — wallets, tokens, execution, fees, and the data model — that the rest of the section assumes.
+An SDP payment moves value between two Solana accounts. A custody wallet sends tokens to a
+destination address, and SDP records the transfer.
+
+This page explains the parts that the rest of this section assumes: wallets, tokens, execution,
+fees, and the transfer record.
 
 ## Custody wallets
 
-Every SDP payment is anchored to a **custody wallet** — an SDP-managed Solana wallet, scoped to an organization and (optionally) a project. The wallet's key is held and signed for by a custody provider; SDP presents a stable Solana address and routes signing to whichever provider holds the key. Wallets sign outbound transfers on your behalf and contribute to balances and policies for the addresses you control.
+Every SDP payment starts from a **custody wallet**. A custody wallet is a Solana wallet that SDP
+manages for an organization, and optionally for one project inside it.
 
-You provision custody wallets up front (see [Set Up Wallets](/docs/guides/setup-wallets)). Transfer requests use the exact SDP Wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`; responses expose it as `custodyWalletId` and retain the provider's identifier separately as `providerWalletId` evidence. The **destination** remains the recipient's on-chain Solana address.
+A custody provider holds the key and signs with it. SDP gives you one stable Solana address and
+sends each signing request to the provider that holds the key. The wallet signs your outbound
+transfers. It also reports balances and applies policies for the addresses you control.
 
-Ramp quote endpoints use the same public shape for every provider: `destinationCustodyWalletId` (onramp) or `sourceCustodyWalletId` (offramp) identifies a custody wallet you control by its internal custody wallet `id` (the `id` returned by `GET /v1/wallets`). Provider-specific identifiers such as customer and payout-account IDs are resolved server-side from the **Counterparty**'s Provider Requirements — see [Ramps](/docs/payments/ramps).
+Create your custody wallets before you send a payment. See
+[Set up wallets](/docs/guides/setup-wallets).
+
+A transfer request passes the SDP wallet `id` (`cwlt_…`) as `sourceCustodyWalletId`. The response
+returns the same value as `custodyWalletId`, and keeps the provider's own identifier separately as
+`providerWalletId`. The `destination` is always the recipient's Solana address.
+
+Ramp quote endpoints use the same fields for every provider. An onramp quote takes
+`destinationCustodyWalletId`. An offramp quote takes `sourceCustodyWalletId`. Both identify a
+custody wallet you control, by the `id` that `GET /v1/wallets` returns.
+
+SDP resolves provider-specific identifiers, such as a customer ID or a payout account ID, from the
+counterparty's provider requirements. See [Ramps](/docs/payments/ramps).
 
 ## Tokens and token accounts
 
-Payments transfer **SPL tokens** — stablecoins, tokenized assets, or any mint your project supports. The `token` field on `POST /v1/payments/transfers` requires the on-chain **mint address** for SPL tokens; the literal string `SOL` is accepted as the native-SOL shorthand. Symbols like `USDC` are not resolved at request time. The `token` filter on `GET /v1/payments/transfers` does an **exact match** against the `Transfer.token` value as stored — API-created transfers store the mint you supplied (or `SOL`), while indexed/observed transfers run mint-to-symbol resolution and may store a resolved symbol (e.g. `USDC`). Filter using the same label you see on the response, or query without `token` and filter client-side. **Balance responses always attempt symbol resolution** and return the symbol whenever the mint is known — so a wallet holding USDC reports `USDC` rather than the mint string.
+A payment transfers **SPL tokens**. These can be stablecoins, tokenized assets, or any other mint
+your project supports.
 
-**Amounts on the wire are UI-unit decimal strings** — `"100.00"` means 100 tokens, regardless of the mint's decimal count. This applies to issuance operations (mint, burn, seize, force-burn) as well as payments transfers. SDP handles the smallest-unit conversion when it builds the on-chain transaction. The one exception is wallet-balance responses, which return both a raw `amount` (smallest unit) **and** a `uiAmount` (decimal string) so balance consumers can pick whichever fits.
+On `POST /v1/payments/transfers`, the `token` field takes the **mint address**. For native SOL,
+pass the string `SOL`. SDP does not resolve a symbol such as `USDC` when it receives the request.
+
+On `GET /v1/payments/transfers`, the `token` filter matches the stored `Transfer.token` value
+exactly. A transfer created through the API stores the mint you supplied, or `SOL`. A transfer that
+SDP observed onchain can store a resolved symbol instead, such as `USDC`.
+
+Filter with the same label that the response shows. You can also omit `token` and filter the
+results in your own code.
+
+Balance responses behave differently. They always try to resolve the symbol, and return it whenever
+SDP knows the mint. A wallet that holds USDC therefore reports `USDC`, not the mint address.
+
+**Every amount in a request is a decimal string in display units.** `"100.00"` means 100 tokens,
+whatever the mint's decimal count is. This rule covers payment transfers and issuance operations
+such as mint, burn, seize, and force-burn. SDP converts the value to the smallest unit when it
+builds the transaction.
+
+Wallet balance responses are the one exception. They return a raw `amount` in the smallest unit and
+a `uiAmount` as a decimal string, so you can use whichever one you need.
 
 ## Transfer execution
 
-Outbound wallet transfers are server-executed through `POST /v1/payments/transfers`. SDP builds the transaction, signs with the source wallet's custody key, submits it on the configured Solana cluster, and records the resulting transfer lifecycle.
+SDP executes an outbound wallet transfer when you call `POST /v1/payments/transfers`. SDP builds
+the transaction, signs it with the source wallet's custody key, and submits it to the configured
+Solana cluster. SDP then records the transfer and tracks its status.
 
-The rest of this section assumes transfers are submitted by SDP from a custody wallet you control.
+The rest of this section assumes that SDP submits the transfer from a custody wallet you control.
 
 ## Fees and sponsorship
 
-Solana fees are paid in SOL by the transaction's fee payer. On wallet transfers, the source custody wallet is the fee payer by default; SDP can be configured to sponsor fees so end-user wallets do not need a SOL balance.
+The fee payer of a transaction pays the Solana fee in SOL. On a wallet transfer, the source custody
+wallet is the fee payer by default.
+
+You can configure SDP to sponsor the fee instead. An end-user wallet then does not need a SOL
+balance.
 
 ## The transfer data model
 
-Every successful or attempted transfer creates a `Transfer` record. The fields that matter for most flows:
+Every transfer creates a `Transfer` record, whether it succeeds or fails. These are the fields that
+matter in most flows.
 
 | Field | Meaning |
 | --- | --- |
 | `id` | SDP-internal transfer identifier (use this in API URLs). |
 | `status` | Wallet transfers: `processing`, `confirmed`, `finalized`, `failed`. Ramp transfers: `pending`, `awaiting_payment`, `settling`, `completed`, `canceled`, `expired`, `failed`. See [Verifying a payment](/docs/payments/accept-verification). |
 | `direction` | `inbound` (someone paid you) or `outbound` (you paid someone). |
-| `source`, `destination` | On-chain addresses. |
-| `token`, `amount` | What moved and how much. `amount` is a UI-unit decimal string (e.g. `"100.00"`). |
+| `source`, `destination` | Solana addresses. |
+| `token`, `amount` | What moved, and how much. `amount` is a decimal string in display units, for example `"100.00"`. |
 | `memo` | Optional UTF-8 string, up to 256 chars. See [Payment with memo](/docs/payments/send-payment-with-memo). |
-| `signature` | Solana transaction signature once confirmed. **Unique across SDP** — the natural dedup key. |
-| `slot`, `blockTime`, `fee` | On-chain settlement details, populated as the transaction lands. |
-| `error` | Set if the transfer failed; the rest of the record explains what reached the network. |
-| `risk` | Optional risk-score metadata, when a risk provider is configured. |
+| `signature` | The Solana transaction signature, set once the transfer is confirmed. It is unique across SDP, so use it as the deduplication key. |
+| `slot`, `blockTime`, `fee` | Settlement details from the network, filled in as the transaction lands. |
+| `error` | Set when the transfer fails. The rest of the record shows what reached the network. |
+| `risk` | Risk score metadata. Present only when a risk provider is configured. |
 
-Outbound wallet transfers start at `processing` and move to `confirmed` → `finalized`. Inbound transfers discovered on-chain surface directly at `confirmed`. Ramp transfers can start at `pending` while provider-side steps are still underway. See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state table.
+An outbound wallet transfer starts at `processing`, then moves to `confirmed` and then
+`finalized`. An inbound transfer that SDP finds onchain appears at `confirmed`. A ramp transfer can
+start at `pending` while the provider completes its own steps.
+
+See [Verifying a payment](/docs/payments/accept-verification#status-lifecycle) for the full state
+table.
 
 ## What SDP does and does not give you
 
-SDP exposes everything you need to **send**, **track**, and **reconcile** payments at the transfer level: status polling, filtered lists, wallet-level balances, exact-wallet `Idempotency-Key` replay, and a unique on-chain `signature` once populated (see [Basic payment → Deduplication](/docs/payments/send-basic-payment#deduplication)). It does **not** ship higher-level commerce primitives such as a checkout session or invoice object. The [Accept payments](/docs/payments/accept-overview) section shows how to build those abstractions on top of the transfer model.
+SDP gives you what you need to send, track, and reconcile payments at the level of a single
+transfer:
+
+- Status polling.
+- Filtered transfer lists.
+- Balances per wallet.
+- Replay of a request through the `Idempotency-Key` header, per wallet.
+- A unique `signature` once the network confirms the transaction. See
+  [Basic payment](/docs/payments/send-basic-payment#deduplication).
+
+SDP does not give you commerce objects such as a checkout session or an invoice. The
+[Accept payments](/docs/payments/accept-overview) section shows how to build those on top of the
+transfer record.
 
 ## Related
 
-- [Payments API reference](/docs/reference/api/payments) — auto-generated endpoint reference.
-- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — a step-by-step tutorial through the same lifecycle from a different angle.
+- [Payments API reference](/docs/reference/api/payments). The generated endpoint reference.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow). The same lifecycle as a
+  step-by-step tutorial.

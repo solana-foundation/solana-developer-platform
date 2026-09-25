@@ -1,55 +1,69 @@
 ---
-title: Manage API Keys
-description: Create, rotate, and revoke API keys with role-based access, wallet bindings, and zero-downtime rotation.
+title: Manage API keys
+description: Create, rotate, and delete the API keys that authenticate your SDP API requests.
 ---
 
-Create, rotate, and revoke the API keys that authenticate SDP API requests. Each key belongs to a project, inherits its environment, and carries a role plus optional fine-grained controls — see [Authentication](/docs/developing-with-sdp/authentication) for how those layers are enforced.
+An API key authenticates an SDP API request. Each key belongs to a project, takes that project's
+environment, and carries a role. A key can also carry finer controls. See
+[Authentication](/docs/developing-with-sdp/authentication) for how SDP enforces each of those
+layers.
 
-The full secret is returned exactly once — at creation and at rotation. SDP stores only a salted hash and a display prefix; a lost key cannot be recovered, only rotated or replaced. Every key tracks `lastUsedAt` so you can identify stale credentials before revoking them.
+SDP returns the full secret once, when you create the key and when you rotate it. SDP stores only a
+salted hash and a display prefix. You cannot recover a lost key. You can only rotate it or replace
+it.
+
+Every key records `lastUsedAt`. Use that value to find a stale credential before you delete it.
 
 ## Key format
 
-| Environment | Prefix | Solana network |
+| Environment | Prefix | Solana cluster |
 | --- | --- | --- |
 | Sandbox | `sk_test_` | devnet |
-| Production | `sk_live_` | mainnet-beta |
+| Production | `sk_live_` | mainnet |
 
 ## Roles
 
 | Role | Description |
 | --- | --- |
-| `api_admin` | Full access including custody and platform operations |
-| `api_developer` | Read/write access, excludes custody actions |
-| `api_readonly` | Read-only access to all resources |
+| `api_admin` | Full access, including custody operations and platform operations. |
+| `api_developer` | Read and write access. It excludes custody actions. |
+| `api_readonly` | Read-only access to every resource. |
 
-A key can also carry explicit `permissions` that override the role's defaults. A key can only be granted permissions its creator holds.
+A key can also carry explicit `permissions` that override the role's defaults. A key can hold only
+the permissions its creator holds.
 
 ## Create a key
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-1. Navigate to **API keys** in the sidebar. You start with an empty list.
+1. Select **API keys** in the sidebar. The list is empty until you create your first key.
 
    ![API keys page with no keys yet](/images/getting-started/api-keys-empty.png)
 
-2. Click **New API key** in the top right, then fill in the key details:
-   - **Name** — a descriptive label (e.g., "CI deploy key")
-   - **Role** — Admin, Developer, or Read only
-   - **Wallet access** — All wallets or Selected wallets
-   - **Expiration (optional)** — date/time picker
+2. Select **New API key**.
+
+3. Enter the key details:
+   - **Name**. A descriptive label, for example "CI deploy key".
+   - **Role**. **Admin**, **Developer**, or **Read only**.
+   - **Wallet access**. **All wallets** or **Selected wallets**.
+   - **Expiration (optional)**. A date and a time.
 
    ![Create API key modal](/images/getting-started/api-key-create.png)
 
-3. Click **Continue**, review the summary, and click **Create key**.
+4. Select **Continue**.
+
+5. Review the summary, then select **Create key**.
 
    ![Review API key modal](/images/getting-started/api-key-review.png)
 
-4. Click **Copy** on the **API key generated** modal and save the key — it will not be shown again.
+6. Select **Copy** on the **API key generated** dialog, and save the key. SDP does not show it
+   again.
 
    ![API key generated modal showing the full key](/images/getting-started/api-key-generated.png)
 
-5. Dismiss the modal. The key now appears in the table with its prefix, role, environment, and status.
+7. Select **Dismiss**. The key now appears in the table with its prefix, role, environment, and
+   status.
 
    ![API keys list with one active key](/images/getting-started/api-keys-list.png)
 
@@ -66,7 +80,7 @@ curl -X POST https://api.solana.com/v1/api-keys \
     "name": "CI deploy key",
     "role": "api_developer",
     "walletScope": "all",
-    "expiresAt": "2026-12-31T23:59:59Z"
+    "expiresAt": "2027-12-31T23:59:59Z"
   }'
 ```
 </Tab>
@@ -82,7 +96,7 @@ const response = await fetch("https://api.solana.com/v1/api-keys", {
     name: "CI deploy key",
     role: "api_developer",
     walletScope: "all",
-    expiresAt: "2026-12-31T23:59:59Z",
+    expiresAt: "2027-12-31T23:59:59Z",
   }),
 });
 const { data } = await response.json();
@@ -100,32 +114,45 @@ HttpRequest request = HttpRequest.newBuilder()
           "name": "CI deploy key",
           "role": "api_developer",
           "walletScope": "all",
-          "expiresAt": "2026-12-31T23:59:59Z"
+          "expiresAt": "2027-12-31T23:59:59Z"
         }"""))
     .build();
 ```
 </Tab>
 </Tabs>
 
-The new key belongs to the project of the key that created it and inherits that project's environment — there is no environment field on the request. The response includes the full `key` value — **save it, it is only returned once**.
+The new key belongs to the project of the key that created it, and takes that project's
+environment. The request has no environment field.
 
-Optional fields: `description`, `permissions` (fine-grained overrides), `allowedIps` (IPv4/IPv6/CIDR ranges), `signingWalletId` / `signingWalletIds`, `walletBindings` (per-wallet permission lists).
+The response includes the full `key` value. **Save it. SDP returns it only once.**
+
+These fields are optional: `description`, `permissions` for finer overrides, `allowedIps` for IPv4,
+IPv6, or CIDR ranges, `signingWalletId` and `signingWalletIds`, and `walletBindings` for per-wallet
+permission lists.
 
 </Tab>
 </Tabs>
 
 ## Rotate a key
 
-Rotation replaces the secret without an availability gap: the new key is a fresh record that clones the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles, while the old key keeps working until its grace deadline. During the grace period both keys are valid; after it, the old key fails with `EXPIRED_API_KEY`.
+Rotation replaces the secret without a gap in availability. SDP creates a fresh key record that
+copies the old key's role, permissions, IP allowlist, wallet bindings, and policy profiles. The old
+key keeps working until its grace deadline.
+
+Both keys are valid during the grace period. After the deadline, the old key fails with
+`EXPIRED_API_KEY`.
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-1. In the API keys table, open the **Actions** dropdown next to the key and click **Rotate key (24h grace)**. The dashboard always uses a 24-hour grace period — use the API for a custom value (0–168h).
+1. Open the **Actions** menu next to the key in the API keys table.
+
+2. Select **Rotate key (24h grace)**. The dashboard always uses a grace period of 24 hours. Use the
+   API to set another value, from 0 to 168 hours.
 
    ![Actions dropdown showing Rotate key and Delete key options](/images/getting-started/api-key-rotate.png)
 
-2. Copy the new key value from the generated key modal — it is shown once.
+3. Copy the new key value from the **API key generated** dialog. SDP shows it once.
 
 </Tab>
 <Tab value="API">
@@ -170,17 +197,24 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-`gracePeriodHours` accepts 0–168 (default 24). A key cannot rotate itself — authenticate the rotation with a different key or a dashboard session.
+`gracePeriodHours` accepts a value from 0 to 168. The default is 24. A key cannot rotate itself.
+Authenticate the rotation with another key, or with a dashboard session.
 
 </Tab>
 </Tabs>
 
-## Revoke a key
+## Delete a key
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-Open the **Actions** dropdown next to the key and click **Delete key**. The key stops working immediately and cannot be restored.
+1. Open the **Actions** menu next to the key.
+
+2. Select **Delete key**.
+
+3. Enter the key's name to confirm, then select **Delete key**.
+
+The key stops working at once, and you cannot restore it. The row stays in the table.
 
 </Tab>
 <Tab value="API">
@@ -219,7 +253,10 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `confirmation` field must match the key's **name**. Revocation takes effect immediately, is idempotent (revoking an already-revoked key succeeds), and cannot be undone. As with rotation, a key cannot revoke itself.
+The `confirmation` field must match the key's **name**.
+
+The deletion takes effect at once, and you cannot undo it. The call is idempotent, so a second call
+on the same key also succeeds. As with rotation, a key cannot delete itself.
 
 </Tab>
 </Tabs>

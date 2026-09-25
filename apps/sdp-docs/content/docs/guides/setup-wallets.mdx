@@ -1,56 +1,68 @@
 ---
-title: Set Up Wallets
-description: Initialize a custody provider and create wallets for signing transactions.
+title: Set up wallets
+description: Initialize a custody provider, then create the custody wallets that sign your transactions.
 ---
 
-A **custody wallet** is a Solana keypair whose key is held and signed for by a custody provider — SDP routes signing requests to whichever provider holds the wallet's key. Initialize a provider, then create wallets for token deployment, minting, transfers, and other onchain operations.
+A **custody wallet** is a Solana keypair that a custody provider holds and signs with. SDP sends
+each signing request to the provider that holds the wallet's key.
+
+Initialize a provider first. Then create the wallets that deploy tokens, mint tokens, send
+transfers, and run other onchain operations.
 
 ## Supported providers
 
-| Provider | Description |
-| --- | --- |
-| **Privy** | Embedded wallet infrastructure platform |
-| **Fireblocks** | Digital asset infrastructure company |
-| **Coinbase CDP** | Embedded wallets for developers |
-| **Para** | Wallet and authentication suite |
-| **Turnkey** | Non-custodial wallet infrastructure platform |
-| **DFNS** | Digital asset wallet infrastructure |
-| **Anchorage** | Regulated institutional crypto custody |
+Four providers are available to every organization. The others need access to be granted for your
+organization before the provider appears. Ask your SDP contact to grant that access.
+
+| Provider | Description | Availability |
+| --- | --- | --- |
+| **Privy** | An embedded wallet infrastructure platform. | Available to every organization |
+| **Fireblocks** | A digital asset infrastructure company. | Access granted per organization |
+| **Coinbase CDP** | Embedded wallets for developers. | Available to every organization |
+| **Para** | A wallet and authentication suite. | Available to every organization |
+| **Turnkey** | A non-custodial wallet infrastructure platform. | Available to every organization |
+| **DFNS** | Digital asset wallet infrastructure. | Access granted per organization |
+| **Anchorage** | Regulated institutional crypto custody. | Access granted per organization |
 
 <Tabs items={["Dashboard", "API"]}>
 <Tab value="Dashboard">
 
-### 1. Navigate to Wallets
+### 1. Open the Wallets page
 
-Open the sidebar and click **Wallets**. If you haven't linked your organization yet, complete the [organization setup](/docs/guides/setup-organization) first.
+Select **Wallets** in the sidebar. If you have not set up your organization yet, complete the
+[organization setup](/docs/guides/setup-organization) first.
 
 ### 2. Choose a custody provider
 
-The Wallets page shows all supported providers, each with a **New wallet** button. Pick the provider that fits your setup.
+The Wallets page shows the providers your organization can use. Each one has a **New wallet**
+button. Choose the provider that fits your setup.
 
-![Wallets page showing custody provider cards](/images/getting-started/wallet-providers.png)
+![Wallets page showing one card per custody provider, each with a New wallet button](/images/getting-started/wallet-providers.png)
 
 ### 3. Create the wallet
 
-Click **New wallet** on your chosen provider. In the modal, enter a label for the wallet and click **Create wallet**.
+1. Select **New wallet** on the provider you chose.
+2. Enter a label for the wallet.
+3. Select **Create wallet**.
 
-<img src="/docs/images/getting-started/wallet-create-modal.png" alt="New wallet modal" width="696" style={{ display: "block", maxWidth: "100%" }} />
+<img src="/docs/images/getting-started/wallet-create-modal.png" alt="The new wallet dialog, with the label field filled in" width="696" style={{ display: "block", maxWidth: "100%" }} />
 
 ### 4. View your wallet
 
-After provisioning, the wallet card appears on the Wallets page with its address, wallet ID, and balance.
+SDP creates the wallet, then shows its card on the Wallets page with the wallet's address, wallet
+ID, and balance.
 
-![Wallets page after wallet creation](/images/getting-started/wallet-created.png)
+![Wallets page showing the card of the new wallet](/images/getting-started/wallet-created.png)
 
-To create additional wallets, click **Create Wallet** in the top right and repeat the process.
+To create another wallet, select **Create wallet** and repeat step 3.
 
 ### 5. Provider capabilities
 
-Each provider supports a different set of operations shown as capability chips:
+Each provider supports a different set of operations. The wallet card shows them as chips:
 
-- **Issuance** — can deploy and mint tokens
-- **Transfers** — can sign payment transactions
-- **Compliance** — can sign freeze/unfreeze instructions
+- **Issuance**. The wallet can deploy and mint tokens.
+- **Transfers**. The wallet can sign payment transactions.
+- **Compliance**. The wallet can sign freeze and unfreeze instructions.
 
 </Tab>
 <Tab value="API">
@@ -150,7 +162,8 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The `purpose` field is optional metadata in the API. The current dashboard create-wallet flow does not expose wallet-purpose selection.
+The `purpose` field is optional metadata in the API. The create-wallet flow in the dashboard does
+not offer a wallet purpose.
 
 #### 3. List wallets
 
@@ -181,9 +194,19 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-Use the returned `walletId` when setting a default wallet or binding wallet-scoped API keys.
+`GET /v1/wallets` returns two identifiers for each wallet. `walletId` is the provider wallet ID,
+for example `privy_wallet_123`. `id` is the SDP wallet ID, for example `cwlt_abc123`.
+
+Use the provider wallet ID (`walletId`) to set the default wallet, and to bind an API key to a
+wallet. Use the SDP wallet ID (`id`) as `sourceCustodyWalletId` or `destinationCustodyWalletId` on
+the payments and ramps endpoints. See
+[Which wallet identifier to use](/docs/wallet-operations#which-wallet-identifier-to-use) for the
+full table.
 
 #### 4. Set a default wallet
+
+`POST /v1/wallets/default-wallet` takes the provider wallet ID in its `walletId` field. It does not
+accept the SDP wallet ID, and it does not accept the wallet address.
 
 <Tabs items={["curl", "TypeScript", "Java"]}>
 <Tab value="curl">
@@ -191,7 +214,7 @@ Use the returned `walletId` when setting a default wallet or binding wallet-scop
 curl -X POST https://api.solana.com/v1/wallets/default-wallet \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
-  -d '{ "walletId": "wal_xyz789" }'
+  -d '{ "walletId": "privy_wallet_123" }'
 ```
 </Tab>
 <Tab value="TypeScript">
@@ -202,7 +225,7 @@ await fetch("https://api.solana.com/v1/wallets/default-wallet", {
     "Authorization": "Bearer sk_test_...",
     "Content-Type": "application/json",
   },
-  body: JSON.stringify({ walletId: "wal_xyz789" }),
+  body: JSON.stringify({ walletId: "privy_wallet_123" }),
 });
 ```
 </Tab>
@@ -213,7 +236,7 @@ HttpRequest request = HttpRequest.newBuilder()
     .header("Authorization", "Bearer sk_test_...")
     .header("Content-Type", "application/json")
     .POST(HttpRequest.BodyPublishers.ofString("""
-        { "walletId": "wal_xyz789" }"""))
+        { "walletId": "privy_wallet_123" }"""))
     .build();
 ```
 </Tab>

@@ -1,31 +1,38 @@
 ---
 title: Documentation for AI
-description: Public machine-readable entry points and guidance for agents and AI systems consuming SDP docs and APIs.
+description: The machine-readable entry points that agents and AI systems use to read SDP docs and APIs.
 ---
 
-Use this page when you need the public AI-facing entry points for Solana Developer Platform.
+Use this page when you need the public AI-facing entry points for the Solana Developer Platform.
 
 ## Machine-readable resources
 
-- [llms.txt](/docs/ai/llms.txt): Concise discovery file with canonical URLs, supported surfaces, and key starting pages.
-- [llms-full.txt](/docs/ai/llms-full.txt): Expanded docs map generated from the docs navigation and public API reference.
-- [OpenAPI](/docs/reference/api): Human-readable API reference generated from the public contract.
-- [OpenAPI JSON](https://api.solana.com/openapi.json): Machine-readable API contract for the public SDP API.
-- [API llms.txt](https://api.solana.com/llms.txt): API-only discovery entry point for endpoint families and authentication expectations.
-- [Postman Collection](/docs/reference/postman-collection): Downloadable public collection generated from the same OpenAPI source.
+- [llms.txt](/docs/ai/llms.txt) is a concise discovery file. It lists the canonical URLs, the
+  supported API areas, and the key starting pages.
+- [llms-full.txt](/docs/ai/llms-full.txt) is an expanded docs map. SDP generates it from the docs
+  navigation and the public API reference.
+- [OpenAPI](/docs/reference/api) is the human-readable API reference. SDP generates it from the
+  public contract.
+- [OpenAPI JSON](https://api.solana.com/openapi.json) is the machine-readable API contract for the
+  public SDP API.
+- [API llms.txt](https://api.solana.com/llms.txt) is the API-only discovery entry point. It covers
+  the endpoint families and the authentication expectations.
+- [Postman collection](/docs/reference/postman-collection) is a downloadable public collection. SDP
+  generates it from the same OpenAPI source.
 
 ## Recommended ingestion order
 
 1. Start with [llms.txt](/docs/ai/llms.txt).
 2. Expand to [llms-full.txt](/docs/ai/llms-full.txt) when you need broader site coverage.
-3. Use the [API reference](/docs/reference/api) and [OpenAPI JSON](https://api.solana.com/openapi.json) for exact request and response schemas.
+3. Use the [API reference](/docs/reference/api) and the
+   [OpenAPI JSON](https://api.solana.com/openapi.json) for exact request and response schemas.
 4. Use the product guides for workflow sequencing, operational constraints, and supported patterns.
 
 ## Scope
 
-- These AI resources are limited to the supported public SDP surface.
-- Hidden or internal-only route families are intentionally excluded.
-- Public docs should be treated as the source of truth ahead of internal implementation details.
+- These AI resources cover the supported public SDP API areas only.
+- SDP excludes the hidden and internal-only route families on purpose.
+- Treat the public docs as the source of truth, ahead of any internal implementation detail.
 
 ## Coverage focus
 
