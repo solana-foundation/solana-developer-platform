@@ -3,7 +3,15 @@ import { withHeliusApiKey } from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
 import { SOL_MINT } from "@sdp/types";
-import type { Address } from "@solana/kit";
+import { type Address, createSolanaRpc } from "@solana/kit";
+import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import {
+  amountToUiAmountForInterestBearingMintWithoutSimulation,
+  amountToUiAmountForScaledUiAmountMintWithoutSimulation,
+  fetchMaybeMint,
+  type Mint,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { observedTransferKind } from "@/db/repositories/payments.kind";
 import type {
   PaymentTransferDirection as TransferDirection,
@@ -199,9 +207,16 @@ function readInstructionInfoInteger(
   return null;
 }
 
+/**
+ * The raw UI amount string the RPC reported for a parsed token amount, or
+ * null when the payload carries none (plain `transfer` instructions have no
+ * token amount at all, and `uiAmountString` is nullable even where present).
+ * Extension-aware conversion decides separately whether a decimals-only
+ * fallback is safe.
+ */
 function readTokenAmountInfo(
   info: Record<string, unknown> | undefined
-): { amount: bigint; decimals: number; uiAmount: string | null } | null {
+): { amount: bigint; decimals: number; uiAmountString: string | null } | null {
   const rawTokenAmount = info?.tokenAmount;
   if (!rawTokenAmount || typeof rawTokenAmount !== "object" || Array.isArray(rawTokenAmount)) {
     const rawAmount = readInstructionInfoInteger(info, "amount");
@@ -215,11 +230,7 @@ function readTokenAmountInfo(
       return null;
     }
 
-    return {
-      amount: rawAmount,
-      decimals: decimalsValue,
-      uiAmount: formatDecimalAmount(rawAmount, decimalsValue),
-    };
+    return { amount: rawAmount, decimals: decimalsValue, uiAmountString: null };
   }
 
   const tokenAmountRecord = rawTokenAmount as RpcTokenBalanceAmount;
@@ -242,12 +253,207 @@ function readTokenAmountInfo(
   return {
     amount: amountValue,
     decimals: decimalsValue,
-    uiAmount:
+    uiAmountString:
       typeof tokenAmountRecord.uiAmountString === "string" &&
       tokenAmountRecord.uiAmountString.trim()
         ? tokenAmountRecord.uiAmountString
-        : formatDecimalAmount(amountValue, decimalsValue),
+        : null,
   };
+}
+
+/**
+ * How a mint mutates the UI amount its holders see, resolved from the mint
+ * account's Token-2022 extension state.
+ *
+ * - `scaled` / `interest-bearing`: the on-chain program converts raw units
+ *   through the extension, so a decimals-only amount would misreport the
+ *   transfer while the row still claims to be confirmed.
+ * - `static`: no amount-mutating extension (including legacy SPL mints), so
+ *   the RPC-reported amount or decimals-only formatting is the amount the
+ *   holder sees.
+ * - `unresolved`: the mint account could not be read or decoded. Extension
+ *   state cannot be distinguished from none, so observations against this
+ *   mint are dropped rather than confirmed with a possibly-wrong amount.
+ */
+type ObservedMintAmountState =
+  | { kind: "static" }
+  | {
+      kind: "scaled";
+      multiplier: number;
+      newMultiplier: number;
+      newMultiplierEffectiveTimestamp: bigint;
+    }
+  | {
+      kind: "interest-bearing";
+      initializationTimestamp: bigint;
+      preUpdateAverageRate: number;
+      lastUpdateTimestamp: bigint;
+      currentRate: number;
+    }
+  | { kind: "unresolved" };
+
+function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
+  if (mint.extensions.__option !== "Some") {
+    return { kind: "static" };
+  }
+
+  for (const extension of mint.extensions.value) {
+    // biome-ignore lint/security/noSecrets: Token-2022 extension name, not a secret.
+    if (extension.__kind === "ScaledUiAmountConfig") {
+      return {
+        kind: "scaled",
+        multiplier: extension.multiplier,
+        newMultiplier: extension.newMultiplier,
+        newMultiplierEffectiveTimestamp: extension.newMultiplierEffectiveTimestamp,
+      };
+    }
+
+    if (extension.__kind === "InterestBearingConfig") {
+      return {
+        kind: "interest-bearing",
+        initializationTimestamp: extension.initializationTimestamp,
+        preUpdateAverageRate: extension.preUpdateAverageRate,
+        lastUpdateTimestamp: extension.lastUpdateTimestamp,
+        currentRate: extension.currentRate,
+      };
+    }
+  }
+
+  return { kind: "static" };
+}
+
+async function fetchObservedMintAmountState(
+  rpc: ReturnType<typeof createSolanaRpc>,
+  mint: Address
+): Promise<ObservedMintAmountState> {
+  try {
+    const maybeMint = await fetchMaybeMint(rpc, mint);
+    if (!maybeMint.exists) {
+      // A mint account that is gone (Token-2022 close-mint) leaves its
+      // extension history unrecoverable.
+      return { kind: "unresolved" };
+    }
+
+    if (maybeMint.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
+      return resolveMintAmountState(maybeMint.data);
+    }
+
+    // Legacy SPL mints carry no extensions by construction; any other owner
+    // is not a mint the parsed instruction could have moved.
+    return maybeMint.programAddress === TOKEN_PROGRAM_ADDRESS
+      ? { kind: "static" }
+      : { kind: "unresolved" };
+  } catch (error) {
+    getLogger().warn(
+      { mint, error: error instanceof Error ? error.message : String(error) },
+      "observed-transfers: failed to resolve mint extension state; dropping its observations"
+    );
+    return { kind: "unresolved" };
+  }
+}
+
+/**
+ * Seconds of the block the transaction confirmed in — the historical clock the
+ * on-chain conversion used. Null when the block time is unknown, in which case
+ * an extension-aware conversion cannot be reconstructed.
+ */
+function resolveObservedTimestampSeconds(
+  blockTime: bigint | number | null | undefined
+): number | null {
+  if (typeof blockTime === "bigint") {
+    const seconds = Number(blockTime);
+    return Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  }
+
+  if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
+    return blockTime;
+  }
+
+  return null;
+}
+
+/**
+ * Converts a parsed raw token amount into the UI amount the mint's holders
+ * see, or null when no trustworthy amount can be produced (the caller drops
+ * the observation instead of confirming a wrong one).
+ *
+ * Extension state decides the conversion: static mints keep the RPC-reported
+ * amount (or decimals-only formatting); `ScaledUiAmountConfig` and
+ * `InterestBearingConfig` mints are recomputed from the extension state and
+ * the historical clock at confirmation, ignoring any decimals-only amount the
+ * RPC reported for them. When the extension state is unresolved, a
+ * Token-2022-labeled instruction is dropped (fail closed) while a
+ * classic-labeled one keeps its decimals-only amount, since legacy SPL mints
+ * cannot carry the extensions.
+ */
+function convertObservedTokenAmount(input: {
+  rawAmount: bigint;
+  decimals: number;
+  rpcUiAmount: string | null;
+  mint: string | null;
+  isToken2022Instruction: boolean;
+  mintStates: Map<string, ObservedMintAmountState>;
+  timestampSeconds: number | null;
+}): string | null {
+  const {
+    rawAmount,
+    decimals,
+    rpcUiAmount,
+    mint,
+    isToken2022Instruction,
+    mintStates,
+    timestampSeconds,
+  } = input;
+
+  const state = mint ? mintStates.get(mint) : undefined;
+  if (!state || state.kind === "unresolved") {
+    // Legacy SPL mints cannot carry amount-mutating extensions, so a
+    // classic-labeled instruction keeps its decimals-only amount even when
+    // the mint account cannot be resolved. A Token-2022 label fails closed:
+    // the unresolved mint could be scaled or interest-bearing. A resolvable
+    // mint overrides the label through its owner program either way.
+    return isToken2022Instruction
+      ? null
+      : (rpcUiAmount ?? formatDecimalAmount(rawAmount, decimals));
+  }
+
+  if (state.kind === "static") {
+    return rpcUiAmount ?? formatDecimalAmount(rawAmount, decimals);
+  }
+
+  if (timestampSeconds === null) {
+    return null;
+  }
+
+  if (state.kind === "scaled") {
+    const effectiveMultiplier =
+      state.newMultiplierEffectiveTimestamp !== 0n &&
+      BigInt(timestampSeconds) >= state.newMultiplierEffectiveTimestamp
+        ? state.newMultiplier
+        : state.multiplier;
+    return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
+      rawAmount,
+      decimals,
+      effectiveMultiplier
+    );
+  }
+
+  // Interest-bearing: a rate update recorded after the transaction replaced
+  // the historical average rate, so the accrual at confirmation time cannot
+  // be reconstructed from the current mint state.
+  if (BigInt(timestampSeconds) < state.lastUpdateTimestamp) {
+    return null;
+  }
+
+  return amountToUiAmountForInterestBearingMintWithoutSimulation(
+    rawAmount,
+    decimals,
+    timestampSeconds,
+    Number(state.lastUpdateTimestamp),
+    Number(state.initializationTimestamp),
+    state.preUpdateAverageRate,
+    state.currentRate
+  );
 }
 
 function compareSignatureHistoryDesc(
@@ -448,35 +654,24 @@ async function fetchParsedTransaction(
   return pending;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
-function buildObservedTransferRows(
-  parsedTransaction: ParsedTransactionResponse["result"],
-  signatureInfo: SignatureHistoryEntry,
-  context: ObservedTransferContext
-): TransferRow[] {
-  if (!parsedTransaction) {
-    return [];
-  }
-
-  const signature = String(signatureInfo.signature);
-  // A transaction confirmed on a minority fork can be dropped and re-land in a
-  // different slot, so slot and blockTime always come from the fresh
-  // signature-history entry; the cached body's copy is only a fallback for
-  // history entries that lack the metadata.
-  const timestamp = resolveObservedTimestamp(
-    signatureInfo.blockTime ?? parsedTransaction.blockTime
-  );
-  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
-  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
-
+/**
+ * Token-account address → the mint, owner, and decimals the transaction's own
+ * pre/post token balances report for it. Parsed token instructions often name
+ * only the token accounts, so this map is what ties an instruction to its mint
+ * for extension resolution and row synthesis.
+ */
+function buildTokenAccountMetadataMap(
+  parsedTransaction: ParsedTransaction
+): Map<string, { decimals: number | null; mint: string | null; owner: string | null }> {
   const accountKeys = (parsedTransaction.transaction?.message?.accountKeys ?? [])
     .map((accountKey) => resolveParsedAccountKey(accountKey))
     .filter((accountKey): accountKey is string => Boolean(accountKey));
+
   const tokenAccountMetadata = new Map<
     string,
     { decimals: number | null; mint: string | null; owner: string | null }
   >();
-  const observedRows = new Map<string, TransferRow>();
+
   const preTokenBalances = parsedTransaction.meta?.preTokenBalances ?? [];
   const postTokenBalances = parsedTransaction.meta?.postTokenBalances ?? [];
 
@@ -509,6 +704,99 @@ function buildObservedTransferRows(
     });
   }
 
+  return tokenAccountMetadata;
+}
+
+/**
+ * The distinct mints whose extension state the parsed transaction's token
+ * instructions need: the explicit mint of checked instructions, or the mint
+ * the instruction's token accounts carry in the token balances.
+ */
+function collectObservedMintAddresses(parsedTransaction: ParsedTransaction): Address[] {
+  const tokenAccountMetadata = buildTokenAccountMetadataMap(parsedTransaction);
+  const mints = new Set<string>();
+
+  for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
+    const parsedType = instruction.parsed?.type;
+    const info = instruction.parsed?.info;
+
+    if (!parsedType || !info) {
+      continue;
+    }
+
+    const normalizedProgram = (instruction.program ?? "").toLowerCase();
+    if (!normalizedProgram.includes("token")) {
+      continue;
+    }
+
+    // Only the instruction families the row builder synthesizes rows for.
+    const tokenAccountKeys =
+      parsedType === "transfer" || parsedType === "transferChecked"
+        ? ["source", "destination"]
+        : parsedType === "mintTo" || parsedType === "mintToChecked"
+          ? ["account"]
+          : null;
+    if (!tokenAccountKeys) {
+      continue;
+    }
+
+    const explicitMint = readInstructionInfoString(info, "mint");
+    if (explicitMint) {
+      mints.add(explicitMint);
+      continue;
+    }
+
+    for (const key of tokenAccountKeys) {
+      const accountAddress = readInstructionInfoString(info, key);
+      const mint = accountAddress ? tokenAccountMetadata.get(accountAddress)?.mint : null;
+      if (mint) {
+        mints.add(mint);
+      }
+    }
+  }
+
+  return [...mints] as Address[];
+}
+
+/**
+ * Resolves every requested mint's extension state, coalescing repeated
+ * requests for the same mint within one call.
+ */
+async function resolveObservedMintAmountStates(
+  rpc: ReturnType<typeof createSolanaRpc>,
+  mints: Address[]
+): Promise<Map<string, ObservedMintAmountState>> {
+  const states = await Promise.all(
+    mints.map(async (mint) => [mint, await fetchObservedMintAmountState(rpc, mint)] as const)
+  );
+  return new Map(states);
+}
+
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Parsed transaction synthesis intentionally handles both SOL and SPL transfers in one pass.
+function buildObservedTransferRows(
+  parsedTransaction: ParsedTransactionResponse["result"],
+  signatureInfo: SignatureHistoryEntry,
+  context: ObservedTransferContext,
+  mintStates: Map<string, ObservedMintAmountState>,
+  timestampSeconds: number | null
+): TransferRow[] {
+  if (!parsedTransaction) {
+    return [];
+  }
+
+  const signature = String(signatureInfo.signature);
+  // A transaction confirmed on a minority fork can be dropped and re-land in a
+  // different slot, so slot and blockTime always come from the fresh
+  // signature-history entry; the cached body's copy is only a fallback for
+  // history entries that lack the metadata.
+  const timestamp = resolveObservedTimestamp(
+    signatureInfo.blockTime ?? parsedTransaction.blockTime
+  );
+  const slot = resolveObservedSlot(signatureInfo.slot, parsedTransaction.slot);
+  const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
+
+  const tokenAccountMetadata = buildTokenAccountMetadataMap(parsedTransaction);
+  const observedRows = new Map<string, TransferRow>();
   for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
     const parsedType = instruction.parsed?.type;
     const info = instruction.parsed?.info;
@@ -589,6 +877,7 @@ function buildObservedTransferRows(
     if (!normalizedProgram.includes("token")) {
       continue;
     }
+    const isToken2022Instruction = normalizedProgram.includes("token-2022");
 
     if (parsedType === "mintTo" || parsedType === "mintToChecked") {
       const destinationTokenAccount = readInstructionInfoString(info, "account");
@@ -621,8 +910,19 @@ function buildObservedTransferRows(
         continue;
       }
 
-      const resolvedUiAmount =
-        tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
+      const resolvedUiAmount = convertObservedTokenAmount({
+        rawAmount,
+        decimals: resolvedDecimals,
+        rpcUiAmount: tokenAmount?.uiAmountString ?? null,
+        mint,
+        isToken2022Instruction,
+        mintStates,
+        timestampSeconds,
+      });
+      if (resolvedUiAmount === null) {
+        continue;
+      }
+
       const dedupeKey = `${destinationWalletId}:${signature}:${mint}:mint:${rawAmount.toString()}`;
 
       if (observedRows.has(dedupeKey)) {
@@ -718,8 +1018,18 @@ function buildObservedTransferRows(
 
     const direction: TransferDirection =
       destinationWalletId && !sourceWalletId ? "inbound" : "outbound";
-    const resolvedUiAmount =
-      tokenAmount?.uiAmount ?? formatDecimalAmount(rawAmount, resolvedDecimals);
+    const resolvedUiAmount = convertObservedTokenAmount({
+      rawAmount,
+      decimals: resolvedDecimals,
+      rpcUiAmount: tokenAmount?.uiAmountString ?? null,
+      mint,
+      isToken2022Instruction,
+      mintStates,
+      timestampSeconds,
+    });
+    if (resolvedUiAmount === null) {
+      continue;
+    }
     const dedupeKey = `${walletId}:${signature}:${mint}:${direction}:${rawAmount.toString()}`;
 
     if (observedRows.has(dedupeKey)) {
@@ -782,7 +1092,10 @@ export async function buildObservedTransfersForSignatures(
 
   // Bounded: the signature list is capped at historyLimit (200), and a bare
   // Promise.allSettled would open that many concurrent getTransaction calls
-  // against the billed RPC per request.
+  // against the billed RPC per request. Mint extension-state reads are
+  // memoized per mint for the whole call, so repeated signatures over the
+  // same mint cost one getAccountInfo.
+  const mintStateRpc = createSolanaRpc(resolveSignatureHistoryRpcUrl(env));
   const settled = await mapSettledWithConcurrency(
     signatures,
     SIGNATURE_HISTORY_LOOKUP_CONCURRENCY,
@@ -795,7 +1108,23 @@ export async function buildObservedTransfersForSignatures(
         String(signatureInfo.signature),
         isFinalized
       );
-      return buildObservedTransferRows(parsedTransaction, signatureInfo, context);
+      // The historical clock and the mints' extension state decide whether an
+      // extension-aware UI amount can be produced at all; both come from the
+      // body and the fresh history entry before any row is synthesized.
+      const timestampSeconds = resolveObservedTimestampSeconds(
+        signatureInfo.blockTime ?? parsedTransaction?.blockTime
+      );
+      const mintStates = await resolveObservedMintAmountStates(
+        mintStateRpc,
+        parsedTransaction ? collectObservedMintAddresses(parsedTransaction) : []
+      );
+      return buildObservedTransferRows(
+        parsedTransaction,
+        signatureInfo,
+        context,
+        mintStates,
+        timestampSeconds
+      );
     }
   );
 
