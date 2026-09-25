@@ -293,6 +293,68 @@ const seeders = {
   rings: seedRings,
 } as const satisfies Record<UnifiedTransactionModule, (status: string) => Promise<string>>;
 
+/**
+ * One escrow movement as the reconciler would have read it off the chain
+ * (0111). Signatures are free-form text in the ledger; matching against a
+ * trade's close signature is plain string equality.
+ */
+async function seedLegTransfer(
+  tradeId: string,
+  side: "a" | "b",
+  signature: string,
+  direction: "in" | "out",
+  amount: string,
+  sequence: string
+): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO dvp_leg_transfers
+       (trade_id, side, signature, direction, amount, slot, block_time, fee_payer,
+        finalized, sequence)
+     VALUES (?, ?, ?, ?, ?, '420', '1789000000', 'UnifiedViewWallet111', TRUE, ?)`,
+    [tradeId, side, signature, direction, amount, sequence]
+  );
+}
+
+/**
+ * A closed trade whose side-A escrow peaked at 100 units (1,000,000 base of 4
+ * decimals), with whatever escrow history the caller seeds.
+ */
+async function seedClosedTrade(
+  tradeId: string,
+  status: string,
+  closeSignature: string
+): Promise<void> {
+  await getDb(env).execute(
+    `INSERT INTO dvp_trades
+       (id, organization_id, project_id, swap_dvp, settlement_authority, user_a, user_b,
+        mint_a, mint_b, nonce, token_program_a, token_program_b, amount_a, amount_b,
+        expiry_timestamp, user_a_settlement_destination, user_b_settlement_destination,
+        escrow_a, escrow_b, status, escrow_a_amount, escrow_b_amount,
+        escrow_a_peak_amount, escrow_b_peak_amount, decimals_a, decimals_b, close_signature,
+        closed_at)
+     VALUES (?, ?, ?, ?, 'authority', 'user-a', 'user-b', 'mint-a', 'mint-b', '1',
+             'program-a', 'program-b', '1', '2', '2000000000', 'destination-a',
+             'destination-b', 'escrow-a', 'escrow-b', ?, '0', '0', '1000000', '0', 4, 6,
+             ?, ?)`,
+    [tradeId, TEST_ORG.id, PROJECT, `swap-${tradeId}`, status, closeSignature, CREATED_AT]
+  );
+  await getDb(env).execute(
+    `INSERT INTO dvp_leg_funding_claims
+       (trade_id, side, organization_id, project_id, custody_wallet_id, signature, expiry_height)
+     VALUES (?, 'a', ?, ?, ?, 'fund-signature', '100')`,
+    [tradeId, TEST_ORG.id, PROJECT, CUSTODY_WALLET]
+  );
+}
+
+async function closeAmount(tradeId: string, side: "a" | "b"): Promise<string | null | undefined> {
+  const row = await getDb(env).queryOne<{ amount: string | null }>(
+    `SELECT amount FROM unified_transactions
+     WHERE module = 'dvp' AND kind = 'close' AND module_id = ? AND id = ?`,
+    [tradeId, `${tradeId}:close:${side}`]
+  );
+  return row === null ? undefined : row.amount;
+}
+
 describe("unified_transactions view (postgres)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
@@ -437,6 +499,10 @@ describe("unified_transactions view (postgres)", () => {
        VALUES (?, 'a', ?, ?, ?, 'fund-signature', '100')`,
       [tradeId, TEST_ORG.id, PROJECT, CUSTODY_WALLET]
     );
+    // The close rows report the ledger deltas the reconciler recorded, one per
+    // leg, matched to the trade's closing signature.
+    await seedLegTransfer(tradeId, "a", "close-signature", "out", "1000000", "1");
+    await seedLegTransfer(tradeId, "b", "close-signature", "out", "2000000000", "1");
     const dvpRows = await getDb(env).queryMany<{
       amount: string | null;
       custody_wallet_id: string | null;
@@ -467,5 +533,42 @@ describe("unified_transactions view (postgres)", () => {
     );
     if (ringsAmount === null) throw new Error("missing Rings amount fixture");
     expect(ringsAmount.amount_matches).toBe(true);
+  });
+
+  it("reports a reclaimed-then-cancelled close as its own outflow, not the peak (SOLA9-579)", async () => {
+    const tradeId = "dvp_reclaim_cancel";
+    await seedClosedTrade(tradeId, "cancelled", "cancel-signature");
+    // A leg that funded to its 100-unit peak, was reclaimed in full, and was
+    // then cancelled with a 40-unit outflow (a partial reclaim the ledger
+    // recorded against the closing signature).
+    await seedLegTransfer(tradeId, "a", "fund-signature", "in", "1000000", "1");
+    await seedLegTransfer(tradeId, "a", "reclaim-signature", "out", "600000", "2");
+    await seedLegTransfer(tradeId, "a", "cancel-signature", "out", "400000", "3");
+
+    await expect(closeAmount(tradeId, "a")).resolves.toBe("40");
+  });
+
+  it("reports a reclaimed-then-redeposited-then-cancelled close as its own outflow", async () => {
+    const tradeId = "dvp_reclaim_redeposit_cancel";
+    await seedClosedTrade(tradeId, "cancelled", "cancel-signature");
+    // The same peak of 100, reclaimed in full, re-funded with 40, then
+    // cancelled by moving those 40 back out. The peak (100) matches neither
+    // the balance at close (0) nor the closing transfer (40).
+    await seedLegTransfer(tradeId, "a", "fund-signature", "in", "1000000", "1");
+    await seedLegTransfer(tradeId, "a", "reclaim-signature", "out", "1000000", "2");
+    await seedLegTransfer(tradeId, "a", "redeposit-signature", "in", "400000", "3");
+    await seedLegTransfer(tradeId, "a", "cancel-signature", "out", "400000", "4");
+
+    await expect(closeAmount(tradeId, "a")).resolves.toBe("40");
+  });
+
+  it("leaves a close whose signature the ledger has not matched yet unknown", async () => {
+    const tradeId = "dvp_unreconciled_close";
+    await seedClosedTrade(tradeId, "settled", "settle-signature");
+    await seedLegTransfer(tradeId, "a", "fund-signature", "in", "1000000", "1");
+    // No ledger row carries the closing signature: the reconciler has not
+    // recorded the settle yet.
+
+    await expect(closeAmount(tradeId, "a")).resolves.toBeNull();
   });
 });
