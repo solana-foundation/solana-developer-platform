@@ -237,6 +237,68 @@ describe("ApiPlaygroundShell response identity isolation", () => {
     expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
   });
 
+  it("keeps a rendered response hidden when switching away and back to the key it was produced under", async () => {
+    storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
+    storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "1000 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            body: { project: "project-a", balance: "42 SOL" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const view = render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+
+    // The response lands and renders while the identity still matches.
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(view.container.textContent).toContain('"balance": "1000 SOL"'));
+
+    // Leaving the identity hides the rendered response…
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-b" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+
+    // …and returning to the identity it was produced under must not resurface
+    // it: the epoch gate keeps it hidden even though the key IDs match again.
+    view.rerender(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <ApiPlaygroundShell apiKeyId="key-a" endpoints={[endpoint]} productName="Test product" />
+      </I18nProvider>
+    );
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+
+    // A request issued under the restored identity still works and renders.
+    fireEvent.click(view.getByRole("button", { name: "Run request" }));
+    await waitFor(() => expect(view.container.textContent).toContain('"balance": "42 SOL"'));
+    expect(view.container.textContent).not.toContain('"balance": "1000 SOL"');
+  });
+
   it("executes subsequent requests with the new key identity after a change", async () => {
     storeApiKeySecret({ value: "sk_test_project_a", apiKeyId: "key-a" });
     storeApiKeySecret({ value: "sk_test_project_b", apiKeyId: "key-b" });
