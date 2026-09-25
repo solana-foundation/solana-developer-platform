@@ -47,6 +47,18 @@ const createdEvent = {
   mgiTransactionId: created.mgiTransactionId,
 } satisfies MoneygramRampEvent;
 const deposit = { address: DEPOSIT_WALLET, chain: "solana", asset: "USDC", amount: "25" };
+const completedTransaction = { id: created.id, type: "transfer", status: "complete", amount: 25 };
+const completedEvent = {
+  kind: "onramp_completed",
+  sessionId: "mg_session_1",
+  transactionId: created.id,
+  status: completedTransaction.status,
+  amount: completedTransaction.amount,
+} satisfies MoneygramRampEvent;
+const onrampQuote = {
+  ...props.quote,
+  widgetUrl: "https://playground.xramps.moneygram.com/sdk/widget.html?mode=on-ramp",
+};
 
 type RampsConfig = Parameters<NonNullable<Window["RampsSDK"]>["createRamps"]>[0];
 let captured: RampsConfig | undefined;
@@ -82,10 +94,12 @@ afterEach(() => {
   vi.mocked(fundMoneygramDeposit).mockReset();
 });
 
-async function renderWidget(): Promise<RampsConfig> {
+async function renderWidget(
+  overrides: Partial<MoneygramRampWidgetProps> = {}
+): Promise<RampsConfig> {
   render(
     <I18nProvider locale="en" messages={messages}>
-      <MoneygramRampWidget {...props} />
+      <MoneygramRampWidget {...props} {...overrides} />
     </I18nProvider>
   );
   await waitFor(() => expect(createRamps).toHaveBeenCalledTimes(1));
@@ -168,6 +182,45 @@ describe("MoneygramRampWidget", () => {
       translate(messages, "DashboardPayments.ramps.moneygramTransactionUnreported")
     );
     expect(fundMoneygramDeposit).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).not.toHaveBeenCalled();
+  });
+
+  it("waits for a successful created post before reporting an onramp completion", async () => {
+    const posted = Promise.withResolvers<void>();
+    vi.mocked(postMoneygramRampEvent).mockReturnValueOnce(posted.promise);
+    const config = await renderWidget({ direction: "onramp", quote: onrampQuote });
+    config.onTransactionCreated(created);
+
+    config.onComplete?.(completedTransaction);
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
+    posted.resolve(undefined);
+
+    await waitFor(() => expect(postMoneygramRampEvent).toHaveBeenCalledTimes(2));
+    expect(postMoneygramRampEvent).toHaveBeenNthCalledWith(2, completedEvent, expect.any(Function));
+  });
+
+  it("re-posts a failed created event before reporting an onramp completion", async () => {
+    vi.mocked(postMoneygramRampEvent)
+      .mockRejectedValueOnce(new Error("Created event request failed"))
+      .mockResolvedValueOnce(undefined);
+    const config = await renderWidget({ direction: "onramp", quote: onrampQuote });
+    config.onTransactionCreated(created);
+
+    config.onComplete?.(completedTransaction);
+
+    await waitFor(() => expect(postMoneygramRampEvent).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(postMoneygramRampEvent).mock.calls[1]).toEqual(
+      vi.mocked(postMoneygramRampEvent).mock.calls[0]
+    );
+    expect(postMoneygramRampEvent).toHaveBeenNthCalledWith(3, completedEvent, expect.any(Function));
+  });
+
+  it("does not report an onramp completion before a created event", async () => {
+    const config = await renderWidget({ direction: "onramp", quote: onrampQuote });
+
+    config.onComplete?.(completedTransaction);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(postMoneygramRampEvent).not.toHaveBeenCalled();
   });
 });
