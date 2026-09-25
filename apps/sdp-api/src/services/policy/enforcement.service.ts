@@ -291,7 +291,7 @@ export function walletOperationActorFromAuth(auth: ApiKeyContext): WalletOperati
 
   if (auth.userId) {
     return {
-      type: auth.authType,
+      type: auth.approvedWalletOperationActorType ?? auth.authType,
       id: auth.userId,
       userId: auth.userId,
     };

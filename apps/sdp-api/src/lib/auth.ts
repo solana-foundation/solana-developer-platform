@@ -10,7 +10,9 @@ import type { Context } from "hono";
 import type { Env } from "@/types/env";
 import { AppError, badRequest } from "./errors";
 
-export type AuthType = "api_key" | "clerk" | "session";
+export const HUMAN_AUTH_TYPES = ["clerk", "session"] as const;
+export type HumanAuthType = (typeof HUMAN_AUTH_TYPES)[number];
+export type AuthType = "api_key" | HumanAuthType;
 
 interface AuthContextBase {
   id: string;
@@ -33,7 +35,13 @@ interface AuthContextBase {
 export type ApiKeyContext = AuthContextBase &
   (
     | { authType: "api_key"; apiKeyId: string; userId: null }
-    | { authType: "clerk" | "session"; apiKeyId: null; userId: string }
+    | {
+        authType: HumanAuthType;
+        apiKeyId: null;
+        userId: string;
+        /** Original author type, set only by authenticated approved-operation replay. */
+        approvedWalletOperationActorType?: HumanAuthType;
+      }
   );
 
 export interface ClerkAuthContext {
@@ -116,6 +124,7 @@ export function getOptionalAuth(c: Context<{ Bindings: Env }>): ApiKeyContext | 
       signingWalletIds: [],
       walletBindings: [],
       authType: "session",
+      approvedWalletOperationActorType: c.get("approvedWalletOperationActorType"),
       userId: session.userId,
       apiKeyId: null,
     };
