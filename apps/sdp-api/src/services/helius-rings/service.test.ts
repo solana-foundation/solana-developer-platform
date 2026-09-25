@@ -446,7 +446,7 @@ describe("HeliusRingsService", () => {
       const outage = new InMemoryRingsGateway();
       outage.provisionIdentity = () =>
         Promise.reject(new HeliusRingsError("gateway_unavailable", "controlled provider outage"));
-      await service({ gateway: outage })
+      const outageResult = await service({ gateway: outage })
         .provisionPrivateWallet({
           sdpWalletId: "wal_retry_same",
           sdpAddress: "addrA",
@@ -455,8 +455,20 @@ describe("HeliusRingsService", () => {
         })
         .then(
           () => null,
-          () => undefined
+          (error: unknown) => error
         );
+      expect(outageResult).toMatchObject({ code: "gateway_unavailable" });
+
+      const reserved = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
+        ...tenant,
+        sdpWalletId: "wal_retry_same",
+      });
+      expect(reserved).toMatchObject({
+        status: "pending",
+        custody_wallet_id: "cw_retry_a",
+        owner_address: null,
+        shielded_address: null,
+      });
 
       const wallet = await service({ gateway: new InMemoryRingsGateway() }).provisionPrivateWallet({
         sdpWalletId: "wal_retry_same",
@@ -550,6 +562,65 @@ describe("HeliusRingsService", () => {
         custody_wallet_id: "cw_reissue_a",
         owner_address: null,
         shielded_address: null,
+      });
+    });
+
+    it("refuses a call that resolves a different custody row for an already-ready wallet", async () => {
+      // The wallet provisioned fully under custody row A, so its identity is
+      // already registered under that binding.
+      await seedCustodyWalletRow({
+        configId: "cc_ready_a",
+        custodyWalletId: "cw_ready_a",
+        providerWalletId: "wal_ready_1",
+        publicKey: "addrA",
+      });
+      const provisioned = await service({
+        gateway: new InMemoryRingsGateway(),
+      }).provisionPrivateWallet({
+        sdpWalletId: "wal_ready_1",
+        sdpAddress: "addrA",
+        name: "Ops",
+        custodyWalletId: "cw_ready_a",
+      });
+      expect(provisioned.status).toBe("ready");
+
+      // The provider retired A and reissued its wallet id to active row B, so
+      // a later call now resolves B. The ready wallet must not adopt it.
+      await seedCustodyWalletRow({
+        configId: "cc_ready_b",
+        custodyWalletId: "cw_ready_b",
+        providerWalletId: "wal_ready_1",
+        publicKey: "addrB",
+      });
+      await getDb(env)
+        .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+        .bind("cw_ready_a")
+        .run();
+      const retry = await service({ gateway: new InMemoryRingsGateway() })
+        .provisionPrivateWallet({
+          sdpWalletId: "wal_ready_1",
+          sdpAddress: "addrB",
+          name: "Ops",
+          custodyWalletId: "cw_ready_b",
+        })
+        .then(
+          () => null,
+          (error: unknown) => error
+        );
+
+      expect(retry).toMatchObject({ code: "conflict" });
+
+      const row = await createHeliusRingsWalletRepository(env).getWalletBySdpWalletId({
+        ...tenant,
+        sdpWalletId: "wal_ready_1",
+      });
+      // Fail closed: still ready under the original binding, having adopted
+      // none of B's identity.
+      expect(row).toMatchObject({
+        status: "ready",
+        custody_wallet_id: "cw_ready_a",
+        owner_address: "addrA",
+        shielded_address: provisioned.shieldedAddress,
       });
     });
 

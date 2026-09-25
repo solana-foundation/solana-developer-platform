@@ -335,7 +335,7 @@ export class HeliusRingsService {
     ) {
       throw new HeliusRingsError(
         "conflict",
-        `this rings wallet is already bound to custody wallet ${wallet.custody_wallet_id}; resolve that custody row instead of provisioning from a reissued provider id`
+        "this rings wallet is already bound to a different custody wallet; resolve the original custody row instead of provisioning from a reissued provider id"
       );
     }
     if (wallet.status !== "pending") {
