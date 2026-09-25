@@ -47,6 +47,15 @@ export async function provisionApiKeyWallet(
   return createSigningService(env).createWallet(
     params.organizationId,
     params.legacyConfigProjectId,
-    { label: params.label, purpose: params.purpose }
+    {
+      label: params.label,
+      purpose: params.purpose,
+      auditContext: params.auditContext,
+      creationReason: params.creationReason,
+      // A retry after a failed API-key creation must reuse the durable unbound
+      // wallet the previous audited attempt persisted instead of provisioning
+      // another provider wallet.
+      reuseUnboundProvisionedWallet: true,
+    }
   );
 }

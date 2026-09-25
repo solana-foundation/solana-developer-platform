@@ -116,6 +116,151 @@ describe("rotateApiKey wallet-scope guard", () => {
     expect(replacement).toEqual({ count: 0 });
   });
 
+  it("transfers provisioned-binding exclusivity to the replacement key", async () => {
+    // A provisioned wallet is exclusive to the key it was provisioned for
+    // (partial unique index on provisioned bindings). Rotation replaces the
+    // same key identity, so the clone must succeed: exclusivity moves to the
+    // replacement and the old key's binding becomes a regular shareable one.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+         VALUES ('akw_rotation_scope_prov', ?, 'wallet_rotation_prov', '["tokens:read"]', TRUE)`
+      )
+      .bind(TARGET_KEY_ID)
+      .run();
+
+    const rotation = await new ApiKeyService(getDb(env), SCOPE).rotateApiKey(
+      TARGET_KEY_ID,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      24,
+      ["*"],
+      null,
+      "pepper"
+    );
+
+    expect(rotation).not.toBeNull();
+    if (!rotation || isApiKeyAlreadyRotated(rotation)) {
+      throw new Error("expected a replacement key");
+    }
+
+    const flags = await getDb(env).queryMany<{ api_key_id: string; provisioned_binding: boolean }>(
+      `SELECT api_key_id, provisioned_binding FROM api_key_wallet_permissions
+         WHERE wallet_id = 'wallet_rotation_prov' ORDER BY api_key_id ASC`
+    );
+    expect(flags).toHaveLength(2);
+    const replacementId = (
+      await getDb(env)
+        .prepare("SELECT id FROM api_keys WHERE rotated_from = ?")
+        .bind(TARGET_KEY_ID)
+        .first<{ id: string }>()
+    )?.id;
+    expect(replacementId).toBeDefined();
+    expect(new Map(flags.map((row) => [row.api_key_id, row.provisioned_binding]))).toEqual(
+      new Map([
+        [TARGET_KEY_ID, false],
+        [replacementId as string, true],
+      ])
+    );
+  });
+
+  it("restores provisioned-binding exclusivity when undoing the rotation", async () => {
+    // The rotation moves the exclusivity flag to the replacement; the undo
+    // compensating action must move it back, so the original key is the
+    // wallet's exclusive holder again and a retried rotation re-clones the
+    // flagged binding instead of a shareable one.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+         VALUES ('akw_rotation_scope_undo', ?, 'wallet_rotation_undo', '["tokens:read"]', TRUE)`
+      )
+      .bind(TARGET_KEY_ID)
+      .run();
+
+    const service = new ApiKeyService(getDb(env), SCOPE);
+    const rotation = await service.rotateApiKey(
+      TARGET_KEY_ID,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      24,
+      ["*"],
+      null,
+      "pepper"
+    );
+    expect(rotation).not.toBeNull();
+    if (!rotation || isApiKeyAlreadyRotated(rotation)) {
+      throw new Error("expected a replacement key");
+    }
+    const replacementId = (
+      await getDb(env)
+        .prepare("SELECT id FROM api_keys WHERE rotated_from = ?")
+        .bind(TARGET_KEY_ID)
+        .first<{ id: string }>()
+    )?.id;
+    expect(replacementId).toBeDefined();
+
+    await service.undoRotation(TARGET_KEY_ID, replacementId as string);
+
+    const flags = await getDb(env).queryMany<{ api_key_id: string; provisioned_binding: boolean }>(
+      `SELECT api_key_id, provisioned_binding FROM api_key_wallet_permissions
+         WHERE wallet_id = 'wallet_rotation_undo' ORDER BY api_key_id ASC`
+    );
+    expect(new Map(flags.map((row) => [row.api_key_id, row.provisioned_binding]))).toEqual(
+      new Map([
+        [TARGET_KEY_ID, true],
+        [replacementId as string, false],
+      ])
+    );
+    const undone = await getDb(env)
+      .prepare("SELECT id, status, rotation_deadline FROM api_keys WHERE id IN (?, ?)")
+      .bind(TARGET_KEY_ID, replacementId)
+      .all<{ id: string; status: string; rotation_deadline: string | null }>();
+    expect(new Map(undone.results.map((row) => [row.id, row.status]))).toEqual(
+      new Map([
+        [TARGET_KEY_ID, "active"],
+        [replacementId as string, "revoked"],
+      ])
+    );
+    expect(undone.results.find((row) => row.id === TARGET_KEY_ID)?.rotation_deadline).toBeNull();
+
+    // The retry after the undo is a fresh rotation of the same key identity:
+    // it must succeed and carry the exclusivity flag into the new replacement.
+    const retry = await service.rotateApiKey(
+      TARGET_KEY_ID,
+      TEST_ORG.id,
+      TEST_PROJECT.id,
+      24,
+      ["*"],
+      null,
+      "pepper"
+    );
+    expect(retry).not.toBeNull();
+    if (!retry || isApiKeyAlreadyRotated(retry)) {
+      throw new Error("expected a replacement key");
+    }
+    const retryId = (
+      await getDb(env)
+        .prepare("SELECT id FROM api_keys WHERE rotated_from = ? AND status = 'active'")
+        .bind(TARGET_KEY_ID)
+        .first<{ id: string }>()
+    )?.id;
+    expect(retryId).toBeDefined();
+    const retryFlags = await getDb(env).queryMany<{
+      api_key_id: string;
+      provisioned_binding: boolean;
+    }>(
+      `SELECT api_key_id, provisioned_binding FROM api_key_wallet_permissions
+         WHERE wallet_id = 'wallet_rotation_undo' ORDER BY api_key_id ASC`
+    );
+    expect(new Map(retryFlags.map((row) => [row.api_key_id, row.provisioned_binding]))).toEqual(
+      new Map([
+        [TARGET_KEY_ID, false],
+        [replacementId as string, false],
+        [retryId as string, true],
+      ])
+    );
+  });
+
   it("still rotates when no guard is supplied", async () => {
     const rotation = await new ApiKeyService(getDb(env), SCOPE).rotateApiKey(
       TARGET_KEY_ID,

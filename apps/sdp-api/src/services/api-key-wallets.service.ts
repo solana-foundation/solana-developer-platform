@@ -208,7 +208,8 @@ export async function listApiKeyWalletBindingsForApiKeys(
 export async function replaceApiKeyWalletBindings(
   db: DatabaseClient,
   apiKeyId: string,
-  bindings: ApiKeyWalletBinding[]
+  bindings: ApiKeyWalletBinding[],
+  options: { provisioned?: boolean } = {}
 ): Promise<void> {
   const statements: PreparedStatement[] = [
     db.prepare("DELETE FROM api_key_wallet_permissions WHERE api_key_id = ?").bind(apiKeyId),
@@ -218,15 +219,37 @@ export async function replaceApiKeyWalletBindings(
     statements.push(
       db
         .prepare(
-          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-         VALUES (?, ?, ?, ?)`
+          `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+         VALUES (?, ?, ?, ?, ?)`
         )
         .bind(
           `akw_${crypto.randomUUID()}`,
           apiKeyId,
           binding.walletId,
-          JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions))
+          JSON.stringify(normalizeApiKeyWalletPermissions(binding.permissions)),
+          options.provisioned === true
         )
+    );
+  }
+
+  if (bindings.length > 0) {
+    // Consuming a wallet as a key's signing wallet retires its provisioning
+    // provenance in the same transaction as the binding: a wallet whose
+    // provisioning attempt completed is never re-adopted by a later retry,
+    // even after the binding (or the key itself) is gone.
+    statements.push(
+      db
+        .prepare(
+          `UPDATE custody_wallets
+           SET creation_reason = NULL,
+               provisioned_by_api_key_id = NULL,
+               provisioned_by_user_id = NULL
+           WHERE wallet_id IN (${bindings.map(() => "?").join(", ")})
+             AND (creation_reason IS NOT NULL
+                  OR provisioned_by_api_key_id IS NOT NULL
+                  OR provisioned_by_user_id IS NOT NULL)`
+        )
+        .bind(...bindings.map((binding) => binding.walletId))
     );
   }
 
@@ -263,17 +286,42 @@ export async function cloneApiKeyWalletBindings(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
         SELECT
          'akw_' || md5(random()::text || clock_timestamp()::text),
          ?,
          wallet_id,
-         permissions
+         permissions,
+         provisioned_binding
        FROM api_key_wallet_permissions
        WHERE api_key_id = ?`
     )
     .bind(targetApiKeyId, sourceApiKeyId)
     .run();
+}
+
+/**
+ * Whether a failed transaction was rejected by the exclusive-binding guarantee
+ * for provisioned wallets (migration 0119): a wallet provisioned for API-key
+ * creation can be bound to exactly one key, so two requests that adopted the
+ * same still-unbound wallet cannot both commit. The loser surfaces as a 409
+ * instead of an opaque storage error.
+ */
+export function isProvisionedWalletBindingConflict(error: unknown): boolean {
+  for (
+    let current: unknown = error;
+    current != null;
+    current = (current as { cause?: unknown }).cause
+  ) {
+    const candidate = current as { constraint?: unknown; code?: unknown };
+    if (
+      candidate.constraint === "uq_api_key_wallet_permissions_provisioned_wallet" &&
+      candidate.code === "23505"
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Parse an api_key_wallet_permissions.permissions column into a normalized list. */

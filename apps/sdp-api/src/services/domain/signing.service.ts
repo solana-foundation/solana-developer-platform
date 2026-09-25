@@ -62,6 +62,7 @@ import {
 import {
   createProviderWallet,
   deleteProviderWallet,
+  type ProvisionedProviderWallet,
 } from "@/services/domain/signing/provider-wallet-lifecycle";
 import { assertProviderAvailable } from "@/services/provider-availability.service";
 import {
@@ -76,6 +77,28 @@ import type { Env } from "@/types/env";
 export { createAdapterFromEncryptedConfig };
 
 const base58 = getBase58Codec();
+
+/** Why a legacy Config branch wallet is being provisioned; recorded on its audit intent. */
+type ConfigWalletCreationReason = "wallet_api" | "api_key" | "dvp_settlement_authority";
+
+/**
+ * Resolve the actor that drove an audited provisioning request, mirroring how
+ * AuditService attributes audit events: API-key actors by key id, dashboard
+ * actors by user id. The result is persisted with the wallet row so retry
+ * reuse can adopt only wallets provisioned by the same actor.
+ */
+function resolveProvisioningActor(c: Context<{ Bindings: Env }>): {
+  provisionedByApiKeyId: string | null;
+  provisionedByUserId: string | null;
+} {
+  const auth = c.get("apiKey");
+  const clerk = c.get("clerk");
+  const session = c.get("session");
+  return {
+    provisionedByApiKeyId: auth?.id ?? null,
+    provisionedByUserId: clerk?.userId ?? session?.userId ?? null,
+  };
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -1267,6 +1290,8 @@ export class SigningService {
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
       auditContext?: Context<{ Bindings: Env }>;
+      creationReason?: ConfigWalletCreationReason;
+      reuseUnboundProvisionedWallet?: boolean;
     }
   ): Promise<CustodyConfigWallet> {
     const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
@@ -1278,7 +1303,7 @@ export class SigningService {
         "NOT_FOUND"
       );
     }
-    const auditContext = params.setDefault ? params.auditContext : undefined;
+    const auditContext = params.auditContext;
     if (params.setDefault && !auditContext) {
       throw new SigningError("Default wallet changes require an audit context", "INVALID_REQUEST");
     }
@@ -1288,10 +1313,13 @@ export class SigningService {
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
     if (auditContext) {
-      return this.createDefaultWallet(auditContext, orgId, projectId, config, parsed, {
-        label: params.label,
-        purpose: params.purpose,
-      });
+      if (params.setDefault) {
+        return this.createDefaultWallet(auditContext, orgId, projectId, config, parsed, {
+          label: params.label,
+          purpose: params.purpose,
+        });
+      }
+      return this.createAuditedConfigWallet(auditContext, orgId, projectId, config, parsed, params);
     }
 
     const { walletId, publicKey } = await createProviderWallet({
@@ -1322,6 +1350,198 @@ export class SigningService {
     }
 
     return wallet;
+  }
+
+  /**
+   * Provision a non-default Config wallet with the same durable audit
+   * admission the Connection path uses: the local `custody_wallets.id` is
+   * allocated before any provider I/O, an intent naming it is persisted before
+   * the provider is called, and the outcome is appended only after the local
+   * wallet row is persisted. Deterministic provider rejections close the
+   * intent with a failure outcome; ambiguous provider or persistence failures
+   * leave it unresolved with the provider and local identifiers reconciliation
+   * needs.
+   */
+  private async createAuditedConfigWallet(
+    c: Context<{ Bindings: Env }>,
+    orgId: string,
+    projectId: string | undefined,
+    config: SigningConfigRecord,
+    parsed: Parameters<typeof createProviderWallet>[0]["parsed"],
+    params: {
+      label?: string;
+      purpose?: WalletPurpose;
+      creationReason?: ConfigWalletCreationReason;
+      reuseUnboundProvisionedWallet?: boolean;
+    }
+  ): Promise<CustodyConfigWallet> {
+    if (params.reuseUnboundProvisionedWallet) {
+      const reused = await this.findUnboundProvisionedWallet(
+        orgId,
+        config,
+        params,
+        resolveProvisioningActor(c)
+      );
+      if (reused) {
+        return reused;
+      }
+    }
+
+    const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
+    const auditService = new AuditService(getDb(this.env));
+    const intent = await auditService.beginCritical(c, {
+      action: "create",
+      resourceType: "custody_wallet",
+      resourceId: custodyWalletId,
+      metadata: {
+        event: "custody_wallet_created",
+        projectId: projectId ?? null,
+        provider: config.provider,
+        custodyConfigId: config.id,
+        custodyWalletId,
+        creationReason: params.creationReason ?? "wallet_api",
+        setDefault: false,
+      },
+    });
+
+    let provisioned: ProvisionedProviderWallet;
+    try {
+      provisioned = await createProviderWallet({
+        env: this.env,
+        orgId,
+        projectId,
+        params: { label: params.label },
+        parsed,
+        cipher: this.getCustodyCipher(),
+      });
+    } catch (error) {
+      if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
+        // Keep the intent unresolved: the Provider may have created the wallet.
+        this.logWalletOrphanRisk(orgId, projectId, config, "provider_result_unknown", intent.id);
+      } else {
+        await auditService.completeCritical(c, intent, {
+          status: "failure",
+          metadata: { result: "failed", reason: "provider_rejected" },
+        });
+      }
+      throw error;
+    }
+
+    let wallet: CustodyConfigWallet;
+    try {
+      wallet = await this.configStore.createWallet(config.id, {
+        id: custodyWalletId,
+        walletId: provisioned.walletId,
+        publicKey: provisioned.publicKey,
+        label: params.label,
+        purpose: params.purpose,
+        creationReason: params.creationReason ?? "wallet_api",
+        ...resolveProvisioningActor(c),
+      });
+    } catch (error) {
+      // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
+      this.logWalletOrphanRisk(
+        orgId,
+        projectId,
+        config,
+        "persistence_failed",
+        intent.id,
+        provisioned.walletId
+      );
+      throw new SigningError(
+        `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "NETWORK_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
+
+    await auditService.completeCritical(c, intent, {
+      metadata: {
+        result: "created",
+        walletId: provisioned.walletId,
+        publicKey: provisioned.publicKey,
+      },
+    });
+
+    return wallet;
+  }
+
+  /**
+   * Find a durable, active, unbound wallet that a previous audited API-key
+   * provisioning attempt persisted on this config, so a retry reuses that
+   * attempt instead of provisioning another provider wallet. Adoption is
+   * scoped to the durable provisioning provenance (migration 0119): the
+   * wallet must have been provisioned for the `api_key` creation reason by
+   * the same actor as the current request, so wallets created for other
+   * purposes or by other actors stay untouched. A wallet whose provisioning
+   * attempt completed (bound to a key) has its provenance cleared at bind
+   * time and is never re-adopted, even after that key is gone.
+   */
+  private async findUnboundProvisionedWallet(
+    orgId: string,
+    config: SigningConfigRecord,
+    params: {
+      label?: string;
+      purpose?: WalletPurpose;
+      creationReason?: ConfigWalletCreationReason;
+    },
+    actor: { provisionedByApiKeyId: string | null; provisionedByUserId: string | null }
+  ): Promise<CustodyConfigWallet | null> {
+    if (params.creationReason !== "api_key") {
+      return null;
+    }
+    const row = await getDb(this.env)
+      .prepare(
+        `SELECT w.id, w.wallet_id, w.public_key, w.label, w.purpose, w.created_at
+         FROM custody_wallets w
+         JOIN custody_configs c ON c.id = w.custody_config_id
+         WHERE w.custody_config_id = ?
+           AND c.organization_id = ?
+           AND c.status = 'active'
+           AND w.status = 'active'
+           AND w.custody_connection_id IS NULL
+           AND w.creation_reason = ?
+           AND w.purpose IS NOT DISTINCT FROM ?
+           AND w.label IS NOT DISTINCT FROM ?
+           AND ((w.provisioned_by_api_key_id IS NOT NULL
+                 AND w.provisioned_by_api_key_id = ?)
+                OR (w.provisioned_by_user_id IS NOT NULL
+                    AND w.provisioned_by_user_id = ?))
+           AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.signing_wallet_id = w.wallet_id)
+           AND NOT EXISTS (SELECT 1 FROM api_key_wallet_permissions p WHERE p.wallet_id = w.wallet_id)
+         ORDER BY w.created_at ASC, w.id ASC
+         LIMIT 1`
+      )
+      .bind(
+        config.id,
+        orgId,
+        params.creationReason,
+        params.purpose ?? null,
+        params.label ?? null,
+        actor.provisionedByApiKeyId,
+        actor.provisionedByUserId
+      )
+      .first<{
+        id: string;
+        wallet_id: string;
+        public_key: string;
+        label: string | null;
+        purpose: string | null;
+        created_at: string;
+      }>();
+    if (!row) {
+      return null;
+    }
+    return {
+      id: row.id,
+      custodyConfigId: config.id,
+      walletId: row.wallet_id,
+      publicKey: row.public_key,
+      label: row.label,
+      purpose: row.purpose as WalletPurpose | null,
+      status: "active",
+      createdAt: row.created_at,
+    };
   }
 
   private async createDefaultWallet(

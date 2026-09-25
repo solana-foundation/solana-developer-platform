@@ -577,8 +577,12 @@ export class ApiKeyService {
         );
 
         const signingWalletId = target.signing_wallet_id;
-        const bindingRows = await tx.queryMany<{ wallet_id: string; permissions: unknown }>(
-          `SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1`,
+        const bindingRows = await tx.queryMany<{
+          wallet_id: string;
+          permissions: unknown;
+          provisioned_binding: boolean;
+        }>(
+          `SELECT wallet_id, permissions, provisioned_binding FROM api_key_wallet_permissions WHERE api_key_id = $1`,
           [keyId]
         );
         guardTargetWalletScope?.({
@@ -625,12 +629,24 @@ export class ApiKeyService {
 
         // The clone inserts the rows the guard judged, not a re-read of the
         // table — under READ COMMITTED an INSERT … SELECT would see rows
-        // committed after the guard ran.
+        // committed after the guard ran. Provisioned bindings keep their
+        // exclusivity flag: a wallet provisioned for one key cannot serve a
+        // second key. Rotation replaces the same key identity, so its
+        // exclusivity transfers to the replacement below instead of failing
+        // the clone on the partial unique index.
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+           SET provisioned_binding = FALSE
+           WHERE api_key_id = ? AND provisioned_binding`
+          )
+          .bind(keyId)
+          .run();
         for (const row of bindingRows) {
           await tx
             .prepare(
-              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-             VALUES (?, ?, ?, ?)`
+              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+             VALUES (?, ?, ?, ?, ?)`
             )
             .bind(
               `akw_${crypto.randomUUID()}`,
@@ -638,7 +654,8 @@ export class ApiKeyService {
               row.wallet_id,
               // Preserve the column verbatim: NULL stays the historical
               // unrestricted marker, and a driver-parsed array re-serializes.
-              row.permissions == null ? null : stringifyJsonb(row.permissions, [])
+              row.permissions == null ? null : stringifyJsonb(row.permissions, []),
+              row.provisioned_binding
             )
             .run();
         }
@@ -724,6 +741,40 @@ export class ApiKeyService {
           this.scope.projectId
         )
         .run();
+
+      // The rotation transferred provisioned-binding exclusivity to the
+      // replacement (the original's bindings were unflagged so the clone
+      // could hold the flag). The undo puts Postgres back into the state
+      // the stale cache entry describes, so the flag moves back too: the
+      // original key is the wallet's exclusive holder again and a retried
+      // rotation re-clones the flagged binding instead of a shareable one.
+      // The flagged wallets are read before the replacement's rows are
+      // unflagged — they identify what the replacement held exclusively.
+      const flagged = await tx.queryMany<{ wallet_id: string }>(
+        `SELECT wallet_id FROM api_key_wallet_permissions
+          WHERE api_key_id = ? AND provisioned_binding`,
+        [replacementKeyId]
+      );
+      if (flagged.length > 0) {
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+             SET provisioned_binding = FALSE
+             WHERE api_key_id = ? AND provisioned_binding`
+          )
+          .bind(replacementKeyId)
+          .run();
+
+        await tx
+          .prepare(
+            `UPDATE api_key_wallet_permissions
+             SET provisioned_binding = TRUE
+             WHERE api_key_id = ? AND NOT provisioned_binding
+               AND wallet_id IN (${flagged.map(() => "?").join(", ")})`
+          )
+          .bind(keyId, ...flagged.map((row) => row.wallet_id))
+          .run();
+      }
     });
   }
 
