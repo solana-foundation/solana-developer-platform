@@ -105,27 +105,26 @@ async function callSolanaRpc<T>(method: string, params: unknown[]): Promise<T> {
   return payload.result;
 }
 
-function assertKoraLiveSmokeEnvConfigured() {
-  const missing: string[] = [];
-  if (env.RUN_INTEGRATION_TESTS !== "true") missing.push("RUN_INTEGRATION_TESTS=true");
-  if (!env.SOLANA_RPC_URL) missing.push("SOLANA_RPC_URL");
-  if (!env.KORA_RPC_URL) missing.push("KORA_RPC_URL");
-  if (!env.PRIVY_APP_ID) missing.push("PRIVY_APP_ID");
-  if (!env.PRIVY_APP_SECRET) missing.push("PRIVY_APP_SECRET");
-
-  if (missing.length > 0) {
-    throw new Error(`Kora live smoke tests require env configuration: ${missing.join(", ")}.`);
-  }
+function isKoraLiveSmokeEnvConfigured(): boolean {
+  return (
+    env.RUN_INTEGRATION_TESTS === "true" &&
+    !!env.SOLANA_RPC_URL &&
+    !!env.KORA_RPC_URL &&
+    !!env.PRIVY_APP_ID &&
+    !!env.PRIVY_APP_SECRET
+  );
 }
 
-describe("Kora Fee Payment (Live Smoke)", () => {
+// Matches the other live-provider suites in this package: without the live
+// smoke env the file skips instead of failing at setup. CI's live-smoke shard
+// validates its secrets in a dedicated step before running these tests.
+describe.skipIf(!isKoraLiveSmokeEnvConfigured())("Kora Fee Payment (Live Smoke)", () => {
   const request = requestWithApiKey();
   let liveSmokePolicies: Awaited<
     ReturnType<InstanceType<typeof SponsorshipBudgetRepository>["resolvePolicies"]>
   >;
 
   beforeAll(async () => {
-    assertKoraLiveSmokeEnvConfigured();
     await initIntegrationSuite();
     const repository = new SponsorshipBudgetRepository(getDb(env));
     for (const policy of [

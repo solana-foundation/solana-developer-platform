@@ -212,7 +212,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "env": ["TEST_SHARD"],
+      "env": ["TEST_SHARD", "TEST_DATABASE_URL"],
       "outputs": ["coverage/**", ".vitest-reports/**"]
     },
     "test:coverage": {
