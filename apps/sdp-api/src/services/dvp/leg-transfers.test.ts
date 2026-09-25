@@ -878,6 +878,59 @@ describe("syncDvpLegTransfers", () => {
       expect(rows.has(sig(2))).toBe(true);
     });
 
+    // An entry at an earlier slot convinces the watermark the cursor's slot
+    // is complete even while the node still hides an older movement inside
+    // that slot, so the read that follows bounds itself at the cursor and
+    // cannot list what sits behind it. The proof ages out with the audit,
+    // whose unbounded walk from the top is what recovers the omission.
+    it("recovers a same-slot movement at the audit after an earlier-slot proof hid it", async () => {
+      let nodeHoldsTheOmission = false;
+      listSignatures.mockImplementation(async (_escrow, page) => {
+        if (page.until === sig(3)) {
+          return history([1]);
+        }
+        if (page.until !== null || page.before !== null) {
+          return [];
+        }
+        return nodeHoldsTheOmission
+          ? [sameSlot(3), sameSlot(2), ...history([1])]
+          : [sameSlot(3), ...history([1])];
+      });
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+      served.set(sig(3), transaction({ pre: "1000", post: "900" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW);
+      // The movement at the earlier slot proved the cursor's slot, so the
+      // next read binds itself to the cursor and the hidden movement stays
+      // hidden.
+      await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 }, NOW);
+
+      expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: sig(3) });
+      expect(rows.has(sig(2))).toBe(false);
+
+      // The audit falls due and walks the whole history from the top, where
+      // the node now serves the movement it had omitted.
+      nodeHoldsTheOmission = true;
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        saved[1],
+        { remaining: 10 },
+        NOW + 2 * HISTORY_AUDIT_MS
+      );
+
+      expect(listSignatures).toHaveBeenLastCalledWith(ESCROW, { before: null, until: null });
+      expect(rows.has(sig(2))).toBe(true);
+      expect(saved[2]).toEqual({
+        side: "a",
+        cursor: { signature: sig(3), slot: "420" },
+        cursorSlotComplete: true,
+        scannedAt: expect.any(String),
+      });
+    });
+
     it("re-reads from the top while the stored cursor's slot is unproven", async () => {
       listSignatures.mockResolvedValueOnce([sameSlot(2)]);
       served.set(sig(2), transaction({ post: "100" }));
