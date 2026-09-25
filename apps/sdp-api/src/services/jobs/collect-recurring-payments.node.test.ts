@@ -167,8 +167,20 @@ describe("collectDueRecurringPayments", () => {
     const result = await collectDueRecurringPayments(env, new Date("2026-07-01T12:30:00Z"));
 
     expect(result).toEqual({ recovered: 2, collected: 1, failed: 0, skipped: 0 });
+    // The worker drives the recovery broadcast: the audit actor is never the
+    // payment's original creator (who may be long gone); the creator stays on
+    // the durable rows, and the per-row correlation ID ties the pass together.
     expect(activateRecurringPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ recurringPayment: lifecycle })
+      expect.objectContaining({
+        recurringPayment: lifecycle,
+        createdBy: lifecycle.created_by,
+        auditActor: expect.objectContaining({
+          organizationId: lifecycle.organization_id,
+          userId: null,
+          apiKeyId: null,
+          requestId: expect.stringMatching(/^cron_recurring_recovery_prp_activation_/),
+        }),
+      })
     );
     expect(collectRecurringPayment).toHaveBeenNthCalledWith(
       1,

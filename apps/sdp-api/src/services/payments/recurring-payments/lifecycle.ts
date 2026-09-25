@@ -530,10 +530,6 @@ async function runRecurringPaymentLifecycle(input: {
         await concludeRecurringPaymentAuditOnError(input.env, lifecycleIntent, error);
         throw error;
       }
-      await completeRecurringPaymentAudit(input.env, lifecycleIntent, {
-        signature,
-        metadata: { planPda, subscriptionPda },
-      });
 
       const updatedAttempt = await recurringRepo.updateLifecycleAttempt({
         attemptId: attempt.id,
@@ -548,6 +544,26 @@ async function runRecurringPaymentLifecycle(input: {
         throw conflict("Recurring payment lifecycle attempt changed concurrently");
       }
       attempt = updatedAttempt;
+
+      // Seal success only after definitive confirmation: the broadcast can
+      // still fail on-chain, and the sealed ledger must not record a failed
+      // lifecycle broadcast as a successful outcome. A definitive on-chain
+      // failure closes the intent as a failure; an ambiguous outcome (RPC
+      // trouble, timeout) leaves it unresolved for reconciliation.
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          signature,
+          lifecycleConfirmationMessage(input.operation)
+        );
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, lifecycleIntent, error);
+        throw error;
+      }
+      await completeRecurringPaymentAudit(input.env, lifecycleIntent, {
+        signature,
+        metadata: { planPda, subscriptionPda },
+      });
     }
 
     await confirmSubscriptionSignature(

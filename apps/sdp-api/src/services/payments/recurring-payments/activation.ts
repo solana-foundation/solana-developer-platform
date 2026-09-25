@@ -552,14 +552,6 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     return input.subscriptionAuthority;
   }
 
-  // Fail-closed: the setup broadcast creates the source ATA and/or the
-  // subscription authority, so it is admitted into the sealed ledger first.
-  const setupIntent = await beginRecurringPaymentAudit(
-    input.env,
-    input.auditActor,
-    "activation_setup",
-    input.recurringPaymentId
-  );
   const payer = createNoopSigner(input.feePayer);
   const initAuthorityInstruction = input.subscriptionAuthority.exists
     ? null
@@ -579,6 +571,16 @@ async function prepareSubscriptionAuthorityForActivation(input: {
         mint: input.mint,
         tokenProgram: input.tokenProgram,
       });
+  // Fail-closed: the setup broadcast creates the source ATA and/or the
+  // subscription authority, so it is admitted into the sealed ledger first.
+  // The intent is begun only after the instructions are built, so a builder
+  // throw cannot strand an intent that no broadcast will ever resolve.
+  const setupIntent = await beginRecurringPaymentAudit(
+    input.env,
+    input.auditActor,
+    "activation_setup",
+    input.recurringPaymentId
+  );
   let initSignature: Signature;
   try {
     initSignature = await sendSubscriptionInstructions({
@@ -597,6 +599,21 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     await concludeRecurringPaymentAuditOnError(input.env, setupIntent, error);
     throw error;
   }
+  // Seal success only after definitive confirmation: the broadcast can still
+  // fail on-chain, and the sealed ledger must not record a failed setup as a
+  // successful outcome. A definitive on-chain failure closes the intent as a
+  // failure; an ambiguous outcome (RPC trouble, timeout) leaves it unresolved
+  // for reconciliation, the designed operator-paging signal.
+  try {
+    await confirmSubscriptionSignature(
+      input.env,
+      initSignature,
+      "Recurring payment activation failed on-chain"
+    );
+  } catch (error) {
+    await concludeRecurringPaymentAuditOnError(input.env, setupIntent, error);
+    throw error;
+  }
   await completeRecurringPaymentAudit(input.env, setupIntent, {
     signature: initSignature,
     metadata: { subscriptionAuthorityAddress: input.subscriptionAuthorityAddress },
@@ -608,11 +625,6 @@ async function prepareSubscriptionAuthorityForActivation(input: {
     metadata: { authorizationSetupSignature: initSignature },
     updatedAt: new Date().toISOString(),
   });
-  await confirmSubscriptionSignature(
-    input.env,
-    initSignature,
-    "Recurring payment activation failed on-chain"
-  );
 
   if (!initAuthorityInstruction) {
     return input.subscriptionAuthority;
@@ -812,6 +824,21 @@ export async function activateRecurringPayment(input: {
         await concludeRecurringPaymentAuditOnError(input.env, planIntent, error);
         throw error;
       }
+      // Seal success only after definitive confirmation: the broadcast can
+      // still fail on-chain, and the sealed ledger must not record a failed
+      // CreatePlan as a successful outcome. A definitive on-chain failure
+      // closes the intent as a failure; an ambiguous outcome (RPC trouble,
+      // timeout) leaves it unresolved for reconciliation.
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          planCreationSignature,
+          "Recurring payment activation failed on-chain"
+        );
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, planIntent, error);
+        throw error;
+      }
       await completeRecurringPaymentAudit(input.env, planIntent, {
         signature: planCreationSignature,
         metadata: { planPda, planId: plan.id },
@@ -989,6 +1016,21 @@ export async function activateRecurringPayment(input: {
           instructions: [subscribeInstruction],
           feePayer,
         });
+      } catch (error) {
+        await concludeRecurringPaymentAuditOnError(input.env, subscribeIntent, error);
+        throw error;
+      }
+      // Seal success only after definitive confirmation: the broadcast can
+      // still fail on-chain, and the sealed ledger must not record a failed
+      // Subscribe as a successful outcome. A definitive on-chain failure
+      // closes the intent as a failure; an ambiguous outcome (RPC trouble,
+      // timeout) leaves it unresolved for reconciliation.
+      try {
+        await confirmSubscriptionSignature(
+          input.env,
+          authorizationSignature,
+          "Recurring payment activation failed on-chain"
+        );
       } catch (error) {
         await concludeRecurringPaymentAuditOnError(input.env, subscribeIntent, error);
         throw error;
