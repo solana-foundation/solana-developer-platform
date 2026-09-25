@@ -341,6 +341,10 @@ describe("Payments routes — subscriptions", () => {
     });
 
     mockTokenSupplyDecimalsOnce();
+    // The create-plan transaction has not been submitted yet: nothing on-chain.
+    fetchMaybePlanMock.mockResolvedValue({
+      exists: false,
+    } as Awaited<ReturnType<typeof subscriptionsProgram.fetchMaybePlan>>);
     const preparePlanRes = await app.request(
       `/v1/payments/subscription-plans/${planId}/prepare-create`,
       {
@@ -367,6 +371,9 @@ describe("Payments routes — subscriptions", () => {
       TEST_SOLANA_ADDRESSES.wallet1,
       TEST_MOCK_FEE_PAYER,
     ]);
+
+    // The remainder of the lifecycle reads the shared on-chain plan fixture.
+    installDefaultFetchMaybePlanMock();
 
     const activePlansRes = await app.request(
       "/v1/payments/subscription-plans?status=active",

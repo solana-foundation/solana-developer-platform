@@ -8,7 +8,11 @@ import type {
 } from "@sdp/types";
 import type { Address } from "@solana/kit";
 import { createNoopSigner } from "@solana/kit";
-import { getCreatePlanOverlayInstructionAsync, PlanStatus } from "@solana/subscriptions";
+import {
+  getCreatePlanOverlayInstructionAsync,
+  findPlanPda,
+  PlanStatus,
+} from "@solana/subscriptions";
 import { z } from "zod";
 import type { PaymentSubscriptionPlanRow } from "@/db/repositories/payment-subscriptions.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -162,7 +166,17 @@ export const createSubscriptionPlan = async (
   assertApiKeyWalletAccess(scope.auth, ownerWallet.walletId, ["payments:write"]);
 
   const puller = await resolvePullerWalletAddress(c, body.pullerWalletId);
+  const programPlanId = body.programPlanId ?? generateProgramPlanId();
   if (body.planPda) {
+    // Every flow derives the plan PDA from the owner and program plan ID, so
+    // an attached planPda must match that derivation (SOLA9-634).
+    const [derivedPlanPda] = await findPlanPda({
+      owner: assertValidAddress(ownerWallet.publicKey, "ownerAddress"),
+      planId: parseU64String(programPlanId, "programPlanId"),
+    });
+    if (body.planPda !== derivedPlanPda) {
+      throw badRequest("Subscription plan PDA does not match the owner and program plan ID");
+    }
     await assertAttachedPlanMatchesChain(c, assertValidAddress(body.planPda, "planPda"), {
       destinationAddress: body.destinationAddress ?? null,
       status: body.status,
@@ -182,7 +196,7 @@ export const createSubscriptionPlan = async (
     token: normalizePaymentToken(body.token, c.env),
     amount: body.amount,
     periodHours: body.periodHours,
-    programPlanId: body.programPlanId ?? generateProgramPlanId(),
+    programPlanId,
     planPda: body.planPda ?? null,
     destinationAddress: body.destinationAddress ?? null,
     pullerWalletId: puller.pullerWalletId ?? null,
@@ -292,6 +306,13 @@ export const prepareCreateSubscriptionPlan = async (
       "BAD_REQUEST",
       "Subscription plan owner wallet does not match owner address"
     );
+  }
+
+  // The create instruction can only run once: once the on-chain plan exists,
+  // re-preparing creation or rewriting the record it anchors would let SDP
+  // report consent the chain never approved (SOLA9-634).
+  if (await fetchLiveSubscriptionPlan(c.env, planPda)) {
+    throw new AppError("CONFLICT", "Subscription plan already exists on-chain");
   }
 
   const destinations = (

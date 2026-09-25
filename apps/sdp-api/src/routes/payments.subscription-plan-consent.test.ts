@@ -145,6 +145,8 @@ async function createLivePlan(): Promise<{
   ).data.subscriptionPlan;
 
   mockTokenSupplyDecimalsOnce();
+  // The create-plan transaction has not been submitted yet: nothing on-chain.
+  mockOnChainPlan({ exists: false });
   const preparedCreate = await app.request(
     `/v1/payments/subscription-plans/${plan.id}/prepare-create`,
     {
@@ -636,12 +638,25 @@ it("blocks the reported stale-consent exploit end to end", async () => {
 });
 
 it("validates destination and status claims when a plan references an on-chain planPda", async () => {
+  const [firstPda] = await subscriptionsProgram.findPlanPda({
+    owner: address(OWNER),
+    planId: 123n,
+  });
+  const [secondPda] = await subscriptionsProgram.findPlanPda({
+    owner: address(OWNER),
+    planId: 456n,
+  });
+  const [thirdPda] = await subscriptionsProgram.findPlanPda({
+    owner: address(OWNER),
+    planId: 789n,
+  });
   const requestBody = {
     ownerWalletId: TEST_WALLET_ID,
     token: DEVNET_USDC_MINT,
     amount: "25.00",
     periodHours: 720,
-    planPda: OTHER_DESTINATION,
+    programPlanId: "123",
+    planPda: firstPda,
   };
   const createPlan = async (body: Record<string, unknown>) =>
     app.request(
@@ -649,6 +664,19 @@ it("validates destination and status claims when a plan references an on-chain p
       { method: "POST", headers: HEADERS, body: JSON.stringify(body) },
       env
     );
+
+  // An attached planPda must be derived from the owner and program plan ID.
+  const unrelatedPda = await createPlan({
+    ...requestBody,
+    planPda: OTHER_DESTINATION,
+  });
+  expect(unrelatedPda.status).toBe(400);
+
+  const mismatchedPlanId = await createPlan({
+    ...requestBody,
+    programPlanId: "999",
+  });
+  expect(mismatchedPlanId.status).toBe(400);
 
   mockOnChainPlan({ exists: false });
   const missingChainDestination = await createPlan({
@@ -677,7 +705,8 @@ it("validates destination and status claims when a plan references an on-chain p
   mockOnChainPlan({ destinations: [DESTINATION] });
   const attached = await createPlan({
     ...requestBody,
-    planPda: TEST_SOLANA_ADDRESSES.mint,
+    programPlanId: "456",
+    planPda: secondPda,
     destinationAddress: DESTINATION,
   });
   expect(attached.status).toBe(201);
@@ -685,7 +714,8 @@ it("validates destination and status claims when a plan references an on-chain p
     await attached.json()
   ).data.subscriptionPlan;
   expect(attachedPlan).toMatchObject({
-    planPda: TEST_SOLANA_ADDRESSES.mint,
+    programPlanId: "456",
+    planPda: secondPda,
     destinationAddress: DESTINATION,
     status: "draft",
   });
@@ -693,7 +723,8 @@ it("validates destination and status claims when a plan references an on-chain p
   mockOnChainPlan({ destinations: [DESTINATION] });
   const attachedActive = await createPlan({
     ...requestBody,
-    planPda: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    programPlanId: "789",
+    planPda: thirdPda,
     status: "active",
   });
   expect(attachedActive.status).toBe(201);
@@ -775,6 +806,8 @@ it("keeps the stored destination in sync with the destinations of the prepared c
   ).data.subscriptionPlan;
 
   mockTokenSupplyDecimalsOnce();
+  // The create-plan transaction has not been submitted yet: nothing on-chain.
+  mockOnChainPlan({ exists: false });
   const preparedCreate = await app.request(
     `/v1/payments/subscription-plans/${plan.id}/prepare-create`,
     {
@@ -810,4 +843,22 @@ it("keeps the stored destination in sync with the destinations of the prepared c
     env
   );
   expect(destinationPatch.status).toBe(400);
+});
+
+it("refuses to re-prepare creation once the on-chain plan exists", async () => {
+  const { planId } = await createLivePlan();
+
+  // The first prepared transaction landed: the on-chain plan now exists.
+  mockOnChainPlan({});
+  const rePrepare = await app.request(
+    `/v1/payments/subscription-plans/${planId}/prepare-create`,
+    {
+      method: "POST",
+      headers: HEADERS,
+      body: JSON.stringify({ destinations: [OTHER_DESTINATION] }),
+    },
+    env
+  );
+  expect(rePrepare.status).toBe(409);
+  expect((await getPlan(planId)).destinationAddress).toBe(DESTINATION);
 });
