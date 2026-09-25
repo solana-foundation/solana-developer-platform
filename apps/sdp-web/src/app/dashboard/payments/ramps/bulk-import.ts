@@ -1,4 +1,7 @@
 import { isWellKnownTokenSymbol } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export interface BulkImportRow {
   accountId: string;
@@ -9,6 +12,8 @@ export interface BulkImportRow {
 export interface BulkRowError {
   row: number;
   message: string;
+  /** Set for duplicate-account errors: the id already claimed by an earlier row. */
+  duplicateAccountId?: string;
 }
 
 export function emptyBulkRow(): BulkImportRow {
@@ -41,6 +46,7 @@ export function validateBulkRows(rows: BulkImportRow[]): {
 } {
   const valid: BulkImportRow[] = [];
   const errors: BulkRowError[] = [];
+  const seenAccountIds = new Set<string>();
 
   rows.forEach((row, index) => {
     if (isEmptyBulkRow(row)) {
@@ -60,8 +66,51 @@ export function validateBulkRows(rows: BulkImportRow[]): {
       errors.push({ row: line, message: "Amount must be a positive number" });
       return;
     }
+    // One leg per account: the wizard keys batches by account id, so a
+    // repeated id would silently overwrite the earlier row's amount and drop
+    // that transfer leg. Refuse it here, where the operator can fix the row.
+    if (seenAccountIds.has(row.accountId)) {
+      errors.push({
+        row: line,
+        message: "Duplicate counterparty_wallet_id",
+        duplicateAccountId: row.accountId,
+      });
+      return;
+    }
+    seenAccountIds.add(row.accountId);
     valid.push(row);
   });
 
   return { valid, errors };
+}
+
+/**
+ * The first account id that appears on more than one row, if any. The wizard
+ * stores one entry per account id, so importing the same id twice would
+ * silently overwrite the earlier amount and drop that transfer leg.
+ */
+export function firstDuplicateAccountId(rows: BulkImportRow[]): string | null {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.accountId)) {
+      return row.accountId;
+    }
+    seen.add(row.accountId);
+  }
+  return null;
+}
+
+/**
+ * Batch wizard entries are keyed by account id, so two rows for the same
+ * account would silently overwrite the earlier amount and drop that transfer
+ * leg. Throws a translated error so callers refuse the import before any
+ * wizard state is mutated.
+ */
+export function assertDistinctAccountIds(rows: BulkImportRow[], t: Translate): void {
+  const duplicateAccountId = firstDuplicateAccountId(rows);
+  if (duplicateAccountId !== null) {
+    throw new Error(
+      t("DashboardPayments.batchSend.importDuplicateWallet", { id: duplicateAccountId })
+    );
+  }
 }

@@ -398,6 +398,7 @@
       "unknownToken": "Unknown token",
       "tokenUnavailableOnNetwork": "{currency} is not available on this network.",
       "importExceedsMaximumRecipients": "A batch can have at most {max} recipients. This import would bring the total to {total}.",
+      "importDuplicateWallet": "Duplicate counterparty_wallet_id {id}: each wallet may appear only once per import.",
       "submitting": "Submitting batch.",
       "someRecipientsDidNotReceiveFunds": "Some recipients did not receive funds.",
       "status": "Status: {status}",

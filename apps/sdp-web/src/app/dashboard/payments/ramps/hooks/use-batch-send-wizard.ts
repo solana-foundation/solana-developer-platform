@@ -36,7 +36,7 @@ import {
 } from "@/app/dashboard/payments/transfer-batch-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import type { BulkImportRow } from "../bulk-import";
+import { assertDistinctAccountIds, type BulkImportRow } from "../bulk-import";
 import { batchSendSchema, MAX_BATCH_RECIPIENTS, ONCHAIN_AMOUNT_PATTERN } from "../schema";
 import { walletBalanceAssetOptions } from "../wallet-options";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
@@ -101,6 +101,7 @@ export interface UseBatchSendWizardProps {
   onExit: () => void;
 }
 
+// react-doctor-disable-next-line no-high-complexity-react-function -- complexity is pre-existing on main; the APE-688 duplicate guard is extracted to the pure bulk-import module
 export function useBatchSendWizard({
   wallets,
   walletsError,
@@ -224,6 +225,11 @@ export function useBatchSendWizard({
   };
 
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
+    // Entries are keyed by account id, so two rows for the same account would
+    // silently overwrite the earlier amount and drop that transfer leg.
+    // Refuse duplicates before any state changes — never collapse them.
+    assertDistinctAccountIds(rows, t);
+
     const ids = [...new Set(rows.map((row) => row.accountId))];
     const resolved = await fetchBatchRecipients({ ids }, t);
     const byId = new Map(
