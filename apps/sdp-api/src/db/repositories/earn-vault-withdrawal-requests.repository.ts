@@ -49,6 +49,19 @@ export interface EarnVaultWithdrawalRequestRow {
   creation_timestamp: string | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
+  /**
+   * Whether the request's plan reported creating persistent output token
+   * accounts (Hastra's wYLDS and USDC ATAs), and who those creates charged.
+   * NULL keeps the historical meaning — nothing was created, or the owner
+   * funded its own accounts. The pair is the durable refund source for the
+   * output accounts' own rent; it never feeds the movement's share-account
+   * refund claim, which a queued redemption has no part in. The creates are
+   * idempotent, so the claim is the builder's build-time observation until
+   * reconciliation settles it from the landed request transaction and retires
+   * it when the creates charged the recorded funder nothing.
+   */
+  creates_output_accounts: boolean;
+  output_accounts_rent_funder: string | null;
   client_request_id: string;
   idempotency_fingerprint: string;
   creation_signature: string | null;
@@ -116,6 +129,9 @@ export interface EarnExternalWalletWithdrawalRequestTransactionRow {
   discount_bps: number | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
+  /** Build-time output-ATA rent attribution, promoted onto the request at submit. */
+  creates_output_accounts: boolean;
+  output_accounts_rent_funder: string | null;
   fee_payer: string | null;
   unsigned_transaction: string;
   last_valid_block_height: string;
@@ -173,6 +189,14 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   discountBps?: number | null;
   maturityTimestamp?: string | null;
   deadlineTimestamp?: string | null;
+  /**
+   * Build-time attribution for persistent output ATAs the queued plan creates
+   * (SOLA9-228): whether any were created, and who the creates charged.
+   * Durable on the request row as the output accounts' own refund source —
+   * deliberately separate from the movement's share-account rent claim.
+   */
+  createsOutputAccounts?: boolean;
+  outputAccountsRentFunder?: string | null;
   signature: string;
   signedTransaction: string;
   lastValidBlockHeight: string;
@@ -226,6 +250,9 @@ export interface CreateExternalWalletQueuedTransactionInput {
   intermediateMint?: string | null;
   intermediateAmount?: string | null;
   feePayer?: string | null;
+  /** Output-ATA rent attribution recorded at build time (SOLA9-228). */
+  createsOutputAccounts?: boolean;
+  outputAccountsRentFunder?: string | null;
   unsignedTransaction: string;
   lastValidBlockHeight: string;
   /** Confirmed height used to reap an abandoned build for this same PDA. */
@@ -349,6 +376,19 @@ export interface EarnVaultWithdrawalRequestsRepository {
     error: string;
     /** Earliest time this failed request may be claimed again. */
     retryAt: string;
+  }): Promise<void>;
+  /**
+   * Drop the request's output-ATA rent claim when the LANDED request
+   * transaction proves it charged nothing (SOLA9-228 exactness): the creates
+   * are idempotent, so an output account someone else created between build
+   * and landing charged the recorded funder nothing and the claim must not
+   * survive as a refund source. One-directional on purpose — an observation
+   * can only retire a claim, never invent or strengthen one — and a no-op
+   * for rows without a claim.
+   */
+  dropUnpaidOutputAccountsRentClaim(input: {
+    withdrawalRequestId: string;
+    organizationId: string;
   }): Promise<void>;
   claimUnsettledActions(limit: number): Promise<EarnVaultWithdrawalRequestActionRow[]>;
   claimOpenRequests(limit: number): Promise<EarnVaultWithdrawalRequestRow[]>;
@@ -608,6 +648,14 @@ async function promoteRequestAddressLease(
  * NULL — setting both would activate the external-wallet claim foreign key
  * against a custody position row that has no owner address. Either way the
  * payout's destination is recorded in destination_address.
+ *
+ * The request's output-ATA rent attribution (0119, SOLA9-228) stays on the
+ * request row, deliberately separate from this movement's
+ * `(creates_share_account, share_ata_rent_funder)` pair: a queued redemption
+ * spends an existing holding and never creates the position's share account,
+ * so claiming otherwise — or projecting the output funder into the share
+ * refund — would make a later exit hand the share account's rent to a party
+ * that funded a different account.
  */
 async function recordFulfilledQueueMovement(
   tx: DatabaseExecutor,
@@ -937,10 +985,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                request_address, status, mechanism, shares, quoted_assets,
                share_decimals, asset_decimals, intermediate_mint, intermediate_amount,
                discount_bps, maturity_timestamp, deadline_timestamp,
+               creates_output_accounts, output_accounts_rent_funder,
                client_request_id, idempotency_fingerprint, creation_signature,
                created_by, initiated_by_key_id
              ) VALUES (
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              )
              RETURNING *`
           )
@@ -967,6 +1016,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.discountBps ?? null,
             input.maturityTimestamp ?? null,
             input.deadlineTimestamp ?? null,
+            input.createsOutputAccounts === true,
+            input.createsOutputAccounts === true ? (input.outputAccountsRentFunder ?? null) : null,
             input.clientRequestId,
             input.idempotencyFingerprint,
             input.signature,
@@ -1447,6 +1498,19 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
         .run();
     },
 
+    async dropUnpaidOutputAccountsRentClaim(input) {
+      await db
+        .prepare(
+          `UPDATE earn_vault_withdrawal_requests
+              SET creates_output_accounts = FALSE,
+                  output_accounts_rent_funder = NULL,
+                  updated_at = sdp_iso_now()
+            WHERE id = ? AND organization_id = ? AND creates_output_accounts`
+        )
+        .bind(input.withdrawalRequestId, input.organizationId)
+        .run();
+    },
+
     async claimUnsettledActions(limit) {
       if (!Number.isInteger(limit) || limit < 1 || limit > 256) {
         throw new Error("Queued withdrawal action claim limit must be from 1 to 256");
@@ -1682,9 +1746,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
              share_mint, request_address, shares, quoted_assets, share_decimals,
              asset_decimals, intermediate_mint, intermediate_amount,
              discount_bps, maturity_timestamp, deadline_timestamp,
+             creates_output_accounts, output_accounts_rent_funder,
              fee_payer, unsigned_transaction, last_valid_block_height,
              created_by, initiated_by_key_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING *`
           )
@@ -1712,6 +1777,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.discountBps ?? null,
             input.maturityTimestamp ?? null,
             input.deadlineTimestamp ?? null,
+            input.createsOutputAccounts === true,
+            input.createsOutputAccounts === true ? (input.outputAccountsRentFunder ?? null) : null,
             input.feePayer ?? null,
             input.unsignedTransaction,
             input.lastValidBlockHeight,

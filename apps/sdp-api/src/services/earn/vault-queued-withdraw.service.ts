@@ -1,6 +1,7 @@
 import { notImplemented } from "@sdp/earn/errors";
 import type {
   EarnRuntimeContext,
+  EarnVaultCreatedOutputAta,
   EarnVaultParRedemptionQuote,
   EarnVaultParRedemptionRequestPlan,
   EarnVaultQueuedWithdrawalQuote,
@@ -129,6 +130,9 @@ export interface ExternalQueuedWithdrawalBuiltTransaction {
   discount_bps: number | null;
   maturity_timestamp: string | null;
   deadline_timestamp: string | null;
+  /** Build-time output-ATA rent attribution (SOLA9-228); see the repository input. */
+  creates_output_accounts: boolean;
+  output_accounts_rent_funder: string | null;
   fee_payer: string | null;
   unsigned_transaction: string;
   last_valid_block_height: string;
@@ -185,10 +189,42 @@ interface NormalizedAsyncWithdrawalPlan extends EarnVaultTransactionPlan {
     maturityTimestamp: string | null;
     deadlineTimestamp: string | null;
   };
+  createdOutputAtas?: readonly EarnVaultCreatedOutputAta[];
 }
 
 function asyncMechanism(terms: AsyncWithdrawalTermsInput): EarnVaultWithdrawalMechanism {
   return terms.mechanism === "operator_redemption" ? "operator_redemption" : "solver_queue";
+}
+
+/**
+ * Durable rent attribution for the persistent output token accounts a queued
+ * request's plan creates (SOLA9-228). A Hastra par-redemption request prepares
+ * the owner's wYLDS and USDC ATAs for an operator settlement that happens
+ * later, and those creates charge the rentPayer whenever the accounts were
+ * absent — a partner fee payer on the external-wallet flow. Without the
+ * attribution nothing could ever refund the partner, and the owner could close
+ * the emptied accounts and keep the partner-funded rent.
+ *
+ * The funder is the normalized rentPayer the caller passed into the build (the
+ * same address the provider embedded in the creates), NULL when the owner paid
+ * or nothing was created — the same recording rule the direct external-wallet
+ * builds apply to `share_ata_rent_funder`. The creates stay idempotent, so
+ * this claim is the builder's observation, not the landed truth: an account
+ * someone else creates between build and landing charges nothing. The
+ * reconciliation settles the claim from the LANDED request transaction's
+ * token balances and retires it when the creates charged the recorded funder
+ * nothing, so a claim that survives to drive a refund cites rent the chain
+ * actually moved.
+ */
+function outputRentAttribution(
+  plan: NormalizedAsyncWithdrawalPlan,
+  rentPayer: string | undefined
+): { createsOutputAccounts: boolean; outputAccountsRentFunder: string | null } {
+  const creates = (plan.createdOutputAtas?.length ?? 0) > 0;
+  return {
+    createsOutputAccounts: creates,
+    outputAccountsRentFunder: creates && rentPayer !== undefined ? rentPayer : null,
+  };
 }
 
 function requestFingerprint(input: {
@@ -295,6 +331,9 @@ async function quoteAndBuildRequest(
           maturityTimestamp: null,
           deadlineTimestamp: null,
         },
+        ...(parPlan.createdOutputAtas === undefined
+          ? {}
+          : { createdOutputAtas: parPlan.createdOutputAtas }),
       };
     } else {
       const client = resolveVaultQueuedWithdrawClient(env, input.position.provider, deadline);
@@ -503,6 +542,7 @@ export async function createCustodyQueuedWithdrawal(
     rentPayer: vaultRentPayer(fee),
     memoKind: "vault-withdrawal-request",
   });
+  const outputAttribution = outputRentAttribution(plan, vaultRentPayer(fee));
   const reservationId = generateEarnVaultWithdrawalRequestReservationId();
   await repository.acquireRequestReservation({
     id: reservationId,
@@ -589,6 +629,8 @@ export async function createCustodyQueuedWithdrawal(
         discountBps: plan.expectedRequest.discountBps,
         maturityTimestamp: plan.expectedRequest.maturityTimestamp,
         deadlineTimestamp: plan.expectedRequest.deadlineTimestamp,
+        createsOutputAccounts: outputAttribution.createsOutputAccounts,
+        outputAccountsRentFunder: outputAttribution.outputAccountsRentFunder,
         signature: signed.signature,
         signedTransaction: Buffer.from(signed.bytes).toString("base64"),
         lastValidBlockHeight: signed.lastValidBlockHeight,
@@ -852,6 +894,7 @@ export async function buildExternalQueuedWithdrawalRequest(
     plan,
     ...(feePayer ? { feePayer } : {}),
   });
+  const outputAttribution = outputRentAttribution(plan, feePayer);
   const built: ExternalQueuedWithdrawalBuiltTransaction = {
     id: transactionId,
     environment: input.actor.environment,
@@ -874,6 +917,8 @@ export async function buildExternalQueuedWithdrawalRequest(
     discount_bps: plan.expectedRequest.discountBps,
     maturity_timestamp: plan.expectedRequest.maturityTimestamp,
     deadline_timestamp: plan.expectedRequest.deadlineTimestamp,
+    creates_output_accounts: outputAttribution.createsOutputAccounts,
+    output_accounts_rent_funder: outputAttribution.outputAccountsRentFunder,
     fee_payer: feePayer ?? null,
     unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
     last_valid_block_height: unsigned.lastValidBlockHeight,
@@ -908,6 +953,8 @@ export async function buildExternalQueuedWithdrawalRequest(
     discountBps: built.discount_bps,
     maturityTimestamp: built.maturity_timestamp,
     deadlineTimestamp: built.deadline_timestamp,
+    createsOutputAccounts: built.creates_output_accounts,
+    outputAccountsRentFunder: built.output_accounts_rent_funder,
     feePayer: built.fee_payer,
     unsignedTransaction: built.unsigned_transaction,
     lastValidBlockHeight: built.last_valid_block_height,
@@ -1062,6 +1109,10 @@ export async function buildExternalQueuedWithdrawalCancel(
     discount_bps: null,
     maturity_timestamp: null,
     deadline_timestamp: null,
+    // A cancellation creates no persistent output account of its own (its
+    // idempotent wYLDS create is owner-paid), so there is no rent to attribute.
+    creates_output_accounts: false,
+    output_accounts_rent_funder: null,
     fee_payer: feePayer ?? null,
     unsigned_transaction: Buffer.from(unsigned.bytes).toString("base64"),
     last_valid_block_height: unsigned.lastValidBlockHeight,
@@ -1216,6 +1267,10 @@ export async function submitExternalQueuedWithdrawalAction(
       discountBps: build.discount_bps,
       maturityTimestamp: build.maturity_timestamp,
       deadlineTimestamp: build.deadline_timestamp,
+      // The build's output-ATA rent attribution rides onto the request row,
+      // the durable refund source for the output accounts' own rent.
+      createsOutputAccounts: build.creates_output_accounts,
+      outputAccountsRentFunder: build.output_accounts_rent_funder,
       signature: signed.signature,
       signedTransaction: signed.signedTransactionBase64,
       lastValidBlockHeight: build.last_valid_block_height,

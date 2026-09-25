@@ -72,7 +72,25 @@ interface QueueReconciliationStats {
 
 interface RawTransactionResponse {
   blockTime?: bigint | number | null;
-  meta: { err: unknown | null; logMessages?: readonly string[] | null } | null;
+  meta: RawTransactionMeta | null;
+}
+
+interface RawTransactionMeta {
+  err: unknown | null;
+  logMessages?: readonly string[] | null;
+  preTokenBalances?: readonly RawTokenBalance[] | null;
+  postTokenBalances?: readonly RawTokenBalance[] | null;
+}
+
+/**
+ * One entry of a landed transaction's token-balance lists. Matching a created
+ * account needs (mint, owner): the vault's own wYLDS ATA shares the mint with
+ * the request's output ATA, so mint alone cannot distinguish "the owner's
+ * output account was created" from "the vault's account was touched".
+ */
+interface RawTokenBalance {
+  mint: string;
+  owner?: string | null;
 }
 
 interface RawSignatureInfo {
@@ -435,7 +453,7 @@ async function recoverExpiredUnknownAction(
   const closing = await findClosingEvent(env, rpc, request, client);
   if (closing !== null) {
     assertClosingIdentity(request, closing.event);
-    await projectClosingEvent(ledger, request, closing);
+    await projectClosingEvent(ledger, rpc, request, closing);
     if (actionRow.action === "cancel") {
       if (closing.event.kind === "withdrawalFulfilled") {
         await ledger.advanceAction({
@@ -535,7 +553,7 @@ async function recoverExpiredUnknownParAction(
   const closing = await findClosingParEvent(env, rpc, request, client);
   if (closing !== null) {
     assertParEventIdentity(request, closing.event);
-    await projectClosingParEvent(ledger, request, closing);
+    await projectClosingParEvent(ledger, rpc, request, closing);
     if (actionRow.action === "cancel") {
       if (closing.event.kind === "redemptionFulfilled") {
         await ledger.advanceAction({
@@ -612,6 +630,78 @@ async function transactionObservation(
         ? null
         : String(transaction.blockTime),
   };
+}
+
+/**
+ * SOLA9-228 exactness at landing. The build recorded which persistent output
+ * ATAs it expected to create and who the creates would charge, but the
+ * creates are idempotent: an output account someone else creates between
+ * build and landing turns the create into a no-op that charges the recorded
+ * funder nothing. The provider can only observe chain state at build time,
+ * so the reconciliation settles the claim from the LANDED request
+ * transaction instead: a token account that transaction created appears in
+ * its postTokenBalances and not in its preTokenBalances.
+ *
+ * When neither claimed output account was created by the landed transaction,
+ * the recorded funder was never charged and the claim is retired before it
+ * can become a refund source. A partially-landed claim (one account created,
+ * the other lost the race) stays: the row names the funder the landed create
+ * did charge, and a refund consumer re-verifies per account before paying.
+ * An unreadable transaction — or one that landed but reported no
+ * token-balance lists — keeps the claim untouched: absent RPC evidence is
+ * not evidence of absence, and the same documented external-create residual
+ * the share-account projection accepts applies. Custody requests (whose
+ * funder and refund path are both SDP-internal) also keep their claim.
+ *
+ * One-directional by construction: the check can only retire a claim, never
+ * invent or strengthen one.
+ */
+async function retireUnpaidOutputRentClaim(
+  ledger: QueueLedger,
+  rpc: RawHistoryRpc,
+  request: EarnVaultWithdrawalRequestRow
+): Promise<void> {
+  if (!request.creates_output_accounts || request.custody_wallet_id !== null) return;
+  const claimedMints = new Set(
+    [request.intermediate_mint, request.token_mint].filter((mint) => mint !== null)
+  );
+  if (claimedMints.size === 0) return;
+  if (request.creation_signature === null) return;
+  let transaction: RawTransactionResponse | null;
+  try {
+    transaction = await rpc
+      .getTransaction(request.creation_signature as Signature, {
+        commitment: "finalized",
+        encoding: "json",
+        maxSupportedTransactionVersion: 0,
+      })
+      .send();
+  } catch (error) {
+    getLogger().warn(
+      { error, withdrawalRequestId: request.id },
+      "queued request transaction unreadable; keeping its output-rent claim"
+    );
+    return;
+  }
+  if (!transaction || transaction.meta === null || transaction.meta.err !== null) return;
+  // An omitted balance list is missing evidence, not empty evidence: without
+  // both lists the landing cannot be judged, and the claim stays.
+  const preTokenBalances = transaction.meta.preTokenBalances;
+  const postTokenBalances = transaction.meta.postTokenBalances;
+  if (preTokenBalances === undefined || preTokenBalances === null) return;
+  if (postTokenBalances === undefined || postTokenBalances === null) return;
+  const balanceKey = (balance: RawTokenBalance): string => `${balance.mint}:${balance.owner ?? ""}`;
+  const preExisting = new Set(preTokenBalances.map(balanceKey));
+  const createdMints = new Set(
+    postTokenBalances
+      .filter((balance) => !preExisting.has(balanceKey(balance)))
+      .map((balance) => balance.mint)
+  );
+  if ([...claimedMints].some((mint) => createdMints.has(mint))) return;
+  await ledger.dropUnpaidOutputAccountsRentClaim({
+    withdrawalRequestId: request.id,
+    organizationId: request.organization_id,
+  });
 }
 
 async function transactionLogs(
@@ -967,7 +1057,7 @@ async function reconcileRequest(
     return "closedUnknown";
   }
   assertClosingIdentity(request, closing.event);
-  await projectClosingEvent(ledger, request, closing);
+  await projectClosingEvent(ledger, rpc, request, closing);
   return "advanced";
 }
 
@@ -1030,15 +1120,17 @@ export async function reconcileParRequest(
     return "closedUnknown";
   }
   assertParEventIdentity(request, closing.event);
-  await projectClosingParEvent(ledger, request, closing);
+  await projectClosingParEvent(ledger, rpc, request, closing);
   return "advanced";
 }
 
 async function projectClosingParEvent(
   ledger: QueueLedger,
+  rpc: RawHistoryRpc,
   request: EarnVaultWithdrawalRequestRow,
   closing: ClosingParEventObservation
 ): Promise<void> {
+  await retireUnpaidOutputRentClaim(ledger, rpc, request);
   if (closing.event.kind === "redemptionCancelled") {
     await ledger.advanceRequest({
       withdrawalRequestId: request.id,
@@ -1063,9 +1155,11 @@ async function projectClosingParEvent(
 
 export async function projectClosingEvent(
   ledger: QueueLedger,
+  rpc: RawHistoryRpc,
   request: EarnVaultWithdrawalRequestRow,
   closing: ClosingEventObservation
 ): Promise<void> {
+  await retireUnpaidOutputRentClaim(ledger, rpc, request);
   if (closing.event.kind === "withdrawalCancelled") {
     await ledger.advanceRequest({
       withdrawalRequestId: request.id,

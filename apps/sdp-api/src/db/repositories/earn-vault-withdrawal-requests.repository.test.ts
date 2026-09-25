@@ -1066,6 +1066,221 @@ describe("Earn queued withdrawal repository", () => {
     });
   });
 
+  it("keeps output-ATA rent attribution off the fulfillment movement's share-account claim", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    // The founding deposit created the position's share account, so the
+    // projection already names ITS funder before any queued redemption.
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_positions SET share_ata_rent_funder = ? WHERE id = ? AND organization_id = ?`
+      )
+      .bind("OriginalShareRentFunder1111111111111111111", EXTERNAL_POSITION, ORG)
+      .run();
+    const external = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+      mechanism: "operator_redemption",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: external.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "queued-fulfilled-partner-rent-signature",
+      assetsPaid: "10.25",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+
+    // A queued redemption spends an existing holding and never creates the
+    // position's share account, so the movement claims nothing: the
+    // output-ATA attribution stays on the request row, separate from the
+    // share-account refund claim a later exit reads.
+    const movement = await getDb(env)
+      .prepare(
+        `SELECT creates_share_account, share_ata_rent_funder
+            FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${external.request.id}`)
+      .first<{ creates_share_account: boolean; share_ata_rent_funder: string | null }>();
+    expect(movement).toEqual({ creates_share_account: false, share_ata_rent_funder: null });
+
+    // The exit's refund projection must still name the share account's real
+    // funder — never the party that funded the output ATAs.
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(EXTERNAL_POSITION)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBe("OriginalShareRentFunder1111111111111111111");
+  });
+
+  it("keeps an unattributed fulfillment movement and position projection at NULL", async () => {
+    const external = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: external.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "queued-fulfilled-owner-rent-signature",
+      assetsPaid: "9.8",
+      fulfilledAt: "2026-09-18T01:00:00.000Z",
+    });
+    const movement = await getDb(env)
+      .prepare(
+        `SELECT creates_share_account, share_ata_rent_funder
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(`earn_queue_fulfillment_${external.request.id}`)
+      .first<{ creates_share_account: boolean; share_ata_rent_funder: string | null }>();
+    expect(movement).toEqual({ creates_share_account: false, share_ata_rent_funder: null });
+    const position = await getDb(env)
+      .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
+      .bind(EXTERNAL_POSITION)
+      .first<{ share_ata_rent_funder: string | null }>();
+    expect(position?.share_ata_rent_funder).toBeNull();
+  });
+
+  it("persists output-ATA rent attribution on the durable build row", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const build = await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_output_rent",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      mechanism: "operator_redemption",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "OutputRentParRequestAddress1111111111111",
+      shares: "1",
+      quotedAssets: "1.25",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "1.25",
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+      feePayer: partner,
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "20000",
+      currentBlockHeight: "10000",
+    });
+    expect(build.creates_output_accounts).toBe(true);
+    expect(build.output_accounts_rent_funder).toBe(partner);
+    await expect(
+      repository.getExternalWalletTransaction({
+        organizationId: ORG,
+        transactionId: build.id,
+      })
+    ).resolves.toMatchObject({
+      creates_output_accounts: true,
+      output_accounts_rent_funder: partner,
+    });
+  });
+
+  it("refuses an output-ATA rent funder without a creation claim at the database boundary", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const created = await createRequest();
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_vault_withdrawal_requests
+              SET output_accounts_rent_funder = ?
+            WHERE id = ?`
+        )
+        .bind(partner, created.request.id)
+        .run()
+    ).rejects.toThrow(/output_rent_funder_shape_check/);
+
+    await repository.createExternalWalletTransaction({
+      id: "earn_external_wallet_withdrawal_request_transaction_rent_shape",
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: EXTERNAL_POSITION,
+      action: "request",
+      mechanism: "operator_redemption",
+      ownerAddress: EXTERNAL_OWNER,
+      vaultAddress: VAULT,
+      tokenMint: TOKEN_MINT,
+      shareMint: SHARE_MINT,
+      requestAddress: "RentShapeParRequestAddress11111111111111",
+      shares: "1",
+      quotedAssets: "1.25",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "1.25",
+      unsignedTransaction: "AQ==",
+      lastValidBlockHeight: "20000",
+      currentBlockHeight: "10000",
+    });
+    await expect(
+      getDb(env)
+        .prepare(
+          `UPDATE earn_external_wallet_withdrawal_request_transactions
+              SET output_accounts_rent_funder = ?
+            WHERE id = 'earn_external_wallet_withdrawal_request_transaction_rent_shape'`
+        )
+        .bind(partner)
+        .run()
+    ).rejects.toThrow(/output_rent_funder_shape_check/);
+  });
+
+  it("drops an unpaid output-ATA rent claim and never touches an unclaimed row", async () => {
+    const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    const claimed = await createRequest({
+      mechanism: "operator_redemption",
+      quotedAssets: "10.25",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "10.25",
+      createsOutputAccounts: true,
+      outputAccountsRentFunder: partner,
+    });
+    await repository.dropUnpaidOutputAccountsRentClaim({
+      withdrawalRequestId: claimed.request.id,
+      organizationId: ORG,
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: claimed.request.id,
+      })
+    ).resolves.toMatchObject({ creates_output_accounts: false, output_accounts_rent_funder: null });
+
+    const unclaimed = await createRequest();
+    await repository.dropUnpaidOutputAccountsRentClaim({
+      withdrawalRequestId: unclaimed.request.id,
+      organizationId: ORG,
+    });
+    await expect(
+      repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: unclaimed.request.id,
+      })
+    ).resolves.toMatchObject({ creates_output_accounts: false, output_accounts_rent_funder: null });
+  });
+
   it("returns the winner to concurrent identical cancellation submissions", async () => {
     const created = await createRequest();
     await repository.advanceRequest({
