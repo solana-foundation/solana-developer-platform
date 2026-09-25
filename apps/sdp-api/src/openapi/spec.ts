@@ -88,9 +88,10 @@ const OPENAPI_TAG = {
  * Swagger UI, the generated API reference, the Postman collection, the
  * playground catalog and the AI discovery files. Held false until launch
  * (PRO-2038): Earn is feature-complete but not announced, so partners must not
- * discover it yet. The internal document and the runtime are unaffected.
- * Flipping this back is a PRO-1872 security sign-off PR (routes/earn/CLAUDE.md,
- * "Public OpenAPI promotion"); spec.test.ts pins both states.
+ * discover it yet. The hold is a document boundary only — the runtime is
+ * unaffected. Flipping this back is a PRO-1872 security sign-off PR
+ * (routes/earn/CLAUDE.md, "Public OpenAPI promotion"); spec.test.ts pins both
+ * states.
  */
 export const EARN_PUBLIC_SURFACE_PUBLISHED = false;
 
@@ -181,7 +182,7 @@ function registerPublicPaths(registry: OpenAPIRegistry, publishEarn: boolean) {
   registerProjectPaths(registry);
   registerIssuancePaths(registry);
   registerPaymentsPaths(registry);
-  registerTransactionsPaths(registry);
+  registerTransactionsPaths(registry, { publishEarn });
   registerPolicyPaths(registry);
   registerCompliancePaths(registry);
   registerCounterpartyPaths(registry);

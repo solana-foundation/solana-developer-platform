@@ -43,6 +43,19 @@ function getWalletListItemSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallets?.items ?? {};
 }
 
+interface TestNamedParameter {
+  name?: string;
+  schema?: TestJsonSchema;
+}
+
+function getNamedQueryParameters(operation: unknown): TestNamedParameter[] {
+  const parameters = (operation as { parameters?: unknown[] } | undefined)?.parameters ?? [];
+  return parameters.filter(
+    (parameter): parameter is TestNamedParameter & { name: string } =>
+      typeof parameter === "object" && parameter !== null && "name" in parameter
+  );
+}
+
 describe("OpenAPI spec", () => {
   it("documents exact signer-check runtime failures without changing its Provider-ID request", () => {
     const operation = createPublicOpenApiDocument().paths?.["/v1/wallets/signer-check"]?.post;
@@ -108,6 +121,116 @@ describe("OpenAPI spec", () => {
     // `earn_vault_deposit`, `earn_vault_withdrawal` and `earn_program_withdrawal`,
     // because the policy API accepts them today and the public schema must not
     // lie about accepted values. Nothing else in the document names Earn.
+  });
+
+  it("holds the held-back Earn module out of the public /v1/transactions contract", () => {
+    const publicDocument = createPublicOpenApiDocument();
+    const operation = publicDocument.paths?.["/v1/transactions"]?.get;
+    expect(operation).toBeDefined();
+
+    // The unified list is a shared authenticated route, but its published
+    // contract is still a publication surface (SOLA9-85): the held-back
+    // module's name must not be recoverable from the module selector, the
+    // response union, or anywhere else in the default public document.
+    const moduleParameter = getNamedQueryParameters(operation).find(
+      (parameter) => parameter.name === "module"
+    );
+    expect(moduleParameter?.schema?.enum).toBeDefined();
+    expect(moduleParameter?.schema?.enum).not.toContain("earn");
+
+    const responseSchema = getJsonSchema(operation?.responses?.["200"]);
+    const transactionItems = responseSchema.properties?.data?.properties?.transactions?.items;
+    // While the hold is active the union is open (the module-agnostic variant
+    // that parses held-back rows must not overlap-name them), so it renders
+    // as anyOf; the closed internal union renders as oneOf. Either way, no
+    // variant may name the held-back module.
+    const unionVariants = transactionItems?.oneOf ?? transactionItems?.anyOf;
+    expect(unionVariants).toBeDefined();
+    for (const variant of unionVariants ?? []) {
+      // The module-agnostic variant types `module` as a plain string with no
+      // enum of its own; every branching variant must exclude the held-back
+      // module from its enum.
+      expect(variant.properties?.module?.enum ?? []).not.toContain("earn");
+    }
+    // The module-agnostic variant must refuse the published modules as a
+    // document-level constraint (`not.enum`), so a generated client cannot
+    // parse a published row — whatever its `kind` or `moduleStatus` — through
+    // it: published rows resolve to their own branch, and generated types can
+    // narrow those fields by module. The `not` enumerates only published
+    // modules; naming the held-back family is what the hold forbids.
+    const moduleAgnosticVariant = (unionVariants ?? []).find(
+      (variant) => variant.properties?.module?.enum === undefined
+    );
+    expect(moduleAgnosticVariant).toBeDefined();
+    expect(moduleAgnosticVariant?.properties?.module?.not?.enum).toEqual([
+      "payments",
+      "dvp",
+      "private_channels",
+      "issuance",
+      "rings",
+    ]);
+    // Earn-only lifecycle vocabulary must not survive through a shared
+    // variant: these moduleStatus values name no other module's contract.
+    const unionJson = JSON.stringify(transactionItems);
+    for (const earnOnlyStatus of ["requested", "pending_approval", "partially_completed"]) {
+      expect(unionJson).not.toContain(earnOnlyStatus);
+    }
+    // The operation as a whole (selector, union, descriptions) names no Earn
+    // vocabulary at all.
+    expect(JSON.stringify(operation)).not.toMatch(/earn/);
+
+    // Publication-wide: the default public document must not name the
+    // held-back module as a standalone value anywhere. (The wallet-policy
+    // `operationTypes` and API-key `earn:read`/`earn:write` scope values above
+    // are deliberate accepted-value pins, not the module name.)
+    const earnValueSites: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (typeof node === "string") {
+        if (node === "earn") earnValueSites.push(path);
+        return;
+      }
+      if (Array.isArray(node)) {
+        node.forEach((value, index) => {
+          walk(value, `${path}[${index}]`);
+        });
+        return;
+      }
+      if (node && typeof node === "object") {
+        for (const [key, value] of Object.entries(node)) walk(value, `${path}/${key}`);
+      }
+    };
+    walk(publicDocument, "");
+    expect(earnValueSites).toEqual([]);
+
+    // The dashboard playground catalog is generated from this document; it
+    // must not offer the held-back module as a selectable value either.
+    const catalog = readFileSync(
+      new URL("../../../sdp-web/src/lib/api-playground-catalog.generated.json", import.meta.url),
+      "utf8"
+    );
+    expect(catalog).not.toMatch(/earn/);
+  });
+
+  it("keeps Earn in the /v1/transactions contract once it is publishable", () => {
+    // The publishable document (what PRO-2038 flips the hold to) and the
+    // internal document both keep the full unified contract, so flipping
+    // EARN_PUBLIC_SURFACE_PUBLISHED restores the selector without new work.
+    for (const document of [
+      createPublicOpenApiDocument({ publishEarn: true }),
+      createOpenApiDocument(),
+    ]) {
+      const operation = document.paths?.["/v1/transactions"]?.get;
+      const moduleParameter = getNamedQueryParameters(operation).find(
+        (parameter) => parameter.name === "module"
+      );
+      expect(moduleParameter?.schema?.enum).toContain("earn");
+      const transactionItems = getJsonSchema(operation?.responses?.["200"]).properties?.data
+        ?.properties?.transactions?.items;
+      const earnVariant = transactionItems?.oneOf?.find((variant) =>
+        variant.properties?.module?.enum?.includes("earn")
+      );
+      expect(earnVariant?.properties?.kind?.enum).toEqual(["deposit", "withdraw"]);
+    }
   });
 
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
