@@ -267,6 +267,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
       amount: "10",
       minSharesOut: "1",
     }),
+    depositIntentFingerprint: `intent_${strategy.id}_${requestId}`,
     createdBy: TEST_USER.id,
   });
 }

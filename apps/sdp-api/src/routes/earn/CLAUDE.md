@@ -595,6 +595,28 @@ transaction signed by the organization custody wallet or external owner.
     `buildEarnVaultDepositFingerprint`, and the replay is resolved BEFORE the
     position is claimed — reusing a key with a different intent is a **409**, not
     a silent replay, and writes nothing.
+  - **The CROSS-KEY intent claim (SOLA9-496).** The dashboard mints its key per
+    browser tab (per-tab `sessionStorage`), so the same unchanged deposit intent
+    can arrive under two different keys, and the `(organization_id, request_id)`
+    anchor above cannot see them. Every custody deposit therefore also stamps
+    `deposit_intent_fingerprint` (migration 0119,
+    `buildEarnVaultDepositIntentFingerprint`): organization, project,
+    environment, provider, vault, custody wallet, resolved asset identity,
+    amount, and swap source — deliberately NOT `minSharesOut`, which is
+    quote-derived and moves with the rate, exactly why the client's own
+    fingerprint carries the user's tolerance. A different key submitting that
+    unchanged intent while a prior movement is still non-terminal is answered
+    with THAT movement (`replayed: true`) at the service preflight and again
+    under the per-vault ledger lock for the concurrent race — no second
+    build/sign/record/broadcast. The claim releases only on terminality (the
+    same settled predicate the `?settled=` list filter uses), so a `failed`
+    attempt frees the intent and a settled one makes the next same-amount
+    deposit a genuinely new movement. The claimed row's own idempotency
+    fingerprint legitimately differs (it was minted with a different floor);
+    ownership is enforced in the claim query itself (organization AND exact
+    project). External-wallet submits are outside this claim on purpose: each
+    submit consumes one durable built transaction at most once, so the build
+    row is that surface's server-backed claim.
   - Gate order: schema → strategy resolution → provider/environment capability
     → provider-specific production floor → deposit-style check → surfacing → entitlement →
     **catalogue admission** → **vault exposure cap** → wallet.

@@ -301,6 +301,26 @@ export interface EarnMovementsRepository {
     organizationId: string;
     requestId: string;
   }): Promise<EarnMovementRow | null>;
+  /**
+   * The server-backed claim for an unchanged custody DEPOSIT intent
+   * (SOLA9-496): the newest non-terminal vault-deposit movement carrying this
+   * intent fingerprint under this organization AND project, or null.
+   *
+   * The browser mints its idempotency key per tab, so the same unchanged
+   * intent can arrive under two different keys and the
+   * `(organization_id, request_id)` anchor above cannot see them. This read is
+   * the answer: ownership is enforced IN THE QUERY (organization and exact
+   * project bound, the detail read's own scoping rules), and the claim releases
+   * exactly when the movement is terminal for its settlement model — the same
+   * settled predicate the `?settled=` list filter uses (`failed`, or success
+   * past the provider's atomic settlement boundary). Terminality is the ONLY
+   * release: a still-open movement keeps the claim, whatever key holds it.
+   */
+  findOpenVaultDepositIntentClaim(params: {
+    organizationId: string;
+    projectId: string;
+    depositIntentFingerprint: string;
+  }): Promise<EarnMovementRow | null>;
   /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
   findCustodialMovementByRequestId(params: {
     organizationId: string;
@@ -684,6 +704,15 @@ export interface CreateSignedVaultDepositIntentInput
   lastValidBlockHeight: string;
   requestId: string;
   idempotencyFingerprint: string;
+  /**
+   * The CROSS-KEY intent claim (SOLA9-496): a fingerprint of the logical
+   * deposit intent (org, project, environment, provider, vault, custody
+   * wallet, amount, swap source — NOT the quote-derived floor). Stamped on the
+   * row so a different key submitting the same unchanged intent while this
+   * movement is still open is answered with THIS row instead of starting a
+   * second sign/record/broadcast path. See `buildEarnVaultDepositIntentFingerprint`.
+   */
+  depositIntentFingerprint: string;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -1186,6 +1215,35 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND execution_model = 'vault_direct'`
         )
         .bind(params.organizationId, params.requestId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async findOpenVaultDepositIntentClaim(params) {
+      // The unsettled predicate of `listVaultMovements`' `?settled=true` —
+      // `failed`, or success past the provider's atomic settlement boundary —
+      // is the definition of "the prior movement is terminal" here. Reuse it
+      // rather than restating it: a settlement-boundary change must move the
+      // claim's release point with it.
+      const settlement = vaultSettlementFilter("deposit", false);
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND deposit_intent_fingerprint = ?
+               AND direction = 'deposit'
+               AND execution_model = 'vault_direct'
+               ${settlement.clause}
+             ORDER BY created_at DESC, id DESC
+             LIMIT 1`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.depositIntentFingerprint,
+          ...settlement.values
+        )
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },
@@ -2088,6 +2146,24 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
+        // The cross-key intent claim, decided under the same lock: a
+        // DIFFERENT key submitting this unchanged intent while a prior
+        // movement is still open is answered with that movement instead of
+        // signing and broadcasting a second one (SOLA9-496 — the browser mints
+        // its key per tab). Ownership is enforced in the claim query itself
+        // (organization AND exact project bound); the claim row's own
+        // idempotency fingerprint legitimately differs — it was minted with a
+        // different quote-derived floor — which is the whole reason this
+        // separate fingerprint exists.
+        const claimTwin = await findOpenDepositIntentClaim(transaction, input);
+        if (claimTwin) {
+          return {
+            position: await requireMovementPosition(transaction, claimTwin),
+            movement: claimTwin,
+            replayed: true,
+          };
+        }
+
         // Platform admission, decided on committed rows under the vault lock,
         // before anything is claimed. See `LedgerAdmissionHook`.
         await input.admit?.(executor);
@@ -2717,6 +2793,45 @@ async function findVaultMovementByRequest(
   return row ? mapMovementRow(row) : null;
 }
 
+/**
+ * The open intent claim for a deposit write, inside its ledger transaction.
+ *
+ * The vault write lock is already held by the caller, so the twin that
+ * committed while this write waited is visible here: answering it is what
+ * keeps two different keys from recording two movements for one unchanged
+ * intent. Same terminality rule as the interface's claim read.
+ */
+async function findOpenDepositIntentClaim(
+  db: AppDb,
+  input: {
+    organizationId: string;
+    projectId: string;
+    depositIntentFingerprint: string;
+  }
+): Promise<EarnMovementRow | null> {
+  const settlement = vaultSettlementFilter("deposit", false);
+  const row = await db
+    .prepare(
+      `SELECT * FROM earn_movements
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND deposit_intent_fingerprint = ?
+          AND direction = 'deposit'
+          AND execution_model = 'vault_direct'
+          ${settlement.clause}
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.depositIntentFingerprint,
+      ...settlement.values
+    )
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
+}
+
 async function requireMovementPosition(
   db: AppDb,
   movement: EarnMovementRow
@@ -3139,10 +3254,11 @@ async function insertVaultMovement(
          denomination, amount_requested, min_shares_out,
          custody_wallet_id, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height,
-         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         request_id, idempotency_fingerprint, deposit_intent_fingerprint,
+         created_by, initiated_by_key_id,
          creates_share_account, share_ata_rent_funder
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -3168,6 +3284,8 @@ async function insertVaultMovement(
       input.lastValidBlockHeight,
       input.requestId,
       input.idempotencyFingerprint,
+      // The cross-key intent claim stamped beside the same-key fingerprint.
+      input.depositIntentFingerprint,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
       ...shareAccountClaimBindings(input)

@@ -320,7 +320,134 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
   });
 
-  it("binds independent request keys into distinct on-chain memo instructions", async () => {
+  /**
+   * The browser mints an idempotency key per TAB (`sessionStorage`), so the
+   * same unchanged deposit intent can arrive under two different keys. The
+   * `(organization_id, request_id)` replay anchor cannot see them — each key
+   * looks fresh — and without an intent claim the second key starts a second
+   * sign/record/broadcast path for money that is already moving (SOLA9-496).
+   * The claim is keyed on the intent itself (org, project, environment,
+   * provider, vault, custody wallet, resolved asset identity, amount, swap
+   * source) and deliberately NOT on `minSharesOut`: the floor is derived from
+   * a live quote, so two tabs quoting at different moments carry different
+   * floors for one intent.
+   */
+  it("answers a different key for the same unchanged intent with the movement already counted", async () => {
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_cross_tab_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    const second = await depositIntoVault(
+      env,
+      depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(second).toMatchObject({ replayed: true });
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(second.position.id).toBe(first.position.id);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(signVaultPlan).toHaveBeenCalledTimes(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a concurrent different-key twin for the same intent with one recorded movement", async () => {
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_intent_twin_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const results = await Promise.all([
+      depositIntoVault(env, depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })),
+      depositIntoVault(env, depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })),
+    ]);
+
+    expect(new Set(results.map((result) => result.movement.id))).toHaveProperty("size", 1);
+    expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("claims the same intent across keys even when a re-quoted floor differs", async () => {
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({
+        accepted: {
+          amount: args.amount,
+          ...(args.minSharesOut ? { minSharesOut: args.minSharesOut } : {}),
+        },
+      })
+    );
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_refloored_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "1" })
+    );
+    const second = await depositIntoVault(
+      env,
+      depositInput({ requestId: "22222222-2222-4222-8222-222222222222", minSharesOut: "2" })
+    );
+
+    expect(second).toMatchObject({ replayed: true });
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a fresh movement for the same intent once the prior one failed", async () => {
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    await repository.advanceVaultMovement({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      toStatus: "failed",
+      failureReason: "chain rejected",
+    });
+
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([2]),
+      signature: "sig_retry_after_failure",
+      lastValidBlockHeight: "12345",
+    });
+    const second = await depositIntoVault(
+      env,
+      depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(second).toMatchObject({ replayed: false });
+    expect(second.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("binds independent request keys for distinct intents into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
     signVaultPlan.mockImplementation(async (_env, input) => {
       const encoded = input.plan.instructions.at(-1)?.data;
@@ -332,12 +459,15 @@ describe("depositIntoVault — idempotency", () => {
         lastValidBlockHeight: "12345",
       };
     });
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({ accepted: { amount: args.amount } })
+    );
 
     const firstRequestId = "11111111-1111-4111-8111-111111111111";
     const secondRequestId = "22222222-2222-4222-8222-222222222222";
     await Promise.all([
-      depositIntoVault(env, depositInput({ requestId: firstRequestId })),
-      depositIntoVault(env, depositInput({ requestId: secondRequestId })),
+      depositIntoVault(env, depositInput({ requestId: firstRequestId, amount: "10" })),
+      depositIntoVault(env, depositInput({ requestId: secondRequestId, amount: "25" })),
     ]);
 
     expect(memoPayloads.sort()).toEqual(
@@ -785,14 +915,17 @@ describe("depositIntoVault — signed persistence boundary", () => {
         lastValidBlockHeight: "12345",
       };
     });
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({ accepted: { amount: args.amount } })
+    );
     broadcastVaultTransaction.mockRejectedValue(new Error("ambiguous broadcast"));
     const first = await depositIntoVault(
       env,
-      depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", amount: "10" })
     );
     const second = await depositIntoVault(
       env,
-      depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+      depositInput({ requestId: "22222222-2222-4222-8222-222222222222", amount: "25" })
     );
     const repository = createPostgresEarnMovementsRepository(getDb(env));
 
@@ -1186,13 +1319,18 @@ describe("earn vault project attribution", () => {
      */
     it("falls back to the earlier surviving claim", async () => {
       const SPONSOR_LATER = "8pPyFjmDGXnstD9Yg8H1jd1CyJcCPHwRvUBhZ4NRLPMe";
-      buildVaultDeposit.mockResolvedValue(plan({ createsShareAccount: true }));
+      buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+        plan({ createsShareAccount: true, accepted: { amount: args.amount } })
+      );
       resolveVaultSponsorship.mockResolvedValue({
         kind: "sponsored",
         sponsor: SPONSOR,
         feePayment: { getFeePayer: vi.fn(), signAsFeePayer: vi.fn(), signAndSend: vi.fn() },
       });
-      const first = await depositIntoVault(env, depositInput());
+      const first = await depositIntoVault(
+        env,
+        depositInput({ requestId: "11111111-1111-4111-8111-111111111111", amount: "10" })
+      );
 
       resolveVaultSponsorship.mockResolvedValue({
         kind: "sponsored",
@@ -1206,7 +1344,10 @@ describe("earn vault project attribution", () => {
       });
       const second = await depositIntoVault(
         env,
-        depositInput({ requestId: "22222222-2222-4222-8222-222222222222" })
+        depositInput({
+          requestId: "22222222-2222-4222-8222-222222222222",
+          amount: "25",
+        })
       );
       expect(second.position.id).toBe(first.position.id);
       expect(await recordedFunder(first.position.id)).toBe(SPONSOR_LATER);

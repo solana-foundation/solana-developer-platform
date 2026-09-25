@@ -162,6 +162,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       lastValidBlockHeight: "123456",
       requestId: `earn-mv-request-${sequence}`,
       idempotencyFingerprint: `earn-mv-fingerprint-${sequence}`,
+      depositIntentFingerprint: `earn-mv-intent-${sequence}`,
       createdBy: USER,
       initiatedByKeyId: null,
       ...overrides,

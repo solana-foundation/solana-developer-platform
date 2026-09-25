@@ -12,7 +12,11 @@ import {
   type EarnPositionRow,
 } from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
-import { buildEarnVaultDepositFingerprint, resolveIdempotencyReplay } from "@/lib/idempotency";
+import {
+  buildEarnVaultDepositFingerprint,
+  buildEarnVaultDepositIntentFingerprint,
+  resolveIdempotencyReplay,
+} from "@/lib/idempotency";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { assertVaultDepositEligible } from "./deposit-eligibility";
@@ -174,6 +178,26 @@ export async function depositIntoVault(
           swapSlippageBps: input.swap.slippageBps,
         }),
   });
+  // The CROSS-KEY intent claim (SOLA9-496): the caller mints its idempotency
+  // key per browser tab, so the same unchanged intent can arrive under two
+  // different keys and the (organization_id, request_id) anchor above cannot
+  // see them. This fingerprint names the intent itself and deliberately omits
+  // `minSharesOut` — the floor is quote-derived and moves with the rate, so
+  // two tabs quoting at different moments carry different floors for one
+  // intent. A different key submitting it while a prior movement is still
+  // open must be answered with that movement, never sign a second one.
+  const intentFingerprint = buildEarnVaultDepositIntentFingerprint({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    environment: input.environment,
+    provider: input.provider,
+    providerReference: input.providerReference,
+    custodyWalletId: input.wallet.id,
+    tokenMint: input.tokenMint,
+    shareMint: input.shareMint,
+    amount: input.amount,
+    ...(input.swap === undefined ? {} : { swapSourceTokenMint: input.swap.sourceTokenMint }),
+  });
 
   // Fast sequential replay path. The atomic insert below repeats this check to
   // close the concurrent race; this read only avoids rebuilding and re-signing
@@ -199,6 +223,21 @@ export async function depositIntoVault(
       idempotencyFingerprint: fingerprint,
     });
     return replayResult(ledger, input, prior);
+  }
+
+  // Same posture as the replay above, one claim over: a different key for the
+  // same unchanged intent is answered from the ledger without proving the RPC
+  // endpoint, rebuilding, or re-signing anything. The claim's own scoping
+  // (organization AND exact project, in SQL) IS the ownership check here — the
+  // claimed row's idempotency fingerprint legitimately differs from this
+  // request's, because it was minted with a different quote-derived floor.
+  const openClaim = await ledger.findOpenVaultDepositIntentClaim({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    depositIntentFingerprint: intentFingerprint,
+  });
+  if (openClaim) {
+    return replayResult(ledger, input, openClaim);
   }
 
   // Replays above are pure durable reads: they must keep working during an RPC
@@ -385,6 +424,7 @@ export async function depositIntoVault(
           lastValidBlockHeight: signed.lastValidBlockHeight,
           requestId: input.requestId,
           idempotencyFingerprint: fingerprint,
+          depositIntentFingerprint: intentFingerprint,
           createdBy: input.userId ?? null,
           initiatedByKeyId: input.apiKeyId ?? null,
           // Only the builder, which read the chain, knows whether this deposit

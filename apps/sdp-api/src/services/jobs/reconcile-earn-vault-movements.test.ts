@@ -107,6 +107,7 @@ async function seedMovement(lastValidBlockHeight = "100", provider = "kamino") {
     lastValidBlockHeight,
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: crypto.randomUUID(),
+    depositIntentFingerprint: crypto.randomUUID(),
   });
 }
 
