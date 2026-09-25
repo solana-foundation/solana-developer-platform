@@ -43,6 +43,21 @@ export function mergeApprovalRequests(
   return [...new Map(requestGroups.flat().map((request) => [request.id, request])).values()];
 }
 
+/**
+ * Whether a fetched batch may repaint an inbox bound to `projectId`. The API
+ * scopes the approval-request list strictly to the project the proxy sends,
+ * so rows naming another project (or none) mean the answer came from outside
+ * the mounted workspace — a shared selection cookie a sibling tab switched
+ * mid-refresh, or a proxy that predates the explicit binding — and the batch
+ * is dropped whole rather than partially applied.
+ */
+export function approvalRequestsInProjectScope(
+  requests: WalletApprovalRequestSummary[],
+  projectId: string
+): boolean {
+  return requests.every((request) => request.projectId === projectId);
+}
+
 function localDateBoundary(value: string, endOfDay: boolean): number | null {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return null;

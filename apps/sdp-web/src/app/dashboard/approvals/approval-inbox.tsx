@@ -41,6 +41,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { useDashboardTab } from "@/lib/dashboard-url-state";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { cn } from "@/lib/utils";
 import { formatDisplayAmount, resolveTokenByMint } from "../payments/payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments/payments-page.data";
@@ -54,6 +55,7 @@ import {
   approvalApiKeyLabel,
   approvalBadgeStatus,
   approvalReason,
+  approvalRequestsInProjectScope,
   approvalWalletLabel,
   EMPTY_APPROVAL_FILTERS,
   filterApprovalRequests,
@@ -71,6 +73,13 @@ function approvalRequestHref(approvalRequestId: string): string {
 }
 
 interface ApprovalInboxProps {
+  /**
+   * The page's immutable project scope, or null when the page could not
+   * resolve one. Refreshes re-bind to it explicitly instead of the shared
+   * selection cookie, and responses carrying another project's rows are
+   * dropped, so a mounted inbox can never mix projects.
+   */
+  projectId: string | null;
   initialRequests: WalletApprovalRequestSummary[];
   apiKeyNames: Record<string, string>;
   /** The org's issued tokens keyed by mint, so SDP-minted assets resolve to a symbol. */
@@ -80,7 +89,19 @@ interface ApprovalInboxProps {
   loadError?: boolean;
 }
 
+/**
+ * The inbox's data lives under its project scope, so an update is only ever
+ * applied when the scope that requested it is still the mounted one.
+ */
+interface InboxState {
+  scope: { projectId: string | null };
+  requests: WalletApprovalRequestSummary[];
+  relativeTimeBase: number;
+  loadError: boolean;
+}
+
 export function ApprovalInbox({
+  projectId,
   initialRequests,
   apiKeyNames,
   issuedTokensByMint,
@@ -93,16 +114,34 @@ export function ApprovalInbox({
   const reduceMotion = useReducedMotion();
   const tab: ApprovalInboxTab = useDashboardTab() === "history" ? "history" : "pending";
   const { page, pageSize, setPage, setPageSize } = usePaginationUrlState(APPROVAL_INBOX_PAGE_SIZE);
-  const [requests, setRequests] = useState(initialRequests);
+  // Rows and their project scope move together, so a refresh answered for
+  // another project is dropped whole instead of partially applied.
+  const [inbox, setInbox] = useState<InboxState>(() => ({
+    scope: { projectId },
+    requests: initialRequests,
+    relativeTimeBase: renderedAt,
+    loadError,
+  }));
+  const { requests, relativeTimeBase, loadError: hasLoadError } = inbox;
   const [filters, setFilters] = useState<ApprovalInboxFilters>(EMPTY_APPROVAL_FILTERS);
   const [isReloading, setReloading] = useState(false);
   const [spinning, setSpinning] = useState(false);
   if (isReloading && !spinning) setSpinning(true);
-  const [hasLoadError, setLoadError] = useState(loadError);
-  const [relativeTimeBase, setRelativeTimeBase] = useState(renderedAt);
   const [previousTab, setPreviousTab] = useState(tab);
   if (previousTab !== tab) {
     setPreviousTab(tab);
+    setFilters(EMPTY_APPROVAL_FILTERS);
+  }
+  // The mounted project is the inbox's identity: when it changes, rows,
+  // filters and load state reset to the new scope's initial data, and every
+  // in-flight refresh of the old scope is dropped by its scope identity.
+  if (inbox.scope.projectId !== projectId) {
+    setInbox({
+      scope: { projectId },
+      requests: initialRequests,
+      relativeTimeBase: renderedAt,
+      loadError: false,
+    });
     setFilters(EMPTY_APPROVAL_FILTERS);
   }
 
@@ -155,18 +194,33 @@ export function ApprovalInbox({
   /**
    * Refetches pending and recent approval requests and merges them into state.
    *
+   * Every fetch names the mounted project explicitly (`x-project-id`), so the
+   * proxy binds the response to this inbox's scope instead of resolving the
+   * shared selection cookie, which a sibling tab can change at any moment. A
+   * response whose rows carry another project's id is dropped whole, and so
+   * is a response that resolves after the mounted project changed.
+   *
    * @param options - `silent` suppresses the failure toast for background auto-refreshes;
    * manual reloads pass `silent: false` to surface the error.
    */
   async function reload(options: { silent: boolean }) {
     if (isReloading) return;
+    // The scope pins this attempt to the mounted project: its identity is
+    // what the update below is judged against, so a response that resolves
+    // after the project changed never writes into the new scope.
+    const scope = inbox.scope;
     setReloading(true);
     try {
+      const projectHeaders = projectId ? { [PROJECT_HEADER_NAME]: projectId } : undefined;
       const [pendingResponse, recentResponse] = await Promise.all([
         fetch("/api/dashboard/approval-requests?status=pending&limit=100", {
           cache: "no-store",
+          headers: projectHeaders,
         }),
-        fetch("/api/dashboard/approval-requests?limit=100", { cache: "no-store" }),
+        fetch("/api/dashboard/approval-requests?limit=100", {
+          cache: "no-store",
+          headers: projectHeaders,
+        }),
       ]);
       const [pendingBody, recentBody] = (await Promise.all([
         pendingResponse.json().catch(() => null),
@@ -179,12 +233,32 @@ export function ApprovalInbox({
       if (!pendingResponse.ok || !recentResponse.ok || !pendingRequests || !recentRequests) {
         throw new Error("Approval reload failed");
       }
-      setRequests(mergeApprovalRequests(pendingRequests, recentRequests));
-      setRelativeTimeBase(Date.now());
-      setLoadError(false);
+      // Defense in depth for the explicit binding: a batch answered for
+      // another project — an older proxy deploy still resolving the shared
+      // cookie, say — must not repaint this inbox.
+      if (projectId !== null) {
+        if (!approvalRequestsInProjectScope(pendingRequests, projectId)) {
+          throw new Error("Approval reload left the mounted project");
+        }
+        if (!approvalRequestsInProjectScope(recentRequests, projectId)) {
+          throw new Error("Approval reload left the mounted project");
+        }
+      }
+      // Functional so a response that resolves after the scope moved on is
+      // dropped rather than written into the new scope's inbox.
+      setInbox((prev) =>
+        prev.scope === scope
+          ? {
+              ...prev,
+              requests: mergeApprovalRequests(pendingRequests, recentRequests),
+              relativeTimeBase: Date.now(),
+              loadError: false,
+            }
+          : prev
+      );
       window.dispatchEvent(new Event("sdp:approval-requests-updated"));
     } catch {
-      setLoadError(true);
+      setInbox((prev) => (prev.scope === scope ? { ...prev, loadError: true } : prev));
       if (!options.silent && requests.length > 0) {
         toast.error(t("DashboardApprovals.refreshFailed"), { position: "bottom-right" });
       }
@@ -197,12 +271,13 @@ export function ApprovalInbox({
   useEffect(() => {
     reloadRef.current = reload;
   });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the timer is deliberately recreated whenever the mounted project changes, so no interval outlives its scope.
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       void reloadRef.current({ silent: true });
     }, AUTO_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [projectId]);
 
   if (hasLoadError && requests.length === 0) {
     return (

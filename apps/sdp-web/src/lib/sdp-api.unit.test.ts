@@ -300,6 +300,80 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
+
+  // Views that must stay bound to the project they rendered with — the
+  // approval inbox and detail page — name their project on every refresh, so
+  // a sibling tab's cookie switch cannot answer one workspace's request with
+  // another project's data.
+  describe("explicit project binding", () => {
+    it("binds the upstream request to the declared project instead of the cookie", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_cookie"));
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+      const request = new Request("https://dashboard.example.test/api/dashboard/approval-requests");
+
+      const response = await proxyToSdpApi({
+        request,
+        traceSource: "test.proxy.bound",
+        path: "/v1/wallets/approval-requests",
+        boundProjectId: "project_test",
+      });
+
+      expect(response.status).toBe(200);
+      const headers = headersOf(callsTo(fetchMock, "/v1/wallets/approval-requests")[0]);
+      expect(headers.get("x-project-id")).toBe("project_test");
+      expect(headers.get("Authorization")).toBe("Bearer token_test");
+    });
+
+    it("refuses a declared project the organization does not list without calling upstream", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await proxyToSdpApi({
+        request: new Request("https://dashboard.example.test/api/dashboard/approval-requests"),
+        traceSource: "test.proxy.bound",
+        path: "/v1/wallets/approval-requests",
+        boundProjectId: "project_unlisted",
+      });
+
+      expect(response.status).toBe(400);
+      const body = (await response.json()) as { error?: { message?: string } };
+      expect(body.error?.message).toBe("Requested project is not available for this organization");
+      expect(callsTo(fetchMock, "/v1/wallets/approval-requests")).toHaveLength(0);
+    });
+
+    it("still resolves the shared cookie when no project is bound", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const response = await proxyToSdpApi({
+        request: new Request("https://dashboard.example.test/api/anything"),
+        traceSource: "test.proxy.unbound",
+        path: "/v1/wallets/approval-requests",
+      });
+
+      expect(response.status).toBe(200);
+      const headers = headersOf(callsTo(fetchMock, "/v1/wallets/approval-requests")[0]);
+      expect(headers.get("x-project-id")).toBe("project_test");
+    });
+  });
 });
 
 // A cookie can name a project this organization does not list: two local stacks

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { cn } from "@/lib/utils";
 import {
   type ApprovalAction,
@@ -30,6 +31,13 @@ import {
 } from "../approval-requests.data";
 
 interface ApprovalRequestDetailProps {
+  /**
+   * The page's immutable project scope. Follow-up refreshes and decisions
+   * re-bind to it explicitly instead of the shared selection cookie, and
+   * responses carrying another project's request are dropped, so a mounted
+   * page can never mix projects.
+   */
+  projectId: string;
   initialRequest: WalletApprovalRequestSummary;
   evaluation: WalletPolicyEvaluationDetail | null;
   apiKeyNames: Record<string, string>;
@@ -138,8 +146,14 @@ function decisionFeedback(
   }
 }
 
-/** Holds the request on screen and runs approve, reject and cancel against it. */
-function useApprovalDecision(initialRequest: WalletApprovalRequestSummary) {
+/**
+ * Holds the request on screen and runs approve, reject and cancel against it.
+ *
+ * Every follow-up request names the page's project explicitly, so the proxy
+ * binds it to the mounted page instead of resolving the shared selection
+ * cookie, and a response answered for another project is never displayed.
+ */
+function useApprovalDecision(projectId: string, initialRequest: WalletApprovalRequestSummary) {
   const t = useTranslations();
   const [request, setRequest] = useState(initialRequest);
   const [confirmation, setConfirmation] = useState<ApprovalAction | null>(null);
@@ -154,10 +168,10 @@ function useApprovalDecision(initialRequest: WalletApprovalRequestSummary) {
     try {
       const response = await fetch(
         `/api/dashboard/approval-requests/${encodeURIComponent(request.id)}`,
-        { cache: "no-store" }
+        { cache: "no-store", headers: { [PROJECT_HEADER_NAME]: projectId } }
       );
       const result = await readApprovalActionResponse(response);
-      if (result.ok && result.approvalRequest) {
+      if (result.ok && result.approvalRequest && result.approvalRequest.projectId === projectId) {
         showLatest(result.approvalRequest);
         return result.approvalRequest;
       }
@@ -170,15 +184,22 @@ function useApprovalDecision(initialRequest: WalletApprovalRequestSummary) {
   async function decide(action: ApprovalAction) {
     setActiveAction(action);
     try {
-      const response = await fetch(buildApprovalActionPath(request.id, action), { method: "POST" });
+      const response = await fetch(buildApprovalActionPath(request.id, action), {
+        method: "POST",
+        headers: { [PROJECT_HEADER_NAME]: projectId },
+      });
       const feedback = decisionFeedback(action, await readApprovalActionResponse(response));
       if (!feedback.settled) {
         if (feedback.closeConfirmation) setConfirmation(null);
         toast.error("key" in feedback.message ? t(feedback.message.key) : feedback.message.text);
         return;
       }
-      if (feedback.request) showLatest(feedback.request);
-      const latest = feedback.request ?? (await refreshRequest());
+      // A decision answered for another project must not repaint this page;
+      // the refetch below applies only what the mounted scope can read back.
+      const inScopeRequest =
+        feedback.request && feedback.request.projectId === projectId ? feedback.request : null;
+      if (inScopeRequest) showLatest(inScopeRequest);
+      const latest = inScopeRequest ?? (await refreshRequest());
       setConfirmation(null);
       if (feedback.tone === "error") {
         toast.error(t(feedback.message));
@@ -200,6 +221,7 @@ function useApprovalDecision(initialRequest: WalletApprovalRequestSummary) {
 }
 
 export function ApprovalRequestDetail({
+  projectId,
   initialRequest,
   evaluation,
   apiKeyNames,
@@ -207,8 +229,10 @@ export function ApprovalRequestDetail({
 }: ApprovalRequestDetailProps) {
   const t = useTranslations();
   const locale = useLocale();
-  const { request, confirmation, setConfirmation, activeAction, decide } =
-    useApprovalDecision(initialRequest);
+  const { request, confirmation, setConfirmation, activeAction, decide } = useApprovalDecision(
+    projectId,
+    initialRequest
+  );
   const apiKeyLabel = approvalApiKeyLabel(
     request,
     apiKeyNames,

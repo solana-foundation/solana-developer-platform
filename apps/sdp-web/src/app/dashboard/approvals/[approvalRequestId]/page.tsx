@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
 import {
   fetchApprovalApiKeyNames,
   fetchApprovalPolicyEvaluation,
@@ -41,7 +41,15 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
     );
   }
 
-  const apiClient = await createSdpApiClient();
+  // The same request-scoped resolution the client used: the scope this detail
+  // page rendered under. Its follow-up refreshes and decisions re-bind to it
+  // instead of the mutable selection cookie.
+  const [apiClient, projectId] = await Promise.all([createSdpApiClient(), getSelectedProjectId()]);
+  if (!projectId) {
+    // Unreachable while the client above built: both resolve the same
+    // request-scoped project chain, which refuses the page first.
+    throw new Error("Selected project required");
+  }
   const apiKeyNamesPromise = fetchApprovalApiKeyNames(apiClient);
   // The primary request can exit through notFound() before this speculative
   // lookup is awaited. Keep that early exit from leaving a rejected promise
@@ -62,6 +70,7 @@ export default async function ApprovalRequestPage({ params }: PageContext) {
 
   return (
     <ApprovalRequestDetail
+      projectId={projectId}
       initialRequest={approvalRequest}
       evaluation={evaluation}
       apiKeyNames={apiKeyNames}

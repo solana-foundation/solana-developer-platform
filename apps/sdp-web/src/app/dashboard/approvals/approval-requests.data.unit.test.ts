@@ -4,6 +4,7 @@ import {
   type ApprovalInboxFilters,
   approvalBadgeStatus,
   approvalExecutionState,
+  approvalRequestsInProjectScope,
   EMPTY_APPROVAL_FILTERS,
   filterApprovalRequests,
   formatApprovalLabel,
@@ -199,5 +200,26 @@ describe("approvalExecutionState", () => {
     expect(approvalBadgeStatus(withOperationStatus("approved", "completed"))).toBe("approved");
     expect(approvalBadgeStatus(withOperationStatus("approved", "executing"))).toBe("approved");
     expect(approvalBadgeStatus(withOperationStatus("failed", "failed"))).toBe("failed");
+  });
+});
+
+describe("approvalRequestsInProjectScope", () => {
+  it("accepts a batch whose rows all carry the bound project", () => {
+    expect(approvalRequestsInProjectScope([approvalRequest("a", "pending")], "project-1")).toBe(
+      true
+    );
+  });
+
+  it("rejects a batch carrying another project's row", () => {
+    const batch = [
+      approvalRequest("a", "pending"),
+      approvalRequest("b", "pending", { projectId: "project-2" }),
+    ];
+    expect(approvalRequestsInProjectScope(batch, "project-1")).toBe(false);
+  });
+
+  it("rejects a batch with a row that reports no project", () => {
+    const batch = [approvalRequest("a", "pending", { projectId: null })];
+    expect(approvalRequestsInProjectScope(batch, "project-1")).toBe(false);
   });
 });

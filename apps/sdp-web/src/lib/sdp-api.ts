@@ -441,6 +441,7 @@ export async function proxyToSdpApi({
   traceSource,
   path,
   upstreamHeaders,
+  boundProjectId,
 }: {
   request: Request;
   traceSource: string;
@@ -451,6 +452,16 @@ export async function proxyToSdpApi({
    * remain server-owned, while endpoint-specific metadata is opt-in.
    */
   upstreamHeaders?: HeadersInit;
+  /**
+   * Explicit project scope declared by the dashboard client for this one call,
+   * for views that must stay bound to the project they rendered with instead
+   * of re-reading the shared selection cookie on every refresh. The id is
+   * validated against this organization's project list before it goes
+   * anywhere upstream — an arbitrary or no-longer-listed project is refused
+   * with a 400 — and the API still authorizes the caller on every request.
+   * Without it the proxy resolves the ambient cookie, as before.
+   */
+  boundProjectId?: string;
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
@@ -461,13 +472,26 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
-  const projectId = await getSelectedProjectId();
+  const projectId = boundProjectId ?? (await getSelectedProjectId());
   if (!projectId) {
     return proxyFailure(trace, 400, "Selected project required");
   }
+  if (boundProjectId !== undefined) {
+    // Client-declared scope, so validate it here where a refusal is a 4xx:
+    // the projects read is request-cached, and the bound client below walks
+    // the same list again without a second upstream call.
+    const projects = await fetchRequestProjects(await getRequestClerkToken());
+    if (!projects.some((project) => project.id === boundProjectId)) {
+      return proxyFailure(trace, 400, "Requested project is not available for this organization");
+    }
+  }
 
   try {
-    const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
+    const traceContext = trace.childContext(`${traceSource}.api`);
+    const apiClient =
+      boundProjectId !== undefined
+        ? await createProjectBoundSdpApiClient(boundProjectId, traceContext)
+        : await createSdpApiClient(traceContext);
     const method = request.method;
     const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
     const response = await apiClient.request(path, {

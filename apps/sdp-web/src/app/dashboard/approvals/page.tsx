@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createSdpApiClient, getSelectedProjectId } from "@/lib/sdp-api";
 import {
   fetchPaymentsIssuedTokenSymbols,
   type PaymentsIssuedTokenSymbol,
@@ -37,9 +37,14 @@ export default async function ApprovalsPage() {
   let apiKeyNames: Record<string, string> = {};
   let issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol> = {};
   let loadError = false;
+  // The same request-scoped resolution the client used: the scope the initial
+  // rows were loaded under. Follow-up refreshes re-bind to it instead of the
+  // mutable selection cookie, so a mounted inbox can never mix projects.
+  let projectId: string | null = null;
 
   try {
     const apiClient = await createSdpApiClient();
+    projectId = (await getSelectedProjectId()) ?? null;
     // Issued tokens are absent from the well-known catalogue, so without this
     // map every token this org minted renders as a shortened mint address.
     const [fetchedRequests, fetchedApiKeyNames, issuedTokenSymbolsResult] = await Promise.all([
@@ -58,6 +63,7 @@ export default async function ApprovalsPage() {
 
   return (
     <ApprovalInbox
+      projectId={projectId}
       initialRequests={requests}
       apiKeyNames={apiKeyNames}
       issuedTokensByMint={issuedTokensByMint}

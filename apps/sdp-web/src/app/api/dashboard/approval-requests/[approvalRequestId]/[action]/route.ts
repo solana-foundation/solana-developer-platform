@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isApprovalAction } from "@/app/dashboard/approvals/approval-actions";
+import { PROJECT_HEADER_NAME } from "@/lib/project-cookie";
 import { proxyToSdpApi } from "@/lib/sdp-api";
 
 type RouteContext = {
@@ -19,5 +20,8 @@ export async function POST(request: Request, context: RouteContext) {
     request,
     traceSource: `route.dashboard.approval-requests.${action}`,
     path: `/v1/wallets/approval-requests/${encodeURIComponent(approvalRequestId)}/${action}`,
+    // The decision must run under the project the detail page rendered with,
+    // not whichever project the shared selection cookie names by now.
+    boundProjectId: request.headers.get(PROJECT_HEADER_NAME) ?? undefined,
   });
 }
