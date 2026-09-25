@@ -444,7 +444,10 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
-  const assetOptions = recurringPaymentAssetOptions(wallet, {}, t);
+  // Currency options follow the mutable funding-wallet selection, so a
+  // replacement wallet never leaves the previous wallet's token selected.
+  const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? null, {}, t);
+  const selectedTokenIsHeld = assetOptions.some((asset) => asset.value === selectedToken);
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
   );
@@ -534,7 +537,9 @@ export function RecurringPaymentDetailWorkspace({
       setPaymentValidationError(t("DashboardPayments.recurring.invalidInterval"));
       return;
     }
-    if (!selectedToken) {
+    if (!selectedTokenIsHeld) {
+      // The persisted pair must come from the selected wallet's inventory, so a
+      // token that has fallen out of it cannot be saved implicitly.
       setPaymentValidationError(t("DashboardPayments.recurring.selectCurrency"));
       return;
     }
@@ -875,6 +880,16 @@ export function RecurringPaymentDetailWorkspace({
               value={selectedCustodyWalletId}
               onChange={(value) => {
                 setSelectedCustodyWalletId(value);
+                // A wallet change re-binds the currency to the replacement
+                // wallet's inventory: keep the token only if the new wallet
+                // holds it too, otherwise fall back to its first asset.
+                const nextWallet = liveWallets.find((entry) => entry.id === value) ?? null;
+                const nextAssets = recurringPaymentAssetOptions(nextWallet, {}, t);
+                setSelectedToken((current) =>
+                  nextAssets.some((asset) => asset.value === current)
+                    ? current
+                    : (nextAssets[0]?.value ?? "")
+                );
                 setPaymentValidationError(null);
               }}
               options={liveWallets.map((entry) => ({

@@ -266,3 +266,161 @@ describe("Recurring Payment exact source selection", () => {
     }
   );
 });
+
+describe("Recurring payment funding-wallet token integrity", () => {
+  const usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const usdtMint = "Es9vMFrzaCERmJfrF4H2FYDgW5Wj1jY5YqW6cQ7V8s9";
+  const walletA: PaymentsDashboardWallet = {
+    id: "cwlt_wallet_a",
+    walletId: "provider_wallet_a",
+    publicKey: "11111111111111111111111111111111",
+    label: "Wallet A",
+    isRuntimeExecutionAllowed: true,
+    balances: [{ token: "USDC", mint: usdcMint, amount: "10000000", uiAmount: "10", decimals: 6 }],
+  };
+  const walletB: PaymentsDashboardWallet = {
+    id: "cwlt_wallet_b",
+    walletId: "provider_wallet_b",
+    publicKey: "11111111111111111111111111111112",
+    label: "Wallet B",
+    isRuntimeExecutionAllowed: true,
+    balances: [{ token: "USDT", mint: usdtMint, amount: "20000000", uiAmount: "20", decimals: 6 }],
+  };
+  const payment: PaymentRecurringPayment & { sourceCustodyWalletId: string } = {
+    ...recurring,
+    id: "prp_wallet_token_integrity",
+    sourceCustodyWalletId: walletA.id,
+    sourceProviderWalletId: walletA.walletId,
+    sourceAddress: walletA.publicKey,
+    token: usdcMint,
+  };
+
+  function renderDetailWorkspace(wallets: PaymentsDashboardWallet[], wallet = wallets[0]) {
+    return render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={payment}
+        wallet={wallet}
+        wallets={wallets}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        amountLabel="1 USDC"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+  }
+
+  async function openEditorAndSelectWallet(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    await user.click(screen.getByRole("button", { name }));
+  }
+
+  it("submits the replacement wallet's token instead of retaining the previous wallet's token", async () => {
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?")) {
+        return Response.json({ data: { wallets: [walletA, walletB] } });
+      }
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+      }
+      return Response.json({
+        data: {
+          recurringPayment: {
+            ...payment,
+            sourceCustodyWalletId: walletB.id,
+            sourceProviderWalletId: walletB.walletId,
+            sourceAddress: walletB.publicKey,
+          },
+        },
+      });
+    });
+    renderDetailWorkspace([walletA, walletB]);
+
+    const user = userEvent.setup();
+    await openEditorAndSelectWallet(user, /Wallet B/);
+
+    // The currency picker must reflect the replacement wallet's inventory: the
+    // retained token from wallet A is no longer on offer.
+    await user.click(screen.getByRole("button", { name: "Currency" }));
+    expect(screen.getByRole("button", { name: /USDT/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /USDC/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Currency" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    // The persisted pair is wallet B with a token from wallet B's own
+    // inventory — never wallet B silently paired with wallet A's token.
+    expect(writes[0]).toEqual({ sourceCustodyWalletId: walletB.id, token: usdtMint });
+  });
+
+  it("retains the token without resubmitting it when the replacement wallet also holds it", async () => {
+    const walletC: PaymentsDashboardWallet = {
+      ...walletA,
+      id: "cwlt_wallet_c",
+      walletId: "provider_wallet_c",
+      publicKey: "11111111111111111111111111111113",
+      label: "Wallet C",
+    };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?")) {
+        return Response.json({ data: { wallets: [walletA, walletC] } });
+      }
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+      }
+      return Response.json({
+        data: {
+          recurringPayment: {
+            ...payment,
+            sourceCustodyWalletId: walletC.id,
+            sourceProviderWalletId: walletC.walletId,
+            sourceAddress: walletC.publicKey,
+          },
+        },
+      });
+    });
+    renderDetailWorkspace([walletA, walletC]);
+
+    const user = userEvent.setup();
+    await openEditorAndSelectWallet(user, /Wallet C/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toEqual({ sourceCustodyWalletId: walletC.id });
+  });
+
+  it("requires a currency when the replacement wallet holds no supported tokens", async () => {
+    const walletD: PaymentsDashboardWallet = {
+      ...walletB,
+      id: "cwlt_wallet_d",
+      walletId: "provider_wallet_d",
+      publicKey: "11111111111111111111111111111114",
+      label: "Wallet D",
+      balances: [],
+    };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?")) {
+        return Response.json({ data: { wallets: [walletA, walletD] } });
+      }
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+      }
+      return Response.json({ data: { recurringPayment: payment } });
+    });
+    renderDetailWorkspace([walletA, walletD]);
+
+    const user = userEvent.setup();
+    await openEditorAndSelectWallet(user, /Wallet D/);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Select a currency.")).toBeTruthy();
+    await waitFor(() => expect(writes).toEqual([]));
+  });
+});

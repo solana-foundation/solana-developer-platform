@@ -915,6 +915,115 @@ describe("Payments routes — recurring", () => {
     expect(event?.after_values.amount).toBe("30.50");
   });
 
+  it("rejects a funding-wallet change that would retain a token the replacement wallet cannot hold", async () => {
+    // The replacement wallet holds no token accounts at all, while the payment
+    // keeps the USDC token retained from its current wallet: the sparse PATCH
+    // must not pair wallet B with wallet A's token.
+    mockRecurringActivationRpc({ tokenAccounts: [] });
+    const replacementSigner = await generateKeyPairSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_token_inventory";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        replacementCustodyWalletId,
+        TEST_CONFIG_ID,
+        "wal_recurring_token_inventory",
+        replacementSigner.address
+      )
+      .run();
+    const payment = await seedPendingRecurringPayment();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const responseBody = errorResponseSchema.parse(await response.json());
+    expect(responseBody.error.message).toBe(
+      "Recurring payment source wallet has no token account for the payment token"
+    );
+    const row = await getDb(env)
+      .prepare(
+        "SELECT source_custody_wallet_id, token FROM payment_recurring_payments WHERE id = ?"
+      )
+      .bind(payment.id)
+      .first<{ source_custody_wallet_id: string; token: string }>();
+    expect(row).toEqual({
+      source_custody_wallet_id: TEST_CUSTODY_WALLET_ID,
+      token: DEVNET_USDC_MINT,
+    });
+  });
+
+  it("moves a pending payment to a replacement wallet that holds the retained token", async () => {
+    const replacementSigner = await generateKeyPairSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_token_move";
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_config_id, wallet_id, public_key, status)
+         VALUES (?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        replacementCustodyWalletId,
+        TEST_CONFIG_ID,
+        "wal_recurring_token_move",
+        replacementSigner.address
+      )
+      .run();
+    const payment = await seedPendingRecurringPayment();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const responseBody = await parseRecurringResponse(response);
+    expect(responseBody.data.recurringPayment).toMatchObject({
+      sourceCustodyWalletId: replacementCustodyWalletId,
+      token: DEVNET_USDC_MINT,
+      status: "pending_activation",
+    });
+  });
+
+  it("rejects activation when the stored token is not a valid recurring-payment token", async () => {
+    const payment = await createRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+    await getDb(env)
+      .prepare("UPDATE payment_recurring_payments SET token = ? WHERE id = ?")
+      .bind(TEST_SOLANA_ADDRESSES.wallet3, payment.id)
+      .run();
+
+    const response = await app.request(
+      `/v1/payments/recurring-payments/${payment.id}/activate`,
+      { method: "POST", headers: RECURRING_HEADERS, body: "{}" },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    const responseBody = errorResponseSchema.parse(await response.json());
+    expect(responseBody.error.message).toBe(
+      "Recurring payments support USD stablecoins and tokens issued in this project; native SOL is not supported"
+    );
+  });
+
   it("updates active recurring payment metadata in place on the existing on-chain plan", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"

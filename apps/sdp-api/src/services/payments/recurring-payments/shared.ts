@@ -36,7 +36,11 @@ import {
   transactionFailed,
 } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
-import { resolveMintDecimals, resolveMintTokenProgram } from "@/routes/payments/token-accounts";
+import {
+  resolveMintDecimals,
+  resolveMintTokenProgram,
+  walletHoldsTokenAccount,
+} from "@/routes/payments/token-accounts";
 import {
   isNativePaymentToken,
   normalizePaymentToken,
@@ -212,6 +216,26 @@ export function assertRecurringPaymentSourceWallet(
   }
   if (recurringPayment.source_address !== sourceWallet.publicKey) {
     throw badRequest("Recurring payment source address does not match wallet");
+  }
+}
+
+/**
+ * The final wallet/token pair must be one the source wallet can fund: it must
+ * own a token account for the payment token. A zero-balance account still
+ * counts — the schedule can be funded later — but a wallet that has never
+ * held the token can never collect it, so a funding-wallet change must not
+ * leave the previous wallet's token behind on the replacement.
+ */
+export async function assertRecurringPaymentSourceWalletTokenHeld(input: {
+  env: Env;
+  sourceWallet: Pick<CustodyWallet, "publicKey">;
+  token: string;
+}): Promise<void> {
+  const owner = assertValidAddress(input.sourceWallet.publicKey, "sourceAddress");
+  const mint = assertValidAddress(input.token, "token");
+  const held = await walletHoldsTokenAccount(solanaRpc.createRpc(input.env), owner, mint);
+  if (!held) {
+    throw badRequest("Recurring payment source wallet has no token account for the payment token");
   }
 }
 
