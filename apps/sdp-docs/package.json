@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:local": "node scripts/dev.mjs",
-    "build": "pnpm generate:api && pnpm generate:ai && pnpm generate:source && next build",
+    "build": "pnpm generate:api && pnpm generate:ai && pnpm check:idempotency-examples && pnpm generate:source && next build",
     "start": "next start --port 3001",
     "pretypecheck": "pnpm generate:source",
     "typecheck": "tsc --noEmit",
@@ -15,7 +15,9 @@
     "generate:ai": "tsx scripts/generate-ai-resources.ts",
     "generate:source": "node scripts/generate-source.mjs",
     "check:links": "tsx scripts/check-links.ts",
-    "watch:source": "node scripts/watch-source.mjs"
+    "check:idempotency-examples": "node scripts/check-idempotency-examples.mjs",
+    "watch:source": "node scripts/watch-source.mjs",
+    "test": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@sdp/env-config": "workspace:*",

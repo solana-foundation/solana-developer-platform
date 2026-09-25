@@ -737,11 +737,18 @@ Token-2022's `0x11` is `AccountFrozen` (decimal 17). Treat it as a compliance ve
 For a production environment, unfreezing happens only after the underlying compliance review resolves. For sandbox testing, you can unfreeze immediately:
 
 ```javascript title="unfreeze-account.js"
-await sdpAdmin.post(`/v1/issuance/tokens/${tokenId}/unfreeze`, {
-  signingCustodyWalletId,
-  accountAddress: destinationAddress,
-});
+const unfreezeKey = idempotencyKey("unfreeze");
+await sdpAdmin.post(
+  `/v1/issuance/tokens/${tokenId}/unfreeze`,
+  {
+    signingCustodyWalletId,
+    accountAddress: destinationAddress,
+  },
+  { idempotencyKey: unfreezeKey }
+);
 ```
+
+The unfreeze carries an `Idempotency-Key` for the same reason the freeze does: an unchanged retry with the same key replays the original action, so a lost response cannot turn into a second unfreeze.
 
 With the freeze cleared, the destination can receive transfers again. Section 8 covers the production transition: what changes between `sk_test_` and `sk_live_`, and which checks your compliance officer signs against before this same code runs on mainnet.
 
