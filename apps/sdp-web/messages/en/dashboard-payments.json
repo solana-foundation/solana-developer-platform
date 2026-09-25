@@ -1111,6 +1111,9 @@
     },
     "requests": {
       "loadFailed": "Unable to load payment requests",
+      "stalePage": "This page is out of date. Reload the page and try again.",
+      "projectSelectionChanged": "Project selection changed. Reload the page and try again.",
+      "authenticationRequired": "Authentication required.",
       "awaitingPayment": "Awaiting payment",
       "paid": "Paid",
       "canceled": "Canceled",

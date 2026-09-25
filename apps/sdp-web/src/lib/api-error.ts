@@ -9,6 +9,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Read a stable machine-readable error code from an untrusted API error
+ * envelope. Codes (unlike messages) are locale-independent, so clients can
+ * map them to localized catalog copy.
+ *
+ * @param value - Untrusted value parsed from an API response.
+ * @returns The error code, or null when the envelope carries none.
+ */
+export function readApiErrorCode(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const error = value.error;
+  return isRecord(error) && typeof error.code === "string" ? error.code : null;
+}
+
+/**
  * Read a human-readable message from an untrusted API error envelope.
  *
  * @param value - Untrusted value parsed from an API response.
