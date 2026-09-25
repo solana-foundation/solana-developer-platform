@@ -200,7 +200,8 @@ test.describe("dashboard theme e2e", () => {
     await clearThemePreferenceBeforeNavigation(page);
     await page.emulateMedia({ colorScheme: "light" });
 
-    const codePanel = page.locator(".code-block-line-numbers");
+    // The request's Code view renders before the response body, so first() is the snippet.
+    const codePanel = page.getByTestId("api-playground-code").first();
     const readCodeTokens = () =>
       codePanel.evaluate((element) => {
         const styles = getComputedStyle(element);
@@ -213,6 +214,7 @@ test.describe("dashboard theme e2e", () => {
     const openPlayground = async () => {
       await page.goto("/dashboard/payments");
       await page.getByRole("tab", { name: "API Playground" }).click();
+      await page.getByRole("tab", { name: "Code", exact: true }).click();
       await expect(codePanel).toBeVisible();
     };
 

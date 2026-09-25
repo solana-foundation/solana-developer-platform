@@ -8,6 +8,7 @@ This file is the canonical agent guide for this repository.
 - `apps/sdp-web`: dashboard application
 - `apps/sdp-docs`: public documentation site and generated API reference
 - `packages/sdp-types`: shared runtime types and shared product constants
+- `packages/sdp-design-tokens`: shared design tokens (CSS custom properties, Tailwind theme mapping, typed catalog) and the `refresh` theme scope; see its README
 
 ## Source of truth
 

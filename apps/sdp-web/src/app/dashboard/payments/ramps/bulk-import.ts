@@ -65,3 +65,29 @@ export function validateBulkRows(rows: BulkImportRow[]): {
 
   return { valid, errors };
 }
+
+/** The header row the batch CSV template starts with; `parseBulkCsv` skips it. */
+export const BULK_CSV_HEADER = ["counterparty_wallet_id", "currency_or_mint", "amount"] as const;
+
+/**
+ * The downloadable batch template: the header and one example row, in the same three columns
+ * a pasted import takes.
+ */
+export function bulkCsvTemplate(): string {
+  return `${BULK_CSV_HEADER.join(",")}\r\ncpa_example123,USDC,25.00\r\n`;
+}
+
+/**
+ * Rows from an uploaded batch CSV. Tolerates a byte-order mark, CRLF line endings, a header
+ * row (skipped when its first cell is the template's first column) and blank lines; each other
+ * line is read exactly as a pasted row.
+ *
+ * @param text - The file's text.
+ * @returns The rows, in file order.
+ */
+export function parseBulkCsv(text: string): BulkImportRow[] {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
+  const firstCell = lines[0]?.split(",")[0]?.trim().toLowerCase();
+  const body = firstCell === BULK_CSV_HEADER[0] ? lines.slice(1) : lines;
+  return splitPastedRows(body.join("\n"));
+}

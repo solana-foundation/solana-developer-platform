@@ -47,11 +47,8 @@ export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
 export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
-    {
-      id: "RECIPIENTS",
-      label: t("DashboardPayments.batchSend.recipientsStep"),
-      title: t("DashboardPayments.batchSend.recipientsTitle"),
-    },
+    // The rows form speaks for itself; the step header already says "Details".
+    { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {
       id: "REVIEW",
       label: t("DashboardPayments.batchSend.reviewStep"),
@@ -243,6 +240,15 @@ export function useBatchSendWizard({
       return { unresolved };
     }
 
+    // One batch pays one token. The paste dialog checks this before it gets here; the CSV
+    // drop does not, so the guard lives where both arrive.
+    const currencies = [...new Set(rows.map((row) => row.currency))];
+    if (currencies.length > 1) {
+      throw new Error(
+        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
+      );
+    }
+
     const { currency } = rows[0];
     const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
     if (!mint) {
@@ -430,6 +436,14 @@ export function useBatchSendWizard({
     onExit();
   };
 
+  // Back from review to the rows; nothing has been sent yet.
+  const handleBack = () => {
+    if (submitting || batchResult) {
+      return;
+    }
+    setStepIndex((current) => Math.max(0, current - 1));
+  };
+
   return {
     stepIndex,
     currentStepId,
@@ -479,6 +493,7 @@ export function useBatchSendWizard({
     batchResult,
     handlePrimary,
     handleSecondary,
+    handleBack,
   };
 }
 

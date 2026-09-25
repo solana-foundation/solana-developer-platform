@@ -5,22 +5,18 @@ import {
   type PaymentRecurringPayment,
   type PaymentRecurringPaymentStatus,
 } from "@sdp/types";
-import { ChevronRightIcon, PlusIcon, RepeatIcon, SearchIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { z } from "zod";
-import {
-  DashboardWorkspaceCard,
-  DashboardWorkspaceOverviewPanel,
-} from "@/components/dashboard-workspace-panel";
-import { EntityLink } from "@/components/entity-link";
-import { TokenMark } from "@/components/token-mark";
+import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
+import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { FilterMenu, FilterMenuOptions } from "@/components/ui/filter-menu";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
-import { PaginatedFooter } from "@/components/ui/paginated-footer";
-import { Select, SelectItem } from "@/components/ui/select";
+import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
+import { SearchInput } from "@/components/ui/search-input";
+import { StatusText, type StatusTone } from "@/components/ui/status-text";
 import {
   Table,
   TableBody,
@@ -29,29 +25,46 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import {
   formatDisplayAmount,
   resolveTokenByMint,
   shortenAddress,
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
+import { formatDateTime } from "../payments-presentation";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
   RECURRING_PAYMENT_STATUSES,
   type RecurringPaymentsListState,
 } from "./recurring-payments.data";
 import {
-  formatOptionalTimestamp,
   formatPeriodHours,
   type RecurringPaymentCounterpartyView,
-  RecurringPaymentStatusBadge,
   type RecurringPaymentWalletView,
   resolveTokenLabel,
   STATUS_TRANSLATION_KEYS,
 } from "./recurring-payments-shared";
-import { RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY } from "./recurring-payments-table-layout";
+
+/** How each schedule status reads in the list: settled, still moving, waiting, or lapsed. */
+const STATUS_TONES = {
+  pending_activation: "attention",
+  activating: "progress",
+  active: "positive",
+  updating: "progress",
+  canceling: "progress",
+  resuming: "progress",
+  paused: "attention",
+  canceled: "neutral",
+  expired: "neutral",
+} as const satisfies Record<PaymentRecurringPaymentStatus, StatusTone>;
+
+const CREATE_HREF = "/dashboard/payments/recurring/create";
+
+function scheduleHref(recurringPaymentId: string): string {
+  return `/dashboard/payments/recurring/${encodeURIComponent(recurringPaymentId)}`;
+}
 
 interface RecurringPaymentsWorkspaceProps {
   initialRecurringPayments: PaymentRecurringPayment[];
@@ -64,6 +77,10 @@ interface RecurringPaymentsWorkspaceProps {
   counterparties: RecurringPaymentCounterpartyView[];
 }
 
+/**
+ * The Schedules list. The status filter and the page live in the URL and load on the server;
+ * search runs here over the loaded page, because the API has none.
+ */
 export function RecurringPaymentsWorkspace({
   initialRecurringPayments,
   total,
@@ -75,9 +92,8 @@ export function RecurringPaymentsWorkspace({
   counterparties,
 }: RecurringPaymentsWorkspaceProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const router = useRouter();
-  const workspace = useDashboardWorkspace();
-  const custodyEnabled = workspace.flags.custody;
   const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -143,14 +159,21 @@ export function RecurringPaymentsWorkspace({
       ? t("DashboardPayments.recurring.counterpartyUnavailable")
       : counterparty.displayName;
   };
-  const getResolvedToken = (recurringPayment: PaymentRecurringPayment) =>
-    resolveTokenByMint(
-      recurringPayment.token,
-      issuedTokensByMint,
-      resolveTokenLabel(recurringPayment.token, wallets)
-    );
   const getAmountLabel = (recurringPayment: PaymentRecurringPayment) =>
-    formatDisplayAmount(recurringPayment.amount, getResolvedToken(recurringPayment).tokenName);
+    formatDisplayAmount(
+      recurringPayment.amount,
+      resolveTokenByMint(
+        recurringPayment.token,
+        issuedTokensByMint,
+        resolveTokenLabel(recurringPayment.token, wallets)
+      ).tokenName
+    );
+  const getScheduleTitle = (recurringPayment: PaymentRecurringPayment) =>
+    t("DashboardPayments.recurring.amountToCounterparty", {
+      amount: getAmountLabel(recurringPayment),
+      counterparty: getCounterpartyLabel(recurringPayment),
+    });
+  const statusLabel = (status: PaymentRecurringPaymentStatus) => t(STATUS_TRANSLATION_KEYS[status]);
 
   const needle = query.trim().toLowerCase();
   const visibleRecurringPayments = initialRecurringPayments.filter((recurringPayment) => {
@@ -160,262 +183,170 @@ export function RecurringPaymentsWorkspace({
     return [
       getCounterpartyLabel(recurringPayment),
       getWalletLabel(recurringPayment),
-      resolveTokenLabel(recurringPayment.token, wallets),
+      getAmountLabel(recurringPayment),
     ]
       .join(" ")
       .toLowerCase()
       .includes(needle);
   });
 
-  const clearFilters = () => {
-    setQuery("");
-    applyListParams({ status: null, page: 1 });
-  };
-
   const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
   const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
   const rangeEnd = Math.min(listState.page * listState.pageSize, total);
   const listIsEmpty = total === 0 && listState.status === null;
 
-  return (
-    <DashboardWorkspaceOverviewPanel className="flex min-h-0 flex-col overflow-hidden">
-      <DashboardWorkspaceCard clamp>
-        <div className="border-b border-border-default px-4 py-3">
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_190px_auto]">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder={t("DashboardPayments.recurring.searchPayments")}
-              aria-label={t("DashboardPayments.recurring.searchPayments")}
-              iconLeft={<SearchIcon />}
-              action={
-                query ? (
-                  <button
-                    type="button"
-                    aria-label={t("DashboardPayments.recurring.clearSearch")}
-                    onClick={() => setQuery("")}
-                    className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
-                  >
-                    <XIcon className="size-5" />
-                  </button>
-                ) : undefined
-              }
-            />
-            <Select
-              value={listState.status === null ? "all" : listState.status}
-              onValueChange={(value) => {
-                const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES).safeParse(value);
-                applyListParams({
-                  status: value === "all" || !parsed.success ? null : parsed.data,
-                });
-              }}
-            >
-              <SelectItem value="all">{t("DashboardPayments.recurring.allStatuses")}</SelectItem>
-              {RECURRING_PAYMENT_STATUSES.map((status) => (
-                <SelectItem key={status} value={status}>
-                  {t(STATUS_TRANSLATION_KEYS[status])}
-                </SelectItem>
-              ))}
-            </Select>
-            {listIsEmpty ? null : (
-              <Button asChild size="sm">
-                <Link href="/dashboard/payments/recurring/create">
-                  <PlusIcon className="size-4" />
-                  {t("DashboardPayments.recurring.createPayment")}
-                </Link>
-              </Button>
-            )}
-          </div>
+  if (initialError) {
+    return (
+      <DashboardWorkspaceOverviewPanel>
+        <div
+          role="alert"
+          className="rounded-card border border-error-border bg-error-bg p-4 text-body text-error"
+        >
+          <p className="font-medium">{t("DashboardPayments.recurring.unableToLoad")}</p>
+          <p className="mt-1">{initialError}</p>
         </div>
-        {initialError ? (
-          <div
-            role="alert"
-            className="border border-error-border bg-error-bg p-4 text-sm text-error"
-          >
-            <p className="font-medium">{t("DashboardPayments.recurring.unableToLoad")}</p>
-            <p className="mt-1">{initialError}</p>
-          </div>
-        ) : listIsEmpty ? (
-          <ListEmptyState
-            icon={<RepeatIcon className="size-5" />}
-            message={t("DashboardPayments.recurring.noPayments")}
-            description={t("DashboardPayments.recurring.paymentsAppearHere")}
-            action={
-              <Button asChild size="sm">
-                <Link href="/dashboard/payments/recurring/create">
-                  <PlusIcon className="size-4" />
-                  {t("DashboardPayments.recurring.createPayment")}
-                </Link>
-              </Button>
-            }
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+
+  if (listIsEmpty) {
+    return (
+      <DashboardWorkspaceOverviewPanel className="flex flex-col">
+        <ListEmptyState
+          hidesPageAction
+          message={t("DashboardPayments.recurring.emptyTitle")}
+          description={t("DashboardPayments.recurring.emptyDescription")}
+          action={
+            <Button asChild size="sm">
+              <Link href={CREATE_HREF}>{t("DashboardPayments.recurring.newSchedule")}</Link>
+            </Button>
+          }
+        />
+      </DashboardWorkspaceOverviewPanel>
+    );
+  }
+
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col gap-5">
+      <ListToolbar
+        filters={
+          <FilterMenu
+            label={t("Shared.SharedComponents.filter")}
+            searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+            sections={[
+              {
+                id: "status",
+                label: t("DashboardPayments.status"),
+                value: listState.status === null ? undefined : statusLabel(listState.status),
+                content: (
+                  <FilterMenuOptions
+                    value={listState.status ?? undefined}
+                    anyLabel={t("DashboardPayments.recurring.allStatuses")}
+                    options={RECURRING_PAYMENT_STATUSES.map((status) => ({
+                      value: status,
+                      label: statusLabel(status),
+                    }))}
+                    onChange={(value) => {
+                      const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_STATUSES).safeParse(value);
+                      applyListParams({ status: parsed.success ? parsed.data : null });
+                    }}
+                  />
+                ),
+              },
+            ]}
           />
-        ) : visibleRecurringPayments.length === 0 ? (
-          <ListEmptyState
-            message={t("DashboardPayments.recurring.noMatches")}
-            action={
-              <Button type="button" variant="secondary" onClick={clearFilters}>
-                {t("DashboardPayments.recurring.clearFilters")}
-              </Button>
-            }
-          />
-        ) : (
-          <>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {lookupError ? <p className="mb-3 text-sm text-warning">{lookupError}</p> : null}
-              <div className="divide-y divide-border-default md:hidden">
-                {visibleRecurringPayments.map((recurringPayment) => (
-                  <button
+        }
+      >
+        <RowsPerPageSelect
+          value={listState.pageSize}
+          onChange={(pageSize) => applyListParams({ pageSize })}
+        />
+        <SearchInput
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          clear={{
+            label: t("DashboardPayments.recurring.clearSearch"),
+            onClear: () => setQuery(""),
+          }}
+          placeholder={t("DashboardPayments.recurring.searchPayments")}
+          className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+        />
+      </ListToolbar>
+      {lookupError ? <p className="text-meta text-warning">{lookupError}</p> : null}
+      {visibleRecurringPayments.length === 0 ? (
+        <p className="py-12 text-center text-body text-tertiary">
+          {t("DashboardPayments.recurring.noMatches")}
+        </p>
+      ) : (
+        <div className="overflow-x-auto refresh:-mx-3">
+          <Table className="min-w-[760px] rounded-none border-0" data-recurring-payments-table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("DashboardPayments.status")}</TableHead>
+                <TableHead>{t("DashboardPayments.recurring.schedule")}</TableHead>
+                <TableHead>{t("DashboardPayments.recurring.repeats")}</TableHead>
+                <TableHead>{t("DashboardPayments.recurring.nextRun")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visibleRecurringPayments.map((recurringPayment) => {
+                const href = scheduleHref(recurringPayment.id);
+                return (
+                  <TableRow
                     key={recurringPayment.id}
-                    type="button"
-                    onClick={() =>
-                      router.push(
-                        `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
-                      )
-                    }
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-fill-subtle"
+                    className="cursor-pointer"
+                    onClick={() => router.push(href)}
                   >
-                    <span className="min-w-0 flex-1 space-y-1.5">
-                      <span className="flex items-center justify-between gap-3">
-                        <RecurringPaymentStatusBadge status={recurringPayment.status} />
-                        <span className="truncate text-sm font-medium text-primary">
-                          {getAmountLabel(recurringPayment)}
-                        </span>
-                      </span>
-                      <span className="block truncate text-xs text-secondary">
-                        {getCounterpartyLabel(recurringPayment)} ·{" "}
-                        {getWalletLabel(recurringPayment)}
-                      </span>
-                    </span>
-                    <ChevronRightIcon className="size-4 shrink-0 text-tertiary" />
-                  </button>
-                ))}
-              </div>
-              <Table className="hidden rounded-none border-0 w-full [&_table]:table-fixed md:block">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[34%] md:w-[26%] lg:w-[21%] xl:w-[18%] 2xl:w-[15%]">
-                      {t("DashboardPayments.status")}
-                    </TableHead>
-                    <TableHead className="w-[26%] md:w-[22%] lg:w-[20%] xl:w-[18%] 2xl:w-[15%]">
-                      {t("DashboardPayments.recurring.amount")}
-                    </TableHead>
-                    <TableHead className="w-[40%] md:w-[34%] lg:w-[31%] xl:w-[24%] 2xl:w-[20%]">
-                      {t("DashboardPayments.counterpartyLabel")}
-                    </TableHead>
-                    <TableHead className="hidden lg:table-cell lg:w-[28%] xl:w-[22%] 2xl:w-[18%]">
-                      {t("DashboardPayments.recurring.fundingWallet")}
-                    </TableHead>
-                    <TableHead className="hidden xl:table-cell xl:w-[18%] 2xl:w-[16%]">
-                      {t("DashboardPayments.recurring.interval")}
-                    </TableHead>
-                    <TableHead
-                      className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} md:w-[18%] 2xl:w-[16%]`}
-                    >
-                      {t("DashboardPayments.recurring.nextPayment")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {visibleRecurringPayments.map((recurringPayment) => {
-                    const resolvedToken = getResolvedToken(recurringPayment);
-                    const wallet = recurringPayment.sourceCustodyWalletId
-                      ? walletById.get(recurringPayment.sourceCustodyWalletId)
-                      : undefined;
-                    return (
-                      <TableRow
-                        key={recurringPayment.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          router.push(
-                            `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
-                          )
-                        }
-                        onKeyDown={(event: KeyboardEvent) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            router.push(
-                              `/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`
-                            );
-                          }
-                        }}
-                        className="cursor-pointer"
+                    <TableCell className="text-body whitespace-nowrap">
+                      <StatusText tone={STATUS_TONES[recurringPayment.status]}>
+                        {statusLabel(recurringPayment.status)}
+                      </StatusText>
+                    </TableCell>
+                    <TableCell className="max-w-96">
+                      <Link
+                        href={href}
+                        className="block truncate text-body text-primary focus-visible:underline focus-visible:outline-none"
+                        onClick={(event) => event.stopPropagation()}
                       >
-                        <TableCell>
-                          <RecurringPaymentStatusBadge status={recurringPayment.status} />
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <TokenMark
-                              mint={recurringPayment.token}
-                              symbol={resolvedToken.tokenName}
-                              logoUrl={resolvedToken.metadataImageUrl}
-                              size="xs"
-                            />
-                            <span className="truncate">{getAmountLabel(recurringPayment)}</span>
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm text-secondary">
-                          {counterpartyById.has(recurringPayment.counterpartyId) ? (
-                            <EntityLink
-                              href={`/dashboard/payments/counterparty/${encodeURIComponent(recurringPayment.counterpartyId)}`}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              {getCounterpartyLabel(recurringPayment)}
-                            </EntityLink>
-                          ) : (
-                            <span className="block truncate">
-                              {getCounterpartyLabel(recurringPayment)}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="hidden text-sm text-secondary lg:table-cell">
-                          {wallet && custodyEnabled ? (
-                            <EntityLink
-                              href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              {getWalletLabel(recurringPayment)}
-                            </EntityLink>
-                          ) : (
-                            <span className="block truncate">
-                              {getWalletLabel(recurringPayment)}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="hidden text-sm text-secondary xl:table-cell">
-                          {formatPeriodHours(recurringPayment.periodHours, t)}
-                        </TableCell>
-                        <TableCell
-                          className={`${RECURRING_NEXT_PAYMENT_COLUMN_VISIBILITY} text-sm text-secondary`}
-                        >
-                          {formatOptionalTimestamp(recurringPayment.nextCollectionDueAt, t)}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-            <PaginatedFooter
-              className="mt-auto"
-              page={listState.page}
-              pageCount={pageCount}
-              onPageChange={(nextPage) => applyListParams({ page: nextPage })}
-              disabled={isPending}
-              summary={t("DashboardPayments.recurring.range", {
-                from: rangeStart,
-                to: rangeEnd,
-                total,
+                        {getScheduleTitle(recurringPayment)}
+                      </Link>
+                      <span className="block truncate text-meta text-secondary">
+                        {t("DashboardPayments.recurring.fromWallet", {
+                          wallet: getWalletLabel(recurringPayment),
+                        })}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-body whitespace-nowrap text-secondary">
+                      {formatPeriodHours(recurringPayment.periodHours, t)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "text-body whitespace-nowrap",
+                        recurringPayment.nextCollectionDueAt ? "text-primary" : "text-tertiary"
+                      )}
+                    >
+                      {recurringPayment.nextCollectionDueAt
+                        ? formatDateTime(recurringPayment.nextCollectionDueAt, locale)
+                        : t("DashboardPayments.recurring.notScheduled")}
+                    </TableCell>
+                  </TableRow>
+                );
               })}
-              pageSizeControl={{
-                pageSize: listState.pageSize,
-                onPageSizeChange: (nextPageSize) => applyListParams({ pageSize: nextPageSize }),
-              }}
-            />
-          </>
-        )}
-      </DashboardWorkspaceCard>
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      <ArrowPagination
+        page={listState.page}
+        pageCount={pageCount}
+        onPageChange={(page) => applyListParams({ page })}
+        disabled={isPending}
+        summary={t("DashboardPayments.recurring.range", {
+          from: rangeStart,
+          to: rangeEnd,
+          total,
+        })}
+      />
     </DashboardWorkspaceOverviewPanel>
   );
 }

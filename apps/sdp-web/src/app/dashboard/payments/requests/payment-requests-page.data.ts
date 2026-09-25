@@ -37,19 +37,21 @@ export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenO
 }
 
 /**
- * Fetches the first {@link PAYMENT_REQUESTS_PAGE_SIZE} payment requests for
- * the authenticated project.
+ * Fetches one page of payment requests for the authenticated project, newest first, up to
+ * {@link PAYMENT_REQUESTS_PAGE_SIZE} rows.
  *
  * @param request - Authenticated SDP API fetcher.
+ * @param options - The page (1-based), its size and an optional status.
  * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
  *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
  */
 export async function fetchPaymentRequests(
   request: SdpApiClient["request"],
-  options: { pageSize?: number; status?: PaymentRequest["status"] } = {}
+  options: { page?: number; pageSize?: number; status?: PaymentRequest["status"] } = {}
 ): Promise<PaymentRequestsResult> {
   try {
     const query = new URLSearchParams({
+      page: String(options.page ?? 1),
       pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
       ...(options.status ? { status: options.status } : {}),
     });
@@ -68,4 +70,67 @@ export async function fetchPaymentRequests(
       localErrorCode: error instanceof Error ? undefined : "paymentRequestsLoadFailed",
     };
   }
+}
+
+/** The most requests the Requests list loads for local search, filtering and paging. */
+export const PAYMENT_REQUESTS_CAP = 500;
+
+/**
+ * The newest payment requests up to `cap`, read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}.
+ * The list API has no search, so the Requests list loads this once and searches it locally;
+ * `total` is the project's full count, so the list can say when the cap cut it short.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param cap - Most rows to read.
+ * @returns The loaded requests and the full total; never throws.
+ */
+export async function fetchPaymentRequestDirectory(
+  request: SdpApiClient["request"],
+  cap = PAYMENT_REQUESTS_CAP
+): Promise<PaymentRequestsResult> {
+  const first = await fetchPaymentRequests(request, { page: 1 });
+  if (!first.ok) return first;
+  const target = Math.min(first.total, cap);
+  const pages = Math.ceil(target / PAYMENT_REQUESTS_PAGE_SIZE);
+  const rest = await Promise.all(
+    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
+      fetchPaymentRequests(request, { page: index + 2 })
+    )
+  );
+  const failed = rest.find((result) => !result.ok);
+  if (failed) return failed;
+  return {
+    ok: true,
+    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
+    total: first.total,
+  };
+}
+
+export type PaymentRequestDetailResult =
+  | { status: "found"; request: PaymentRequest }
+  | { status: "not_found" }
+  | { status: "error"; error: string | undefined };
+
+/**
+ * One payment request by id. The API reads requests only as a list, so this pages through it
+ * newest first, as far as the Requests list itself reads ({@link PAYMENT_REQUESTS_CAP}), and
+ * stops at the match; a request just created is on the first page.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @param requestId - The request's id.
+ * @returns The request, `not_found`, or the load error; never throws.
+ */
+export async function fetchPaymentRequestDetail(
+  request: SdpApiClient["request"],
+  requestId: string
+): Promise<PaymentRequestDetailResult> {
+  const pages = Math.ceil(PAYMENT_REQUESTS_CAP / PAYMENT_REQUESTS_PAGE_SIZE);
+  for (let page = 1; page <= pages; page += 1) {
+    const result = await fetchPaymentRequests(request, { page });
+    if (!result.ok) return { status: "error", error: result.error };
+    const match = result.data.find((candidate) => candidate.id === requestId);
+    if (match) return { status: "found", request: match };
+    if (page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) break;
+  }
+  return { status: "not_found" };
 }

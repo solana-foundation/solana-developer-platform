@@ -12,6 +12,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
+import { fetchCounterparties } from "./counterparty/counterparty-page.data";
 import { PaymentsCommandCenter } from "./payments-command-center";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsPlaygroundWorkspace } from "./payments-workspace";
@@ -27,12 +28,16 @@ async function PaymentsPlaygroundData({
   trace: Trace;
 }) {
   const [t, apiClient] = await Promise.all([getTranslations(), apiClientPromise]);
-  const [apiKeysResult, walletsResult, transfersResult] = await Promise.all([
+  const [apiKeysResult, walletsResult, transfersResult, counterpartiesResult] = await Promise.all([
     trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(apiClient.request)),
     trace.step("fetch_payments_wallet_summaries", () =>
       fetchPaymentsWallets(apiClient.request, { view: "summary" })
     ),
     trace.step("fetch_payment_transfers", () => fetchPaymentTransfers(apiClient.request)),
+    // Fills the contact endpoints' id pickers; the API's largest page.
+    trace.step("fetch_counterparties", () =>
+      fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
+    ),
   ]);
   const wallets = walletsResult.data ?? [];
   const transfers = transfersResult.data ?? [];
@@ -64,6 +69,7 @@ async function PaymentsPlaygroundData({
       walletsError={walletsError}
       transfers={transfers}
       transfersError={transfersError}
+      counterparties={counterpartiesResult.data.map(({ id, displayName }) => ({ id, displayName }))}
     />
   );
 }

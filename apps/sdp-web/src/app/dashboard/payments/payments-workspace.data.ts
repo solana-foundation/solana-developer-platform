@@ -310,6 +310,9 @@ export async function fetchTransfers(
     category?: "wallet" | "ramp";
     counterpartyId?: string;
     statuses?: readonly string[];
+    direction?: "inbound" | "outbound";
+    /** Include chain history SDP did not initiate (deposits from outside), for one wallet. */
+    includeObserved?: boolean;
     signal?: AbortSignal;
   },
   t: Translate
@@ -321,6 +324,8 @@ export async function fetchTransfers(
     ...(options.category ? { category: options.category } : {}),
     ...(options.counterpartyId ? { counterpartyId: options.counterpartyId } : {}),
     ...(options.statuses ? { status: options.statuses.join(",") } : {}),
+    ...(options.direction ? { direction: options.direction } : {}),
+    ...(options.includeObserved ? { includeObserved: "true" } : {}),
   }).toString();
   const response = await fetch(`/api/dashboard/payments/transfers?${transfersQuery}`, {
     method: "GET",

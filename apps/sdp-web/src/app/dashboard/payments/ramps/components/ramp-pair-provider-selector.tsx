@@ -13,10 +13,14 @@ import {
   getCryptoRailAssetLabel,
   type RampProviderDirectionSupport,
 } from "@sdp/types/payment-rails";
-import type { ProviderAvailabilityEntry } from "@sdp/types/provider-access";
+import {
+  type ProviderAvailabilityEntry,
+  RAMP_PROVIDER_SURFACING,
+} from "@sdp/types/provider-access";
 import { AnimatePresence, motion } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
+import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
@@ -35,7 +39,7 @@ import {
 } from "@/lib/ramps";
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector";
-import { ProviderCard } from "./provider-card";
+import { ProviderCard, ProviderQuoteCard } from "./provider-card";
 import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
@@ -237,6 +241,7 @@ export function RampPairProviderSelector({
 }: RampPairProviderSelectorProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const [unavailableDialogOpen, setUnavailableDialogOpen] = useState(false);
   const pairs = pairsForDirection(direction, sdpEnvironment, enabledRampProviders);
   const selectedPairSupport = useMemo(
@@ -382,60 +387,103 @@ export function RampPairProviderSelector({
   );
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-7 refresh:space-y-6">
       <RampSelectionProvider value={selectionContextValue}>
         <div className="flex flex-col gap-2">
           <CurrencyPairSelector />
         </div>
       </RampSelectionProvider>
 
-      <div className="space-y-2.5">
-        <div className="flex items-center gap-3">
-          <p className="shrink-0 text-xl font-medium text-primary">
+      {refresh ? (
+        // The heading is a 13px field label; the tiles sit 12px under it in equal-height rows.
+        <div className="space-y-3">
+          <p className="text-meta font-medium text-primary">
             {t("DashboardPayments.ramps.chooseProvider")}
           </p>
-          {providerExclusions.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setUnavailableDialogOpen(true)}
-              className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
-            >
-              {t("DashboardPayments.ramps.unavailableCount", {
-                count: providerExclusions.length,
-              })}
-            </button>
+          <div
+            role="radiogroup"
+            aria-label={t("DashboardPayments.ramps.chooseProvider")}
+            className="grid auto-rows-fr gap-3 sm:grid-cols-2"
+          >
+            {availableProviders.map((option) => (
+              <ProviderQuoteCard
+                key={option.id}
+                name={`${direction}-provider`}
+                option={option}
+                active={selectedProvider === option.id}
+                estimate={estimatesByProvider.get(option.id)}
+                estimateLoading={estimatesLoading}
+                sandboxOnly={RAMP_PROVIDER_SURFACING[option.id] === "sandbox"}
+                onSelect={() => onProviderSelect(option.id)}
+              />
+            ))}
+            {providerExclusions.map((exclusion) => (
+              <ProviderQuoteCard
+                key={exclusion.option.id}
+                name={`${direction}-provider`}
+                option={exclusion.option}
+                active={false}
+                sandboxOnly={RAMP_PROVIDER_SURFACING[exclusion.option.id] === "sandbox"}
+                unavailableReason={exclusion.reasons[0] ?? t("DashboardPayments.ramps.unavailable")}
+                onSelect={() => {}}
+              />
+            ))}
+          </div>
+          {availableProviders.length === 0 && providerExclusions.length === 0 ? (
+            <p className="text-body text-tertiary">
+              {t("DashboardPayments.ramps.noProvidersAvailable")}
+            </p>
           ) : null}
-          <div className="h-px flex-1 bg-fill-strong" />
         </div>
-
-        <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
-          <motion.div layout className="space-y-2">
-            <AnimatePresence mode="popLayout" initial={false}>
-              {availableProviders.map((option) => (
-                <ProviderCard
-                  key={option.id}
-                  option={option}
-                  active={selectedProvider === option.id}
-                  estimate={estimatesByProvider.get(option.id)}
-                  estimateLoading={estimatesLoading}
-                  onSelect={() => onProviderSelect(option.id)}
-                />
-              ))}
-            </AnimatePresence>
-
-            {availableProviders.length === 0 ? (
-              <motion.p
-                layout
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="py-2 text-sm text-tertiary"
+      ) : (
+        <div className="space-y-2.5">
+          <div className="flex items-center gap-3">
+            <p className="shrink-0 text-xl font-medium text-primary">
+              {t("DashboardPayments.ramps.chooseProvider")}
+            </p>
+            {providerExclusions.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setUnavailableDialogOpen(true)}
+                className="rounded-full bg-fill-subtle px-2 py-0.5 text-xs leading-none font-medium text-tertiary transition-colors hover:bg-fill-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tertiary focus-visible:ring-offset-2"
               >
-                {t("DashboardPayments.ramps.noProvidersAvailable")}
-              </motion.p>
+                {t("DashboardPayments.ramps.unavailableCount", {
+                  count: providerExclusions.length,
+                })}
+              </button>
             ) : null}
-          </motion.div>
+            <div className="h-px flex-1 bg-fill-strong" />
+          </div>
+
+          <div className="-mx-1.5 h-96 overflow-y-auto px-1.5 py-1">
+            <motion.div layout className="space-y-2">
+              <AnimatePresence mode="popLayout" initial={false}>
+                {availableProviders.map((option) => (
+                  <ProviderCard
+                    key={option.id}
+                    option={option}
+                    active={selectedProvider === option.id}
+                    estimate={estimatesByProvider.get(option.id)}
+                    estimateLoading={estimatesLoading}
+                    onSelect={() => onProviderSelect(option.id)}
+                  />
+                ))}
+              </AnimatePresence>
+
+              {availableProviders.length === 0 ? (
+                <motion.p
+                  layout
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="py-2 text-sm text-tertiary"
+                >
+                  {t("DashboardPayments.ramps.noProvidersAvailable")}
+                </motion.p>
+              ) : null}
+            </motion.div>
+          </div>
         </div>
-      </div>
+      )}
 
       <Modal
         isOpen={unavailableDialogOpen && providerExclusions.length > 0}

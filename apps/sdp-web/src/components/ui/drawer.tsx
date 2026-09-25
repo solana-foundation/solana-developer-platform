@@ -3,6 +3,7 @@
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer";
 import * as React from "react";
 
+import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { cn } from "@/lib/utils";
 
 type DrawerContextProps = {
@@ -94,6 +95,7 @@ function DrawerSwipeHandle({ className, ...props }: React.ComponentProps<"div">)
 function DrawerContent({ className, children, ...props }: DrawerPrimitive.Popup.Props) {
   const { hasSnapPoints, modal, showSwipeHandle, swipeDirection } = useDrawer();
   const swipeAxis = swipeDirection === "down" || swipeDirection === "up" ? "y" : "x";
+  const themeScopeAttributes = useThemeScopeAttributes();
 
   return (
     <DrawerPortal data-slot="drawer-portal">
@@ -104,6 +106,7 @@ function DrawerContent({ className, children, ...props }: DrawerPrimitive.Popup.
         className="pointer-events-none fixed inset-0 z-50 select-none data-[modal=true]:pointer-events-auto"
       >
         <DrawerPrimitive.Popup
+          {...themeScopeAttributes}
           data-slot="drawer-popup"
           data-swipe-axis={swipeAxis}
           data-snap-points={hasSnapPoints ? "" : undefined}

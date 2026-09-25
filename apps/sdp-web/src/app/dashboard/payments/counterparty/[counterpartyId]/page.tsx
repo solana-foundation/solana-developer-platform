@@ -45,6 +45,7 @@ export default async function CounterpartyDetailRoute({
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
             initialTransfers={detail.transfers}
+            transfersTotal={detail.transfersTotal}
           />
         </div>
       );

@@ -17,6 +17,7 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/api` | Node.js API and application composition root. | `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/hastra`, `@sdp/issuance`, `@sdp/kamino`, `@sdp/jupiter-lend`, `@sdp/ondo`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree` |
 | `@sdp/api-integration` | Maintainer integration harness for API endpoint and provider coverage. | `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types` |
 | `@sdp/custody` | Custody provider abstractions and keychain adapters. | `@sdp/redaction`, `@sdp/types` |
+| `@sdp/design-tokens` | Design tokens (CSS custom properties, Tailwind theme mapping, typed catalog) for SDP UI. | None |
 | `@sdp/dvp` | Generated @solana/kit client for the DvP atomic swap program. | None |
 | `@sdp/earn` | Earn domain services, yield strategies, and vault-infra providers. | `@sdp/payments`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/types` |
 | `@sdp/env-config` | Runtime environment configuration and validation. | None |
@@ -40,13 +41,14 @@ This map is generated from the module-boundary check. It records the permitted w
 | `@sdp/wisdomtree` | Kit-native WisdomTree Connect transfer plans (on-receipt subscription/redemption legs) and Token-2022 fund position reads. | `@sdp/earn`, `@sdp/types` |
 | `bigint-buffer` | Private pure-JavaScript compatibility package replacing bigint-buffer's vulnerable native binding. | None |
 | `sdp-docs` | Public documentation site and generated API reference. | `@sdp/env-config`, `@sdp/types` |
-| `sdp-web` | Dashboard application. | `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types` |
+| `sdp-web` | Dashboard application. | `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types` |
 
 ## Declared Workspace Graph
 
 - `@sdp/api` -> `@sdp/custody`, `@sdp/dvp`, `@sdp/earn`, `@sdp/env-config`, `@sdp/hastra`, `@sdp/helius-rings`, `@sdp/helius-rings-sdk`, `@sdp/issuance`, `@sdp/jupiter-lend`, `@sdp/kamino`, `@sdp/ondo`, `@sdp/payments`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/rpc`, `@sdp/solana`, `@sdp/spc-escrow`, `@sdp/spc-withdraw`, `@sdp/types`, `@sdp/veda`, `@sdp/wisdomtree`
 - `@sdp/api-integration` -> `@sdp/api`, `@sdp/private-channels`, `@sdp/rpc`, `@sdp/spc-escrow`, `@sdp/types`
 - `@sdp/custody` -> `@sdp/redaction`, `@sdp/types`
+- `@sdp/design-tokens` -> None
 - `@sdp/dvp` -> None
 - `@sdp/earn` -> `@sdp/redaction`, `@sdp/types`
 - `@sdp/env-config` -> None
@@ -70,4 +72,4 @@ This map is generated from the module-boundary check. It records the permitted w
 - `@sdp/wisdomtree` -> `@sdp/earn`, `@sdp/types`
 - `bigint-buffer` -> None
 - `sdp-docs` -> `@sdp/env-config`, `@sdp/types`
-- `sdp-web` -> `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`
+- `sdp-web` -> `@sdp/design-tokens`, `@sdp/issuance`, `@sdp/policy`, `@sdp/private-channels`, `@sdp/redaction`, `@sdp/solana`, `@sdp/types`

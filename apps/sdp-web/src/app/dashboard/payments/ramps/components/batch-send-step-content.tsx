@@ -1,9 +1,10 @@
 "use client";
 
 import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
-import { ExternalLink, PlusIcon, SearchIcon, WalletIcon } from "lucide-react";
+import { ExternalLink, PlusIcon, UploadIcon, XIcon } from "lucide-react";
 import { motion } from "motion/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   formatLamportsAsSol,
   formatTokenAmount,
@@ -13,11 +14,14 @@ import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchInput } from "@/components/ui/search-input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
+import { bulkCsvTemplate, parseBulkCsv, validateBulkRows } from "../bulk-import";
 import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { MAX_BATCH_RECIPIENTS } from "../schema";
 import { walletComboboxOptions } from "../wallet-options";
@@ -105,6 +109,156 @@ function recipientsStatusLabel(
   );
 }
 
+type RowsSource = "csv" | "contacts";
+
+/**
+ * Reads a dropped or chosen CSV into the batch through the same resolver the paste dialog
+ * uses, and says what went wrong in a toast when it cannot.
+ */
+function CsvDropzone({
+  onImport,
+  onPaste,
+}: {
+  onImport: BatchSendWizard["bulkImport"];
+  onPaste: () => void;
+}) {
+  const t = useTranslations();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const importFile = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const { valid, errors } = validateBulkRows(parseBulkCsv(await file.text()));
+      if (errors.length > 0) {
+        toast.error(
+          t("DashboardPayments.batchSend.csvRowError", {
+            row: errors[0].row,
+            message: errors[0].message,
+          })
+        );
+        return;
+      }
+      if (valid.length === 0) {
+        toast.error(t("DashboardPayments.batchSend.csvEmpty"));
+        return;
+      }
+      const { unresolved } = await onImport(valid);
+      if (unresolved.length > 0) {
+        toast.error(
+          t("DashboardPayments.batchSend.csvUnresolved", { ids: unresolved.slice(0, 3).join(", ") })
+        );
+        return;
+      }
+      toast.success(t("DashboardPayments.batchSend.csvImported", { count: valid.length }));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t("DashboardPayments.batchSend.csvEmpty")
+      );
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  const downloadTemplate = () => {
+    const url = URL.createObjectURL(new Blob([bulkCsvTemplate()], { type: "text/csv" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "sdp-batch-template.csv";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: The drop target; the button inside is the keyboard path.
+    <div
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        void importFile(event.dataTransfer.files[0]);
+      }}
+      aria-busy={busy}
+      className={cn(
+        "flex flex-col items-center gap-3 rounded-card border border-dashed border-border-strong px-6 py-10 text-center transition-colors",
+        dragging && "bg-fill-subtle"
+      )}
+    >
+      <UploadIcon className="size-5 text-secondary" aria-hidden="true" />
+      <p className="text-body text-secondary">
+        {t("DashboardPayments.batchSend.dropCsv")}{" "}
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="font-medium text-primary hover:underline"
+        >
+          {t("DashboardPayments.batchSend.chooseFile")}
+        </button>
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          className="text-body font-medium text-primary hover:underline"
+        >
+          {t("DashboardPayments.batchSend.downloadTemplate")}
+        </button>
+        <button
+          type="button"
+          onClick={onPaste}
+          className="text-body text-secondary hover:text-primary"
+        >
+          {t("DashboardPayments.batchSend.pasteRows")}
+        </button>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="sr-only"
+        tabIndex={-1}
+        aria-label={t("DashboardPayments.batchSend.chooseFile")}
+        onChange={(event) => void importFile(event.currentTarget.files?.[0])}
+      />
+    </div>
+  );
+}
+
+function RecipientAmountInput({
+  value,
+  onChange,
+  onEmpty,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onEmpty: () => void;
+}) {
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min="0"
+      step="any"
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      onBlur={() => {
+        if (value.trim() === "" || Number(value) === 0) onEmpty();
+      }}
+      placeholder="0.0"
+      className="w-24 border-0 border-b border-border-strong bg-transparent pb-0.5 text-right text-sm text-primary [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
+  );
+}
+
 function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
   const {
@@ -140,6 +294,7 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   } = wizard;
 
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [rowsSource, setRowsSource] = useState<RowsSource>("csv");
   const walletOptions = useMemo(
     () =>
       walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
@@ -147,10 +302,11 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       }),
     [liveWallets, t]
   );
+  const selectedEntries = Object.values(entries);
 
   return (
-    <div className="space-y-4">
-      <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
+    <div className="space-y-6">
+      <div className="space-y-2">
         <Combobox
           label={t("DashboardPayments.batchSend.from")}
           value={walletId || null}
@@ -158,7 +314,6 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           options={walletOptions}
           placeholder={t("DashboardPayments.batchSend.selectSourceWallet")}
           searchPlaceholder={t("DashboardPayments.batchSend.searchWallets")}
-          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
           isLoading={walletsLoading}
           trailing={
             selectedAssetBalance && displayAsset !== null ? (
@@ -176,161 +331,188 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
             ) : null
           }
         />
-        <Combobox
-          label={t("DashboardPayments.batchSend.asset")}
-          value={asset || null}
-          onChange={setAsset}
-          options={assetOptions}
-          placeholder={t("DashboardPayments.batchSend.selectAsset")}
-          searchable={false}
-          disabled={!walletId || assetOptions.length === 0}
-        />
-        {/* First grid column only, so the hint sits under the source picker it
-            describes rather than under the asset picker beside it. */}
-        <p hidden={!sourceWalletHint} className="text-sm text-warning">
+        <p hidden={!sourceWalletHint} className="text-meta text-warning">
           {sourceWalletHint}
         </p>
-        <div className="flex flex-col gap-2 sm:col-span-2">
-          <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
-          <Input
-            id="batch-send-reference"
-            value={externalId}
-            onChange={(event) => setExternalId(event.currentTarget.value)}
-            maxLength={256}
-            placeholder={t("DashboardPayments.batchSend.referenceOptional")}
-            size="xl"
-          />
-        </div>
       </div>
-
+      <Combobox
+        label={t("DashboardPayments.payForm.token")}
+        value={asset || null}
+        onChange={setAsset}
+        options={assetOptions}
+        placeholder={t("DashboardPayments.batchSend.selectAsset")}
+        searchable={false}
+        disabled={!walletId || assetOptions.length === 0}
+      />
       {walletId && assetOptions.length === 0 ? (
-        <p className="text-sm text-error">{t("DashboardPayments.batchSend.noAssets")}</p>
+        <p className="text-meta text-error">{t("DashboardPayments.batchSend.noAssets")}</p>
       ) : null}
-
-      <div className="flex items-center justify-between gap-4 px-1">
-        <p className="text-xl font-medium tracking-tight text-primary">
-          {t("DashboardPayments.batchSend.selectRecipientWallets")}
-        </p>
-        <button
-          type="button"
-          onClick={() => setBulkOpen(true)}
-          className="text-sm font-medium text-tertiary transition-colors hover:text-primary"
-        >
-          {t("DashboardPayments.batchSend.bulkImport")}
-        </button>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
+        <Input
+          id="batch-send-reference"
+          value={externalId}
+          onChange={(event) => setExternalId(event.currentTarget.value)}
+          maxLength={256}
+          placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
+          size="xl"
+        />
       </div>
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <Input
-              value={search}
-              onChange={(event) => setSearchQuery(event.currentTarget.value)}
-              placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
-              size="xl"
-              iconLeft={<SearchIcon />}
-            />
-          </div>
-          <ArrowPagination
-            page={page}
-            pageCount={pageCount}
-            onPageChange={setPage}
-            summary={t("DashboardPayments.batchSend.paginationSummary", { page, pageCount })}
-            className="shrink-0 gap-2"
-          />
-        </div>
-
-        <motion.div
-          key={page}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.15 }}
-          className="divide-y divide-border-default"
-        >
-          {recipientsLoading ? (
-            Array.from({ length: 6 }, (_, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-              <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-                  <SkeletonBlock className="h-4 w-32" />
-                  <SkeletonBlock className="h-3 w-44" />
-                </div>
-                <SkeletonBlock className="size-4 shrink-0 rounded" />
-              </div>
-            ))
-          ) : pageRecipients.length === 0 ? (
-            <p className="py-6 text-center text-sm text-tertiary">
-              {recipientTotal === 0
-                ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
-                : t("DashboardPayments.batchSend.noMatches")}
-            </p>
-          ) : (
-            pageRecipients.map((account) => {
-              const entry = entries[account.counterpartyAccountId];
-              const isSelected = Boolean(entry);
-              const hasLabel = account.label !== null && account.label.trim().length > 0;
-              return (
-                <div
-                  key={account.counterpartyAccountId}
-                  className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 transition-colors",
-                    isSelected ? "bg-fill-subtle" : "hover:bg-fill-subtle"
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleRecipient(account)}
-                    className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+      <div className="space-y-3">
+        <Label>{t("DashboardPayments.batchSend.rows")}</Label>
+        <SegmentedControl
+          ariaLabel={t("DashboardPayments.batchSend.rows")}
+          value={rowsSource}
+          onChange={(next) => setRowsSource(next === "contacts" ? "contacts" : "csv")}
+          options={[
+            { value: "csv", label: t("DashboardPayments.batchSend.uploadCsv") },
+            { value: "contacts", label: t("DashboardPayments.batchSend.pickFromContacts") },
+          ]}
+          className="w-fit"
+        />
+        {rowsSource === "csv" ? (
+          <>
+            <CsvDropzone onImport={bulkImport} onPaste={() => setBulkOpen(true)} />
+            {selectedEntries.length > 0 ? (
+              <div className="divide-y divide-border-subtle">
+                {selectedEntries.map(({ recipient, amount }) => (
+                  <div
+                    key={recipient.counterpartyAccountId}
+                    className="flex items-center gap-3 py-2.5"
                   >
-                    <span className="truncate text-sm font-medium text-primary">
-                      {account.name}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-body text-primary">
+                        {recipient.name}
+                      </span>
+                      <span className="block truncate text-meta text-tertiary">
+                        {recipient.label ? `${recipient.label} · ` : ""}
+                        {shortenAddress(recipient.address)}
+                      </span>
                     </span>
-                    <span className="truncate text-xs text-tertiary">
-                      {hasLabel ? `${account.label} · ` : ""}
-                      <span className="font-mono">{shortenAddress(account.address)}</span>
-                    </span>
-                  </button>
-                  {isSelected ? (
-                    <motion.div
-                      initial={{ opacity: 0, x: 8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.15 }}
-                      className="flex shrink-0 items-center gap-1.5"
-                    >
-                      <input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        step="any"
-                        value={entry.amount}
-                        onChange={(event) => setRecipientAmount(account, event.currentTarget.value)}
-                        onBlur={() => {
-                          if (entry.amount.trim() === "" || Number(entry.amount) === 0) {
-                            toggleRecipient(account);
-                          }
-                        }}
-                        placeholder="0.0"
-                        className="w-24 border-0 border-b border-border-strong bg-transparent pb-0.5 text-right text-sm text-primary [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                      />
-                      <span className="text-sm text-tertiary">{displayAsset}</span>
-                    </motion.div>
-                  ) : (
+                    <RecipientAmountInput
+                      value={amount}
+                      onChange={(value) => setRecipientAmount(recipient, value)}
+                      onEmpty={() => toggleRecipient(recipient)}
+                    />
+                    <span className="text-sm text-tertiary">{displayAsset}</span>
                     <button
                       type="button"
-                      onClick={() => toggleRecipient(account)}
-                      aria-label={t("DashboardPayments.batchSend.addRecipient", {
-                        name: account.name,
+                      onClick={() => toggleRecipient(recipient)}
+                      aria-label={t("DashboardPayments.batchSend.removeRecipient", {
+                        name: recipient.name,
                       })}
                       className="shrink-0 text-tertiary transition-colors hover:text-primary"
                     >
-                      <PlusIcon className="size-4" />
+                      <XIcon className="size-4" />
                     </button>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </motion.div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <SearchInput
+                  value={search}
+                  onChange={(event) => setSearchQuery(event.currentTarget.value)}
+                  placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
+                />
+              </div>
+              <ArrowPagination
+                page={page}
+                pageCount={pageCount}
+                onPageChange={setPage}
+                summary={t("DashboardPayments.batchSend.paginationSummary", { page, pageCount })}
+                className="shrink-0 gap-2"
+              />
+            </div>
+
+            <motion.div
+              key={page}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.15 }}
+              className="divide-y divide-border-subtle"
+            >
+              {recipientsLoading ? (
+                Array.from({ length: 6 }, (_, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
+                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+                      <SkeletonBlock className="h-4 w-32" />
+                      <SkeletonBlock className="h-3 w-44" />
+                    </div>
+                    <SkeletonBlock className="size-4 shrink-0 rounded" />
+                  </div>
+                ))
+              ) : pageRecipients.length === 0 ? (
+                <p className="py-6 text-center text-sm text-tertiary">
+                  {recipientTotal === 0
+                    ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
+                    : t("DashboardPayments.batchSend.noMatches")}
+                </p>
+              ) : (
+                pageRecipients.map((account) => {
+                  const entry = entries[account.counterpartyAccountId];
+                  const isSelected = Boolean(entry);
+                  const hasLabel = account.label !== null && account.label.trim().length > 0;
+                  return (
+                    <div
+                      key={account.counterpartyAccountId}
+                      className={cn(
+                        "flex items-center gap-3 px-3 py-2.5 transition-colors",
+                        isSelected ? "bg-fill-subtle" : "hover:bg-fill-subtle"
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleRecipient(account)}
+                        className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+                      >
+                        <span className="truncate text-sm font-medium text-primary">
+                          {account.name}
+                        </span>
+                        <span className="truncate text-xs text-tertiary">
+                          {hasLabel ? `${account.label} · ` : ""}
+                          {shortenAddress(account.address)}
+                        </span>
+                      </button>
+                      {isSelected ? (
+                        <motion.div
+                          initial={{ opacity: 0, x: 8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ duration: 0.15 }}
+                          className="flex shrink-0 items-center gap-1.5"
+                        >
+                          <RecipientAmountInput
+                            value={entry.amount}
+                            onChange={(value) => setRecipientAmount(account, value)}
+                            onEmpty={() => toggleRecipient(account)}
+                          />
+                          <span className="text-sm text-tertiary">{displayAsset}</span>
+                        </motion.div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleRecipient(account)}
+                          aria-label={t("DashboardPayments.batchSend.addRecipient", {
+                            name: account.name,
+                          })}
+                          className="shrink-0 text-tertiary transition-colors hover:text-primary"
+                        >
+                          <PlusIcon className="size-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </motion.div>
+          </div>
+        )}
       </div>
 
       <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImport={bulkImport} />

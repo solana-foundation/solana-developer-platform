@@ -29,7 +29,7 @@ test.describe("payments command center and transaction ledger", () => {
     const destinations = [
       ["Pay", "/dashboard/payments/pay"],
       ["Deposit", "/dashboard/payments/deposit"],
-      ["Request payment", "/dashboard/payments/requests"],
+      ["Request", "/dashboard/payments/requests"],
       ["Schedule", "/dashboard/payments/recurring/create"],
     ] as const;
     for (const [name, href] of destinations) {
@@ -38,7 +38,7 @@ test.describe("payments command center and transaction ledger", () => {
       ).toHaveAttribute("href", href);
     }
 
-    for (const section of ["balance", "activity", "upcoming", "network"]) {
+    for (const section of ["balance", "summary", "actions", "activity"]) {
       await expect(
         commandCenter.locator(`[data-payments-overview-section="${section}"]`)
       ).toBeVisible({
@@ -57,7 +57,7 @@ test.describe("payments command center and transaction ledger", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/dashboard/payments/transactions", { waitUntil: "domcontentloaded" });
 
-    const search = page.getByRole("textbox", { name: /search transactions/i });
+    const search = page.getByRole("searchbox", { name: /search transactions/i });
     await expect(search).toBeVisible();
     await search.fill("invoice-42");
     await search.press("Enter");

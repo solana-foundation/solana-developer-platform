@@ -22,8 +22,11 @@ import {
   formatRampQuoteExpiry,
   formatRampQuoteTimeRemaining,
 } from "@/app/dashboard/payments/payments-overview.utils";
+import { formatDecimalAmount } from "@/app/dashboard/payments/payments-presentation";
+import { useThemeScope } from "@/components/theme-scope";
 import { Button } from "@/components/ui/button";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { getRampProviderLabel } from "@/lib/ramps";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { cn } from "@/lib/utils";
 
@@ -58,8 +61,30 @@ function PaymentInstructionField({
   className?: string;
 }) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   if (!value) {
     return null;
+  }
+
+  if (refresh) {
+    // A plain row: label, value, copy icon, the way the design lays out account details.
+    return (
+      <div className="flex items-center justify-between gap-4 border-b border-border-subtle py-3.5">
+        <span className="text-body text-secondary">{label}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 break-all text-right text-body text-primary">{value}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("DashboardPayments.manualInstructions.copyLabel", { label })}
+            onClick={() => void copyPaymentInstruction(label, value, t)}
+          >
+            <CopyIcon className="size-3.5" />
+          </Button>
+        </span>
+      </div>
+    );
   }
 
   return (
@@ -280,14 +305,16 @@ function LightsparkInstruction({
   const info = instruction.accountOrWalletInfo;
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <InstructionBadges>
-          <InstructionBadge>{info.accountType.replaceAll("_", " ")}</InstructionBadge>
-          {info.assetType ? <InstructionBadge>{info.assetType}</InstructionBadge> : null}
-        </InstructionBadges>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between refresh:justify-end">
+        <div className="refresh:hidden">
+          <InstructionBadges>
+            <InstructionBadge>{info.accountType.replaceAll("_", " ")}</InstructionBadge>
+            {info.assetType ? <InstructionBadge>{info.assetType}</InstructionBadge> : null}
+          </InstructionBadges>
+        </div>
         {showAction && action ? <InstructionActionButton action={action} /> : null}
       </div>
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-2 refresh:gap-0 refresh:lg:grid-cols-1">
         <PaymentInstructionField
           label={t("DashboardPayments.manualInstructions.bankName")}
           value={info.bankName}
@@ -311,11 +338,13 @@ function LightsparkInstruction({
         value={info.reference}
       />
       {info.paymentRails?.length ? (
-        <div className="rounded-xl bg-fill-subtle px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary">
+        <div className="rounded-xl bg-fill-subtle px-4 py-3 refresh:flex refresh:items-center refresh:justify-between refresh:gap-4 refresh:rounded-none refresh:bg-transparent refresh:px-0 refresh:py-3.5">
+          <p className="text-xs font-medium uppercase tracking-[0.08em] text-tertiary refresh:text-body refresh:font-normal refresh:tracking-normal refresh:normal-case refresh:text-secondary">
             {t("DashboardPayments.manualInstructions.supportedRails")}
           </p>
-          <p className="mt-1 text-sm text-primary">{info.paymentRails.join(", ")}</p>
+          <p className="mt-1 text-sm text-primary refresh:mt-0 refresh:text-body">
+            {info.paymentRails.join(", ")}
+          </p>
         </div>
       ) : null}
       {instruction.instructionsNotes ? (
@@ -546,6 +575,8 @@ export function ManualInstructionsQuote({
   description?: string;
 }) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
+  const locale = useLocale();
   const [activeTab, setActiveTab] = useState<"instructions" | "summary">("instructions");
 
   const instructionList = instructions.map((instruction, index) =>
@@ -579,6 +610,31 @@ export function ManualInstructionsQuote({
       />
     )
   );
+
+  if (refresh) {
+    // The figure to send first, then the account details; the review already showed the quote.
+    return (
+      <div className="flex flex-col gap-6">
+        {amount ? (
+          <div className="space-y-1">
+            <p className="text-body text-secondary">
+              {t("DashboardPayments.manualInstructions.sendExactly")}
+            </p>
+            <p className="text-amount font-medium text-primary tabular-nums">
+              {formatDecimalAmount(amount, locale)} {fiatCurrency.toUpperCase()}
+            </p>
+            <p className="text-body text-secondary">
+              {description ??
+                t("DashboardPayments.manualInstructions.throughProvider", {
+                  provider: getRampProviderLabel(quote.provider),
+                })}
+            </p>
+          </div>
+        ) : null}
+        <div>{instructionList}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col">

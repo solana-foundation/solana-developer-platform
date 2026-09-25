@@ -367,6 +367,9 @@ importers:
       '@flags-sdk/vercel':
         specifier: 1.4.8
         version: 1.4.8(flags@4.3.1(@opentelemetry/api@1.9.1)(next@16.3.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(next@16.3.4(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.63.0)(@types/node@26.5.1)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))
+      '@sdp/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/sdp-design-tokens
       '@sdp/issuance':
         specifier: workspace:*
         version: link:../../packages/sdp-issuance
@@ -621,6 +624,18 @@ importers:
       tsx:
         specifier: 4.23.13
         version: 4.23.13
+
+  packages/sdp-design-tokens:
+    devDependencies:
+      '@types/node':
+        specifier: 26.5.1
+        version: 26.5.1
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
 
   packages/sdp-dvp:
     dependencies:

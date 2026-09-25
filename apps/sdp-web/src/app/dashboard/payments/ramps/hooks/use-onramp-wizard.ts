@@ -21,7 +21,7 @@ import { useLocale, useTranslations } from "@/i18n/provider";
 import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
-import { depositAmountSchema, depositSelectionSchema } from "../schema";
+import { depositDetailsSchema, depositSelectionSchema } from "../schema";
 import {
   memoSummaryDetails,
   optionalDetail,
@@ -31,23 +31,30 @@ import {
 import { type RampWizardStep, type UseRampWizardProps, useRampWizard } from "./use-ramp-wizard";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
-export type OnrampStepId = "DEPOSIT" | "MEMO" | "PROVIDER" | "REQUIREMENTS";
+export type OnrampStepId = "DEPOSIT" | "MEMO" | "REVIEW" | "PROVIDER" | "REQUIREMENTS";
 
+/**
+ * Details (contact, amount, wallet, provider), what the provider needs (memo, plus the
+ * requirements step when the provider asks for more), a review built from the chosen
+ * provider's estimate, and completion. Nothing is persisted before completion: the quote, and
+ * the transfer it records, are created when the wizard lands on the last step.
+ */
 export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStepId>[] {
   return [
-    {
-      id: "DEPOSIT",
-      label: t("DashboardPayments.ramps.onrampDepositStep"),
-      title: t("DashboardPayments.ramps.onrampDepositTitle"),
-    },
+    { id: "DEPOSIT", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {
       id: "MEMO",
-      label: t("DashboardPayments.ramps.rampMemoStep"),
+      label: t("DashboardPayments.ramps.providerDetailsStep"),
       title: t("DashboardPayments.ramps.rampMemoStepTitle"),
     },
     {
+      id: "REVIEW",
+      label: t("DashboardPayments.onchainSend.review"),
+      title: t("DashboardPayments.ramps.reviewBeforeContinue"),
+    },
+    {
       id: "PROVIDER",
-      label: t("DashboardPayments.ramps.provider"),
+      label: t("DashboardPayments.ramps.completeStep"),
       title: t("DashboardPayments.ramps.onrampProviderTitle"),
     },
   ];
@@ -56,7 +63,7 @@ export function getOnrampSteps(t: Translate): readonly RampWizardStep<OnrampStep
 function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   return {
     id: "REQUIREMENTS",
-    label: t("DashboardPayments.ramps.detailsStep"),
+    label: t("DashboardPayments.ramps.providerDetailsStep"),
     title: t("DashboardPayments.ramps.onrampRequirementsTitle"),
   };
 }
@@ -71,7 +78,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
   const wizard = useRampWizard<OnrampStepId>(props, {
     pairs: onrampPairs(sdpEnvironment, props.enabledRampProviders),
     steps: getOnrampSteps(t),
-    stepSchemas: { DEPOSIT: depositAmountSchema },
+    stepSchemas: { DEPOSIT: depositDetailsSchema },
     quoteStepId: "MEMO",
     memoStepId: "MEMO",
     requirements: {

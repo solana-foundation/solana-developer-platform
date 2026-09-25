@@ -1,179 +1,49 @@
 "use client";
 
-import { compareDecimalAmounts, decimalScale, isDecimalString } from "@sdp/solana/amount";
-import {
-  type Counterparty,
-  type CounterpartyAccount,
-  PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS,
-  type PaymentRecurringPaymentSchedulePreset,
-  type PaymentsDashboardWallet,
-} from "@sdp/types";
-import { PlusIcon, RepeatIcon, WalletIcon } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-import useSWR, { preload } from "swr";
+import { isDecimalString } from "@sdp/solana/amount";
+import { PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS } from "@sdp/types";
+import { startOfTomorrow } from "date-fns";
+import { PlusIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { z } from "zod";
-import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
-import { TokenMark } from "@/components/token-mark";
-import type { BadgeVariant } from "@/components/ui/badge";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
-import { DateTimePicker } from "@/components/ui/date-picker";
+import { Combobox } from "@/components/ui/combobox";
+import { DateField } from "@/components/ui/date-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useTranslations } from "@/i18n/provider";
-import { AddExternalAccountDialog } from "../counterparty/add-external-account-dialog";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
+import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import {
-  amountInputPlaceholder,
-  isHttpUrl,
-  isSolBalance,
-  resolveTokenByMint,
+  formatCurrencyAmount,
+  formatTokenAmount,
   shortenAddress,
 } from "../payments-overview.utils";
-import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
-import {
-  type CounterpartiesResult,
-  fetchAllCounterparties,
-  fetchCounterpartyAccounts,
-} from "../payments-workspace.data";
-import { AmountBalanceReadout } from "../ramps/components/amount-balance-readout";
-import { CounterpartyPicker } from "../ramps/components/counterparty-picker";
+import { formatDate } from "../payments-presentation";
+import { ContactCombobox } from "../ramps/components/contact-combobox";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell";
-import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
-import { walletBalanceAssetOptions } from "../ramps/wallet-options";
-import { createRecurringPayment } from "./recurring-payments.data";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared";
+import {
+  amountErrorMessage,
+  firstCollectionAtIsValid,
+  type RecurringPaymentCreateForm,
+  type RecurringPaymentCreateInput,
+  resolveScheduleLabel,
+  useRecurringPaymentCreate,
+} from "./use-recurring-payment-create";
 
-interface RecurringPaymentCreateWorkspaceProps {
-  wallets: PaymentsDashboardWallet[];
-  walletsError: string | null;
-  issuedTokenSymbolsByMint: Record<string, string>;
-  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>;
-  counterpartiesResult: CounterpartiesResult;
-}
-
-type StepId = "counterparty" | "destination" | "details" | "review";
-
-type SchedulePreset = PaymentRecurringPaymentSchedulePreset;
-
-interface RecurringPaymentCreateFields {
-  counterpartyId: string;
-  counterpartyAccountId: string;
-  sourceCustodyWalletId: string;
-  token: string;
-  amount: string;
-  schedulePreset: SchedulePreset;
-  customPeriodHours: string;
-  firstCollectionAt: string;
-  metadataUri: string;
-}
-
-type WalletBalance = NonNullable<PaymentsDashboardWallet["balances"]>[number];
-
-export function recurringPaymentAssetOptions(
-  wallet: PaymentsDashboardWallet | null,
-  issuedTokenSymbolsByMint: Record<string, string>,
-  t: ReturnType<typeof useTranslations>
-): ComboboxOption[] {
-  const walletWithoutSol = wallet
-    ? { ...wallet, balances: wallet.balances?.filter((balance) => !isSolBalance(balance)) }
-    : null;
-
-  return walletBalanceAssetOptions(walletWithoutSol, issuedTokenSymbolsByMint, t, {
-    hideUnresolvedMints: true,
-  });
-}
-
-function resolveScheduleLabel(
-  fields: RecurringPaymentCreateFields,
-  t: ReturnType<typeof useTranslations>,
-  schedulePresets: readonly { value: SchedulePreset; label: string }[]
-): string {
-  if (fields.schedulePreset !== "custom") {
-    return (
-      schedulePresets.find((preset) => preset.value === fields.schedulePreset)?.label ??
-      t("DashboardPayments.recurring.notSet")
-    );
-  }
-  const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
-  if (!periodHours) {
-    return t("DashboardPayments.recurring.customInterval");
-  }
-  return periodHours === 1
-    ? t("DashboardPayments.recurring.everyHour")
-    : t("DashboardPayments.recurring.everyHours", { count: periodHours });
-}
-
-type AmountValidationError = "format" | "notPositive" | "decimals";
-
-/** Max fractional digits accepted before a selected asset bounds the precision (the on-chain 9-decimal cap). */
-const AMOUNT_PATTERN_MAX_DECIMALS = 9;
-
-function amountError(value: string, maxDecimals: number): AmountValidationError | null {
-  const trimmed = value.trim();
+/** The figure as the review shows it: grouped, with at least two decimals ("2,400.00"). */
+function formatReviewAmount(amount: string, locale: string): string {
+  const trimmed = amount.trim();
   if (!isDecimalString(trimmed)) {
-    return "format";
+    return trimmed;
   }
-  if (decimalScale(trimmed) > maxDecimals) {
-    return "decimals";
-  }
-  return compareDecimalAmounts(trimmed, "0") > 0 ? null : "notPositive";
+  const [whole, fraction = ""] = trimmed.split(".");
+  return formatTokenAmount(`${whole}.${fraction.padEnd(2, "0")}`, locale);
 }
 
-function amountErrorMessage(
-  error: AmountValidationError,
-  maxDecimals: number,
-  t: ReturnType<typeof useTranslations>
-): string {
-  switch (error) {
-    case "decimals":
-      return t("DashboardPayments.recurring.invalidAmountDecimals", { decimals: maxDecimals });
-    case "notPositive":
-      return t("DashboardPayments.recurring.invalidAmount");
-    case "format":
-      return t("DashboardPayments.recurring.invalidAmountFormat");
-    default: {
-      const exhaustive: never = error;
-      throw new Error(`Unhandled amount error: ${exhaustive}`);
-    }
-  }
-}
-
-function metadataUriIsValid(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return true;
-  }
-  if (trimmed.length > 128) {
-    return false;
-  }
-  return isHttpUrl(trimmed);
-}
-
-function firstCollectionAtIsValid(value: string): boolean {
-  if (!value) {
-    return true;
-  }
-  const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) && timestamp > Date.now();
-}
-
-function ReviewSummaryCard({ rows }: { rows: Array<{ label: string; value: ReactNode }> }) {
-  return (
-    <section className="rounded-2xl border border-border-default bg-fill-subtle p-5">
-      <div className="divide-y divide-border-subtle">
-        {rows.map((row) => (
-          <div
-            key={row.label}
-            className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
-          >
-            <p className="text-sm text-tertiary">{row.label}</p>
-            <div className="min-w-0 text-right text-base font-medium text-primary">{row.value}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
+/** The step's question, 18px under the stepper; the fields follow 32px below. */
+function StepHeading({ children }: { children: ReactNode }) {
+  return <h2 className="text-subheading font-medium text-primary">{children}</h2>;
 }
 
 function FieldHint({
@@ -184,705 +54,440 @@ function FieldHint({
   tone: "neutral" | "error" | "warning";
 }) {
   const toneClassName = { neutral: "text-tertiary", error: "text-error", warning: "text-warning" };
-  return <p className={`text-sm ${toneClassName[tone]}`}>{children}</p>;
+  return <p className={cn("text-meta", toneClassName[tone])}>{children}</p>;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: This wizard intentionally keeps shared form state in one place while each step remains simple.
-export function RecurringPaymentCreateWorkspace({
-  wallets,
-  walletsError,
-  issuedTokenSymbolsByMint,
-  issuedTokensByMint,
-  counterpartiesResult,
-}: RecurringPaymentCreateWorkspaceProps) {
+/**
+ * One line of the review: a 13px label in a 144px column, then the value at 16px with its
+ * detail beside it at 14px. Rows are 44px on a shared rule, as the design draws them.
+ */
+function ReviewRow({
+  label,
+  value,
+  details,
+}: {
+  label: string;
+  value: string;
+  details: readonly string[];
+}) {
+  return (
+    <div className="grid grid-cols-[9rem_minmax(0,1fr)] items-baseline gap-x-4 py-2.5">
+      <dt className="text-meta text-secondary">{label}</dt>
+      <dd className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-field text-primary">{value}</span>
+        {details.map((detail) => (
+          <span key={detail} className="text-body text-secondary">
+            {detail}
+          </span>
+        ))}
+      </dd>
+    </div>
+  );
+}
+
+interface StepProps {
+  form: RecurringPaymentCreateForm;
+}
+
+/** The contact, and its Solana address when it has more than one (or none). */
+function ContactFields({ form }: StepProps) {
   const t = useTranslations();
-  const createSteps = [
-    {
-      id: "counterparty",
-      label: t("DashboardPayments.counterpartyLabel"),
-      title: t("DashboardPayments.recurring.counterpartyStepTitle"),
-    },
-    {
-      id: "destination",
-      label: t("DashboardPayments.recurring.destination"),
-      title: t("DashboardPayments.recurring.destinationStepTitle"),
-    },
-    {
-      id: "details",
-      label: t("DashboardPayments.recurring.details"),
-      title: t("DashboardPayments.recurring.detailsStepTitle"),
-    },
-    {
-      id: "review",
-      label: t("DashboardPayments.counterparty.review"),
-      title: t("DashboardPayments.recurring.reviewStepTitle"),
-    },
-  ] as const satisfies readonly { id: StepId; label: string; title: string }[];
-  const schedulePresets = [
-    {
-      value: "24",
-      label: t("DashboardPayments.recurring.everyDay"),
-      description: t("DashboardPayments.recurring.collectDaily"),
-    },
-    {
-      value: "168",
-      label: t("DashboardPayments.recurring.everyWeek"),
-      description: t("DashboardPayments.recurring.collectWeekly"),
-    },
-    {
-      value: "720",
-      label: t("DashboardPayments.recurring.everyThirtyDays"),
-      description: t("DashboardPayments.recurring.collectMonthly"),
-    },
-    {
-      value: "custom",
-      label: t("DashboardPayments.recurring.custom"),
-      description: t("DashboardPayments.recurring.customScheduleDescription"),
-    },
-  ] as const satisfies readonly { value: SchedulePreset; label: string; description: string }[];
-  const router = useRouter();
-  const [stepIndex, setStepIndex] = useState(0);
-  const [counterpartyDialogOpen, setCounterpartyDialogOpen] = useState(false);
-  const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [fields, setFields] = useState<RecurringPaymentCreateFields>({
-    counterpartyId: "",
-    counterpartyAccountId: "",
-    sourceCustodyWalletId: "",
-    token: "",
-    amount: "",
-    schedulePreset: "24",
-    customPeriodHours: "",
-    firstCollectionAt: "",
-    metadataUri: "",
-  });
-
-  const { data: liveCounterpartiesResult, mutate: mutateCounterparties } = useSWR(
-    paymentsQueryKeys.actionCounterparties(),
-    fetchAllCounterparties,
-    {
-      fallbackData: counterpartiesResult,
-    }
-  );
-  const liveCounterparties =
-    liveCounterpartiesResult === undefined ? counterpartiesResult : liveCounterpartiesResult;
-
-  const { liveWallets: availableWallets, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
-
   const {
-    data: accounts,
-    isLoading: accountsLoading,
-    mutate: mutateAccounts,
-  } = useSWR(
-    fields.counterpartyId
-      ? paymentsQueryKeys.counterpartyAccounts({ counterpartyId: fields.counterpartyId })
-      : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
-    { revalidateOnFocus: false }
-  );
-
-  const cryptoAccounts = useMemo(
-    () =>
-      (accounts === undefined ? [] : accounts).filter(
-        (account) =>
-          account.accountKind === "crypto_wallet" &&
-          account.status === "active" &&
-          accountAddress(account).length > 0
-      ),
-    [accounts]
-  );
-
-  const foundCounterparty = liveCounterparties.data.find(
-    (counterparty) => counterparty.id === fields.counterpartyId
-  );
-  const selectedCounterparty = foundCounterparty === undefined ? null : foundCounterparty;
-  const activeCounterpartiesResult = useMemo(
-    () => ({
-      ...liveCounterparties,
-      data: liveCounterparties.data.filter((counterparty) => counterparty.status === "active"),
-    }),
-    [liveCounterparties]
-  );
-  const foundAccount = cryptoAccounts.find(
-    (account) => account.id === fields.counterpartyAccountId
-  );
-  const selectedAccount = foundAccount === undefined ? null : foundAccount;
-  const foundWallet = availableWallets.find((wallet) => wallet.id === fields.sourceCustodyWalletId);
-  const selectedWallet = foundWallet === undefined ? null : foundWallet;
-
-  const assetOptions = useMemo<ComboboxOption[]>(
-    () => recurringPaymentAssetOptions(selectedWallet, issuedTokenSymbolsByMint, t),
-    [issuedTokenSymbolsByMint, selectedWallet, t]
-  );
-  const assetSelectOptions = useMemo(
-    () =>
-      assetOptions.map((asset) => {
-        const token = resolveTokenByMint(asset.value, issuedTokensByMint, asset.label);
-        const sdpMinted = token.tokenId !== null;
-        let badge: string | undefined;
-        let badgeVariant: BadgeVariant | undefined;
-        if (sdpMinted) {
-          badge = t("Shared.SharedComponents.sdpMintedToken");
-          badgeVariant = "outline";
-        } else if (!token.isWellKnown) {
-          badge = t("Shared.SharedComponents.unknownToken");
-        }
-        return {
-          value: asset.value,
-          label: token.tokenName,
-          icon: (
-            <TokenMark
-              mint={asset.value}
-              symbol={token.tokenName}
-              logoUrl={token.metadataImageUrl}
-              size="xs"
-            />
-          ),
-          badge,
-          badgeVariant,
-        };
-      }),
-    [assetOptions, issuedTokensByMint, t]
-  );
-  const nonSolBalanceCount =
-    selectedWallet?.balances?.filter((balance) => !isSolBalance(balance)).length ?? 0;
-
-  const foundAsset = assetOptions.find((asset) => asset.value === fields.token);
-  const selectedAsset = foundAsset === undefined ? null : foundAsset;
-  const selectedAssetBalance = useMemo<WalletBalance | null>(
-    () =>
-      selectedAsset
-        ? (selectedWallet?.balances?.find((balance) => balance.mint === fields.token) ?? null)
-        : null,
-    [fields.token, selectedAsset, selectedWallet]
-  );
-  const maxAmountDecimals = selectedAssetBalance
-    ? selectedAssetBalance.decimals
-    : AMOUNT_PATTERN_MAX_DECIMALS;
-  const amountValidationError = amountError(fields.amount, maxAmountDecimals);
-  const exceedsBalance =
-    isDecimalString(fields.amount) &&
-    selectedAssetBalance !== null &&
-    compareDecimalAmounts(fields.amount, selectedAssetBalance.uiAmount) > 0;
-  const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
-  const currentStep = createSteps[stepIndex];
-  const accountSelectPlaceholder = accountsLoading
-    ? t("DashboardPayments.recurring.loadingAccounts")
-    : cryptoAccounts.length === 0
-      ? t("DashboardPayments.recurring.noSolanaAccounts")
-      : t("DashboardPayments.recurring.selectDestinationAccount");
-  const assetSelectPlaceholder = fields.sourceCustodyWalletId
-    ? assetOptions.length === 0
-      ? t("DashboardPayments.recurring.noTokenBalances")
-      : t("DashboardPayments.recurring.selectAsset")
-    : t("DashboardPayments.recurring.selectWalletFirst");
-
-  useEffect(() => {
-    if (!fields.sourceCustodyWalletId) {
-      return;
-    }
-
-    const nextToken = assetOptions.some((asset) => asset.value === fields.token)
-      ? fields.token
-      : (assetOptions[0]?.value ?? "");
-
-    if (nextToken === fields.token) {
-      return;
-    }
-
-    setFields((current) => ({ ...current, token: nextToken }));
-  }, [assetOptions, fields.token, fields.sourceCustodyWalletId]);
-
-  const setField = <TKey extends keyof RecurringPaymentCreateFields>(
-    key: TKey,
-    value: RecurringPaymentCreateFields[TKey]
-  ) => {
-    setFormError(null);
-    setFields((current) => ({ ...current, [key]: value }));
-  };
-
-  const selectCounterparty = (counterpartyId: string) => {
-    setFields((current) => ({
-      ...current,
-      counterpartyId,
-      counterpartyAccountId: "",
-    }));
-    setFormError(null);
-    if (counterpartyId) {
-      void preload(paymentsQueryKeys.counterpartyAccounts({ counterpartyId }), () =>
-        fetchCounterpartyAccounts(counterpartyId, t)
-      );
-    }
-  };
-
-  const selectWallet = (sourceCustodyWalletId: string) => {
-    const foundWallet = availableWallets.find((entry) => entry.id === sourceCustodyWalletId);
-    const wallet = foundWallet === undefined ? null : foundWallet;
-    const nextAssets = recurringPaymentAssetOptions(wallet, issuedTokenSymbolsByMint, t);
-    setFields((current) => ({
-      ...current,
-      sourceCustodyWalletId,
-      token: nextAssets.some((asset) => asset.value === current.token)
-        ? current.token
-        : (nextAssets[0]?.value ?? ""),
-    }));
-    setFormError(null);
-  };
-
-  const handleCounterpartyCreated = (created: Counterparty) => {
-    selectCounterparty(created.id);
-    void mutateCounterparties(
-      (previous) =>
-        previous
-          ? { ...previous, data: [created, ...previous.data] }
-          : { ok: true, data: [created] },
-      { revalidate: true }
-    );
-    setCounterpartyDialogOpen(false);
-  };
-
-  const handleDestinationAccountAdded = (account: CounterpartyAccount) => {
-    setFields((current) => ({
-      ...current,
-      counterpartyAccountId: account.id,
-    }));
-    setFormError(null);
-    setDestinationAccountDialogOpen(false);
-    void mutateAccounts((previous) => [account, ...(previous ?? [])], { revalidate: true });
-  };
-
-  const canProceed = useMemo(() => {
-    if (currentStep.id === "counterparty") {
-      return Boolean(fields.counterpartyId);
-    }
-    if (currentStep.id === "destination") {
-      return Boolean(fields.counterpartyAccountId && accountAddress(selectedAccount));
-    }
-    if (currentStep.id === "details") {
-      return Boolean(
-        fields.sourceCustodyWalletId &&
-          fields.token &&
-          selectedAssetBalance &&
-          amountValidationError === null &&
-          periodHours &&
-          firstCollectionAtIsValid(fields.firstCollectionAt) &&
-          metadataUriIsValid(fields.metadataUri)
-      );
-    }
-    return true;
-  }, [
-    amountValidationError,
-    currentStep.id,
     fields,
-    periodHours,
-    selectedAccount,
+    setField,
+    liveCounterparties,
+    selectCounterparty,
+    setCounterpartyDialogOpen,
+    accountsLoading,
+    cryptoAccounts,
+    resolvedAccountId,
+    destinationAccountDialogOpen,
+    setDestinationAccountDialogOpen,
+    handleDestinationAccountAdded,
+  } = form;
+  const hasContact = fields.counterpartyId !== "";
+  const accountsKnown = hasContact && !accountsLoading;
+  return (
+    <div className="space-y-3">
+      <ContactCombobox
+        counterpartiesResult={liveCounterparties}
+        onChange={selectCounterparty}
+        value={fields.counterpartyId}
+        hint={t("DashboardPayments.payForm.contactHint")}
+        footer={(close) => (
+          <button
+            type="button"
+            onClick={() => {
+              close();
+              setCounterpartyDialogOpen(true);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-body font-medium text-secondary transition-colors hover:bg-[var(--select-item-highlight-bg)] hover:text-primary"
+          >
+            <PlusIcon className="size-4" aria-hidden="true" />
+            {t("DashboardPayments.recurring.newContact")}
+          </button>
+        )}
+      />
+      {accountsKnown && cryptoAccounts.length > 1 ? (
+        <Combobox
+          label={t("DashboardPayments.payForm.destination")}
+          value={resolvedAccountId || null}
+          onChange={(value) => setField("counterpartyAccountId", value)}
+          options={cryptoAccounts.map((account) => {
+            const address = accountAddress(account);
+            return {
+              value: account.id,
+              label: account.label ?? shortenAddress(address),
+              description: shortenAddress(address),
+            };
+          })}
+          placeholder={t("DashboardPayments.payForm.selectDestination")}
+          searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
+        />
+      ) : null}
+      {accountsKnown && cryptoAccounts.length === 0 ? (
+        <FieldHint tone="error">{t("DashboardPayments.payForm.noDestinations")}</FieldHint>
+      ) : null}
+      {hasContact && destinationAccountDialogOpen ? (
+        // The new address opens under the contact, as the design does, in place of its button.
+        <NewSolanaAddressForm
+          key={fields.counterpartyId}
+          className="mt-4"
+          counterpartyId={fields.counterpartyId}
+          idPrefix="schedule-add"
+          onAdded={handleDestinationAccountAdded}
+          onCancel={() => setDestinationAccountDialogOpen(false)}
+        />
+      ) : null}
+      {hasContact && !destinationAccountDialogOpen ? (
+        <button
+          type="button"
+          disabled={accountsLoading}
+          onClick={() => setDestinationAccountDialogOpen(true)}
+          className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="size-4" aria-hidden="true" />
+          {t("DashboardPayments.payForm.addSolanaAddress")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The source wallet, with its total beside it and a note when it cannot sign. */
+function SourceWalletField({ form }: StepProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const { fields, selectWallet, walletOptions, availableWallets, selectedWallet } = form;
+  const total = form.selectedWalletTotal;
+  return (
+    <div className="space-y-2">
+      <Combobox
+        label={t("DashboardPayments.onchainSend.sourceWallet")}
+        value={fields.sourceCustodyWalletId || null}
+        onChange={selectWallet}
+        options={walletOptions}
+        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
+        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
+        disabled={availableWallets.length === 0}
+        trailing={
+          total === null ? undefined : (
+            <span className="text-secondary tabular-nums">
+              {formatCurrencyAmount(total, locale)}
+            </span>
+          )
+        }
+      />
+      {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
+        <FieldHint tone="warning">
+          {t("DashboardPayments.signingUnavailable")}{" "}
+          {t("DashboardPayments.recurring.signingDisabledDraft")}
+        </FieldHint>
+      ) : null}
+    </div>
+  );
+}
+
+/** The amount beside its token, then the balance it is checked against (or why there is none). */
+function AmountFields({ form }: StepProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const {
+    fields,
+    setField,
+    maxAmountDecimals,
+    assetSelectOptions,
+    assetSelectPlaceholder,
+    resolvedToken,
+    selectedAsset,
     selectedAssetBalance,
-  ]);
+    amountValidationError,
+    exceedsBalance,
+    assetOptions,
+    nonSolBalanceCount,
+  } = form;
+  const assetLabel = selectedAsset?.label ?? resolvedToken;
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-6 sm:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="recurring-payment-amount">
+            {t("DashboardPayments.recurring.amount")}
+          </Label>
+          <Input
+            id="recurring-payment-amount"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            value={fields.amount}
+            onChange={(event) => setField("amount", event.currentTarget.value)}
+            placeholder="0.00"
+            size="xl"
+            maxDecimals={maxAmountDecimals}
+          />
+        </div>
+        <Combobox
+          label={t("DashboardPayments.payForm.token")}
+          value={resolvedToken || null}
+          onChange={(value) => setField("token", value)}
+          options={assetSelectOptions}
+          placeholder={assetSelectPlaceholder}
+          searchable={false}
+          disabled={!fields.sourceCustodyWalletId || assetSelectOptions.length === 0}
+          size="xl"
+        />
+      </div>
+      {fields.amount && amountValidationError ? (
+        <FieldHint tone="error">
+          {amountErrorMessage(amountValidationError, maxAmountDecimals, t)}
+        </FieldHint>
+      ) : selectedAssetBalance ? (
+        <FieldHint tone={exceedsBalance ? "error" : "neutral"}>
+          {t("DashboardPayments.payForm.available", {
+            amount: formatTokenAmount(selectedAssetBalance.uiAmount, locale),
+            asset: assetLabel,
+          })}
+        </FieldHint>
+      ) : null}
+      {fields.sourceCustodyWalletId && assetOptions.length === 0 ? (
+        <FieldHint tone="error">
+          {nonSolBalanceCount > 0
+            ? t("DashboardPayments.recurring.unresolvedTokenBalances")
+            : t("DashboardPayments.recurring.nativeSolUnsupported")}
+        </FieldHint>
+      ) : null}
+    </div>
+  );
+}
 
-  const reviewRows = [
-    {
-      label: t("DashboardPayments.counterpartyLabel"),
-      value: selectedCounterparty?.displayName ?? t("DashboardPayments.recurring.notSelected"),
-    },
-    {
-      label: t("DashboardPayments.recurring.destinationAccount"),
-      value: selectedAccount
-        ? (selectedAccount.label ?? shortenAddress(accountAddress(selectedAccount)))
-        : t("DashboardPayments.recurring.notSelected"),
-    },
-    {
-      label: t("DashboardPayments.recurring.fundingWallet"),
-      value:
-        selectedWallet?.label ??
-        selectedWallet?.walletId ??
-        t("DashboardPayments.recurring.notSelected"),
-    },
-    {
-      label: t("DashboardPayments.recurring.amount"),
-      value: `${fields.amount || "-"} ${selectedAsset?.label ?? ""}`.trim(),
-    },
-    {
-      label: t("DashboardPayments.recurring.billingInterval"),
-      value: resolveScheduleLabel(fields, t, schedulePresets),
-    },
-    {
-      label: t("DashboardPayments.recurring.firstPayment"),
-      value: fields.firstCollectionAt
-        ? new Date(fields.firstCollectionAt).toLocaleString()
-        : t("DashboardPayments.recurring.afterActivation"),
-    },
-    {
-      label: t("DashboardPayments.recurring.metadata"),
-      value: fields.metadataUri.trim() || t("DashboardPayments.recurring.notSet"),
-    },
-  ];
+function PaymentStep({ form }: StepProps) {
+  const t = useTranslations();
+  return (
+    <div>
+      <StepHeading>{t("DashboardPayments.recurring.paymentStepTitle")}</StepHeading>
+      <div className="mt-8 space-y-6">
+        <ContactFields form={form} />
+        <SourceWalletField form={form} />
+        <AmountFields form={form} />
+      </div>
+    </div>
+  );
+}
 
-  const submitRecurringPayment = async () => {
-    if (!periodHours || !selectedAccount || !selectedAssetBalance) {
-      return;
-    }
+function WhenStep({ form }: StepProps) {
+  const t = useTranslations();
+  const { fields, setField, schedulePresets } = form;
+  return (
+    <div>
+      <StepHeading>{t("DashboardPayments.recurring.whenStepTitle")}</StepHeading>
+      <div className="mt-8 space-y-6">
+        <Combobox
+          label={t("DashboardPayments.recurring.repeats")}
+          value={fields.schedulePreset}
+          onChange={(value) => {
+            const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(value);
+            if (parsed.success) setField("schedulePreset", parsed.data);
+          }}
+          options={schedulePresets}
+          searchable={false}
+          size="xl"
+        />
 
-    setSubmitting(true);
-    setFormError(null);
-    const toastId = toast.loading(t("DashboardPayments.recurring.creatingPayment"), {
-      position: "bottom-right",
-    });
-    try {
-      const recurringPayment = await createRecurringPayment(
-        {
-          sourceCustodyWalletId: fields.sourceCustodyWalletId,
-          counterpartyId: fields.counterpartyId,
-          counterpartyAccountId: fields.counterpartyAccountId,
-          token: selectedAssetBalance.mint,
-          amount: fields.amount.trim(),
-          periodHours,
-          ...(fields.firstCollectionAt
-            ? { firstCollectionAt: new Date(fields.firstCollectionAt).toISOString() }
-            : {}),
-          ...(fields.metadataUri.trim() ? { metadataUri: fields.metadataUri.trim() } : {}),
-        },
-        undefined,
-        t
-      );
-      toast.success(t("DashboardPayments.recurring.paymentCreated"), {
-        id: toastId,
-        description: t("DashboardPayments.recurring.pendingActivationDescription"),
-        position: "bottom-right",
-      });
-      router.push(`/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToCreate");
-      setFormError(message);
-      toast.error(t("DashboardPayments.recurring.paymentNotCreated"), {
-        id: toastId,
-        description: message,
-        position: "bottom-right",
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+        {fields.schedulePreset === "custom" ? (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="recurring-payment-period-hours">
+              {t("DashboardPayments.recurring.intervalHours")}
+            </Label>
+            <Input
+              id="recurring-payment-period-hours"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max={24 * 365}
+              step="1"
+              value={fields.customPeriodHours}
+              onChange={(event) => setField("customPeriodHours", event.currentTarget.value)}
+              placeholder="24"
+              size="xl"
+            />
+            {fields.customPeriodHours &&
+            !parsePeriodHours(fields.schedulePreset, fields.customPeriodHours) ? (
+              <FieldHint tone="error">{t("DashboardPayments.recurring.invalidInterval")}</FieldHint>
+            ) : null}
+          </div>
+        ) : null}
 
-  const handlePrimary = async () => {
-    if (!canProceed || submitting) {
-      return;
-    }
-    const stepId: StepId = currentStep.id;
-    switch (stepId) {
-      case "counterparty":
-      case "destination":
-      case "details":
-        setStepIndex((current) => current + 1);
-        return;
-      case "review":
-        await submitRecurringPayment();
-        return;
-      default: {
-        const exhaustive: never = stepId;
-        throw new Error(`Unhandled recurring payment step: ${String(exhaustive)}`);
-      }
-    }
-  };
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="recurring-payment-first-collection">
+            {t("DashboardPayments.recurring.startsOn")}
+          </Label>
+          {/* The design asks for a day, not a time: the first run is due at the start of it,
+              in the viewer's time, so today (already begun) cannot be picked. */}
+          <DateField
+            id="recurring-payment-first-collection"
+            label={t("DashboardPayments.recurring.startsOn")}
+            value={fields.firstCollectionAt.slice(0, 10)}
+            onChange={(day) => setField("firstCollectionAt", day ? `${day}T00:00` : "")}
+            minDate={startOfTomorrow()}
+            placeholder={t("Shared.SharedComponents.chooseDate")}
+          />
+          {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
+            <FieldHint tone="error">
+              {t("DashboardPayments.recurring.invalidFirstPayment")}
+            </FieldHint>
+          ) : (
+            <FieldHint tone="neutral">
+              {t("DashboardPayments.recurring.startAfterActivation")}
+            </FieldHint>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const handleSecondary = () => {
-    if (submitting) {
-      return;
-    }
-    if (stepIndex === 0) {
-      router.push("/dashboard/payments/recurring");
-      return;
-    }
-    setStepIndex((current) => Math.max(0, current - 1));
-  };
+function ReviewStep({ form }: StepProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const {
+    fields,
+    schedulePresets,
+    selectedCounterparty,
+    selectedAsset,
+    resolvedToken,
+    selectedWallet,
+    selectedAccount,
+  } = form;
+  const contactName = selectedCounterparty?.displayName ?? t("DashboardPayments.counterpartyLabel");
+  const scheduleLabel = resolveScheduleLabel(fields, t, schedulePresets);
+  const assetLabel = selectedAsset?.label ?? resolvedToken;
+  const reviewAmount = `${formatReviewAmount(fields.amount, locale)} ${assetLabel}`.trim();
+  // The first run is picked on the When step in the browser, so it is never formatted on the
+  // server; it is a day (its run is due at the start of it), in the list's "Aug 5, 2026" form.
+  const firstRunDate = formatDate(fields.firstCollectionAt || null, locale);
+  const firstRunDetail = firstRunDate
+    ? t("DashboardPayments.recurring.firstRun", { date: firstRunDate })
+    : t("DashboardPayments.recurring.firstRunAfterActivation");
+  const walletName = selectedWallet?.label ?? selectedWallet?.walletId ?? "";
+  const destinationDetail = selectedAccount
+    ? (selectedAccount.label ?? shortenAddress(accountAddress(selectedAccount)))
+    : "";
+  return (
+    <div>
+      <p className="text-quote font-medium tracking-tight">
+        <span className="text-primary tabular-nums">
+          {formatReviewAmount(fields.amount, locale)}
+        </span>{" "}
+        <span className="text-secondary">{assetLabel}</span>
+      </p>
+      <p className="mt-5 text-body text-secondary">
+        {t("DashboardPayments.recurring.reviewSentence", {
+          contact: contactName,
+          schedule: scheduleLabel.toLocaleLowerCase(locale),
+        })}
+      </p>
+      <dl className="mt-6 divide-y divide-border-subtle">
+        <ReviewRow
+          label={t("DashboardPayments.recurring.pays")}
+          value={t("DashboardPayments.recurring.amountToCounterparty", {
+            amount: reviewAmount,
+            counterparty: contactName,
+          })}
+          details={[
+            t("DashboardPayments.recurring.fromWallet", { wallet: walletName }),
+            ...(destinationDetail
+              ? [t("DashboardPayments.recurring.toAccount", { account: destinationDetail })]
+              : []),
+          ]}
+        />
+        <ReviewRow
+          label={t("DashboardPayments.recurring.repeats")}
+          value={scheduleLabel}
+          details={[firstRunDetail]}
+        />
+        <ReviewRow
+          label={t("DashboardPayments.recurring.ends")}
+          value={t("DashboardPayments.recurring.noEndDate")}
+          details={[t("DashboardPayments.recurring.runsUntilStopped")]}
+        />
+        <ReviewRow
+          label={t("DashboardPayments.recurring.ifRunFails")}
+          value={t("DashboardPayments.recurring.staysActive")}
+          details={[t("DashboardPayments.recurring.failedRunDetail")]}
+        />
+      </dl>
+      <p className="mt-6 text-body text-secondary">
+        {t("DashboardPayments.recurring.pendingRecordDescription")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * New schedule, in the design's three steps: the payment (contact, source wallet, amount and
+ * token), when it happens (how often and the first run), then a review. The API's schedule is
+ * an interval in hours from a first collection date with no end, so the design's one-time
+ * option, end date and "on the 1st" cadence are not offered; what is shown is what the API
+ * will do. The state lives in {@link useRecurringPaymentCreate}; this wires it to the frame.
+ */
+export function RecurringPaymentCreateWorkspace(props: RecurringPaymentCreateInput) {
+  const t = useTranslations();
+  const form = useRecurringPaymentCreate(props);
+  const { currentStep } = form;
 
   return (
     <RampWizardShell
-      steps={createSteps}
-      stepIndex={stepIndex}
-      primaryDisabled={!canProceed || submitting}
+      steps={form.steps}
+      stepIndex={form.stepIndex}
+      primaryDisabled={!form.canProceed || form.submitting}
       primaryLabel={
         currentStep.id === "review"
-          ? t("DashboardPayments.recurring.createPayment")
-          : t("DashboardPayments.counterparty.next")
+          ? t("DashboardPayments.recurring.createTheSchedule")
+          : t("DashboardPayments.ramps.continue")
       }
-      secondaryLabel={
-        stepIndex === 0
-          ? t("DashboardPayments.counterparty.cancel")
-          : t("DashboardPayments.previous")
-      }
-      walletsError={liveWalletsError}
-      onPrimary={handlePrimary}
-      onSecondary={handleSecondary}
+      walletsError={form.liveWalletsError}
+      onPrimary={() => void form.handlePrimary()}
+      onSecondary={form.handleSecondary}
+      onCancel={form.exitToSchedules}
       counterpartyDialog={{
-        open: counterpartyDialogOpen,
-        setOpen: setCounterpartyDialogOpen,
-        onCreated: handleCounterpartyCreated,
+        open: form.counterpartyDialogOpen,
+        setOpen: form.setCounterpartyDialogOpen,
+        onCreated: form.handleCounterpartyCreated,
       }}
-      secondaryDisabled={submitting}
+      secondaryDisabled={form.submitting}
     >
-      {formError ? (
+      {form.formError ? (
         <div
           role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
+          className="rounded-card border border-error-border bg-error-bg px-4 py-3 text-body text-error"
         >
-          {formError}
+          {form.formError}
         </div>
       ) : null}
-
-      {currentStep.id === "counterparty" ? (
-        <CounterpartyPicker
-          mode="send"
-          counterpartiesResult={activeCounterpartiesResult}
-          value={fields.counterpartyId || null}
-          onChange={selectCounterparty}
-          onAddClick={() => setCounterpartyDialogOpen(true)}
-        />
-      ) : null}
-
-      {currentStep.id === "destination" ? (
-        <div className="space-y-3">
-          <Combobox
-            label={t("DashboardPayments.recurring.destinationAccount")}
-            value={fields.counterpartyAccountId || null}
-            onChange={(value) => setField("counterpartyAccountId", value)}
-            options={cryptoAccounts.map((account) => {
-              const address = accountAddress(account);
-              return {
-                value: account.id,
-                label: account.label ?? shortenAddress(address),
-                description: shortenAddress(address),
-              };
-            })}
-            placeholder={accountSelectPlaceholder}
-            searchPlaceholder={t("DashboardPayments.recurring.searchAccounts")}
-            icon={<WalletIcon />}
-            isLoading={accountsLoading}
-            disabled={accountsLoading || cryptoAccounts.length === 0}
-          />
-          {!accountsLoading && cryptoAccounts.length === 0 ? (
-            <FieldHint tone="error">
-              {t("DashboardPayments.recurring.needsCryptoAccount")}
-            </FieldHint>
-          ) : null}
-          {fields.counterpartyId && !accountsLoading ? (
-            <button
-              type="button"
-              onClick={() => setDestinationAccountDialogOpen(true)}
-              className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-border-strong px-4 py-4 text-left transition-colors hover:bg-fill-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            >
-              <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill-subtle text-primary">
-                <PlusIcon className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium text-primary">
-                  {t("DashboardPayments.recurring.addSolanaAddress")}
-                </span>
-                <span className="block text-sm text-tertiary">
-                  {cryptoAccounts.length === 0
-                    ? t("DashboardPayments.recurring.noDestinationWallet", {
-                        name:
-                          selectedCounterparty?.displayName ??
-                          t("DashboardPayments.counterpartyLabel"),
-                      })
-                    : t("DashboardPayments.recurring.attachDestinationWallet")}
-                </span>
-              </span>
-            </button>
-          ) : null}
-          {fields.counterpartyId ? (
-            <AddExternalAccountDialog
-              isOpen={destinationAccountDialogOpen}
-              counterpartyId={fields.counterpartyId}
-              onAdded={handleDestinationAccountAdded}
-              onClose={() => setDestinationAccountDialogOpen(false)}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      {currentStep.id === "details" ? (
-        <div className="space-y-5">
-          <Combobox
-            label={t("DashboardPayments.recurring.fundingWallet")}
-            value={fields.sourceCustodyWalletId || null}
-            onChange={selectWallet}
-            options={availableWallets.map((wallet) => ({
-              value: wallet.id,
-              label: wallet.label ?? wallet.walletId,
-              description: shortenAddress(wallet.publicKey),
-              ...(wallet.isRuntimeExecutionAllowed !== true
-                ? { badge: t("DashboardPayments.restricted"), badgeVariant: "warning" as const }
-                : {}),
-            }))}
-            placeholder={t("DashboardPayments.recurring.selectFundingWallet")}
-            searchPlaceholder={t("DashboardPayments.recurring.searchWallets")}
-            icon={<WalletIcon />}
-            disabled={availableWallets.length === 0}
-          />
-          {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
-            <FieldHint tone="warning">
-              {t("DashboardPayments.signingUnavailable")}{" "}
-              {t("DashboardPayments.recurring.signingDisabledDraft")}
-            </FieldHint>
-          ) : null}
-
-          <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_220px]">
-            <div className="flex flex-col gap-2">
-              <Label className="text-tertiary" htmlFor="recurring-payment-amount">
-                {t("DashboardPayments.recurring.amount")}
-              </Label>
-              <Input
-                id="recurring-payment-amount"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="any"
-                value={fields.amount}
-                onChange={(event) => setField("amount", event.currentTarget.value)}
-                placeholder={amountInputPlaceholder(maxAmountDecimals)}
-                size="xl"
-                maxDecimals={maxAmountDecimals}
-                action={
-                  selectedAssetBalance !== null ? (
-                    <AmountBalanceReadout
-                      available={selectedAssetBalance.uiAmount}
-                      assetLabel={selectedAsset?.label ?? fields.token}
-                      exceeds={exceedsBalance}
-                      onMax={
-                        compareDecimalAmounts(selectedAssetBalance.uiAmount, "0") > 0
-                          ? () => setField("amount", selectedAssetBalance.uiAmount)
-                          : undefined
-                      }
-                    />
-                  ) : undefined
-                }
-              />
-              {fields.amount && amountValidationError ? (
-                <FieldHint tone="error">
-                  {amountErrorMessage(amountValidationError, maxAmountDecimals, t)}
-                </FieldHint>
-              ) : null}
-            </div>
-
-            <Combobox
-              label={t("DashboardPayments.recurring.asset")}
-              value={fields.token || null}
-              onChange={(value) => setField("token", value)}
-              options={assetSelectOptions}
-              placeholder={assetSelectPlaceholder}
-              searchable={false}
-              disabled={!fields.sourceCustodyWalletId || assetSelectOptions.length === 0}
-              size="xl"
-            />
-          </div>
-          {fields.sourceCustodyWalletId && assetOptions.length === 0 ? (
-            <FieldHint tone="error">
-              {nonSolBalanceCount > 0
-                ? t("DashboardPayments.recurring.unresolvedTokenBalances")
-                : t("DashboardPayments.recurring.nativeSolUnsupported")}
-            </FieldHint>
-          ) : null}
-
-          <Combobox
-            label={t("DashboardPayments.recurring.billingInterval")}
-            value={fields.schedulePreset}
-            onChange={(value) => {
-              const parsed = z.enum(PAYMENT_RECURRING_PAYMENT_SCHEDULE_PRESETS).safeParse(value);
-              if (parsed.success) setField("schedulePreset", parsed.data);
-            }}
-            options={schedulePresets}
-            searchable={false}
-            icon={<RepeatIcon />}
-            size="xl"
-            variant="dialog"
-          />
-
-          {fields.schedulePreset === "custom" ? (
-            <div className="flex flex-col gap-2">
-              <Label className="text-tertiary" htmlFor="recurring-payment-period-hours">
-                {t("DashboardPayments.recurring.intervalHours")}
-              </Label>
-              <Input
-                id="recurring-payment-period-hours"
-                type="number"
-                inputMode="numeric"
-                min="1"
-                max={24 * 365}
-                step="1"
-                value={fields.customPeriodHours}
-                onChange={(event) => setField("customPeriodHours", event.currentTarget.value)}
-                placeholder="24"
-                size="xl"
-              />
-              {fields.customPeriodHours &&
-              !parsePeriodHours(fields.schedulePreset, fields.customPeriodHours) ? (
-                <FieldHint tone="error">
-                  {t("DashboardPayments.recurring.invalidInterval")}
-                </FieldHint>
-              ) : null}
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 sm:grid-cols-[280px_minmax(0,1fr)]">
-            <div className="flex flex-col gap-2">
-              <Label className="text-tertiary" htmlFor="recurring-payment-first-collection">
-                {t("DashboardPayments.recurring.firstPayment")}
-              </Label>
-              <DateTimePicker
-                id="recurring-payment-first-collection"
-                value={fields.firstCollectionAt}
-                onChange={(value) => setField("firstCollectionAt", value)}
-                disablePast
-                size="xl"
-              />
-              {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
-                <FieldHint tone="error">
-                  {t("DashboardPayments.recurring.invalidFirstPayment")}
-                </FieldHint>
-              ) : (
-                <FieldHint tone="neutral">
-                  {t("DashboardPayments.recurring.startAfterActivation")}
-                </FieldHint>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label className="text-tertiary" htmlFor="recurring-payment-metadata">
-                {t("DashboardPayments.recurring.metadataUrl")}
-              </Label>
-              <Input
-                id="recurring-payment-metadata"
-                type="url"
-                value={fields.metadataUri}
-                onChange={(event) => setField("metadataUri", event.currentTarget.value)}
-                placeholder={t("DashboardPayments.recurring.metadataUrlPlaceholder")}
-                size="xl"
-              />
-              {fields.metadataUri && !metadataUriIsValid(fields.metadataUri) ? (
-                <FieldHint tone="error">
-                  {t("DashboardPayments.recurring.invalidMetadataUrl")}
-                </FieldHint>
-              ) : (
-                <FieldHint tone="neutral">{t("DashboardPayments.recurring.optional")}</FieldHint>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {currentStep.id === "review" ? (
-        <div className="space-y-5">
-          <ReviewSummaryCard rows={reviewRows} />
-          <div className="rounded-2xl border border-border-default bg-surface-raised px-4 py-3 text-sm text-secondary">
-            {t("DashboardPayments.recurring.pendingRecordDescription")}
-          </div>
-        </div>
-      ) : null}
+      {currentStep.id === "payment" ? <PaymentStep form={form} /> : null}
+      {currentStep.id === "when" ? <WhenStep form={form} /> : null}
+      {currentStep.id === "review" ? <ReviewStep form={form} /> : null}
     </RampWizardShell>
   );
 }

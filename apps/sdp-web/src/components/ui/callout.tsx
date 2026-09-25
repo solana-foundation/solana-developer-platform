@@ -18,7 +18,9 @@ const variantClassNames: Record<CalloutVariant, string> = {
   neutral: "border-border-default bg-fill-subtle text-secondary",
   info: "border-info-border bg-info-bg text-info",
   success: "border-success-border bg-success-bg text-success",
-  warning: "border-warning-border bg-warning-bg text-warning",
+  // A refresh surface marks a pending state with a bar on the leading edge instead of a frame.
+  warning:
+    "border-warning-border bg-warning-bg text-warning refresh:rounded-l-none refresh:border-y-0 refresh:border-r-0 refresh:border-l-[3px] refresh:border-l-warning",
   danger: "border-error-border bg-error-bg text-error",
 };
 
@@ -60,7 +62,11 @@ export function Callout({
 }: CalloutProps) {
   return (
     <div
-      className={cn("rounded-xl border px-4 py-3 text-sm", variantClassNames[variant], className)}
+      className={cn(
+        "rounded-xl border px-4 py-3 text-sm refresh:rounded-card refresh:px-5 refresh:py-4",
+        variantClassNames[variant],
+        className
+      )}
       role={live ? liveRoles[variant] : undefined}
     >
       {/* Deliberately not a heading: the callout does not know the outline of the
@@ -68,7 +74,9 @@ export function Callout({
       {title ? (
         <>
           <p className="font-medium">{title}</p>
-          <div className="mt-1">{children}</div>
+          {/* A refresh callout keeps the status colour for the title and sets the explanation
+              in body ink, so the colour marks the state without shouting the paragraph. */}
+          <div className="mt-1 refresh:text-secondary">{children}</div>
         </>
       ) : (
         // Untitled callouts stay transparent to the caller's layout. Wrapping here

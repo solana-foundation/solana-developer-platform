@@ -146,8 +146,36 @@ describe("POST /api/playground/execute", () => {
       status: 400,
       statusText: "Rejected [REDACTED]",
       body: { error: "Rejected [REDACTED]" },
+      // A string body gets the fetch default content type.
+      headers: { "content-type": "text/plain;charset=UTF-8" },
     });
     expect(responseText).not.toContain(OWNED_API_KEY);
+  });
+
+  it("passes only allowlisted response headers through, with the secret redacted", async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "X-SDP-Trace-ID": `trace ${OWNED_API_KEY}`,
+            "Set-Cookie": "session=abc",
+            "X-Internal-Route": "pod-7",
+          },
+        })
+      );
+    mocks.createSdpApiClient.mockResolvedValue({ request });
+
+    const response = await POST(executeRequest());
+    const envelope = (await response.json()) as { headers: Record<string, string> };
+
+    expect(envelope.headers).toEqual({
+      "content-type": "application/json",
+      "x-sdp-trace-id": "trace [REDACTED]",
+    });
   });
 
   it.each([

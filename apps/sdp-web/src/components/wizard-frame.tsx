@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useState } from "react";
+import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
 import { useTranslations } from "@/i18n/provider";
@@ -16,6 +17,13 @@ interface WizardFrameProps {
   footer?: ReactNode;
   header?: ReactNode;
   maxWidthClassName?: string;
+  /** Refresh surfaces only: omit the step header, for a single-page form such as a settings page. */
+  hideProgress?: boolean;
+  /**
+   * Refresh surfaces only: let the content fill the column's height (a `flex-1` child then
+   * centres in it), for a state that stands alone in the frame.
+   */
+  fillHeight?: boolean;
   progressLabel: string;
   /** Selection recap opened from the "View summary" button in a modal. */
   summary?: ReactNode;
@@ -42,6 +50,8 @@ export function WizardFrame({
   footer,
   header,
   maxWidthClassName = "max-w-3xl",
+  hideProgress = false,
+  fillHeight = false,
   progressLabel,
   summary,
   summaryTrigger,
@@ -50,16 +60,22 @@ export function WizardFrame({
   toolbarActions,
 }: WizardFrameProps) {
   const t = useTranslations();
+  const refresh = useThemeScope() === "refresh";
   const [summaryOpen, setSummaryOpen] = useState(false);
   const activeStep = steps[currentStep];
   const showSummaryButton = summary !== undefined && currentStep > 0;
   const hasTitleBadge = Boolean(titleBadge);
+  // A step can leave the title empty when its step header already names it; the heading row
+  // then collapses instead of leaving a gap.
+  const titleRowEmpty =
+    !(currentStepTitle ?? activeStep.title) && !header && !showSummaryButton && !hasTitleBadge;
 
   const stepContent = (
     <>
       <div
         className={cn(
           "mb-6 gap-3 sm:gap-4",
+          titleRowEmpty && "sr-only",
           hasTitleBadge
             ? "grid grid-cols-1 items-center text-center sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
             : "flex flex-col items-start sm:flex-row sm:items-center sm:justify-between"
@@ -67,12 +83,19 @@ export function WizardFrame({
       >
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-medium tracking-tight text-primary">
+            <h2
+              className={cn(
+                "text-2xl font-medium tracking-tight text-primary",
+                refresh && "text-heading"
+              )}
+            >
               {currentStepTitle ?? activeStep.title}
             </h2>
             {titleBadge}
           </div>
-          {description ? <div className="text-sm text-secondary">{description}</div> : null}
+          {description ? (
+            <div className="text-sm text-secondary refresh:text-body">{description}</div>
+          ) : null}
         </div>
         {header || showSummaryButton ? (
           <div
@@ -101,6 +124,68 @@ export function WizardFrame({
       {children}
     </>
   );
+
+  const summaryModal =
+    summary === undefined ? null : (
+      <Modal
+        isOpen={summaryOpen}
+        onClose={() => setSummaryOpen(false)}
+        ariaLabel={t("DashboardPayments.wizardSummaryTitle")}
+        size="sm"
+      >
+        <div className="p-6">{summary}</div>
+      </Modal>
+    );
+
+  if (refresh) {
+    // The refresh flow is one column in the shell's gutter: 36px under the title or tabs, the
+    // step header, 48px, the content, then a footer band across the bottom of the page on the
+    // sidebar's paper (a step darker than the page in both themes, as the design draws it). The
+    // column scrolls on its own when a step outgrows the viewport; the band stays put. The shell
+    // section has no padding on a refresh route, so the band reaches the edges as it is.
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-4 pt-9 pb-10 md:px-6"
+          data-wizard-scroll-region
+        >
+          <div
+            className={cn("mx-auto w-full max-w-flow", fillHeight && "flex min-h-full flex-col")}
+          >
+            <div
+              className={cn("mb-12 flex items-start gap-3", hideProgress && "hidden")}
+              data-wizard-stepper
+            >
+              <WizardStepProgress
+                className="min-w-0 flex-1"
+                currentStep={currentStep}
+                progressLabel={progressLabel}
+                steps={steps.map((step) => step.label)}
+              />
+              {toolbarActions}
+            </div>
+            {aside ? (
+              <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_440px]">
+                <main className="min-w-0">{stepContent}</main>
+                {aside}
+              </div>
+            ) : (
+              stepContent
+            )}
+          </div>
+        </div>
+        {footer ? (
+          <footer
+            className="shrink-0 border-t border-border-subtle bg-surface px-4 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
+            data-wizard-actions
+          >
+            <div className="mx-auto w-full max-w-flow">{footer}</div>
+          </footer>
+        ) : null}
+        {summaryModal}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col" data-wizard-frame>
@@ -142,16 +227,7 @@ export function WizardFrame({
         </footer>
       ) : null}
 
-      {summary === undefined ? null : (
-        <Modal
-          isOpen={summaryOpen}
-          onClose={() => setSummaryOpen(false)}
-          ariaLabel={t("DashboardPayments.wizardSummaryTitle")}
-          size="sm"
-        >
-          <div className="p-6">{summary}</div>
-        </Modal>
-      )}
+      {summaryModal}
     </div>
   );
 }
