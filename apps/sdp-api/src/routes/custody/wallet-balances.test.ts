@@ -1,11 +1,14 @@
-import type { SolanaRpc } from "@sdp/rpc/solana";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
-import { getAddressDecoder } from "@solana/kit";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import { createRpc, type SolanaRpc } from "@sdp/rpc/solana";
+import { type CustodyWalletTokenBalance, SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { address, getAddressDecoder } from "@solana/kit";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SOL_MINT } from "@/routes/payments/token-accounts";
 import {
   clearWalletBalanceCache,
+  parseWalletBalanceReadConcurrency,
   readWalletBalances,
+  WALLET_BALANCE_READ_CONCURRENCY,
   type WalletBalanceTarget,
 } from "./wallet-balances";
 
@@ -33,20 +36,20 @@ interface Pending<T> {
  * any of them finish.
  */
 function heldRpc() {
-  const accountReads: Array<{ addresses: string[] } & Pending<{ value: unknown[] }>> = [];
+  const balanceReads: Array<{ address: string } & Pending<{ value: bigint }>> = [];
   const tokenReads: Array<{ owner: string; programId: string } & Pending<{ value: unknown[] }>> =
     [];
   const rpc = {
-    getMultipleAccounts: (addresses: string[]) => ({
+    getBalance: (asked: string) => ({
       send: () =>
-        new Promise((resolve, reject) => accountReads.push({ addresses, resolve, reject })),
+        new Promise((resolve, reject) => balanceReads.push({ address: asked, resolve, reject })),
     }),
     getTokenAccountsByOwner: (owner: string, { programId }: { programId: string }) => ({
       send: () =>
         new Promise((resolve, reject) => tokenReads.push({ owner, programId, resolve, reject })),
     }),
   } as unknown as SolanaRpc;
-  return { rpc, accountReads, tokenReads };
+  return { rpc, balanceReads, tokenReads };
 }
 
 /** Answers every token-program read with no token accounts. */
@@ -84,22 +87,33 @@ afterEach(() => {
 });
 
 describe("readWalletBalances", () => {
-  it("reads SOL for every missed wallet in one call and both token programs side by side", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+  it("reads SOL for every missed wallet from its own address-bound call, both token programs side by side", async () => {
+    const { rpc, balanceReads, tokenReads } = heldRpc();
     const wallets = [wallet(1), wallet(2), wallet(3)];
 
     const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
     await flush();
 
-    expect(accountReads).toHaveLength(1);
-    expect(accountReads[0]?.addresses).toEqual([ownerAddress(1), ownerAddress(2), ownerAddress(3)]);
+    // Exact per-address counts: a set would still pass if a wallet were read twice.
+    expect(balanceReads.map((read) => read.address).sort()).toEqual(
+      [ownerAddress(1), ownerAddress(2), ownerAddress(3)].sort()
+    );
     // Both programs are asked for every wallet before any answer arrives.
     expect(tokenReads).toHaveLength(6);
     expect(
       tokenReads.filter((read) => read.owner === ownerAddress(1)).map((read) => read.programId)
     ).toEqual([SPL_TOKEN_PROGRAMS["spl-token"], SPL_TOKEN_PROGRAMS["token-2022"]]);
 
-    accountReads[0]?.resolve({ value: [{ lamports: 1_500_000_000n }, null, { lamports: 1n }] });
+    for (const read of balanceReads) {
+      read.resolve({
+        value:
+          read.address === ownerAddress(1)
+            ? 1_500_000_000n
+            : read.address === ownerAddress(3)
+              ? 1n
+              : 0n,
+      });
+    }
     for (const read of tokenReads) {
       const holdsUsdc =
         read.owner === ownerAddress(1) && read.programId === SPL_TOKEN_PROGRAMS["spl-token"];
@@ -117,33 +131,103 @@ describe("readWalletBalances", () => {
     expect(balances.get("cwlt_3")?.[0]).toMatchObject({ amount: "1" });
   });
 
-  it("chunks at the RPC limit, and a failed chunk leaves out only its own wallets", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+  it("reads every wallet independently, so a failed read leaves out only its own wallet", async () => {
+    const { rpc, balanceReads, tokenReads } = heldRpc();
     const wallets = Array.from({ length: 101 }, (_, index) => wallet(index));
 
     const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
     await flush();
 
-    expect(accountReads.map((read) => read.addresses.length)).toEqual([100, 1]);
-    accountReads[0]?.resolve({ value: Array.from({ length: 100 }, () => ({ lamports: 7n })) });
-    accountReads[1]?.reject(new Error("rpc unavailable"));
-    answerTokenReadsEmpty(tokenReads);
+    // The reads run under a concurrency bound, so only the first wave starts
+    // before any answer arrives, however many wallets are uncached.
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Answer every wave as it starts: wallet 57's SOL read fails, every other
+    // read succeeds, until all 101 wallets have been read.
+    const answered = new Set<object>();
+    for (;;) {
+      await flush();
+      const nextBalanceReads = balanceReads.filter((read) => !answered.has(read));
+      const nextTokenReads = tokenReads.filter((read) => !answered.has(read));
+      if (nextBalanceReads.length === 0 && nextTokenReads.length === 0) {
+        break;
+      }
+      for (const read of nextBalanceReads) {
+        answered.add(read);
+        if (read.address === ownerAddress(57)) {
+          read.reject(new Error("rpc unavailable"));
+        } else {
+          read.resolve({ value: 7n });
+        }
+      }
+      for (const read of nextTokenReads) {
+        answered.add(read);
+        read.resolve({ value: [] });
+      }
+    }
 
     const balances = await result;
+    expect(balanceReads).toHaveLength(101);
     expect(balances.size).toBe(100);
-    expect(balances.has("cwlt_100")).toBe(false);
+    expect(balances.has("cwlt_57")).toBe(false);
+  });
+
+  it("keeps later SOL reads flowing past a held token read", async () => {
+    const { rpc, balanceReads, tokenReads } = heldRpc();
+    const wallets = Array.from({ length: WALLET_BALANCE_READ_CONCURRENCY + 1 }, (_, index) =>
+      wallet(index)
+    );
+
+    const result = readWalletBalances(rpc, SCOPE, wallets, "req_test");
+    await flush();
+
+    // The first wave of each leg fills its own bound.
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY);
+    expect(tokenReads).toHaveLength(2 * WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Answer one wallet's SOL read while every token read stays held: the
+    // freed SOL slot starts the next wallet's SOL read instead of queueing it
+    // behind the outstanding token scans.
+    balanceReads[0]?.resolve({ value: 5n });
+    await flush();
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY + 1);
+    expect(tokenReads).toHaveLength(2 * WALLET_BALANCE_READ_CONCURRENCY);
+
+    // Drain every remaining read.
+    const answered = new Set<object>();
+    for (;;) {
+      await flush();
+      const nextBalanceReads = balanceReads.filter((read) => !answered.has(read));
+      const nextTokenReads = tokenReads.filter((read) => !answered.has(read));
+      if (nextBalanceReads.length === 0 && nextTokenReads.length === 0) {
+        break;
+      }
+      for (const read of nextBalanceReads) {
+        answered.add(read);
+        read.resolve({ value: 3n });
+      }
+      for (const read of nextTokenReads) {
+        answered.add(read);
+        read.resolve({ value: [] });
+      }
+    }
+
+    const balances = await result;
+    expect(balanceReads).toHaveLength(WALLET_BALANCE_READ_CONCURRENCY + 1);
+    expect(tokenReads).toHaveLength(2 * (WALLET_BALANCE_READ_CONCURRENCY + 1));
+    expect(balances.size).toBe(WALLET_BALANCE_READ_CONCURRENCY + 1);
   });
 
   it("shares one read between two callers asking at the same time", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
 
     const first = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_first");
     const second = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_second");
     await flush();
 
-    expect(accountReads).toHaveLength(1);
+    expect(balanceReads).toHaveLength(1);
     expect(tokenReads).toHaveLength(2);
-    accountReads[0]?.resolve({ value: [{ lamports: 5n }] });
+    balanceReads[0]?.resolve({ value: 5n });
     answerTokenReadsEmpty(tokenReads);
 
     const [firstBalances, secondBalances] = await Promise.all([first, second]);
@@ -151,32 +235,32 @@ describe("readWalletBalances", () => {
   });
 
   it("leaves a failed wallet out instead of zero, and reads it again next time", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
 
     const failed = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_failed");
     await flush();
-    accountReads[0]?.reject(new Error("rpc unavailable"));
+    balanceReads[0]?.reject(new Error("rpc unavailable"));
     answerTokenReadsEmpty(tokenReads);
     expect((await failed).has("cwlt_1")).toBe(false);
 
     const retried = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_retry");
     await flush();
     // Neither the cache nor the finished read kept the failure.
-    expect(accountReads).toHaveLength(2);
-    accountReads[1]?.resolve({ value: [{ lamports: 9n }] });
+    expect(balanceReads).toHaveLength(2);
+    balanceReads[1]?.resolve({ value: 9n });
     answerTokenReadsEmpty(tokenReads.slice(2));
 
     expect((await retried).get("cwlt_1")?.[0]).toMatchObject({ amount: "9" });
   });
 
   it("leaves out a wallet whose public key is not an address, without reading it", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
     const unreadable = { id: "cwlt_bad", walletId: "provider_bad", publicKey: "not-an-address" };
 
     const result = readWalletBalances(rpc, SCOPE, [unreadable, wallet(1)], "req_test");
     await flush();
-    expect(accountReads[0]?.addresses).toEqual([ownerAddress(1)]);
-    accountReads[0]?.resolve({ value: [{ lamports: 2n }] });
+    expect(balanceReads.map((read) => read.address)).toEqual([ownerAddress(1)]);
+    balanceReads[0]?.resolve({ value: 2n });
     answerTokenReadsEmpty(tokenReads);
 
     const balances = await result;
@@ -185,11 +269,11 @@ describe("readWalletBalances", () => {
   });
 
   it("leaves a wallet out when only its token read failed", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
 
     const result = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_test");
     await flush();
-    accountReads[0]?.resolve({ value: [{ lamports: 9n }] });
+    balanceReads[0]?.resolve({ value: 9n });
     tokenReads[0]?.resolve({ value: [] });
     tokenReads[1]?.reject(new Error("rpc unavailable"));
 
@@ -198,35 +282,159 @@ describe("readWalletBalances", () => {
 
   it("serves a success from the cache until it expires", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
 
     const first = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_first");
     await flush();
-    accountReads[0]?.resolve({ value: [{ lamports: 3n }] });
+    balanceReads[0]?.resolve({ value: 3n });
     answerTokenReadsEmpty(tokenReads);
     await first;
 
     await readWalletBalances(rpc, SCOPE, [wallet(1)], "req_cached");
-    expect(accountReads).toHaveLength(1);
+    expect(balanceReads).toHaveLength(1);
 
     vi.advanceTimersByTime(10_000);
     void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_expired");
     await flush();
-    expect(accountReads).toHaveLength(2);
+    expect(balanceReads).toHaveLength(2);
   });
 
   it("does not cache a read that finished after the cache was cleared", async () => {
-    const { rpc, accountReads, tokenReads } = heldRpc();
+    const { rpc, balanceReads, tokenReads } = heldRpc();
 
     const stale = readWalletBalances(rpc, SCOPE, [wallet(1)], "req_stale");
     await flush();
     clearWalletBalanceCache();
-    accountReads[0]?.resolve({ value: [{ lamports: 3n }] });
+    balanceReads[0]?.resolve({ value: 3n });
     answerTokenReadsEmpty(tokenReads);
     await stale;
 
     void readWalletBalances(rpc, SCOPE, [wallet(1)], "req_after_clear");
     await flush();
-    expect(accountReads).toHaveLength(2);
+    expect(balanceReads).toHaveLength(2);
+  });
+});
+
+/**
+ * Regression (APE-780 / SOLA9-491) against the real Solana HTTP client: a
+ * same-length `getMultipleAccounts` response whose entries are permuted must
+ * never be attributed to the requested wallets. The flow reads one address per
+ * call, so each answer is bound to the only address it could have been asked
+ * about and no positional batch is issued at all.
+ */
+describe("parseWalletBalanceReadConcurrency", () => {
+  it("defaults to the per-leg burst floor when unset", () => {
+    expect(parseWalletBalanceReadConcurrency(undefined)).toBe(16);
+  });
+
+  it("accepts a positive integer override", () => {
+    expect(parseWalletBalanceReadConcurrency("32")).toBe(32);
+    expect(parseWalletBalanceReadConcurrency("1")).toBe(1);
+  });
+
+  it("refuses values that are not positive integers", () => {
+    for (const raw of ["0", "-4", "2.5", "8abc", "", "  "]) {
+      expect(() => parseWalletBalanceReadConcurrency(raw)).toThrow(
+        /WALLET_BALANCE_READ_CONCURRENCY/
+      );
+    }
+  });
+});
+
+describe("wallet balance attribution", () => {
+  const WALLET_A = address("11111111111111111111111111111111");
+  const WALLET_B = address("So11111111111111111111111111111111111111112");
+  const TRUE_LAMPORTS: Record<string, number> = {
+    [WALLET_A]: 1_000_000_000,
+    [WALLET_B]: 2_000_000_000,
+  };
+
+  let server: Server;
+  let rpcUrl: string;
+  let getBalanceCalls: string[];
+  let multipleAccountsCalls: number;
+
+  beforeAll(async () => {
+    server = createServer(async (request, response) => {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const rpcRequest = JSON.parse(body) as {
+        id: number;
+        method: string;
+        params: unknown[];
+      };
+
+      let result: unknown;
+      if (rpcRequest.method === "getBalance") {
+        // One address per call: the answer affects only the wallet asked about.
+        const [asked] = rpcRequest.params as [string];
+        getBalanceCalls.push(asked);
+        result = { context: { slot: 1 }, value: TRUE_LAMPORTS[asked] };
+      } else if (rpcRequest.method === "getTokenAccountsByOwner") {
+        result = { context: { slot: 1 }, value: [] };
+      } else if (rpcRequest.method === "getMultipleAccounts") {
+        // The reported attack payload: a same-length answer whose entries are
+        // permuted relative to the request.
+        multipleAccountsCalls += 1;
+        const [asked] = rpcRequest.params as [string[]];
+        result = {
+          context: { slot: 1 },
+          value: [...asked].reverse().map((entryAddress) => ({
+            lamports: TRUE_LAMPORTS[entryAddress],
+            owner: "11111111111111111111111111111111",
+            executable: false,
+            rentEpoch: 0,
+            data: ["", "base64"],
+          })),
+        };
+      } else {
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: `unexpected method ${rpcRequest.method}` }));
+        return;
+      }
+
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: rpcRequest.id, result }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const bound = server.address();
+    if (!bound || typeof bound === "string") throw new Error("RPC test server did not bind");
+    rpcUrl = `http://127.0.0.1:${bound.port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve()))
+    );
+  });
+
+  beforeEach(() => {
+    getBalanceCalls = [];
+    multipleAccountsCalls = 0;
+  });
+
+  it("keeps each wallet's SOL bound to its own address instead of a positional batch", async () => {
+    const rpc = createRpc({ SOLANA_RPC_URL: rpcUrl }, { requestTimeoutMs: 2_000 });
+    const wallets = [
+      { id: "wallet-a", walletId: "provider-a", publicKey: WALLET_A },
+      { id: "wallet-b", walletId: "provider-b", publicKey: WALLET_B },
+    ];
+
+    const first = await readWalletBalances(rpc, "org:project", wallets, "req_attribution");
+    const second = await readWalletBalances(rpc, "org:project", wallets, "req_attribution_cached");
+
+    const solAmount = (balances: Map<string, CustodyWalletTokenBalance[]>, id: string) =>
+      balances.get(id)?.find((balance) => balance.token === "SOL")?.amount;
+    // Each wallet is answered with its own balance, never its neighbor's.
+    expect(solAmount(first, "wallet-a")).toBe("1000000000");
+    expect(solAmount(first, "wallet-b")).toBe("2000000000");
+    // The cached answer keeps the same binding.
+    expect(solAmount(second, "wallet-a")).toBe("1000000000");
+    expect(solAmount(second, "wallet-b")).toBe("2000000000");
+    // No positional batch was issued, so a permuted answer cannot enter the
+    // cache under any wallet's key. The counts are exact: a duplicate read for
+    // either address would still pass a set-based assertion.
+    expect(multipleAccountsCalls).toBe(0);
+    expect(getBalanceCalls.slice().sort()).toEqual([WALLET_A, WALLET_B].sort());
   });
 });
