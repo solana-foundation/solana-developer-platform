@@ -746,7 +746,13 @@
         "notKeptHere": "Not kept here",
         "notKeptHereDescription": "Phone, address and identity details are collected per payment.",
         "delete": "Delete"
-      }
+      },
+      "newSolanaAddress": "New Solana address",
+      "screenAndAdd": "Screen and add",
+      "doNotAdd": "Do not add",
+      "addressAdded": "Address added",
+      "addressLabelPlaceholder": "Ops wallet",
+      "addressPlaceholder": "Solana address, 32 to 44 characters"
     },
     "playground": {
       "moonPay": "MoonPay",

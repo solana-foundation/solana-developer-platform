@@ -14,7 +14,8 @@ export interface ContactControls {
 
 /**
  * The "Contact" field Pay and Deposit open with: active contacts, searchable. Outside a refresh
- * surface the label carries a hint; the design's label stands alone.
+ * surface the label carries a hint and each contact its type; the design's label stands alone
+ * and its list names the contacts only.
  */
 export function ContactCombobox({
   counterpartiesResult,
@@ -37,9 +38,12 @@ export function ContactCombobox({
         .map((counterparty) => ({
           value: counterparty.id,
           label: counterparty.displayName,
-          description: t(`DashboardPayments.counterparty.${counterparty.entityType}`),
+          // The design lists contacts by name alone.
+          description: refresh
+            ? undefined
+            : t(`DashboardPayments.counterparty.${counterparty.entityType}`),
         })),
-    [counterpartiesResult.data, t]
+    [counterpartiesResult.data, refresh, t]
   );
   return (
     <Combobox

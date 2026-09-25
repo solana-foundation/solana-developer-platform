@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { type ReactNode, useMemo } from "react";
-import { AddExternalAccountDialog } from "@/app/dashboard/payments/counterparty/add-external-account-dialog";
+import { NewSolanaAddressForm } from "@/app/dashboard/payments/counterparty/new-solana-address-form";
 import {
   formatTokenAmount,
   shortenAddress,
@@ -158,6 +158,9 @@ function DestinationFields({
   } = wizard;
   const destinationOptions = DestinationOptions(wizard);
   const hasContact = counterpartyId !== "";
+  // The new address opens under the destination, as the design does, in place of its button.
+  const addingAddress = addAccountOpen && hasContact;
+  const payByBank = hasContact ? onPayByBank : undefined;
 
   return (
     <>
@@ -185,33 +188,41 @@ function DestinationFields({
           isLoading={hasContact && accountsLoading}
           disabled={!hasContact || destinationOptions.length === 0}
         />
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <button
-            type="button"
-            disabled={!hasContact}
-            onClick={() => setAddAccountOpen(true)}
-            className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <PlusIcon className="size-4" aria-hidden="true" />
-            {t("DashboardPayments.payForm.addSolanaAddress")}
-          </button>
-          {onPayByBank && hasContact ? (
-            <button
-              type="button"
-              onClick={onPayByBank}
-              className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary"
-            >
-              <LandmarkIcon className="size-4" aria-hidden="true" />
-              {t("DashboardPayments.payForm.payByBank")}
-            </button>
-          ) : null}
-        </div>
-        <AddExternalAccountDialog
-          isOpen={addAccountOpen}
-          counterpartyId={counterpartyId}
-          onAdded={handleAccountAdded}
-          onClose={() => setAddAccountOpen(false)}
-        />
+        {addingAddress ? (
+          <NewSolanaAddressForm
+            key={counterpartyId}
+            className="mt-4"
+            counterpartyId={counterpartyId}
+            idPrefix="pay-add"
+            onAdded={handleAccountAdded}
+            onCancel={() => setAddAccountOpen(false)}
+          />
+        ) : null}
+        {addingAddress && !payByBank ? null : (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            {addingAddress ? null : (
+              <button
+                type="button"
+                disabled={!hasContact}
+                onClick={() => setAddAccountOpen(true)}
+                className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <PlusIcon className="size-4" aria-hidden="true" />
+                {t("DashboardPayments.payForm.addSolanaAddress")}
+              </button>
+            )}
+            {payByBank ? (
+              <button
+                type="button"
+                onClick={payByBank}
+                className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary"
+              >
+                <LandmarkIcon className="size-4" aria-hidden="true" />
+                {t("DashboardPayments.payForm.payByBank")}
+              </button>
+            ) : null}
+          </div>
+        )}
       </div>
     </>
   );
