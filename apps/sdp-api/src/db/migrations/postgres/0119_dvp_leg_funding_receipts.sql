@@ -39,6 +39,13 @@ CREATE TABLE IF NOT EXISTS dvp_leg_funding_receipts (
     -- each a true record of a transfer that went out.
     signature TEXT NOT NULL,
 
+    -- What THAT transfer sent, in base units, recorded at broadcast. A leg can
+    -- be funded again after a reclaim, and each funding sends only the
+    -- shortfall it observed, so per-event amounts cannot be derived from the
+    -- trade: the trade-level escrow peak is the leg's high-water mark, not what
+    -- any one transfer moved. The feed shows this amount per receipt.
+    amount TEXT NOT NULL,
+
     created_at TEXT NOT NULL DEFAULT (sdp_iso_now()),
 
     PRIMARY KEY (trade_id, side, signature)
@@ -54,11 +61,27 @@ CREATE INDEX IF NOT EXISTS idx_dvp_leg_funding_receipts_organization_created
 -- when the claim last changed, which for an untouched receipt is the broadcast.
 -- Receipts the chain later proves moved nothing are removed by the reconciler
 -- as before.
+--
+-- The backfilled amount is the side's escrow peak, which is exactly what the
+-- deployed feed showed for that row and what the claim alone can still tell
+-- about the transfer; per-event amounts are recorded from this migration
+-- forward, at broadcast.
+--
+-- A funding whose claim was already taken over by a reclaim before this
+-- migration ran has NO claim row left to backfill from: the takeover turned the
+-- row into the reclaim's lock, and a later release deleted it. The deployed
+-- feed sourced fund rows from that same claim row, so those fundings were
+-- already absent from the feed before this deploy — this backfill preserves
+-- exactly what was shown, and changes nothing about what was not. From here on
+-- every broadcast writes a receipt of its own, so the gap cannot grow.
 INSERT INTO dvp_leg_funding_receipts
-    (trade_id, side, organization_id, project_id, custody_wallet_id, signature, created_at)
-SELECT trade_id, side, organization_id, project_id, custody_wallet_id, funding_tx, updated_at
-  FROM dvp_leg_funding_claims
- WHERE funding_tx IS NOT NULL
+    (trade_id, side, organization_id, project_id, custody_wallet_id, signature, amount, created_at)
+SELECT c.trade_id, c.side, c.organization_id, c.project_id, c.custody_wallet_id, c.funding_tx,
+       CASE c.side WHEN 'a' THEN t.escrow_a_peak_amount WHEN 'b' THEN t.escrow_b_peak_amount END,
+       c.updated_at
+  FROM dvp_leg_funding_claims c
+  JOIN dvp_trades t ON t.id = c.trade_id
+ WHERE c.funding_tx IS NOT NULL
  ON CONFLICT (trade_id, side, signature) DO NOTHING;
 
 -- Ordinary tenant isolation, exactly as on `dvp_leg_funding_claims`.

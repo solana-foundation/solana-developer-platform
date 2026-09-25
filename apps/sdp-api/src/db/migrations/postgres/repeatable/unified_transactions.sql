@@ -157,7 +157,7 @@ SELECT
   r.project_id,
   r.custody_wallet_id,
   CASE r.side WHEN 'a' THEN t.mint_a WHEN 'b' THEN t.mint_b END AS token,
-  trim_scale((CASE r.side WHEN 'a' THEN t.escrow_a_peak_amount WHEN 'b' THEN t.escrow_b_peak_amount END)::numeric /
+  trim_scale(r.amount::numeric /
     (10::numeric ^ CASE r.side WHEN 'a' THEN t.decimals_a WHEN 'b' THEN t.decimals_b END))::text AS amount,
   NULL::text AS counterparty_id,
   r.signature,
@@ -187,9 +187,20 @@ LEFT JOIN LATERAL (
   -- through the wallet that holds it. Not the side's funding claim — a
   -- cross-organization close must not carry another tenant's wallet id, and a
   -- settlement-wallet-scoped read must find the closes its wallet signed.
+  -- The address is only a key; the wallet that holds it is a tenant fact, so
+  -- the lookup is scoped to the trade's own organization and project (an
+  -- organization-level custody config is the fallback), and a project-scoped
+  -- match wins over an org-level one. The same public key can be recorded on
+  -- more than one custody wallet — a provisioning race leaves the loser behind,
+  -- and a rotated mapping does not migrate older trades — and picking among
+  -- them arbitrarily could name a wallet that never signed the close.
   SELECT w.id
     FROM custody_wallets w
+    JOIN custody_configs cfg ON cfg.id = w.custody_config_id
    WHERE w.public_key = t.settlement_authority
+     AND cfg.organization_id = t.organization_id
+     AND (cfg.project_id = t.project_id OR cfg.project_id IS NULL)
+   ORDER BY (cfg.project_id = t.project_id) DESC NULLS LAST
    LIMIT 1
 ) authority ON TRUE
 WHERE t.close_signature IS NOT NULL

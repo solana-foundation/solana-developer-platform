@@ -171,8 +171,8 @@ async function seedDvp(status: string): Promise<string> {
   );
   await getDb(env).execute(
     `INSERT INTO dvp_leg_funding_receipts
-       (trade_id, side, organization_id, project_id, custody_wallet_id, signature)
-     VALUES (?, 'a', ?, ?, ?, ?)`,
+       (trade_id, side, organization_id, project_id, custody_wallet_id, signature, amount)
+     VALUES (?, 'a', ?, ?, ?, ?, '1000000')`,
     [tradeId, TEST_ORG.id, PROJECT, CUSTODY_WALLET, `signature-${status}`]
   );
   return `${tradeId}:fund:a:signature-${status}`;

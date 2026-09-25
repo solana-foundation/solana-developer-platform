@@ -203,7 +203,9 @@ describe("fundDvpTradeLeg", () => {
   it("records the funding transaction separately from the claim", async () => {
     const result = await fundDvpTradeLeg(context, trade(), FUNDER_A);
 
-    expect(recordFundingTx).toHaveBeenCalledWith(trade().id, "a", result.signature);
+    // The receipt carries the amount THIS transfer sent (the observed
+    // shortfall), which the unified feed shows per funding.
+    expect(recordFundingTx).toHaveBeenCalledWith(trade().id, "a", result.signature, result.amount);
   });
 
   it("records no receipt when the send failed", async () => {

@@ -73,8 +73,13 @@ export interface DvpLegFundingClaimRepository {
    * release a newer claim taken after its own had already been swept.
    */
   release(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
-  /** Records the transfer once it is on the wire, so it outlives the claim. */
-  recordFundingTx(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+  /** Records the transfer once it is on the wire, with the amount it sent, so it outlives the claim. */
+  recordFundingTx(
+    tradeId: string,
+    side: "a" | "b",
+    signature: string,
+    amount: string
+  ): Promise<void>;
   /**
    * Whether any leg of the trade is being moved right now: a lock (a funding not
    * yet on the wire, or a reclaim not yet confirmed) whose transaction can still
@@ -240,13 +245,17 @@ export function createPostgresDvpLegFundingClaimRepository(
       return result !== null;
     },
 
-    async recordFundingTx(tradeId, side, signature) {
+    async recordFundingTx(tradeId, side, signature, amount) {
       // Two facts at once, in one transaction: the claim becomes a receipt
       // (`funding_tx` set, which is what keeps the leg taken), and the funding
       // gets its permanent receipt row (0119). The receipt row is what the
       // unified transaction feed reads as a `fund` event, so it is written
       // here, with the single writer of the funding lifecycle, and never
       // updated again — a later reclaim or rebind may not rewrite history.
+      // The amount rides with it: each funding sends only that broadcast's
+      // shortfall, so the per-event amount cannot be derived from the trade
+      // later (the escrow peak is the leg's high-water mark, not what any one
+      // transfer moved).
       await db.batch([
         db
           .prepare(
@@ -258,13 +267,13 @@ export function createPostgresDvpLegFundingClaimRepository(
         db
           .prepare(
             `INSERT INTO dvp_leg_funding_receipts
-               (trade_id, side, organization_id, project_id, custody_wallet_id, signature)
-             SELECT trade_id, side, organization_id, project_id, custody_wallet_id, ?
-               FROM dvp_leg_funding_claims
-              WHERE trade_id = ? AND side = ? AND signature = ?
-             ON CONFLICT (trade_id, side, signature) DO NOTHING`
+                (trade_id, side, organization_id, project_id, custody_wallet_id, signature, amount)
+              SELECT trade_id, side, organization_id, project_id, custody_wallet_id, ?, ?
+                FROM dvp_leg_funding_claims
+               WHERE trade_id = ? AND side = ? AND signature = ?
+               ON CONFLICT (trade_id, side, signature) DO NOTHING`
           )
-          .bind(signature, tradeId, side, signature),
+          .bind(signature, amount, tradeId, side, signature),
       ]);
     },
 

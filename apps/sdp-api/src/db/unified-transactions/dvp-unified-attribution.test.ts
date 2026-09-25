@@ -35,8 +35,9 @@ const PROJECT_B = "prj_poc_dvp_b";
 const WALLET_A_FUNDER = "cwlt_poc_dvp_a_funder";
 const WALLET_A_SETTLEMENT = "cwlt_poc_dvp_a_settlement";
 const WALLET_B_FUNDER = "cwlt_poc_dvp_b_funder";
+const WALLET_A_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_a_settlement_impostor";
+const WALLET_B_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_b_settlement_impostor";
 const SETTLEMENT_AUTHORITY = "PocDvpASettlement111";
-
 async function seedFixture(): Promise<void> {
   await seedTestDatabase(env);
   const db = getDb(env);
@@ -109,6 +110,38 @@ async function seedFixture(): Promise<void> {
          VALUES (?, 'cfg_poc_dvp_b', ?, ?, ?, 'active')`
       )
       .bind(WALLET_B_FUNDER, "provider-b-funder", "PocPartyB111", "B funder"),
+    // The settlement authority's public key recorded on wallets that did not
+    // sign the trade's closes: a provisioning race leaves the loser's wallet
+    // behind, and a rotated mapping does not migrate older trades. Resolving
+    // the close's wallet by the address alone could name one of these.
+    db
+      .prepare(
+        `INSERT INTO custody_configs (id, organization_id, project_id, provider, config_encrypted, status)
+         VALUES (?, ?, ?, 'local', 'poc-only', 'active')`
+      )
+      .bind("cfg_poc_dvp_a_other", ORG_A, `${PROJECT_A}_production`),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, status)
+         VALUES (?, 'cfg_poc_dvp_a_other', ?, ?, ?, 'active')`
+      )
+      .bind(
+        WALLET_A_SETTLEMENT_IMPOSTOR,
+        "provider-a-settlement-impostor",
+        SETTLEMENT_AUTHORITY,
+        "A impostor"
+      ),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, status)
+         VALUES (?, 'cfg_poc_dvp_b', ?, ?, ?, 'active')`
+      )
+      .bind(
+        WALLET_B_SETTLEMENT_IMPOSTOR,
+        "provider-b-settlement-impostor",
+        SETTLEMENT_AUTHORITY,
+        "B impostor"
+      ),
     db
       .prepare(
         `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
@@ -217,8 +250,10 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
     await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, async () => {
       const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
 
-      // The funding is broadcast: the receipt is the fund event.
-      await claims.recordFundingTx("dvp_poc_reclaim", "a", "sig_original_funding");
+      // The funding is broadcast: the receipt is the fund event, carrying the
+      // amount THIS transfer sent — not the trade's escrow peak, which a
+      // repeated funding would otherwise show for every event.
+      await claims.recordFundingTx("dvp_poc_reclaim", "a", "sig_original_funding", "123456");
       const afterBroadcast = await listDvp({ organizationId: ORG_A, projectId: PROJECT_A });
       expect(afterBroadcast.rows.filter((row) => row.moduleId === "dvp_poc_reclaim")).toEqual([
         expect.objectContaining({
@@ -227,6 +262,9 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
           custodyWalletId: WALLET_A_FUNDER,
           organizationId: ORG_A,
           projectId: PROJECT_A,
+          // The fixture's escrow peak for side a is 1000000; the row must show
+          // the receipt's own 123456 base units instead.
+          amount: "0.123456",
         }),
       ]);
 
@@ -319,6 +357,25 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
     ).toHaveLength(2);
   });
 
+  it("resolves a close wallet within the trade's organization and project when the address is recorded elsewhere too", async () => {
+    // The fixture seeds the settlement authority's address on two more wallets:
+    // one under the same organization but a different project, one under
+    // another organization entirely. A lookup by the address alone could pick
+    // either; the close must name the trade's own project's wallet.
+    await insertTrade("dvp_poc_close_dupe", "settled", "sig_settlement_authority");
+
+    const orgAFeed = await listDvp({ organizationId: ORG_A, projectId: PROJECT_A });
+    const closeRows = orgAFeed.rows.filter(
+      (row) => row.moduleId === "dvp_poc_close_dupe" && row.kind === "close"
+    );
+    expect(closeRows).toHaveLength(2);
+    for (const row of closeRows) {
+      expect(row.custodyWalletId).toBe(WALLET_A_SETTLEMENT);
+      expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_IMPOSTOR);
+      expect(row.custodyWalletId).not.toBe(WALLET_B_SETTLEMENT_IMPOSTOR);
+    }
+  });
+
   it("leaves no fund row for a funding the chain proved moved nothing", async () => {
     await insertTrade("dvp_poc_dead", "partially_funded");
     await insertClaim(
@@ -333,7 +390,7 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
 
     await runWithTenantDatabaseIdentity({ organizationId: ORG_A }, async () => {
       const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-      await claims.recordFundingTx("dvp_poc_dead", "a", "sig_brd_dead");
+      await claims.recordFundingTx("dvp_poc_dead", "a", "sig_brd_dead", "1000000");
       await claims.deleteBroadcastClaim("dvp_poc_dead", "a", "sig_brd_dead");
     });
 
@@ -363,8 +420,8 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
     );
     await runWithSystemDatabaseIdentity("poc-dvp-unified-transactions", async () => {
       const claims = createPostgresDvpLegFundingClaimRepository(getDb(env));
-      await claims.recordFundingTx("dvp_poc_shared", "a", "sig_a_funding");
-      await claims.recordFundingTx("dvp_poc_shared", "b", "sig_b_funding");
+      await claims.recordFundingTx("dvp_poc_shared", "a", "sig_a_funding", "1000000");
+      await claims.recordFundingTx("dvp_poc_shared", "b", "sig_b_funding", "2000000");
     });
 
     const orgAFeed = await listDvp({ organizationId: ORG_A, projectId: PROJECT_A });
