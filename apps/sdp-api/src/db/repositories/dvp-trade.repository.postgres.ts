@@ -402,22 +402,35 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
                  -- through to the newest signature, since later reads can only
                  -- add newer transactions than the close. A missing scan row
                  -- counts as outstanding, which is what makes a trade closed
-                 -- before the ledger existed selectable.
+                 -- before the ledger existed selectable. Each leg is judged
+                 -- separately: a close transfer already recorded for one side
+                 -- does not excuse the other side's unfinished scan, which is
+                 -- what still has to backfill that side's own close row.
                  OR (status IN ('settled', 'cancelled', 'rejected', 'closed_unknown')
                      AND (closed_at::timestamptz >= CURRENT_TIMESTAMP - INTERVAL '7 days'
                           OR (close_signature IS NOT NULL
-                              AND NOT EXISTS (SELECT 1
-                                                FROM dvp_leg_transfers x
-                                               WHERE x.trade_id = laned.id
-                                                 AND x.signature = laned.close_signature)
-                              AND (NOT EXISTS (SELECT 1
-                                                 FROM dvp_leg_transfer_scans s
-                                                WHERE s.trade_id = laned.id AND s.side = 'a'
-                                                  AND s.scanned_at IS NOT NULL)
-                                   OR NOT EXISTS (SELECT 1
-                                                    FROM dvp_leg_transfer_scans s
-                                                   WHERE s.trade_id = laned.id AND s.side = 'b'
-                                                     AND s.scanned_at IS NOT NULL)))))
+                              -- A leg is accounted for once its own close row
+                              -- exists or its own history read completed; the
+                              -- trade stays selectable while either leg has
+                              -- neither.
+                              AND (   (NOT EXISTS (SELECT 1
+                                                     FROM dvp_leg_transfers x
+                                                    WHERE x.trade_id = laned.id
+                                                      AND x.signature = laned.close_signature
+                                                      AND x.side = 'a')
+                                       AND NOT EXISTS (SELECT 1
+                                                         FROM dvp_leg_transfer_scans s
+                                                        WHERE s.trade_id = laned.id AND s.side = 'a'
+                                                          AND s.scanned_at IS NOT NULL))
+                                   OR (NOT EXISTS (SELECT 1
+                                                     FROM dvp_leg_transfers x
+                                                    WHERE x.trade_id = laned.id
+                                                      AND x.signature = laned.close_signature
+                                                      AND x.side = 'b')
+                                       AND NOT EXISTS (SELECT 1
+                                                         FROM dvp_leg_transfer_scans s
+                                                        WHERE s.trade_id = laned.id AND s.side = 'b'
+                                                          AND s.scanned_at IS NOT NULL))))))
            )
            SELECT ${SELECT_COLUMNS}
              FROM ranked

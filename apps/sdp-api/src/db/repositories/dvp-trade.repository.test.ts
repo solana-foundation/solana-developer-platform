@@ -712,6 +712,61 @@ describe("DvpTradeRepository (postgres)", () => {
     await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([]);
   });
 
+  it("keeps a pre-ledger closed trade while one leg's scan is unfinished, even though the other leg recorded the close", async () => {
+    await repo.create(tradeInsert({ id: "dvp_preledger_halffilled" }));
+    await getDb(env)
+      .prepare(
+        `UPDATE dvp_trades
+            SET status = 'settled', closed_at = CURRENT_TIMESTAMP - INTERVAL '30 days',
+                close_signature = ?
+          WHERE id = 'dvp_preledger_halffilled'`
+      )
+      .bind(CLOSE_SIGNATURE)
+      .run();
+    const transfers = createPostgresDvpLegTransferRepository(getDb(env));
+    const scans = createPostgresDvpLegTransferRepository(getDb(env));
+    // Side A: close recorded and history fully read.
+    await transfers.record({
+      tradeId: "dvp_preledger_halffilled",
+      side: "a",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "1000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+    await scans.saveScan("dvp_preledger_halffilled", {
+      side: "a",
+      cursor: null,
+      scannedAt: new Date().toISOString(),
+    });
+    // Side B: close not yet recorded, scan still outstanding.
+    await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([
+      expect.objectContaining({ id: "dvp_preledger_halffilled" }),
+    ]);
+
+    // Once side B's scan records its close row, the trade drops out.
+    await transfers.record({
+      tradeId: "dvp_preledger_halffilled",
+      side: "b",
+      signature: CLOSE_SIGNATURE,
+      direction: "out",
+      amount: "2000",
+      slot: "1",
+      blockTime: null,
+      feePayer: address(WALLET_A_PUBKEY),
+      finalized: true,
+    });
+    await scans.saveScan("dvp_preledger_halffilled", {
+      side: "b",
+      cursor: null,
+      scannedAt: new Date().toISOString(),
+    });
+    await expect(repo.listOpenForReconciliation(10)).resolves.toEqual([]);
+  });
+
   /**
    * PRO-1930, PRO-1974. The sweep's limit is shared out between live trades,
    * expired trades still holding something, and trades kept only for late
