@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { depositStageStates } from "./deposit-timeline";
+import { depositStageStates } from "./deposit-timeline-stages";
 
 describe("depositStageStates", () => {
   it("puts sending on the payer while the provider waits", () => {

@@ -2,7 +2,7 @@
 
 import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Callout } from "@/components/ui/callout";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { getRampProviderLabel } from "@/lib/ramps";
@@ -54,11 +54,14 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
   const fiat = selectedRampPair.fiatCurrency.toUpperCase();
   const asset = getCryptoRailAssetLabel(selectedRampPair.assetRail);
   const amount = Number(fields.amount);
+  // Built once per locale: a formatter is slow to construct and the review re-renders each tick.
+  const percentFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 }),
+    [locale]
+  );
   const feeShare =
     ok && Number.isFinite(amount) && amount > 0
-      ? new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 }).format(
-          Number(ok.fees.total) / amount
-        )
+      ? percentFormat.format(Number(ok.fees.total) / amount)
       : null;
   const walletProvider = selectedWallet?.provider
     ? CUSTODY_PROVIDER_CATALOG_BY_ID[selectedWallet.provider].label

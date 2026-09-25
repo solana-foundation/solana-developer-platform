@@ -226,7 +226,10 @@ function PlainCode({ content }: { content: string }) {
 /** ⌘↵ or Ctrl+↵ runs the request from anywhere on the page while running is allowed. */
 function useRunShortcut(onRun: () => void, disabled: boolean) {
   const latest = useRef({ onRun, disabled });
-  latest.current = { onRun, disabled };
+  // Written after commit, not during render: React may replay or discard a render.
+  useEffect(() => {
+    latest.current = { onRun, disabled };
+  });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {

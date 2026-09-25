@@ -457,6 +457,189 @@ function DirectoryCapNotice({ count, total }: { count: number; total: number }) 
   );
 }
 
+/** The list's rows: status, amount, who pays, where to, when, and a copy of the link. */
+function PaymentRequestsTable({
+  rows,
+  locale,
+  amountLabel,
+  fromLabel,
+  onSelect,
+  onCopyLink,
+}: {
+  rows: readonly PaymentRequest[];
+  locale: string;
+  amountLabel: (request: PaymentRequest) => string;
+  fromLabel: (counterpartyId: string | null) => string;
+  onSelect: (request: PaymentRequest) => void;
+  onCopyLink: (request: PaymentRequest) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="overflow-x-auto">
+      <Table className="min-w-[760px] rounded-none border-0">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("DashboardPayments.status")}</TableHead>
+            <TableHead className="text-right">{t("DashboardPayments.requests.amount")}</TableHead>
+            <TableHead>{t("DashboardPayments.requests.from")}</TableHead>
+            <TableHead>{t("DashboardPayments.requests.to")}</TableHead>
+            <TableHead>{t("DashboardPayments.recurring.created")}</TableHead>
+            <TableHead className="w-px">
+              <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((request) => (
+            <TableRow
+              key={request.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onSelect(request)}
+              onKeyDown={(event: KeyboardEvent) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onSelect(request);
+                }
+              }}
+              className="cursor-pointer"
+            >
+              <TableCell>
+                <StatusBadge status={request.status} />
+              </TableCell>
+              <TableCell className="text-right text-body whitespace-nowrap text-primary tabular-nums">
+                {amountLabel(request)}
+              </TableCell>
+              <TableCell
+                className={cn(
+                  "max-w-56 truncate text-body",
+                  request.counterpartyId ? "text-primary" : "text-tertiary"
+                )}
+              >
+                {fromLabel(request.counterpartyId)}
+              </TableCell>
+              <TableCell className="text-body whitespace-nowrap text-secondary">
+                {shortenAddress(request.destinationAddress)}
+              </TableCell>
+              <TableCell className="text-body whitespace-nowrap text-secondary">
+                {formatDateTime(request.createdAt, locale)}
+              </TableCell>
+              <TableCell className="text-right whitespace-nowrap">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  iconLeft={<CopyIcon />}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCopyLink(request);
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  {t("Shared.SharedComponents.copyLink")}
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** One request in full: its amount, its link to copy, and where it came from and goes. */
+function PaymentRequestDetailsModal({
+  request,
+  payLink,
+  fromLabel,
+  walletName,
+  tokenSymbol,
+  onClose,
+}: {
+  request: PaymentRequest;
+  payLink: string;
+  fromLabel: string;
+  walletName: string | null | undefined;
+  tokenSymbol: string | undefined;
+  onClose: () => void;
+}) {
+  const t = useTranslations();
+  const tokenLabel = tokenSymbol ? tokenSymbol : shortenAddress(request.token);
+  return (
+    <Modal
+      isOpen
+      ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
+      onClose={onClose}
+      size="lg"
+    >
+      <div className="space-y-5 p-6">
+        <div className="flex items-start justify-between gap-4 pr-8">
+          <div className="space-y-1">
+            <h2 className="text-xl font-medium tracking-tight text-primary">
+              {t("DashboardPayments.requests.paymentRequest")}
+            </h2>
+            <p className="text-sm text-secondary">{formatTimestamp(request.createdAt, t)}</p>
+          </div>
+          <StatusBadge status={request.status} />
+        </div>
+
+        <div className="rounded-2xl bg-fill-subtle p-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-secondary">
+            {t("DashboardPayments.requests.amountRequested")}
+          </p>
+          <p className="truncate text-xl font-semibold tracking-tight text-primary">
+            {formatDisplayAmount(request.amount, tokenLabel)}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
+          <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
+            {payLink}
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            iconLeft={<CopyIcon />}
+            onClick={() => {
+              void navigator.clipboard.writeText(payLink);
+              toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
+            }}
+          >
+            {t("DashboardPayments.requests.copy")}
+          </Button>
+        </div>
+
+        <div className="rounded-2xl border border-border-default px-4">
+          <div className="divide-y divide-border-default">
+            <DetailRow label={t("DashboardPayments.requests.from")}>{fromLabel}</DetailRow>
+            <DetailRow label={t("DashboardPayments.requests.to")}>
+              {walletName ? (
+                <span className="block font-medium text-primary">{walletName}</span>
+              ) : null}
+              <span className="block font-mono text-xs font-normal text-secondary">
+                {request.destinationAddress}
+              </span>
+            </DetailRow>
+            <DetailRow label={t("DashboardPayments.requests.token")}>{tokenLabel}</DetailRow>
+            <DetailRow label={t("DashboardPayments.requests.reference")}>
+              {shortenAddress(request.reference)}
+            </DetailRow>
+            <DetailRow label={t("DashboardPayments.requests.expires")}>
+              {request.expiresAt
+                ? formatTimestamp(request.expiresAt, t)
+                : t("DashboardPayments.requests.noExpiry")}
+            </DetailRow>
+            <DetailRow label={t("DashboardPayments.recurring.created")}>
+              {formatTimestamp(request.createdAt, t)}
+            </DetailRow>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /**
  * The Requests list. The API has no search, so the page loads the newest requests up to a cap
  * and search, the status filter and paging all run over those here. When the cap cut the list
@@ -522,9 +705,6 @@ export function PaymentRequestsWorkspace({
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  const selectedWalletName = selected ? walletNameById.get(selected.walletId) : null;
-  const selectedTokenSymbol = selected ? tokenSymbolByMint.get(selected.token) : undefined;
-
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return requests.filter((request) => {
@@ -630,77 +810,14 @@ export function PaymentRequestsWorkspace({
                 {t("DashboardPayments.requests.noMatches")}
               </p>
             ) : (
-              <div className="overflow-x-auto">
-                <Table className="min-w-[760px] rounded-none border-0">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("DashboardPayments.status")}</TableHead>
-                      <TableHead className="text-right">
-                        {t("DashboardPayments.requests.amount")}
-                      </TableHead>
-                      <TableHead>{t("DashboardPayments.requests.from")}</TableHead>
-                      <TableHead>{t("DashboardPayments.requests.to")}</TableHead>
-                      <TableHead>{t("DashboardPayments.recurring.created")}</TableHead>
-                      <TableHead className="w-px">
-                        <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((request) => (
-                      <TableRow
-                        key={request.id}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setSelected(request)}
-                        onKeyDown={(event: KeyboardEvent) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setSelected(request);
-                          }
-                        }}
-                        className="cursor-pointer"
-                      >
-                        <TableCell>
-                          <StatusBadge status={request.status} />
-                        </TableCell>
-                        <TableCell className="text-right text-body whitespace-nowrap text-primary tabular-nums">
-                          {amountLabel(request)}
-                        </TableCell>
-                        <TableCell
-                          className={cn(
-                            "max-w-56 truncate text-body",
-                            request.counterpartyId ? "text-primary" : "text-tertiary"
-                          )}
-                        >
-                          {fromLabel(request.counterpartyId)}
-                        </TableCell>
-                        <TableCell className="text-body whitespace-nowrap text-secondary">
-                          {shortenAddress(request.destinationAddress)}
-                        </TableCell>
-                        <TableCell className="text-body whitespace-nowrap text-secondary">
-                          {formatDateTime(request.createdAt, locale)}
-                        </TableCell>
-                        <TableCell className="text-right whitespace-nowrap">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="xs"
-                            iconLeft={<CopyIcon />}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              copyLink(request);
-                            }}
-                            onKeyDown={(event) => event.stopPropagation()}
-                          >
-                            {t("Shared.SharedComponents.copyLink")}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <PaymentRequestsTable
+                rows={rows}
+                locale={locale}
+                amountLabel={amountLabel}
+                fromLabel={fromLabel}
+                onSelect={setSelected}
+                onCopyLink={copyLink}
+              />
             )}
             {filtered.length > pageSize ? (
               <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
@@ -710,84 +827,14 @@ export function PaymentRequestsWorkspace({
       </DashboardWorkspaceOverviewPanel>
 
       {selected && payLink ? (
-        <Modal
-          isOpen
-          ariaLabel={t("DashboardPayments.requests.paymentRequestDetails")}
+        <PaymentRequestDetailsModal
+          request={selected}
+          payLink={payLink}
+          fromLabel={fromLabel(selected.counterpartyId)}
+          walletName={walletNameById.get(selected.walletId)}
+          tokenSymbol={tokenSymbolByMint.get(selected.token)}
           onClose={() => setSelected(null)}
-          size="lg"
-        >
-          <div className="space-y-5 p-6">
-            <div className="flex items-start justify-between gap-4 pr-8">
-              <div className="space-y-1">
-                <h2 className="text-xl font-medium tracking-tight text-primary">
-                  {t("DashboardPayments.requests.paymentRequest")}
-                </h2>
-                <p className="text-sm text-secondary">{formatTimestamp(selected.createdAt, t)}</p>
-              </div>
-              <StatusBadge status={selected.status} />
-            </div>
-
-            <div className="rounded-2xl bg-fill-subtle p-5">
-              <p className="text-xs font-medium uppercase tracking-wide text-secondary">
-                {t("DashboardPayments.requests.amountRequested")}
-              </p>
-              <p className="truncate text-xl font-semibold tracking-tight text-primary">
-                {formatDisplayAmount(
-                  selected.amount,
-                  selectedTokenSymbol ? selectedTokenSymbol : shortenAddress(selected.token)
-                )}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 rounded-2xl border border-border-default p-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-sm text-secondary">
-                {payLink}
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                iconLeft={<CopyIcon />}
-                onClick={() => {
-                  void navigator.clipboard.writeText(payLink);
-                  toast.success(t("DashboardPayments.requests.paymentLinkCopied"));
-                }}
-              >
-                {t("DashboardPayments.requests.copy")}
-              </Button>
-            </div>
-
-            <div className="rounded-2xl border border-border-default px-4">
-              <div className="divide-y divide-border-default">
-                <DetailRow label={t("DashboardPayments.requests.from")}>
-                  {fromLabel(selected.counterpartyId)}
-                </DetailRow>
-                <DetailRow label={t("DashboardPayments.requests.to")}>
-                  {selectedWalletName ? (
-                    <span className="block font-medium text-primary">{selectedWalletName}</span>
-                  ) : null}
-                  <span className="block font-mono text-xs font-normal text-secondary">
-                    {selected.destinationAddress}
-                  </span>
-                </DetailRow>
-                <DetailRow label={t("DashboardPayments.requests.token")}>
-                  {selectedTokenSymbol ? selectedTokenSymbol : shortenAddress(selected.token)}
-                </DetailRow>
-                <DetailRow label={t("DashboardPayments.requests.reference")}>
-                  {shortenAddress(selected.reference)}
-                </DetailRow>
-                <DetailRow label={t("DashboardPayments.requests.expires")}>
-                  {selected.expiresAt
-                    ? formatTimestamp(selected.expiresAt, t)
-                    : t("DashboardPayments.requests.noExpiry")}
-                </DetailRow>
-                <DetailRow label={t("DashboardPayments.recurring.created")}>
-                  {formatTimestamp(selected.createdAt, t)}
-                </DetailRow>
-              </div>
-            </div>
-          </div>
-        </Modal>
+        />
       ) : null}
 
       {createOpen ? (

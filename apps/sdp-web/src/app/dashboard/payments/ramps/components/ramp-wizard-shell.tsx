@@ -142,6 +142,72 @@ function LegacyFooter({
   );
 }
 
+/**
+ * The footer for where the wizard is. On a refresh surface: Back from the second step on, the
+ * flow's own Cancel (or the first step's secondary action, which is a cancel there) and the
+ * primary action. Elsewhere: Previous or Cancel on the left, the primary action right.
+ */
+function wizardFooter({
+  refresh,
+  stepIndex,
+  primary,
+  secondaryLabel,
+  secondaryDisabled,
+  hideSecondary,
+  onSecondaryClick,
+  cancel,
+  footerHint,
+  footerActions,
+  t,
+}: {
+  refresh: boolean;
+  stepIndex: number;
+  primary: { label: string; disabled: boolean; onClick: () => void } | null;
+  secondaryLabel: string | undefined;
+  secondaryDisabled: boolean | undefined;
+  hideSecondary: boolean | undefined;
+  onSecondaryClick: () => void;
+  cancel: { label: string; onClick: () => void } | null;
+  footerHint: ReactNode;
+  footerActions: ReactNode;
+  t: ReturnType<typeof useTranslations>;
+}): ReactNode {
+  if (refresh) {
+    const refreshCancel =
+      cancel ??
+      (stepIndex === 0 && hideSecondary !== true
+        ? {
+            label: secondaryLabel ?? t("DashboardPayments.counterparty.cancel"),
+            onClick: onSecondaryClick,
+          }
+        : null);
+    return (
+      <RefreshFooter
+        showBack={hideSecondary !== true && stepIndex > 0}
+        backLabel={secondaryLabel ?? t("DashboardPayments.back")}
+        backDisabled={secondaryDisabled === true}
+        onBack={onSecondaryClick}
+        cancel={refreshCancel}
+        hint={footerHint}
+        actions={footerActions}
+        primary={primary}
+      />
+    );
+  }
+  const legacySecondary = hideSecondary
+    ? null
+    : {
+        label:
+          secondaryLabel ??
+          (stepIndex === 0
+            ? t("DashboardPayments.counterparty.cancel")
+            : t("DashboardPayments.previous")),
+        disabled: secondaryDisabled,
+        onClick: onSecondaryClick,
+      };
+  return <LegacyFooter secondary={legacySecondary} actions={footerActions} primary={primary} />;
+}
+
 export function RampWizardShell({
   steps,
   stepIndex,
@@ -183,52 +249,28 @@ export function RampWizardShell({
     setCancelConfirmOpen(true);
   };
   const onSecondaryClick = confirmSecondary ? askToConfirm("secondary") : onSecondary;
-  const primary = hidePrimary
-    ? null
-    : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary };
-  // The refresh footer's Cancel: the flow's own exit when it has one, else the first step's
-  // secondary action (which is a cancel there).
-  const refreshCancel = onCancel
-    ? {
-        label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
-        onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
-      }
-    : stepIndex === 0 && hideSecondary !== true
-      ? {
-          label: secondaryLabel ?? t("DashboardPayments.counterparty.cancel"),
-          onClick: onSecondaryClick,
-        }
-      : null;
-  const legacySecondary = hideSecondary
-    ? null
-    : {
-        label:
-          secondaryLabel ??
-          (stepIndex === 0
-            ? t("DashboardPayments.counterparty.cancel")
-            : t("DashboardPayments.previous")),
-        disabled: secondaryDisabled,
-        onClick: onSecondaryClick,
-      };
-  let footer: ReactNode;
-  if (!showFooter) {
-    footer = undefined;
-  } else if (refresh) {
-    footer = (
-      <RefreshFooter
-        showBack={hideSecondary !== true && stepIndex > 0}
-        backLabel={secondaryLabel ?? t("DashboardPayments.back")}
-        backDisabled={secondaryDisabled === true}
-        onBack={onSecondaryClick}
-        cancel={refreshCancel}
-        hint={footerHint}
-        actions={footerActions}
-        primary={primary}
-      />
-    );
-  } else {
-    footer = <LegacyFooter secondary={legacySecondary} actions={footerActions} primary={primary} />;
-  }
+  const footer = showFooter
+    ? wizardFooter({
+        refresh,
+        stepIndex,
+        primary: hidePrimary
+          ? null
+          : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary },
+        secondaryLabel,
+        secondaryDisabled,
+        hideSecondary,
+        onSecondaryClick,
+        cancel: onCancel
+          ? {
+              label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
+              onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
+            }
+          : null,
+        footerHint,
+        footerActions,
+        t,
+      })
+    : undefined;
   return (
     <>
       <WizardFrame

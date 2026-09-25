@@ -5,7 +5,7 @@ import { Select, SelectItem } from "@/components/ui/select";
 import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
-export const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
+const LIST_PAGE_SIZES = [10, 25, 50, 100] as const;
 
 /**
  * A list's control row: filters on the left; page size and search on the right. On a phone it

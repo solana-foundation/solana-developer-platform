@@ -21,7 +21,10 @@ import { useDashboardTab } from "@/lib/dashboard-url-state";
 import { hasEnabledRampProvider, type RampProviderAccess } from "@/lib/provider-availability";
 import { BatchSendRail } from "./batch-send-rail";
 import { DepositAddressPanel } from "./components/deposit-address-panel";
-import type { PrivateSendStatus } from "./components/onchain-send-step-content";
+import type {
+  OnchainSendContactControls,
+  PrivateSendStatus,
+} from "./components/onchain-send-step-content";
 import { OfframpRail } from "./offramp-rail";
 import { OnchainSendRail } from "./onchain-send-rail";
 import { OnrampRail } from "./onramp-rail";
@@ -110,46 +113,98 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
   }, [liveCounterparties.data, counterpartyId]);
   const counterpartyName = selectedCounterparty ? selectedCounterparty.displayName : "";
 
+  const railProps: RailProps = {
+    wallets: props.wallets,
+    walletsError: props.walletsError,
+    issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
+    enabledRampProviders: props.enabledRampProviders,
+    rampProviderAccess,
+    counterpartiesResult: liveCounterparties,
+    selectedCounterparty,
+    counterpartyId,
+    counterpartyName,
+    methodLabel,
+    preSteps: [],
+    onExit: exitToPayments,
+  };
+  const contact = { counterpartiesResult: liveCounterparties, onChange: selectCounterparty };
+
   if (mode === "send") {
-    if (tab === "batch") {
-      return (
-        <BatchSendRail
-          wallets={props.wallets}
-          walletsError={props.walletsError}
-          issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
-          onExit={exitToPayments}
-        />
-      );
-    }
-    const sendRailProps: RailProps = {
-      wallets: props.wallets,
-      walletsError: props.walletsError,
-      issuedTokenSymbolsByMint: props.issuedTokenSymbolsByMint,
-      enabledRampProviders: props.enabledRampProviders,
-      rampProviderAccess,
-      counterpartiesResult: liveCounterparties,
-      selectedCounterparty,
-      counterpartyId,
-      counterpartyName,
-      methodLabel,
-      preSteps: [],
-      onExit: exitToPayments,
-    };
-    if (effectiveMethod === "ramp") {
-      // A bank payout keeps the contact picked on the details step; leaving it returns there.
-      return <OfframpRail {...sendRailProps} onExit={() => setPayByBank(false)} />;
-    }
     return (
-      <OnchainSendRail
-        {...sendRailProps}
-        contact={{ counterpartiesResult: liveCounterparties, onChange: selectCounterparty }}
+      <PayFlow
+        tab={tab}
+        method={effectiveMethod}
+        railProps={railProps}
+        contact={contact}
         privateSend={props.privateSend ?? null}
-        onPayByBank={fiatEnabled ? () => setPayByBank(true) : undefined}
-        onCancel={exitToPayments}
+        fiatEnabled={fiatEnabled}
+        onPayByBank={() => setPayByBank(true)}
+        onLeaveBank={() => setPayByBank(false)}
       />
     );
   }
+  return (
+    <DepositFlow
+      tab={tab}
+      method={effectiveMethod}
+      railProps={railProps}
+      contact={contact}
+      fiatEnabled={fiatEnabled}
+    />
+  );
+}
 
+interface FlowProps {
+  tab: string | null;
+  method: PaymentMethod;
+  railProps: RailProps;
+  contact: OnchainSendContactControls;
+  fiatEnabled: boolean;
+}
+
+/** Pay: a batch from a file, a bank payout through a provider, or a Solana transfer. */
+function PayFlow({
+  tab,
+  method,
+  railProps,
+  contact,
+  privateSend,
+  fiatEnabled,
+  onPayByBank,
+  onLeaveBank,
+}: FlowProps & {
+  privateSend: PrivateSendStatus | null;
+  onPayByBank: () => void;
+  onLeaveBank: () => void;
+}) {
+  if (tab === "batch") {
+    return (
+      <BatchSendRail
+        wallets={railProps.wallets}
+        walletsError={railProps.walletsError}
+        issuedTokenSymbolsByMint={railProps.issuedTokenSymbolsByMint}
+        onExit={railProps.onExit}
+      />
+    );
+  }
+  if (method === "ramp") {
+    // A bank payout keeps the contact picked on the details step; leaving it returns there.
+    return <OfframpRail {...railProps} onExit={onLeaveBank} />;
+  }
+  return (
+    <OnchainSendRail
+      {...railProps}
+      contact={contact}
+      privateSend={privateSend}
+      onPayByBank={fiatEnabled ? onPayByBank : undefined}
+      onCancel={railProps.onExit}
+    />
+  );
+}
+
+/** Deposit: the wallet's address, or a card or bank payment through a provider. */
+function DepositFlow({ tab, method, railProps, contact, fiatEnabled }: FlowProps) {
+  const t = useTranslations();
   // A tab without a wizard frame lays out the same column the frame does: the shell's gutter,
   // 36px under the tabs (32px on a phone), the flow's width, and its own scrolling when it
   // outgrows the viewport.
@@ -171,34 +226,17 @@ export function PaymentsActionPage(props: PaymentsActionPageProps) {
       </div>
     );
   }
-  if (effectiveMethod === "onchain") {
+  if (method === "onchain") {
     // The address tab needs no contact: anyone can send to a wallet address.
     return tabColumn(
       <DepositAddressPanel
-        wallets={props.wallets}
-        walletsError={props.walletsError}
-        issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
+        wallets={railProps.wallets}
+        walletsError={railProps.walletsError}
+        issuedTokenSymbolsByMint={railProps.issuedTokenSymbolsByMint}
       />
     );
   }
 
   // The provider tab picks its contact on its own details step.
-  return (
-    <OnrampRail
-      wallets={props.wallets}
-      walletsError={props.walletsError}
-      issuedTokenSymbolsByMint={props.issuedTokenSymbolsByMint}
-      enabledRampProviders={props.enabledRampProviders}
-      rampProviderAccess={rampProviderAccess}
-      counterpartiesResult={liveCounterparties}
-      selectedCounterparty={selectedCounterparty}
-      counterpartyId={counterpartyId}
-      counterpartyName={counterpartyName}
-      methodLabel={methodLabel}
-      preSteps={[]}
-      onExit={exitToPayments}
-      contact={{ counterpartiesResult: liveCounterparties, onChange: selectCounterparty }}
-      onCancel={exitToPayments}
-    />
-  );
+  return <OnrampRail {...railProps} contact={contact} onCancel={railProps.onExit} />;
 }

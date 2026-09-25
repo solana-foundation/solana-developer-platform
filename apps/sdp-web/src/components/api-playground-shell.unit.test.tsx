@@ -7,7 +7,7 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { clearStoredApiKeySecrets, storeApiKeySecret } from "@/lib/playground-api-keys";
 import { type ApiPlaygroundEndpointConfig, ApiPlaygroundShell } from "./api-playground-shell";
-import { ThemeScopeProvider } from "./theme-scope";
+import { ThemeScopeProvider } from "./theme-scope-provider";
 
 const mocks = vi.hoisted(() => ({
   replaceSearchParams: vi.fn(),

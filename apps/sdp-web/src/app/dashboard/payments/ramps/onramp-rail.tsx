@@ -77,6 +77,57 @@ function displaySteps(wizard: OnrampWizard, t: ReturnType<typeof useTranslations
   });
 }
 
+/**
+ * What the frame shows for where the deposit is: the verification the provider still wants,
+ * whether the transfer can still be canceled, and the hints, labels and gates that follow.
+ */
+function onrampFrameState(
+  wizard: OnrampWizard,
+  onCancel: (() => void) | undefined,
+  t: ReturnType<typeof useTranslations>
+) {
+  const onOnboardingStep =
+    wizard.currentStepId === "PROVIDER" || wizard.currentStepId === "REQUIREMENTS";
+  const verificationUrl =
+    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
+      ? wizard.onboarding.verificationUrl
+      : undefined;
+  const verificationPending =
+    onOnboardingStep &&
+    wizard.onboarding !== null &&
+    isRampOnboardingPendingStatus(wizard.onboarding.status);
+  const transferState =
+    wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
+  const cancelable = transferState?.cancelable === true;
+  return {
+    verificationUrl,
+    verificationPending,
+    footerHint:
+      wizard.currentStepId === "DEPOSIT" && wizard.fields.provider === null
+        ? t("DashboardPayments.ramps.pickProviderHint")
+        : undefined,
+    onCancel: wizard.onTransactionStage
+      ? cancelable
+        ? wizard.handleSecondary
+        : undefined
+      : onCancel,
+    cancelLabel: wizard.onTransactionStage ? t("DashboardPayments.ramps.cancelDeposit") : undefined,
+    confirmCancel: wizard.onTransactionStage && cancelable,
+    completionTitle:
+      wizard.transferStatus?.status === "completed"
+        ? t("DashboardPayments.ramps.depositComplete")
+        : undefined,
+    primaryDisabled:
+      wizard.hostedQuoteLoading ||
+      verificationPending ||
+      !wizard.canProceed ||
+      (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
+    hidePrimary: wizard.currentStepId === "PROVIDER" && !verificationUrl,
+    hostedStage: wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted",
+    showInlineStatus: wizard.onTransactionStage && Boolean(wizard.quote),
+  };
+}
+
 export function OnrampRail({
   wallets,
   walletsError,
@@ -109,73 +160,36 @@ export function OnrampRail({
     onExit,
   });
 
-  const onOnboardingStep =
-    wizard.currentStepId === "PROVIDER" || wizard.currentStepId === "REQUIREMENTS";
-
-  const verificationUrl =
-    onOnboardingStep && wizard.onboarding?.status === "customer_verification_required"
-      ? wizard.onboarding.verificationUrl
-      : undefined;
-
-  const verificationPending =
-    onOnboardingStep &&
-    wizard.onboarding !== null &&
-    isRampOnboardingPendingStatus(wizard.onboarding.status);
-
+  const frame = onrampFrameState(wizard, onCancel, t);
   const summaryDetails = [
     ...preStepSummaryDetails(t, counterpartyName, methodLabel),
     ...wizard.summaryDetails,
   ];
-  const hostedStage = wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted";
-  const showInlineStatus = wizard.onTransactionStage && Boolean(wizard.quote);
-  const transferState =
-    wizard.transferStatus === undefined ? null : getRampTransferState(wizard.transferStatus.status);
-  const cancelable = transferState !== null && transferState.cancelable;
+  const provider = wizard.fields.provider;
   return (
     <RampWizardShell
       steps={[...preSteps, ...displaySteps(wizard, t)]}
       stepIndex={preSteps.length + wizard.stepIndex}
-      footerHint={
-        wizard.currentStepId === "DEPOSIT" && wizard.fields.provider === null
-          ? t("DashboardPayments.ramps.pickProviderHint")
-          : undefined
-      }
-      onCancel={
-        wizard.onTransactionStage ? (cancelable ? wizard.handleSecondary : undefined) : onCancel
-      }
-      cancelLabel={
-        wizard.onTransactionStage ? t("DashboardPayments.ramps.cancelDeposit") : undefined
-      }
-      confirmCancel={wizard.onTransactionStage && cancelable}
-      completionTitle={
-        wizard.transferStatus?.status === "completed"
-          ? t("DashboardPayments.ramps.depositComplete")
-          : undefined
-      }
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        verificationPending ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading)
-      }
-      primaryLabel={onrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
+      footerHint={frame.footerHint}
+      onCancel={frame.onCancel}
+      cancelLabel={frame.cancelLabel}
+      confirmCancel={frame.confirmCancel}
+      completionTitle={frame.completionTitle}
+      primaryDisabled={frame.primaryDisabled}
+      primaryLabel={onrampPrimaryLabel(wizard, frame.verificationPending, frame.verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
-      onPrimary={onrampPrimaryAction(wizard, verificationUrl)}
+      onPrimary={onrampPrimaryAction(wizard, frame.verificationUrl)}
       onSecondary={wizard.handleSecondary}
       counterpartyDialog={null}
-      summary={
-        wizard.fields.provider === null ? undefined : <WizardSummaryList details={summaryDetails} />
-      }
+      summary={provider === null ? undefined : <WizardSummaryList details={summaryDetails} />}
       summaryTrigger={
-        wizard.fields.provider === null ? undefined : (
-          <ProviderSummaryTrigger provider={wizard.fields.provider} />
-        )
+        provider === null ? undefined : <ProviderSummaryTrigger provider={provider} />
       }
       header={
-        showInlineStatus ? (
+        frame.showInlineStatus ? (
           <RampStatusInline
             direction="onramp"
-            hosted={hostedStage}
+            hosted={frame.hostedStage}
             transfer={wizard.transferStatus}
           />
         ) : undefined
@@ -195,7 +209,7 @@ export function OnrampRail({
           </Button>
         ) : null
       }
-      hidePrimary={wizard.currentStepId === "PROVIDER" && !verificationUrl}
+      hidePrimary={frame.hidePrimary}
     >
       <OnrampStepContent wizard={wizard} contact={contact} />
     </RampWizardShell>

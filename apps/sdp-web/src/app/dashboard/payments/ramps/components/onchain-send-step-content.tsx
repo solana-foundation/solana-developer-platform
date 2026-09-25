@@ -136,44 +136,31 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
   );
 }
 
-function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
+/** The contact and the account to pay, with the ways to add an address or pay by bank instead. */
+function DestinationFields({
+  wizard,
+  contact,
+  onPayByBank,
+}: {
+  wizard: OnchainSendWizard;
+  contact?: OnchainSendContactControls;
+  onPayByBank?: () => void;
+}) {
   const t = useTranslations();
-  const locale = useLocale();
   const {
-    liveWallets,
-    walletsLoading,
-    assetOptions,
-    availableAmount,
-    selectedAsset,
-    exceedsBalance,
     fields,
     setField,
-    selectWallet,
-    sourceWalletHint,
     accountsLoading,
     counterpartyId,
     addAccountOpen,
     setAddAccountOpen,
     handleAccountAdded,
   } = wizard;
-  const walletOptions = useMemo(
-    () =>
-      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
-        disableRestricted: true,
-      }),
-    [liveWallets, t]
-  );
-  const assetSelectOptions = useMemo(
-    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
-    [assetOptions]
-  );
   const destinationOptions = DestinationOptions(wizard);
   const hasContact = counterpartyId !== "";
-  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
-  const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
 
   return (
-    <div className="space-y-6">
+    <>
       {contact ? (
         <ContactCombobox
           {...contact}
@@ -226,78 +213,126 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
           onClose={() => setAddAccountOpen(false)}
         />
       </div>
-      <div className="space-y-2">
-        <Combobox
-          label={t("DashboardPayments.onchainSend.sourceWallet")}
-          value={fields.walletId === "" ? null : fields.walletId}
-          onChange={selectWallet}
-          options={walletOptions}
-          placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
-          searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-          isLoading={walletsLoading}
-        />
-        <p hidden={!sourceWalletHint} className="text-meta text-warning">
-          {sourceWalletHint}
-        </p>
-      </div>
-      <div className="space-y-2">
-        <div className="grid items-end gap-x-4 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)]">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="onchain-send-amount">{t("DashboardPayments.onchainSend.amount")}</Label>
-            <Input
-              id="onchain-send-amount"
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="any"
-              value={fields.amount}
-              onChange={(event) => setField("amount", event.currentTarget.value)}
-              placeholder="0.00"
-              size="xl"
-            />
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="mb-1 self-end"
-            disabled={!canMax}
-            onClick={() => {
-              if (availableAmount !== null) setField("amount", availableAmount);
-            }}
-          >
-            {t("DashboardPayments.payForm.max")}
-          </Button>
-          <Combobox
-            label={t("DashboardPayments.payForm.token")}
-            value={fields.asset === "" ? null : fields.asset}
-            onChange={(value) => setField("asset", value)}
-            options={assetSelectOptions}
-            placeholder={t("DashboardPayments.onchainSend.selectAsset")}
-            searchable={false}
-            disabled={fields.walletId === "" || assetSelectOptions.length === 0}
+    </>
+  );
+}
+
+/** The wallet the payment leaves from, and why it may not be able to sign. */
+function SourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
+  const t = useTranslations();
+  const { liveWallets, walletsLoading, fields, selectWallet, sourceWalletHint } = wizard;
+  const walletOptions = useMemo(
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
+    [liveWallets, t]
+  );
+  return (
+    <div className="space-y-2">
+      <Combobox
+        label={t("DashboardPayments.onchainSend.sourceWallet")}
+        value={fields.walletId === "" ? null : fields.walletId}
+        onChange={selectWallet}
+        options={walletOptions}
+        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
+        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
+        isLoading={walletsLoading}
+      />
+      <p hidden={!sourceWalletHint} className="text-meta text-warning">
+        {sourceWalletHint}
+      </p>
+    </div>
+  );
+}
+
+/** The amount, its Max, the token, and the balance the amount is checked against. */
+function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const { assetOptions, availableAmount, selectedAsset, exceedsBalance, fields, setField } = wizard;
+  const assetSelectOptions = useMemo(
+    () => assetOptions.map((asset) => ({ value: asset.value, label: asset.label })),
+    [assetOptions]
+  );
+  const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
+  const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
+  return (
+    <div className="space-y-2">
+      <div className="grid items-end gap-x-4 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)]">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="onchain-send-amount">{t("DashboardPayments.onchainSend.amount")}</Label>
+          <Input
+            id="onchain-send-amount"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            value={fields.amount}
+            onChange={(event) => setField("amount", event.currentTarget.value)}
+            placeholder="0.00"
+            size="xl"
           />
         </div>
-        {availableAmount === null ? null : (
-          <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
-            {t("DashboardPayments.payForm.available", {
-              amount: formatTokenAmount(availableAmount, locale),
-              asset: WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel,
-            })}
-          </p>
-        )}
-        <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="onchain-send-memo">{t("DashboardPayments.payForm.memo")}</Label>
-        <Input
-          id="onchain-send-memo"
-          value={fields.memo}
-          onChange={(event) => setField("memo", event.currentTarget.value)}
-          placeholder={t("DashboardPayments.payForm.memoPlaceholder")}
-          size="xl"
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="mb-1 self-end"
+          disabled={!canMax}
+          onClick={() => {
+            if (availableAmount !== null) setField("amount", availableAmount);
+          }}
+        >
+          {t("DashboardPayments.payForm.max")}
+        </Button>
+        <Combobox
+          label={t("DashboardPayments.payForm.token")}
+          value={fields.asset === "" ? null : fields.asset}
+          onChange={(value) => setField("asset", value)}
+          options={assetSelectOptions}
+          placeholder={t("DashboardPayments.onchainSend.selectAsset")}
+          searchable={false}
+          disabled={fields.walletId === "" || assetSelectOptions.length === 0}
         />
       </div>
+      {availableAmount === null ? null : (
+        <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
+          {t("DashboardPayments.payForm.available", {
+            amount: formatTokenAmount(availableAmount, locale),
+            asset: WELL_KNOWN_TOKEN_BY_MINT.get(assetLabel)?.symbol ?? assetLabel,
+          })}
+        </p>
+      )}
+      <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
+    </div>
+  );
+}
+
+function MemoField({ wizard }: { wizard: OnchainSendWizard }) {
+  const t = useTranslations();
+  const { fields, setField } = wizard;
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="onchain-send-memo">{t("DashboardPayments.payForm.memo")}</Label>
+      <Input
+        id="onchain-send-memo"
+        value={fields.memo}
+        onChange={(event) => setField("memo", event.currentTarget.value)}
+        placeholder={t("DashboardPayments.payForm.memoPlaceholder")}
+        size="xl"
+      />
+    </div>
+  );
+}
+
+function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
+  return (
+    <div className="space-y-6">
+      <DestinationFields wizard={wizard} contact={contact} onPayByBank={onPayByBank} />
+      <SourceWalletField wizard={wizard} />
+      <AmountFields wizard={wizard} />
+      <MemoField wizard={wizard} />
       <PrivateSendOption status={privateSend ?? null} />
     </div>
   );

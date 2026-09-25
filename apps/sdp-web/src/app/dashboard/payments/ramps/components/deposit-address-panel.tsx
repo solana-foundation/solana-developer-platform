@@ -9,7 +9,7 @@ import { ChevronDownIcon, CopyIcon, InfoIcon, PlayIcon, PlusIcon } from "lucide-
 import Image from "next/image";
 import Link from "next/link";
 import QRCode from "qrcode";
-import { useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { requestDevnetSolanaFaucetAction } from "@/app/dashboard/custody/actions";
@@ -123,6 +123,256 @@ function AddressQr({ address, className }: { address: string; className?: string
   );
 }
 
+/** The wallet to deposit into, chosen from the project's wallets, with its provider beside it. */
+function WalletPicker({
+  wallet,
+  wallets,
+  onSelect,
+}: {
+  wallet: PaymentsDashboardWallet;
+  wallets: readonly PaymentsDashboardWallet[];
+  onSelect: (walletId: string) => void;
+}) {
+  const t = useTranslations();
+  const provider = walletProviderLabel(wallet);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+        <span className="truncate text-field font-medium text-primary">{walletName(wallet)}</span>
+        {provider ? <span className="shrink-0 text-field text-tertiary">{provider}</span> : null}
+        <ChevronDownIcon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
+        <span className="sr-only">{t("DashboardPayments.depositAddress.chooseWallet")}</span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-64">
+        <DropdownMenuRadioGroup value={wallet.id} onValueChange={onSelect}>
+          {wallets.map((candidate) => (
+            <DropdownMenuRadioItem
+              key={candidate.id}
+              value={candidate.id}
+              className="text-body font-normal"
+            >
+              <span className="min-w-0 truncate">{walletName(candidate)}</span>
+              {walletProviderLabel(candidate) ? (
+                <span className="ml-auto pl-3 text-meta text-tertiary">
+                  {walletProviderLabel(candidate)}
+                </span>
+              ) : null}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The design's 160px card: a 128px code in a 16px inset; the wallet and its address at the top
+ * of the text column, the network warning at its foot. On a phone the card stacks: the code
+ * first, centred on its plate, then the wallet, the address, a full-width copy button and the
+ * warning as a 13px hint.
+ */
+function AddressCard({
+  wallet,
+  wallets,
+  network,
+  onSelectWallet,
+  onCopy,
+}: {
+  wallet: PaymentsDashboardWallet;
+  wallets: readonly PaymentsDashboardWallet[];
+  network: string;
+  onSelectWallet: (walletId: string) => void;
+  onCopy: () => void;
+}) {
+  const t = useTranslations();
+  return (
+    <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
+      <AddressQr address={wallet.publicKey} className="self-center sm:order-last sm:self-auto" />
+      <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-6 sm:px-2 sm:pt-2">
+        <div className="space-y-3">
+          <WalletPicker wallet={wallet} wallets={wallets} onSelect={onSelectWallet} />
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 font-mono text-field break-all text-primary">
+              {wallet.publicKey}
+            </p>
+            {/* Wrapped, not classed: the design-system button sets its own display. */}
+            <span className="hidden sm:contents">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t("DashboardPayments.ramps.copyAddress")}
+                onClick={onCopy}
+              >
+                <CopyIcon className="size-4" />
+              </Button>
+            </span>
+          </div>
+        </div>
+        {/* The phone's copy control: the design's full-width 44px outline button, 20px under
+            the address. From sm the icon beside the address does it. */}
+        <Button
+          type="button"
+          variant="outline"
+          iconLeft={<CopyIcon />}
+          onClick={onCopy}
+          className="mt-4 h-11 w-full text-field sm:hidden"
+        >
+          {t("DashboardPayments.ramps.copyAddress")}
+        </Button>
+        <p className="mt-4 text-meta text-secondary sm:mt-0 sm:text-body">
+          {t("DashboardPayments.depositAddress.networkWarning", { network })}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** What the address accepts, its minimum and how fast it lands: 40px rows over faint rules. */
+function DepositFacts() {
+  const t = useTranslations();
+  const rows = [
+    {
+      label: t("DashboardPayments.depositAddress.accepts"),
+      value: t("DashboardPayments.depositAddress.acceptsValue"),
+    },
+    {
+      label: t("DashboardPayments.depositAddress.minimum"),
+      value: t("DashboardPayments.depositAddress.minimumValue"),
+    },
+    {
+      label: t("DashboardPayments.depositAddress.arrives"),
+      value: t("DashboardPayments.depositAddress.arrivesValue"),
+      hint: t("DashboardPayments.depositAddress.arrivesHint"),
+    },
+  ];
+  return (
+    <dl className="mt-6 divide-y divide-border-subtle">
+      {rows.map((row) => (
+        <div key={row.label} className="flex items-center justify-between gap-4 py-2">
+          <dt className="text-field text-secondary">{row.label}</dt>
+          <dd className="flex items-center gap-2 text-field text-primary">
+            {row.value}
+            {row.hint ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={row.hint}
+                      className="inline-flex text-tertiary hover:text-primary"
+                    >
+                      <InfoIcon className="size-4" aria-hidden="true" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-64 text-xs">
+                    {row.hint}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The wallet's last few deposits, or why there are none to show. */
+function RecentDeposits({
+  wallet,
+  deposits,
+  depositsError,
+  issuedTokenSymbolsByMint,
+}: {
+  wallet: PaymentsDashboardWallet;
+  deposits: PaymentTransferSummary[] | undefined;
+  depositsError: unknown;
+  issuedTokenSymbolsByMint: Record<string, string>;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  let body: ReactNode;
+  if (depositsError) {
+    body = (
+      <p className="text-body text-tertiary">
+        {t("DashboardPayments.depositAddress.recentUnavailable")}
+      </p>
+    );
+  } else if (deposits === undefined) {
+    body = <div className="h-32 animate-pulse rounded-control bg-fill-subtle" />;
+  } else if (deposits.length === 0) {
+    body = (
+      <p className="py-6 text-body text-tertiary">
+        {t("DashboardPayments.depositAddress.noDeposits")}
+      </p>
+    );
+  } else {
+    body = (
+      <Table className="rounded-none border-0">
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("DashboardPayments.status")}</TableHead>
+            <TableHead>{t("DashboardPayments.commandCenter.amount")}</TableHead>
+            <TableHead>{t("DashboardPayments.transactions.contact")}</TableHead>
+            <TableHead>{t("DashboardPayments.createdLabel")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {deposits.map((deposit) => {
+            const amount = depositAmount(deposit, issuedTokenSymbolsByMint, locale);
+            const contact =
+              deposit.counterpartyDisplayName ??
+              (deposit.source ? shortenAddress(deposit.source) : null);
+            return (
+              <TableRow key={deposit.id}>
+                <TableCell>
+                  <StatusText tone={PAYMENT_STATUS_TONE[deposit.status]} className="text-body">
+                    {t(statusMessageKey(deposit.status))}
+                  </StatusText>
+                </TableCell>
+                <TableCell className="text-body whitespace-nowrap text-primary tabular-nums">
+                  {amount === null ? (
+                    "—"
+                  ) : (
+                    <>
+                      {amount.amount}
+                      {amount.asset ? (
+                        <span className="text-secondary"> {amount.asset}</span>
+                      ) : null}
+                    </>
+                  )}
+                </TableCell>
+                <TableCell className="text-body text-primary">{contact ?? "—"}</TableCell>
+                <TableCell className="text-body text-secondary">
+                  {formatDate(deposit.createdAt, locale)}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    );
+  }
+  return (
+    <section className="mt-14 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-subheading font-medium text-primary">
+          {t("DashboardPayments.depositAddress.recentTitle")}
+        </h2>
+        <Button asChild variant="outline" size="sm">
+          <Link
+            href={`/dashboard/payments/transactions?module=payments&custodyWalletId=${encodeURIComponent(wallet.id)}`}
+          >
+            {t("DashboardPayments.depositAddress.openInTransactions")}
+          </Link>
+        </Button>
+      </div>
+      {body}
+    </section>
+  );
+}
+
 /**
  * Deposit's "Solana address" tab: one wallet's address to send to, what it accepts, and the
  * deposits it has received. No contact is needed; anyone can send to an address.
@@ -194,7 +444,6 @@ export function DepositAddressPanel({
     cluster === "mainnet-beta"
       ? t("DashboardPayments.depositAddress.networkMainnet")
       : t("DashboardPayments.depositAddress.networkDevnet");
-  const provider = walletProviderLabel(wallet);
   const lastDeposit = deposits?.[0]?.createdAt;
 
   const copyAddress = async () => {
@@ -219,124 +468,15 @@ export function DepositAddressPanel({
 
   return (
     <div>
-      {/* The design's 160px card: a 128px code in a 16px inset; the wallet and its address at
-          the top of the text column, the network warning at its foot. On a phone the card
-          stacks: the code first, centred on its plate, then the wallet, the address, a
-          full-width copy button and the warning as a 13px hint. */}
-      <section className="flex flex-col gap-6 rounded-card border border-border-default bg-fill-subtle p-4 sm:flex-row sm:items-stretch">
-        <AddressQr address={wallet.publicKey} className="self-center sm:order-last sm:self-auto" />
-        <div className="flex min-w-0 flex-1 flex-col sm:justify-between sm:gap-6 sm:px-2 sm:pt-2">
-          <div className="space-y-3">
-            <DropdownMenu>
-              <DropdownMenuTrigger className="inline-flex max-w-full items-center gap-2 rounded-control-inner text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <span className="truncate text-field font-medium text-primary">
-                  {walletName(wallet)}
-                </span>
-                {provider ? (
-                  <span className="shrink-0 text-field text-tertiary">{provider}</span>
-                ) : null}
-                <ChevronDownIcon className="size-4 shrink-0 text-secondary" aria-hidden="true" />
-                <span className="sr-only">
-                  {t("DashboardPayments.depositAddress.chooseWallet")}
-                </span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-64">
-                <DropdownMenuRadioGroup value={wallet.id} onValueChange={setSelectedId}>
-                  {liveWallets.map((candidate) => (
-                    <DropdownMenuRadioItem
-                      key={candidate.id}
-                      value={candidate.id}
-                      className="text-body font-normal"
-                    >
-                      <span className="min-w-0 truncate">{walletName(candidate)}</span>
-                      {walletProviderLabel(candidate) ? (
-                        <span className="ml-auto pl-3 text-meta text-tertiary">
-                          {walletProviderLabel(candidate)}
-                        </span>
-                      ) : null}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <div className="flex items-start gap-2">
-              <p className="min-w-0 font-mono text-field break-all text-primary">
-                {wallet.publicKey}
-              </p>
-              {/* Wrapped, not classed: the design-system button sets its own display. */}
-              <span className="hidden sm:contents">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("DashboardPayments.ramps.copyAddress")}
-                  onClick={() => void copyAddress()}
-                >
-                  <CopyIcon className="size-4" />
-                </Button>
-              </span>
-            </div>
-          </div>
-          {/* The phone's copy control: the design's full-width 44px outline button, 20px under
-              the address. From sm the icon beside the address does it. */}
-          <Button
-            type="button"
-            variant="outline"
-            iconLeft={<CopyIcon />}
-            onClick={() => void copyAddress()}
-            className="mt-4 h-11 w-full text-field sm:hidden"
-          >
-            {t("DashboardPayments.ramps.copyAddress")}
-          </Button>
-          <p className="mt-4 text-meta text-secondary sm:mt-0 sm:text-body">
-            {t("DashboardPayments.depositAddress.networkWarning", { network })}
-          </p>
-        </div>
-      </section>
-
-      {/* 40px rows of 16px text over faint rules, 24px under the card. */}
-      <dl className="mt-6 divide-y divide-border-subtle">
-        {[
-          {
-            label: t("DashboardPayments.depositAddress.accepts"),
-            value: t("DashboardPayments.depositAddress.acceptsValue"),
-          },
-          {
-            label: t("DashboardPayments.depositAddress.minimum"),
-            value: t("DashboardPayments.depositAddress.minimumValue"),
-          },
-          {
-            label: t("DashboardPayments.depositAddress.arrives"),
-            value: t("DashboardPayments.depositAddress.arrivesValue"),
-            hint: t("DashboardPayments.depositAddress.arrivesHint"),
-          },
-        ].map((row) => (
-          <div key={row.label} className="flex items-center justify-between gap-4 py-2">
-            <dt className="text-field text-secondary">{row.label}</dt>
-            <dd className="flex items-center gap-2 text-field text-primary">
-              {row.value}
-              {row.hint ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        aria-label={row.hint}
-                        className="inline-flex text-tertiary hover:text-primary"
-                      >
-                        <InfoIcon className="size-4" aria-hidden="true" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-64 text-xs">
-                      {row.hint}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              ) : null}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <AddressCard
+        wallet={wallet}
+        wallets={liveWallets}
+        network={network}
+        onSelectWallet={setSelectedId}
+        onCopy={() => void copyAddress()}
+      />
+      {/* 24px under the card. */}
+      <DepositFacts />
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <p className="flex items-center gap-2.5 text-field text-secondary" aria-live="polite">
@@ -360,75 +500,12 @@ export function DepositAddressPanel({
         ) : null}
       </div>
 
-      <section className="mt-14 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-subheading font-medium text-primary">
-            {t("DashboardPayments.depositAddress.recentTitle")}
-          </h2>
-          <Button asChild variant="outline" size="sm">
-            <Link
-              href={`/dashboard/payments/transactions?module=payments&custodyWalletId=${encodeURIComponent(wallet.id)}`}
-            >
-              {t("DashboardPayments.depositAddress.openInTransactions")}
-            </Link>
-          </Button>
-        </div>
-        {depositsError ? (
-          <p className="text-body text-tertiary">
-            {t("DashboardPayments.depositAddress.recentUnavailable")}
-          </p>
-        ) : deposits === undefined ? (
-          <div className="h-32 animate-pulse rounded-control bg-fill-subtle" />
-        ) : deposits.length === 0 ? (
-          <p className="py-6 text-body text-tertiary">
-            {t("DashboardPayments.depositAddress.noDeposits")}
-          </p>
-        ) : (
-          <Table className="rounded-none border-0">
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("DashboardPayments.status")}</TableHead>
-                <TableHead>{t("DashboardPayments.commandCenter.amount")}</TableHead>
-                <TableHead>{t("DashboardPayments.transactions.contact")}</TableHead>
-                <TableHead>{t("DashboardPayments.createdLabel")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deposits.map((deposit) => {
-                const amount = depositAmount(deposit, issuedTokenSymbolsByMint, locale);
-                const contact =
-                  deposit.counterpartyDisplayName ??
-                  (deposit.source ? shortenAddress(deposit.source) : null);
-                return (
-                  <TableRow key={deposit.id}>
-                    <TableCell>
-                      <StatusText tone={PAYMENT_STATUS_TONE[deposit.status]} className="text-body">
-                        {t(statusMessageKey(deposit.status))}
-                      </StatusText>
-                    </TableCell>
-                    <TableCell className="text-body whitespace-nowrap text-primary tabular-nums">
-                      {amount === null ? (
-                        "—"
-                      ) : (
-                        <>
-                          {amount.amount}
-                          {amount.asset ? (
-                            <span className="text-secondary"> {amount.asset}</span>
-                          ) : null}
-                        </>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-body text-primary">{contact ?? "—"}</TableCell>
-                    <TableCell className="text-body text-secondary">
-                      {formatDate(deposit.createdAt, locale)}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </section>
+      <RecentDeposits
+        wallet={wallet}
+        deposits={deposits}
+        depositsError={depositsError}
+        issuedTokenSymbolsByMint={issuedTokenSymbolsByMint}
+      />
     </div>
   );
 }
