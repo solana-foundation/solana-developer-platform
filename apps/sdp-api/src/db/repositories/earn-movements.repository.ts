@@ -86,35 +86,47 @@ export function assertMovementIsOwnReplay(
 /**
  * The floor rule for a CROSS-KEY intent replay, and the sibling of
  * `assertMovementIsOwnReplay`: exported so every site that answers a
- * different-key twin with the claimed movement enforces the same one, because
- * a per-site re-implementation is how that earlier rule kept getting lost.
+ * different-key twin with a claimed movement enforces the same one, because a
+ * per-site re-implementation is how that earlier rule kept getting lost.
  *
  * The intent claim deliberately ignores `minSharesOut` (quote-derived, moves
- * with the rate), so a twin can arrive demanding a STRICTER floor than the
- * signed transaction it would be answered with. Silently replaying then would
- * tell a caller demanding floor Y that floor X < Y is in force. This rule
- * refuses that answer: a stricter twin gets a conflict naming both floors —
- * nothing is signed or broadcast either way, so the double-deposit protection
- * the claim exists for stays intact — while an equal-or-looser request keeps
- * its replay (the claimed transaction enforces AT LEAST what was asked).
+ * with the rate), so a twin can arrive demanding a stricter floor than some
+ * open movement for the intent enforces — and deliberate duplicates can leave
+ * SEVERAL open movements with different floors. `openMovements` is that set,
+ * newest first. The newest movement whose floor honors the request wins the
+ * replay (`min_shares_out` at least the requested floor, or no floor at all);
+ * when open movements exist but NONE honors the request, the conflict names
+ * the newest one's floor — nothing is signed or broadcast either way, so the
+ * double-deposit protection the claim exists for stays intact. A request with
+ * no floor is answered with the newest open movement, as before this rule
+ * existed.
  */
-export function assertDepositIntentFloorHonored(
-  claimed: Pick<EarnMovementRow, "min_shares_out">,
+export function resolveDepositIntentReplayClaim(
+  openMovements: readonly EarnMovementRow[],
   requestedMinSharesOut: string | null | undefined
-): void {
+): EarnMovementRow | null {
+  const newest = openMovements[0];
+  if (!newest) {
+    return null;
+  }
   if (requestedMinSharesOut === undefined || requestedMinSharesOut === null) {
-    return;
+    return newest;
   }
-  const claimedFloor = claimed.min_shares_out;
-  if (claimedFloor === null || compareDecimalAmounts(claimedFloor, requestedMinSharesOut) < 0) {
-    throw conflict(
-      `An identical deposit is already in flight enforcing a lower share floor (${
-        claimedFloor ?? "none"
-      }) than requested (${requestedMinSharesOut}). The open deposit cannot be upgraded to the ` +
-        "stricter floor; wait for it to settle and submit the deposit again, or resend with the " +
-        "floor the open deposit enforces."
-    );
+  const qualifying = openMovements.find(
+    (movement) =>
+      movement.min_shares_out === null ||
+      compareDecimalAmounts(movement.min_shares_out, requestedMinSharesOut) >= 0
+  );
+  if (qualifying) {
+    return qualifying;
   }
+  throw conflict(
+    `An identical deposit is already in flight enforcing a lower share floor (${
+      newest.min_shares_out ?? "none"
+    }) than requested (${requestedMinSharesOut}). The open deposit cannot be upgraded to the ` +
+      "stricter floor; wait for it to settle and submit the deposit again, or resend with the " +
+      "floor the open deposit enforces."
+  );
 }
 
 export interface EarnPositionRow {
@@ -363,12 +375,16 @@ export interface EarnMovementsRepository {
    * A twin the caller has flagged DELIBERATE
    * (`allowConcurrentDuplicateIntent`) never reaches this read: the caller
    * decides to start a second movement, and the exposure cap still bounds it.
+   * Deliberate duplicates are also why this returns EVERY open movement for
+   * the intent, newest first, instead of one: which of them answers a later
+   * twin is the floor rule's decision (`resolveDepositIntentReplayClaim`),
+   * and the newest is not always the one that honors the request.
    */
-  findOpenVaultDepositIntentClaim(params: {
+  findOpenVaultDepositIntentClaims(params: {
     organizationId: string;
     projectId: string;
     depositIntentFingerprint: string;
-  }): Promise<EarnMovementRow | null>;
+  }): Promise<EarnMovementRow[]>;
   /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
   findCustodialMovementByRequestId(params: {
     organizationId: string;
@@ -1026,6 +1042,15 @@ function allowedSourceStatuses(model: EarnExecutionModel, toStatus: string): rea
 const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
 const NON_ZERO_DIGIT = /[1-9]/;
 
+/**
+ * How many open movements of ONE deposit intent the cross-key claim read
+ * considers, newest first. Bounded deliberately: deliberate duplicates can
+ * stack open movements on one intent, but the exposure cap bounds how many
+ * in-flight deposits a vault accumulates, and a twin beyond this window gets
+ * the honest conflict rather than a silently wrong answer.
+ */
+const OPEN_VAULT_DEPOSIT_INTENT_CLAIMS_LIMIT = 25;
+
 const ATOMIC_VAULT_PROVIDERS_BY_DIRECTION = {
   deposit: Object.entries(EARN_PROVIDER_DEPOSIT_SETTLEMENT)
     .filter(([, settlement]) => settlement === "atomic")
@@ -1275,7 +1300,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return row ? mapMovementRow(row) : null;
     },
 
-    async findOpenVaultDepositIntentClaim(params) {
+    async findOpenVaultDepositIntentClaims(params) {
       // The unsettled predicate of `listVaultMovements`' `?settled=true` —
       // `failed`, or success past the provider's atomic settlement boundary —
       // is the definition of "the prior movement is terminal" here. Reuse it
@@ -1284,10 +1309,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // release point: for a provider-order deposit it coexists with an order
       // the provider has not completed, and a cross-key twin released there
       // would start a second sign/record/broadcast path for money already
-      // committed. The floor rule for the replay this row answers is
-      // `assertDepositIntentFloorHonored`, enforced by every caller.
+      // committed. Which of the returned movements answers a twin is the
+      // floor rule's call: `resolveDepositIntentReplayClaim`, enforced by
+      // every caller.
       const settlement = vaultSettlementFilter("deposit", false);
-      const row = await db
+      const result = await db
         .prepare(
           `SELECT * FROM earn_movements
              WHERE organization_id = ?
@@ -1297,16 +1323,17 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND execution_model = 'vault_direct'
                ${settlement.clause}
              ORDER BY created_at DESC, id DESC
-             LIMIT 1`
+             LIMIT ?`
         )
         .bind(
           params.organizationId,
           params.projectId,
           params.depositIntentFingerprint,
-          ...settlement.values
+          ...settlement.values,
+          OPEN_VAULT_DEPOSIT_INTENT_CLAIMS_LIMIT
         )
-        .first<Record<string, unknown>>();
-      return row ? mapMovementRow(row) : null;
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
     },
 
     async findCustodialMovementByRequestId(params) {
@@ -2215,16 +2242,18 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         // (organization AND exact project bound); the claim row's own
         // idempotency fingerprint legitimately differs — it was minted with a
         // different quote-derived floor — which is the whole reason this
-        // separate fingerprint exists. The floor rule still applies to the
-        // replay: a twin demanding a STRICTER floor than the claimed movement
-        // enforces is refused here under the lock, never answered silently.
-        // A DELIBERATE duplicate (caller-flagged) skips the claim entirely —
-        // including this floor refusal — and records a second movement, with
-        // the exposure gate below still bounding it.
+        // separate fingerprint exists. Which open movement answers, and when
+        // the answer is a conflict instead of a replay, is the floor rule's
+        // decision (`resolveDepositIntentReplayClaim`): the newest open
+        // movement that honors the request wins, and a twin whose floor NO
+        // open movement satisfies is refused here under the lock, never
+        // answered silently. A DELIBERATE duplicate (caller-flagged) skips
+        // the claim entirely — including this floor refusal — and records a
+        // second movement, with the exposure gate below still bounding it.
         if (!input.allowConcurrentDuplicateIntent) {
-          const claimTwin = await findOpenDepositIntentClaim(transaction, input);
+          const openClaims = await findOpenDepositIntentClaims(transaction, input);
+          const claimTwin = resolveDepositIntentReplayClaim(openClaims, input.acceptedMinSharesOut);
           if (claimTwin) {
-            assertDepositIntentFloorHonored(claimTwin, input.acceptedMinSharesOut);
             return {
               position: await requireMovementPosition(transaction, claimTwin),
               movement: claimTwin,
@@ -2863,26 +2892,26 @@ async function findVaultMovementByRequest(
 }
 
 /**
- * The open intent claim for a deposit write, inside its ledger transaction.
+ * The open intent claims for a deposit write, inside its ledger transaction.
  *
  * The vault write lock is already held by the caller, so the twin that
  * committed while this write waited is visible here: answering it is what
  * keeps two different keys from recording two movements for one unchanged
  * intent. Same terminality rule as the interface's claim read: the settled
  * boundary, never chain finality (a provider order can still be pending
- * there). Callers enforce the replay's floor rule
- * (`assertDepositIntentFloorHonored`) and the deliberate-duplicate flag.
+ * there). Callers pick the answering movement with the floor rule
+ * (`resolveDepositIntentReplayClaim`) and honor the deliberate-duplicate flag.
  */
-async function findOpenDepositIntentClaim(
+async function findOpenDepositIntentClaims(
   db: AppDb,
   input: {
     organizationId: string;
     projectId: string;
     depositIntentFingerprint: string;
   }
-): Promise<EarnMovementRow | null> {
+): Promise<EarnMovementRow[]> {
   const settlement = vaultSettlementFilter("deposit", false);
-  const row = await db
+  const result = await db
     .prepare(
       `SELECT * FROM earn_movements
         WHERE organization_id = ?
@@ -2892,16 +2921,17 @@ async function findOpenDepositIntentClaim(
           AND execution_model = 'vault_direct'
           ${settlement.clause}
         ORDER BY created_at DESC, id DESC
-        LIMIT 1`
+        LIMIT ?`
     )
     .bind(
       input.organizationId,
       input.projectId,
       input.depositIntentFingerprint,
-      ...settlement.values
+      ...settlement.values,
+      OPEN_VAULT_DEPOSIT_INTENT_CLAIMS_LIMIT
     )
-    .first<Record<string, unknown>>();
-  return row ? mapMovementRow(row) : null;
+    .all<Record<string, unknown>>();
+  return (result.results ?? []).map(mapMovementRow);
 }
 
 async function requireMovementPosition(

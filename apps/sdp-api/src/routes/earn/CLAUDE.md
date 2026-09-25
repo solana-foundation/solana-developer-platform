@@ -608,12 +608,15 @@ transaction signed by the organization custody wallet or external owner.
     unchanged intent while a prior movement is still non-terminal is answered
     with THAT movement (`replayed: true`) at the service preflight and again
     under the per-vault ledger lock for the concurrent race — no second
-    build/sign/record/broadcast. Because the claim ignores the floor, a twin
-    demanding a STRICTER floor than the claimed transaction enforces is
-    refused instead (`assertDepositIntentFloorHonored`, both claim sites): a
-    replay may never silently enforce less than the request asked for, and
-    nothing is signed either way, so the double-deposit protection holds. The
-    claimed movement's own floor is disclosed on every deposit response
+    build/sign/record/broadcast. Because the claim ignores the floor, the
+    answering movement is picked by the floor rule
+    (`resolveDepositIntentReplayClaim`, both claim sites): the newest open
+    movement whose floor honors the request wins, and a twin whose floor NO
+    open movement satisfies is refused with a conflict naming the newest
+    movement's floor — a replay may never silently enforce less than the
+    request asked for, and nothing is signed either way, so the
+    double-deposit protection holds. The claimed movement's own floor is
+    disclosed on every deposit response
     (`minSharesOut`). A genuinely deliberate second deposit of the same amount
     is expressed with `allowConcurrentDuplicateIntent` (fresh key required —
     the same-key anchor still applies): the claim is skipped for that request

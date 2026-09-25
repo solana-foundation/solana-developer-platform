@@ -553,6 +553,10 @@ const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
   signature: z.string(),
   failureReason: z.string().nullable(),
+  // The floor the SIGNED transaction enforces, disclosed even on a cross-key
+  // replay that never saw this request's own floor. Stripping it here would
+  // hide exactly the fact the field exists to disclose.
+  minSharesOut: z.string().nullable(),
   replayed: z.boolean(),
   strategy: z.object({
     id: z.string(),

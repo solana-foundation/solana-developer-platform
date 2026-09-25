@@ -6,11 +6,11 @@ import type { EarnProviderId } from "@sdp/types/provider-access";
 import { address } from "@solana/kit";
 import { type AppDb, getDb } from "@/db";
 import {
-  assertDepositIntentFloorHonored,
   assertMovementIsOwnReplay,
   createPostgresEarnMovementsRepository,
   type EarnMovementRow,
   type EarnPositionRow,
+  resolveDepositIntentReplayClaim,
 } from "@/db/repositories/earn-movements.repository";
 import { badRequest, internalError } from "@/lib/errors";
 import {
@@ -257,10 +257,13 @@ export async function depositIntoVault(
   // request's, because it was minted with a different quote-derived floor.
   //
   // The quote-derived floor cuts both ways: a twin that arrives demanding a
-  // STRICTER floor than the claimed transaction enforces is NOT answered as a
-  // replay — `assertDepositIntentFloorHonored` refuses it, so a caller never
+  // stricter floor than EVERY open movement enforces is NOT answered as a
+  // replay — `resolveDepositIntentReplayClaim` refuses it, so a caller never
   // silently receives a movement enforcing less than it asked for (the equal
   // or looser case still replays; the response discloses the floor in force).
+  // Deliberate duplicates can leave several open movements with different
+  // floors, so the rule picks the newest one that HONORS the request rather
+  // than just the newest one.
   //
   // A DELIBERATE second identical deposit (same wallet, vault, and amount) is
   // indistinguishable from the two-tab twin on the wire — no request field
@@ -278,13 +281,13 @@ export async function depositIntoVault(
   // the provider finished the order, and a twin released in between would
   // double-broadcast it.
   if (!input.allowConcurrentDuplicateIntent) {
-    const openClaim = await ledger.findOpenVaultDepositIntentClaim({
+    const openClaims = await ledger.findOpenVaultDepositIntentClaims({
       organizationId: input.organizationId,
       projectId: input.projectId,
       depositIntentFingerprint: intentFingerprint,
     });
+    const openClaim = resolveDepositIntentReplayClaim(openClaims, input.minSharesOut);
     if (openClaim) {
-      assertDepositIntentFloorHonored(openClaim, input.minSharesOut);
       return replayResult(ledger, input, openClaim);
     }
   }

@@ -471,6 +471,65 @@ describe("depositIntoVault — idempotency", () => {
   });
 
   /**
+   * A deliberate duplicate can leave TWO open movements for one intent with
+   * different floors. The claim answers with the newest movement that HONORS
+   * the request, not just the newest movement: a twin whose floor the older
+   * deposit already satisfies is a replay of THAT deposit, not a conflict.
+   */
+  it("answers a twin with an older open deposit when that one honors the requested floor", async () => {
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({
+        accepted: {
+          amount: args.amount,
+          ...(args.minSharesOut ? { minSharesOut: args.minSharesOut } : {}),
+        },
+      })
+    );
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_older_qualifies_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const older = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "1" })
+    );
+    await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        minSharesOut: "0.5",
+        allowConcurrentDuplicateIntent: true,
+      })
+    );
+
+    // The newest open movement enforces 0.5 < 1, but the OLDER one enforces
+    // exactly 1 — the twin is answered with it, not refused.
+    const twin = await depositIntoVault(
+      env,
+      depositInput({ requestId: "33333333-3333-4333-8333-333333333333", minSharesOut: "1" })
+    );
+    expect(twin).toMatchObject({ replayed: true });
+    expect(twin.movement.id).toBe(older.movement.id);
+    expect(twin.movement.min_shares_out).toBe("1");
+    expect(await tableCount("earn_movements")).toBe(2);
+
+    // A floor NO open movement satisfies is still refused, naming the newest.
+    await expect(
+      depositIntoVault(
+        env,
+        depositInput({ requestId: "44444444-4444-4444-8444-444444444444", minSharesOut: "2" })
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(await tableCount("earn_movements")).toBe(2);
+  });
+
+  /**
    * The wire cannot separate a deliberate second identical deposit from the
    * two-tab twin, so the claim answers both with the open movement — unless
    * the caller says this one is deliberate. `allowConcurrentDuplicateIntent`

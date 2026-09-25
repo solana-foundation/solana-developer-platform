@@ -223,6 +223,7 @@ function vaultDeposit(
     status,
     signature: "5R3h9GmTn1pQ7Yv4Jk8Nc2Wx6BdLfUaEoPiSzCvHrKqM",
     failureReason: status === "failed" ? "Provider simulation rejected the transaction" : null,
+    minSharesOut: null,
     replayed: false,
     strategy: {
       id: strategy.id,
