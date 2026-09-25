@@ -456,10 +456,14 @@ async function runRecurringPaymentLifecycle(input: {
       "tokenMint"
     );
 
-    const expectedSubscriptionStatus = input.operation === "cancel" ? "active" : "canceled";
+    // A cancel claim may originate from pending_activation when the activation
+    // broadcast already landed (SOLA9-454): the subscription row is still
+    // pending_authorization until the revoking cancel finalizes it.
+    const expectedSubscriptionStatuses: Array<PaymentSubscriptionRow["status"]> =
+      input.operation === "cancel" ? ["active", "pending_authorization"] : ["canceled"];
     const finalSubscriptionStatus = input.operation === "cancel" ? "canceled" : "active";
     if (
-      subscription.status !== expectedSubscriptionStatus &&
+      !expectedSubscriptionStatuses.includes(subscription.status) &&
       subscription.status !== finalSubscriptionStatus
     ) {
       throw conflict(
@@ -599,6 +603,315 @@ async function runRecurringPaymentLifecycle(input: {
   }
 }
 
+/**
+ * Activation persists the subscription records (including the delegation PDA)
+ * before the Subscribe broadcast, so their presence means the on-chain
+ * delegation may be live even though the row fell back to pending_activation
+ * after a journal failure (SOLA9-454).
+ */
+function hasRecurringPaymentPersistedSubscriptionRecords(
+  recurringPayment: PaymentRecurringPaymentRow
+): boolean {
+  return recurringPayment.subscription_id !== null || recurringPayment.subscription_pda !== null;
+}
+
+async function finalizePendingActivationCancellationLocally(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  recurringPayment: PaymentRecurringPaymentRow;
+  subscription: PaymentSubscriptionRow | null;
+}): Promise<PaymentRecurringPaymentRow> {
+  const finalizedAt = new Date().toISOString();
+  const updated = await getDb(input.env).transaction(async (tx) => {
+    const txSubscriptionsRepo = createPostgresPaymentSubscriptionsRepository(tx);
+    const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+    if (input.subscription) {
+      await txSubscriptionsRepo.updateSubscription({
+        subscriptionId: input.subscription.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "canceled",
+        cancelAt: finalizedAt,
+        canceledAt: finalizedAt,
+        updatedAt: finalizedAt,
+      });
+    }
+    return txRecurringRepo.updateRecurringPaymentLifecycle({
+      recurringPaymentId: input.recurringPayment.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "canceled",
+      expectedStatus: "pending_activation",
+      updatedAt: finalizedAt,
+    });
+  });
+  if (!updated) {
+    throw conflict("Recurring payment status changed before it could be canceled");
+  }
+  return updated;
+}
+
+/**
+ * Cancels a pending_activation recurring payment whose activation already
+ * persisted subscription records. The on-chain delegation is reconciled
+ * first: a live delegation is revoked with a confirmed cancel instruction
+ * before the SDP rows are marked canceled, and unknown chain state keeps the
+ * record in its recoverable pending_activation state.
+ */
+async function cancelReconcilablePendingActivationRecurringPayment(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  recurringPayment: PaymentRecurringPaymentRow;
+}): Promise<PaymentRecurringPaymentRow> {
+  const recurringRepo = createPaymentRecurringPaymentsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+  const subscriptionsRepo = createPaymentSubscriptionsRepository(
+    input.env,
+    createTenantScope(input)
+  );
+
+  const subscription = await subscriptionsRepo.getSubscriptionById({
+    subscriptionId: input.recurringPayment.subscription_id ?? "",
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (!subscription) {
+    throw notFound("Subscription");
+  }
+  const subscriptionPdaValue =
+    subscription.subscription_pda ?? input.recurringPayment.subscription_pda;
+  if (!subscriptionPdaValue) {
+    // Activation never reached delegation setup: nothing can be live on chain.
+    return finalizePendingActivationCancellationLocally({ ...input, subscription });
+  }
+
+  const subscriptionPda = assertValidAddress(subscriptionPdaValue, "subscriptionPda");
+  const rpc = solanaRpc.createRpc(input.env);
+  let onChainDelegation: Awaited<
+    ReturnType<typeof subscriptionsProgram.fetchMaybeSubscriptionDelegation>
+  >;
+  try {
+    onChainDelegation = await subscriptionsProgram.fetchMaybeSubscriptionDelegation(
+      rpc,
+      subscriptionPda,
+      { commitment: "confirmed" }
+    );
+  } catch (error) {
+    getLogger().error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        recurring_payment_id: input.recurringPayment.id,
+        subscription_pda: subscriptionPda,
+      },
+      "Failed to reconcile on-chain subscription delegation before pending_activation cancellation"
+    );
+    // Chain state is unknown: keep the record recoverable instead of
+    // reporting a cancellation that may leave the delegation live.
+    throw error;
+  }
+
+  if (!onChainDelegation.exists) {
+    return finalizePendingActivationCancellationLocally({ ...input, subscription });
+  }
+
+  return revokeLivePendingActivationDelegation({
+    env: input.env,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    sourceWallet: input.sourceWallet,
+    recurringPayment: input.recurringPayment,
+    recurringRepo,
+    subscription,
+    subscriptionPda,
+  });
+}
+
+async function revokeLivePendingActivationDelegation(input: {
+  env: Env;
+  organizationId: string;
+  projectId: string;
+  sourceWallet: CustodyWallet;
+  recurringPayment: PaymentRecurringPaymentRow;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  subscription: PaymentSubscriptionRow;
+  subscriptionPda: Address;
+}): Promise<PaymentRecurringPaymentRow> {
+  const nowIso = new Date().toISOString();
+
+  await createSigningService(input.env).admitRuntimeExecution(
+    input.organizationId,
+    input.projectId,
+    input.sourceWallet.id
+  );
+
+  const claimed = await input.recurringRepo.updateRecurringPaymentLifecycle({
+    recurringPaymentId: input.recurringPayment.id,
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    status: "canceling",
+    expectedStatus: "pending_activation",
+    updatedAt: nowIso,
+  });
+  if (!claimed) {
+    throw conflict("Recurring payment status changed before it could be canceled");
+  }
+
+  let attempt: PaymentRecurringPaymentLifecycleAttemptRow | null = null;
+  try {
+    attempt = await input.recurringRepo.createLifecycleAttempt({
+      id: `prpl_${crypto.randomUUID()}`,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: claimed.id,
+      operation: "cancel",
+      status: "processing",
+      stage: "claim",
+      signature: null,
+      error: null,
+      metadata: {},
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    await resetRecurringPaymentClaim(input.recurringRepo, claimed, nowIso);
+    throw error;
+  }
+  if (!attempt) {
+    await resetRecurringPaymentClaim(input.recurringRepo, claimed, nowIso);
+    throw internalError("Failed to journal recurring payment lifecycle");
+  }
+
+  let currentStage: PaymentRecurringPaymentLifecycleAttemptStage = "claim";
+  let signature: Signature | null = null;
+  try {
+    if (!claimed.plan_pda) {
+      throw conflict("Recurring payment is missing on-chain subscription records");
+    }
+    const planPda = assertValidAddress(claimed.plan_pda, "planPda");
+    const sourceSigner = await solanaServices.createOrgSignerForCustodyWallet(
+      input.env,
+      input.organizationId,
+      input.projectId,
+      input.sourceWallet.id
+    );
+    if (sourceSigner.address !== input.sourceWallet.publicKey) {
+      throw badRequest("Resolved signing wallet does not match source wallet");
+    }
+
+    currentStage = "submit";
+    await input.recurringRepo.updateLifecycleAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stage: currentStage,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const instruction = await subscriptionsProgram.getCancelSubscriptionOverlayInstructionAsync({
+      planPda,
+      subscriber: sourceSigner,
+      subscriptionPda: input.subscriptionPda,
+    });
+    signature = await sendSubscriptionInstructions({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      sourceWallet: input.sourceWallet,
+      sourceSigner,
+      instructions: [instruction],
+    });
+    await input.recurringRepo.updateLifecycleAttempt({
+      attemptId: attempt.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      stage: currentStage,
+      signature,
+      error: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    await confirmSubscriptionSignature(
+      input.env,
+      signature,
+      "Recurring payment cancellation failed on-chain"
+    );
+
+    return await finalizeRecurringPaymentLifecycle({
+      env: input.env,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      operation: "cancel",
+      recurringPayment: claimed,
+      subscription: input.subscription,
+      attempt,
+      signature,
+    });
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    getLogger().error(
+      {
+        err: error,
+        organization_id: input.organizationId,
+        project_id: input.projectId,
+        recurring_payment_id: claimed.id,
+        attempt_id: attempt.id,
+      },
+      "Recurring payment pending_activation cancellation reconciliation failed"
+    );
+    try {
+      await getDb(input.env).transaction(async (tx) => {
+        const txRecurringRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
+        await txRecurringRepo.updateLifecycleAttempt({
+          attemptId: attempt.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          status: "failed",
+          stage: currentStage,
+          signature,
+          error: recurringPaymentErrorMessage(error),
+          updatedAt: new Date().toISOString(),
+        });
+        await resetRecurringPaymentClaim(txRecurringRepo, claimed, new Date().toISOString());
+      });
+    } catch (resetError) {
+      getLogger().error(
+        {
+          error: resetError instanceof Error ? resetError.message : String(resetError),
+          operation: "cancel",
+          recurring_payment_id: claimed.id,
+        },
+        "Failed to journal/reset recurring payment after failed pending_activation cancellation"
+      );
+    }
+    throw error;
+  }
+}
+
+async function resetRecurringPaymentClaim(
+  recurringRepo: PaymentRecurringPaymentsRepository,
+  claimed: PaymentRecurringPaymentRow,
+  updatedAt: string
+): Promise<void> {
+  const reset = await recurringRepo.updateRecurringPaymentLifecycle({
+    recurringPaymentId: claimed.id,
+    organizationId: claimed.organization_id,
+    projectId: claimed.project_id,
+    status: "pending_activation",
+    expectedStatus: "canceling",
+    updatedAt,
+  });
+  if (!reset) {
+    throw conflict("Recurring payment lifecycle changed concurrently");
+  }
+}
+
 export async function cancelRecurringPayment(input: {
   env: Env;
   organizationId: string;
@@ -607,22 +920,25 @@ export async function cancelRecurringPayment(input: {
   recurringPayment: PaymentRecurringPaymentRow;
 }): Promise<PaymentRecurringPaymentRow> {
   if (isPendingActivationRecurringPaymentStatus(input.recurringPayment.status)) {
-    const recurringRepo = createPaymentRecurringPaymentsRepository(
-      input.env,
-      createTenantScope(input)
-    );
-    const updated = await recurringRepo.updateRecurringPaymentLifecycle({
-      recurringPaymentId: input.recurringPayment.id,
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      status: "canceled",
-      expectedStatus: "pending_activation",
-      updatedAt: new Date().toISOString(),
-    });
-    if (!updated) {
-      throw conflict("Recurring payment status changed before it could be canceled");
+    if (!hasRecurringPaymentPersistedSubscriptionRecords(input.recurringPayment)) {
+      const recurringRepo = createPaymentRecurringPaymentsRepository(
+        input.env,
+        createTenantScope(input)
+      );
+      const updated = await recurringRepo.updateRecurringPaymentLifecycle({
+        recurringPaymentId: input.recurringPayment.id,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        status: "canceled",
+        expectedStatus: "pending_activation",
+        updatedAt: new Date().toISOString(),
+      });
+      if (!updated) {
+        throw conflict("Recurring payment status changed before it could be canceled");
+      }
+      return updated;
     }
-    return updated;
+    return cancelReconcilablePendingActivationRecurringPayment(input);
   }
   return runRecurringPaymentLifecycle({ ...input, operation: "cancel" });
 }
