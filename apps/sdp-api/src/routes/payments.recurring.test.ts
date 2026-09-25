@@ -44,6 +44,7 @@ import {
   createOrgSignerMock,
   DEVNET_USDC_MINT,
   fetchMaybeSubscriptionDelegationMock,
+  fetchMaybeSubscriptionAuthorityMock,
   getAccountInfoMock,
   getRecentBlockhashMock,
   getTransactionMock,
@@ -1901,15 +1902,51 @@ describe("Payments routes — recurring", () => {
       headers: RECURRING_HEADERS,
     });
 
+    // Make the subscription authority setup broadcast happen so the attempt
+    // journal carries a setup signature the broadcast marker must preserve.
+    fetchMaybeSubscriptionAuthorityMock.mockResolvedValueOnce({
+      exists: false,
+      address: address(TEST_SOLANA_ADDRESSES.wallet3),
+    });
+    // The harness queues two broadcast signatures (plan and Subscribe); the
+    // setup broadcast becomes the second, so queue a third for the Subscribe.
+    signAndSendMock.mockResolvedValueOnce(testSignature(3));
+
     const activationResponse = await activateWithFailingAuthorizationJournal(recurringPayment.id);
     expect(activationResponse.status).toBe(500);
     await expectPendingActivationAfterBroadcastFailure(recurringPayment.id);
 
-    // The journal-write failure left the activation attempt at the
-    // authorization stage without a signature, so the submitted Subscribe
-    // cannot be resolved from the journal. Even though the delegation read
-    // finds nothing, the cancel must not finalize locally: the authorization
-    // could still land and leave a live delegation behind.
+    // The journal-write failure left the attempt marked with the pending
+    // authorization broadcast and its setup signature preserved, but with no
+    // journaled signature, so the submitted Subscribe cannot be resolved from
+    // the journal. Even though the delegation read finds nothing, the cancel
+    // must not finalize locally: the authorization could still land and leave
+    // a live delegation behind.
+    const failedActivationAttempt = await getDb(env)
+      .prepare(
+        `SELECT status, stage, authorization_signature, metadata
+           FROM payment_recurring_payment_activation_attempts
+          WHERE recurring_payment_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`
+      )
+      .bind(recurringPayment.id)
+      .first<{
+        status: string;
+        stage: string;
+        authorization_signature: string | null;
+        metadata: Record<string, unknown>;
+      }>();
+    expect(failedActivationAttempt).toMatchObject({
+      status: "failed",
+      stage: "authorize_subscription",
+      authorization_signature: null,
+      metadata: {
+        authorizationSetupSignature: expect.any(String),
+        authorizationBroadcastPending: true,
+      },
+    });
+
     fetchMaybeSubscriptionDelegationMock.mockResolvedValueOnce({
       exists: false,
       address: address(TEST_SOLANA_ADDRESSES.wallet3),
@@ -1921,7 +1958,7 @@ describe("Payments routes — recurring", () => {
     );
 
     expect(cancelRes.status).toBe(500);
-    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
 
     const afterCancel = await getDb(env)
       .prepare(

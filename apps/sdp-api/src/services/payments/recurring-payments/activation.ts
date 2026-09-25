@@ -921,12 +921,22 @@ export async function activateRecurringPayment(input: {
       });
       // Mark the attempt before broadcasting: if the journal write of the
       // signature below fails, the pending-activation cancel path must treat
-      // the submitted authorization as unresolvable (SOLA9-454).
+      // the submitted authorization as unresolvable (SOLA9-454). Metadata is
+      // re-read and merged so the setup-signature journal written by the
+      // authority preparation above is preserved.
+      const attemptBeforeBroadcast = await recurringRepo.getLatestActivationAttempt({
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: claimed.id,
+      });
       await recurringRepo.updateActivationAttempt({
         attemptId: attempt.id,
         organizationId: input.organizationId,
         projectId: input.projectId,
-        metadata: { [RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY]: true },
+        metadata: {
+          ...attemptBeforeBroadcast?.metadata,
+          [RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY]: true,
+        },
         updatedAt: new Date().toISOString(),
       });
       authorizationSignature = await sendSubscriptionInstructions({
@@ -951,13 +961,24 @@ export async function activateRecurringPayment(input: {
         if (updatedRecurringPayment === null) {
           throw conflict("Recurring payment activation changed concurrently");
         }
+        const attemptBeforeClose = await txRecurringRepo.getLatestActivationAttempt({
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          recurringPaymentId: claimed.id,
+        });
+        // The signature resolves the broadcast, so clear its pending marker
+        // while preserving the rest of the journal metadata.
+        const preservedMetadata: Record<string, unknown> = {
+          ...attemptBeforeClose?.metadata,
+        };
+        delete preservedMetadata[RECURRING_PAYMENT_ACTIVATION_BROADCAST_PENDING_METADATA_KEY];
         requireUpdatedAttempt(
           await txRecurringRepo.updateActivationAttempt({
             attemptId: attempt.id,
             organizationId: input.organizationId,
             projectId: input.projectId,
             authorizationSignature,
-            metadata: {},
+            metadata: preservedMetadata,
             updatedAt: signatureUpdatedAt,
           })
         );
