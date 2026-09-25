@@ -87,27 +87,33 @@ export interface RampWizardConfig<TId extends string = string> {
 async function createRampQuote(
   endpoint: string,
   payload: Record<string, unknown>,
+  idempotencyKey: string | null,
   t: Translate
 ): Promise<{ quote: PaymentRampQuote; transferId: string }> {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey === null ? {} : { "Idempotency-Key": idempotencyKey }),
+    },
     body: JSON.stringify(payload),
   });
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote; transferId?: string };
-    error?: { message?: string };
-  };
 
   if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string };
+    };
     throw new Error(
       getApiError(
-        body,
+        errorBody,
         t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
       )
     );
   }
 
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: { quote?: PaymentRampQuote; transferId?: string };
+  };
   if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
   }
@@ -280,37 +286,83 @@ export function useRampWizard<TId extends string>(
 
   const isLastStep = stepIndex === steps.length - 1;
 
-  const createQuoteForCurrentSelection = async (
+  /** The quote request body for the current selection, or null while the
+   * selection is not yet a valid committed quote operation. */
+  const currentQuotePayload = (
     providerAccountId: string | null
+  ): Record<string, unknown> | null => {
+    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+      return null;
+    }
+    return config.buildQuotePayload({
+      fields,
+      selectedWallet,
+      provider: fields.provider,
+      selectedRampPair,
+      assetRail: selectedRampPair.assetRail,
+      collectedData: requirements.collectedData,
+      selectedProviderAccountId: providerAccountId,
+      selectedPayoutAccount: requirements.selectedPayoutAccount,
+      rampsMemo: memoRowsToRecord(memoRows),
+    });
+  };
+
+  const createQuoteForCurrentSelection = async (
+    providerAccountId: string | null,
+    idempotencyKey: string | null
   ): Promise<{
     quote: PaymentRampQuote;
     transferId: string;
   } | null> => {
-    if (!config.selectionSchema.safeParse(fields).success || !fields.provider || !selectedWallet) {
+    const payload = currentQuotePayload(providerAccountId);
+    if (payload === null) {
       return null;
     }
-    const created = await createRampQuote(
-      config.quoteEndpoint,
-      config.buildQuotePayload({
-        fields,
-        selectedWallet,
-        provider: fields.provider,
-        selectedRampPair,
-        assetRail: selectedRampPair.assetRail,
-        collectedData: requirements.collectedData,
-        selectedProviderAccountId: providerAccountId,
-        selectedPayoutAccount: requirements.selectedPayoutAccount,
-        rampsMemo: memoRowsToRecord(memoRows),
-      }),
-      t
-    );
+    const created = await createRampQuote(config.quoteEndpoint, payload, idempotencyKey, t);
     setCreatedQuote(created);
     return created;
   };
 
+  // One stable operation key per committed quote selection, retained across
+  // response loss, a malformed response, and the explicit Try Again: the API
+  // replays a keyed quote instead of minting a second provider session and
+  // transfer row for the same operation. A deliberate re-quote (an expiring
+  // provider session) is a NEW operation and mints a fresh key. The key also
+  // rotates when the selection is edited after a failed attempt: the retained
+  // key answers only for the payload it minted, and the API conflicts a keyed
+  // replay whose fingerprint differs instead of quoting the edited request.
+  const quoteOperationKeyRef = useRef<string | null>(null);
+  const quoteOperationPayloadRef = useRef<string | null>(null);
+  const mintQuoteOperationKey = (serializedPayload: string | null) => {
+    const key = `ramp-quote-${crypto.randomUUID()}`;
+    quoteOperationKeyRef.current = key;
+    quoteOperationPayloadRef.current = serializedPayload;
+    return key;
+  };
+
+  // Every quote attempt builds its payload against ONE payout-account source:
+  // the user's current explicit saved-account pick when one exists, else the
+  // corridor's provider-resolved account (the collected-payout flow has no
+  // pick). The resolved account alone cannot serve every attempt: it is
+  // corridor-addressed, so a changed pick nulls it until a fresh advance
+  // answers, and a retry built then would omit the selected account entirely —
+  // the API would resolve (or reject) a corridor that may hold several saved
+  // accounts instead of quoting the one the user picked. Feeding the retry or
+  // re-quote a different source than the initial fire would also change the
+  // payload without any user edit, so a keyed retry would mint a second quote
+  // operation instead of replaying the recorded one. With one account source
+  // for every attempt, a payload difference is always a real edit of the
+  // selection (amount, wallet, provider, memo, payout account).
+  const quoteProviderAccountId =
+    requirements.selectedProviderAccountId ?? requirements.resolvedProviderAccountId;
+
   const refreshQuote = async () => {
     try {
-      await createQuoteForCurrentSelection(requirements.selectedProviderAccountId);
+      const payload = currentQuotePayload(quoteProviderAccountId);
+      await createQuoteForCurrentSelection(
+        quoteProviderAccountId,
+        mintQuoteOperationKey(payload === null ? null : JSON.stringify(payload))
+      );
     } catch (error) {
       toast.error(t("DashboardPayments.ramps.unableToCreateQuote"), {
         description:
@@ -333,7 +385,27 @@ export function useRampWizard<TId extends string>(
   const runQuoteCreation = async (providerAccountId: string | null) => {
     setQuoteCreationRetrying(true);
     try {
-      await createQuoteForCurrentSelection(providerAccountId);
+      // A retry of the committed selection reuses the operation key the first
+      // attempt minted; an edited selection after a failed attempt is a NEW
+      // operation and mints a fresh key, since the API rejects a keyed replay
+      // whose fingerprint differs instead of quoting the edited request.
+      // Every attempt builds its payload against the same payout-account
+      // source (see quoteProviderAccountId above), so the comparison below can
+      // only differ when the selection itself changed.
+      const payload = currentQuotePayload(providerAccountId);
+      if (payload !== null) {
+        const serialized = JSON.stringify(payload);
+        if (
+          quoteOperationKeyRef.current !== null &&
+          quoteOperationPayloadRef.current !== serialized
+        ) {
+          quoteOperationKeyRef.current = null;
+        }
+        if (quoteOperationKeyRef.current === null) {
+          mintQuoteOperationKey(serialized);
+        }
+      }
+      await createQuoteForCurrentSelection(providerAccountId, quoteOperationKeyRef.current);
       setQuoteCreationError(null);
     } catch (error) {
       setQuoteCreationError(error instanceof Error ? error : new Error(String(error)));
@@ -341,7 +413,7 @@ export function useRampWizard<TId extends string>(
       setQuoteCreationRetrying(false);
     }
   };
-  const retryQuoteCreation = () => void runQuoteCreation(requirements.selectedProviderAccountId);
+  const retryQuoteCreation = () => void runQuoteCreation(quoteProviderAccountId);
   const maybeCreateQuote = (providerAccountId: string | null) => {
     if (quoteCreationAttempted.current) {
       return;
@@ -356,12 +428,12 @@ export function useRampWizard<TId extends string>(
   // at most one quote per wizard instance. A genuine network side effect on data
   // arrival — not derived state — hence the effect.
   const onboardingStatus = requirements.onboarding === null ? null : requirements.onboarding.status;
-  const resolvedProviderAccountId = requirements.resolvedProviderAccountId;
+  // react-doctor-disable-next-line no-fetch-in-effect no-set-state-after-await-in-effect -- deliberate single-fire quote trigger: the once-per-wizard ref guard makes the fetch unable to double-fire or race, so late state writes are its own completed attempt
   useEffect(() => {
     if (!isLastStep || onboardingStatus !== "ready") {
       return;
     }
-    maybeCreateQuote(resolvedProviderAccountId);
+    maybeCreateQuote(quoteProviderAccountId);
   });
 
   const advanceRequirementsAndProceed = async () => {

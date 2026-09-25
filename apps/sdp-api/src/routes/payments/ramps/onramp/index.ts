@@ -4,6 +4,7 @@ import { meteredQuota } from "@/middleware/metered-quota";
 import { policyGate } from "@/middleware/policy-gate";
 import { validateBody } from "@/middleware/validate";
 import type { Env } from "@/types/env";
+import { findRampQuoteIdempotentKeyReplay } from "../shared";
 import {
   createOnrampQuote,
   estimateOnramp,
@@ -27,7 +28,10 @@ onramp.post(
   requirePermissions("payments:write", "wallets:read"),
   validateBody(createOnrampQuoteSchema),
   meteredQuota({ name: "ramp-quote", actorMax: 20, orgMax: 60 }),
-  policyGate({ extract: extractOnrampQuotePolicyCandidate }),
+  policyGate({
+    extract: extractOnrampQuotePolicyCandidate,
+    findIdempotentKeyReplay: findRampQuoteIdempotentKeyReplay("onramp"),
+  }),
   createOnrampQuote
 );
 

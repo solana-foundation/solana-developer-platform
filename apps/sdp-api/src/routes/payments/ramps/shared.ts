@@ -39,6 +39,12 @@ import {
   redactErrorForCapture,
   unsupportedRampCorridor,
 } from "@/lib/errors";
+import {
+  buildRampQuoteFingerprint,
+  resolveIdentityBoundIdempotencyReplay,
+} from "@/lib/idempotency";
+import { success } from "@/lib/response";
+import type { PolicyGateConfig } from "@/middleware/policy-gate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { describeError, logEvent } from "@/runtime/money-path-events";
@@ -130,6 +136,27 @@ export async function assertRampProviderAvailable(
 type RampQuoteDirection = "onramp" | "offramp";
 
 /**
+ * Whether a failed provider quote call provably minted nothing: definitive
+ * rejections (validation refusal, conflict, rate limit, missing configuration)
+ * are answered before the provider creates a session, so the pre-created keyed
+ * transfer row may be marked failed and a retry may free the key. Ambiguous
+ * failures (timeouts, provider outages, any unknown error) may have minted a
+ * session whose response was lost: the keyed row must keep its pending state —
+ * only its error is recorded — because the replay gate frees the key of a
+ * failed row with no recorded outcome, and a freed key would let the retry
+ * mint a second provider session and transfer for the same operation.
+ */
+export function isDefinitiveRampQuoteRejection(error: unknown): boolean {
+  return (
+    error instanceof SdpPaymentsError &&
+    (error.code === "BAD_REQUEST" ||
+      error.code === "CONFLICT" ||
+      error.code === "RATE_LIMITED" ||
+      error.code === "PROVIDER_NOT_CONFIGURED")
+  );
+}
+
+/**
  * Throws unless the committed corridor-support matrix (the same tables estimate
  * selects providers from) lists the provider for the requested crypto/fiat pair.
  * When fiatCurrency is omitted (off-ramp quotes may defer fiat selection to the
@@ -189,6 +216,133 @@ interface PersistRampQuoteTransferInput {
   fiatAmount: string | null;
   rampsMemo: Record<string, string> | undefined;
   providerData?: Record<string, unknown>;
+  /** Caller's Idempotency-Key, when the request carried one. */
+  idempotencyKey?: string | null;
+  /** Fingerprint of the keyed request, computed with {@link rampQuoteIdempotencyFingerprint}. */
+  idempotencyFingerprint?: string | null;
+}
+
+/** provider_data fragment storing the quote a keyed retry replays verbatim. */
+export function rampQuoteReplayProviderData(quote: PaymentRampQuote): Record<string, unknown> {
+  return { rampQuoteReplay: { quote } };
+}
+
+/**
+ * Reads back the replayable quote stored at keyed quote creation. Returns null
+ * when the row predates the payload or the fragment is malformed: the caller
+ * must then refuse the replay rather than guess at the recorded outcome.
+ */
+export function readRampQuoteReplay(transfer: PaymentTransferRow): PaymentRampQuote | null {
+  const fragment = transfer.provider_data.rampQuoteReplay;
+  if (!fragment || typeof fragment !== "object" || Array.isArray(fragment)) {
+    return null;
+  }
+  const quote = (fragment as Record<string, unknown>).quote;
+  if (!quote || typeof quote !== "object" || Array.isArray(quote)) {
+    return null;
+  }
+  const candidate = quote as Record<string, unknown>;
+  if (
+    candidate.provider !== transfer.provider ||
+    typeof candidate.id !== "string" ||
+    typeof candidate.status !== "string" ||
+    typeof candidate.deliveryMode !== "string"
+  ) {
+    return null;
+  }
+  return quote as PaymentRampQuote;
+}
+
+/**
+ * The request fingerprint a keyed quote's replay record is bound to: direction,
+ * resolved wallet, and the whole validated body (see
+ * {@link buildRampQuoteFingerprint}).
+ */
+export function rampQuoteIdempotencyFingerprint(
+  direction: RampQuoteDirection,
+  custodyWalletId: string,
+  body: CreateOnrampQuoteBody | CreateOfframpQuoteBody
+): string {
+  return buildRampQuoteFingerprint({ direction, custodyWalletId, request: body });
+}
+
+/**
+ * The policy-gate replay hook for one ramp quote direction: a key that matches
+ * a recorded quote with the same fingerprint returns the recorded outcome, so
+ * the handler — and the provider session mint inside it — never runs again.
+ *
+ * A stored recorded outcome answers the retry whatever the row's current
+ * status: even a quote marked failed after the client lost the response replays
+ * its recorded quote rather than minting a second provider session. A key with
+ * no replayable outcome that a provably failed quote holds is freed (CAS) and
+ * the request runs fresh; a key held by a quote whose bound session expired
+ * conflicts until the caller moves to a new key. A fingerprint mismatch
+ * conflicts, so a key can never silently answer for a different request.
+ *
+ * @param direction - Which quote route the hook guards.
+ * @returns The gate's `findIdempotentKeyReplay` hook.
+ */
+export function findRampQuoteIdempotentKeyReplay(
+  direction: RampQuoteDirection
+): NonNullable<PolicyGateConfig["findIdempotentKeyReplay"]> {
+  return async (c, extraction, idempotencyKey) => {
+    const input = extraction.body as CreateOnrampQuoteBody | CreateOfframpQuoteBody;
+    const { scope, wallet } = extraction.resolved as RampQuotePolicyResolved;
+    const repository = getPaymentsRepository(c);
+
+    const existing = await resolveIdentityBoundIdempotencyReplay(
+      () =>
+        repository.findTransferByIdempotency({
+          organizationId: scope.auth.organizationId,
+          projectId: scope.auth.projectId,
+          idempotencyKey,
+        }),
+      rampQuoteIdempotencyFingerprint(direction, wallet.id, input),
+      (row) => row.type === direction
+    );
+    if (!existing) {
+      return null;
+    }
+
+    // The recorded outcome answers the retry whatever the row's current status:
+    // the key's one operation already minted its provider session, so the retry
+    // must return that outcome instead of minting a second session and row —
+    // including when the row was marked failed after the client lost the
+    // response.
+    const quote = readRampQuoteReplay(existing);
+    if (quote) {
+      if (isRampQuoteBindingExpired(existing)) {
+        throw conflict("Provider quote/session reference has expired; create a new quote.");
+      }
+      return success(c, { quote, transferId: existing.id });
+    }
+
+    if (existing.status === "failed") {
+      // Provably fruitless — no stored outcome to replay — so the key is freed
+      // (CAS) and the request runs fresh instead of dead-locking on the key.
+      const freed = await repository.clearTransferIdempotencyKey({
+        transferId: existing.id,
+        organizationId: scope.auth.organizationId,
+        projectId: scope.auth.projectId,
+        idempotencyKey,
+        updatedAt: new Date().toISOString(),
+      });
+      if (!freed) {
+        throw conflict(
+          "A request with this Idempotency-Key is still being processed; retry shortly"
+        );
+      }
+      return null;
+    }
+
+    if (isRampQuoteBindingExpired(existing)) {
+      throw conflict("Provider quote/session reference has expired; create a new quote.");
+    }
+
+    throw conflict(
+      "Idempotency key matches an existing ramp quote that cannot be replayed; create a new quote with a new key."
+    );
+  };
 }
 
 /**
@@ -299,6 +453,9 @@ export async function persistRampQuoteTransfer(
       rampsMemo: input.rampsMemo,
       providerData: {
         ...(input.providerData ?? {}),
+        // A keyed request stores the exact quote it answered with, so a retry
+        // that lost the first response replays it without new provider work.
+        ...(input.idempotencyKey ? rampQuoteReplayProviderData(input.quote) : {}),
         ...rampQuoteExpiryProviderData(input.quote),
         ...rampQuoteCryptoDepositProviderData(input.quote, input.cryptoAmount),
       },
@@ -306,6 +463,8 @@ export async function persistRampQuoteTransfer(
       signature: null,
       slot: null,
       initiatedByKeyId: apiKey ? apiKey.id : null,
+      idempotencyKey: input.idempotencyKey ?? null,
+      idempotencyFingerprint: input.idempotencyFingerprint ?? null,
     });
   } catch (error) {
     // The (provider, provider_reference) unique index spans all tenants: a

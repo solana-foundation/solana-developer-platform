@@ -332,6 +332,36 @@ export function createPostgresPaymentsRepository(
       return row ? mapTransferRow(row) : null;
     },
 
+    async clearTransferIdempotencyKey(input) {
+      assertScope(input);
+      const row = await db
+        .prepare(
+          `WITH pt AS (
+           UPDATE payment_transfers
+           SET idempotency_key = NULL,
+               idempotency_fingerprint = NULL,
+               updated_at = ?
+           WHERE id = ?
+             AND organization_id = ?
+             AND project_id IS NOT DISTINCT FROM ?
+             AND status = 'failed'
+             AND idempotency_key = ?
+           RETURNING *
+           )
+           SELECT pt.*, ${PAYMENT_TRANSACTION_KIND_SQL} AS kind FROM pt`
+        )
+        .bind(
+          input.updatedAt,
+          input.transferId,
+          input.organizationId,
+          input.projectId,
+          input.idempotencyKey
+        )
+        .first<PaymentTransferProjectionRow>();
+
+      return row ? mapTransferRow(row) : null;
+    },
+
     async updateTransfer(input: UpdatePaymentTransferInput) {
       if (tenantScope) {
         if (input.organizationId !== undefined) {

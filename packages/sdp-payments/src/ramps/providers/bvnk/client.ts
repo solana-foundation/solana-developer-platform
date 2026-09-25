@@ -174,7 +174,12 @@ function parseBvnkChannelAddress(channel: BvnkChannelResponse, network: BvnkNetw
   }
   const match = candidates.find((candidate) => candidate.network === network);
   if (!match) {
-    throw badRequest(`BVNK channel did not return a ${network} deposit address.`);
+    // The channel was already created by the POST above, so this failure is not
+    // a definitive rejection that provably minted nothing: a keyed quote retry
+    // must not free the operation key and mint a second channel. Classify it
+    // provider-side (unavailable answer for the requested network) so the
+    // ambiguous-failure handling keeps the keyed row pending instead.
+    throw providerUnavailable(`BVNK channel did not return a ${network} deposit address.`);
   }
   return match.address;
 }

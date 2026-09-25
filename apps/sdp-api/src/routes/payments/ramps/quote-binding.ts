@@ -1,5 +1,6 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
 import type { PaymentRampInstruction, PaymentRampQuote } from "@sdp/types";
+import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { conflict } from "@/lib/errors";
 
@@ -127,4 +128,17 @@ export function rampQuoteCryptoDepositProviderData(
       amount: cryptoAmount,
     },
   };
+}
+
+/**
+ * Maps a keyed-quote insert that lost the (organization, project,
+ * idempotency_key) unique index onto a 409. The index is the durable guard
+ * behind the replay lookup: the loser persisted nothing and its next retry is
+ * answered by the winner's recorded quote.
+ */
+export function throwRampQuoteKeyConflict(error: unknown): never {
+  if (isPostgresUniqueViolation(error)) {
+    throw conflict("A ramp quote with this Idempotency-Key already exists.");
+  }
+  throw error;
 }

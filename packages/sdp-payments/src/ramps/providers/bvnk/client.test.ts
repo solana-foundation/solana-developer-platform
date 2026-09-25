@@ -728,4 +728,43 @@ describe("BvnkRampClient off-ramp channel surfaces", () => {
       "00000000-0000-4000-8000-00000000c057"
     );
   });
+  it("classifies a channel created without the requested network's deposit address as provider-unavailable, not a definitive rejection", async () => {
+    // The channel was already minted by POST /api/v2/channel when the address
+    // read-back fails, so the error must NOT be one the replay gate treats as
+    // "provably minted nothing" (BAD_REQUEST): a keyed retry would free the
+    // operation key and mint a second channel for the same quote operation.
+    const payload = readChannelCreatedPayload();
+    const { alternatives, ...channel } = payload.data;
+    void alternatives;
+    queueFetch(respond({ ...channel, alternatives: [] }, { status: 200 }));
+
+    const quote = new BvnkRampClient().createOfframpQuote(runtimeContext, {
+      assetRail: "usdc.solana",
+      fiatCurrency: "USD",
+      cryptoAmount: "75.25",
+      sourceWalletAddress: "SourceWallet11111111111111111111111111",
+      paymentTransferId: "xfr_00000000-0000-4000-8000-0000000000f1",
+      externalCustomerId: "00000000-0000-4000-8000-00000000c057",
+      bvnkFundingWalletId: "a:10000000000001:TESTWLT:1",
+      bvnkCompliance: {
+        partyDetails: [
+          {
+            type: "ORIGINATOR",
+            entityType: "INDIVIDUAL",
+            firstName: "Ada",
+            lastName: "Lovelace",
+            dateOfBirth: "1990-01-01",
+            relationshipType: "THIRD_PARTY",
+            countryCode: "US",
+          },
+        ],
+      },
+    });
+
+    await assert.rejects(quote, (error: unknown) => {
+      assert.ok(error instanceof SdpPaymentsError);
+      assert.equal(error.code, "PROVIDER_UNAVAILABLE");
+      return true;
+    });
+  });
 });

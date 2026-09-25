@@ -15,6 +15,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import { generatePaymentTransferId } from "@/db/repositories/payments.repository";
 import {
   badRequest,
@@ -45,14 +46,18 @@ import {
   requireLightsparkPayoutAccountById,
   selectLightsparkPayoutAccount,
 } from "../providers/lightspark";
+import { throwRampQuoteKeyConflict } from "../quote-binding";
 import {
   buildProviderDetails,
   type CreateOfframpQuoteBody,
   estimateAcrossProviders,
   filterProviders,
+  isDefinitiveRampQuoteRejection,
   persistRampQuoteTransfer,
   providersFromPairs,
   type RampQuotePolicyResolved,
+  rampQuoteIdempotencyFingerprint,
+  rampQuoteReplayProviderData,
   rampQuoteTransferStatus,
   resolveRampQuoteRequest,
   uniqueSorted,
@@ -148,6 +153,11 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       walletAddress: sourceWalletAddress,
     },
   } = getPolicyGateContext<CreateOfframpQuoteBody, RampQuotePolicyResolved>(c);
+  const idempotencyKey = c.req.header("Idempotency-Key") ?? null;
+  const idempotencyFingerprint =
+    idempotencyKey === null
+      ? null
+      : rampQuoteIdempotencyFingerprint("offramp", sourceWallet.id, input);
 
   await beginApprovedWalletOperationEffect(c);
 
@@ -160,33 +170,40 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
   switch (input.provider) {
     case "moonpay": {
       const apiKey = c.get("apiKey");
-      const pendingMoonpayTransfer = await getPaymentsRepository(c).createTransfer({
-        id: reservedTransferId,
-        organizationId: scope.auth.organizationId,
-        projectId,
-        custodyWalletId: sourceWallet.id,
-        walletId: sourceWallet.walletId,
-        counterpartyId: counterparty.id,
-        sourceAddress: sourceWalletAddress,
-        destinationAddress: null,
-        token: rampTransferTokenMint(input.assetRail, c.env),
-        amount: input.cryptoAmount,
-        memo: null,
-        type: "offramp",
-        direction: "outbound",
-        status: "pending",
-        provider: "moonpay",
-        providerReference: null,
-        deliveryMode: null,
-        fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
-        fiatAmount: null,
-        rampsMemo: input.rampsMemo,
-        providerData: {},
-        serializedTx: null,
-        signature: null,
-        slot: null,
-        initiatedByKeyId: apiKey ? apiKey.id : null,
-      });
+      let pendingMoonpayTransfer: PaymentTransferRow | null;
+      try {
+        pendingMoonpayTransfer = await getPaymentsRepository(c).createTransfer({
+          id: reservedTransferId,
+          organizationId: scope.auth.organizationId,
+          projectId,
+          custodyWalletId: sourceWallet.id,
+          walletId: sourceWallet.walletId,
+          counterpartyId: counterparty.id,
+          sourceAddress: sourceWalletAddress,
+          destinationAddress: null,
+          token: rampTransferTokenMint(input.assetRail, c.env),
+          amount: input.cryptoAmount,
+          memo: null,
+          type: "offramp",
+          direction: "outbound",
+          status: "pending",
+          provider: "moonpay",
+          providerReference: null,
+          deliveryMode: null,
+          fiatCurrency: input.fiatCurrency ? input.fiatCurrency : null,
+          fiatAmount: null,
+          rampsMemo: input.rampsMemo,
+          providerData: {},
+          serializedTx: null,
+          signature: null,
+          slot: null,
+          initiatedByKeyId: apiKey ? apiKey.id : null,
+          idempotencyKey,
+          idempotencyFingerprint,
+        });
+      } catch (error) {
+        throwRampQuoteKeyConflict(error);
+      }
       if (!pendingMoonpayTransfer) {
         throw internalError("Failed to create MoonPay off-ramp transfer record");
       }
@@ -212,14 +229,30 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           throw internalError("Failed to complete MoonPay off-ramp transfer record");
         }
       } catch (error) {
-        await getPaymentsRepository(c).updateTransfer({
-          transferId: pendingMoonpayTransfer.id,
-          organizationId: scope.auth.organizationId,
-          projectId,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          updatedAt: new Date().toISOString(),
-        });
+        // A definitive provider rejection provably minted no quote session, so
+        // the pre-created row may fail (a keyed retry then frees the key and
+        // runs fresh). An ambiguous failure may have minted a session whose
+        // response was lost: a keyed row stays pending with only the error
+        // recorded, so the retry conflicts instead of freeing the key and
+        // minting a second session and transfer.
+        if (idempotencyKey === null || isDefinitiveRampQuoteRejection(error)) {
+          await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingMoonpayTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingMoonpayTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        }
         throw error;
       }
       break;
@@ -338,6 +371,8 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
         cryptoAmount: input.cryptoAmount,
         fiatCurrency: input.fiatCurrency,
         rampsMemo: input.rampsMemo,
+        idempotencyKey,
+        idempotencyFingerprint,
       });
       let bvnkQuote: PaymentRampQuote;
       try {
@@ -354,15 +389,31 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
           bvnkFundingWalletId: fundingRow.external_account_reference,
         });
       } catch (error) {
-        await getPaymentsRepository(c).updateTransferStatusGuarded({
-          transferId: pendingTransfer.id,
-          organizationId: scope.auth.organizationId,
-          projectId,
-          fromStatuses: ["pending"],
-          toStatus: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          updatedAt: new Date().toISOString(),
-        });
+        // A definitive provider rejection provably minted no quote session, so
+        // the pre-created row may fail (a keyed retry then frees the key and
+        // runs fresh). An ambiguous failure may have minted a session whose
+        // response was lost: a keyed row stays pending with only the error
+        // recorded, so the retry conflicts instead of freeing the key and
+        // minting a second session and transfer.
+        if (idempotencyKey === null || isDefinitiveRampQuoteRejection(error)) {
+          await getPaymentsRepository(c).updateTransferStatusGuarded({
+            transferId: pendingTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            fromStatuses: ["pending"],
+            toStatus: "failed",
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          await getPaymentsRepository(c).updateTransfer({
+            transferId: pendingTransfer.id,
+            organizationId: scope.auth.organizationId,
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+            updatedAt: new Date().toISOString(),
+          });
+        }
         throw error;
       }
       await completePendingBvnkOfframpTransfer(c, {
@@ -425,7 +476,25 @@ export async function createOfframpQuote(c: AppContext): Promise<Response> {
       fiatAmount: null,
       rampsMemo: input.rampsMemo,
       providerData: transferProviderData,
+      idempotencyKey,
+      idempotencyFingerprint,
     });
+  }
+
+  // Precreated rows were written before the provider call; the keyed quote's
+  // replayable outcome is only known now. The provider_data merge is shallow
+  // and additive, so provider blocks written earlier survive it.
+  if (precreatedTransferId !== undefined && idempotencyKey !== null) {
+    const updated = await getPaymentsRepository(c).updateTransfer({
+      transferId: precreatedTransferId,
+      organizationId: scope.auth.organizationId,
+      projectId,
+      providerData: rampQuoteReplayProviderData(quote),
+      updatedAt: new Date().toISOString(),
+    });
+    if (!updated) {
+      throw internalError("Failed to record the replayable ramp quote outcome");
+    }
   }
 
   return success(c, { quote, transferId });
