@@ -10,9 +10,12 @@ describe("turnkey adapter", () => {
   it("signs transaction message bytes via signMessages", async () => {
     const apiKey = createECDH("prime256v1");
     apiKey.generateKeys();
+    // Node strips leading zero bytes from the hex private key, so ~1 in 256
+    // scalars render as 31 bytes and the Turnkey stamper rejects them. Zero
+    // padding restores the fixed 32-byte encoding of the same scalar.
     const adapter = new KeychainTurnkeyAdapter({
       apiPublicKey: apiKey.getPublicKey("hex", "compressed"),
-      apiPrivateKey: apiKey.getPrivateKey("hex"),
+      apiPrivateKey: apiKey.getPrivateKey("hex").padStart(64, "0"),
       organizationId: "org-id",
       defaultWalletId: "turnkey_private-key-id",
       defaultWalletPublicKey: DEFAULT_WALLET_PUBLIC_KEY,
