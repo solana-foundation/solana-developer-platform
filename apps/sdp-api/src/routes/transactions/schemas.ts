@@ -136,7 +136,38 @@ export const unifiedTransactionSchema = unifiedTransactionSchemaForModules(
   UNIFIED_TRANSACTION_MODULES
 ) satisfies z.ZodType<UnifiedTransaction>;
 
-export function unifiedTransactionsListResponseSchemaForModules<
+/**
+ * The module-agnostic variant of the published transaction union. While a
+ * module is held back (SOLA9-85) the published response union cannot branch
+ * on its rows — but the runtime is not narrowed, so an unfiltered read still
+ * returns held-back rows to an authorized caller, and a client generated
+ * from the published document must parse them. This variant describes any
+ * transaction over the shared envelope without naming its module or carrying
+ * its vocabulary, so the published contract stays true (and parseable)
+ * without leaking the held-back family. The OpenAPI layer appends it only
+ * where the module selector omits modules (openapi/paths/transactions.ts).
+ */
+export function unpublishedModuleTransactionSchema() {
+  return z.object({
+    ...commonFields,
+    module: z.string(),
+    kind: z.string(),
+    moduleStatus: z.string(),
+  });
+}
+
+export interface UnifiedTransactionsListResponseSchemaOptions {
+  /**
+   * Append `unpublishedModuleTransactionSchema` to the response union. Set
+   * only for publication-filtered documents, where the union's branches name
+   * a subset of the modules the runtime can return: the open variant keeps
+   * every response the endpoint can produce parseable for a client generated
+   * from the published document.
+   */
+  openUnpublished?: boolean;
+}
+
+function closedUnifiedTransactionsListResponseSchemaForModules<
   const Modules extends readonly [UnifiedTransactionModule, ...UnifiedTransactionModule[]],
 >(modules: Modules) {
   return z.object({
@@ -145,8 +176,29 @@ export function unifiedTransactionsListResponseSchemaForModules<
   });
 }
 
+export function unifiedTransactionsListResponseSchemaForModules<
+  const Modules extends readonly [UnifiedTransactionModule, ...UnifiedTransactionModule[]],
+>(modules: Modules, options: UnifiedTransactionsListResponseSchemaOptions = {}) {
+  if (!options.openUnpublished) {
+    return closedUnifiedTransactionsListResponseSchemaForModules(modules);
+  }
+  // TS cannot carry the tuple type through .map(), so the head element is
+  // destructured out to keep the literal a tuple for z.union; every module
+  // element is exactly the moduleSchemas entry for its module.
+  const [headModule, ...tailModules] = modules;
+  const variants = [
+    moduleSchemas[headModule],
+    ...tailModules.map((module) => moduleSchemas[module]),
+    unpublishedModuleTransactionSchema(),
+  ];
+  return z.object({
+    transactions: z.array(z.union(variants)),
+    nextCursor: z.string().nullable(),
+  });
+}
+
 export const unifiedTransactionsListResponseSchema =
-  unifiedTransactionsListResponseSchemaForModules(
+  closedUnifiedTransactionsListResponseSchemaForModules(
     UNIFIED_TRANSACTION_MODULES
   ) satisfies z.ZodType<UnifiedTransactionsListResponse>;
 

@@ -140,9 +140,17 @@ describe("OpenAPI spec", () => {
 
     const responseSchema = getJsonSchema(operation?.responses?.["200"]);
     const transactionItems = responseSchema.properties?.data?.properties?.transactions?.items;
-    expect(transactionItems?.oneOf).toBeDefined();
-    for (const variant of transactionItems?.oneOf ?? []) {
-      expect(variant.properties?.module?.enum).not.toContain("earn");
+    // While the hold is active the union is open (the module-agnostic variant
+    // that parses held-back rows must not overlap-name them), so it renders
+    // as anyOf; the closed internal union renders as oneOf. Either way, no
+    // variant may name the held-back module.
+    const unionVariants = transactionItems?.oneOf ?? transactionItems?.anyOf;
+    expect(unionVariants).toBeDefined();
+    for (const variant of unionVariants ?? []) {
+      // The module-agnostic variant types `module` as a plain string and
+      // carries no enum at all; every branching variant must exclude the
+      // held-back module from its enum.
+      expect(variant.properties?.module?.enum ?? []).not.toContain("earn");
     }
     // Earn-only lifecycle vocabulary must not survive through a shared
     // variant: these moduleStatus values name no other module's contract.

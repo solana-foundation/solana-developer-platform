@@ -1,8 +1,6 @@
-import type { UnifiedTransactionModule } from "@sdp/types";
 import { getDb } from "@/db";
 import { createPostgresUnifiedTransactionsRepository } from "@/db/repositories/unified-transactions.repository.postgres";
 import { getAuth } from "@/lib/auth";
-import { EARN_PUBLIC_SURFACE_PUBLISHED } from "@/lib/earn-publication";
 import { forbidden, insufficientPermissions } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { grantedPermissions } from "@/middleware/auth";
@@ -12,7 +10,6 @@ import {
   permittedUnifiedTransactionModules,
   UNIFIED_TRANSACTION_MODULE_PERMISSIONS,
 } from "./module-permissions";
-import { publishedTransactionModules } from "./publication";
 import type { UnifiedTransactionsQuery, unifiedTransactionsQuerySchema } from "./schemas";
 
 export async function listUnifiedTransactions(
@@ -28,29 +25,7 @@ export async function listUnifiedTransactions(
   ) {
     throw insufficientPermissions();
   }
-  // An unfiltered API-key read covers only published modules: the public
-  // document authenticates with apiKeyAuth, so while the hold is active its
-  // default response must never carry a row the published response schema
-  // does not describe — a client generated from the public document would
-  // receive transactions it cannot parse (SOLA9-85). Dashboard callers
-  // (Clerk/session) run under the internal contract and keep the full
-  // unfiltered default. An explicitly requested module bypasses the hold for
-  // every caller — the permission matrix decides that path exactly as
-  // before.
-  const publishedModules: readonly UnifiedTransactionModule[] = publishedTransactionModules(
-    EARN_PUBLIC_SURFACE_PUBLISHED
-  );
-  const queryModules =
-    auth.authType === "api_key" && query.module === undefined
-      ? permittedModules.filter((module) => publishedModules.includes(module))
-      : permittedModules;
-  if (queryModules.length === 0) {
-    // The caller's credentials name no published module, so the unfiltered
-    // default view is the empty published-contract page — an authorized but
-    // empty read, not a permission failure.
-    return success(c, { transactions: [], nextCursor: null });
-  }
-  const moduleWalletScopes = queryModules.flatMap((module) => {
+  const moduleWalletScopes = permittedModules.flatMap((module) => {
     const authorization = getAllowedApiKeyWalletAuthorizationForPermissions(auth, [
       UNIFIED_TRANSACTION_MODULE_PERMISSIONS[module],
     ]);
@@ -70,7 +45,7 @@ export async function listUnifiedTransactions(
   const repository = createPostgresUnifiedTransactionsRepository(getDb(c.env));
   const result = await repository.list({
     ...query,
-    modules: queryModules,
+    modules: permittedModules,
     organizationId: auth.organizationId,
     projectId: auth.projectId,
     moduleWalletScopes: walletScoped ? moduleWalletScopes : undefined,

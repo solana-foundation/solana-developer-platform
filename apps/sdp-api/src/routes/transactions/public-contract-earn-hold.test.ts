@@ -1,3 +1,4 @@
+import { UNIFIED_TRANSACTION_MODULE_CONTRACTS, UNIFIED_TRANSACTION_STATUSES } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db/client";
 import app from "@/index";
@@ -14,23 +15,50 @@ import {
  * Publication hold for the unified transaction contract (SOLA9-85).
  *
  * The public OpenAPI document narrows `/v1/transactions` to the
- * published-module allowlist (openapi/paths/transactions.ts), and the
- * runtime's unfiltered API-KEY default narrows with it (handlers.ts, via
- * publication.ts): a response built without an explicit module filter never
- * carries a row the published response schema does not describe, so a client
- * generated from the public document only ever parses what it was built for.
- * The hold still never narrows an explicitly requested module — the runtime
- * permission matrix admits `module=earn` for an authorized `earn:read` key
- * exactly as before — and dashboard callers (Clerk/session) keep the full
- * internal contract. These tests pin both halves of that split — the
- * published schema refuses the held-back module while explicit authorized
- * reads still reach it, and the unfiltered key default stays inside the
- * published contract — so neither the document nor the runtime can silently
- * regress into the other's shape.
+ * published-module allowlist (openapi/paths/transactions.ts, via
+ * publication.ts): the held-back module is omitted from the module selector
+ * and its branch and status vocabulary from the response union, so the
+ * published contract cannot name it. The hold is a DOCUMENT boundary only —
+ * the runtime is unchanged — so the published response union carries the
+ * module-agnostic variant (`unpublishedModuleTransactionSchema`): an
+ * unfiltered read still returns held-back rows to an authorized caller, and
+ * a client generated from the public document must parse them even though
+ * the document never names their module. The hold also never narrows an
+ * explicitly requested module — the runtime permission matrix admits
+ * `module=earn` for an authorized `earn:read` key exactly as before — and
+ * dashboard callers (Clerk/session) keep the full internal contract. These
+ * tests pin both halves: the published schema refuses the held-back module
+ * in the selector while still parsing its rows through the open variant, and
+ * every caller keeps the exact rows it was entitled to before the hold.
  */
 
 const ALL_MODULES = ["payments", "earn", "dvp", "private_channels", "issuance", "rings"] as const;
 const PUBLISHED_MODULES = ["payments", "dvp", "private_channels", "issuance", "rings"] as const;
+
+/**
+ * A minimal transaction of the held-back module, in the exact shape the
+ * unified view serves: the shared envelope plus the held-back module's
+ * module/kind/moduleStatus vocabulary.
+ */
+function earnTransactionFixture() {
+  return {
+    id: "txn_earn_hold_fixture",
+    moduleId: "module_earn_hold_fixture",
+    module: "earn",
+    kind: UNIFIED_TRANSACTION_MODULE_CONTRACTS.earn.kinds[0],
+    status: UNIFIED_TRANSACTION_STATUSES[0],
+    moduleStatus: UNIFIED_TRANSACTION_MODULE_CONTRACTS.earn.moduleStatuses[0],
+    organizationId: "org_earn_hold_fixture",
+    projectId: null,
+    custodyWalletId: null,
+    custodyWalletLabel: null,
+    token: null,
+    amount: "1",
+    counterpartyId: null,
+    signature: null,
+    createdAt: "2026-09-20T10:00:00.000Z",
+  };
+}
 
 describe("unified transactions publication hold (schemas)", () => {
   it("rejects the held-back module in the published query schema", () => {
@@ -43,14 +71,33 @@ describe("unified transactions publication hold (schemas)", () => {
     expect(runtime.safeParse({ module: "earn" }).success).toBe(true);
   });
 
-  it("omits the held-back module's branch from the published response union", () => {
-    const published = unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES);
-    const parsed = published.parse({ transactions: [], nextCursor: null });
-    expect(parsed.transactions).toEqual([]);
-    expect(JSON.stringify(published)).not.toContain('"earn"');
-
+  it("parses a held-back row through the published union's module-agnostic variant without naming it", () => {
+    // The closed published union omits the held-back module's branch (the
+    // internal document's union keeps it), and an empty page parses either
+    // way.
+    const closed = unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES);
+    expect(JSON.stringify(closed)).not.toContain('"earn"');
+    expect(closed.parse({ transactions: [], nextCursor: null }).transactions).toEqual([]);
     const runtime = unifiedTransactionsListResponseSchemaForModules(ALL_MODULES);
     expect(JSON.stringify(runtime)).toContain('"earn"');
+
+    // A held-back row cannot parse against the closed union, but the
+    // published document ships with the module-agnostic variant appended —
+    // the response the unfiltered default can carry must parse against the
+    // contract a client is generated from.
+    expect(
+      closed.safeParse({ transactions: [earnTransactionFixture()], nextCursor: null }).success
+    ).toBe(false);
+    const published = unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES, {
+      openUnpublished: true,
+    });
+    expect(JSON.stringify(published)).not.toContain('"earn"');
+    expect(
+      published.parse({ transactions: [earnTransactionFixture()], nextCursor: null }).transactions
+    ).toHaveLength(1);
+    expect(
+      runtime.parse({ transactions: [earnTransactionFixture()], nextCursor: null }).transactions
+    ).toHaveLength(1);
   });
 });
 
@@ -187,9 +234,41 @@ describe("unified transactions publication hold (unfiltered default)", () => {
     env.EARN_ENABLED = originalEarnEnabled;
   });
 
-  it("keeps a held-back row out of an unfiltered response a public client must parse", async () => {
-    // The seed produced a real Earn row, and an explicit read still reaches
-    // it — the assertion below is not passing because the fixture is empty.
+  const publishedResponseSchema = () =>
+    unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES, { openUnpublished: true });
+
+  it("keeps the unfiltered default serving every module the caller can read, and parseable under the published contract", async () => {
+    // The hold is a document boundary, so the runtime is unchanged: the
+    // unfiltered default still returns the held-back row the caller is
+    // entitled to — it is not narrowed behind the caller's back.
+    const unfilteredResponse = await app.request(
+      "/v1/transactions",
+      {
+        headers: {
+          Authorization: `Bearer ${rawFullKey}`,
+          "x-forwarded-for": "10.0.0.102",
+        },
+      },
+      env
+    );
+    expect(unfilteredResponse.status).toBe(200);
+    const unfilteredBody = (await unfilteredResponse.json()) as {
+      data?: { transactions?: Array<{ module?: string }> };
+    };
+    expect(
+      (unfilteredBody.data?.transactions ?? []).map((transaction) => transaction.module)
+    ).toContain("earn");
+
+    // And the body still parses against the PUBLISHED response schema — the
+    // contract a client generated from the public document is built from —
+    // through the module-agnostic variant that names no held-back family.
+    expect(publishedResponseSchema().safeParse(unfilteredBody.data).success).toBe(true);
+    expect(
+      unifiedTransactionsListResponseSchemaForModules(ALL_MODULES).safeParse(unfilteredBody.data)
+        .success
+    ).toBe(true);
+
+    // An explicit read keeps working for the same key.
     const explicitResponse = await app.request(
       "/v1/transactions?module=earn",
       {
@@ -207,39 +286,12 @@ describe("unified transactions publication hold (unfiltered default)", () => {
     expect(
       (explicitBody.data?.transactions ?? []).map((transaction) => transaction.module)
     ).toEqual(["earn"]);
-
-    // The unfiltered default never returns the held-back row, and the body
-    // parses against the PUBLISHED response schema — the contract a client
-    // generated from the public document is built from.
-    const unfilteredResponse = await app.request(
-      "/v1/transactions",
-      {
-        headers: {
-          Authorization: `Bearer ${rawFullKey}`,
-          "x-forwarded-for": "10.0.0.102",
-        },
-      },
-      env
-    );
-    expect(unfilteredResponse.status).toBe(200);
-    const unfilteredBody = (await unfilteredResponse.json()) as {
-      data?: { transactions?: Array<{ module?: string }> };
-    };
-    expect(
-      (unfilteredBody.data?.transactions ?? []).map((transaction) => transaction.module)
-    ).not.toContain("earn");
-    expect(
-      unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES).safeParse(
-        unfilteredBody.data
-      ).success
-    ).toBe(true);
   });
 
-  it("answers an unfiltered read that can only ever see held-back modules with an empty published page", async () => {
-    // An earn:read-only key names no published module, so its unfiltered
-    // default view is the empty page the published contract can describe —
-    // an authorized but empty read, not a permission failure and not a body
-    // a public-contract client cannot parse.
+  it("keeps an earn-only key's unfiltered read returning its authorized held-back rows", async () => {
+    // An earn:read-only key is entitled to exactly one module, and the
+    // unfiltered default still serves it: an authorized read never comes
+    // back silently emptied by a publication boundary.
     const response = await app.request(
       "/v1/transactions",
       {
@@ -252,14 +304,12 @@ describe("unified transactions publication hold (unfiltered default)", () => {
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      data?: { transactions?: Array<{ module?: string }>; nextCursor?: string | null };
+      data?: { transactions?: Array<{ module?: string }> };
     };
-    expect(body.data?.transactions).toEqual([]);
-    expect(body.data?.nextCursor).toBeNull();
-    expect(
-      unifiedTransactionsListResponseSchemaForModules(PUBLISHED_MODULES).safeParse(body.data)
-        .success
-    ).toBe(true);
+    expect((body.data?.transactions ?? []).map((transaction) => transaction.module)).toEqual([
+      "earn",
+    ]);
+    expect(publishedResponseSchema().safeParse(body.data).success).toBe(true);
 
     // The explicit read keeps working for the same key.
     const explicitResponse = await app.request(
@@ -278,8 +328,7 @@ describe("unified transactions publication hold (unfiltered default)", () => {
   it("keeps the dashboard's unfiltered view on the full internal contract", async () => {
     // The dashboard authenticates with a session, not an API key, and runs
     // under the internal contract: its unfiltered "All" view keeps returning
-    // the held-back module's rows. Only the published contract's audience
-    // (API-key callers) gets the narrowed default.
+    // the held-back module's rows.
     const dashboardResponse = await app.request(
       "/v1/transactions",
       {
