@@ -202,13 +202,16 @@ function asyncMechanism(terms: AsyncWithdrawalTermsInput): EarnVaultWithdrawalMe
  * the owner's wYLDS and USDC ATAs for an operator settlement that happens
  * later, and those creates charge the rentPayer whenever the accounts were
  * absent — a partner fee payer on the external-wallet flow. Without the
- * attribution the fulfillment ledger could not refund the partner, and the
- * owner could close the emptied accounts and keep the partner-funded rent.
+ * attribution nothing could ever refund the partner, and the owner could close
+ * the emptied accounts and keep the partner-funded rent.
  *
  * The funder is the normalized rentPayer the caller passed into the build (the
  * same address the provider embedded in the creates), NULL when the owner paid
  * or nothing was created — the same recording rule the direct external-wallet
- * builds apply to `share_ata_rent_funder`.
+ * builds apply to `share_ata_rent_funder`. The claim is exact because the
+ * provider emits a NON-idempotent create for an account absent at build: the
+ * landed create either charges the recorded funder or fails the request, and
+ * only landed requests are promoted onto the durable rows.
  */
 function outputRentAttribution(
   plan: NormalizedAsyncWithdrawalPlan,
@@ -1261,8 +1264,8 @@ export async function submitExternalQueuedWithdrawalAction(
       discountBps: build.discount_bps,
       maturityTimestamp: build.maturity_timestamp,
       deadlineTimestamp: build.deadline_timestamp,
-      // The build's output-ATA rent attribution rides onto the request so the
-      // fulfillment movement can feed the ledger's rent-refund columns.
+      // The build's output-ATA rent attribution rides onto the request row,
+      // the durable refund source for the output accounts' own rent.
       createsOutputAccounts: build.creates_output_accounts,
       outputAccountsRentFunder: build.output_accounts_rent_funder,
       signature: signed.signature,

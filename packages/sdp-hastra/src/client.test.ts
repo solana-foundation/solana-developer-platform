@@ -630,9 +630,9 @@ describe("Hastra par redemption", () => {
       owner: TOKEN_PROGRAM,
       data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 2_000_000_000n),
     });
-    // The owner holds neither persistent output account, so both idempotent
-    // creates charge real rent to the sponsor and the plan must name each
-    // created account and its funder for the queued lifecycle to refund.
+    // The owner holds neither persistent output account, so both creates
+    // charge real rent to the sponsor and the plan must name each created
+    // account and its funder for the queued lifecycle to refund.
     fixture.accounts.delete(ata(OWNER, USDC));
     stubRpc(fixture.accounts);
     const plan = await makeClient().buildParRedemptionRequest(CTX, {
@@ -657,6 +657,11 @@ describe("Hastra par redemption", () => {
     expect(plan.instructions[3]?.accounts[0]).toEqual({ address: PAYER, role: 3 });
     expect(plan.instructions[3]?.accounts[1]?.address).toBe(ata(OWNER, USDC));
     expect(plan.instructions[3]?.accounts[2]?.address).toBe(OWNER);
+    // Absent-at-build creates are NON-idempotent, so the landed create either
+    // charges the recorded funder or fails the request — a build-time claim
+    // can never survive an account someone else created in between.
+    expect(plan.instructions[2]?.data).toBe(Buffer.from([0]).toString("base64"));
+    expect(plan.instructions[3]?.data).toBe(Buffer.from([0]).toString("base64"));
   });
 
   it("omits output-ATA attribution when both persistent output accounts already exist", async () => {
@@ -679,6 +684,9 @@ describe("Hastra par redemption", () => {
     // Both idempotent creates are no-ops here, so no rent was charged and the
     // plan must not claim an attribution that could route a false refund.
     expect(plan.createdOutputAtas).toBeUndefined();
+    // Already-present accounts keep their idempotent no-op creates.
+    expect(plan.instructions[2]?.data).toBe(Buffer.from([1]).toString("base64"));
+    expect(plan.instructions[3]?.data).toBe(Buffer.from([1]).toString("base64"));
   });
 
   it("charges a sponsored rent payer for the creates and pre-funds the owner's request rent", async () => {

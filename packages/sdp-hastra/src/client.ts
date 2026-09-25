@@ -1017,7 +1017,8 @@ function computeUnitLimitInstruction(units: number): EarnVaultInstruction {
 function createAssociatedTokenInstruction(
   payer: PublicKey,
   owner: PublicKey,
-  mint: PublicKey
+  mint: PublicKey,
+  idempotent = true
 ): EarnVaultInstruction {
   return {
     programAddress: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -1029,8 +1030,8 @@ function createAssociatedTokenInstruction(
       { address: SYSTEM_PROGRAM_ID, role: 0 },
       { address: TOKEN_PROGRAM_ID, role: 0 },
     ],
-    // Associated Token Program: CreateIdempotent
-    data: Buffer.from([1]).toString("base64"),
+    // Associated Token Program: CreateIdempotent (1) or Create (0).
+    data: Buffer.from([idempotent ? 1 : 0]).toString("base64"),
   };
 }
 
@@ -2253,11 +2254,15 @@ export class HastraVaultDirectClient
           refundTo: rentPayer,
           amount: intermediateAtoms,
         });
-        // The two creates above are idempotent: they charge the rentPayer only
-        // when the chain read found the account absent. The output accounts
-        // outlive this transaction and an operator settles later, so the plan
-        // records per-account rent truth — the durable source a queued
-        // fulfillment's refund can cite instead of guessing from fee_payer.
+        // The two output accounts outlive this transaction and an operator
+        // settles later, so the plan records per-account rent truth — the
+        // durable source a queued fulfillment's refund can cite instead of
+        // guessing from fee_payer. An account absent at this read gets a
+        // NON-idempotent create: the landed create then either charges the
+        // rentPayer exactly as claimed or fails this request transaction, so
+        // an account someone else creates in between can never leave a funder
+        // claim the chain never charged. An account already present keeps its
+        // idempotent no-op create and the plan claims nothing for it.
         const createdOutputAtas: EarnVaultCreatedOutputAta[] = [];
         if (userWyldsAccount === null) {
           createdOutputAtas.push({
@@ -2279,9 +2284,9 @@ export class HastraVaultDirectClient
           instructions: [
             computeUnitLimitInstruction(HASTRA_NATIVE_COMPUTE_UNIT_LIMIT),
             ...(prefund ? [prefund] : []),
-            createAssociatedTokenInstruction(rentPayer, owner, wylds),
+            createAssociatedTokenInstruction(rentPayer, owner, wylds, userWyldsAccount !== null),
             // Completion is operator-signed, so prepare the user's canonical USDC destination now.
-            createAssociatedTokenInstruction(rentPayer, owner, usdc),
+            createAssociatedTokenInstruction(rentPayer, owner, usdc, userUsdcAccount !== null),
             ...transientWylds.setupInstructions,
             stakeRedeemInstruction({
               config,

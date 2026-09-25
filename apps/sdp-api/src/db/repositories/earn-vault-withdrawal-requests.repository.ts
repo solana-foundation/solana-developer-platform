@@ -1,9 +1,6 @@
 import type { SdpEnvironment } from "@sdp/types";
 import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
-import {
-  projectShareAccountRentFunder,
-  queuedFulfillmentMovementId,
-} from "@/db/repositories/earn-movements.repository";
+import { queuedFulfillmentMovementId } from "@/db/repositories/earn-movements.repository";
 import { conflict } from "@/lib/errors";
 
 export type EarnVaultWithdrawalRequestStatus =
@@ -56,8 +53,9 @@ export interface EarnVaultWithdrawalRequestRow {
    * Whether the request's plan reported creating persistent output token
    * accounts (Hastra's wYLDS and USDC ATAs), and who those creates charged.
    * NULL keeps the historical meaning — nothing was created, or the owner
-   * funded its own accounts — so the fulfillment movement's refund defaults
-   * back to the owner.
+   * funded its own accounts. The pair is the durable refund source for the
+   * output accounts' own rent; it never feeds the movement's share-account
+   * refund claim, which a queued redemption has no part in.
    */
   creates_output_accounts: boolean;
   output_accounts_rent_funder: string | null;
@@ -191,8 +189,8 @@ export interface CreateSignedQueuedWithdrawalRequestInput {
   /**
    * Build-time attribution for persistent output ATAs the queued plan creates
    * (SOLA9-228): whether any were created, and who the creates charged.
-   * Recorded on the request so the fulfillment movement can carry it into the
-   * ledger's rent-refund columns instead of relying on fee_payer alone.
+   * Durable on the request row as the output accounts' own refund source —
+   * deliberately separate from the movement's share-account rent claim.
    */
   createsOutputAccounts?: boolean;
   outputAccountsRentFunder?: string | null;
@@ -635,11 +633,13 @@ async function promoteRequestAddressLease(
  * against a custody position row that has no owner address. Either way the
  * payout's destination is recorded in destination_address.
  *
- * The request's output-ATA rent attribution (0119, SOLA9-228) rides onto the
- * movement's existing `(creates_share_account, share_ata_rent_funder)` pair:
- * the queued request transaction created the owner's persistent output token
- * accounts and charged them to the recorded funder, and this is the refund
- * machinery the settlement must feed instead of relying on fee_payer alone.
+ * The request's output-ATA rent attribution (0119, SOLA9-228) stays on the
+ * request row, deliberately separate from this movement's
+ * `(creates_share_account, share_ata_rent_funder)` pair: a queued redemption
+ * spends an existing holding and never creates the position's share account,
+ * so claiming otherwise — or projecting the output funder into the share
+ * refund — would make a later exit hand the share account's rent to a party
+ * that funded a different account.
  */
 async function recordFulfilledQueueMovement(
   tx: DatabaseExecutor,
@@ -648,7 +648,6 @@ async function recordFulfilledQueueMovement(
   if (!request.closing_signature) return;
   const settledAt = request.fulfilled_at ?? request.updated_at;
   const ownerAddress = request.custody_wallet_id ? null : request.owner_address;
-  const createsOutputAccounts = request.creates_output_accounts === true;
   await tx
     .prepare(
       `INSERT INTO earn_movements (
@@ -671,7 +670,7 @@ async function recordFulfilledQueueMovement(
          ?, ?,
          ?, ?, ?::jsonb,
          ?, ?,
-         ?, ?, NULL,
+         FALSE, NULL, NULL,
          ?, ?
        )
        ON CONFLICT (id) DO NOTHING`
@@ -709,8 +708,6 @@ async function recordFulfilledQueueMovement(
       }),
       request.created_by,
       request.initiated_by_key_id,
-      createsOutputAccounts,
-      createsOutputAccounts ? (request.output_accounts_rent_funder ?? null) : null,
       settledAt,
       request.updated_at
     )
@@ -1414,11 +1411,6 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           // insert replays as a no-op; the closing signature is unique per
           // fulfillment via idx_earn_movements_signature.
           await recordFulfilledQueueMovement(tx, request);
-          // The fulfillment movement may carry the request's output-ATA rent
-          // attribution (0119). Feed it into the same position projection the
-          // direct intents use, so the recorded funder — never a fee_payer
-          // guess — drives the exit's refund (SOLA9-228).
-          await projectShareAccountRentFunder(tx, request.position_id, request.organization_id);
         }
         if (input.toStatus === "cancelled" && request.mechanism === "solver_queue") {
           // A cancellation can restore a full wallet balance after hydration

@@ -43,9 +43,10 @@ const { buildExternalQueuedWithdrawalRequest, submitExternalQueuedWithdrawalActi
 /**
  * The queued external-wallet operator-redemption rent contract (SOLA9-228):
  * the partner fee payer funds the owner's persistent wYLDS and USDC ATA
- * creates, so the durable build, the submitted request, and the eventual
- * fulfillment movement must all carry WHO funded them — the chain the exit's
- * refund logic reads — instead of leaving only `fee_payer` behind.
+ * creates, so the durable build and the submitted request must carry WHO
+ * funded them — the refund source for the output accounts' own rent, kept
+ * separate from the movement's share-account claim — instead of leaving only
+ * `fee_payer` behind.
  */
 
 const ORG = "org_queued_output_rent";

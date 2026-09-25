@@ -1066,8 +1066,16 @@ describe("Earn queued withdrawal repository", () => {
     });
   });
 
-  it("carries output-ATA rent attribution onto the fulfillment movement and its position", async () => {
+  it("keeps output-ATA rent attribution off the fulfillment movement's share-account claim", async () => {
     const partner = "PfQueuedOutputRentFunder11111111111111111111";
+    // The founding deposit created the position's share account, so the
+    // projection already names ITS funder before any queued redemption.
+    await getDb(env)
+      .prepare(
+        `UPDATE earn_positions SET share_ata_rent_funder = ? WHERE id = ? AND organization_id = ?`
+      )
+      .bind("OriginalShareRentFunder1111111111111111111", EXTERNAL_POSITION, ORG)
+      .run();
     const external = await createRequest({
       positionId: EXTERNAL_POSITION,
       custodyWalletId: null,
@@ -1091,25 +1099,26 @@ describe("Earn queued withdrawal repository", () => {
       fulfilledAt: "2026-09-18T01:00:00.000Z",
     });
 
-    // The movement owns the ledger's rent-attribution pair, satisfied here by
-    // the request's output-ATA claim: the partner funded the persistent
-    // accounts the request created.
+    // A queued redemption spends an existing holding and never creates the
+    // position's share account, so the movement claims nothing: the
+    // output-ATA attribution stays on the request row, separate from the
+    // share-account refund claim a later exit reads.
     const movement = await getDb(env)
       .prepare(
         `SELECT creates_share_account, share_ata_rent_funder
-           FROM earn_movements WHERE id = ?`
+            FROM earn_movements WHERE id = ?`
       )
       .bind(`earn_queue_fulfillment_${external.request.id}`)
       .first<{ creates_share_account: boolean; share_ata_rent_funder: string | null }>();
-    expect(movement).toEqual({ creates_share_account: true, share_ata_rent_funder: partner });
+    expect(movement).toEqual({ creates_share_account: false, share_ata_rent_funder: null });
 
-    // And the projection the exit's refund reads must name the partner too —
-    // never a fee_payer-derived guess and never the owner.
+    // The exit's refund projection must still name the share account's real
+    // funder — never the party that funded the output ATAs.
     const position = await getDb(env)
       .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
       .bind(EXTERNAL_POSITION)
       .first<{ share_ata_rent_funder: string | null }>();
-    expect(position?.share_ata_rent_funder).toBe(partner);
+    expect(position?.share_ata_rent_funder).toBe("OriginalShareRentFunder1111111111111111111");
   });
 
   it("keeps an unattributed fulfillment movement and position projection at NULL", async () => {

@@ -1091,14 +1091,8 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     initiated_by_key_id: row.initiated_by_key_id == null ? null : String(row.initiated_by_key_id),
     created_at: settledAt,
     updated_at: String(row.updated_at),
-    // Mirrors the writer (recordFulfilledQueueMovement) field for field: the
-    // request's output-ATA rent attribution (0119) is the fulfillment
-    // movement's claim, so the synthetic fallback renders the same funder.
-    creates_share_account: row.creates_output_accounts === true,
-    share_ata_rent_funder:
-      row.creates_output_accounts === true
-        ? ((row.output_accounts_rent_funder as string | null) ?? null)
-        : null,
+    creates_share_account: false,
+    share_ata_rent_funder: null,
     unknown_signature_observed_at: null,
   };
 }
@@ -2761,10 +2755,7 @@ function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean
 
 /**
  * Recompute `earn_positions.share_ata_rent_funder` from the movements that
- * claimed to create the share account (migration 0067). Exported for the queue
- * fulfillment writer, which inserts its claimant through
- * `recordFulfilledQueueMovement` (0119) and must feed the same projection the
- * direct intents do.
+ * claimed to create the share account (migration 0067).
  *
  * DERIVED, not remembered, and that is the whole design. The claim is written on
  * the movement inside the pre-broadcast intent transaction, so it is a statement
@@ -2798,7 +2789,7 @@ function shareAccountClaimBindings(input: ShareAccountRentAttribution): [boolean
  * without any fork. Confirming the funder from the LANDED transaction at
  * settlement closes both and is deliberately not attempted here.
  */
-export async function projectShareAccountRentFunder(
+async function projectShareAccountRentFunder(
   db: AppDb,
   positionId: string,
   organizationId: string

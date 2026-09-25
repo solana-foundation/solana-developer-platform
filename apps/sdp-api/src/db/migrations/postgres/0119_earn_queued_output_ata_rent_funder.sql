@@ -3,24 +3,25 @@
 --
 -- ── What the two columns record ────────────────────────────────────────────
 -- A Hastra par-redemption request transaction prepares the owner's persistent
--- intermediate (wYLDS) and asset (USDC) token accounts with idempotent ATA
--- creates, so an operator settlement can pay out later. Those creates charge
--- the request's rentPayer — a partner fee payer on the external-wallet flow —
--- whenever the owner's account was absent at build time, and the accounts
--- outlive the transaction: after settlement the owner can close them and
--- reclaim the rent. Until now the queued build/request rows kept only
--- `fee_payer` and the fulfillment movement wrote
--- `creates_share_account`/`share_ata_rent_funder` hardcoded FALSE/NULL, so the
+-- intermediate (wYLDS) and asset (USDC) token accounts with ATA creates — non-
+-- idempotent for an account absent at build time, so the landed create either
+-- charges the recorded funder or fails the request — so an operator settlement
+-- can pay out later. Those creates charge the request's rentPayer — a partner
+-- fee payer on the external-wallet flow — and the accounts outlive the
+-- transaction: after settlement the owner can close them and reclaim the
+-- rent. Until now the queued build/request rows kept only `fee_payer`, so the
 -- ledger had no durable field from which to refund the partner.
 --
 -- `creates_output_accounts` states whether the request's plan reported
 -- creating any persistent output token account at all.
 -- `output_accounts_rent_funder` names the address those creates charged: the
 -- partner fee payer when one was named, NULL when the owner funded its own
--- accounts. `recordFulfilledQueueMovement` now copies the pair onto the
--- fulfillment movement's existing rent-attribution columns, so the position
--- projection and the direct external-wallet rent-refund path follow whoever
--- actually paid — never a fee_payer-derived guess.
+-- accounts. The pair is the durable refund source for the output accounts'
+-- OWN rent, kept deliberately separate from the fulfillment movement's
+-- `(creates_share_account, share_ata_rent_funder)` claim: a queued redemption
+-- spends an existing holding and never creates the position's share account,
+-- so projecting the output funder into the share refund would make a later
+-- exit hand the share account's rent to a party that funded another account.
 --
 -- Both are nullable/defaulted with no backfill: every existing row predates
 -- the attribution and correctly reads as "nothing recorded", the same posture
