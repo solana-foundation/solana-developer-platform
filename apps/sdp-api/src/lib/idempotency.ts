@@ -280,6 +280,12 @@ export interface EarnVaultDepositIntentFingerprintInput {
   amount: string;
   /** Swap-funded deposits only: the funding mint changes what leaves the wallet. */
   swapSourceTokenMint?: string;
+  /**
+   * Swap-funded deposits only, together with the source mint: the caller's
+   * swap tolerance. A caller term (the same line the same-key deposit
+   * fingerprint draws), not a quote derivation — see the builder's note.
+   */
+  swapSlippageBps?: number;
 }
 
 /**
@@ -295,12 +301,15 @@ export interface EarnVaultDepositIntentFingerprintInput {
  * different-key twin with the movement that already counts instead of signing
  * and broadcasting a second one.
  *
- * Deliberately OMITS `minSharesOut` (and `swapSlippageBps`): the floor is
- * derived from a live quote and moves with the rate, so two tabs quoting at
- * different moments carry different floors for one intent. The client's own
- * intent fingerprint carries the user's tolerance rather than the floor for
- * exactly this reason; this is the server-side twin of that decision, and the
- * same normalization (`1` and `1.000000` are one intent) applies to `amount`.
+ * Deliberately OMITS `minSharesOut`: the floor is derived from a live quote
+ * and moves with the rate, so two tabs quoting at different moments carry
+ * different floors for one intent, and keying the claim on it would re-open
+ * the two-tab hole. The swap tolerance is the opposite case and IS included
+ * when the deposit is swap-funded: it is what the caller chose, not what the
+ * quote produced (the same-key deposit fingerprint draws the same line), so a
+ * caller who tightens it must get a fresh swap built rather than a replay of
+ * the earlier, looser one. The same normalization (`1` and `1.000000` are one
+ * intent) applies to `amount`.
  */
 export const buildEarnVaultDepositIntentFingerprint = (
   input: EarnVaultDepositIntentFingerprintInput
@@ -320,7 +329,10 @@ export const buildEarnVaultDepositIntentFingerprint = (
       amount: normalizeDecimalString(input.amount),
       ...(input.swapSourceTokenMint === undefined
         ? {}
-        : { swapSourceTokenMint: input.swapSourceTokenMint }),
+        : {
+            swapSourceTokenMint: input.swapSourceTokenMint,
+            swapSlippageBps: input.swapSlippageBps ?? null,
+          }),
     })
   );
 

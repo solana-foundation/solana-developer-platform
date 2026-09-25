@@ -447,6 +447,79 @@ describe("depositIntoVault — idempotency", () => {
     expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
+  /**
+   * WisdomTree deposits are provider orders: the reconciliation sweep stamps
+   * `chain_finalized_at` but the row REMAINS `confirmed` — this ledger never
+   * records provider settlement (see the settlement filter), so a claim keyed
+   * on settlement alone would hold a successful deposit's intent forever and
+   * answer every later same-amount deposit with the old movement. Chain
+   * finality is the release: the signed bytes can never be un-done, so a fresh
+   * identical submission past it is a new deposit, not a two-tab twin.
+   */
+  it("releases the claim for a provider-order deposit once its chain leg is final", async () => {
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const first = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    await repository.advanceVaultMovement({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date().toISOString(),
+    });
+    const finalized = await repository.recordVaultMovementChainFinalization({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      observedAt: new Date().toISOString(),
+    });
+    expect(finalized?.chain_finalized_at).not.toBeNull();
+
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([2]),
+      signature: "sig_provider_order_released",
+      lastValidBlockHeight: "12345",
+    });
+    const second = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(second).toMatchObject({ replayed: false });
+    expect(second.movement.id).not.toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(2);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * The chain-final release must be a PROVIDER-ORDER fact, not a license to
+   * drop the atomic settlement boundary: a wisdomtree row that is still
+   * reversible (no `chain_finalized_at`) keeps its claim exactly as before.
+   */
+  it("keeps the claim for a provider-order deposit whose chain leg is still reversible", async () => {
+    const repository = createPostgresEarnMovementsRepository(getDb(env));
+    const first = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    await repository.advanceVaultMovement({
+      movementId: first.movement.id,
+      organizationId: ORG,
+      toStatus: "confirmed",
+      confirmedAt: new Date().toISOString(),
+    });
+
+    const second = await depositIntoVault(
+      env,
+      depositInput({ provider: "wisdomtree", requestId: "22222222-2222-4222-8222-222222222222" })
+    );
+
+    expect(second).toMatchObject({ replayed: true });
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it("binds independent request keys for distinct intents into distinct on-chain memo instructions", async () => {
     const memoPayloads: string[] = [];
     signVaultPlan.mockImplementation(async (_env, input) => {
@@ -1496,6 +1569,76 @@ describe("depositIntoVault — swap-funded (Jupiter)", () => {
     await expect(depositIntoVault(env, swapInput())).rejects.toThrowError(
       /different request payload|conflict/i
     );
+  });
+
+  /**
+   * The swap tolerance is a caller term, not a quote derivation, so it is part
+   * of the intent fingerprint: two keys carrying the SAME tolerance are one
+   * intent (the cross-tab claim must hold for swaps too), while a key that
+   * TIGHTENS the tolerance on the same amount and source is a fresh request —
+   * replaying the earlier movement would sign nothing and leave the caller
+   * with worse terms than it now accepts.
+   */
+  it("answers a different-key twin carrying the same swap tolerance with the movement already counted", async () => {
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_swap_tolerance_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "11111111-1111-4111-8111-111111111111",
+        swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+      })
+    );
+    const second = await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+      })
+    );
+
+    expect(second).toMatchObject({ replayed: true });
+    expect(second.movement.id).toBe(first.movement.id);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("builds a fresh swap when a different key tightens the tolerance on the same intent", async () => {
+    await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "11111111-1111-4111-8111-111111111111",
+        swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 50 },
+      })
+    );
+    signVaultPlan.mockResolvedValue({
+      bytes: new Uint8Array([2]),
+      signature: "sig_tightened_tolerance",
+      lastValidBlockHeight: "12345",
+    });
+
+    const second = await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        swap: { sourceTokenMint: SOURCE_MINT, slippageBps: 10 },
+      })
+    );
+
+    expect(second).toMatchObject({ replayed: false });
+    expect(await tableCount("earn_movements")).toBe(2);
+    // The second build quoted under the tightened tolerance, not the first
+    // request's.
+    expect(fetchJupiterSwapLeg.mock.calls[1]?.[2]).toMatchObject({ slippageBps: 10 });
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(2);
   });
 
   it("re-routes once for compactness and refuses when the transaction still cannot fit", async () => {

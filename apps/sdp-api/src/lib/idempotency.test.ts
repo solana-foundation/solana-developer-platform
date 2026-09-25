@@ -53,12 +53,13 @@ describe("buildEarnVaultDepositIntentFingerprint", () => {
   /**
    * The cross-key claim's key: two tabs submitting the same unchanged intent
    * must land on ONE claim even when they re-quoted at different moments, so
-   * the quote-derived floor must never enter this fingerprint. The input type
-   * already refuses to carry it; this pins the serialized shape against a
-   * future field sneaking back in under a permissive name.
+   * the quote-derived floor must never enter this fingerprint. The serialized
+   * shape is pinned against a future field sneaking back in under a
+   * permissive name.
    */
   it("carries no quote-derived floor material", () => {
     expect(buildEarnVaultDepositIntentFingerprint(base)).not.toContain("minSharesOut");
+    // And no swap material at all when the deposit is not swap-funded.
     expect(buildEarnVaultDepositIntentFingerprint(base)).not.toContain("swapSlippageBps");
   });
 
@@ -86,6 +87,27 @@ describe("buildEarnVaultDepositIntentFingerprint", () => {
         buildEarnVaultDepositIntentFingerprint(variant)
       );
     }
+  });
+
+  /**
+   * The swap tolerance is a caller term, not a quote derivation (the same-key
+   * deposit fingerprint draws the same line): a caller who TIGHTENS it while a
+   * same-amount, same-source deposit is open must get a fresh swap built, not
+   * a replay of the earlier, looser one — while two tabs carrying the same
+   * tolerance still claim as one intent.
+   */
+  it("keys swap-funded intents on the caller's tolerance, not the quote", () => {
+    const swap = { ...base, swapSourceTokenMint: "mint_usdt", swapSlippageBps: 50 };
+
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 50 })
+    );
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).not.toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 10 })
+    );
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).not.toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 500 })
+    );
   });
 });
 

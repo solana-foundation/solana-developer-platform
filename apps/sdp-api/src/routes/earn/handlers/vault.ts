@@ -328,6 +328,13 @@ function buildEarnVaultDepositResponse(
     status: toLegacyVaultDepositStatus(result.movement.status),
     signature: result.movement.signature,
     failureReason: result.movement.failure_reason,
+    // The floor the signed transaction actually enforces. On a cross-key
+    // replay this is the CLAIMED movement's floor, which can sit below the
+    // floor this request arrived with (the intent claim deliberately ignores
+    // the quote-derived floor); omitting it would let the caller believe a
+    // stricter floor is in force. Echoed on every response so the shape never
+    // depends on how the movement was won.
+    minSharesOut: result.movement.min_shares_out,
     // Tells a retrying caller that its key was already used and NOTHING was
     // re-sent — distinct from a fresh success with the same shape.
     replayed: result.replayed,

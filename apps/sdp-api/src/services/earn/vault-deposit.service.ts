@@ -184,8 +184,11 @@ export async function depositIntoVault(
   // see them. This fingerprint names the intent itself and deliberately omits
   // `minSharesOut` — the floor is quote-derived and moves with the rate, so
   // two tabs quoting at different moments carry different floors for one
-  // intent. A different key submitting it while a prior movement is still
-  // open must be answered with that movement, never sign a second one.
+  // intent. The caller-supplied swap tolerance is the opposite case (a chosen
+  // economic term, not a quote derivation) and is part of the intent when the
+  // deposit is swap-funded. A different key submitting the unchanged intent
+  // while a prior movement is still open must be answered with that movement,
+  // never sign a second one.
   const intentFingerprint = buildEarnVaultDepositIntentFingerprint({
     organizationId: input.organizationId,
     projectId: input.projectId,
@@ -196,7 +199,12 @@ export async function depositIntoVault(
     tokenMint: input.tokenMint,
     shareMint: input.shareMint,
     amount: input.amount,
-    ...(input.swap === undefined ? {} : { swapSourceTokenMint: input.swap.sourceTokenMint }),
+    ...(input.swap === undefined
+      ? {}
+      : {
+          swapSourceTokenMint: input.swap.sourceTokenMint,
+          swapSlippageBps: input.swap.slippageBps,
+        }),
   });
 
   // Fast sequential replay path. The atomic insert below repeats this check to
@@ -231,6 +239,15 @@ export async function depositIntoVault(
   // (organization AND exact project, in SQL) IS the ownership check here — the
   // claimed row's idempotency fingerprint legitimately differs from this
   // request's, because it was minted with a different quote-derived floor.
+  //
+  // A DELIBERATE second identical deposit (same wallet, vault, and amount) is
+  // indistinguishable from the two-tab twin on the wire — no request field
+  // separates them without re-opening the hole this claim closes — so while
+  // the prior movement is open it is answered as a replay, and the response
+  // discloses the floor the signed transaction actually enforces. That window
+  // is the prior movement's own lifetime: the claim releases on terminality
+  // (failed, atomic-settled, or chain-final for a provider order), after which
+  // the same intent deposits again freely.
   const openClaim = await ledger.findOpenVaultDepositIntentClaim({
     organizationId: input.organizationId,
     projectId: input.projectId,

@@ -311,9 +311,10 @@ export interface EarnMovementsRepository {
    * `(organization_id, request_id)` anchor above cannot see them. This read is
    * the answer: ownership is enforced IN THE QUERY (organization and exact
    * project bound, the detail read's own scoping rules), and the claim releases
-   * exactly when the movement is terminal for its settlement model — the same
-   * settled predicate the `?settled=` list filter uses (`failed`, or success
-   * past the provider's atomic settlement boundary). Terminality is the ONLY
+   * when the movement is terminal for its settlement model (`failed`, or
+   * success past the provider's atomic settlement boundary) — or, for a
+   * provider-order deposit whose settlement never arrives through this
+   * ledger, once its Solana leg is chain-final. Terminality is the ONLY
    * release: a still-open movement keeps the claim, whatever key holds it.
    */
   findOpenVaultDepositIntentClaim(params: {
@@ -1009,6 +1010,35 @@ function vaultSettlementFilter(
   };
 }
 
+/**
+ * "Open" for the CROSS-KEY deposit-intent claim, at both of its sites (the
+ * service preflight read and the write-side twin under the ledger lock).
+ *
+ * The settlement boundary alone cannot be the claim's release point: a
+ * provider-order deposit never settles through this ledger (an authenticated
+ * provider reconciler must introduce that completion fact first — see
+ * `vaultSettlementFilter`), so keying the claim on settlement would hold a
+ * successful WisdomTree deposit's claim forever and answer every later
+ * same-amount deposit — forever — with the old movement. The claim therefore
+ * also releases once the movement's Solana leg is chain-final
+ * (`chain_finalized_at` stamped, the durable monotone fact the reconciliation
+ * sweep records for exactly these rows). Past that moment the bytes can never
+ * be un-done, so there is nothing left to double-sign: a fresh identical
+ * submission is a new deposit by definition, not a two-tab twin. Atomic
+ * providers keep releasing on their settlement statuses, which already imply
+ * the landed transaction.
+ */
+function vaultDepositClaimOpenFilter(): { clause: string; values: readonly unknown[] } {
+  const atomicProviders = [...ATOMIC_VAULT_PROVIDERS_BY_DIRECTION.deposit];
+  const atomicStatuses = [...ATOMIC_SETTLED_STATUSES_BY_DIRECTION.deposit];
+  return {
+    clause: `AND status <> 'failed'
+             AND NOT (provider = ANY (?::text[]) AND status = ANY (?::text[]))
+             AND (provider = ANY (?::text[]) OR chain_finalized_at IS NULL)`,
+    values: [atomicProviders, atomicStatuses, atomicProviders],
+  };
+}
+
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
   return {
     id: row.id as string,
@@ -1220,12 +1250,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
     },
 
     async findOpenVaultDepositIntentClaim(params) {
-      // The unsettled predicate of `listVaultMovements`' `?settled=true` —
-      // `failed`, or success past the provider's atomic settlement boundary —
-      // is the definition of "the prior movement is terminal" here. Reuse it
-      // rather than restating it: a settlement-boundary change must move the
-      // claim's release point with it.
-      const settlement = vaultSettlementFilter("deposit", false);
+      // "Open" is `vaultDepositClaimOpenFilter`'s predicate: not failed, not
+      // past the provider's atomic settlement boundary, and — for a
+      // provider-order deposit, whose settlement never arrives through this
+      // ledger — not chain-final yet. The chain-finality release is what keeps
+      // a successful WisdomTree deposit from holding its claim forever.
+      const open = vaultDepositClaimOpenFilter();
       const row = await db
         .prepare(
           `SELECT * FROM earn_movements
@@ -1234,7 +1264,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND deposit_intent_fingerprint = ?
                AND direction = 'deposit'
                AND execution_model = 'vault_direct'
-               ${settlement.clause}
+               ${open.clause}
              ORDER BY created_at DESC, id DESC
              LIMIT 1`
         )
@@ -1242,7 +1272,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           params.organizationId,
           params.projectId,
           params.depositIntentFingerprint,
-          ...settlement.values
+          ...open.values
         )
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
@@ -2799,7 +2829,8 @@ async function findVaultMovementByRequest(
  * The vault write lock is already held by the caller, so the twin that
  * committed while this write waited is visible here: answering it is what
  * keeps two different keys from recording two movements for one unchanged
- * intent. Same terminality rule as the interface's claim read.
+ * intent. Same open rule as the interface's claim read
+ * (`vaultDepositClaimOpenFilter`), chain-finality release included.
  */
 async function findOpenDepositIntentClaim(
   db: AppDb,
@@ -2809,7 +2840,7 @@ async function findOpenDepositIntentClaim(
     depositIntentFingerprint: string;
   }
 ): Promise<EarnMovementRow | null> {
-  const settlement = vaultSettlementFilter("deposit", false);
+  const open = vaultDepositClaimOpenFilter();
   const row = await db
     .prepare(
       `SELECT * FROM earn_movements
@@ -2818,16 +2849,11 @@ async function findOpenDepositIntentClaim(
           AND deposit_intent_fingerprint = ?
           AND direction = 'deposit'
           AND execution_model = 'vault_direct'
-          ${settlement.clause}
+          ${open.clause}
         ORDER BY created_at DESC, id DESC
         LIMIT 1`
     )
-    .bind(
-      input.organizationId,
-      input.projectId,
-      input.depositIntentFingerprint,
-      ...settlement.values
-    )
+    .bind(input.organizationId, input.projectId, input.depositIntentFingerprint, ...open.values)
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
 }

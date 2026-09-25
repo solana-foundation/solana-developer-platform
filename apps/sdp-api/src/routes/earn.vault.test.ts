@@ -242,7 +242,11 @@ async function requireDepositApproval() {
   return repo;
 }
 
-function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
+function recordConnectionDeposit(
+  strategy: EarnStrategyRow,
+  requestId: string,
+  minSharesOut?: string
+) {
   return createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultDepositIntent({
     organizationId: TEST_ORG.id,
     projectId: TEST_PROJECT.id,
@@ -255,6 +259,7 @@ function recordConnectionDeposit(strategy: EarnStrategyRow, requestId: string) {
     shareMint: SHARE_MINT,
     label: strategy.name,
     requestedAmount: "10",
+    ...(minSharesOut === undefined ? {} : { acceptedMinSharesOut: minSharesOut }),
     signature: "sig_recorded_deposit",
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
@@ -931,7 +936,7 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
     await seedAuth();
     await seedConnectionWallet();
     const strategy = await seedStrategy();
-    const recorded = await recordConnectionDeposit(strategy, "recorded-deposit");
+    const recorded = await recordConnectionDeposit(strategy, "recorded-deposit", "0.75");
     env.PRIVY_BYOK_ENABLED = "false";
 
     const response = await postVaultDeposit(
@@ -941,7 +946,15 @@ describe("POST /v1/earn/vault-deposits — custody runtime admission", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
-      data: { movementId: recorded.movement.id, replayed: true, signature: "sig_recorded_deposit" },
+      data: {
+        movementId: recorded.movement.id,
+        replayed: true,
+        signature: "sig_recorded_deposit",
+        // The floor the signed transaction actually enforces, disclosed even
+        // when the movement was won by a replay that never saw this request's
+        // own floor.
+        minSharesOut: "0.75",
+      },
     });
     expect(depositIntoVault).not.toHaveBeenCalled();
   });
