@@ -82,6 +82,7 @@ vi.mock("@sdp/rpc/solana", () => ({
 }));
 
 const { createDvpTrade } = await import("./create");
+const { dvpCreateFingerprint } = await import("./fingerprint");
 
 const TEST_PROJECT_ID = "prj_dvp_create_test";
 const CUSTODY_CONFIG_ID = "cust_dvp_create_test";
@@ -673,6 +674,47 @@ describe("createDvpTrade", () => {
 
     // Both originals stand, neither retry minted a second trade.
     expect(await rowsInDb()).toHaveLength(2);
+  });
+
+  // Rows written before the absent-reference spellings were canonicalized keep
+  // a fingerprint hashed from the raw "" payload. A retry of such a trade's
+  // IDENTICAL payload must still replay it: the canonical hash of the same
+  // terms differs, so without accepting the as-sent hash every retry 409s
+  // forever and the caller's only escape — a fresh key — mints a second live
+  // trade at a second PDA.
+  it("still replays a keyed trade whose row predates absent-reference canonicalization", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-legacy-empty-ref" };
+
+    const created = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    // Regress the row to the shape the pre-canonicalization code wrote: the
+    // fingerprint hashed the "" spelling AS SENT, and the empty spelling was
+    // persisted verbatim.
+    const legacyFingerprint = dvpCreateFingerprint({
+      input: { ...input, refString: "" },
+      resolvedA: { address: address(custodyWalletAddress), counterpartyAccountId: null },
+      resolvedB: { address: address(COUNTERPARTY_ADDRESS), counterpartyAccountId: null },
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET idempotency_fingerprint = ?, ref_string = '' WHERE id = ?")
+      .bind(legacyFingerprint, created.id)
+      .run();
+
+    const retried = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    expect(retried.id).toBe(created.id);
+    expect(retried.swapDvp).toBe(created.swapDvp);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+
+    // The acceptance is keyed to the as-sent payload: any other term under the
+    // same key — including a different reference — still refuses.
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: "ref-1" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, amountA: 2000n, refString: "" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
   // A create that definitively never landed leaves its logical request unmade,

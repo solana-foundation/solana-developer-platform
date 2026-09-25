@@ -9,8 +9,11 @@
  * AS SENT, except that the absent reference spellings (omitted, null, "") are
  * canonicalized by the caller to null first: on chain they are the same
  * zero-filled 64-byte field, so hashing them apart would refuse a retry that
- * only changed spelling. No v1 compatibility: an old-keyed replay now
- * mismatches by design.
+ * only changed spelling. One legacy spell-over remains accepted: a keyed
+ * replay of a request that PRE-dates the canonicalization still matches via
+ * the as-sent hash the service computes alongside the canonical one, so
+ * existing empty-reference trades keep replaying (see
+ * `replayFingerprints` in ./create).
  */
 
 import { createHash } from "node:crypto";

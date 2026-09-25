@@ -111,13 +111,64 @@ export type CreateDvpTradeInput = {
 };
 
 /**
+ * The fingerprints a keyed replay may match.
+ *
+ * `canonical` is what rows created by this code store. `legacy` is the
+ * fingerprint the pre-canonicalization code minted for a request sent with
+ * `refString: ""` — rows written before the absent-reference spellings were
+ * collapsed still carry it. Null when there is no such variant to accept.
+ */
+type ReplayFingerprints = {
+  canonical: string | null;
+  legacy: string | null;
+};
+
+/**
+ * The fingerprints a keyed create may replay against.
+ *
+ * New rows store the canonical hash. Rows created BEFORE the absent-reference
+ * spellings (omitted, null, "") were collapsed store the hash of the request
+ * AS SENT — for a caller whose original request said `refString: ""` that is
+ * the only spelling their stored fingerprint covers, and refusing it would
+ * deadlock the key: every identical retry 409s forever, and the only escape
+ * (a fresh key) mints a second live trade at a second PDA (SOLA9-584). So
+ * when the request arrived with the empty spelling, the as-sent hash is
+ * offered alongside the canonical one. It is acceptance-only — never stored —
+ * and a pure function of the same payload, so a replay differing in any other
+ * term still matches neither and refuses.
+ */
+function replayFingerprints(
+  requested: CreateDvpTradeInput,
+  canonical: CreateDvpTradeInput,
+  resolvedA: ResolvedParty,
+  resolvedB: ResolvedParty
+): ReplayFingerprints {
+  if (canonical.idempotencyKey === null) {
+    return { canonical: null, legacy: null };
+  }
+  const canonicalFingerprint = dvpCreateFingerprint({ input: canonical, resolvedA, resolvedB });
+  if (requested.refString === "") {
+    return {
+      canonical: canonicalFingerprint,
+      legacy: dvpCreateFingerprint({ input: requested, resolvedA, resolvedB }),
+    };
+  }
+  return { canonical: canonicalFingerprint, legacy: null };
+}
+
+/**
  * Confirms a replay is the SAME request, not merely one carrying the same key.
  *
  * A key is a claim, not a proof; the fingerprint is compared precisely so a
- * wallet-scoped caller never receives escrows outside its scope.
+ * wallet-scoped caller never receives escrows outside its scope. The legacy
+ * fingerprint counts as the same request — see {@link replayFingerprints}.
  */
-function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTradeRow {
-  if (trade.idempotencyFingerprint !== fingerprint) {
+function assertOwnReplay(trade: DvpTradeRow, fingerprints: ReplayFingerprints): DvpTradeRow {
+  const { canonical, legacy } = fingerprints;
+  if (
+    trade.idempotencyFingerprint !== canonical &&
+    (legacy === null || trade.idempotencyFingerprint !== legacy)
+  ) {
     throw conflict("Idempotency key already used with different request payload");
   }
   return trade;
@@ -134,7 +185,7 @@ async function insertOrReplay(
   repository: ReturnType<typeof createDvpTradeRepository>,
   failedRowId: string | null,
   idempotencyKey: string | null,
-  fingerprint: string | null,
+  fingerprints: ReplayFingerprints,
   row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
 ): Promise<DvpTradeRow> {
   try {
@@ -147,7 +198,7 @@ async function insertOrReplay(
     if (!winner) {
       throw error;
     }
-    return assertOwnReplay(winner, fingerprint);
+    return assertOwnReplay(winner, fingerprints);
   }
 }
 
@@ -319,9 +370,7 @@ export async function createDvpTrade(
   // fresh nonce, lands at a different address, and leaves the first trade on
   // chain with a published escrow nobody is watching. Returning the original is
   // the only answer that does not create a second obligation.
-  const fingerprint = input.idempotencyKey
-    ? dvpCreateFingerprint({ input, resolvedA, resolvedB })
-    : null;
+  const fingerprints = replayFingerprints(requested, input, resolvedA, resolvedB);
   let failedRowId: string | null = null;
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
@@ -329,7 +378,7 @@ export async function createDvpTrade(
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
       } else {
-        return assertOwnReplay(replayed, fingerprint);
+        return assertOwnReplay(replayed, fingerprints);
       }
     }
   }
@@ -441,7 +490,7 @@ export async function createDvpTrade(
     repository,
     failedRowId,
     input.idempotencyKey,
-    fingerprint,
+    fingerprints,
     {
       id,
       organizationId: input.organizationId,
@@ -473,7 +522,7 @@ export async function createDvpTrade(
       counterpartyAccountIdA: resolvedA.counterpartyAccountId,
       counterpartyAccountIdB: resolvedB.counterpartyAccountId,
       idempotencyKey: input.idempotencyKey,
-      idempotencyFingerprint: fingerprint,
+      idempotencyFingerprint: fingerprints.canonical,
       createSignature: null,
       createLastValidBlockHeight: null,
     }
