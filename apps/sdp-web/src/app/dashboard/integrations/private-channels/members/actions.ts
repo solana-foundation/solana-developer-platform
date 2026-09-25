@@ -17,30 +17,23 @@ import { bindRenderedProjectClient } from "../private-channels-project-client";
 const PRINCIPALS_PATH = "/dashboard/integrations/private-channels/members";
 
 /**
- * How long a lost-response retry may resume a principal the first attempt
- * could have created. The wizard locks the name and offers the retry
- * immediately, so a same-named principal older than this window predates the
- * submission.
- */
-const RESUME_WINDOW_MS = 10 * 60 * 1000;
-
-/**
  * Whether a same-named active principal is one the lost first attempt could
  * have created — and only that. A retry flag attests a lost response but
  * cannot establish which principal, if any, the first attempt created, so
  * adoption must grant the submitted wallet nothing it could not get by
- * creating a fresh principal: the first attempt reaches this action alone, so
- * a principal it created has no verified wallet (only this action verifies
- * one) and no channel memberships (only the members table grants those).
- * Established principals — the project default, older than the window,
+ * creating a fresh principal: a principal it created has no verified wallet
+ * (only this action verifies one) and no channel memberships (only the
+ * members table grants those). Established principals — the project default,
  * already wallet-verified, or already in channels — are never resumable.
+ * Age is deliberately not a criterion: the wizard keeps the name locked
+ * until this submission finishes, so the retry must resume the stranded
+ * principal however much later the user makes it back, and an empty
+ * principal grants the submitted wallet nothing a fresh creation would not.
  */
 function isResumableLostResponsePrincipal(candidate: PrivateChannelPrincipalDto): boolean {
-  if (candidate.isDefault || candidate.verifiedWalletCount !== 0 || candidate.channels.length > 0) {
-    return false;
-  }
-  const createdAt = Date.parse(candidate.createdAt);
-  return Number.isFinite(createdAt) && Date.now() - createdAt <= RESUME_WINDOW_MS;
+  return (
+    !candidate.isDefault && candidate.verifiedWalletCount === 0 && candidate.channels.length === 0
+  );
 }
 
 export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; message: string };
@@ -61,7 +54,7 @@ export type CreateAndVerifyPrincipalResult =
  * lost outright (the wizard never learns the id), a retry attests the lost
  * response with `isRetry` and carries no id; the action then resumes the
  * newest same-named active principal the first attempt could have created
- * (recent, with no verified wallet and no channel memberships) instead of
+ * (with no verified wallet and no channel memberships) instead of
  * creating a second one. Anything else same-named is reported as a name
  * conflict: a retry flag cannot establish which principal, if any, the first
  * attempt created, so adoption is limited to a principal holding nothing the
