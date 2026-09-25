@@ -3,7 +3,7 @@ import { hashString } from "@sdp/payments/hash";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import { type CachedApiKey, WELL_KNOWN_TOKENS } from "@sdp/types";
-import { getBase58Codec } from "@solana/codecs";
+import { getBase58Codec, getBase64Codec } from "@solana/codecs";
 import {
   address,
   createNoopSigner,
@@ -15,7 +15,11 @@ import {
   SolanaError,
 } from "@solana/kit";
 import * as subscriptionsProgram from "@solana/subscriptions";
-import { findAssociatedTokenPda } from "@solana-program/token-2022";
+import {
+  findAssociatedTokenPda,
+  getMintEncoder,
+  TOKEN_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { afterEach, beforeEach, vi } from "vitest";
 import { getDb } from "@/db";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
@@ -74,6 +78,24 @@ const fetchMaybeSubscriptionAuthorityMock = vi.spyOn(
 export const fetchMaybeSubscriptionDelegationMock = vi.spyOn(
   subscriptionsProgram,
   "fetchMaybeSubscriptionDelegation"
+);
+
+/**
+ * A minimal legacy SPL mint account, as `getAccountInfo` returns it. The
+ * default `createRpc` stub serves it for mint reads so the observed-transfer
+ * builder resolves a static-decimal legacy mint (reported decimals-only
+ * amounts, no extensions) — matching every pre-extension-aware route test's
+ * RPC mocks.
+ */
+const LEGACY_MINT_ACCOUNT_BASE64 = getBase64Codec().decode(
+  getMintEncoder().encode({
+    mintAuthority: null,
+    supply: 0n,
+    decimals: 6,
+    isInitialized: true,
+    freezeAuthority: null,
+    extensions: [] as never,
+  })
 );
 
 export const TEST_CONFIG_ID = "cust_cfg_payments_test";
@@ -515,6 +537,21 @@ export function installPaymentsRouteTestHooks(): void {
       }),
       getFeeForMessage: () => ({
         send: async () => ({ value: 5000n }),
+      }),
+      // Serves the mint reads the observed-transfer builder issues via
+      // fetchMaybeMint; a legacy SPL mint keeps the reported decimals-only
+      // amounts these route suites pin.
+      getAccountInfo: () => ({
+        send: async () => ({
+          value: {
+            data: [LEGACY_MINT_ACCOUNT_BASE64, "base64"],
+            executable: false,
+            lamports: 1_461_600,
+            owner: TOKEN_PROGRAM_ADDRESS,
+            rentEpoch: 0,
+            space: 82,
+          },
+        }),
       }),
     } as unknown as ReturnType<typeof solanaRpc.createRpc>);
     getAccountInfoMock.mockResolvedValue({

@@ -325,34 +325,33 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
   return { kind: "static" };
 }
 
+/**
+ * Resolves one mint's extension state over RPC. A definitive outcome (a
+ * readable mint, one that is gone, or one owned by a program the parsed
+ * instruction cannot have come from) resolves; a transient RPC failure
+ * rejects so the per-batch resolver can retry a later read instead of
+ * pinning the omission for the whole call.
+ */
 async function fetchObservedMintAmountState(
   rpc: solanaRpc.SolanaRpc,
   mint: Address
 ): Promise<ObservedMintAmountState> {
-  try {
-    const maybeMint = await fetchMaybeMint(rpc, mint);
-    if (!maybeMint.exists) {
-      // A mint account that is gone (Token-2022 close-mint) leaves its
-      // extension history unrecoverable.
-      return { kind: "unresolved" };
-    }
-
-    if (maybeMint.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
-      return resolveMintAmountState(maybeMint.data);
-    }
-
-    // Legacy SPL mints carry no extensions by construction; any other owner
-    // is not a mint the parsed instruction could have moved.
-    return maybeMint.programAddress === TOKEN_PROGRAM_ADDRESS
-      ? { kind: "static" }
-      : { kind: "unresolved" };
-  } catch (error) {
-    getLogger().warn(
-      { mint, error: error instanceof Error ? error.message : String(error) },
-      "observed-transfers: failed to resolve mint extension state; dropping its observations"
-    );
+  const maybeMint = await fetchMaybeMint(rpc, mint);
+  if (!maybeMint.exists) {
+    // A mint account that is gone (Token-2022 close-mint) leaves its
+    // extension history unrecoverable.
     return { kind: "unresolved" };
   }
+
+  if (maybeMint.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
+    return resolveMintAmountState(maybeMint.data);
+  }
+
+  // Legacy SPL mints carry no extensions by construction; any other owner
+  // is not a mint the parsed instruction could have moved.
+  return maybeMint.programAddress === TOKEN_PROGRAM_ADDRESS
+    ? { kind: "static" }
+    : { kind: "unresolved" };
 }
 
 /**
@@ -765,16 +764,27 @@ function collectObservedMintAddresses(parsedTransaction: ParsedTransaction): Add
 /**
  * A per-call resolver of mint extension states that shares one lookup per
  * mint across every signature in the batch: repeated signatures over the same
- * mint await the single in-flight read instead of re-billing it. The
- * underlying fetch never rejects (failures resolve to `unresolved`), so a
- * cached promise is always safe to share.
+ * mint await the single in-flight read instead of re-billing it. A
+ * transiently failed read resolves to `unresolved` for the signatures already
+ * awaiting it but is evicted, so a later signature retries the read instead
+ * of inheriting the omission; a definitive resolution stays cached for the
+ * rest of the call.
  */
 function createMintAmountStateResolver(rpc: solanaRpc.SolanaRpc) {
   const pending = new Map<string, Promise<ObservedMintAmountState>>();
   return (mint: Address): Promise<ObservedMintAmountState> => {
     let state = pending.get(mint);
     if (!state) {
-      state = fetchObservedMintAmountState(rpc, mint);
+      state = fetchObservedMintAmountState(rpc, mint).catch((error) => {
+        // Evict so the next signature can retry a read that failed
+        // temporarily; definitive resolutions never land here.
+        pending.delete(mint);
+        getLogger().warn(
+          { mint, error: error instanceof Error ? error.message : String(error) },
+          "observed-transfers: failed to resolve mint extension state; dropping its observations"
+        );
+        return { kind: "unresolved" };
+      });
       pending.set(mint, state);
     }
     return state;
