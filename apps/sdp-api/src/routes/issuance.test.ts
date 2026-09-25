@@ -2096,6 +2096,275 @@ describe("Issuance Routes", () => {
       configSpy.mockRestore();
     });
 
+    it("discloses the residual ABL list authority when rotating the mint authority that controls it", async () => {
+      // The global getListConfig mock reports the live list authority as
+      // wallet3 — the same signer this token's rotation retires — so the
+      // governed workflow must say the control list stays behind.
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_disclosure",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_disclosure",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockResolvedValue({ signature: "sig_abl_rotation_disclosure", slot: 888n });
+      const prepareUpdateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "prepareUpdateAuthority")
+        .mockResolvedValue({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+        } as never);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signingCustodyWalletId: wallet.custodyWalletId,
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+        expect(await response.json()).toMatchObject({
+          data: {
+            warnings: [
+              {
+                code: "RESIDUAL_ABL_LIST_AUTHORITY",
+              },
+            ],
+          },
+        });
+      } finally {
+        updateAuthoritySpy.mockRestore();
+        prepareUpdateAuthoritySpy.mockRestore();
+      }
+    });
+
+    it("omits the residual ABL warning when the live list authority differs from the retiring signer", async () => {
+      // The recorded list is administered by wallet1 while the retiring mint
+      // authority is wallet3: the list domain is not stranded by this rotation.
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_split",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_split",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const listConfigSpy = vi
+        .spyOn(MosaicSdk, "getListConfig")
+        .mockResolvedValue({ authority: TEST_SOLANA_ADDRESSES.wallet1 } as never);
+      const prepareUpdateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "prepareUpdateAuthority")
+        .mockResolvedValue({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+        } as never);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signingCustodyWalletId: wallet.custodyWalletId,
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+        expect(await response.json()).not.toHaveProperty("data.warnings");
+      } finally {
+        listConfigSpy.mockRestore();
+        prepareUpdateAuthoritySpy.mockRestore();
+      }
+    });
+
+    it("still rotates the mint authority when the residual ABL lookup fails", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_rpc_failure",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_rpc_failure",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const listConfigSpy = vi
+        .spyOn(MosaicSdk, "getListConfig")
+        .mockRejectedValue(new Error("RPC unavailable"));
+      const prepareUpdateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "prepareUpdateAuthority")
+        .mockResolvedValue({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+        } as never);
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority/prepare`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signingCustodyWalletId: wallet.custodyWalletId,
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+        expect(await response.json()).not.toHaveProperty("data.warnings");
+      } finally {
+        listConfigSpy.mockRestore();
+        prepareUpdateAuthoritySpy.mockRestore();
+      }
+    });
+
+    it("omits the residual ABL warning when a non-mint authority is rotated on an ACL token", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_freeze",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_freeze",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const prepareUpdateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "prepareUpdateAuthority")
+        .mockResolvedValue({
+          serializedTx: "ZmFrZS1zZXJpYWxpemVkLXR4",
+          blockhash: "11111111111111111111111111111111",
+          lastValidBlockHeight: 0n,
+        } as never);
+
+      const response = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority/prepare`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            signingCustodyWalletId: wallet.custodyWalletId,
+            authority: {
+              role: "metadata",
+              newAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+            },
+          }),
+        },
+        env
+      );
+
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(await response.json()).not.toHaveProperty("data.warnings");
+      prepareUpdateAuthoritySpy.mockRestore();
+    });
+
+    it("discloses the residual ABL list authority when the executed rotation completes", async () => {
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_abl_rotation_execute",
+        policyMintAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_abl_rotation_execute",
+        signingWalletId: wallet.walletId,
+        mintAuthority: policyMintAuthority,
+        ablListAddress: TEST_SOLANA_ADDRESSES.wallet2,
+      });
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockResolvedValue({ signature: "sig_abl_rotation_execute", slot: 889n });
+
+      try {
+        const response = await app.request(
+          `/v1/issuance/tokens/${token.id}/authority`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+            },
+            body: JSON.stringify({
+              signingCustodyWalletId: wallet.custodyWalletId,
+              authority: {
+                role: "mint",
+                newAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+              },
+            }),
+          },
+          env
+        );
+
+        expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+        const body = (await response.json()) as {
+          data: {
+            transaction: { id: string };
+            warnings?: { code: string }[];
+          };
+        };
+        expect(body.data.warnings?.[0]?.code).toBe("RESIDUAL_ABL_LIST_AUTHORITY");
+
+        const audit = await getDb(env)
+          .prepare(
+            `SELECT metadata FROM audit_logs
+             WHERE action = 'update_authority' AND resource_id = ?
+             ORDER BY created_at DESC LIMIT 1`
+          )
+          .bind(body.data.transaction.id)
+          .first<{ metadata: string }>();
+        const meta = JSON.parse(audit?.metadata ?? "{}") as {
+          mode?: string;
+          warnings?: { code: string }[];
+        };
+        expect(meta.mode).toBe("execute");
+        expect(meta.warnings?.[0]?.code).toBe("RESIDUAL_ABL_LIST_AUTHORITY");
+      } finally {
+        updateAuthoritySpy.mockRestore();
+      }
+    });
+
     it("loads the approved authority signer before starting the external-effect fence", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_authority_signer_failure",
@@ -7838,6 +8107,128 @@ describe("Issuance Routes", () => {
           expect(meta.addedToAllowlist).toBe(true);
         } finally {
           createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("signs the on-chain allowlist sync with the live list authority, not the rotated mint authority", async () => {
+        await seedAblListAddress();
+
+        // Post-rotation on-chain state: the live ABL list is still administered
+        // by the original deploy wallet (wallet1) while the mint authority the
+        // route resolves is the rotated signer (wallet3, the stored authority).
+        const retiredListAuthority = TEST_SOLANA_ADDRESSES.wallet1;
+        const listConfigSpy = vi
+          .spyOn(MosaicSdk, "getListConfig")
+          .mockResolvedValue({ authority: retiredListAuthority } as never);
+        await getDb(env)
+          .prepare(
+            `INSERT INTO custody_wallets
+               (id, custody_config_id, wallet_id, public_key, label, purpose, status)
+             VALUES ('cwlt_issuance_retired_list_authority', 'cust_cfg_issuance_activity',
+                     'wal_issuance_retired_list_authority', ?, 'Retired list authority', 'transfer', 'active')`
+          )
+          .bind(retiredListAuthority)
+          .run();
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(false);
+        const listSyncSigners: string[] = [];
+        const addToListSpy = vi
+          .spyOn(MosaicService.prototype, "addToList")
+          .mockImplementation(async function (this: unknown) {
+            listSyncSigners.push((this as { signer: { address: string } }).signer.address);
+            return undefined as never;
+          });
+        const mintSigners: string[] = [];
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async function (this: unknown) {
+            mintSigners.push((this as { signer: { address: string } }).signer.address);
+            return mockMintResult as never;
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          expect(addToListSpy).toHaveBeenCalledTimes(1);
+          // The ABL list is its own authority domain: the sync must be signed
+          // by the wallet that controls the live on-chain list, never by the
+          // rotated mint authority the ABL program would reject.
+          expect(listSyncSigners[0]).toBe(retiredListAuthority);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          expect(mintSigners[0]).toBe(TEST_ACTIVE_TOKEN.mintAuthority);
+        } finally {
+          listConfigSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          addToListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("fails closed when the live list authority is not controlled by custody", async () => {
+        await seedAblListAddress();
+
+        // Same post-rotation state, but the retired deploy wallet that still
+        // controls the list is gone from custody: the governed mint must refuse
+        // the destination sync instead of signing with the mint authority.
+        const listConfigSpy = vi
+          .spyOn(MosaicSdk, "getListConfig")
+          .mockResolvedValue({ authority: TEST_SOLANA_ADDRESSES.wallet1 } as never);
+
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(false);
+        const addToListSpy = vi.spyOn(MosaicService.prototype, "addToList");
+        const mintToSpy = vi.spyOn(MosaicService.prototype, "mintTo");
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "1" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(409);
+          const body = (await res.json()) as { error: { code: string; message: string } };
+          expect(body.error.code).toBe("ABL_LIST_AUTHORITY_NOT_CONTROLLED");
+          expect(addToListSpy).not.toHaveBeenCalled();
+          expect(mintToSpy).not.toHaveBeenCalled();
+          const entry = await getDb(env)
+            .prepare(
+              "SELECT id FROM token_allowlists WHERE token_id = ? AND address = ? AND status = 'active'"
+            )
+            .bind(allowlistTokenId, freshDestination)
+            .first<{ id: string }>();
+          expect(entry).toBeNull();
+        } finally {
+          listConfigSpy.mockRestore();
           isWalletOnListSpy.mockRestore();
           addToListSpy.mockRestore();
           mintToSpy.mockRestore();

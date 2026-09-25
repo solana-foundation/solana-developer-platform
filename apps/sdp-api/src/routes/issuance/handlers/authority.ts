@@ -12,6 +12,7 @@ import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import { AuditService } from "@/services/audit.service";
 import {
   approvedWalletOperationId,
@@ -31,6 +32,7 @@ import {
   type AuthorityRole,
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
@@ -55,6 +57,7 @@ interface UpdateAuthorityExecutionPolicyResolved {
   role: AuthorityRole;
   currentAuthorityRaw: string;
   custodyWalletId: string;
+  ablListAddress: string | null;
   mintAddress: ReturnType<typeof assertValidAddress>;
   newAuthority: ReturnType<typeof assertValidAddress> | null;
 }
@@ -107,6 +110,53 @@ function isSettledAuthorityTransaction(transaction: TokenTransaction): boolean {
     (transaction.status === "confirmed" || transaction.status === "finalized") &&
     transaction.signature !== null
   );
+}
+
+interface AuthorityUpdateWarning {
+  code: string;
+  message: string;
+}
+
+const RESIDUAL_ABL_LIST_AUTHORITY_CODE = "RESIDUAL_ABL_LIST_AUTHORITY";
+
+/**
+ * Surface authority domains a rotation does not carry over.
+ *
+ * ABL deployments derive the on-chain control list's authority from the
+ * deploy-time mint signer, and the ABL program cannot reassign list
+ * authority. A mint-role rotation therefore leaves the live list administered
+ * by the retiring signer; disclose that residual authority instead of
+ * implying a complete handoff. Best-effort: a failed live read only omits the
+ * warning, it never blocks the rotation.
+ */
+async function resolveResidualAblAuthorityWarnings(
+  env: Env,
+  token: { id: string; ablListAddress: string | null },
+  role: AuthorityRole,
+  currentAuthority: string
+): Promise<AuthorityUpdateWarning[]> {
+  if (role !== "mint" || !token.ablListAddress) return [];
+  try {
+    const listAuthority = await resolveAllowlistAuthority(env, token.ablListAddress);
+    if (listAuthority !== currentAuthority) return [];
+    return [
+      {
+        code: RESIDUAL_ABL_LIST_AUTHORITY_CODE,
+        message:
+          "The token's on-chain control list is still administered by the retiring mint signer. The ABL program cannot reassign list authority, so keep administering the list with the wallet that controls it.",
+      },
+    ];
+  } catch (error) {
+    getLogger().warn(
+      {
+        event: "abl_residual_authority_lookup_failed",
+        tokenId: token.id,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      "Could not read the live ABL list authority during an authority rotation; omitting the residual-authority warning."
+    );
+    return [];
+  }
 }
 
 const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
@@ -273,6 +323,8 @@ export const prepareUpdateAuthority = async (
     simulation = await simulateTransaction(rpc, txBytes);
   }
 
+  const warnings = await resolveResidualAblAuthorityWarnings(c.env, token, role, currentAuthority);
+
   const { transaction: tx } = await tokenService.createTransaction({
     tokenId,
     organizationId: auth.organizationId,
@@ -309,6 +361,7 @@ export const prepareUpdateAuthority = async (
       lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
     },
     simulation,
+    ...(warnings.length > 0 ? { warnings } : {}),
   });
 };
 
@@ -430,6 +483,7 @@ export async function extractUpdateAuthorityPolicyCandidate(
       role,
       currentAuthorityRaw,
       custodyWalletId,
+      ablListAddress: token.ablListAddress ?? null,
       mintAddress,
       newAuthority,
     },
@@ -469,6 +523,7 @@ export const executeUpdateAuthority = async (c: AppContext) => {
       role,
       currentAuthorityRaw,
       custodyWalletId,
+      ablListAddress,
       mintAddress,
       newAuthority,
     },
@@ -544,6 +599,14 @@ export const executeUpdateAuthority = async (c: AppContext) => {
   }
 
   const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+  // Disclose authority domains this rotation does not carry over before the
+  // on-chain effect, so the audit record and the response both name them.
+  const warnings = await resolveResidualAblAuthorityWarnings(
+    c.env,
+    { id: tokenId, ablListAddress },
+    role,
+    currentAuthorityRaw
+  );
   const auditIntent = await auditService.beginCritical(c, {
     action: "update_authority",
     resourceType: "token_transaction",
@@ -575,13 +638,17 @@ export const executeUpdateAuthority = async (c: AppContext) => {
           metadata: {
             signature: result.signature,
             slot: result.slot.toString(),
+            ...(warnings.length > 0 ? { warnings } : {}),
           },
         }),
     });
 
     await tokenService.applySettledTokenAuthority(tx.id, tokenId, role, newAuthority);
 
-    return success(c, { transaction: toPublicTokenTransaction(updatedTx) });
+    return success(c, {
+      transaction: toPublicTokenTransaction(updatedTx),
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
   } catch (error) {
     if (!onChainEffectCompleted) {
       await auditService.completeCritical(c, auditIntent, {

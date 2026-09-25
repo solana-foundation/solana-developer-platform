@@ -1,3 +1,4 @@
+import { deriveAblListAddress } from "@sdp/issuance/mosaic";
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { TokenTransaction } from "@sdp/types";
@@ -35,6 +36,7 @@ import {
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
+  resolveAllowlistAuthority,
   resolveAuthoritySigner,
   resolveAuthorityWallet,
   resolveCurrentAuthorityForRole,
@@ -343,6 +345,64 @@ async function rollbackCreatedAllowlistEntry(
     );
   }
   throw originalError;
+}
+
+/**
+ * Resolve the mosaic that signs ABL list mutations during a governed mint.
+ *
+ * The ABL list authority is its own authority domain: deployments derive the
+ * list from the deploy-time mint signer, and the ABL program cannot reassign
+ * list authority when the mint authority later rotates. While the recorded
+ * list is still the PDA the deploy flow derives from the current mint signer,
+ * the mint mosaic already signs with the list authority. Otherwise resolve the
+ * live list authority from the on-chain list config and bind the custody
+ * wallet that controls it — the same domain separation the allowlist routes
+ * use — or fail closed when custody cannot bind that wallet, rather than
+ * signing with a wallet the ABL program would reject.
+ */
+async function resolveOnChainListMosaic(opts: {
+  c: AppContext;
+  auth: ApiKeyContext;
+  ablListAddress: string;
+  mintAuthority: string;
+  mintAddress: ReturnType<typeof assertValidAddress>;
+  mintMosaic: ReturnType<typeof createIssuanceMosaicService>;
+}): Promise<ReturnType<typeof createIssuanceMosaicService>> {
+  const listAddress = assertValidAddress(opts.ablListAddress, "ablListAddress");
+  const derivedFromMintSigner = await deriveAblListAddress(
+    assertValidAddress(opts.mintAuthority, "mintAuthority"),
+    opts.mintAddress
+  );
+  if (derivedFromMintSigner === listAddress) {
+    return opts.mintMosaic;
+  }
+
+  const listAuthority = await resolveAllowlistAuthority(opts.c.env, listAddress);
+  try {
+    const listAuthorityWallet = await resolveAuthorityWallet({
+      env: opts.c.env,
+      auth: opts.auth,
+      currentAuthority: listAuthority,
+      requiredWalletPermissions: ["tokens:write"],
+    });
+    const listSigner = await createResolvedAuthoritySigner({
+      env: opts.c.env,
+      auth: opts.auth,
+      custodyWalletId: listAuthorityWallet.custodyWalletId,
+      currentAuthority: listAuthority,
+      requiredWalletPermissions: ["tokens:write"],
+    });
+    return createIssuanceMosaicService(opts.c, listSigner, "sponsored");
+  } catch (error) {
+    if (error instanceof AppError && error.statusCode === 409) {
+      throw new AppError("ABL_LIST_AUTHORITY_NOT_CONTROLLED", undefined, {
+        list: listAddress,
+        listAuthority,
+        reason: error.message,
+      });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -881,21 +941,37 @@ export const executeMint = async (c: AppContext) => {
       currentAuthority,
       requiredWalletPermissions: ["tokens:write"],
     });
-    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-    addedToAllowlist = ablListAddress
-      ? await syncDestinationToOnChainAllowlist({
+    const mintMosaic = createIssuanceMosaicService(c, signer, "sponsored");
+    // The ABL list is its own authority domain — sign list mutations with the
+    // wallet that controls the live on-chain list, not the mint authority.
+    const listAddress = ablListAddress
+      ? assertValidAddress(ablListAddress, "ablListAddress")
+      : null;
+    const listMosaic = listAddress
+      ? await resolveOnChainListMosaic({
           c,
-          tokenService,
-          mosaic,
-          tokenId,
-          ablListAddress,
-          destinationRaw: input.mint.destination,
-          destination,
-          addedBy: auth.id,
+          auth,
+          ablListAddress: listAddress,
+          mintAuthority: currentAuthority,
+          mintAddress,
+          mintMosaic,
         })
-      : false;
+      : null;
+    addedToAllowlist =
+      listAddress && listMosaic
+        ? await syncDestinationToOnChainAllowlist({
+            c,
+            tokenService,
+            mosaic: listMosaic,
+            tokenId,
+            ablListAddress: listAddress,
+            destinationRaw: input.mint.destination,
+            destination,
+            addedBy: auth.id,
+          })
+        : false;
 
-    const result = await mosaic.mintTo(
+    const result = await mintMosaic.mintTo(
       {
         mint: mintAddress,
         destination,

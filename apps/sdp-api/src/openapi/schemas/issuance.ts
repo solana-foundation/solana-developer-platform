@@ -536,6 +536,17 @@ export const executeForceBurnResponseSchema = z
   })
   .openapi({ description: "Execute force burn response payload." });
 
+export const authorityUpdateWarningSchema = z
+  .object({
+    code: withOpenApi(z.string(), {
+      description: "Stable warning code identifying the disclosed condition.",
+    }),
+    message: withOpenApi(z.string(), {
+      description: "Human-readable detail for the disclosed condition.",
+    }),
+  })
+  .openapi({ description: "Non-fatal governance disclosure attached to an authority update." });
+
 export const prepareUpdateAuthorityResponseSchema = z
   .object({
     transaction: tokenTransactionSchema.openapi({
@@ -547,6 +558,10 @@ export const prepareUpdateAuthorityResponseSchema = z
     simulation: simulationResultSchema
       .optional()
       .openapi({ description: "Optional transaction simulation results." }),
+    warnings: withOpenApi(z.array(authorityUpdateWarningSchema), {
+      description:
+        "Authority domains the rotation does not carry over, such as an ABL control list that stays administered by the retiring mint signer.",
+    }).optional(),
   })
   .openapi({ description: "Prepare authority update response payload." });
 
@@ -555,6 +570,10 @@ export const executeUpdateAuthorityResponseSchema = z
     transaction: tokenTransactionSchema.openapi({
       description: "Authority update transaction record.",
     }),
+    warnings: withOpenApi(z.array(authorityUpdateWarningSchema), {
+      description:
+        "Authority domains the rotation does not carry over, such as an ABL control list that stays administered by the retiring mint signer.",
+    }).optional(),
   })
   .openapi({ description: "Execute authority update response payload." });
 

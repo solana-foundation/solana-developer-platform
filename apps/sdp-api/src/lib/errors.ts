@@ -35,6 +35,7 @@ export type ErrorCode =
   | "INVALID_TOKEN_AMOUNT"
   | "NOT_ON_TOKEN_ALLOWLIST"
   | "DESTINATION_REVOKED"
+  | "ABL_LIST_AUTHORITY_NOT_CONTROLLED"
   | "ON_TOKEN_BLOCKLIST"
   | "TOKEN_ACCOUNT_NOT_FOUND"
   | "INVALID_BURN_SOURCE"
@@ -97,6 +98,7 @@ const ERROR_STATUS_CODES: Record<ErrorCode, number> = {
   INVALID_TOKEN_AMOUNT: 400,
   NOT_ON_TOKEN_ALLOWLIST: 403,
   DESTINATION_REVOKED: 403,
+  ABL_LIST_AUTHORITY_NOT_CONTROLLED: 409,
   ON_TOKEN_BLOCKLIST: 403,
   TOKEN_ACCOUNT_NOT_FOUND: 400,
   INVALID_BURN_SOURCE: 400,
@@ -155,6 +157,8 @@ const DEFAULT_ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_ON_TOKEN_ALLOWLIST: "Address is not on the token allowlist",
   DESTINATION_REVOKED:
     "Destination address was revoked from the allowlist; re-add it explicitly before minting",
+  ABL_LIST_AUTHORITY_NOT_CONTROLLED:
+    "The token's on-chain control list is administered by a wallet outside custody, so SDP cannot sign list membership changes for it",
   ON_TOKEN_BLOCKLIST: "Address is on the token denylist",
   TOKEN_ACCOUNT_NOT_FOUND: "Token account not found for this mint",
   INVALID_BURN_SOURCE: "Burn source is not valid for this signer",

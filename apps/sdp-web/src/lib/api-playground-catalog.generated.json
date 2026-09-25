@@ -9812,7 +9812,13 @@
               "logs": ["Program log: success"],
               "unitsConsumed": 20000,
               "error": "Insufficient funds"
-            }
+            },
+            "warnings": [
+              {
+                "code": "example",
+                "message": "example"
+              }
+            ]
           },
           "meta": {
             "requestId": "req_example",
@@ -9866,7 +9872,13 @@
               "initiatedByKeyId": "key_example",
               "createdAt": "2025-01-01T00:00:00.000Z",
               "updatedAt": "2025-01-02T00:00:00.000Z"
-            }
+            },
+            "warnings": [
+              {
+                "code": "example",
+                "message": "example"
+              }
+            ]
           },
           "meta": {
             "requestId": "req_example",
