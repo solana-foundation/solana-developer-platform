@@ -19,6 +19,7 @@ import {
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import {
   type ExactApiKeyWalletBinding,
+  isProvisionedWalletBindingConflict,
   replaceApiKeyWalletBindings,
 } from "@/services/api-key-wallets.service";
 import { AuditService } from "@/services/audit.service";
@@ -205,29 +206,44 @@ export const createProjectApiKey = async (c: ValidatedBodyContext<typeof apiKeyC
     organizationId: auth.organizationId,
     projectId,
   });
-  const createdKey = await getDb(c.env).transaction(async (tx) => {
-    const txDb = asTransactionalClient(tx);
-    const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
-      organizationId: auth.organizationId,
-      projectId,
-      createdByKeyId: auth.apiKeyId ?? undefined,
-      createdByUserId: auth.userId ?? undefined,
-      actorPermissions: auth.permissions,
-      actorApiKeyRole: c.get("apiKey")?.role ?? null,
-      name,
-      description,
-      role,
-      permissions,
-      allowedIps,
-      expiresAt,
-      signingWalletId: resolvedSigningWalletId,
-      pepper: c.env.API_KEY_PEPPER,
+  const createdKey = await getDb(c.env)
+    .transaction(async (tx) => {
+      const txDb = asTransactionalClient(tx);
+      const key = await new ApiKeyService(txDb, tenantScope).createApiKey({
+        organizationId: auth.organizationId,
+        projectId,
+        createdByKeyId: auth.apiKeyId ?? undefined,
+        createdByUserId: auth.userId ?? undefined,
+        actorPermissions: auth.permissions,
+        actorApiKeyRole: c.get("apiKey")?.role ?? null,
+        name,
+        description,
+        role,
+        permissions,
+        allowedIps,
+        expiresAt,
+        signingWalletId: resolvedSigningWalletId,
+        pepper: c.env.API_KEY_PEPPER,
+      });
+      if (resolvedWalletBindings.length > 0) {
+        await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings, {
+          provisioned: provisionWalletRequested,
+        });
+      }
+      return key;
+    })
+    .catch((error) => {
+      // A provisioned wallet is exclusive to the key it was provisioned for.
+      // Two concurrent requests can both adopt the same still-unbound wallet;
+      // the exclusive-binding guarantee rejects the loser's transaction here.
+      if (provisionWalletRequested && isProvisionedWalletBindingConflict(error)) {
+        throw new AppError(
+          "CONFLICT",
+          "The provisioned signing wallet was bound to another API key"
+        );
+      }
+      throw error;
     });
-    if (resolvedWalletBindings.length > 0) {
-      await replaceApiKeyWalletBindings(txDb, key.id, resolvedWalletBindings);
-    }
-    return key;
-  });
 
   // Audit log
   const auditService = new AuditService(getDb(c.env));

@@ -577,8 +577,12 @@ export class ApiKeyService {
         );
 
         const signingWalletId = target.signing_wallet_id;
-        const bindingRows = await tx.queryMany<{ wallet_id: string; permissions: unknown }>(
-          `SELECT wallet_id, permissions FROM api_key_wallet_permissions WHERE api_key_id = $1`,
+        const bindingRows = await tx.queryMany<{
+          wallet_id: string;
+          permissions: unknown;
+          provisioned_binding: boolean;
+        }>(
+          `SELECT wallet_id, permissions, provisioned_binding FROM api_key_wallet_permissions WHERE api_key_id = $1`,
           [keyId]
         );
         guardTargetWalletScope?.({
@@ -625,12 +629,15 @@ export class ApiKeyService {
 
         // The clone inserts the rows the guard judged, not a re-read of the
         // table — under READ COMMITTED an INSERT … SELECT would see rows
-        // committed after the guard ran.
+        // committed after the guard ran. Provisioned bindings keep their
+        // exclusivity flag: a wallet provisioned for one key cannot serve a
+        // second key, so cloning such a key fails on the partial unique index
+        // instead of silently sharing the signing wallet.
         for (const row of bindingRows) {
           await tx
             .prepare(
-              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions)
-             VALUES (?, ?, ?, ?)`
+              `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+             VALUES (?, ?, ?, ?, ?)`
             )
             .bind(
               `akw_${crypto.randomUUID()}`,
@@ -638,7 +645,8 @@ export class ApiKeyService {
               row.wallet_id,
               // Preserve the column verbatim: NULL stays the historical
               // unrestricted marker, and a driver-parsed array re-serializes.
-              row.permissions == null ? null : stringifyJsonb(row.permissions, [])
+              row.permissions == null ? null : stringifyJsonb(row.permissions, []),
+              row.provisioned_binding
             )
             .run();
         }

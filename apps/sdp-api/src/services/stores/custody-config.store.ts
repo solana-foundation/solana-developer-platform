@@ -60,6 +60,17 @@ export interface CreateWalletParams {
   publicKey: string;
   label?: string;
   purpose?: WalletPurpose;
+  /**
+   * Durable provisioning provenance (migration 0119). Written for audited
+   * creations so retry-reuse can find unclaimed API-key provisioning wallets
+   * with an indexed lookup instead of parsing audit-ledger metadata, and so
+   * the reuse lookup can scope adoption to the actor whose request provisioned
+   * the wallet. Cleared in the same transaction that binds the wallet to an
+   * API key, so completed attempts are never re-adopted.
+   */
+  creationReason?: string;
+  provisionedByApiKeyId?: string | null;
+  provisionedByUserId?: string | null;
 }
 
 export interface PreviousDefaultWallet {
@@ -430,9 +441,12 @@ export class CustodyConfigStore implements SigningConfigStore {
              label,
              purpose,
              status,
+             creation_reason,
+             provisioned_by_api_key_id,
+             provisioned_by_user_id,
              updated_at
            )
-           VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
+           VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))`
         )
         .bind(
           id,
@@ -440,7 +454,10 @@ export class CustodyConfigStore implements SigningConfigStore {
           params.walletId,
           params.publicKey,
           params.label ?? null,
-          params.purpose ?? null
+          params.purpose ?? null,
+          params.creationReason ?? null,
+          params.provisionedByApiKeyId ?? null,
+          params.provisionedByUserId ?? null
         ),
     ];
 

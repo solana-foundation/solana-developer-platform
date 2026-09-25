@@ -376,6 +376,26 @@ describe("legacy Config wallet provisioning for API keys", () => {
       resource_type: "api_key",
       metadata: { signingWalletId: WALLET_ID, provisionedWallet: true },
     });
+    // Binding the wallet to the key consumes its provisioning provenance in
+    // the same transaction, so a later request never re-adopts it.
+    const walletRow = await getDb(env).queryOne<{
+      creation_reason: string | null;
+      provisioned_by_api_key_id: string | null;
+      provisioned_by_user_id: string | null;
+    }>(
+      "SELECT creation_reason, provisioned_by_api_key_id, provisioned_by_user_id FROM custody_wallets WHERE wallet_id = ?",
+      [WALLET_ID]
+    );
+    expect(walletRow).toEqual({
+      creation_reason: null,
+      provisioned_by_api_key_id: null,
+      provisioned_by_user_id: null,
+    });
+    const binding = await getDb(env).queryOne<{ provisioned_binding: boolean }>(
+      "SELECT provisioned_binding FROM api_key_wallet_permissions WHERE wallet_id = ?",
+      [WALLET_ID]
+    );
+    expect(binding).toEqual({ provisioned_binding: true });
   });
 
   it("does not adopt wallets that were not provisioned for API keys", async () => {
@@ -421,5 +441,80 @@ describe("legacy Config wallet provisioning for API keys", () => {
       await db.queryOne("SELECT id FROM custody_wallets WHERE wallet_id = 'privy_bound_seed'")
     ).not.toBeNull();
     expect(await readProvisionedWallet()).not.toBeNull();
+  });
+
+  it("does not adopt wallets provisioned by a different actor", async () => {
+    const db = getDb(env);
+    // Same config, label, purpose, and api_key creation reason as the current
+    // request — but provisioned by a different actor, so a retry from this
+    // key must not inherit another request's wallet.
+    await db.execute(
+      `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, purpose, status, creation_reason, provisioned_by_api_key_id)
+      VALUES ('cwlt_other_actor_seed', ?, 'privy_other_actor_seed', '${PUBLIC_KEY}', 'API key wallet', 'transfer', 'active', 'api_key', 'key_other_actor')`,
+      [config]
+    );
+
+    const response = await createApiKey();
+
+    expect(response.status).toBe(201);
+    expect(createProviderWallet).toHaveBeenCalledTimes(1);
+    expect(await readProvisionedWallet()).not.toBeNull();
+    const seed = await db.queryOne<{
+      creation_reason: string | null;
+      provisioned_by_api_key_id: string | null;
+    }>(
+      "SELECT creation_reason, provisioned_by_api_key_id FROM custody_wallets WHERE wallet_id = 'privy_other_actor_seed'",
+      []
+    );
+    // The other actor's wallet stays untouched: still durable, unbound, and
+    // recoverable by its own owner's retry.
+    expect(seed).toEqual({
+      creation_reason: "api_key",
+      provisioned_by_api_key_id: "key_other_actor",
+    });
+    expect(
+      await db.queryOne(
+        "SELECT id FROM api_key_wallet_permissions WHERE wallet_id = 'privy_other_actor_seed'",
+        []
+      )
+    ).toBeNull();
+  });
+
+  it("binds provisioned wallets exclusively but allows explicit sharing", async () => {
+    const db = getDb(env);
+    await db.execute(
+      `INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+      VALUES ('key_owner_binding', ?, ?, ?, 'Owner', 'sk_test_own', 'owner-hash', 'api_admin', '["*"]', 'active')`,
+      [org, project, user]
+    );
+    await db.execute(
+      `INSERT INTO api_keys (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+      VALUES ('key_second_binding', ?, ?, ?, 'Second', 'sk_test_sec', 'second-hash', 'api_admin', '["*"]', 'active')`,
+      [org, project, user]
+    );
+    // A provisioned binding is exclusive: the wallet serves exactly one key.
+    await db.execute(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+      VALUES ('akw_owner_seed', 'key_owner_binding', 'privy_shared_wallet', '["*"]', TRUE)`
+    );
+    // A second provisioned binding for the same wallet is a race loser and
+    // must fail on the partial unique index instead of sharing the wallet.
+    await expect(
+      db.execute(
+        `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+        VALUES ('akw_second_seed', 'key_second_binding', 'privy_shared_wallet', '["*"]', TRUE)`
+      )
+    ).rejects.toThrow();
+    // Explicit, operator-driven bindings are not flagged and may still share.
+    await db.execute(
+      `INSERT INTO api_key_wallet_permissions (id, api_key_id, wallet_id, permissions, provisioned_binding)
+      VALUES ('akw_second_explicit', 'key_second_binding', 'privy_shared_wallet', '["*"]', FALSE)`
+    );
+    expect(
+      await db.queryMany(
+        "SELECT id FROM api_key_wallet_permissions WHERE wallet_id = 'privy_shared_wallet'",
+        []
+      )
+    ).toHaveLength(2);
   });
 });

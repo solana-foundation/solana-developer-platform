@@ -81,6 +81,25 @@ const base58 = getBase58Codec();
 /** Why a legacy Config branch wallet is being provisioned; recorded on its audit intent. */
 type ConfigWalletCreationReason = "wallet_api" | "api_key" | "dvp_settlement_authority";
 
+/**
+ * Resolve the actor that drove an audited provisioning request, mirroring how
+ * AuditService attributes audit events: API-key actors by key id, dashboard
+ * actors by user id. The result is persisted with the wallet row so retry
+ * reuse can adopt only wallets provisioned by the same actor.
+ */
+function resolveProvisioningActor(c: Context<{ Bindings: Env }>): {
+  provisionedByApiKeyId: string | null;
+  provisionedByUserId: string | null;
+} {
+  const auth = c.get("apiKey");
+  const clerk = c.get("clerk");
+  const session = c.get("session");
+  return {
+    provisionedByApiKeyId: auth?.id ?? null,
+    provisionedByUserId: clerk?.userId ?? session?.userId ?? null,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1357,7 +1376,12 @@ export class SigningService {
     }
   ): Promise<CustodyConfigWallet> {
     if (params.reuseUnboundProvisionedWallet) {
-      const reused = await this.findUnboundProvisionedWallet(orgId, config, params);
+      const reused = await this.findUnboundProvisionedWallet(
+        orgId,
+        config,
+        params,
+        resolveProvisioningActor(c)
+      );
       if (reused) {
         return reused;
       }
@@ -1411,6 +1435,8 @@ export class SigningService {
         publicKey: provisioned.publicKey,
         label: params.label,
         purpose: params.purpose,
+        creationReason: params.creationReason ?? "wallet_api",
+        ...resolveProvisioningActor(c),
       });
     } catch (error) {
       // A failed/ambiguous commit cannot prove the Provider wallet was persisted.
@@ -1444,9 +1470,12 @@ export class SigningService {
    * Find a durable, active, unbound wallet that a previous audited API-key
    * provisioning attempt persisted on this config, so a retry reuses that
    * attempt instead of provisioning another provider wallet. Adoption is
-   * limited to wallets whose audit intent records the same `api_key` creation
-   * reason on this organization's ledger; wallets created for other purposes
-   * stay untouched.
+   * scoped to the durable provisioning provenance (migration 0119): the
+   * wallet must have been provisioned for the `api_key` creation reason by
+   * the same actor as the current request, so wallets created for other
+   * purposes or by other actors stay untouched. A wallet whose provisioning
+   * attempt completed (bound to a key) has its provenance cleared at bind
+   * time and is never re-adopted, even after that key is gone.
    */
   private async findUnboundProvisionedWallet(
     orgId: string,
@@ -1455,7 +1484,8 @@ export class SigningService {
       label?: string;
       purpose?: WalletPurpose;
       creationReason?: ConfigWalletCreationReason;
-    }
+    },
+    actor: { provisionedByApiKeyId: string | null; provisionedByUserId: string | null }
   ): Promise<CustodyConfigWallet | null> {
     if (params.creationReason !== "api_key") {
       return null;
@@ -1465,28 +1495,32 @@ export class SigningService {
         `SELECT w.id, w.wallet_id, w.public_key, w.label, w.purpose, w.created_at
          FROM custody_wallets w
          JOIN custody_configs c ON c.id = w.custody_config_id
-         WHERE c.id = ?
+         WHERE w.custody_config_id = ?
            AND c.organization_id = ?
            AND c.status = 'active'
            AND w.status = 'active'
            AND w.custody_connection_id IS NULL
+           AND w.creation_reason = ?
            AND w.purpose IS NOT DISTINCT FROM ?
            AND w.label IS NOT DISTINCT FROM ?
+           AND ((w.provisioned_by_api_key_id IS NOT NULL
+                 AND w.provisioned_by_api_key_id = ?)
+                OR (w.provisioned_by_user_id IS NOT NULL
+                    AND w.provisioned_by_user_id = ?))
            AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.signing_wallet_id = w.wallet_id)
            AND NOT EXISTS (SELECT 1 FROM api_key_wallet_permissions p WHERE p.wallet_id = w.wallet_id)
-           AND EXISTS (
-             SELECT 1 FROM audit_logs a
-             WHERE a.organization_id = c.organization_id
-               AND a.metadata IS NOT NULL
-               AND pg_input_is_valid(a.metadata, 'jsonb')
-               AND a.metadata::jsonb -> 'target' ->> 'resourceType' = 'custody_wallet'
-               AND a.metadata::jsonb -> 'target' ->> 'resourceId' = w.id
-               AND a.metadata::jsonb -> 'target' -> 'metadata' ->> 'creationReason' = ?
-           )
          ORDER BY w.created_at ASC, w.id ASC
          LIMIT 1`
       )
-      .bind(config.id, orgId, params.purpose ?? null, params.label ?? null, params.creationReason)
+      .bind(
+        config.id,
+        orgId,
+        params.creationReason,
+        params.purpose ?? null,
+        params.label ?? null,
+        actor.provisionedByApiKeyId,
+        actor.provisionedByUserId
+      )
       .first<{
         id: string;
         wallet_id: string;
