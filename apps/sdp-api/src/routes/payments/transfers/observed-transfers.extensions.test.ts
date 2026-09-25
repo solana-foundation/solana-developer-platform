@@ -588,6 +588,32 @@ describe("observed Token-2022 transfer amount conversion", () => {
     }
   });
 
+  it("shares one mint-state read across every signature in the batch", async () => {
+    // The resolver is created once per call, so a history of signatures over
+    // the same mint must await the single in-flight read instead of
+    // re-billing getAccountInfo per signature.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+    });
+
+    try {
+      const signatures = Array.from({ length: 5 }, (_, index) =>
+        signatureEntry({ signature: `sig_batch_${index}` })
+      );
+      const rows = await buildObservedRows(rpcServer, signatures);
+
+      expect(rows).toHaveLength(signatures.length);
+      for (const row of rows) {
+        expect(row.amount).toBe("2");
+      }
+      expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
   it("drops the observation even behind a classic label when the mint cannot be resolved", async () => {
     // A classic "spl-token" label cannot prove the mint is legacy: a
     // Token-2022 instruction can carry one (as the owner-program conversion
