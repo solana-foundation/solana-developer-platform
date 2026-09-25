@@ -3,17 +3,28 @@ import { themeScopeForPath } from "./theme-scope-routes";
 
 describe("themeScopeForPath", () => {
   it.each([
+    "/dashboard",
     "/dashboard/payments",
     "/dashboard/payments/pay",
     "/dashboard/payments/counterparty/cp_1",
     "/dashboard/integrations/private-channels/setup",
     "/dashboard/integrations/private-channels/inst_1/setup",
+    "/dashboard/wallets",
+    "/dashboard/wallets/setup",
+    "/dashboard/custody",
+    "/dashboard/custody/setup",
+    "/dashboard/wallets/fb_wallet",
+    "/dashboard/custody/fb_wallet",
   ])("puts %s in the refresh scope", (pathname) => {
     expect(themeScopeForPath(pathname)).toBe("refresh");
   });
 
   it.each([
-    "/dashboard",
+    "/dashboard/wallets/connections",
+    "/dashboard/wallets/switch",
+    "/dashboard/wallets/fb_wallet/policy",
+    "/dashboard/wallets/fb_wallet/policy/audit",
+    "/dashboard/wallets/setup/extra",
     "/dashboard/payments-archive",
     "/dashboard/issuance",
     "/dashboard/integrations/private-channels/overview",

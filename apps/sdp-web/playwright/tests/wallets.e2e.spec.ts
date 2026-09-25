@@ -215,8 +215,8 @@ test.describe
       await expect(walletCard).toBeVisible({
         timeout: 120_000,
       });
-      await expect(walletCard.getByText("Privy", { exact: true })).toBeVisible();
-      await expect(walletCard.getByRole("link", { name: "Manage" })).toBeVisible();
+      await expect(walletCard.getByText(/· Privy$/)).toBeVisible();
+      await expect(walletCard.getByRole("link", { name: `Open ${walletLabel}` })).toBeVisible();
     });
 
     test("wallet workspace and detail aliases preserve navigation", async ({ browser, page }) => {
@@ -279,7 +279,7 @@ test.describe
         "overview"
       );
       const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
-      await walletCard.getByRole("link", { name: "Manage" }).click();
+      await walletCard.getByRole("link", { name: `Open ${walletLabel}` }).click();
       await expect(page).toHaveURL(new RegExp(`${walletHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
@@ -419,10 +419,12 @@ test.describe
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
       });
-      const setupActions = page.locator("[data-wallet-setup-actions]");
-      const setupScrollRegion = page.locator("[data-wallet-setup-scroll-region]");
+      const setupActions = page.locator("[data-wallet-setup-flow] [data-wizard-actions]");
+      const setupScrollRegion = page.locator(
+        "[data-wallet-setup-flow] [data-wizard-scroll-region]"
+      );
       const cancelButton = page.getByRole("button", { name: "Cancel" });
-      const nextButton = page.getByRole("button", { name: "Next", exact: true });
+      const nextButton = page.getByRole("button", { name: "Continue", exact: true });
       await expect(setupActions).toBeVisible();
       await expect(cancelButton).toBeVisible();
       await expect(nextButton).toBeDisabled();
@@ -448,10 +450,10 @@ test.describe
       const scrolledActionsBox = await setupActions.boundingBox();
       expect(scrolledActionsBox?.y).toBe(desktopActionsBox?.y);
 
-      const privyProvider = page.getByRole("button", { name: /Privy/ });
+      const privyProvider = page.getByRole("radio", { name: /Privy/ });
       await privyProvider.focus();
       await page.keyboard.press("Space");
-      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await expect(privyProvider).toBeChecked();
       await expect(nextButton).toBeEnabled();
       await nextButton.click();
       await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
@@ -466,7 +468,7 @@ test.describe
 
       await page.getByRole("button", { name: "Back", exact: true }).click();
       await expect(page.getByText("Step 1 of 2", { exact: true })).toBeVisible();
-      await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+      await expect(privyProvider).toBeChecked();
       await cancelButton.click();
       await expect(page).toHaveURL(/\/dashboard\/wallets$/);
 
@@ -502,7 +504,7 @@ test.describe
       });
       const mobileActionsAfterScroll = await setupActions.boundingBox();
       expect(mobileActionsAfterScroll?.y).toBe(mobileActionsBeforeScroll?.y);
-      const lastProvider = setupScrollRegion.getByRole("button").last();
+      const lastProvider = setupScrollRegion.getByRole("link", { name: /^Set up / }).last();
       await expect(lastProvider).toBeVisible();
       const mobileScrollBox = await setupScrollRegion.boundingBox();
       const lastProviderBox = await lastProvider.boundingBox();
@@ -566,10 +568,10 @@ test.describe
       });
 
       const advanceProviderWithEnter = async () => {
-        const privyProvider = page.getByRole("button", { name: /Privy/ });
+        const privyProvider = page.getByRole("radio", { name: /Privy/ });
         await privyProvider.focus();
         await page.keyboard.press("Space");
-        await expect(privyProvider).toHaveAttribute("aria-pressed", "true");
+        await expect(privyProvider).toBeChecked();
         await page.keyboard.press("Enter");
         await expect(page.getByText("Step 2 of 2", { exact: true })).toBeVisible();
         expect(serverActionRequestCount).toBe(0);

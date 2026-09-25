@@ -117,8 +117,8 @@ describe("dashboard route headers", () => {
     ["/dashboard/custody/connections", "Shared.dashboardShell.connections"],
     ["/dashboard/wallets/switch", "Shared.dashboardShell.activateProvider"],
     ["/dashboard/custody/switch", "Shared.dashboardShell.activateProvider"],
-    ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallets"],
-    ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallets"],
+    ["/dashboard/wallets/wallet_1", "Shared.dashboardShell.wallet"],
+    ["/dashboard/custody/wallet_1", "Shared.dashboardShell.wallet"],
     ["/dashboard/wallets/wallet_1/policy", "Shared.dashboardShell.walletControls"],
     [
       "/dashboard/wallets/wallet_1/policy/audit/evaluation_1",

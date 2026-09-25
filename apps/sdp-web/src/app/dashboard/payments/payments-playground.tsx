@@ -7,6 +7,7 @@ import {
   ApiPlaygroundShell,
 } from "@/components/api-playground-shell";
 import { PlaygroundApiKeySelector } from "@/components/playground-api-key-selector";
+import { usePlaygroundCreateKeyHref } from "@/components/use-playground-create-key-href";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import {
@@ -51,6 +52,7 @@ export function PaymentsPlayground({
   counterparties,
 }: PaymentsPlaygroundProps) {
   const t = useTranslations();
+  const createApiKeyHref = usePlaygroundCreateKeyHref();
   const { sdpEnvironment } = useDashboardWorkspace();
   const endpoints = useMemo(() => {
     const tokens = deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]);
@@ -87,6 +89,7 @@ export function PaymentsPlayground({
       apiBaseUrl={apiBaseUrl}
       apiKeyId={apiKeyId}
       apiKeySelector={<PlaygroundApiKeySelector />}
+      createApiKeyHref={createApiKeyHref}
       requiresApiKey={!hasActiveApiKeys}
       leftMessages={[
         ...(walletsError ? [{ text: walletsError, tone: "critical" as const }] : []),

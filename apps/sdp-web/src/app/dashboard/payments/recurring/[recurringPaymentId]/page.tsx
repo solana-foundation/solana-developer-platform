@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getTranslations } from "@/i18n/server";
@@ -8,7 +7,6 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import type { SdpApiClient } from "@/lib/sdp-api";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
-import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace";
 import {
@@ -144,11 +142,6 @@ export default async function RecurringPaymentDetailRoute({
       ]);
       const counterpartyLabel =
         counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");
-      const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
-      const tokenLabel =
-        knownToken?.symbol ??
-        wallet?.balances?.find((entry) => entry.mint === recurringPayment.token)?.token ??
-        shortenAddress(recurringPayment.token);
 
       return (
         <RecurringPaymentDetailWorkspace
@@ -160,7 +153,6 @@ export default async function RecurringPaymentDetailRoute({
             (account) => account.accountKind === "crypto_wallet" && account.status === "active"
           )}
           counterpartyLabel={counterpartyLabel}
-          amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
           collectionAttempts={
             collectionAttemptsResult.ok ? collectionAttemptsResult.data.collectionAttempts : []
           }

@@ -1,33 +1,47 @@
 "use client";
 
 import type { CustodyWalletSummary } from "@sdp/types";
-import { PlusIcon, SearchIcon } from "lucide-react";
+import { LayoutGridIcon, RotateCwIcon, Rows3Icon, SearchIcon } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   formatCustodyProviderName,
+  getCustodyProviderEntry,
   isKnownCustodyProvider,
   type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import {
-  WalletAddressCopyButton,
-  WalletMetadataCopyButton,
-  WalletMetaValue,
-} from "@/app/dashboard/custody/wallet-address-copy-button";
-import { WalletCardBalanceValue } from "@/app/dashboard/custody/wallet-card-balance-value";
-import { formatPurpose, formatWalletMeta } from "@/app/dashboard/custody/wallet-format-utils";
-import { WalletLabelInlineEditor } from "@/app/dashboard/custody/wallet-label-inline-editor";
-import { Badge } from "@/components/ui/badge";
+  useWalletCardBalances,
+  WalletCardBalanceValue,
+} from "@/app/dashboard/custody/wallet-card-balance-value";
+import {
+  formatWalletMeta,
+  formatWalletPurposeLabel,
+  truncateMiddle,
+} from "@/app/dashboard/custody/wallet-format-utils";
+import { DashboardHeaderTabsTrailing } from "@/components/dashboard-header-tabs";
 import { Button } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/search-input";
-import { useTranslations } from "@/i18n/provider";
-import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { useDebounce } from "@/lib/use-debounce";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
-  type CustodyProviderAvailability,
-  resolveCustodyProviderAvailability,
-} from "./provider-display-status";
-import { WalletProviderChoices } from "./wallet-provider-choices";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useWalletFavorites } from "@/components/use-wallet-favorites";
+import { useLocale, useTranslations } from "@/i18n/provider";
+import { useDashboardTab, useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { useDebounce } from "@/lib/use-debounce";
+import { cn } from "@/lib/utils";
+import { syncWalletFavorites, type WalletFavorite } from "@/lib/wallet-favorites";
+import { useWalletFavoriteToggle } from "./use-wallet-favorite-toggle";
+import { WalletActionsMenu } from "./wallet-actions-menu";
+import { WalletFavoriteButton } from "./wallet-favorite-button";
 import { WalletProviderMark } from "./wallet-provider-mark";
 import {
   filterWallets,
@@ -36,200 +50,404 @@ import {
   WALLET_SEARCH_QUERY_PARAM,
 } from "./wallet-search";
 
-type OpenCreateWallet = (provider: KnownCustodyProvider | null) => void;
-
 interface WalletsOverviewProps {
   canManageCustody: boolean;
-  connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
-  onCreateWallet: OpenCreateWallet;
 }
 
-interface WalletWithProvider {
+type WalletsView = "grid" | "list";
+
+const VIEW_QUERY_PARAM = "view";
+/** "Sep 19, 2026, 7:57 PM": when the wallets and balances last arrived. */
+const REFRESHED_AT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
+/**
+ * The design's page has no search field: a handful of wallets reads at a glance. Past this many
+ * the grid runs off the screen, so the field appears above it.
+ */
+const WALLET_SEARCH_THRESHOLD = 6;
+
+interface WalletItem {
   wallet: CustodyWalletSummary;
   provider: KnownCustodyProvider | null;
+  name: string;
+  /** "Transfers · Fireblocks": the purpose, when it has one, then the provider. */
+  kind: string;
+  href: string;
 }
 
-function getWalletProvider(wallet: CustodyWalletSummary): KnownCustodyProvider | null {
-  return wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
+function toWalletItem(
+  wallet: CustodyWalletSummary,
+  t: ReturnType<typeof useTranslations>
+): WalletItem {
+  const provider =
+    wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
+  const providerName = provider
+    ? formatCustodyProviderName(provider)
+    : wallet.provider
+      ? wallet.provider
+      : null;
+  return {
+    wallet,
+    provider,
+    name: wallet.label?.trim() || truncateMiddle(wallet.publicKey, 6, 6),
+    kind: [formatWalletPurposeLabel(wallet.purpose, t), providerName].filter(Boolean).join(" · "),
+    href: `/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`,
+  };
 }
 
-function CreateWalletTile({ onClick }: { onClick: () => void }) {
-  const t = useTranslations();
+function toFavorite(item: WalletItem): WalletFavorite {
+  return {
+    walletId: item.wallet.walletId,
+    name: item.name,
+    provider: item.wallet.provider ?? null,
+  };
+}
+
+/** The same test the wallet page uses: a known provider says; an unknown one is the local signer. */
+function walletSupportsSignerCheck(item: WalletItem): boolean {
+  return item.provider
+    ? getCustodyProviderEntry(item.provider).supportsSigning
+    : !item.wallet.provider;
+}
+
+function WalletRowActions({
+  item,
+  pinned,
+  canPin,
+  onToggleFavorite,
+}: {
+  item: WalletItem;
+  pinned: boolean;
+  canPin: boolean;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
+}) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-wallet-create-tile
-      className="flex cursor-pointer items-center justify-center rounded-2xl border border-dashed border-border-strong bg-surface-raised text-tertiary transition-colors hover:border-primary/40 hover:text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default focus-visible:ring-offset-2"
-      aria-label={t("DashboardCustody.createWallet")}
+    <div className="relative z-10 flex items-center">
+      {canPin ? (
+        <WalletFavoriteButton
+          favorite={toFavorite(item)}
+          pinned={pinned}
+          onToggle={onToggleFavorite}
+        />
+      ) : null}
+      <WalletActionsMenu
+        walletAddress={item.wallet.publicKey}
+        walletId={item.wallet.walletId}
+        walletLabel={item.wallet.label}
+        supportsSignerCheck={walletSupportsSignerCheck(item)}
+        triggerMode="kebab"
+        openHref={item.href}
+      />
+    </div>
+  );
+}
+
+function WalletMark({ item }: { item: WalletItem }) {
+  if (item.provider) {
+    return <WalletProviderMark provider={item.provider} size="row" />;
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border-subtle text-body font-medium text-tertiary"
     >
-      <PlusIcon className="h-6 w-6" />
-    </button>
+      {item.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+/** A copyable identifier in the card's footer: a caption over the shortened value. */
+function WalletIdentifier({
+  label,
+  copyLabel = label,
+  value,
+  displayValue,
+}: {
+  label: string;
+  /** What the copy button names, when the caption alone is too terse ("wallet address"). */
+  copyLabel?: string;
+  value: string;
+  displayValue: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-meta text-tertiary">{label}</dt>
+      <dd className="relative z-10 flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate text-body text-primary">
+          <span aria-hidden="true">{displayValue}</span>
+          <span className="sr-only">{value}</span>
+        </span>
+        <WalletMetadataCopyButton value={value} label={copyLabel} tooltip={value} />
+      </dd>
+    </div>
   );
 }
 
 function WalletCard({
-  canManageCustody,
   item,
+  pinned,
+  canPin,
+  onToggleFavorite,
 }: {
-  canManageCustody: boolean;
-  item: WalletWithProvider;
+  item: WalletItem;
+  pinned: boolean;
+  canPin: boolean;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
 }) {
   const t = useTranslations();
-  const { wallet, provider } = item;
-  const purposeLabel = formatPurpose(wallet.purpose, t);
+  const { wallet } = item;
 
   return (
     <article
-      className="relative flex flex-col rounded-2xl border border-border-default bg-surface-raised p-5 shadow-[0_2px_10px_rgba(28,28,29,0.05)] transition hover:border-primary/30 hover:shadow-[0_4px_16px_rgba(28,28,29,0.08)]"
+      className="relative flex min-w-0 flex-col rounded-card bg-surface-tile"
       data-wallet-card={wallet.walletId}
     >
+      {/* The whole card opens the wallet; its buttons and copy targets sit above this link. */}
       <Link
-        href={`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`}
-        className="absolute inset-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
+        href={item.href}
+        className="absolute inset-0 rounded-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
       >
-        <span className="sr-only">{t("DashboardCustody.manage")}</span>
+        <span className="sr-only">
+          {t("DashboardCustody.openWalletNamed", { wallet: item.name })}
+        </span>
       </Link>
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
-          {provider ? (
-            <WalletProviderMark provider={provider} />
-          ) : (
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border border-border-default bg-surface-raised text-lg font-semibold text-tertiary">
-              {(wallet.label?.trim() || "W").slice(0, 1).toUpperCase()}
-            </div>
-          )}
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium tracking-wide text-tertiary uppercase">
-                {provider ? formatCustodyProviderName(provider) : t("DashboardCustody.wallet")}
-              </p>
-              {purposeLabel ? (
-                <span className="rounded-full border border-border-default bg-fill-subtle px-2 py-0.5 text-[11px] font-medium text-secondary">
-                  {purposeLabel}
-                </span>
-              ) : null}
-              {wallet.isRuntimeExecutionAllowed ? null : (
-                <Badge variant="warning">{t("DashboardCustody.restricted")}</Badge>
-              )}
-            </div>
-            <div className="relative mt-0.5 min-w-0 text-2xl leading-tight font-medium tracking-tight text-primary">
-              <WalletLabelInlineEditor
-                walletId={wallet.walletId}
-                label={wallet.label}
-                canEdit={canManageCustody}
-              />
-            </div>
-          </div>
+      <div className="flex items-center gap-3 px-4 pt-4">
+        <WalletMark item={item} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-nav leading-tight font-medium text-primary">{item.name}</p>
+          <p className="truncate text-body text-secondary">
+            {item.kind}
+            {wallet.isRuntimeExecutionAllowed ? null : (
+              <span className="text-warning"> · {t("DashboardCustody.restricted")}</span>
+            )}
+          </p>
         </div>
-        <div className="shrink-0 text-xl tracking-tight">
-          <WalletCardBalanceValue
-            walletId={wallet.walletId}
-            initialBalances={wallet.balances ?? []}
+        <div className="-mr-2 self-start">
+          <WalletRowActions
+            item={item}
+            pinned={pinned}
+            canPin={canPin}
+            onToggleFavorite={onToggleFavorite}
           />
         </div>
       </div>
-
-      <div className="mt-5 space-y-1.5">
-        <div className="flex h-6 items-center justify-between gap-3 text-xs">
-          <span className="text-tertiary">{t("DashboardCustody.address")}</span>
-          <div className="relative flex min-w-0 items-center gap-1">
-            <WalletMetaValue
-              value={wallet.publicKey}
-              displayValue={formatWalletMeta(wallet.publicKey)}
-            />
-            <WalletAddressCopyButton address={wallet.publicKey} tooltip={wallet.publicKey} />
-          </div>
-        </div>
-        <div className="flex h-6 items-center justify-between gap-3 text-xs">
-          <span className="text-tertiary">{t("DashboardCustody.walletId")}</span>
-          <div className="relative flex min-w-0 items-center gap-1">
-            <WalletMetaValue
-              value={wallet.walletId}
-              displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
-            />
-            <WalletMetadataCopyButton
-              value={wallet.walletId}
-              label={t("DashboardCustody.walletId")}
-              tooltip={wallet.walletId}
-            />
-          </div>
-        </div>
-      </div>
+      <p className="px-4 pt-5 pb-6 text-quote">
+        <WalletCardBalanceValue
+          walletId={wallet.walletId}
+          initialBalances={wallet.balances ?? []}
+        />
+      </p>
+      <dl className="grid grid-cols-2 gap-x-6 border-t border-border-subtle px-4 pt-3 pb-3">
+        <WalletIdentifier
+          label={t("DashboardCustody.address")}
+          copyLabel={t("DashboardCustody.walletAddress")}
+          value={wallet.publicKey}
+          displayValue={formatWalletMeta(wallet.publicKey, 6, 6)}
+        />
+        <WalletIdentifier
+          label={t("DashboardCustody.walletId")}
+          value={wallet.walletId}
+          displayValue={formatWalletMeta(wallet.walletId, 10, 6)}
+        />
+      </dl>
     </article>
   );
 }
 
-function WalletCardsGrid({
-  canManageCustody,
-  children,
-  wallets,
+function WalletsList({
+  items,
+  favoriteIds,
+  canPin,
+  onToggleFavorite,
 }: {
-  canManageCustody: boolean;
-  children?: ReactNode;
-  wallets: WalletWithProvider[];
+  items: WalletItem[];
+  favoriteIds: ReadonlySet<string>;
+  canPin: boolean;
+  onToggleFavorite: (favorite: WalletFavorite) => void;
 }) {
+  const t = useTranslations();
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {wallets.map((item) => (
-        <WalletCard key={item.wallet.walletId} item={item} canManageCustody={canManageCustody} />
-      ))}
-      {children}
-    </div>
+    <Table
+      className="min-w-0 rounded-none border-0 refresh:-mx-3 [&_table]:table-fixed"
+      data-wallet-list
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[32%]">{t("DashboardCustody.wallet")}</TableHead>
+          <TableHead className="w-[25%]">{t("DashboardCustody.purpose")}</TableHead>
+          <TableHead className="w-[14%] text-right">{t("DashboardCustody.balance")}</TableHead>
+          <TableHead className="w-[19%] pl-6">{t("DashboardCustody.address")}</TableHead>
+          <TableHead className="w-[10%]">
+            <span className="sr-only">{t("DashboardCustody.actions")}</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((item) => (
+          <TableRow key={item.wallet.walletId} data-wallet-row={item.wallet.walletId}>
+            <TableCell>
+              <Link
+                href={item.href}
+                className="flex min-w-0 items-center gap-3 text-primary underline-offset-4 hover:underline"
+              >
+                {item.provider ? <WalletProviderMark provider={item.provider} size="nav" /> : null}
+                <span className="truncate">{item.name}</span>
+              </Link>
+            </TableCell>
+            <TableCell className="truncate text-secondary">{item.kind}</TableCell>
+            <TableCell className="text-right">
+              <WalletCardBalanceValue
+                walletId={item.wallet.walletId}
+                initialBalances={item.wallet.balances ?? []}
+              />
+            </TableCell>
+            <TableCell className="pl-6">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-primary">
+                  <span aria-hidden="true">{formatWalletMeta(item.wallet.publicKey, 4, 4)}</span>
+                  <span className="sr-only">{item.wallet.publicKey}</span>
+                </span>
+                <WalletMetadataCopyButton
+                  value={item.wallet.publicKey}
+                  label={t("DashboardCustody.walletAddress")}
+                  tooltip={item.wallet.publicKey}
+                />
+              </span>
+            </TableCell>
+            <TableCell>
+              <div className="flex justify-end">
+                <WalletRowActions
+                  item={item}
+                  pinned={favoriteIds.has(item.wallet.walletId)}
+                  canPin={canPin}
+                  onToggleFavorite={onToggleFavorite}
+                />
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+/**
+ * The tab row's controls: re-read the wallets and their balances, when they last arrived, and
+ * the grid or list toggle. The time is set when a read finishes, so it only renders in the
+ * browser and never differs between the server and the first client render.
+ */
+function WalletsToolbar({
+  view,
+  onViewChange,
+}: {
+  view: WalletsView;
+  onViewChange: (view: WalletsView) => void;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const router = useRouter();
+  const { data, error, isValidating, mutate } = useWalletCardBalances();
+  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const wasValidatingRef = useRef(false);
+
+  // Stamped when a read finishes, or on arrival when the cards' read already finished before
+  // this row mounted.
+  useEffect(() => {
+    const finished = wasValidatingRef.current && !isValidating && !error;
+    const alreadyLoaded = !isValidating && data !== undefined;
+    setRefreshedAt((current) =>
+      finished || (current === null && alreadyLoaded) ? new Date() : current
+    );
+    wasValidatingRef.current = isValidating;
+  }, [data, error, isValidating]);
+
+  const refresh = () => {
+    router.refresh();
+    void mutate();
+  };
+
+  return (
+    <>
+      <span className="flex items-center gap-2 text-body text-tertiary">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={refresh}
+          aria-label={t("DashboardCustody.refreshWallets")}
+          className="-mr-1"
+        >
+          <RotateCwIcon
+            className={cn("size-4", isValidating && "animate-spin motion-reduce:animate-none")}
+          />
+        </Button>
+        {refreshedAt ? (
+          <time dateTime={refreshedAt.toISOString()} data-wallets-refreshed-at>
+            {new Intl.DateTimeFormat(locale, REFRESHED_AT_FORMAT).format(refreshedAt)}
+          </time>
+        ) : null}
+      </span>
+      <SegmentedControl
+        ariaLabel={t("DashboardCustody.walletView")}
+        value={view}
+        onChange={(value) => onViewChange(value === "list" ? "list" : "grid")}
+        options={[
+          {
+            value: "grid",
+            label: t("DashboardCustody.walletViewGrid"),
+            icon: <LayoutGridIcon />,
+          },
+          {
+            value: "list",
+            label: t("DashboardCustody.walletViewList"),
+            icon: <Rows3Icon />,
+          },
+        ]}
+        className="hidden h-control-sm md:flex"
+        optionClassName="px-2.5"
+      />
+    </>
   );
 }
 
 function EmptyWallets({
   canManageCustody,
   configsError,
-  onCreateWallet,
-  providerAvailability,
-}: Pick<WalletsOverviewProps, "canManageCustody" | "configsError" | "onCreateWallet"> & {
-  providerAvailability: CustodyProviderAvailability[];
+}: {
+  canManageCustody: boolean;
+  configsError: string | null;
 }) {
   const t = useTranslations();
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 py-8">
-      <div className="max-w-2xl space-y-2">
-        <h2 className="text-[32px] leading-[1.08] font-medium tracking-[-0.04em] text-primary">
-          {canManageCustody
-            ? t("DashboardCustody.createFirstWallet")
-            : t("DashboardCustody.noWalletsAvailable")}
-        </h2>
-        <p className="text-sm leading-6 text-secondary">
-          {canManageCustody
-            ? t("DashboardCustody.createWalletDescription")
-            : t("DashboardCustody.walletCreationLimited")}
-        </p>
-        {configsError ? <p className="text-sm text-destructive-strong">{configsError}</p> : null}
-      </div>
-
-      <WalletProviderChoices
-        availability={providerAvailability}
-        canSelect={canManageCustody}
-        grouped={false}
-        selectedProvider={null}
-        onSelect={onCreateWallet}
-      />
+    <div className="max-w-md" data-wallets-empty>
+      <h2 className="text-subheading font-medium text-primary">
+        {canManageCustody
+          ? t("DashboardCustody.createFirstWallet")
+          : t("DashboardCustody.noWalletsAvailable")}
+      </h2>
+      <p className="mt-2 text-body text-secondary">
+        {canManageCustody
+          ? t("DashboardCustody.createWalletDescription")
+          : t("DashboardCustody.walletCreationLimited")}
+      </p>
+      {configsError ? <p className="mt-3 text-body text-error">{configsError}</p> : null}
     </div>
   );
 }
 
 export function WalletsOverview({
   canManageCustody,
-  connectedProviders,
-  enabledProviders,
   configsError,
   wallets,
   walletsError,
-  onCreateWallet,
 }: WalletsOverviewProps) {
   const t = useTranslations();
+  const isOverviewTab = useDashboardTab() !== "playground";
   const { replaceSearchParams, searchParams } = useDashboardUrlState();
+  const view: WalletsView = searchParams.get(VIEW_QUERY_PARAM) === "list" ? "list" : "grid";
+  const searchable = wallets.length > WALLET_SEARCH_THRESHOLD;
   const initialSearch = normalizeWalletSearchQuery(
     searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? ""
   );
@@ -241,25 +459,23 @@ export function WalletsOverview({
   const debouncedSearch = useDebounce(normalizeWalletSearchQuery(searchValue), 200);
   const lastUrlSearchRef = useRef(initialSearch);
   const syncingFromUrlRef = useRef<string | null>(null);
-  const providerAvailability = useMemo(
-    () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
-    [connectedProviders, enabledProviders]
-  );
-  const hasAvailableProvider = providerAvailability.some((provider) => provider.isSelectable);
-  const normalizedSearch = normalizeWalletSearchQuery(effectiveSearchValue);
-  const visibleWallets = useMemo(
-    () => filterWallets(wallets, normalizedSearch),
-    [normalizedSearch, wallets]
-  );
-  const walletsWithProvider = useMemo(
-    () =>
-      visibleWallets.map((wallet) => ({
-        wallet,
-        provider: getWalletProvider(wallet),
-      })),
-    [visibleWallets]
-  );
+  // A search left in the URL cannot hide wallets on a page that shows no field to clear it.
+  const normalizedSearch = searchable ? normalizeWalletSearchQuery(effectiveSearchValue) : "";
+  const items = useMemo(() => wallets.map((wallet) => toWalletItem(wallet, t)), [t, wallets]);
+  const visibleItems = useMemo(() => {
+    if (!normalizedSearch) return items;
+    const visible = new Set(filterWallets(wallets, normalizedSearch));
+    return items.filter((item) => visible.has(item.wallet));
+  }, [items, normalizedSearch, wallets]);
   const searchIsPending = deferredSearchValue !== searchValue;
+  const { storageKey } = useWalletFavorites();
+  const { canPin, favoriteIds, toggle } = useWalletFavoriteToggle();
+
+  // A pin keeps the name the list shows now, and a wallet that has gone drops out of the sidebar.
+  useEffect(() => {
+    if (!storageKey || walletsError) return;
+    syncWalletFavorites(storageKey, items.map(toFavorite));
+  }, [items, storageKey, walletsError]);
 
   useEffect(() => {
     const urlSearch = normalizeWalletSearchQuery(searchParams.get(WALLET_SEARCH_QUERY_PARAM) ?? "");
@@ -299,37 +515,48 @@ export function WalletsOverview({
 
   if (walletsError) {
     return (
-      <div className="rounded-[20px] border border-destructive/15 bg-destructive/[0.04] px-5 py-4 text-sm text-destructive-strongest">
-        <p className="font-semibold">{t("DashboardCustody.unableToLoadWallets")}</p>
-        <p className="mt-1">{walletsError}</p>
+      <div role="alert" className="space-y-1 text-body">
+        <p className="font-medium text-error">{t("DashboardCustody.unableToLoadWallets")}</p>
+        <p className="text-secondary">{walletsError}</p>
       </div>
     );
   }
 
   if (wallets.length === 0) {
-    return (
-      <EmptyWallets
-        canManageCustody={canManageCustody}
-        configsError={configsError}
-        onCreateWallet={onCreateWallet}
-        providerAvailability={providerAvailability}
-      />
-    );
+    return <EmptyWallets canManageCustody={canManageCustody} configsError={configsError} />;
   }
+
+  const cards = (
+    <div className="grid gap-5 sm:grid-cols-2" data-wallet-grid>
+      {visibleItems.map((item) => (
+        <WalletCard
+          key={item.wallet.walletId}
+          item={item}
+          pinned={favoriteIds.has(item.wallet.walletId)}
+          canPin={canPin}
+          onToggleFavorite={toggle}
+        />
+      ))}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
-      {configsError ? (
-        <div className="rounded-[18px] border border-border-default bg-fill-subtle px-4 py-3 text-sm text-secondary">
-          {configsError}
-        </div>
+      {isOverviewTab ? (
+        <DashboardHeaderTabsTrailing>
+          <WalletsToolbar
+            view={view}
+            onViewChange={(next) =>
+              replaceSearchParams({ [VIEW_QUERY_PARAM]: next === "list" ? "list" : null })
+            }
+          />
+        </DashboardHeaderTabsTrailing>
       ) : null}
 
-      <div
-        className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
-        data-wallet-search-toolbar
-      >
-        <div className="w-full sm:max-w-md">
+      {configsError ? <p className="text-body text-secondary">{configsError}</p> : null}
+
+      {searchable ? (
+        <div className="max-w-md" data-wallet-search-toolbar>
           <SearchInput
             value={searchValue}
             maxLength={WALLET_SEARCH_MAX_LENGTH}
@@ -338,51 +565,51 @@ export function WalletsOverview({
             clear={{ label: t("DashboardCustody.clearWalletSearch"), onClear: clearSearch }}
           />
           {normalizedSearch ? (
-            <p className="mt-2 text-xs text-secondary" aria-live="polite">
+            <p className="mt-2 text-meta text-secondary" aria-live="polite">
               {t("DashboardCustody.walletSearchResults", {
-                count: visibleWallets.length,
+                count: visibleItems.length,
                 total: wallets.length,
               })}
             </p>
           ) : null}
         </div>
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          {canManageCustody && hasAvailableProvider ? (
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onClick={() => onCreateWallet(null)}
-              iconLeft={<PlusIcon className="h-4 w-4" />}
-            >
-              {t("DashboardCustody.createWallet")}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      ) : null}
 
       <div aria-busy={searchIsPending} data-wallet-search-results>
-        {normalizedSearch && visibleWallets.length === 0 ? (
-          <div className="flex min-h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-border-default bg-surface-raised px-6 text-center">
-            <span className="flex size-11 items-center justify-center rounded-xl bg-fill-subtle text-secondary">
-              <SearchIcon className="size-5" />
-            </span>
-            <h2 className="mt-4 text-base font-medium text-primary">
+        {normalizedSearch && visibleItems.length === 0 ? (
+          <div className="flex flex-col items-start gap-2 py-6">
+            <SearchIcon aria-hidden="true" className="size-5 text-tertiary" />
+            <h2 className="text-body font-medium text-primary">
               {t("DashboardCustody.noWalletSearchResults")}
             </h2>
-            <p className="mt-1 max-w-md text-sm text-secondary">
+            <p className="text-body text-secondary">
               {t("DashboardCustody.noWalletSearchResultsDescription")}
             </p>
-            <Button type="button" variant="secondary" className="mt-4" onClick={clearSearch}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={clearSearch}
+            >
               {t("DashboardCustody.clearWalletSearchAction")}
             </Button>
           </div>
+        ) : view === "list" ? (
+          <>
+            {/* The list needs the width; a phone keeps the cards. */}
+            <div className="md:hidden">{cards}</div>
+            <div className="hidden md:block">
+              <WalletsList
+                items={visibleItems}
+                favoriteIds={favoriteIds}
+                canPin={canPin}
+                onToggleFavorite={toggle}
+              />
+            </div>
+          </>
         ) : (
-          <WalletCardsGrid wallets={walletsWithProvider} canManageCustody={canManageCustody}>
-            {!normalizedSearch && canManageCustody && hasAvailableProvider ? (
-              <CreateWalletTile onClick={() => onCreateWallet(null)} />
-            ) : null}
-          </WalletCardsGrid>
+          cards
         )}
       </div>
     </div>

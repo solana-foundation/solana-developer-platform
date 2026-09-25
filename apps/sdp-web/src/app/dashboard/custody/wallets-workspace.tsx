@@ -2,7 +2,6 @@
 
 import type { CustodyWalletSummary } from "@sdp/types";
 import dynamic from "next/dynamic";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo } from "react";
 import { ApiPlaygroundShellSkeleton } from "@/components/api-playground-shell-skeleton";
 import {
@@ -39,7 +38,6 @@ interface WalletsWorkspaceProps {
   apiBaseUrl: string | null;
   apiKeys: WalletsApiKeyOption[];
   connectedProviders: KnownCustodyProvider[];
-  enabledProviders: KnownCustodyProvider[];
   configsError: string | null;
   wallets: CustodyWalletSummary[];
   walletsError: string | null;
@@ -49,12 +47,10 @@ export function WalletsWorkspace({
   apiBaseUrl,
   apiKeys,
   connectedProviders,
-  enabledProviders,
   configsError,
   wallets,
   walletsError,
 }: WalletsWorkspaceProps) {
-  const router = useRouter();
   const { dashboardAccess, selectedPlaygroundApiKeyId, setPlaygroundApiKeys } =
     useDashboardWorkspace();
   const isPlaygroundTab = useDashboardTab() === "playground";
@@ -85,16 +81,6 @@ export function WalletsWorkspace({
     () => apiKeys.find((key) => key.id === selectedPlaygroundApiKeyId) ?? null,
     [apiKeys, selectedPlaygroundApiKeyId]
   );
-  const openWalletSetup = (provider: KnownCustodyProvider | null) => {
-    const params = new URLSearchParams();
-    if (provider) {
-      params.set("provider", provider);
-    }
-
-    const query = params.toString();
-    router.push(`/dashboard/wallets/setup${query ? `?${query}` : ""}`);
-  };
-
   return (
     <div className="h-full min-h-0 w-full" data-wallet-root>
       <DashboardWorkspaceTabShell
@@ -106,13 +92,10 @@ export function WalletsWorkspace({
             content: (
               <div className="contents" data-wallet-panel="overview">
                 <WalletsOverview
-                  connectedProviders={connectedProviders}
-                  enabledProviders={enabledProviders}
                   configsError={configsError}
                   wallets={wallets}
                   walletsError={walletsError}
                   canManageCustody={dashboardAccess.capabilities.canManageCustody}
-                  onCreateWallet={openWalletSetup}
                 />
               </div>
             ),

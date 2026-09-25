@@ -1,171 +1,62 @@
-"use client";
-
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
-import { useHomeQuickStartPending } from "../use-home-quick-start";
+const BALANCE_ROW_IDS = ["overview-balance-1", "overview-balance-2", "overview-balance-3"];
+const TILE_IDS = ["overview-tile-1", "overview-tile-2", "overview-tile-3", "overview-tile-4"];
+const CHART_IDS = ["overview-chart-1", "overview-chart-2", "overview-chart-3", "overview-chart-4"];
 
-// Mirrors the hero: three context figures under the balance, then the allocation.
-const HERO_STAT_IDS = ["home-hero-stat-1", "home-hero-stat-2", "home-hero-stat-3"];
-const ALLOCATION_ROW_IDS = ["home-alloc-1", "home-alloc-2", "home-alloc-3"];
-const ACTIVITY_ROW_IDS = [
-  "home-table-skeleton-1",
-  "home-table-skeleton-2",
-  "home-table-skeleton-3",
-  "home-table-skeleton-4",
-  "home-table-skeleton-5",
-  "home-table-skeleton-6",
-];
-
+/**
+ * Mirrors the Overview's settled layout: the balance column beside the action tiles, then the
+ * network header over its four charts. The quick start and the approvals list stay out; they
+ * appear only when there is something in them, and a placeholder would promise both.
+ */
 export default function DashboardLoading() {
-  const quickStartPending = useHomeQuickStartPending();
   return (
-    <div className="w-full space-y-8 py-2" data-loading-layout="home" aria-busy="true">
-      {quickStartPending ? null : (
-        <div
-          className="rounded-[18px] border border-border-default bg-surface-raised px-6 py-6"
-          data-loading-home-hero
-        >
-          <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-            <div className="space-y-3">
-              <SkeletonBlock className="h-4 w-28 rounded-[4px]" />
-              <SkeletonBlock className="h-11 w-56 max-w-full rounded-[6px]" />
-            </div>
-            <div className="flex items-center gap-3">
-              <SkeletonBlock className="h-10 w-28 rounded-[10px]" />
-              <SkeletonBlock className="h-10 w-32 rounded-[10px]" />
-            </div>
-          </div>
-
-          <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border-default pt-5 sm:grid-cols-3">
-            {HERO_STAT_IDS.map((id) => (
-              <div key={id} className="space-y-2">
-                <SkeletonBlock className="h-3.5 w-24 rounded-[4px]" />
-                <SkeletonBlock className="h-6 w-20 rounded-[4px]" />
+    <div
+      className="flex w-full min-w-0 flex-col gap-16"
+      data-loading-layout="home"
+      aria-busy="true"
+    >
+      <div className="grid min-w-0 gap-10 lg:grid-cols-2 lg:gap-12" data-loading-home-hero>
+        <div className="min-w-0">
+          <SkeletonBlock className="h-5 w-24 rounded-[4px]" />
+          <SkeletonBlock className="mt-1 h-11 w-56 max-w-full rounded-[6px]" />
+          <div className="mt-8 space-y-2">
+            {BALANCE_ROW_IDS.map((id) => (
+              <div key={id} className="flex h-11 items-center gap-4">
+                <SkeletonBlock className="size-9 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <SkeletonBlock className="h-4 w-16 rounded-[4px]" />
+                  <SkeletonBlock className="h-3.5 w-20 rounded-[4px]" />
+                </div>
+                <SkeletonBlock className="h-4 w-20 rounded-[4px]" />
               </div>
             ))}
           </div>
-
-          <div className="mt-6 space-y-4 border-t border-border-default pt-5">
-            <div className="flex items-center justify-between">
-              <SkeletonBlock className="h-4 w-32 rounded-[4px]" />
-              <SkeletonBlock className="h-4 w-20 rounded-[4px]" />
-            </div>
-            <SkeletonBlock className="h-2.5 w-full rounded-full" />
-            <div className="space-y-1">
-              {ALLOCATION_ROW_IDS.map((id) => (
-                <div key={id} className="flex items-center gap-3 px-2 py-2">
-                  <SkeletonBlock className="size-6 shrink-0 rounded-full" />
-                  <SkeletonBlock className="h-4 w-24 rounded-[4px]" />
-                  <div className="flex-1" />
-                  <SkeletonBlock className="h-4 w-10 rounded-[4px]" />
-                  <SkeletonBlock className="h-4 w-20 rounded-[4px]" />
-                </div>
-              ))}
-            </div>
+          <div className="mt-9 border-t border-border-default pt-6">
+            <SkeletonBlock className="h-6 w-72 max-w-full rounded-[4px]" />
           </div>
         </div>
-      )}
-
-      <Card className="min-w-0 overflow-hidden bg-surface-raised" data-loading-home-activity>
-        <CardHeader
-          className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
-          data-loading-home-activity-header
-        >
-          <div className={quickStartPending ? "min-w-0 space-y-1" : "min-w-0 space-y-2"}>
-            <SkeletonBlock className="h-6 w-52 max-w-full rounded-[4px]" />
-            <SkeletonBlock
-              className={
-                quickStartPending
-                  ? "h-10 w-72 max-w-full rounded-[4px] sm:h-5"
-                  : "h-4 w-72 max-w-full rounded-[4px]"
-              }
-            />
-          </div>
-          <SkeletonBlock className="h-9 w-20 rounded-[10px]" />
-        </CardHeader>
-        <CardContent data-loading-table data-loading-home-activity-table>
-          {quickStartPending ? (
-            <SkeletonBlock className="h-10 w-96 max-w-full rounded-[4px] sm:h-5" />
-          ) : (
-            <Table className="min-w-0 [&_table]:table-fixed">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[8rem] pl-6" data-loading-home-activity-column="time">
-                    <SkeletonBlock className="h-4 w-16" />
-                  </TableHead>
-                  <TableHead
-                    className="w-[calc(100%_-_8rem)] md:hidden"
-                    data-loading-home-activity-column="activity"
-                  >
-                    <SkeletonBlock className="h-4 w-20" />
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-[12rem] md:table-cell"
-                    data-loading-home-activity-column="type"
-                  >
-                    <SkeletonBlock className="h-4 w-16" />
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-[12rem] md:table-cell"
-                    data-loading-home-activity-column="token"
-                  >
-                    <SkeletonBlock className="h-4 w-16" />
-                  </TableHead>
-                  <TableHead
-                    className="hidden w-[9rem] md:table-cell"
-                    data-loading-home-activity-column="amount"
-                  >
-                    <SkeletonBlock className="h-4 w-20" />
-                  </TableHead>
-                  <TableHead
-                    className="hidden pr-6 md:table-cell"
-                    data-loading-home-activity-column="address"
-                  >
-                    <SkeletonBlock className="h-4 w-24" />
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ACTIVITY_ROW_IDS.map((id) => (
-                  <TableRow key={id} data-loading-home-activity-row>
-                    <TableCell className="pl-6">
-                      <SkeletonBlock className="h-4 w-16 max-w-full" />
-                    </TableCell>
-                    <TableCell className="min-w-0 md:hidden">
-                      <div className="min-w-0" data-loading-home-mobile-activity>
-                        <SkeletonBlock className="h-4 w-24 max-w-full" />
-                        <SkeletonBlock className="mt-1 h-3 w-20 max-w-full" />
-                        <SkeletonBlock className="mt-1 h-3 w-32 max-w-full" />
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <SkeletonBlock className="h-4 w-24 max-w-full" />
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <SkeletonBlock className="h-4 w-16 max-w-full" />
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <SkeletonBlock className="h-4 w-24 max-w-full" />
-                    </TableCell>
-                    <TableCell className="hidden pr-6 md:table-cell">
-                      <SkeletonBlock className="h-3 w-32 max-w-full" />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+        <div className="grid min-w-0 grid-cols-2 content-start gap-2">
+          {TILE_IDS.map((id) => (
+            <SkeletonBlock key={id} className="h-[120px] rounded-control" />
+          ))}
+        </div>
+      </div>
+      <div className="min-w-0" data-loading-home-network>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SkeletonBlock className="h-6 w-44 rounded-[4px]" />
+          <SkeletonBlock className="h-control-sm w-80 max-w-full rounded-control" />
+        </div>
+        <div className="mt-5 grid min-w-0 gap-x-12 gap-y-10 md:grid-cols-2">
+          {CHART_IDS.map((id) => (
+            <div key={id} className="min-w-0">
+              <SkeletonBlock className="h-5 w-36 rounded-[4px]" />
+              <SkeletonBlock className="mt-1 h-[30px] w-32 rounded-[4px]" />
+              <SkeletonBlock className="mt-5 h-[182px] w-full rounded-control" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

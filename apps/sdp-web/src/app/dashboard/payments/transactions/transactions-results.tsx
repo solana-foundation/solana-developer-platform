@@ -17,9 +17,11 @@ import {
 } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { transactionHref } from "@/lib/payments-routes";
+import { cn } from "@/lib/utils";
 import { resolveTokenByMint, shortenAddress } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
+import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import { kindLabel, useTransactionStatus } from "./transaction-status";
 import type { TransactionsPageResult } from "./transactions-page.data";
 import { useTransactionFilters } from "./transactions-workspace";
@@ -55,14 +57,24 @@ export function TransactionsResults({
         <Table className="min-w-[760px] rounded-none border-0">
           <TableHeader>
             <TableRow>
-              <TableHead>{t("DashboardPayments.transactions.status")}</TableHead>
-              <TableHead>{t("DashboardPayments.transactions.type")}</TableHead>
-              <TableHead className="text-right">
+              <TableHead className={PAYMENTS_TABLE_HEAD}>
+                {t("DashboardPayments.transactions.status")}
+              </TableHead>
+              <TableHead className={PAYMENTS_TABLE_HEAD}>
+                {t("DashboardPayments.transactions.type")}
+              </TableHead>
+              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
                 {t("DashboardPayments.transactions.amount")}
               </TableHead>
-              <TableHead>{t("DashboardPayments.transactions.contact")}</TableHead>
-              <TableHead>{t("DashboardPayments.transactions.wallet")}</TableHead>
-              <TableHead>{t("DashboardPayments.transactions.created")}</TableHead>
+              <TableHead className={PAYMENTS_TABLE_HEAD}>
+                {t("DashboardPayments.transactions.contact")}
+              </TableHead>
+              <TableHead className={PAYMENTS_TABLE_HEAD}>
+                {t("DashboardPayments.transactions.wallet")}
+              </TableHead>
+              <TableHead className={PAYMENTS_TABLE_HEAD}>
+                {t("DashboardPayments.transactions.created")}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -95,20 +107,22 @@ export function TransactionsResults({
                   }}
                   className="cursor-pointer"
                 >
-                  <TableCell>
-                    <StatusText tone={status.tone} className="text-body">
+                  <TableCell className={PAYMENTS_TABLE_CELL}>
+                    <StatusText tone={status.tone} className="text-meta leading-5">
                       {status.label}
                     </StatusText>
                   </TableCell>
-                  <TableCell className="text-body text-secondary">
+                  <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-secondary")}>
                     {kindLabel(t, transaction)}
                   </TableCell>
-                  <TableCell className="text-right text-body whitespace-nowrap tabular-nums">
+                  <TableCell
+                    className={cn(PAYMENTS_TABLE_CELL, "text-right whitespace-nowrap tabular-nums")}
+                  >
                     {transaction.amount === null ? (
                       <span className="text-tertiary">—</span>
                     ) : (
                       <>
-                        <span className="text-primary">
+                        <span className="font-medium text-primary">
                           {formatDecimalAmount(transaction.amount, locale)}
                         </span>
                         {token === null ? null : <span className="text-secondary"> {token}</span>}
@@ -116,18 +130,20 @@ export function TransactionsResults({
                     )}
                   </TableCell>
                   <TableCell
-                    className="max-w-48 truncate text-body text-primary"
+                    className={cn(PAYMENTS_TABLE_CELL, "max-w-48 truncate text-primary")}
                     title={contact ?? undefined}
                   >
                     {contact ?? <span className="text-tertiary">—</span>}
                   </TableCell>
                   <TableCell
-                    className="max-w-44 truncate text-body text-secondary"
+                    className={cn(PAYMENTS_TABLE_CELL, "max-w-44 truncate text-secondary")}
                     title={wallet ?? undefined}
                   >
                     {wallet ?? <span className="text-tertiary">—</span>}
                   </TableCell>
-                  <TableCell className="text-body whitespace-nowrap text-secondary">
+                  <TableCell
+                    className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary")}
+                  >
                     {formatDateTime(transaction.createdAt, locale)}
                   </TableCell>
                 </TableRow>

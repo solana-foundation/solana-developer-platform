@@ -586,10 +586,8 @@ describe("Contacts", () => {
       }>(`/api/dashboard/counterparty/${encodeURIComponent(counterpartyId)}/provider-accounts`);
       expect(providerAccounts.ok).toBe(true);
       const rows = providerAccounts.ok ? providerAccounts.data.data.accounts : [];
-      // Jane Smith and Acme Logistics have a payout account; everyone else has none.
-      expect(rows).toHaveLength(
-        counterpartyId === "demo_cpty_jane" || counterpartyId === "demo_cpty_acme" ? 1 : 0
-      );
+      // Every demo contact has a payout account, so the page's tables all have rows.
+      expect(rows).toHaveLength(1);
       for (const row of rows) {
         expect(row).toMatchObject({ kind: "payout_account", status: "active" });
         expect(row.accountNumberLast4).toMatch(/^\d{4}$/);

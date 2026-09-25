@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowDownIcon,
   ArrowLeftIcon,
   ChevronLeftIcon,
   DownloadIcon,
@@ -20,6 +21,7 @@ import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import {
   PAYMENT_REQUEST_NEW_HREF,
@@ -59,12 +61,14 @@ export type DashboardHeaderActionConfig = {
   label: string;
   href: string;
   /** Left out for a plain label, as a contact page's Pay is. */
-  icon?: "plus" | "download";
+  icon?: "plus" | "download" | "arrow-down";
   variant: "primary" | "outline";
   /** Appends the page's current query string, so an export follows the list's filters. */
   withCurrentQuery?: boolean;
   /** A file download rather than a page: rendered as a plain anchor with `download`. */
   download?: boolean;
+  /** Hidden from a viewer without this capability, whose click would only reach a refusal. */
+  capability?: keyof DashboardCapabilities;
 };
 
 /**
@@ -80,7 +84,14 @@ export function DashboardHeaderAction({
   action: DashboardHeaderActionConfig;
   search: string;
 }) {
-  const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
+  const Icon =
+    action.icon === undefined
+      ? null
+      : action.icon === "plus"
+        ? PlusIcon
+        : action.icon === "arrow-down"
+          ? ArrowDownIcon
+          : DownloadIcon;
   const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
   const content = (
     <>
@@ -120,6 +131,8 @@ type DashboardTopBarProps = {
   layout?: "base" | "refresh";
   /** Page-level controls at the title row's end (Payments puts its demo switch here). */
   utilities?: ReactNode;
+  /** Shown before a refresh page's title, as a wallet's provider mark is. */
+  mark?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -208,6 +221,7 @@ export function StackedDashboardTopBar({
   trailingContent,
   hideTitle = false,
   above,
+  mark,
 }: {
   navigation: ReactNode;
   title: string;
@@ -216,6 +230,8 @@ export function StackedDashboardTopBar({
   hideTitle?: boolean;
   /** Set over the title in its column: a refresh action page's way back. */
   above?: ReactNode;
+  /** Set before the title, 16px from it (a wallet's 48px provider mark). */
+  mark?: ReactNode;
 }) {
   return (
     <div
@@ -227,10 +243,19 @@ export function StackedDashboardTopBar({
         <h1 className="sr-only">{title}</h1>
       ) : (
         <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {above ? <div className="mb-2">{above}</div> : null}
-          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-            {title}
-          </h1>
+          {above ? <div className={mark ? "mb-4" : "mb-2"}>{above}</div> : null}
+          {mark ? (
+            <div className="flex min-w-0 items-center gap-4">
+              <span className="shrink-0">{mark}</span>
+              <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+                {title}
+              </h1>
+            </div>
+          ) : (
+            <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
+              {title}
+            </h1>
+          )}
         </div>
       )}
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
@@ -340,6 +365,7 @@ export function DashboardTopBar({
   above,
   layout = "base",
   utilities,
+  mark,
 }: DashboardTopBarProps) {
   const utilityContent = utilities ?? null;
   const trailingContent = action ? (
@@ -363,6 +389,7 @@ export function DashboardTopBar({
         title={title}
         hideTitle={titleVisibility === "screen-reader-only"}
         above={above}
+        mark={mark}
         action={action}
         trailingContent={utilityContent}
       />
@@ -682,7 +709,9 @@ function getMarketsRoutePageConfig(
 
 function getWalletRoutePageConfig(
   pathname: string,
-  t: ReturnType<typeof useTranslations>
+  t: ReturnType<typeof useTranslations>,
+  policiesEnabled: boolean,
+  paymentsEnabled: boolean
 ): DashboardPageConfig | null {
   const walletPolicyRouteMatch = pathname.match(
     /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
@@ -702,18 +731,38 @@ function getWalletRoutePageConfig(
     });
   }
 
+  const walletDetailMatch = pathname.match(/^\/dashboard\/(?:wallets|custody)\/([^/]+)\/?$/);
   const isWalletDetail =
-    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
-    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+    walletDetailMatch !== null &&
+    !["setup", "connections", "switch"].includes(walletDetailMatch[1] ?? "");
   if (!isWalletDetail) return null;
 
+  // The wallet names itself (and sets its provider mark and star) through DashboardPageTitle;
+  // "Wallet" holds the place until it does. Policy is a tab only where wallet policies are on.
   return {
-    title: t("Shared.dashboardShell.wallets"),
-    contentWidthClass: "max-w-none",
+    title: t("Shared.dashboardShell.wallet"),
+    contentWidthClass: REFRESH_PAGE_WIDTH,
     backAction: {
       href: "/dashboard/wallets",
-      label: t("Shared.dashboardShell.backToWallets"),
+      label: t("Shared.dashboardShell.wallets"),
     },
+    headerTabs: {
+      tabs: [
+        { id: "overview", label: t("Shared.tabs.overview") },
+        { id: "activity", label: t("Shared.tabs.activity") },
+        ...(policiesEnabled ? [{ id: "policy", label: t("Shared.tabs.policy") }] : []),
+        { id: "settings", label: t("Shared.tabs.settings") },
+      ],
+      hideOnMobile: false,
+    },
+    headerAction: paymentsEnabled
+      ? {
+          label: t("Shared.dashboardShell.deposit"),
+          href: "/dashboard/payments/deposit",
+          icon: "arrow-down",
+          variant: "primary",
+        }
+      : undefined,
   };
 }
 
@@ -871,21 +920,30 @@ function getWalletSectionPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>
 ): DashboardPageConfig | null {
+  // The list and the create flow are built on the refresh design: a left title over the
+  // design's 900px column with the page's one action beside it.
   if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
     return {
       title: t("Shared.dashboardShell.wallets"),
       headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("Shared.dashboardShell.createAWallet"),
+        href: "/dashboard/wallets/setup",
+        icon: "plus",
+        variant: "primary",
+        capability: "canManageCustody",
+      },
     };
   }
+  // The flow names itself in its step header, as the design draws it; the title stays for
+  // assistive tech and the footer's Cancel is the way back.
   if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
     return {
       title: t("Shared.dashboardShell.createWallet"),
+      hideTitle: true,
       contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/wallets",
-        label: t("Shared.dashboardShell.backToWallets"),
-      },
+      headerWidthClass: "max-w-flow",
     };
   }
   if (
@@ -1038,23 +1096,22 @@ export function getDashboardPageConfig(
   assetProfilesEnabled: boolean,
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
-  _paymentsEnabled = true,
-  _policiesEnabled = true
+  paymentsEnabled = true,
+  policiesEnabled = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
-    // Home names itself: the sidebar marks it active and the page opens on a
-    // balance. A 36px "Home" above that spent a slice of the viewport saying
-    // nothing, so the workspace renders an sr-only heading instead.
+    // The Overview is built on the refresh design: a left title over the same 900px column
+    // as the Payments pages.
     return {
       title: t("Shared.dashboardShell.home"),
-      hideTitle: true,
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/tokens") {
-    // Reached from the home allocation card, so it carries a way back rather than
+    // Reached from the Overview's holdings, so it carries a way back rather than
     // relying on the sidebar, which does not list it.
     return {
       title: t("Shared.dashboardShell.holdings"),
@@ -1067,7 +1124,12 @@ export function getDashboardPageConfig(
   }
   const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = getWalletRoutePageConfig(pathname, t);
+  const walletRoutePageConfig = getWalletRoutePageConfig(
+    pathname,
+    t,
+    policiesEnabled,
+    paymentsEnabled
+  );
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
     return {

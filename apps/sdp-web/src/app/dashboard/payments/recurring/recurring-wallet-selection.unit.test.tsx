@@ -16,7 +16,10 @@ import { I18nProvider } from "@/i18n/provider";
 import { RecurringPaymentCreateWorkspace } from "./recurring-payment-create-workspace";
 import { RecurringPaymentDetailWorkspace } from "./recurring-payment-detail-workspace";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/dashboard/payments/recurring/prp_test",
+}));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
   useDashboardWorkspace: () => ({
     dashboardCacheScope: { orgId: "org_test", userId: "user_test" },
@@ -144,14 +147,12 @@ describe("Recurring Payment exact source selection", () => {
         issuedTokensByMint={{}}
         counterpartyAccounts={[account]}
         counterpartyLabel="Receiver"
-        amountLabel="1 USDC"
         collectionAttempts={[]}
         collectionAttemptsTotal={0}
       />,
       { wrapper }
     );
-    await user.click(screen.getByRole("button", { name: "Actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Edit schedule" }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.click(screen.getByRole("button", { name: "Funding wallet" }));
     expect(await screen.findByRole("button", { name: /Other Project/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
@@ -233,28 +234,27 @@ describe("Recurring Payment exact source selection", () => {
           issuedTokensByMint={{}}
           counterpartyAccounts={[]}
           counterpartyLabel="Receiver"
-          amountLabel="1 USDC"
           collectionAttempts={[]}
           collectionAttemptsTotal={0}
         />,
         { wrapper }
       );
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "Actions" }));
-      const edit = screen.getByRole("menuitem", { name: "Edit schedule" });
       if (unavailableWallet === "current") {
         // Nothing about an active payment can be saved without its wallet's
-        // signature, so the editor stays shut and the band carries the reason.
-        expect(edit.getAttribute("aria-disabled")).toBe("true");
-        expect(
-          screen.getByText(
-            /You cannot collect, change, or cancel this schedule until signing is enabled for Treasury/
-          )
-        ).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+        // signature, so there is no Edit and the band carries the reason.
+        await waitFor(() =>
+          expect(
+            screen.getByText(
+              /You cannot collect, change, or cancel this schedule until signing is enabled for Treasury/
+            )
+          ).toBeTruthy()
+        );
+        expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
         return;
       }
-      await user.click(edit);
+      await user.click(screen.getByRole("button", { name: "Edit" }));
       await user.click(screen.getByRole("button", { name: "Funding wallet" }));
       // A restricted replacement is listed and badged, but not on offer: the
       // click changes nothing and the current wallet stays selected.

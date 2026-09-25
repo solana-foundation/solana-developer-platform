@@ -56,3 +56,11 @@ export function formatPurpose(value: string | null, t: Translate): string | null
       return value.replaceAll("_", " ");
   }
 }
+
+/**
+ * The purpose as the wallet list names it: `formatPurpose`, except that a root wallet says so
+ * ("Root wallet") rather than going unnamed.
+ */
+export function formatWalletPurposeLabel(value: string | null, t: Translate): string | null {
+  return value === "root" ? t("DashboardCustody.rootWallet") : formatPurpose(value, t);
+}
