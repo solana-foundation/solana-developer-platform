@@ -216,6 +216,14 @@ function readMuralOrganizationRecord(
   return readMuralOrganization(counterparty.provider_data.mural);
 }
 
+/** The Mural organization id a counterparty's provider_data is keyed on, or undefined. */
+function readMuralOrganizationId(
+  organization: Record<string, unknown> | undefined
+): string | undefined {
+  const id = organization?.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 /** A non-decision status arriving after a recorded decision is a replayed stale event. */
 function isStaleMuralKycStatus(
   currentOrganization: Record<string, unknown> | undefined,
@@ -274,18 +282,43 @@ async function handleOrganizationLifecycleEvent(
       // status that was actually current when its write landed — the ledger
       // never retells a transition from a status another writer replaced.
       const locked = await client
-        .prepare("SELECT provider_data FROM counterparties WHERE id = ? FOR UPDATE")
+        .prepare(
+          "SELECT status, mural_organization_id, provider_data FROM counterparties WHERE id = ? FOR UPDATE"
+        )
         .bind(counterparty.id)
-        .first<{ provider_data: unknown }>();
+        .first<{
+          status: string;
+          mural_organization_id: string | null;
+          provider_data: unknown;
+        }>();
       if (!locked) {
-        // The counterparty was archived or removed between the lookup and the
-        // lock; there is nothing left to mutate or admit.
+        // The counterparty was removed between the lookup and the lock;
+        // there is nothing left to mutate or admit.
         skipped = true;
         return;
       }
       const currentOrganization = readMuralOrganization(
         asPostgresJsonObject(locked.provider_data).mural
       );
+      // Re-validated under the lock: the patch below and the audit outcome
+      // both target the Mural organization this row was looked up by, not an
+      // immutable row id, so the locked row must still be active and still
+      // own that organization. An archive-and-reassign inside the lookup
+      // window must not mutate a successor counterparty while the audit
+      // record names the archived one — or nobody. The effective-reference
+      // unique index (column first, JSON fallback) guarantees an active row
+      // matching this organization can only be this row.
+      if (
+        locked.status !== "active" ||
+        (locked.mural_organization_id ?? readMuralOrganizationId(currentOrganization)) !==
+          event.organizationId
+      ) {
+        skipped = true;
+        getLogger().info(
+          `[mural webhook] ignoring lifecycle event: counterparty ${counterparty.id} is no longer the active owner of Mural organization ${event.organizationId}`
+        );
+        return;
+      }
       if (
         event.kind === "kyc_status" &&
         isStaleMuralKycStatus(currentOrganization, event.kycStatus)

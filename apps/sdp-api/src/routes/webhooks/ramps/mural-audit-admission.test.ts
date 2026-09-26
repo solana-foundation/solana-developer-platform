@@ -1,5 +1,5 @@
 import { createSign, generateKeyPairSync } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { MuralWebhookProcessor } from "@/routes/webhooks/ramps/mural";
@@ -7,6 +7,50 @@ import { applyStoredRampWebhookEvent } from "@/services/jobs/replay-ramp-webhook
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+
+/**
+ * Simulates a concurrent writer winning the race between the counterparty
+ * lookup and the transaction lock inside the lifecycle handler: the wrapped
+ * lookup returns the real row after archiving it ("archive") or after
+ * pointing its denormalized Mural organization id elsewhere ("reassign").
+ * Off by default, so every other test exercises the unmocked flow.
+ */
+const concurrentWriter = vi.hoisted(() => ({
+  mode: "off" as "off" | "archive" | "reassign",
+}));
+
+vi.mock("@/db/repositories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db/repositories")>();
+  return {
+    ...actual,
+    createSystemCounterpartiesRepository: (
+      ...args: Parameters<typeof actual.createSystemCounterpartiesRepository>
+    ) => {
+      const repo = actual.createSystemCounterpartiesRepository(...args);
+      if (concurrentWriter.mode === "off") {
+        return repo;
+      }
+      const [mockEnv] = args;
+      const lookup = repo.findCounterpartyByMuralOrganizationId.bind(repo);
+      repo.findCounterpartyByMuralOrganizationId = async (organizationId: string) => {
+        const found = await lookup(organizationId);
+        if (!found) {
+          return found;
+        }
+        await getDb(mockEnv)
+          .prepare(
+            concurrentWriter.mode === "archive"
+              ? "UPDATE counterparties SET status = 'archived' WHERE id = ?"
+              : "UPDATE counterparties SET mural_organization_id = 'mural_org_reassigned_away' WHERE id = ?"
+          )
+          .bind(found.id)
+          .run();
+        return found;
+      };
+      return repo;
+    },
+  };
+});
 
 /**
  * Regression test for SOLA9-580: a signed Mural KYC/TOS lifecycle webhook
@@ -415,5 +459,99 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
     // No mutation, no admission: the stale event is only acknowledged.
     const auditRows = await readAuditRows(organizationId);
     expect(auditRows).toHaveLength(0);
+  });
+
+  /**
+   * An archive-and-reassign racing the lookup window must not produce an
+   * audit outcome: the handler re-validates under the lock that the locked
+   * row is still active and still owns the Mural organization the event
+   * names, and acknowledges the delivery instead of mutating or admitting.
+   */
+  it("ignores the lifecycle event when the counterparty is archived between lookup and lock", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    concurrentWriter.mode = "archive";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_archived_race",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    expect(applied).toBe(true);
+
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("pending");
+    expect(wallet?.kyc_status).toBe("pending");
+
+    // No admission for a counterparty the event no longer applies to, and
+    // the delivery is acknowledged: the inbox row is deleted on success.
+    const auditRows = await readAuditRows(organizationId);
+    expect(auditRows).toHaveLength(0);
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(0);
+  });
+
+  it("ignores the lifecycle event when the Mural organization was reassigned away between lookup and lock", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    concurrentWriter.mode = "reassign";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_reassigned_race",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    expect(applied).toBe(true);
+
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data, mural_organization_id FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{
+        provider_data: { mural?: { organization?: { kycStatus?: string } } };
+        mural_organization_id: string;
+      }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("pending");
+    expect(counterparty?.mural_organization_id).toBe("mural_org_reassigned_away");
+    expect(wallet?.kyc_status).toBe("pending");
+
+    const auditRows = await readAuditRows(organizationId);
+    expect(auditRows).toHaveLength(0);
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(0);
   });
 });
