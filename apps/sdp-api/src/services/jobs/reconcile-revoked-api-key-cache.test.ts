@@ -55,13 +55,18 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
 });
 
 import { getDb } from "@/db";
+import app from "@/index";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
+import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
-import { reconcileRevokedApiKeyCache } from "./reconcile-revoked-api-key-cache";
+import {
+  ROTATED_DEADLINE_CURSOR_CACHE_KEY,
+  reconcileRevokedApiKeyCache,
+} from "./reconcile-revoked-api-key-cache";
 
 const TEST_ORG = {
   id: "org_reconcile_sweep",
@@ -256,5 +261,232 @@ describe("reconcileRevokedApiKeyCache", () => {
     // processes exactly the limit and leaves the rest for the next tick.
     const limited = await reconcileRevokedApiKeyCache(env, { scanLimit: 10 });
     expect(limited.scanned).toBe(10);
+  });
+});
+
+/**
+ * Regression tests for the Apex finding SOLA9-554: the rotated scan pages
+ * active rows by `rotation_deadline` with LIMIT before any Redis read, so a
+ * converged row occupying the top of the ordering is reselected on every
+ * sweep while a later stale row is never inspected — and the former bearer
+ * keeps authenticating from its pre-rotation cache snapshot.
+ *
+ * The rotated worklist must make progress: every eligible row is eventually
+ * inspected no matter how many converged rows sit ahead of it.
+ */
+describe("rotated scan starvation (SOLA9-554)", () => {
+  const STARVATION_ORG = {
+    id: "org_rotated_starvation",
+    name: "Rotated Starvation Org",
+    slug: "rotated-starvation-org",
+  };
+  const STARVATION_PROJECT = { id: "prj_rotated_starvation", slug: "rotated-starvation" };
+  const STARVATION_USER = { id: "usr_rotated_starvation", email: "rotated-starvation@example.com" };
+
+  const BLOCKER = { id: "key_rotated_blocker", raw: "sk_test_rotated_blocker" };
+  const TARGET = { id: "key_rotated_target", raw: "sk_test_rotated_target" };
+
+  function starvationEntry(keyId: string, rotationDeadline: string | null): CachedApiKey {
+    return {
+      id: keyId,
+      organizationId: STARVATION_ORG.id,
+      projectId: STARVATION_PROJECT.id,
+      role: "api_admin",
+      permissions: ["*"],
+      environment: "sandbox",
+      rateLimitTier: "standard",
+      allowedIps: null,
+      signingWalletId: null,
+      signingWalletIds: [],
+      walletBindings: [],
+      status: "active",
+      expiresAt: null,
+      rotationDeadline,
+    };
+  }
+
+  async function seedActiveRotatedKey(
+    key: { id: string; raw: string },
+    rotationDeadline: string
+  ): Promise<string> {
+    const hash = await hashString(key.raw, env.API_KEY_PEPPER);
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash,
+            role, permissions, status, rotation_deadline)
+         VALUES (?, ?, ?, ?, ?, 'sk_test_rot', ?, 'api_admin', ?, 'active', ?)`
+      )
+      .bind(
+        key.id,
+        STARVATION_ORG.id,
+        STARVATION_PROJECT.id,
+        STARVATION_USER.id,
+        key.id,
+        hash,
+        JSON.stringify(["*"]),
+        rotationDeadline
+      )
+      .run();
+    return hash;
+  }
+
+  /** The cache entry a rotation's failed post-commit write leaves behind. */
+  async function seedStalePreRotationEntry(keyId: string, keyHash: string): Promise<void> {
+    await seedCachedApiKey(env, keyHash, starvationEntry(keyId, null));
+  }
+
+  /** Probe through the real app so auth runs exactly as deployed. */
+  function authenticate(rawKey: string) {
+    return app.request(
+      `/v1/organizations/${STARVATION_ORG.id}`,
+      { headers: { Authorization: `Bearer ${rawKey}` } },
+      env
+    );
+  }
+
+  beforeEach(async () => {
+    await seedTestDatabase(env);
+    await clearKVStores(env);
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
+        .bind(STARVATION_ORG.id, STARVATION_ORG.name, STARVATION_ORG.slug, "individual", "active"),
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, ?, ?)")
+        .bind(STARVATION_USER.id, STARVATION_USER.email, 1, "active"),
+    ]);
+    await seedDefaultProjects(getDb(env), {
+      organizationId: STARVATION_ORG.id,
+      createdBy: STARVATION_USER.id,
+      members: [],
+      ids: { sandbox: STARVATION_PROJECT.id, production: `${STARVATION_PROJECT.id}_production` },
+    });
+  });
+
+  afterEach(async () => {
+    await clearKVStores(env);
+  });
+
+  it("advances past a converged rotated row to inspect and repair a later deadline entry", async () => {
+    // The blocker: deadline in the future, cache entry already carries it —
+    // converged, and selected first by the newest-deadline ordering.
+    const blockerDeadline = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+    const blockerHash = await seedActiveRotatedKey(BLOCKER, blockerDeadline);
+    await seedCachedApiKey(env, blockerHash, starvationEntry(BLOCKER.id, blockerDeadline));
+
+    // The target: deadline already reached in Postgres, but the cache still
+    // holds the pre-rotation snapshot with no deadline at all — the sweep's
+    // one durable path to untrust the former bearer.
+    const targetDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const targetHash = await seedActiveRotatedKey(TARGET, targetDeadline);
+    await seedStalePreRotationEntry(TARGET.id, targetHash);
+
+    // One row per sweep: the first tick inspects only the converged blocker.
+    const firstSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(firstSweep.scanned).toBe(1);
+    expect(firstSweep.repaired).toBe(0);
+
+    // The next tick must resume after the blocker instead of reselecting it
+    // forever: the target is inspected and its stale entry repaired.
+    const secondSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(secondSweep.scanned).toBe(1);
+    expect(secondSweep.repaired).toBe(1);
+
+    const kv = createKVStoreSet(env).apiKeys;
+    const targetCache = await kv.get<CachedApiKey>(apiKeyCacheKey(targetHash), "json");
+    expect(targetCache?.rotationDeadline).toBe(targetDeadline);
+
+    // Negative control: the converged blocker is left untouched.
+    const blockerCache = await kv.get<CachedApiKey>(apiKeyCacheKey(blockerHash), "json");
+    expect(blockerCache?.rotationDeadline).toBe(blockerDeadline);
+
+    // The former bearer is no longer trusted: the authoritative deadline is
+    // reached, and cache-hit auth must agree with Postgres.
+    expect(isRotationDeadlineReached(targetCache?.rotationDeadline)).toBe(true);
+    const rejected = await authenticate(TARGET.raw);
+    expect(rejected.status).toBe(401);
+
+    // Supported flow preserved: the blocker's own bearer still authenticates
+    // — its deadline is genuinely in the future and its cache is converged.
+    const stillAuthorized = await authenticate(BLOCKER.raw);
+    expect(stillAuthorized.status).toBe(200);
+  });
+
+  it("tie-breaks same-deadline rows by key hash so a tie cannot hide a stale row", async () => {
+    // Identical deadline strings: only the (deadline, key_hash) tuple makes
+    // the worklist order deterministic enough to resume from.
+    const sharedDeadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const first = { id: "key_rotated_tie_a", raw: "sk_test_rotated_tie_a" };
+    const second = { id: "key_rotated_tie_b", raw: "sk_test_rotated_tie_b" };
+    const firstHash = await seedActiveRotatedKey(first, sharedDeadline);
+    const secondHash = await seedActiveRotatedKey(second, sharedDeadline);
+    await seedStalePreRotationEntry(first.id, firstHash);
+    await seedStalePreRotationEntry(second.id, secondHash);
+
+    // One row per sweep; each sweep must repair a different row, so both
+    // stale entries are repaired within two ticks.
+    const firstSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(firstSweep.repaired).toBe(1);
+    const secondSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(secondSweep.repaired).toBe(1);
+
+    const kv = createKVStoreSet(env).apiKeys;
+    const firstCache = await kv.get<CachedApiKey>(apiKeyCacheKey(firstHash), "json");
+    const secondCache = await kv.get<CachedApiKey>(apiKeyCacheKey(secondHash), "json");
+    expect(firstCache?.rotationDeadline).toBe(sharedDeadline);
+    expect(secondCache?.rotationDeadline).toBe(sharedDeadline);
+  });
+
+  it("resets its resume position after draining the rotated worklist", async () => {
+    const blockerDeadline = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+    const blockerHash = await seedActiveRotatedKey(BLOCKER, blockerDeadline);
+    await seedCachedApiKey(env, blockerHash, starvationEntry(BLOCKER.id, blockerDeadline));
+
+    // Tick 1 inspects the blocker and parks after it; tick 2 finds nothing
+    // below (the cursor must have actually advanced); tick 3 starts from the
+    // newest deadline again, so rows landing ahead of the resume position are
+    // never stranded behind it.
+    const firstSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(firstSweep.scanned).toBe(1);
+    const secondSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(secondSweep.scanned).toBe(0);
+    const thirdSweep = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(thirdSweep.scanned).toBe(1);
+    expect(thirdSweep.repaired).toBe(0);
+  });
+
+  it("leaves a rotated row with no cache entry as a safe miss", async () => {
+    // Cache-miss safety is load-bearing: an empty slot must stay empty (the
+    // next request re-reads Postgres through the verified fill path) — the
+    // sweep must never install non-terminal state into it.
+    const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const keyHash = await seedActiveRotatedKey(TARGET, deadline);
+
+    const outcome = await reconcileRevokedApiKeyCache(env);
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(0);
+
+    const slot = await createKVStoreSet(env).apiKeys.get(apiKeyCacheKey(keyHash));
+    expect(slot).toBeNull();
+  });
+
+  it("treats a malformed persisted cursor as absent", async () => {
+    // A corrupted cursor must degrade to the pre-cursor behavior (start from
+    // the newest deadline), never crash the cron or wedge the worklist.
+    const deadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const targetHash = await seedActiveRotatedKey(TARGET, deadline);
+    await seedStalePreRotationEntry(TARGET.id, targetHash);
+    await createKVStoreSet(env).apiKeys.put(ROTATED_DEADLINE_CURSOR_CACHE_KEY, "not-json{");
+
+    const outcome = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(1);
+
+    const repaired = await createKVStoreSet(env).apiKeys.get<CachedApiKey>(
+      apiKeyCacheKey(targetHash),
+      "json"
+    );
+    expect(repaired?.rotationDeadline).toBe(deadline);
   });
 });
