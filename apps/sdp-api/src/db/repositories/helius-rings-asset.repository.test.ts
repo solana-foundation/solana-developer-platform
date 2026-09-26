@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { env } from "@/test/helpers/env";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -47,5 +47,16 @@ describe("HeliusRingsAssetRepository (postgres)", () => {
 
     await expect(repo.getActiveByMint(DISABLED_MINT)).resolves.toBeNull();
     expect((await repo.listActive()).map((row) => row.mint)).not.toContain(DISABLED_MINT);
+  });
+
+  // The allowlist is platform reference data that the shared test-DB reset
+  // deliberately leaves alone, and every worker's clone lives for the whole
+  // run: a row left here would leak into whichever file shares this worker
+  // next (0057's migration test asserts the seeded table exactly).
+  afterAll(async () => {
+    await getDb(env)
+      .prepare("DELETE FROM helius_rings_asset_allowlist WHERE mint = ?")
+      .bind(DISABLED_MINT)
+      .run();
   });
 });

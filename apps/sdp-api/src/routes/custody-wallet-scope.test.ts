@@ -1,3 +1,4 @@
+import { FeePaymentError } from "@sdp/payments/fee-payment";
 import { hashString } from "@sdp/payments/hash";
 import * as rpcRelay from "@sdp/rpc/relay";
 import * as solanaRpc from "@sdp/rpc/solana";
@@ -9,6 +10,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -1904,6 +1906,116 @@ describe("Custody wallet scope routes", () => {
       );
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  // APE-893 (SOLA9-633): the route-local catch used to convert FeePaymentError
+  // into an AppError carrying the provider's own message, bypassing the global
+  // fixed-message fee mapper. Provider-selected diagnostics must stay on the
+  // scrubbed server-side telemetry path only.
+  describe("signer-check fee-error boundary", () => {
+    const PROVIDER_DIAGNOSTICS =
+      "ownerAddress=owner-sensitive-007 email=alice.customer@example.com wallet_owner_id=wlt-owner-007";
+
+    function rejectFeePayerWith(error: Error): void {
+      signerCheckMocks.createSponsorship.mockReturnValue({
+        providerId: "test",
+        getFeePayer: vi.fn().mockRejectedValue(error),
+        signAsFeePayer: vi.fn(),
+        signAndSend: signerCheckMocks.signAndSend,
+      });
+    }
+
+    it("keeps provider-selected Kora diagnostics out of the signer-check error body", async () => {
+      await seedActiveConnectionWallet(
+        "fee_error",
+        "privy_fee_error",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(
+        new FeePaymentError(
+          `Failed to get fee payer address: RPC Error -32001: ${PROVIDER_DIAGNOSTICS}`,
+          "PROVIDER_REJECTED"
+        )
+      );
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_error" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(body.error.message).not.toContain("RPC Error -32001");
+      // A structured refusal of the fee-payer LOOKUP is a sponsor-side failure:
+      // signer-check submits nothing, so it must not answer the caller-directed
+      // 422 SIGNING_REJECTED copy ("check the transaction ...").
+      expect(response.status).toBe(503);
+      expect(body.error).toEqual({
+        code: "PROVIDER_UNAVAILABLE",
+        message:
+          "The fee sponsor refused the fee payer address lookup. Verify the sponsor configuration.",
+      });
+      expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
+      // The fixed-copy AppError bypasses the global fee-payment log, so the
+      // route records the refusal (message + cause) on the scrubbed server-side
+      // telemetry path itself; only the HTTP body hides the provider detail.
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_signer_check_fee_payer_refusal",
+          code: "PROVIDER_REJECTED",
+          error: expect.stringContaining("RPC Error -32001"),
+        }),
+        "Signer-check fee payer address lookup refused"
+      );
+      warn.mockRestore();
+    });
+
+    it("keeps rate-limited fee errors on the fixed sponsor copy", async () => {
+      await seedActiveConnectionWallet(
+        "fee_limit",
+        "privy_fee_limit",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(
+        new FeePaymentError(`Kora rate limit exceeded: ${PROVIDER_DIAGNOSTICS}`, "RATE_LIMITED")
+      );
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_limit" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(response.status).toBe(429);
+      expect(body.error).toEqual({
+        code: "RATE_LIMITED",
+        message: "The transaction fee sponsor is busy. Try again.",
+      });
+    });
+
+    it("keeps non-fee Kora failures on the fixed SOLANA_RPC_ERROR copy", async () => {
+      await seedActiveConnectionWallet(
+        "fee_plain",
+        "privy_fee_plain",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      env.PRIVY_BYOK_ENABLED = "true";
+      rejectFeePayerWith(new Error(`Kora transport exploded: ${PROVIDER_DIAGNOSTICS}`));
+
+      const response = await requestSignerCheck({ walletId: "privy_fee_plain" }, "session");
+
+      const body = (await response.json()) as { error: { code: string; message: string } };
+      expect(body.error.message).not.toContain("owner-sensitive-007");
+      expect(body.error.message).not.toContain("alice.customer@example.com");
+      expect(body.error.message).not.toContain("wlt-owner-007");
+      expect(response.status).toBe(502);
+      expect(body.error).toEqual({
+        code: "SOLANA_RPC_ERROR",
+        message: "Kora signer-check request failed. Verify Kora availability and credentials.",
+      });
     });
   });
 });
