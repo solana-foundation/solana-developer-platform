@@ -11,9 +11,9 @@
  * zero-filled 64-byte field, so hashing them apart would refuse a retry that
  * only changed spelling. One legacy spell-over remains accepted: a keyed
  * replay of a request that PRE-dates the canonicalization still matches via
- * the as-sent hash the service computes alongside the canonical one, so
- * existing empty-reference trades keep replaying (see
- * `replayFingerprints` in ./create).
+ * the empty-spelled hash the service computes alongside the canonical one, so
+ * existing empty-reference trades keep replaying whatever spelling a retry
+ * uses for the absence (see `replayFingerprints` in ./create).
  */
 
 import { createHash } from "node:crypto";

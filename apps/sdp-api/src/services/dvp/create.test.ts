@@ -717,6 +717,41 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
+  // The SAME legacy row replayed with the OTHER absent spelling. The stored
+  // fingerprint only covers the "" spelling, and this retry spells the absence
+  // null — the flip the canonicalization exists to tolerate. It must replay
+  // the original too: refusing it would deadlock the key exactly as above.
+  it("still replays a legacy empty-reference trade when the retry spells the absence null", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-legacy-empty-ref-null" };
+
+    const created = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    // Regress the row to the pre-canonicalization shape: fingerprint hashed
+    // from the "" spelling, empty string persisted verbatim.
+    const legacyFingerprint = dvpCreateFingerprint({
+      input: { ...input, refString: "" },
+      resolvedA: { address: address(custodyWalletAddress), counterpartyAccountId: null },
+      resolvedB: { address: address(COUNTERPARTY_ADDRESS), counterpartyAccountId: null },
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET idempotency_fingerprint = ?, ref_string = '' WHERE id = ?")
+      .bind(legacyFingerprint, created.id)
+      .run();
+
+    const retried = await createDvpTrade(env, auditContext, { ...input, refString: null });
+    expect(retried.id).toBe(created.id);
+    expect(retried.swapDvp).toBe(created.swapDvp);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+
+    // Still a term: a null-spelled retry carrying different terms matches
+    // neither fingerprint and refuses.
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: null, amountA: 3000n })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
   // A create that definitively never landed leaves its logical request unmade,
   // so the key it claimed has nothing to answer for. Replaying it hands back a
   // dead trade instead — and for a caller whose key is DERIVED from the payload,

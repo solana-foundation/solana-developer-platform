@@ -128,14 +128,15 @@ type ReplayFingerprints = {
  *
  * New rows store the canonical hash. Rows created BEFORE the absent-reference
  * spellings (omitted, null, "") were collapsed store the hash of the request
- * AS SENT — for a caller whose original request said `refString: ""` that is
- * the only spelling their stored fingerprint covers, and refusing it would
- * deadlock the key: every identical retry 409s forever, and the only escape
- * (a fresh key) mints a second live trade at a second PDA (SOLA9-584). So
- * when the request arrived with the empty spelling, the as-sent hash is
- * offered alongside the canonical one. It is acceptance-only — never stored —
- * and a pure function of the same payload, so a replay differing in any other
- * term still matches neither and refuses.
+ * with the empty spelling — for a caller whose original request said
+ * `refString: ""` that is the only spelling their stored fingerprint covers,
+ * and refusing it would deadlock the key: every identical retry 409s forever,
+ * and the only escape (a fresh key) mints a second live trade at a second PDA
+ * (SOLA9-584). So whenever the reference is ABSENT — whatever spelling the
+ * retry used — the empty-spelled hash is offered alongside the canonical one.
+ * It is acceptance-only — never stored — and a pure function of the same
+ * payload, so a replay differing in any other term still matches neither and
+ * refuses.
  */
 function replayFingerprints(
   requested: CreateDvpTradeInput,
@@ -147,10 +148,14 @@ function replayFingerprints(
     return { canonical: null, legacy: null };
   }
   const canonicalFingerprint = dvpCreateFingerprint({ input: canonical, resolvedA, resolvedB });
-  if (requested.refString === "") {
+  if (canonical.refString === null) {
     return {
       canonical: canonicalFingerprint,
-      legacy: dvpCreateFingerprint({ input: requested, resolvedA, resolvedB }),
+      legacy: dvpCreateFingerprint({
+        input: { ...requested, refString: "" },
+        resolvedA,
+        resolvedB,
+      }),
     };
   }
   return { canonical: canonicalFingerprint, legacy: null };
