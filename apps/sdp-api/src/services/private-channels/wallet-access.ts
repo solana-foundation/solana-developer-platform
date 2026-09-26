@@ -126,6 +126,29 @@ export async function resolvePrivateChannelCustodyWallet(
   return wallet;
 }
 
+/**
+ * Fresh wallet-scope decision for the verified-wallet seams: re-reads the
+ * key's liveness, permissions, and per-wallet bindings from the database so a
+ * binding revoked inside the auth-cache window is honored immediately.
+ * Dashboard actors pass through unchanged.
+ */
+export async function loadFreshWalletScopedAuth(
+  env: Env,
+  auth: ApiKeyContext,
+  projectId: string
+): Promise<ApiKeyContext> {
+  const current = await refreshPrivateChannelAuth(env, auth, projectId);
+  if (current.authType !== "api_key") return current;
+  const authorization = await loadApiKeyWalletAuthorization(
+    getDb(env),
+    current.apiKeyId,
+    current.organizationId,
+    projectId,
+    current.signingWalletId
+  );
+  return { ...current, ...authorization };
+}
+
 /** Admit and prepare the same exact wallet before a new SPC session or intent. */
 export async function createPrivateChannelSigner(
   env: Env,

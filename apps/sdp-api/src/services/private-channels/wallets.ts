@@ -32,9 +32,17 @@ import {
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
+import {
+  assertApiKeyWalletAccess,
+  getAllowedApiKeyWalletIdsForPermissions,
+} from "@/services/api-key-scope.service";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
-import { createPrivateChannelSigner, resolvePrivateChannelCustodyWallet } from "./wallet-access";
+import {
+  createPrivateChannelSigner,
+  loadFreshWalletScopedAuth,
+  resolvePrivateChannelCustodyWallet,
+} from "./wallet-access";
 
 const base58 = getBase58Codec();
 
@@ -126,6 +134,12 @@ async function revokeWalletWithSession(
  * The default identity's verified wallets for the project's active instance
  * (empty when no instance is connected). Scoped to the active
  * instance so a verification never leaks across instances.
+ *
+ * Wallet-scope is re-read from the database before listing (SOLA9-576): a
+ * selected-wallet API key sees only rows whose `wallet_id` still carries a
+ * fresh `payments:read` binding, so an unbound wallet's `walletId` and `pubkey`
+ * are not enumerable through this surface. All-wallet keys and dashboard
+ * actors keep the project-scoped listing.
  */
 export async function listPrivateChannelWallets(
   env: Env,
@@ -133,6 +147,10 @@ export async function listPrivateChannelWallets(
   projectId: string
 ): Promise<PrivateChannelVerifiedWalletRow[]> {
   const scope = { organizationId: auth.organizationId, projectId };
+  const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(
+    await loadFreshWalletScopedAuth(env, auth, projectId),
+    ["payments:read"]
+  );
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   if (!instance) {
     return [];
@@ -142,10 +160,13 @@ export async function listPrivateChannelWallets(
     instance.id
   );
   if (!pcUser) return [];
-  return createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
+  const rows = await createPrivateChannelVerifiedWalletRepository(env).listByUserAndInstance(
     pcUser.id,
     instance.id
   );
+  if (!allowedWalletIds) return rows;
+  const allowed = new Set(allowedWalletIds);
+  return rows.filter((row) => allowed.has(row.wallet_id));
 }
 
 /**
@@ -272,6 +293,12 @@ export async function verifyPrivateChannelWallet(
 /**
  * Revoke a wallet verification with SPC, then remove the SDP mirror row. Returns
  * the instance (the handler emits events) and whether a mirror row was removed.
+ *
+ * Wallet-scope is re-read from the database before revoking (SOLA9-576): a
+ * selected-wallet API key must hold a fresh `payments:write` binding for the
+ * target wallet_id, so a write-capable key cannot revoke an unbound wallet's
+ * enrollment through this unscoped surface. All-wallet keys and dashboard
+ * actors keep the project-scoped behavior.
  */
 export async function deletePrivateChannelWallet(
   env: Env,
@@ -288,6 +315,12 @@ export async function deletePrivateChannelWallet(
     pubkey
   );
   if (!mirror) return { instance, deleted: false };
+
+  assertApiKeyWalletAccess(
+    await loadFreshWalletScopedAuth(env, auth, projectId),
+    mirror.wallet_id,
+    ["payments:write"]
+  );
 
   const session = await resolveWalletSession(env, auth, projectId, mirror.user_id, true);
   const deleted = await revokeWalletWithSession(env, session, pubkey);
