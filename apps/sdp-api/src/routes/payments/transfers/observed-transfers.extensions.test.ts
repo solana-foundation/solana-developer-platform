@@ -55,8 +55,9 @@ const DECIMALS = 6;
 const BLOCK_TIME = 1_700_000_000;
 const SLOT = 123_456;
 const RAW_AMOUNT = 1_000_000n;
-// A schedule that matured before BLOCK_TIME: the transfer confirms at or
-// after it, so the scheduled multiplier is the one the confirming block used.
+// A schedule that matured before BLOCK_TIME: on a mint unmodified since the
+// transfer, the transfer confirms at or after it, so the scheduled multiplier
+// is the one the confirming block used.
 const MATURED_EFFECTIVE_TIMESTAMP = 1_690_000_000n;
 
 interface RpcTokenBalance {
@@ -397,6 +398,12 @@ const SCALED_MINT_ACCOUNT = scaledMintAccount(2, {
 const STATIC_2022_MINT_ACCOUNT = encodeMintAccount([]);
 const CLASSIC_MINT_ACCOUNT = encodeMintAccount([]);
 
+// A mint-history anchor proving the mint was last touched well before the
+// confirming slot, so its current extension state also governed the test
+// transfers (a later touching transaction would drop the rows as possibly
+// rescheduled).
+const MINT_UNMODIFIED_HISTORY = { [MINT_SCALED]: [{ slot: 100_000 }] };
+
 async function buildObservedRows(
   rpcServer: { url: string },
   signatures: Parameters<typeof buildObservedTransfersForSignatures>[1]
@@ -418,6 +425,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
@@ -436,6 +444,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
@@ -460,6 +469,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
           owner: TOKEN_2022_PROGRAM_ADDRESS,
         },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
@@ -473,7 +483,10 @@ describe("observed Token-2022 transfer amount conversion", () => {
     }
   });
 
-  it("converts with the scheduled multiplier once matured and drops the pre-maturity row", async () => {
+  it("anchors a scheduled mint's conversion to an unmodified mint history", async () => {
+    // The mint is unmodified since both transfers, so its own schedule
+    // decides the conversion: the post-maturity transfer converted with the
+    // scheduled multiplier, the pre-maturity one with the current multiplier.
     const mintAccount = scaledMintAccount(1, {
       multiplier: 3,
       effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
@@ -482,25 +495,77 @@ describe("observed Token-2022 transfer amount conversion", () => {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: mintAccount, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
       const rows = await buildObservedRows(rpcServer, [
         // Confirmed after the new multiplier matured: it applies.
         signatureEntry({ signature: "sig_after_maturity" }),
-        // Confirmed before it matured: whether the pending schedule (or an
-        // older one since replaced) governed the confirming block cannot be
-        // established from the current mint account, so the row is dropped
-        // rather than confirmed with a possibly-wrong amount.
+        // Confirmed before it matured: the unmodified mint proves the
+        // pending schedule was already in place, so the current multiplier
+        // governed the confirming block.
         signatureEntry({ signature: "sig_before_maturity", blockTime: 1_680_000_000n }),
       ]);
 
       expect(rows.map((row) => row.amount)).toEqual([
         amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 3),
+        amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 1),
       ]);
       // The shared batch-wide resolver reads the mint once for both
       // signatures instead of once per signature.
       expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops a scheduled mint's row when the mint was touched after the transfer", async () => {
+    // The schedule had already matured at the confirming clock, but a later
+    // transaction touched the mint: it may have replaced the multiplier the
+    // transfer actually converted with, so the row is dropped rather than
+    // confirmed with the scheduled amount.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: {
+          data: scaledMintAccount(1, {
+            multiplier: 4,
+            effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
+          }),
+          owner: TOKEN_2022_PROGRAM_ADDRESS,
+        },
+      },
+      mintSignaturesByAddress: { [MINT_SCALED]: [{ slot: SLOT + 1 }] },
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops a scheduled mint's row when the mint history cannot be read", async () => {
+    // Without a readable touching history the last modification is unknown,
+    // so the row is dropped rather than confirmed with a possibly-wrong
+    // amount — the same anchor every scaled mint's conversion requires.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: {
+          data: scaledMintAccount(1, {
+            multiplier: 4,
+            effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
+          }),
+          owner: TOKEN_2022_PROGRAM_ADDRESS,
+        },
+      },
+      mintSignaturesByAddress: { [MINT_SCALED]: [] },
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
     } finally {
       await rpcServer.close();
     }
@@ -597,6 +662,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
         mintAccountsByAddress: {
           [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
         },
+        mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
       }
     );
 
@@ -657,6 +723,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
         mintAccountsByAddress: {
           [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
         },
+        mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
       }
     );
 
@@ -695,6 +762,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
         mintAccountsByAddress: {
           [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
         },
+        mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
       }
     );
 
@@ -752,6 +820,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
@@ -782,6 +851,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
+      mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
     });
 
     try {
@@ -866,6 +936,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
         mintAccountsByAddress: {
           [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
         },
+        mintSignaturesByAddress: MINT_UNMODIFIED_HISTORY,
       }
     );
 

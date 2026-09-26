@@ -268,11 +268,11 @@ function readTokenAmountInfo(
  * - `scaled` / `interest-bearing`: the on-chain program converts raw units
  *   through the extension, so a decimals-only amount would misreport the
  *   transfer while the row still claims to be confirmed. Both carry enough
- *   state to reconstruct the conversion at the confirming block's clock; a
- *   scaled mint whose pending schedule postdates the transfer cannot be
- *   reconstructed and is dropped instead, and one without a schedule
- *   timestamp is anchored to the mint's own transaction history (see
- *   convertObservedTokenAmount).
+ *   state to reconstruct the conversion at the confirming block's clock: any
+ *   multiplier replacement is a transaction touching the mint account, so
+ *   every scaled mint's conversion is anchored to the mint's own transaction
+ *   history, and a mint touched after the transfer confirmed (or with an
+ *   unreadable history) drops its rows instead (see convertObservedTokenAmount).
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
  *   holder sees.
@@ -289,9 +289,9 @@ type ObservedMintAmountState =
       newMultiplierEffectiveTimestamp: bigint;
       /**
        * The slot of the newest transaction that touched the mint account, or
-       * null when it could not be read. Only resolved for mints without a
-       * schedule timestamp, where the account alone cannot distinguish
-       * initialization from an already-applied multiplier update (see
+       * null when it could not be read. The current account alone cannot show
+       * whether a multiplier was replaced after a transfer confirmed, so every
+       * scaled conversion is anchored to this history (see
        * convertObservedTokenAmount).
        */
       lastModifiedSlot: number | null;
@@ -318,8 +318,8 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
         multiplier: extension.multiplier,
         newMultiplier: extension.newMultiplier,
         newMultiplierEffectiveTimestamp: extension.newMultiplierEffectiveTimestamp,
-        // Filled in by fetchObservedMintAmountState for mints without a
-        // schedule timestamp; the account alone cannot anchor it.
+        // Filled in by fetchObservedMintAmountState for every scaled mint;
+        // the account alone cannot anchor a historical multiplier.
         lastModifiedSlot: null,
       };
     }
@@ -383,9 +383,10 @@ async function fetchObservedMintAmountState(
 
   if (maybeMint.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
     const state = resolveMintAmountState(maybeMint.data);
-    if (state.kind === "scaled" && state.newMultiplierEffectiveTimestamp === 0n) {
-      // A zero schedule timestamp cannot distinguish initialization from an
-      // already-applied multiplier update, so anchor the account to its own
+    if (state.kind === "scaled") {
+      // Whether the current multiplier state also governed a past transfer
+      // cannot be read from the account alone — a schedule may have been
+      // replaced since — so every scaled mint is anchored to its own
       // transaction history before any row relies on the multiplier (see
       // convertObservedTokenAmount).
       return { ...state, lastModifiedSlot: await fetchMintLastModifiedSlot(rpc, mint) };
@@ -465,45 +466,38 @@ function convertObservedTokenAmount(input: {
   }
 
   if (state.kind === "scaled") {
-    // Without a schedule timestamp the account cannot distinguish
-    // initialization from an already-applied multiplier update, so the
-    // historical multiplier is resolved from the mint's own transaction
-    // history instead: any multiplier replacement is a transaction touching
-    // the mint account, so a mint whose newest touching transaction is at or
-    // before the confirming slot still exposes the multiplier that governed
-    // the transfer. A later touching transaction (or an unreadable history)
-    // leaves it unestablishable, and the row is dropped rather than
-    // confirmed with a possibly-wrong amount.
-    if (state.newMultiplierEffectiveTimestamp === 0n) {
-      if (slot === null || state.lastModifiedSlot === null || slot < state.lastModifiedSlot) {
-        return null;
-      }
-      return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
-        rawAmount,
-        decimals,
-        state.multiplier
-      );
-    }
-
-    // A schedule that had not matured when the transfer confirmed leaves the
-    // historical multiplier unrecoverable: whether this pending schedule (or
-    // an older one, since replaced) governed the confirming block cannot be
-    // distinguished from the current mint account. Drop the row instead of
-    // guessing.
-    if (BigInt(timestampSeconds) < state.newMultiplierEffectiveTimestamp) {
+    // The current account cannot show whether its multiplier state also
+    // governed the transfer — a schedule may have been replaced since — so
+    // the historical multiplier is anchored to the mint's own transaction
+    // history: any multiplier replacement is a transaction touching the mint
+    // account, so a mint whose newest touching transaction is at or before
+    // the confirming slot still exposed the state the transfer converted
+    // with. A later touching transaction (or an unreadable history) leaves
+    // the historical multiplier unestablishable, and the row is dropped
+    // rather than confirmed with a possibly-wrong amount.
+    if (slot === null || state.lastModifiedSlot === null || slot < state.lastModifiedSlot) {
       return null;
     }
 
-    // At or after maturity the schedule predates the transfer, so the
-    // scheduled multiplier governed the confirming block. A schedule replaced
-    // since the transfer surfaces as a later effective timestamp and is
-    // dropped above; a multiplier applied with an effective timestamp at or
-    // before the transfer cannot be distinguished from one that governed it,
-    // which is the documented approximation of this best-effort synthesis.
+    // The account is unchanged since the transfer, so its own schedule
+    // decides: a pending schedule that had not matured at the confirming
+    // clock leaves the current multiplier in force, and a schedule that had
+    // matured is the one the confirming block applied.
+    if (
+      state.newMultiplierEffectiveTimestamp !== 0n &&
+      BigInt(timestampSeconds) >= state.newMultiplierEffectiveTimestamp
+    ) {
+      return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
+        rawAmount,
+        decimals,
+        state.newMultiplier
+      );
+    }
+
     return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
       rawAmount,
       decimals,
-      state.newMultiplier
+      state.multiplier
     );
   }
 
@@ -1210,9 +1204,9 @@ export async function buildObservedTransfersForSignatures(
   // against the billed RPC per request. Mint extension-state reads go through
   // the shared deadline-wrapped RPC client and are shared per mint for the
   // whole call (see createMintAmountStateResolver), so repeated signatures
-  // over the same mint cost one getAccountInfo — plus, for a scaled mint
-  // without a schedule timestamp, one getSignaturesForAddress that anchors
-  // the multiplier's last modification.
+  // over the same mint cost one getAccountInfo — plus, for each scaled mint,
+  // one getSignaturesForAddress that anchors the multiplier's last
+  // modification.
   const mintStateRpc = solanaRpc.createRpc(env, {
     rpcUrl: resolveSignatureHistoryRpcUrl(env),
   });
