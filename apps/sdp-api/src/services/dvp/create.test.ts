@@ -82,6 +82,7 @@ vi.mock("@sdp/rpc/solana", () => ({
 }));
 
 const { createDvpTrade } = await import("./create");
+const { dvpCreateFingerprint } = await import("./fingerprint");
 
 const TEST_PROJECT_ID = "prj_dvp_create_test";
 const CUSTODY_CONFIG_ID = "cust_dvp_create_test";
@@ -609,6 +610,145 @@ describe("createDvpTrade", () => {
     expect(retried.swapDvp).toBe(first.swapDvp);
     // The retry must not broadcast a second transaction.
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  // The on-chain refString is a fixed 64-byte zero-padded field with no
+  // presence bit, so omitted, null and "" are ONE absent reference on chain —
+  // the program stores the same bytes for both. A keyed retry that spells the
+  // absent reference differently must therefore replay the original trade:
+  // fingerprinting the spellings apart refuses the replay (409) and pushes the
+  // caller toward a fresh key, which mints a second live trade at a second PDA.
+  it("replays a keyed retry that spells the absent reference differently (null vs empty)", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-absent-ref" };
+
+    const omittedFirst = await createDvpTrade(env, auditContext, { ...input, refString: null });
+    const retriedAsEmpty = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    expect(retriedAsEmpty.id).toBe(omittedFirst.id);
+    expect(retriedAsEmpty.swapDvp).toBe(omittedFirst.swapDvp);
+    // The canonical absent value is persisted, not the empty spelling.
+    expect(retriedAsEmpty.refString).toBeNull();
+
+    const emptyFirst = await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-absent-ref-reverse",
+      refString: "",
+    });
+    const retriedAsOmitted = await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-absent-ref-reverse",
+      refString: null,
+    });
+    expect(retriedAsOmitted.id).toBe(emptyFirst.id);
+    expect(retriedAsOmitted.refString).toBeNull();
+
+    // Two requests, two trades, one broadcast each — no second live trade.
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+    await expect(rowsInDb()).resolves.toHaveLength(2);
+  });
+
+  // A NON-empty reference is real correlation metadata: changing it is a
+  // different request and must keep refusing the key rather than replaying.
+  it("still refuses a keyed retry that swaps the absent reference for a non-empty one", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-named-ref" };
+
+    await createDvpTrade(env, auditContext, { ...input, refString: null });
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: "ref-1" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await createDvpTrade(env, auditContext, {
+      ...input,
+      idempotencyKey: "key-named-ref-reverse",
+      refString: "ref-1",
+    });
+    await expect(
+      createDvpTrade(env, auditContext, {
+        ...input,
+        idempotencyKey: "key-named-ref-reverse",
+        refString: null,
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    // Both originals stand, neither retry minted a second trade.
+    expect(await rowsInDb()).toHaveLength(2);
+  });
+
+  // Rows written before the absent-reference spellings were canonicalized keep
+  // a fingerprint hashed from the raw "" payload. A retry of such a trade's
+  // IDENTICAL payload must still replay it: the canonical hash of the same
+  // terms differs, so without accepting the as-sent hash every retry 409s
+  // forever and the caller's only escape — a fresh key — mints a second live
+  // trade at a second PDA.
+  it("still replays a keyed trade whose row predates absent-reference canonicalization", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-legacy-empty-ref" };
+
+    const created = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    // Regress the row to the shape the pre-canonicalization code wrote: the
+    // fingerprint hashed the "" spelling AS SENT, and the empty spelling was
+    // persisted verbatim.
+    const legacyFingerprint = dvpCreateFingerprint({
+      input: { ...input, refString: "" },
+      resolvedA: { address: address(custodyWalletAddress), counterpartyAccountId: null },
+      resolvedB: { address: address(COUNTERPARTY_ADDRESS), counterpartyAccountId: null },
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET idempotency_fingerprint = ?, ref_string = '' WHERE id = ?")
+      .bind(legacyFingerprint, created.id)
+      .run();
+
+    const retried = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    expect(retried.id).toBe(created.id);
+    expect(retried.swapDvp).toBe(created.swapDvp);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+
+    // The acceptance is keyed to the as-sent payload: any other term under the
+    // same key — including a different reference — still refuses.
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: "ref-1" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, amountA: 2000n, refString: "" })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  // The SAME legacy row replayed with the OTHER absent spelling. The stored
+  // fingerprint only covers the "" spelling, and this retry spells the absence
+  // null — the flip the canonicalization exists to tolerate. It must replay
+  // the original too: refusing it would deadlock the key exactly as above.
+  it("still replays a legacy empty-reference trade when the retry spells the absence null", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-legacy-empty-ref-null" };
+
+    const created = await createDvpTrade(env, auditContext, { ...input, refString: "" });
+    // Regress the row to the pre-canonicalization shape: fingerprint hashed
+    // from the "" spelling, empty string persisted verbatim.
+    const legacyFingerprint = dvpCreateFingerprint({
+      input: { ...input, refString: "" },
+      resolvedA: { address: address(custodyWalletAddress), counterpartyAccountId: null },
+      resolvedB: { address: address(COUNTERPARTY_ADDRESS), counterpartyAccountId: null },
+    });
+    await getDb(env)
+      .prepare("UPDATE dvp_trades SET idempotency_fingerprint = ?, ref_string = '' WHERE id = ?")
+      .bind(legacyFingerprint, created.id)
+      .run();
+
+    const retried = await createDvpTrade(env, auditContext, { ...input, refString: null });
+    expect(retried.id).toBe(created.id);
+    expect(retried.swapDvp).toBe(created.swapDvp);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+
+    // Still a term: a null-spelled retry carrying different terms matches
+    // neither fingerprint and refuses.
+    await expect(
+      createDvpTrade(env, auditContext, { ...input, refString: null, amountA: 3000n })
+    ).rejects.toMatchObject({ statusCode: 409 });
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 

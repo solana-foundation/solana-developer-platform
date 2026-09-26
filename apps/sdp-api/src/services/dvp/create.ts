@@ -111,13 +111,69 @@ export type CreateDvpTradeInput = {
 };
 
 /**
+ * The fingerprints a keyed replay may match.
+ *
+ * `canonical` is what rows created by this code store. `legacy` is the
+ * fingerprint the pre-canonicalization code minted for a request sent with
+ * `refString: ""` — rows written before the absent-reference spellings were
+ * collapsed still carry it. Null when there is no such variant to accept.
+ */
+type ReplayFingerprints = {
+  canonical: string | null;
+  legacy: string | null;
+};
+
+/**
+ * The fingerprints a keyed create may replay against.
+ *
+ * New rows store the canonical hash. Rows created BEFORE the absent-reference
+ * spellings (omitted, null, "") were collapsed store the hash of the request
+ * with the empty spelling — for a caller whose original request said
+ * `refString: ""` that is the only spelling their stored fingerprint covers,
+ * and refusing it would deadlock the key: every identical retry 409s forever,
+ * and the only escape (a fresh key) mints a second live trade at a second PDA
+ * (SOLA9-584). So whenever the reference is ABSENT — whatever spelling the
+ * retry used — the empty-spelled hash is offered alongside the canonical one.
+ * It is acceptance-only — never stored — and a pure function of the same
+ * payload, so a replay differing in any other term still matches neither and
+ * refuses.
+ */
+function replayFingerprints(
+  requested: CreateDvpTradeInput,
+  canonical: CreateDvpTradeInput,
+  resolvedA: ResolvedParty,
+  resolvedB: ResolvedParty
+): ReplayFingerprints {
+  if (canonical.idempotencyKey === null) {
+    return { canonical: null, legacy: null };
+  }
+  const canonicalFingerprint = dvpCreateFingerprint({ input: canonical, resolvedA, resolvedB });
+  if (canonical.refString === null) {
+    return {
+      canonical: canonicalFingerprint,
+      legacy: dvpCreateFingerprint({
+        input: { ...requested, refString: "" },
+        resolvedA,
+        resolvedB,
+      }),
+    };
+  }
+  return { canonical: canonicalFingerprint, legacy: null };
+}
+
+/**
  * Confirms a replay is the SAME request, not merely one carrying the same key.
  *
  * A key is a claim, not a proof; the fingerprint is compared precisely so a
- * wallet-scoped caller never receives escrows outside its scope.
+ * wallet-scoped caller never receives escrows outside its scope. The legacy
+ * fingerprint counts as the same request — see {@link replayFingerprints}.
  */
-function assertOwnReplay(trade: DvpTradeRow, fingerprint: string | null): DvpTradeRow {
-  if (trade.idempotencyFingerprint !== fingerprint) {
+function assertOwnReplay(trade: DvpTradeRow, fingerprints: ReplayFingerprints): DvpTradeRow {
+  const { canonical, legacy } = fingerprints;
+  if (
+    trade.idempotencyFingerprint !== canonical &&
+    (legacy === null || trade.idempotencyFingerprint !== legacy)
+  ) {
     throw conflict("Idempotency key already used with different request payload");
   }
   return trade;
@@ -134,7 +190,7 @@ async function insertOrReplay(
   repository: ReturnType<typeof createDvpTradeRepository>,
   failedRowId: string | null,
   idempotencyKey: string | null,
-  fingerprint: string | null,
+  fingerprints: ReplayFingerprints,
   row: Parameters<ReturnType<typeof createDvpTradeRepository>["create"]>[0]
 ): Promise<DvpTradeRow> {
   try {
@@ -147,7 +203,7 @@ async function insertOrReplay(
     if (!winner) {
       throw error;
     }
-    return assertOwnReplay(winner, fingerprint);
+    return assertOwnReplay(winner, fingerprints);
   }
 }
 
@@ -288,9 +344,23 @@ async function assertNamedDestinationsUsable(
 export async function createDvpTrade(
   env: Env,
   auditContext: Context<{ Bindings: Env }>,
-  input: CreateDvpTradeInput
+  requested: CreateDvpTradeInput
 ): Promise<DvpTradeRow> {
   const repository = createDvpTradeRepository(env);
+
+  // Canonicalize the correlation reference ONCE, here at the service boundary:
+  // the on-chain refString is a fixed 64-byte zero-padded field with no
+  // presence bit, so omitted, null and "" are the SAME absent reference on
+  // chain. The fingerprint, the stored row and the create instruction must all
+  // see one spelling, or a keyed retry that flips between them fingerprints as
+  // different terms — the 409 pushes the caller to a fresh key, and a fresh key
+  // mints a second live trade at a second PDA (SOLA9-584). A non-empty
+  // reference is preserved verbatim as correlation metadata.
+  const input: CreateDvpTradeInput = {
+    ...requested,
+    refString:
+      requested.refString === null || requested.refString === "" ? null : requested.refString,
+  };
 
   // Resolve BOTH parties first: the fingerprint hashes the resolved addresses.
   const [resolvedA, resolvedB] = await resolveParties(env, {
@@ -305,9 +375,7 @@ export async function createDvpTrade(
   // fresh nonce, lands at a different address, and leaves the first trade on
   // chain with a published escrow nobody is watching. Returning the original is
   // the only answer that does not create a second obligation.
-  const fingerprint = input.idempotencyKey
-    ? dvpCreateFingerprint({ input, resolvedA, resolvedB })
-    : null;
+  const fingerprints = replayFingerprints(requested, input, resolvedA, resolvedB);
   let failedRowId: string | null = null;
   if (input.idempotencyKey) {
     const replayed = await repository.getByIdempotencyKey(input.projectId, input.idempotencyKey);
@@ -315,7 +383,7 @@ export async function createDvpTrade(
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
       } else {
-        return assertOwnReplay(replayed, fingerprint);
+        return assertOwnReplay(replayed, fingerprints);
       }
     }
   }
@@ -427,7 +495,7 @@ export async function createDvpTrade(
     repository,
     failedRowId,
     input.idempotencyKey,
-    fingerprint,
+    fingerprints,
     {
       id,
       organizationId: input.organizationId,
@@ -459,7 +527,7 @@ export async function createDvpTrade(
       counterpartyAccountIdA: resolvedA.counterpartyAccountId,
       counterpartyAccountIdB: resolvedB.counterpartyAccountId,
       idempotencyKey: input.idempotencyKey,
-      idempotencyFingerprint: fingerprint,
+      idempotencyFingerprint: fingerprints.canonical,
       createSignature: null,
       createLastValidBlockHeight: null,
     }

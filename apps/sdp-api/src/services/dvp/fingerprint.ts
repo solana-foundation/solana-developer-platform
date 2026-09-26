@@ -6,8 +6,14 @@
  * mints, token programs, amounts, timestamps, destinations
  * and refString — so a reuse with different terms (or a wallet-scoped caller
  * replaying someone else's key) 409s instead of handing escrows back. Hashed
- * AS SENT, so a retry replays even after settlement-wallet rotation. No v1
- * compatibility: an old-keyed replay now mismatches by design.
+ * AS SENT, except that the absent reference spellings (omitted, null, "") are
+ * canonicalized by the caller to null first: on chain they are the same
+ * zero-filled 64-byte field, so hashing them apart would refuse a retry that
+ * only changed spelling. One legacy spell-over remains accepted: a keyed
+ * replay of a request that PRE-dates the canonicalization still matches via
+ * the empty-spelled hash the service computes alongside the canonical one, so
+ * existing empty-reference trades keep replaying whatever spelling a retry
+ * uses for the absence (see `replayFingerprints` in ./create).
  */
 
 import { createHash } from "node:crypto";
@@ -58,7 +64,9 @@ export function dvpCreateFingerprint({
   resolvedB,
 }: DvpCreateFingerprintInput): string {
   // Explicit, not derived from object iteration (reordering must never
-  // invalidate stored fingerprints); JSON encoding keeps null and "" distinct.
+  // invalidate stored fingerprints). `refString` arrives canonicalized (the
+  // service collapses omitted/null/"" to null), so the hash sees one absent
+  // value; non-empty references hash verbatim.
   const material = [
     ...partySlotMaterial(input.partyA, resolvedA),
     ...partySlotMaterial(input.partyB, resolvedB),
