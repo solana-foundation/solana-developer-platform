@@ -269,8 +269,10 @@ function readTokenAmountInfo(
  *   through the extension, so a decimals-only amount would misreport the
  *   transfer while the row still claims to be confirmed. Both carry enough
  *   state to reconstruct the conversion at the confirming block's clock; a
- *   scaled mint without a schedule timestamp, or whose pending schedule
- *   postdates the transfer, cannot be reconstructed and is dropped instead.
+ *   scaled mint whose pending schedule postdates the transfer cannot be
+ *   reconstructed and is dropped instead, and one without a schedule
+ *   timestamp is anchored to the mint's own transaction history (see
+ *   convertObservedTokenAmount).
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
  *   holder sees.
@@ -285,6 +287,14 @@ type ObservedMintAmountState =
       multiplier: number;
       newMultiplier: number;
       newMultiplierEffectiveTimestamp: bigint;
+      /**
+       * The slot of the newest transaction that touched the mint account, or
+       * null when it could not be read. Only resolved for mints without a
+       * schedule timestamp, where the account alone cannot distinguish
+       * initialization from an already-applied multiplier update (see
+       * convertObservedTokenAmount).
+       */
+      lastModifiedSlot: number | null;
     }
   | {
       kind: "interest-bearing";
@@ -308,6 +318,9 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
         multiplier: extension.multiplier,
         newMultiplier: extension.newMultiplier,
         newMultiplierEffectiveTimestamp: extension.newMultiplierEffectiveTimestamp,
+        // Filled in by fetchObservedMintAmountState for mints without a
+        // schedule timestamp; the account alone cannot anchor it.
+        lastModifiedSlot: null,
       };
     }
 
@@ -323,6 +336,31 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
   }
 
   return { kind: "static" };
+}
+
+/**
+ * Cap on the mint-transaction history read that anchors a schedule-less
+ * scaled mint's multiplier. Any multiplier replacement is a transaction
+ * touching the mint account (UpdateMultiplier names it), so the single newest
+ * touching signature — signatures are returned newest first — bounds when the
+ * current multiplier was recorded.
+ */
+export const MINT_LAST_MODIFIED_HISTORY_LIMIT = 1;
+
+/**
+ * The slot of the newest transaction that touched the mint account, or null
+ * when the account has no readable touching signature. Rejections propagate
+ * so the per-batch resolver can retry the read within its budget.
+ */
+async function fetchMintLastModifiedSlot(
+  rpc: solanaRpc.SolanaRpc,
+  mint: Address
+): Promise<number | null> {
+  const signatures = await solanaRpc.getSignaturesForAddress(rpc, mint, {
+    limit: MINT_LAST_MODIFIED_HISTORY_LIMIT,
+  });
+  const newest = signatures[0];
+  return newest?.slot != null ? Number(newest.slot) : null;
 }
 
 /**
@@ -344,7 +382,15 @@ async function fetchObservedMintAmountState(
   }
 
   if (maybeMint.programAddress === TOKEN_2022_PROGRAM_ADDRESS) {
-    return resolveMintAmountState(maybeMint.data);
+    const state = resolveMintAmountState(maybeMint.data);
+    if (state.kind === "scaled" && state.newMultiplierEffectiveTimestamp === 0n) {
+      // A zero schedule timestamp cannot distinguish initialization from an
+      // already-applied multiplier update, so anchor the account to its own
+      // transaction history before any row relies on the multiplier (see
+      // convertObservedTokenAmount).
+      return { ...state, lastModifiedSlot: await fetchMintLastModifiedSlot(rpc, mint) };
+    }
+    return state;
   }
 
   // Legacy SPL mints carry no extensions by construction; any other owner
@@ -396,8 +442,9 @@ function convertObservedTokenAmount(input: {
   mint: string | null;
   mintStates: Map<string, ObservedMintAmountState>;
   timestampSeconds: number | null;
+  slot: number | null;
 }): string | null {
-  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds } = input;
+  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds, slot } = input;
 
   const state = mint ? mintStates.get(mint) : undefined;
   if (!state || state.kind === "unresolved") {
@@ -418,14 +465,24 @@ function convertObservedTokenAmount(input: {
   }
 
   if (state.kind === "scaled") {
-    // Without a schedule timestamp the account exposes no anchor for the
-    // multiplier that governed the confirming block: initialization and an
-    // update already applied (the processor sets multiplier and newMultiplier
-    // together when the effective timestamp has passed) are indistinguishable,
-    // so whether the multiplier was replaced since the transfer confirmed
-    // cannot be ruled out. Drop the row instead of guessing.
+    // Without a schedule timestamp the account cannot distinguish
+    // initialization from an already-applied multiplier update, so the
+    // historical multiplier is resolved from the mint's own transaction
+    // history instead: any multiplier replacement is a transaction touching
+    // the mint account, so a mint whose newest touching transaction is at or
+    // before the confirming slot still exposes the multiplier that governed
+    // the transfer. A later touching transaction (or an unreadable history)
+    // leaves it unestablishable, and the row is dropped rather than
+    // confirmed with a possibly-wrong amount.
     if (state.newMultiplierEffectiveTimestamp === 0n) {
-      return null;
+      if (slot === null || state.lastModifiedSlot === null || slot < state.lastModifiedSlot) {
+        return null;
+      }
+      return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
+        rawAmount,
+        decimals,
+        state.multiplier
+      );
     }
 
     // A schedule that had not matured when the transfer confirmed leaves the
@@ -975,6 +1032,7 @@ function buildObservedTransferRows(
         mint,
         mintStates,
         timestampSeconds,
+        slot,
       });
       if (resolvedUiAmount === null) {
         continue;
@@ -1082,6 +1140,7 @@ function buildObservedTransferRows(
       mint,
       mintStates,
       timestampSeconds,
+      slot,
     });
     if (resolvedUiAmount === null) {
       continue;
@@ -1151,7 +1210,9 @@ export async function buildObservedTransfersForSignatures(
   // against the billed RPC per request. Mint extension-state reads go through
   // the shared deadline-wrapped RPC client and are shared per mint for the
   // whole call (see createMintAmountStateResolver), so repeated signatures
-  // over the same mint cost one getAccountInfo.
+  // over the same mint cost one getAccountInfo — plus, for a scaled mint
+  // without a schedule timestamp, one getSignaturesForAddress that anchors
+  // the multiplier's last modification.
   const mintStateRpc = solanaRpc.createRpc(env, {
     rpcUrl: resolveSignatureHistoryRpcUrl(env),
   });

@@ -74,6 +74,12 @@ interface MintAccountPayload {
 interface TestRpcOptions {
   /** Base64 mint-account payloads served for `getAccountInfo`; absent → account missing. */
   mintAccountsByAddress?: Record<string, MintAccountPayload | null>;
+  /**
+   * Mint signature histories served for `getSignaturesForAddress`, newest
+   * first; absent → empty history, so a schedule-less mint's last
+   * modification is unknown and its rows drop.
+   */
+  mintSignaturesByAddress?: Record<string, Array<{ slot: number }>>;
   /** Serve every `getAccountInfo` with a 500 (a persistent RPC outage), after counting the read. */
   failAccountInfoReads?: boolean;
   /** Serve the first N `getAccountInfo` calls with a 500 (a transient outage), after counting the read. */
@@ -275,6 +281,26 @@ function startTokenRpcServer(
           return;
         }
         respondToAccountInfo();
+        return;
+      }
+
+      if (rpcRequest.method === "getSignaturesForAddress") {
+        const mint = (rpcRequest.params as [string])[0];
+        const signatures = options.mintSignaturesByAddress?.[mint] ?? [];
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: signatures.map((entry) => ({
+              signature: SIGNATURE,
+              slot: entry.slot,
+              blockTime: BLOCK_TIME,
+              err: null,
+              confirmationStatus: "finalized",
+            })),
+          })
+        );
         return;
       }
 
@@ -480,22 +506,70 @@ describe("observed Token-2022 transfer amount conversion", () => {
     }
   });
 
-  it("drops the row when the scaled mint carries no schedule timestamp to anchor the historical multiplier", async () => {
+  it("publishes a schedule-less scaled mint's row anchored to an unmodified mint history", async () => {
     // Initialization and an already-applied multiplier update are
     // indistinguishable when the account carries no schedule timestamp, so
-    // whether the multiplier was replaced since the transfer confirmed cannot
-    // be ruled out. The row is dropped instead of confirmed with a
-    // possibly-wrong amount.
+    // the historical multiplier is resolved from the mint's own transaction
+    // history: any multiplier replacement touches the mint account, so a
+    // newest touching transaction at or before the confirming slot proves the
+    // current multiplier governed the transfer.
     const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+      mintSignaturesByAddress: {
+        // The mint was last touched well before the confirming slot.
+        [MINT_SCALED]: [{ slot: 100_000 }],
+      },
+    });
+
+    try {
+      const [observed] = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(observed?.status).toBe("confirmed");
+      expect(observed?.amount).toBe(
+        amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 2)
+      );
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops a schedule-less scaled mint's row when the mint was touched after the transfer", async () => {
+    // A transaction touched the mint after the transfer confirmed, so whether
+    // it replaced the multiplier cannot be ruled out from the account alone.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+      mintSignaturesByAddress: {
+        [MINT_SCALED]: [{ slot: SLOT + 1 }],
       },
     });
 
     try {
       const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
       expect(rows).toEqual([]);
-      expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops a schedule-less scaled mint's row when the mint history cannot be read", async () => {
+    // Without a readable touching history the last modification is unknown,
+    // so the row is dropped rather than confirmed with a possibly-wrong
+    // amount.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+      mintSignaturesByAddress: {
+        [MINT_SCALED]: [],
+      },
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
     } finally {
       await rpcServer.close();
     }
