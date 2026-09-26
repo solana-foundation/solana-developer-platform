@@ -5465,6 +5465,50 @@ describe("Issuance Routes", () => {
       expect(body.data.token.totalSupplyUpdatedAt).toBeDefined();
     });
 
+    it("bounds a slotless supply reading with the current confirmed slot", async () => {
+      // A supply response without a context slot cannot order settled-burn
+      // bookkeeping against the reading it carries, so the route asks the node
+      // for the current confirmed slot: it bounds the reading from above, so a
+      // burn the reading absorbed is recognized as absorbed and a burn settling
+      // after the refresh still subtracts its decrement exactly.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+        const method = JSON.parse(String(init?.body)).method;
+        if (method === "getSlot") {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: "2", result: 77 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { value: { amount: "1500000000" } },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(200);
+      const db = getDb(env);
+      const stored = await db
+        .prepare("SELECT total_supply_read_slot FROM issued_tokens WHERE id = ?")
+        .bind(activeTokenId)
+        .first<{ total_supply_read_slot: number | null }>();
+      expect(stored?.total_supply_read_slot).toBe(77);
+    });
+
     it("returns 400 for undeployed token", async () => {
       const createRes = await app.request(
         "/v1/issuance/tokens",

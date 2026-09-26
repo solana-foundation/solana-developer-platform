@@ -24,6 +24,33 @@ interface TokenSupplyRpcResponse {
   };
 }
 
+async function fetchCurrentConfirmedSlot(rpcUrl: string): Promise<number | null> {
+  try {
+    const rpcResponse = await fetch(rpcUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: crypto.randomUUID(),
+        method: "getSlot",
+        params: [{ commitment: "confirmed" }],
+      }),
+    });
+
+    if (!rpcResponse.ok) {
+      return null;
+    }
+
+    const payload = (await rpcResponse.json()) as { result?: unknown };
+    const slot = payload.result;
+    return typeof slot === "number" && Number.isInteger(slot) && slot >= 0 ? slot : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchTokenSupplyBaseUnits(
   rpcUrl: string,
   mintAddress: string
@@ -58,13 +85,19 @@ async function fetchTokenSupplyBaseUnits(
   // The response context carries the slot the reading was taken at. Supply
   // reconciliation records it so settled-burn bookkeeping can order a burn's
   // settlement against this reading by slot instead of guessing from
-  // wall-clock stamps. A response without one simply leaves the recorded
-  // slot alone.
+  // wall-clock stamps. A response without one falls back to the current
+  // confirmed slot: it bounds the reading from above, so a burn the reading
+  // absorbed is recognized as absorbed (its slot is at or below the bound)
+  // and a burn settling after the refresh still subtracts its decrement
+  // exactly. The bound can only over-cover a burn that settles inside the
+  // one round trip between the two calls — the record then runs high until
+  // the next refresh, never low. If even the slot lookup fails, the reading
+  // is passed without a slot and reconciliation keeps the recorded anchor.
   const contextSlot = payload.result?.context?.slot;
   const slot =
     typeof contextSlot === "number" && Number.isInteger(contextSlot) && contextSlot >= 0
       ? contextSlot
-      : null;
+      : await fetchCurrentConfirmedSlot(rpcUrl);
 
   return { amount, slot };
 }

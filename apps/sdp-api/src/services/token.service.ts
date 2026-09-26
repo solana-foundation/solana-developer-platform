@@ -2234,7 +2234,12 @@ export class TokenService {
    * @param readSlot the chain slot the reading was taken at, from the RPC
    *   response context. An unknown slot on an absorbed reading clears
    *   `total_supply_read_slot` — the figure's coverage is then unknowable by
-   *   slot, and the bookkeeping keeps deciding from the stamp.
+   *   slot, and the bookkeeping keeps deciding from the stamp. The refresh
+   *   route bounds a slotless response with the current confirmed slot before
+   *   it reaches here, so a null is a defensive path for callers that skip
+   *   that bound: the stamp fallback then errs toward skipping a decrement it
+   *   cannot order (the record runs high and the next refresh heals it) rather
+   *   than subtracting one twice.
    */
   async setSupplyFromBaseUnits(
     tokenId: string,
