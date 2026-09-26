@@ -16,6 +16,7 @@ import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
+import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -151,6 +152,12 @@ vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
   reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
 
+// Literal mock like its siblings above: the real module drags the webhook
+// processor registry (every ramp provider client) into the graph.
+vi.mock("@/services/jobs/replay-ramp-webhook-events", () => ({
+  replayRampWebhookEvents: vi.fn(async () => 0),
+}));
+
 vi.mock("@/services/jobs/detect-orphaned-earn-split-swaps", () => ({
   detectOrphanedEarnSplitSwaps: vi.fn(async () => {}),
 }));
@@ -208,6 +215,7 @@ describe("runCronJob", () => {
     vi.mocked(reconcileSponsorshipBudgets)
       .mockReset()
       .mockResolvedValue(undefined as never);
+    vi.mocked(replayRampWebhookEvents).mockReset().mockResolvedValue(0);
     vi.mocked(reconcileRevokedApiKeyCache)
       .mockReset()
       .mockResolvedValue({ scanned: 0, repaired: 0 });
@@ -774,6 +782,35 @@ describe("runCronJob", () => {
     await expect(runCronJob()).rejects.toThrow("transfers down");
 
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
+  });
+
+  // The managed job is a managed deployment's only tick: the durable ramp
+  // webhook inbox must be replayed here exactly like the in-process
+  // pending-transfers wrapper does, alongside the other legs of the tick.
+  it("replays the ramp webhook inbox beside the pending-transfers legs", async () => {
+    const env = makeEnv();
+    vi.mocked(getProcessEnv).mockReturnValue(env);
+
+    await runCronJob();
+
+    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(env);
+  });
+
+  it("aggregates a replay failure with the tick's other legs", async () => {
+    vi.mocked(replayRampWebhookEvents).mockRejectedValue(new Error("replay down"));
+    vi.mocked(reconcileSponsorshipBudgets).mockRejectedValue(new Error("sponsorship down"));
+
+    await expect(runCronJob()).rejects.toMatchObject({
+      message: "pending-transfers tick had multiple failures",
+      errors: [
+        expect.objectContaining({ message: "sponsorship down" }),
+        expect.objectContaining({ message: "replay down" }),
+      ],
+    });
+
+    // The failure was collected after the legs settled, so later ticks ran.
+    expect(reconcileEarnVaultMovements).toHaveBeenCalledTimes(1);
+    expect(closeDatabasePools).toHaveBeenCalledTimes(1);
   });
 
   it("reports every underlying cause when a tick fails on more than one task", () => {

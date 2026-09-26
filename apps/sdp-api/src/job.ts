@@ -35,6 +35,7 @@ import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
+import { replayRampWebhookEvents } from "@/services/jobs/replay-ramp-webhook-events";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
 import { trackPendingDeposits } from "@/services/jobs/track-pending-deposits";
 import { trackPendingTransfers } from "@/services/jobs/track-pending-transfers";
@@ -71,9 +72,9 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *
  * The reconciliation sequence:
  *
- * 1. **Pending transfers** + approved-wallet-operation replay + sponsorship
- *    budget reconciliation. The transfer legs settle before their tick reports
- *    failure. Fatal.
+ * 1. **Pending transfers** + approved-wallet-operation replay + durable ramp
+ *    webhook event replay + sponsorship budget reconciliation. The transfer
+ *    legs settle before their tick reports failure. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
@@ -191,6 +192,12 @@ export async function runCronJob(): Promise<void> {
                 await recoverApprovedWalletOperations(env);
               })(),
               reconcileSponsorshipBudgets(env),
+              // Same replay leg the in-process pending-transfers wrapper runs:
+              // this job is a managed deployment's only tick, so an acked
+              // webhook whose background apply never ran would otherwise
+              // strand its transfer here forever. Applying is idempotent and
+              // the age cutoff keeps fresh rows with the request's own pass.
+              replayRampWebhookEvents(env),
             ]);
             throwCollected(
               rejectionReasons(outcomes),
