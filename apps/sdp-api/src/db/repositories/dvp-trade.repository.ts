@@ -39,6 +39,14 @@ export interface DvpTradeRow {
   /** The transaction that settled or cancelled the trade. Null while open. */
   closeSignature: Signature | null;
   /**
+   * The custody wallet that signed the close, recorded by the close flow. Null
+   * for closes observed from the chain and for closes recorded before the
+   * column existed — those are attributed by resolving `settlementAuthority`
+   * through today's wallets, which cannot always tell which of several wallets
+   * holding one key signed. @see `recordClose`.
+   */
+  closeCustodyWalletId: string | null;
+  /**
    * The settle or cancel in flight, held from before it is signed until it
    * lands, is refused, or can no longer land. Null when no close is in flight.
    */
@@ -129,6 +137,7 @@ export type DvpTradeInsert = Omit<
   DvpTradeRow,
   // Written by `recordClose`, never at insert: a trade is not born closed.
   | "closeSignature"
+  | "closeCustodyWalletId"
   | "closeClaim"
   | "closeResolutionAttempts"
   | "closeResolutionAfter"
@@ -304,13 +313,21 @@ export interface DvpTradeRepository {
    * it knows — and leaving the sweep to shrug at a settlement the product just
    * performed is a worse answer than the one already in hand.
    *
+   * `custodyWalletId` is the settlement wallet the handler authorized, which is
+   * the wallet whose key signed the close. Recorded with the outcome so the
+   * unified feed can attribute the close to the wallet that actually signed it
+   * even after the project's settlement mapping rotates or other wallets come
+   * to hold the same key (APE-695 review). Null only from a caller that never
+   * knew it — the reconciler never calls this.
+   *
    * Compare-and-swap on an OPEN status, so a reconciler that already observed
    * the chain keeps its reading rather than being walked backwards.
    */
   recordClose(
     id: string,
     status: "settled" | "cancelled",
-    signature: Signature
+    signature: Signature,
+    custodyWalletId: string | null
   ): Promise<DvpTradeRow | null>;
   /**
    * Takes the trade's close lock before a settle or cancel is sent.

@@ -418,7 +418,7 @@ describe("DvpTradeRepository (postgres)", () => {
 
     it("refuses a close lock on a trade that is already closed", async () => {
       const created = await openTrade();
-      await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+      await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE, null);
 
       await expect(
         repo.claimClose(created.id, {
@@ -498,9 +498,23 @@ describe("DvpTradeRepository (postgres)", () => {
         expiryHeight: "500",
       });
 
-      const closed = await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+      const closed = await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE, null);
 
       expect(closed).toMatchObject({ status: "settled", closeClaim: null });
+    });
+
+    // The unified feed attributes a close to this wallet first; only a close
+    // recorded without one is resolved from the authority address (0120).
+    it("records the custody wallet that signed the close", async () => {
+      const created = await openTrade();
+
+      await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE, CUSTODY_WALLET_ID);
+
+      expect(await repo.getById(scope, created.id)).toMatchObject({
+        status: "settled",
+        closeSignature: CLOSE_SIGNATURE,
+        closeCustodyWalletId: CUSTODY_WALLET_ID,
+      });
     });
   });
 
@@ -556,7 +570,7 @@ describe("DvpTradeRepository (postgres)", () => {
     const created = await repo.create(tradeInsert());
     await db.prepare("UPDATE dvp_trades SET status = 'funded' WHERE id = ?").bind(created.id).run();
 
-    await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE);
+    await repo.recordClose(created.id, "settled", CLOSE_SIGNATURE, null);
     const row = await db
       .prepare("SELECT closed_at FROM dvp_trades WHERE id = ?")
       .bind(created.id)
@@ -574,7 +588,7 @@ describe("DvpTradeRepository (postgres)", () => {
       .bind(firstClosedAt, created.id)
       .run();
 
-    await repo.recordClose(created.id, "cancelled", CLOSE_SIGNATURE);
+    await repo.recordClose(created.id, "cancelled", CLOSE_SIGNATURE, null);
     const row = await db
       .prepare("SELECT closed_at FROM dvp_trades WHERE id = ?")
       .bind(created.id)

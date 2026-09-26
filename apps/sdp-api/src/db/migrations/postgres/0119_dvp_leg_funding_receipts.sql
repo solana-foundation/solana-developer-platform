@@ -87,6 +87,13 @@ CREATE INDEX IF NOT EXISTS idx_dvp_leg_funding_receipts_organization_created
 -- already absent from the feed before this deploy — this backfill preserves
 -- exactly what was shown, and changes nothing about what was not. From here on
 -- every broadcast writes a receipt of its own, so the gap cannot grow.
+--
+-- The escrow movement ledger (0111) cannot fill that gap either: it records the
+-- token movement, but its only identity for a mover is the FEE PAYER, and a
+-- sponsored funding's fee payer is the sponsor, not the funder. A receipt needs
+-- the funder's custody wallet and tenant, and guessing one from an address
+-- would fabricate cross-tenant evidence — worse than the honest gap, which the
+-- feed had already closed at the takeover.
 INSERT INTO dvp_leg_funding_receipts
     (trade_id, side, organization_id, project_id, custody_wallet_id, signature, amount, created_at)
 SELECT c.trade_id, c.side, c.organization_id, c.project_id, c.custody_wallet_id, c.funding_tx,

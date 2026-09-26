@@ -38,6 +38,7 @@ const WALLET_B_FUNDER = "cwlt_poc_dvp_b_funder";
 const WALLET_A_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_a_settlement_impostor";
 const WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT = "cwlt_poc_dvp_a_settlement_impostor_same";
 const WALLET_B_SETTLEMENT_IMPOSTOR = "cwlt_poc_dvp_b_settlement_impostor";
+const WALLET_A_SETTLEMENT_ROTATED = "cwlt_poc_dvp_a_settlement_rotated";
 const SETTLEMENT_AUTHORITY = "PocDvpASettlement111";
 async function seedFixture(): Promise<void> {
   await seedTestDatabase(env);
@@ -147,6 +148,23 @@ async function seedFixture(): Promise<void> {
         "provider-a-settlement-impostor-same",
         SETTLEMENT_AUTHORITY,
         "A impostor same project"
+      ),
+    // Where a rotation puts the project's mapping after the old settlement
+    // wallet is deactivated: a replacement provisioned under a NEW key. Trades
+    // created under the old authority keep it, so after this rotation the
+    // mapping no longer names any wallet that could have signed them, and
+    // among the old-key wallets the scan cannot tell the signer from the
+    // orphan. Only the recorded close wallet (0120) still can.
+    db
+      .prepare(
+        `INSERT INTO custody_wallets (id, custody_config_id, wallet_id, public_key, label, status)
+         VALUES (?, 'cfg_poc_dvp_a', ?, ?, ?, 'active')`
+      )
+      .bind(
+        WALLET_A_SETTLEMENT_ROTATED,
+        "provider-a-settlement-rotated",
+        "PocDvpARotated111",
+        "A settlement authority, rotated"
       ),
     db
       .prepare(
@@ -411,6 +429,49 @@ describe("DvP unified transaction attribution (SOLA9-352)", () => {
       expect(row.custodyWalletId).toBe(WALLET_A_SETTLEMENT);
       expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT);
     }
+  });
+
+  it("attributes a close to the wallet recorded as signing it, even after the settlement mapping rotates", async () => {
+    // The close flow knows which custody wallet it authorized, and records it
+    // with the close (0120). That is the one durable answer: once the project's
+    // mapping rotates to a new key, the old-key wallets are indistinguishable
+    // to any scan, and the one that signed can lose the tie.
+    await insertTrade("dvp_poc_close_rotated", "settled", "sig_settlement_authority");
+    await getDb(env).execute("UPDATE dvp_trades SET close_custody_wallet_id = ? WHERE id = ?", [
+      WALLET_A_SETTLEMENT,
+      "dvp_poc_close_rotated",
+    ]);
+    // The rotation: the mapping now points at the replacement wallet, whose
+    // key is not the trade's authority at all.
+    await getDb(env).execute(
+      "UPDATE dvp_settlement_wallets SET custody_wallet_id = ? WHERE project_id = ?",
+      [WALLET_A_SETTLEMENT_ROTATED, PROJECT_A]
+    );
+
+    const orgAFeed = await listDvp({ organizationId: ORG_A, projectId: PROJECT_A });
+    const closeRows = orgAFeed.rows.filter(
+      (row) => row.moduleId === "dvp_poc_close_rotated" && row.kind === "close"
+    );
+    expect(closeRows).toHaveLength(2);
+    for (const row of closeRows) {
+      expect(row.custodyWalletId).toBe(WALLET_A_SETTLEMENT);
+      // Neither the orphan the race left behind nor the rotated wallet: the
+      // wallet the trade row recorded.
+      expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_IMPOSTOR_SAME_PROJECT);
+      expect(row.custodyWalletId).not.toBe(WALLET_A_SETTLEMENT_ROTATED);
+    }
+
+    // A feed scoped to the wallet that signed still finds the closes it signed.
+    const authorityScoped = await listDvp({
+      organizationId: ORG_A,
+      projectId: PROJECT_A,
+      moduleWalletScopes: [{ module: "dvp", custodyWalletIds: [WALLET_A_SETTLEMENT] }],
+    });
+    expect(
+      authorityScoped.rows.filter(
+        (row) => row.moduleId === "dvp_poc_close_rotated" && row.kind === "close"
+      )
+    ).toHaveLength(2);
   });
 
   it("leaves no fund row for a funding the chain proved moved nothing", async () => {

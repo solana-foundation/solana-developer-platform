@@ -626,7 +626,12 @@ const closeTrade = (action: DvpCloseAction) => async (c: AppContext) => {
     ? await createDvpTradeRepository(c.env).recordClose(
         trade.id,
         action === "settle" ? "settled" : "cancelled",
-        result.signature
+        result.signature,
+        // The wallet the handler authorized is the one whose key signed. Kept
+        // on the row so the unified feed attributes the close to it even after
+        // the project's settlement mapping rotates or other wallets come to
+        // hold the same key (0120).
+        settlement.custodyWalletId
       )
     : null;
 
