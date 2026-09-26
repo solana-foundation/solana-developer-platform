@@ -293,6 +293,7 @@ interface TokenRow {
   template: string;
   total_supply_cached: string;
   total_supply_updated_at: string | null;
+  total_supply_read_slot: number | null;
   max_supply: string | null;
   is_mintable: number;
   freeze_authority_enabled: number;
@@ -1410,6 +1411,74 @@ export class TokenService {
   }
 
   /**
+   * Undo a mint's cap reservation for a submission that provably never reached
+   * the network, and clear its pending row, atomically.
+   *
+   * The release has the same burden of proof in reverse as `reserveMintSupply`
+   * has going in: a reservation may only be handed back when nothing can land
+   * with it, which is why the guarded row delete gates the supply write inside
+   * one transaction. The row must still be the unsigned, unsent mint the
+   * execute path leaves behind — if anything settled it in the meantime
+   * (recovered from the audit trail, say), the mint may have landed and the
+   * record stands for `POST /supply/refresh` to reconcile. Returning false is
+   * the caller's signal to keep the retained-reservation posture.
+   *
+   * The subtraction deliberately does not advance `total_supply_updated_at`,
+   * nor `total_supply_read_slot`. That stamp is the settled-burn bookkeeping's
+   * signal that a chain reading has happened — a refresh re-observes the
+   * chain, so a burn admitted before it is already inside the figure it read.
+   * A release is not a chain reading: advancing either signal here would let
+   * a burn whose bookkeeping follows the release mistake it for the
+   * reconciliation that absorbed it, skip its own decrement, and leave the
+   * cache high until a separate supply refresh.
+   *
+   * @returns whether the reservation was released and the row cleared.
+   */
+  async releaseUnbroadcastMintReservation(input: {
+    transactionId: string;
+    tokenId: string;
+    deltaBaseUnits: string;
+  }): Promise<boolean> {
+    const now = new Date().toISOString();
+    const tokenScope = this.tenantTokenScope("token");
+    return await this.db.transaction(async (tx) => {
+      const deleted = await tx
+        .prepare(
+          `DELETE FROM issuance_transactions AS tx
+           USING issued_tokens AS token
+           WHERE tx.id = ?
+             AND tx.token_id = token.id${tokenScope.clause}
+             AND tx.token_id = ?
+             AND tx.type = 'mint'
+             AND tx.status = 'pending'
+             AND tx.signature IS NULL
+             AND tx.serialized_tx IS NULL
+           RETURNING tx.id`
+        )
+        .bind(input.transactionId, ...tokenScope.values, input.tokenId)
+        .first<{ id: string }>();
+      if (deleted?.id !== input.transactionId) {
+        return false;
+      }
+
+      const tenant = this.tenantMutationScope();
+      const released = await tx
+        .prepare(
+          `UPDATE issued_tokens
+           SET total_supply_cached = GREATEST(
+                 COALESCE(total_supply_cached, '0')::numeric - ?::numeric,
+                 0
+               )::text,
+               updated_at = ?
+           WHERE id = ?${tenant.clause}`
+        )
+        .bind(input.deltaBaseUnits, now, input.tokenId, ...tenant.values)
+        .run();
+      return released === 1;
+    });
+  }
+
+  /**
    * Record a supply change that has already settled on-chain — today, a burn.
    *
    * A cache write, not an admission check: the balance is enforced against the
@@ -1451,8 +1520,8 @@ export class TokenService {
     await this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.supply_bookkeeping_applied_at, it.operation_params,
-                  t.decimals, t.total_supply_updated_at
+          `SELECT it.supply_bookkeeping_applied_at, it.operation_params, it.slot,
+                  t.decimals, t.total_supply_updated_at, t.total_supply_read_slot
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
            WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
@@ -1462,8 +1531,10 @@ export class TokenService {
         .first<{
           supply_bookkeeping_applied_at: string | null;
           operation_params: string;
+          slot: number | null;
           decimals: number;
           total_supply_updated_at: string | null;
+          total_supply_read_slot: number | null;
         }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
       if (row.supply_bookkeeping_applied_at !== null) return;
@@ -1475,10 +1546,27 @@ export class TokenService {
       const hasBaseline = baseline === null || typeof baseline === "string";
       const supplyChangedSinceAdmission = hasBaseline && baseline !== row.total_supply_updated_at;
 
-      // A chain reconciliation after this burn was admitted already includes
-      // the settled burn. Subtracting again would undercount supply and create
-      // false mint headroom, so in that case only consume the retry marker.
-      if (!supplyChangedSinceAdmission) {
+      // A chain reconciliation taken at slot S includes every settled effect
+      // with a slot at or below S, so a burn that settled at or before the
+      // last reading's slot is already inside the figure — subtracting again
+      // would undercount supply and create false mint headroom, and a burn
+      // that settled after it is not inside the figure no matter how the
+      // stamps line up. Slots order the burn against the reading exactly,
+      // which is what the wall-clock comparison below cannot do for rows that
+      // predate the read slot: there the comparison stays one-sided — a stamp
+      // move the burn predated skips a decrement the cache may still owe, and
+      // the record runs high until the next refresh past the in-flight window
+      // — accepted, because the reverse guess would subtract twice and run
+      // the record low, admitting mints past the cap. The anchor is null only
+      // when no slotted reading has been applied yet — a token never refreshed,
+      // or a refresh that could not learn its slot, which the service refuses
+      // to apply rather than record a figure it cannot order burns against.
+      // See the stamp discussion on `setSupplyFromBaseUnits`.
+      const burnAlreadyReconciled =
+        row.slot !== null && row.total_supply_read_slot !== null
+          ? row.slot <= row.total_supply_read_slot
+          : supplyChangedSinceAdmission;
+      if (!burnAlreadyReconciled) {
         const tokenMutation = this.tenantMutationScope();
         const updatedToken = await tx
           .prepare(
@@ -2108,10 +2196,58 @@ export class TokenService {
    * that already landed counts twice for the length of the window (once in the
    * chain total, once as its row); the floor is deliberately an upper bound, and
    * the excess falls away as rows settle or age out.
+   *
+   * The stamp stays put only while a hold keeps the figure above the raw
+   * reading: a figure SDP held in place absorbed nothing, so a burn admitted
+   * before the reading but settled after it still owes its decrement. A figure
+   * that came down to the reading or the floor took the settled effects the
+   * chain had already applied, including any burn whose bookkeeping had not run
+   * yet — and so did a reading that leaves the figure unchanged, because the
+   * chain total matching the cache can be a settled burn cancelled out by an
+   * off-platform mint, which the reading absorbed all the same.
+   *
+   * The stamp is one wall-clock figure and cannot say whether a given burn
+   * settled before the reading or after it, so settled-burn bookkeeping does
+   * not have to guess from it: every refresh also records the slot the reading
+   * was taken at (`total_supply_read_slot`, never moved backwards), and a burn
+   * with a settlement slot at or below that reading is inside this figure by
+   * slot order — no wall-clock ambiguity. The stamp comparison survives only
+   * as the fallback for rows recorded before the slot existed, where it keeps
+   * its one-sided trade: a stamp move the burn predated skips a decrement the
+   * cache may still owe, and the record runs high until the next refresh past
+   * the in-flight window — accepted, because the reverse guess would subtract
+   * twice and run the record low, admitting mints past the cap, a hole that
+   * does not heal on its own.
+   *
+   * The anchor follows the figure, and only where the figure is honest about
+   * its coverage. An absorbed reading advances it to the reading's slot (never
+   * backwards): the figure now includes every settled effect up to that slot.
+   * A held reading moves neither the stamp nor the anchor: the figure it left
+   * in place absorbed nothing, so the previous reading's coverage still
+   * describes it exactly.
+   *
+   * @param readSlot the chain slot the reading was taken at, from the RPC
+   *   response context. The slot is what orders settled-burn bookkeeping
+   *   against this figure, so it is mandatory at the service boundary, not
+   *   only in the refresh route: a reading whose slot cannot be determined is
+   *   never applied, because an absorption that cannot be ordered would make
+   *   burn bookkeeping either subtract a burn the reading had already absorbed
+   *   (the record runs low, admitting mints past the cap) or skip a burn that
+   *   settles after it (the record runs high until a separate refresh). The
+   *   route bounds a slotless response with the current confirmed slot and
+   *   fails closed when even that lookup fails; this guard only refuses what
+   *   such a direct caller would have applied.
    */
-  async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
+  async setSupplyFromBaseUnits(
+    tokenId: string,
+    supplyBaseUnits: string,
+    readSlot: number
+  ): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
+    }
+    if (!Number.isInteger(readSlot) || readSlot < 0) {
+      throw new Error("SUPPLY_READING_SLOT_REQUIRED");
     }
 
     const now = new Date().toISOString();
@@ -2145,30 +2281,46 @@ export class TokenService {
                  ?::numeric + live.reserved
                )
              ) AS supply,
-             live.reserved AS reserved
+             live.reserved AS reserved,
+             ?::numeric AS reading
            FROM issued_tokens tok, live
            WHERE tok.id = ?${tenantRead.clause}
          )
-         UPDATE issued_tokens
-         SET total_supply_cached = resolved.supply::text,
-             total_supply_updated_at = CASE
-               WHEN resolved.supply = ?::numeric THEN ?
-               ELSE issued_tokens.total_supply_updated_at
-             END,
-             updated_at = ?
-         FROM resolved
-         WHERE issued_tokens.id = ?${tenantWrite.clause}
-         RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
+          UPDATE issued_tokens
+          SET total_supply_cached = resolved.supply::text,
+              total_supply_updated_at = CASE
+                WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  THEN issued_tokens.total_supply_updated_at
+                ELSE ?
+              END,
+              -- The read slot is the coverage anchor of the figure and moves
+              -- only where the figure can keep its promise. A hold leaves both
+              -- the stamp and the anchor alone: the figure it kept in place
+              -- absorbed nothing, so the previous reading slot still describes
+              -- it. An absorbed reading re-observed the chain, so its anchor is
+              -- the reading own slot, never backwards.
+              total_supply_read_slot = CASE
+                WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  THEN issued_tokens.total_supply_read_slot
+                ELSE GREATEST(issued_tokens.total_supply_read_slot, ?::int)
+              END,
+              updated_at = ?
+          FROM resolved
+          WHERE issued_tokens.id = ?${tenantWrite.clause}
+          RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
       )
       .bind(
         tokenId,
         since,
         supplyBaseUnits,
         supplyBaseUnits,
+        supplyBaseUnits,
         tokenId,
         ...tenantRead.values,
-        supplyBaseUnits,
         now,
+        readSlot,
         now,
         tokenId,
         ...tenantWrite.values
@@ -2184,9 +2336,18 @@ export class TokenService {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
-    // Held above the reading, so the figure on screen is SDP's own count and its
-    // "as of" stamp stays where it was — the next refresh past the window is what
-    // finishes the reconciliation.
+    // Held above the reading, so the figure on screen is SDP's own count. The
+    // stamp stays where it was only while that hold lasts: a figure the hold
+    // kept in place absorbed nothing, and a burn admitted before the reading
+    // but settled after it must still subtract its own decrement. A reading
+    // that leaves the figure unchanged is not a hold — the chain total meeting
+    // the cache can be a settled burn cancelled out by an off-platform mint —
+    // and it moves the stamp, because it re-observed the chain all the same.
+    // The read slot moves with the stamp, not with the wall clock: it anchors
+    // what settled-burn bookkeeping slots against, so it advances only when the
+    // figure re-observed the chain (to the reading's slot, or to nothing when
+    // the response carried none), and stays put through a hold exactly as the
+    // stamp does.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {

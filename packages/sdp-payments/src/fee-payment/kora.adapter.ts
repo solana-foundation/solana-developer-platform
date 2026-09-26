@@ -19,7 +19,7 @@ import {
   type SignAndSendTransactionRequest,
   type SignTransactionRequest,
 } from "@solana/kora";
-import type { FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
+import type { FeePaymentErrorCode, FeePaymentPort, SponsorshipProviderConfiguration } from "./port";
 import { FeePaymentError } from "./port";
 
 interface KoraClientTransport {
@@ -177,6 +177,13 @@ export class KoraAdapter implements FeePaymentPort {
     //  - 502/503/Bad Gateway: The underlying RPC (e.g. Helius devnet) can return transient
     //    HTTP gateway errors that resolve on the next attempt.
     const maxRetries = 2;
+    // A retryable failure — a timeout, a dropped connection, a gateway error —
+    // is an ambiguous verdict: that attempt may have reached Kora and the
+    // transaction may already be live on-chain. Once one has happened, a later
+    // attempt's structured refusal no longer proves Kora signed and sent
+    // nothing (the retry of a landed submission answers "already processed",
+    // which maps to a refusal code), so the outcome must stay ambiguous.
+    let ambiguousAttempt = false;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const { signature: submittedSignature, signed_transaction } =
@@ -196,11 +203,20 @@ export class KoraAdapter implements FeePaymentPort {
         return signature;
       } catch (error) {
         if (attempt < maxRetries && isRetryableSignAndSendError(error)) {
+          ambiguousAttempt = true;
           await sleep((attempt + 1) * 500);
           continue;
         }
 
-        throw this.wrapError(error, "Failed to sign and send transaction");
+        const wrapped = this.wrapError(error, "Failed to sign and send transaction");
+        if (ambiguousAttempt && DETERMINISTIC_REFUSAL_CODES.has(wrapped.code)) {
+          // Downgrade the refusal to the ambiguity the earlier attempt earned:
+          // callers hold the reservation (and the sponsorship budget) for
+          // reconciliation instead of releasing headroom a live submission
+          // may still consume.
+          throw new FeePaymentError(wrapped.message, "NETWORK_ERROR", wrapped.cause);
+        }
+        throw wrapped;
       }
     }
 
@@ -323,6 +339,25 @@ export class KoraAdapter implements FeePaymentPort {
 // ═══════════════════════════════════════════════════════════════════════════
 // Utilities
 // ═══════════════════════════════════════════════════════════════════════════
+
+// The structured verdicts every reservation holder treats as proof that
+// nothing was signed or sent: the mint cap reservation releases on
+// PROVIDER_REJECTED/SIGNING_FAILED, and the sponsorship budget releases on
+// those plus INSUFFICIENT_BALANCE and RATE_LIMITED. After a retryable
+// attempt none of them carries that proof — the first submission may have
+// landed, and the retry's verdict (a balance or rate-limit refusal, or the
+// "already processed" answer a duplicate of a landed submission produces)
+// describes the retry, not the first attempt — so each is downgraded to
+// NETWORK_ERROR and the reservations stay held for reconciliation.
+// SUBMISSION_FAILED is excluded on purpose: it already reads as ambiguous
+// downstream (nothing releases on it), and it carries real information —
+// the retry executed on-chain and failed.
+const DETERMINISTIC_REFUSAL_CODES: ReadonlySet<FeePaymentErrorCode> = new Set([
+  "PROVIDER_REJECTED",
+  "SIGNING_FAILED",
+  "INSUFFICIENT_BALANCE",
+  "RATE_LIMITED",
+]);
 
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -454,9 +489,11 @@ function isRetryableGetFeePayerError(error: unknown): boolean {
 }
 
 // Kora's stable error codes (crates/lib/src/error.rs `KoraErrorCode`).
-// A structured Kora refusal proves nothing was signed or sent and the same
-// bytes will be refused again, so it maps to PROVIDER_REJECTED and the
-// sponsorship budget releases the reservation immediately. Anything ambiguous
+// A structured Kora refusal on an attempt that followed no retryable failure
+// proves nothing was signed or sent and the same bytes will be refused again,
+// so it maps to PROVIDER_REJECTED and the sponsorship budget releases the
+// reservation immediately. After a retryable attempt the verdict loses that
+// proof (`signAndSend` downgrades it to NETWORK_ERROR). Anything ambiguous
 // stays NETWORK_ERROR so the reservation is held for reconciliation.
 function mapKoraErrorCode(code: number): import("./port").FeePaymentErrorCode {
   switch (code) {

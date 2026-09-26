@@ -45,6 +45,7 @@ import {
 } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
+import { sendTransactionPreflightError } from "@/test/helpers/payments-routes";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { seedCachedApiKey } from "@/test/mocks/kv";
@@ -5440,6 +5441,9 @@ describe("Issuance Routes", () => {
               value: {
                 amount: "1500000000",
               },
+              context: {
+                slot: 42,
+              },
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
@@ -5462,6 +5466,103 @@ describe("Issuance Routes", () => {
       expect(body.data.token.id).toBe(activeTokenId);
       expect(body.data.token.totalSupply).toBe("1.5");
       expect(body.data.token.totalSupplyUpdatedAt).toBeDefined();
+    });
+
+    it("bounds a slotless supply reading with the current confirmed slot", async () => {
+      // A supply response without a context slot cannot order settled-burn
+      // bookkeeping against the reading it carries, so the route asks the node
+      // for the current confirmed slot: it bounds the reading from above, so a
+      // burn the reading absorbed is recognized as absorbed and a burn settling
+      // after the refresh still subtracts its decrement exactly.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+        const method = JSON.parse(String(init?.body)).method;
+        if (method === "getSlot") {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: "2", result: 77 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { value: { amount: "1500000000" } },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(200);
+      const db = getDb(env);
+      const stored = await db
+        .prepare("SELECT total_supply_read_slot FROM issued_tokens WHERE id = ?")
+        .bind(activeTokenId)
+        .first<{ total_supply_read_slot: number | null }>();
+      expect(stored?.total_supply_read_slot).toBe(77);
+    });
+
+    it("fails closed when the reading's slot cannot be determined", async () => {
+      // A slotless supply response whose bounding slot lookup also fails
+      // cannot be ordered against settled-burn bookkeeping: an absorbed
+      // slotless reading would leave a burn that settles after the refresh
+      // skipping its decrement, and the record above the chain until a
+      // separate refresh. The refresh is a retryable error instead — the
+      // recorded figure, stamp, and anchor are left exactly as they were.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+        const method = JSON.parse(String(init?.body)).method;
+        if (method === "getSlot") {
+          return new Response("node unavailable", { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { value: { amount: "1500000000" } },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+
+      const db = getDb(env);
+      const stored = await db
+        .prepare(
+          "SELECT total_supply_cached, total_supply_updated_at, total_supply_read_slot FROM issued_tokens WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .first<{
+          total_supply_cached: string;
+          total_supply_updated_at: string | null;
+          total_supply_read_slot: number | null;
+        }>();
+      expect(stored?.total_supply_cached).toBe("0");
+      expect(stored?.total_supply_updated_at).toBeNull();
+      expect(stored?.total_supply_read_slot).toBeNull();
     });
 
     it("returns 400 for undeployed token", async () => {
@@ -7714,6 +7815,257 @@ describe("Issuance Routes", () => {
           // transaction pending and its durable audit intent unresolved until
           // supply reconciliation proves whether the mint landed.
           expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("keeps the reservation when the sponsored provider fails ambiguously after the gate", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // A Kora timeout (NETWORK_ERROR) says nothing about whether the
+        // relayer forwarded the transaction before dying. Ambiguous, so the
+        // reservation must stand exactly as for a confirmation timeout.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new FeePaymentAdapters.FeePaymentError(
+              "Failed to sign and send transaction: Kora signAndSendTransaction timed out after 10000ms",
+              "NETWORK_ERROR"
+            );
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("keeps the reservation when the cluster confirms the mint as failed", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // A confirmation outcome: the transaction was broadcast and landed as
+        // failed. Retained like every post-submission outcome — a settled
+        // failure still consumed block space, and the supply record reconciles
+        // from the chain once the row ages out of the in-flight window.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new AppError(
+              "TRANSACTION_FAILED",
+              'Transaction failed: {"InstructionError":[0,{"Custom":1}]}'
+            );
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("releases the reservation and clears the pending row when preflight proves the mint was rejected before broadcast", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValue({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValue(true);
+        // The exact paused Token-2022 shape: the gate ran (the full remaining
+        // cap is reserved), then the RPC's own preflight gate simulated the
+        // transaction, the paused mint instruction failed, and the node
+        // refused to forward anything. `sendTransaction` never fails over, so
+        // the bytes are provably dead — the reservation must not outlive them.
+        let gateRan = false;
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementationOnce(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            gateRan = true;
+            throw sendTransactionPreflightError();
+          })
+          .mockImplementationOnce(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            return mockMintResult as never;
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(gateRan).toBe(true);
+          // Provably unbroadcast, so the cap headroom is handed back at once
+          // instead of staying pinned at the cap for the in-flight window.
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          // The pending row is cleared, so it cannot pin the supply floor in
+          // `POST /supply/refresh` and the idempotency slot is reusable.
+          expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
+
+          // And the headroom is immediately usable: a legitimate follow-up
+          // mint for the same amount is admitted again.
+          const retry = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+          expect(retry.status).toBe(200);
+          expect(mintToSpy).toHaveBeenCalledTimes(2);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("300000000000");
+          expect((await latestMintTransaction(allowlistTokenId))?.status).toBe("confirmed");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          isWalletOnListSpy.mockRestore();
+          mintToSpy.mockRestore();
+        }
+      });
+
+      it("releases the reservation when the sponsored provider structurally refused to sign or send", async () => {
+        await seedAblListAddress();
+        await getDb(env)
+          .prepare(
+            "UPDATE issued_tokens SET max_supply = '1000000000000', total_supply_cached = '100000000000' WHERE id = ?"
+          )
+          .bind(allowlistTokenId)
+          .run();
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSigner")
+          .mockResolvedValueOnce({ address: signerAddress } as never);
+        const isWalletOnListSpy = vi
+          .spyOn(MosaicService.prototype, "isWalletOnList")
+          .mockResolvedValueOnce(true);
+        // A structured Kora refusal (PROVIDER_REJECTED) proves nothing was
+        // signed or sent — the same verdict the sponsorship budget already
+        // relies on for its own deterministic release.
+        const mintToSpy = vi
+          .spyOn(MosaicService.prototype, "mintTo")
+          .mockImplementation(async (_options, onBeforeSubmit) => {
+            await onBeforeSubmit?.();
+            throw new FeePaymentAdapters.FeePaymentError(
+              "Failed to sign and send transaction: RPC Error -32001: token-2022 guard rejected the transfer",
+              "PROVIDER_REJECTED"
+            );
+          });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${allowlistTokenId}/mint`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                mint: { destination: freshDestination, amount: "200" },
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBeGreaterThanOrEqual(400);
+          expect(mintToSpy).toHaveBeenCalledTimes(1);
+          expect((await storedSupply(allowlistTokenId))?.total_supply_cached).toBe("100000000000");
+          expect(await latestMintTransaction(allowlistTokenId)).toBeNull();
         } finally {
           createOrgSignerSpy.mockRestore();
           isWalletOnListSpy.mockRestore();

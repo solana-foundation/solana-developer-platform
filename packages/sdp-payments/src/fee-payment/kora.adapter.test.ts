@@ -207,6 +207,122 @@ describe("KoraAdapter error classification", () => {
       (error: unknown) => error instanceof FeePaymentError && error.code === "RATE_LIMITED"
     );
   });
+
+  it("keeps a refusal after an ambiguous attempt ambiguous", async () => {
+    // Attempt 0 times out after Kora may have submitted; the retry then gets a
+    // structured refusal — the answer a duplicate of a landed submission
+    // produces. The first submission can still land, so the verdict must stay
+    // ambiguous for every caller that releases a reservation on a refusal.
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("Request timed out");
+        throw new Error("RPC Error -32000: Invalid transaction: already processed");
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+    assert.equal(attempts, 2);
+  });
+
+  it("keeps a signing refusal after an ambiguous attempt ambiguous too", async () => {
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new TypeError("fetch failed");
+        throw new Error("RPC Error -32602: invalid params");
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+    assert.equal(attempts, 2);
+  });
+
+  it("keeps a balance refusal after an ambiguous attempt ambiguous too", async () => {
+    // The sponsorship budget releases fee-budget headroom on
+    // INSUFFICIENT_BALANCE — but after a timeout the first submission may have
+    // landed, and the retry's balance refusal describes the retry, not the
+    // first attempt. The verdict must stay ambiguous for that caller too.
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("Request timed out");
+        throw new Error("RPC Error -32003: Insufficient funds");
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+    assert.equal(attempts, 2);
+  });
+
+  it("keeps a rate-limit refusal after an ambiguous attempt ambiguous too", async () => {
+    let attempts = 0;
+    const transport = {
+      getPayerSigner: async () => ({ signer_address: SIGNER }),
+      signTransaction: async () => ({ signed_transaction: "" }),
+      signAndSendTransaction: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new TypeError("fetch failed");
+        throw new Error("Kora Error -32030: Rate limit exceeded");
+      },
+      estimateTransactionFee: async () => ({ fee_in_lamports: 0 }),
+      getSupportedTokens: async () => ({ tokens: [] }),
+      getConfig: async () => ({}),
+    } as unknown as KoraTransport;
+    const adapter = new KoraAdapter({
+      rpcUrl: "https://kora.example",
+      userId: "u1",
+      client: transport,
+    });
+
+    await assert.rejects(
+      adapter.signAndSend(new Uint8Array(64)),
+      (error: unknown) => error instanceof FeePaymentError && error.code === "NETWORK_ERROR"
+    );
+    assert.equal(attempts, 2);
+  });
 });
 
 describe("KoraAdapter.getSponsorshipConfiguration", () => {
