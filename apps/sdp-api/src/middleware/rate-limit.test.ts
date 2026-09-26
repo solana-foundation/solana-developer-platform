@@ -14,6 +14,7 @@ import {
   KEYED_IP_BACKSTOP_MAX_REQUESTS,
 } from "@/middleware/rate-limit";
 import type { KVStoreSet } from "@/runtime/kv";
+import { getLogger } from "@/runtime/logger";
 import { TEST_API_KEY, TEST_CACHED_API_KEY } from "@/test/fixtures/api-keys";
 import { TEST_ORG } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
@@ -219,6 +220,32 @@ describe("Rate limiting", () => {
       expect(res.status).toBe(429);
       const body = (await res.json()) as { error: { code: string } };
       expect(body.error.code).toBe("RATE_LIMITED");
+    });
+
+    it("logs the route template, never a bearer payment token, when rejecting /pay/:token", async () => {
+      // SOLA9-552 follow-up: the rejection log is the one telemetry line a
+      // 429'd request still produces, and /pay/:token authorizes by the token
+      // in the URL — so the logged route must be the template.
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
+      try {
+        await seedRateLimit(env, CLIENT_IP, 20);
+
+        const res = await app.request(
+          "/pay/SOLA9LeakToken9Abc",
+          { headers: { "x-forwarded-for": CLIENT_IP } },
+          env
+        );
+
+        expect(res.status).toBe(429);
+        const rejections = warn.mock.calls
+          .map((call) => call[0] as Record<string, unknown>)
+          .filter((payload) => payload?.event === "sdp_api_rate_limit_rejected");
+        expect(rejections).toHaveLength(1);
+        expect(rejections[0].route).toBe("/pay/:token");
+        expect(JSON.stringify(warn.mock.calls)).not.toContain("SOLA9LeakToken9Abc");
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it("does not cap keyed requests at the anonymous limit", async () => {

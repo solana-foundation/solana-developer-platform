@@ -25,13 +25,24 @@ function appendServerTiming(existingValue: string | null, nextEntry: string): st
  * telemetry field may carry the concrete pathname. Callers log the matched
  * route template (e.g. `/pay/:token`) instead: method, status, duration, and
  * request ids stay joinable while the credential never serializes. The
- * lookup uses the route that actually responded (`routeIndex`), so
- * short-circuited middleware and error paths resolve to where the request
- * stopped, and unmatched requests resolve to the catch-all pattern, which
+ * lookup resolves the matched endpoint even when a global middleware
+ * rejected the request before its handler ran (`routeIndex` still points at
+ * the middleware's `*` entry), so rejected requests keep grouping by
+ * endpoint, and unmatched requests resolve to the catch-all pattern, which
  * carries no request data. Never log `c.req.url`/`c.req.path` instead.
  */
 export function routeTemplateForTelemetry(c: Context<{ Bindings: Env }>): string {
-  return c.req.matchedRoutes.at(c.req.routeIndex)?.path ?? "*";
+  const routes = c.req.matchedRoutes;
+  // The endpoint is the last matched entry; reverse order also keeps a
+  // path-scoped middleware from shadowing the route that would have served
+  // the request. Every template is static, so none carries request data.
+  for (let i = routes.length - 1; i >= 0; i--) {
+    const path = routes[i].path;
+    if (path !== "*") {
+      return path;
+    }
+  }
+  return "*";
 }
 
 function normalizeHeaderValue(

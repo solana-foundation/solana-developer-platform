@@ -75,6 +75,34 @@ describe("requestTracingMiddleware", () => {
     expect(JSON.stringify(info.mock.calls)).not.toContain("/pay/");
   });
 
+  it("labels a middleware-rejected request with the endpoint route template, not *", async () => {
+    // Mirrors the production wiring: a global limiter-style middleware
+    // rejects after routing but before the handler runs (e.g. a 429), so
+    // routeIndex still points at the middleware's `*` entry when the timing
+    // log is emitted.
+    const app = new Hono<{ Bindings: Env }>();
+    app.use("*", requestTracingMiddleware());
+    app.use("*", async () => {
+      // Rejects before calling next(), like the global rate limiter's 429:
+      // the handler never runs, so routeIndex still points at this
+      // middleware's `*` entry when the timing log is emitted.
+      throw new Error("global limiter rejected the request");
+    });
+    const pay = new Hono<{ Bindings: Env }>();
+    pay.get("/:token", (c) => c.json({ ok: true }));
+    app.route("/pay", pay);
+
+    const info = vi.spyOn(getLogger(), "info").mockImplementation(() => {});
+
+    const res = await app.request(`/pay/${BEARER_TOKEN}`);
+
+    expect(res.status).toBe(500);
+    const events = timingEvents(info.mock.calls);
+    expect(events).toHaveLength(1);
+    expect(events[0].path).toBe("/pay/:token");
+    expect(JSON.stringify(info.mock.calls)).not.toContain(BEARER_TOKEN);
+  });
+
   it("keeps diagnosis fields intact: method, status, duration, source, event", async () => {
     const app = buildApp();
     const info = vi.spyOn(getLogger(), "info").mockImplementation(() => {});

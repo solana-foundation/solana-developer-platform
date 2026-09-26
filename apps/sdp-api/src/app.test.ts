@@ -28,6 +28,20 @@ const FEE_NETWORK_PATH = "/__fee_network_test_throw";
 const FEE_RATE_LIMITED_PATH = "/__fee_rate_limited_test_throw";
 const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 
+// Every request in this file previously landed on one shared anonymous
+// rate-limit bucket (Redis-backed even in unit tests, identifier "unknown"):
+// past ~20 requests inside a trailing minute the limiter starts 429ing and an
+// onError assertion sees RATE_LIMITED instead of the error it is testing —
+// depending on the wall clock and which files the CI worker ran before this
+// one. A fresh RFC-5737 client IP per request gives each request its own
+// bucket, so the suite is deterministic however the schedule shakes out.
+// (getClientIp takes the first x-forwarded-for entry under TRUST_PROXY_HEADERS.)
+let freshClientIpSeq = 0;
+function freshClientIpHeaders(): { "x-forwarded-for": string } {
+  freshClientIpSeq += 1;
+  return { "x-forwarded-for": `203.0.113.${freshClientIpSeq}` };
+}
+
 function makeObservability(): {
   obs: Observability;
   captureException: ReturnType<typeof vi.fn>;
@@ -158,7 +172,7 @@ describe("createApp onError HTTPException mapping", () => {
       VALIDATED_BODY_PATH,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...freshClientIpHeaders() },
         body: "{not json",
       },
       baseEnv
@@ -183,7 +197,7 @@ describe("createApp plugin registration", () => {
     };
     const app = createApp({ observability: obs, plugins: [plugin] });
 
-    const res = await app.request("/v1/test-plugin", {}, baseEnv);
+    const res = await app.request("/v1/test-plugin", { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
@@ -204,7 +218,7 @@ describe("createApp plugin registration", () => {
       "/v1/body-limit-test",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...freshClientIpHeaders() },
         body: "x".repeat(1024 * 1024 + 1),
       },
       baseEnv
@@ -219,7 +233,7 @@ describe("createApp plugin registration", () => {
     const { obs } = makeObservability();
     const app = createApp({ observability: obs });
 
-    const res = await app.request("/v1/test-plugin", {}, baseEnv);
+    const res = await app.request("/v1/test-plugin", { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(404);
   });
@@ -243,7 +257,7 @@ describe("createApp onError capture", () => {
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(THROW_PATH, {}, baseEnv);
+    const res = await app.request(THROW_PATH, { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { code: string } };
@@ -261,8 +275,16 @@ describe("createApp onError capture", () => {
     const { obs, setTag } = makeObservability();
     const app = buildApp(obs);
 
-    await app.request(`/__bearer_unexpected_error_test_throw/${BEARER_TOKEN}`, {}, baseEnv);
-    await app.request(`/__bearer_rpc_error_test_throw/${BEARER_TOKEN}`, {}, baseEnv);
+    await app.request(
+      `/__bearer_unexpected_error_test_throw/${BEARER_TOKEN}`,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
+    await app.request(
+      `/__bearer_rpc_error_test_throw/${BEARER_TOKEN}`,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
 
     const logged = JSON.stringify(loggerError.mock.calls);
     expect(logged).not.toContain(BEARER_TOKEN);
@@ -281,7 +303,7 @@ describe("createApp onError capture", () => {
     const { obs, captureException, withScope } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(FEE_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(FEE_ERROR_PATH, { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -298,7 +320,7 @@ describe("createApp onError capture", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
+    const res = await app.request(FEE_REJECTED_PATH, { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -318,7 +340,7 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(path, {}, baseEnv);
+    const res = await app.request(path, { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -331,7 +353,11 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const limited = await app.request(FEE_RATE_LIMITED_PATH, {}, baseEnv);
+    const limited = await app.request(
+      FEE_RATE_LIMITED_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
     expect(limited.status).toBe(429);
     const limitedBody = (await limited.json()) as { error: { code: string; message: string } };
     expect(limitedBody.error).toEqual({
@@ -339,7 +365,11 @@ describe("createApp onError capture", () => {
       message: "The transaction fee sponsor is busy. Try again.",
     });
 
-    const rejected = await app.request(FEE_REJECTED_PATH, {}, baseEnv);
+    const rejected = await app.request(
+      FEE_REJECTED_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
     const rejectedBody = (await rejected.json()) as { error: { message: string } };
     expect(rejectedBody.error.message).toContain("fee sponsor rejected this transaction");
   });
@@ -348,7 +378,7 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(FEE_AMBIGUOUS_PATH, {}, baseEnv);
+    const res = await app.request(FEE_AMBIGUOUS_PATH, { headers: freshClientIpHeaders() }, baseEnv);
 
     expect(res.status).toBe(502);
     const body = (await res.json()) as { error: { code: string; message: string } };
@@ -360,7 +390,11 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(SECRET_APP_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(
+      SECRET_APP_ERROR_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as {
@@ -378,7 +412,11 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(SECRET_RPC_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(
+      SECRET_RPC_ERROR_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
 
     expect(res.status).toBe(502);
     const body = (await res.json()) as {
@@ -396,7 +434,11 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(SECRET_PAYMENTS_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(
+      SECRET_PAYMENTS_ERROR_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
 
     expect(res.status).toBe(503);
     const body = (await res.json()) as {
@@ -415,7 +457,11 @@ describe("createApp onError capture", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(SECRET_SIGNING_ERROR_PATH, {}, baseEnv);
+    const res = await app.request(
+      SECRET_SIGNING_ERROR_PATH,
+      { headers: freshClientIpHeaders() },
+      baseEnv
+    );
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
@@ -430,7 +476,7 @@ describe("createApp onError capture", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    await app.request(SECRET_UNEXPECTED_ERROR_PATH, {}, baseEnv);
+    await app.request(SECRET_UNEXPECTED_ERROR_PATH, { headers: freshClientIpHeaders() }, baseEnv);
 
     const logged = JSON.stringify(consoleError.mock.calls);
     const captured = JSON.stringify(captureException.mock.calls);
@@ -452,7 +498,7 @@ describe("createApp onError capture", () => {
 
     const res = await app.request(
       PII_UNEXPECTED_ERROR_PATH,
-      {},
+      { headers: freshClientIpHeaders() },
       { ...baseEnv, SENTRY_DSN: "https://x@y/1" }
     );
 

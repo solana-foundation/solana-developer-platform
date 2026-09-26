@@ -7,6 +7,7 @@ import { rateLimited, serviceUnavailable } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { matchesFreePath } from "./path-match";
+import { routeTemplateForTelemetry } from "./request-tracing";
 
 /** Length of every rate limit window; counter buckets align to it. */
 export const RATE_LIMIT_WINDOW_MS = 60_000;
@@ -317,7 +318,10 @@ export async function enforceRateLimit(
         event: "sdp_api_rate_limit_rejected",
         tier: options.metricTier ?? "default",
         method: c.req.method,
-        route: c.req.path,
+        // Route template, never the concrete path: public routes like
+        // /pay/:token authorize by a bearer token in the URL, and a rejected
+        // request logs here without any other scrubbing.
+        route: routeTemplateForTelemetry(c),
         limit: maxRequests,
       },
       "Rate limit rejected request"
