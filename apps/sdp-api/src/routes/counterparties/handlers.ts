@@ -559,27 +559,48 @@ export const createCounterparty = async (
 
   const createdBy = await resolveCreatorUserId(c);
 
-  const counterparty = await repo.createCounterparty({
-    organizationId: auth.organizationId,
-    projectId,
-    externalId: body.externalId ?? null,
-    entityType: body.entityType,
-    displayName: body.displayName,
-    providerData: {},
-    createdBy,
+  // Counterparty rows are durable beneficiary state, so the mutation is
+  // bracketed intent/outcome like the wallet-policy rewrite: a refused audit
+  // intent aborts before anything commits, and a crash between commit and
+  // outcome leaves an unresolved intent the verification gate pages on —
+  // the row can never change while the ledger holds no admission for it.
+  const auditService = new AuditService(getDb(c.env));
+  const auditIntent = await auditService.beginCritical(c, {
+    action: "create",
+    resourceType: "counterparty",
+    metadata: {
+      entityType: body.entityType,
+    },
   });
 
+  let counterparty: CounterpartyRow | null;
+  try {
+    counterparty = await repo.createCounterparty({
+      organizationId: auth.organizationId,
+      projectId,
+      externalId: body.externalId ?? null,
+      entityType: body.entityType,
+      displayName: body.displayName,
+      providerData: {},
+      createdBy,
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
   if (!counterparty) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "insert_returned_no_row" },
+    });
     throw internalError("Failed to create counterparty");
   }
 
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
-    action: "create",
-    resourceType: "counterparty",
+  await auditService.completeCritical(c, auditIntent, {
     resourceId: counterparty.id,
     metadata: {
       entityType: body.entityType,
@@ -617,25 +638,39 @@ export const updateCounterparty = async (
     }
   }
 
-  const updated = await repo.updateCounterparty({
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-    ...body,
-  });
-
-  if (!updated) {
-    throw notFound("Counterparty");
-  }
-
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+  const auditIntent = await auditService.beginCritical(c, {
     action: "update",
     resourceType: "counterparty",
     resourceId: counterpartyId,
+    metadata: { changedFields: Object.keys(body) },
+  });
+
+  let updated: CounterpartyRow | null;
+  try {
+    updated = await repo.updateCounterparty({
+      counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+      ...body,
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  if (!updated) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "counterparty_not_found" },
+    });
+    throw notFound("Counterparty");
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
     metadata: { changedFields: Object.keys(body) },
   });
 
@@ -655,25 +690,37 @@ export const archiveCounterparty = async (c: AppContext) => {
   const { counterpartyId } = params.data;
   const repo = getCounterpartiesRepository(c);
 
-  const archived = await repo.archiveCounterparty({
-    counterpartyId,
-    organizationId: auth.organizationId,
-    projectId,
-  });
-
-  if (!archived) {
-    throw notFound("Counterparty");
-  }
-
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+  const auditIntent = await auditService.beginCritical(c, {
     action: "delete",
     resourceType: "counterparty",
     resourceId: counterpartyId,
   });
+
+  let archived: CounterpartyRow | null;
+  try {
+    archived = await repo.archiveCounterparty({
+      counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  if (!archived) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "counterparty_not_found" },
+    });
+    throw notFound("Counterparty");
+  }
+
+  await auditService.completeCritical(c, auditIntent);
 
   return noContent(c);
 };

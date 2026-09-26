@@ -30,6 +30,7 @@ import {
 } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
+import { AUDIT_LEDGER_CHECKPOINT_KEY } from "@/services/audit.service";
 import {
   TEST_API_KEY,
   TEST_CACHED_API_KEY,
@@ -3388,6 +3389,123 @@ describe("Counterparties Routes", () => {
         env
       );
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("audit admission before counterparty mutations", () => {
+    // A divergent external checkpoint makes every audit-ledger admission fail
+    // closed, exactly like an operator-observed Redis drift. Mutations must be
+    // refused before the counterparty row changes; a durable beneficiary or
+    // provider-link change with no hash-chained audit admission is the bug.
+    const DIVERGED_CHECKPOINT = JSON.stringify({
+      sequence: 999999,
+      headHash: "f".repeat(64),
+    });
+    const divergeAuditCheckpoint = () =>
+      createKVStoreSet(env).cache.put(AUDIT_LEDGER_CHECKPOINT_KEY, DIVERGED_CHECKPOINT);
+    const resetAuditCheckpoint = () =>
+      createKVStoreSet(env).cache.delete(AUDIT_LEDGER_CHECKPOINT_KEY);
+
+    afterEach(resetAuditCheckpoint);
+
+    it("refuses create before the counterparty row is written when audit admission fails", async () => {
+      // Healthy baseline write first: it bootstraps the ledger checkpoint so
+      // the divergence below is the only audit fault in play.
+      const baseline = await createCounterparty({ externalId: "audit_admission_baseline" });
+      expect(baseline.status).toBe(201);
+
+      await divergeAuditCheckpoint();
+
+      const res = await createCounterparty({ externalId: "audit_admission_create" });
+      expect(res.status).toBe(500);
+
+      const row = await getDb(env)
+        .prepare(
+          `SELECT count(*)::integer AS count FROM counterparties
+           WHERE external_id = 'audit_admission_create'`
+        )
+        .first<{ count: number }>();
+      expect(row).toEqual({ count: 0 });
+    });
+
+    it("refuses update before the row changes when audit admission fails", async () => {
+      const created = await createCounterparty({
+        externalId: "audit_admission_patch",
+        displayName: "Before",
+      });
+      expect(created.status).toBe(201);
+      const cp = (await created.json()).data.counterparty;
+
+      await divergeAuditCheckpoint();
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ displayName: "After" }),
+        },
+        env
+      );
+      expect(res.status).toBe(500);
+
+      const row = await getDb(env)
+        .prepare(`SELECT display_name FROM counterparties WHERE id = ?`)
+        .bind(cp.id)
+        .first<{ display_name: string }>();
+      expect(row).toEqual({ display_name: "Before" });
+    });
+
+    it("refuses archive before the row changes when audit admission fails", async () => {
+      const created = await createCounterparty({ externalId: "audit_admission_archive" });
+      expect(created.status).toBe(201);
+      const cp = (await created.json()).data.counterparty;
+
+      await divergeAuditCheckpoint();
+
+      const res = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        { method: "DELETE", headers: { Authorization: authHeader } },
+        env
+      );
+      expect(res.status).toBe(500);
+
+      const row = await getDb(env)
+        .prepare(`SELECT status FROM counterparties WHERE id = ?`)
+        .bind(cp.id)
+        .first<{ status: string }>();
+      expect(row).toEqual({ status: "active" });
+    });
+
+    it("keeps mutations available once the audit checkpoint agrees again", async () => {
+      const baseline = await createCounterparty({ externalId: "audit_recovery_baseline" });
+      expect(baseline.status).toBe(201);
+      const cp = (await baseline.json()).data.counterparty;
+
+      await divergeAuditCheckpoint();
+      const refused = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ displayName: "Blocked" }),
+        },
+        env
+      );
+      expect(refused.status).toBe(500);
+
+      await resetAuditCheckpoint();
+      const healed = await app.request(
+        `/v1/counterparties/${cp.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: authHeader },
+          body: JSON.stringify({ displayName: "Recovered" }),
+        },
+        env
+      );
+      expect(healed.status).toBe(200);
+      expect((await healed.json()).data.counterparty.displayName).toBe("Recovered");
     });
   });
 });
