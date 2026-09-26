@@ -3,9 +3,11 @@ import type { MuralWebhookEvent } from "@sdp/payments/ramps/providers/mural/clie
 import type { MuralKycStatus } from "@sdp/payments/ramps/providers/mural/provider-data";
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { KycStatus, SdpEnvironment } from "@sdp/types";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
+import { asPostgresJsonObject } from "@/db/postgres-utils";
 import {
-  createKycWalletsRepository,
+  createPostgresCounterpartiesRepository,
+  createPostgresKycWalletsRepository,
   createSystemCounterpartiesRepository,
   createSystemPaymentsRepository,
   type PaymentsRepository,
@@ -15,16 +17,27 @@ import {
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
+import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
 
 const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
 
+/**
+ * How many times one lifecycle delivery re-resolves the active owner of its
+ * Mural organization after the lock shows that the row it locked no longer
+ * owns it. Bounded so a pathological reassignment loop parks the inbox row
+ * for replay instead of looping forever.
+ */
+const MURAL_LIFECYCLE_OWNER_RECHECKS = 3;
+
 type MuralProcessorEvent =
-  | Exclude<MuralWebhookEvent, { kind: "account_credited" }>
-  | (Extract<MuralWebhookEvent, { kind: "account_credited" }> & { deliveryId: string });
+  | Exclude<MuralWebhookEvent, { kind: "account_credited" | "kyc_status" | "tos_accepted" }>
+  | (Extract<MuralWebhookEvent, { kind: "account_credited" }> & { deliveryId: string })
+  | (Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & { deliveryId: string });
 
 async function muralDeliveryId(timestamp: string, rawBody: string): Promise<string> {
   const bytes = await crypto.subtle.digest(
@@ -194,60 +207,264 @@ async function handleAccountCredited(
 
 const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "rejected"]);
 
+/** The denormalized Mural organization record a lifecycle event mutates, or undefined. */
+function readMuralOrganization(mural: unknown): Record<string, unknown> | undefined {
+  if (!mural || typeof mural !== "object" || Array.isArray(mural)) {
+    return undefined;
+  }
+  const organization = (mural as Record<string, unknown>).organization;
+  return organization && typeof organization === "object" && !Array.isArray(organization)
+    ? (organization as Record<string, unknown>)
+    : undefined;
+}
+
+function readMuralOrganizationRecord(
+  counterparty: CounterpartyRow
+): Record<string, unknown> | undefined {
+  return readMuralOrganization(counterparty.provider_data.mural);
+}
+
+/** The Mural organization id a counterparty's provider_data is keyed on, or undefined. */
+function readMuralOrganizationId(
+  organization: Record<string, unknown> | undefined
+): string | undefined {
+  const id = organization?.id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 /** A non-decision status arriving after a recorded decision is a replayed stale event. */
-function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
+function isStaleMuralKycStatus(
+  currentOrganization: Record<string, unknown> | undefined,
+  incoming: MuralKycStatus
+): boolean {
   if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
     return false;
   }
-  const mural = counterparty.provider_data.mural;
-  const organization =
-    mural && typeof mural === "object" && !Array.isArray(mural)
-      ? (mural as Record<string, unknown>).organization
-      : undefined;
-  const current =
-    organization && typeof organization === "object" && !Array.isArray(organization)
-      ? (organization as Record<string, unknown>).kycStatus
-      : undefined;
+  const current = currentOrganization?.kycStatus;
   return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
 }
 
-async function handleOrganizationLifecycleEvent(
+/**
+ * One lookup-lock-apply pass against the current active owner of the event's
+ * Mural organization. `"owner-changed"` means the row locked was removed,
+ * archived, or no longer owns the organization: nothing was mutated or
+ * admitted, and the caller re-resolves the owner and tries again.
+ */
+async function applyMuralLifecycleToCurrentOwner(
   env: Env,
-  event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }>
-): Promise<void> {
-  const repo = createSystemCounterpartiesRepository(env);
-  const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
-  if (!counterparty) {
-    getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
-    return;
+  event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & {
+    deliveryId: string;
   }
-  if (event.kind === "kyc_status" && isStaleMuralKycStatus(counterparty, event.kycStatus)) {
+): Promise<"done" | "owner-changed"> {
+  const counterparty = await createSystemCounterpartiesRepository(
+    env
+  ).findCounterpartyByMuralOrganizationId(event.organizationId);
+  if (!counterparty) {
+    // No active counterparty owns the organization: nothing to mutate, and a
+    // retry would resolve the same way, so the delivery is acknowledged.
+    getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
+    return "done";
+  }
+  if (
+    event.kind === "kyc_status" &&
+    isStaleMuralKycStatus(readMuralOrganizationRecord(counterparty), event.kycStatus)
+  ) {
     // A replayed pre-decision event must not undo a delivered compliance
     // decision: the inbox can re-apply an old `pending` after `approved` or
     // `rejected` already landed.
     getLogger().info(
       `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
     );
-    return;
+    return "done";
   }
-  const organization: Record<string, unknown> =
-    event.kind === "kyc_status" ? { kycStatus: event.kycStatus } : { tosStatus: "ACCEPTED" };
-  await repo.patchMuralOrganizationById({
-    organizationId: event.organizationId,
-    organization,
-  });
 
-  // Mirror the KYC status onto the SDP-owned kyc_wallets. No-op when the counterparty
-  // has no registered kyc_wallets.
-  if (event.kind === "kyc_status") {
-    await createKycWalletsRepository(env).setKycStatusByCounterparty({
-      counterpartyId: counterparty.id,
-      organizationId: counterparty.organization_id,
-      projectId: counterparty.project_id,
-      status: mapMuralKycStatusToSdp(event.kycStatus),
-      provider: "mural",
+  // A signed lifecycle webhook outlives its durable inbox row — applyStoredRampWebhookEvent
+  // deletes that row once processing succeeds — so the append-only audit ledger is the only
+  // evidence a compliance decision happened. The counterparty row is locked first and the
+  // durable intent is admitted only under that lock: if the ledger refuses it, the mutation
+  // never happens and the inbox row retries, and the verified provider delivery id binds
+  // the admission to the exact signed event that caused it.
+  const statusScope = event.kind === "kyc_status" ? "kyc" : "tos";
+  const newStatus = event.kind === "kyc_status" ? event.kycStatus : "ACCEPTED";
+  const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
+  let intent: AuditIntent | undefined;
+  let ownerChanged = false;
+
+  try {
+    await getDb(env).transaction(async (tx) => {
+      const client = asTransactionalClient(tx);
+      // Lock the counterparty row before reading the prior status or admitting
+      // the intent. Concurrent lifecycle deliveries for the same Mural
+      // organization serialize here, so every admission records the prior
+      // status that was actually current when its write landed — the ledger
+      // never retells a transition from a status another writer replaced.
+      const locked = await client
+        .prepare(
+          "SELECT status, mural_organization_id, provider_data FROM counterparties WHERE id = ? FOR UPDATE"
+        )
+        .bind(counterparty.id)
+        .first<{
+          status: string;
+          mural_organization_id: string | null;
+          provider_data: unknown;
+        }>();
+      if (!locked) {
+        // The counterparty was removed between the lookup and the lock:
+        // re-resolve the organization's current owner instead of admitting
+        // anything against a row that no longer exists.
+        ownerChanged = true;
+        return;
+      }
+      const currentOrganization = readMuralOrganization(
+        asPostgresJsonObject(locked.provider_data).mural
+      );
+      // Re-validated under the lock: the patch below and the audit outcome
+      // both target the Mural organization this row was looked up by, not an
+      // immutable row id, so the locked row must still be active and still
+      // own that organization. An archive-and-reassign inside the lookup
+      // window must not mutate a successor counterparty while the audit
+      // record names the archived one — or nobody. The effective-reference
+      // unique index (column first, JSON fallback) guarantees an active row
+      // matching this organization can only be this row.
+      if (
+        locked.status !== "active" ||
+        (locked.mural_organization_id ?? readMuralOrganizationId(currentOrganization)) !==
+          event.organizationId
+      ) {
+        ownerChanged = true;
+        getLogger().info(
+          `[mural webhook] counterparty ${counterparty.id} is no longer the active owner of Mural organization ${event.organizationId}; re-resolving its owner`
+        );
+        return;
+      }
+      if (
+        event.kind === "kyc_status" &&
+        isStaleMuralKycStatus(currentOrganization, event.kycStatus)
+      ) {
+        // Re-checked under the lock: a pre-decision event that raced the
+        // decision delivery must not undo it. Acknowledged: the event is
+        // stale for the current owner, and re-resolving cannot freshen it.
+        getLogger().info(
+          `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+        );
+        return;
+      }
+      const oldStatus =
+        event.kind === "kyc_status"
+          ? currentOrganization?.kycStatus
+          : currentOrganization?.tosStatus;
+      intent = await audit.beginCriticalSystem({
+        organizationId: counterparty.organization_id,
+        requestId: event.deliveryId,
+        action: "update",
+        resourceType: "counterparty",
+        resourceId: counterparty.id,
+        metadata: {
+          provider: "mural",
+          trigger: "mural_webhook",
+          eventKind: event.kind,
+          providerEventId: event.deliveryId,
+          muralOrganizationId: event.organizationId,
+          projectId: counterparty.project_id,
+          counterpartyId: counterparty.id,
+          statusScope,
+          oldStatus: oldStatus ?? null,
+          newStatus,
+          walletScope: event.kind === "kyc_status" ? "counterparty_kyc_wallets" : null,
+        },
+      });
+
+      // The counterparty patch and the normalized KYC-wallet mirror derive from one
+      // provider event, so they land or roll back together.
+      const organization: Record<string, unknown> =
+        event.kind === "kyc_status" ? { kycStatus: event.kycStatus } : { tosStatus: "ACCEPTED" };
+      await createPostgresCounterpartiesRepository(client).patchMuralOrganizationById({
+        organizationId: event.organizationId,
+        organization,
+      });
+
+      // Mirror the KYC status onto the SDP-owned kyc_wallets. No-op when the counterparty
+      // has no registered kyc_wallets.
+      if (event.kind === "kyc_status") {
+        await createPostgresKycWalletsRepository(client).setKycStatusByCounterparty({
+          counterpartyId: counterparty.id,
+          organizationId: counterparty.organization_id,
+          projectId: counterparty.project_id,
+          status: mapMuralKycStatusToSdp(event.kycStatus),
+          provider: "mural",
+        });
+      }
+    });
+  } catch (error) {
+    // The transaction rolled back, so the admitted operation produced no
+    // success-shaped outcome. Record a failure outcome against the durable
+    // intent — an abort is not a success — so a successful inbox retry does
+    // not strand an earlier intent unresolved, which would fail integrity
+    // verification forever despite the delivery eventually succeeding. If
+    // this outcome write also fails, the intent stays unresolved for
+    // operator reconciliation and the inbox row keeps the payload for retry.
+    getLogger().error(
+      {
+        err: error,
+        audit_intent_id: intent?.id,
+        counterparty_id: counterparty.id,
+        event_kind: event.kind,
+        provider_event_id: event.deliveryId,
+      },
+      "[mural webhook] lifecycle mutation failed after audit admission"
+    );
+    if (intent) {
+      const resolved = await audit.completeCriticalSystem(intent, {
+        status: "failure",
+        metadata: { result: "aborted" },
+      });
+      if (!resolved) {
+        getLogger().error(
+          { audit_intent_id: intent.id, provider_event_id: event.deliveryId },
+          "[mural webhook] aborted lifecycle outcome was not persisted; intent left unresolved for reconciliation"
+        );
+      }
+    }
+    throw error;
+  }
+  if (ownerChanged) {
+    return "owner-changed";
+  }
+  if (intent) {
+    await audit.completeCriticalSystem(intent, {
+      metadata: {
+        result: "applied",
+        ...(event.kind === "kyc_status"
+          ? { normalizedKycStatus: mapMuralKycStatusToSdp(event.kycStatus) }
+          : {}),
+      },
     });
   }
+  return "done";
+}
+
+async function handleOrganizationLifecycleEvent(
+  env: Env,
+  event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & {
+    deliveryId: string;
+  }
+): Promise<void> {
+  for (let attempt = 0; attempt < MURAL_LIFECYCLE_OWNER_RECHECKS; attempt += 1) {
+    if ((await applyMuralLifecycleToCurrentOwner(env, event)) === "done") {
+      return;
+    }
+    getLogger().info(
+      `[mural webhook] Mural organization ${event.organizationId} changed owner while applying ${event.kind} ${event.deliveryId}; re-applying to its current owner`
+    );
+  }
+  // The owner kept changing through every bounded re-resolve. Fail the apply
+  // (non-terminal): the inbox keeps the verified payload and retries, so the
+  // signed compliance decision lands on whichever counterparty owns the
+  // organization once the reassignment settles — or parks as failed and
+  // pages — instead of being acknowledged unapplied.
+  throw new Error(
+    `[mural webhook] Mural organization ${event.organizationId} changed owners on every re-resolve while applying ${event.kind} ${event.deliveryId}; leaving the delivery pending for retry`
+  );
 }
 
 export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralProcessorEvent> {
@@ -293,9 +510,16 @@ export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralPro
 
   parse(payload: unknown): MuralProcessorEvent {
     const event = RAMP_PROVIDER_CLIENTS.mural.parseMuralWebhookEvent(payload);
-    if (event.kind !== "account_credited") {
+    if (
+      event.kind !== "account_credited" &&
+      event.kind !== "kyc_status" &&
+      event.kind !== "tos_accepted"
+    ) {
       return event;
     }
+    // Settlement and lifecycle events alike bind to the signature-verified
+    // delivery digest: account_credited for replay protection, lifecycle
+    // events as the audit-ledger admission's provider-event binding.
     const deliveryId =
       payload && typeof payload === "object" && !Array.isArray(payload)
         ? (payload as Record<string, unknown>)[MURAL_DELIVERY_ID_FIELD]

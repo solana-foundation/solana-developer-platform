@@ -83,8 +83,17 @@ describe("MuralWebhookProcessor.parse", () => {
     expect(
       processor.parse({
         payload: { type: "tos_accepted", organizationId: "org_9" },
+        __sdpDeliveryId: "a".repeat(64),
       })
-    ).toEqual({ kind: "tos_accepted", organizationId: "org_9" });
+    ).toEqual({ kind: "tos_accepted", organizationId: "org_9", deliveryId: "a".repeat(64) });
+  });
+
+  it("requires the verified delivery id on lifecycle events", () => {
+    const processor = new MuralWebhookProcessor();
+
+    expect(() =>
+      processor.parse({ payload: { type: "tos_accepted", organizationId: "org_9" } })
+    ).toThrow(/verified delivery id/);
   });
 });
 
