@@ -823,6 +823,51 @@ describe("PolicyRepository (postgres)", () => {
     expect(badWindow).toEqual([]);
   });
 
+  it("counts a persisted issuance metadata update's modeled SOL cost in the SOL velocity window (APE-831)", async () => {
+    const service = policyStores(repo);
+    const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);
+    const current = await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "issuance",
+      operationType: "issuance_metadata_update_execute",
+      // The modeled custody outflow (network fee + metadata-growth rent) rides
+      // on the operation row as SOL, so velocity rules for SOL govern it.
+      asset: "SOL",
+      amount: "0.0000059",
+      legs: [],
+      status: "evaluated",
+    });
+    await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "issuance",
+      operationType: "issuance_metadata_update_execute",
+      asset: "SOL",
+      amount: "0.000005",
+      legs: [],
+      status: "evaluated",
+    });
+
+    const [solWindow] = await enforcement.loadVelocityObservations(current, [
+      { kind: "velocity", window: "P1D", max: "1", asset: "SOL" },
+    ]);
+    // The window sums the PRIOR decided metadata updates (the row under
+    // evaluation excludes itself): one earlier update at its modeled SOL cost.
+    expect(solWindow).toMatchObject({ asset: "SOL", total: "0.000005" });
+
+    const tokenWindow = await enforcement.loadVelocityObservations(current, [
+      { kind: "velocity", window: "P1D", max: "1", asset: "POLICY" },
+    ]);
+    expect(tokenWindow[0]?.total).toBe("0");
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = policyStores(repo);
 

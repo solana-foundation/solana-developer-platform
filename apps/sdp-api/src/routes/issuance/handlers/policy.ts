@@ -1,4 +1,9 @@
-import type { PolicyCandidate, Token, WalletOperationType } from "@sdp/types";
+import type {
+  PolicyCandidate,
+  Token,
+  WalletOperationContext,
+  WalletOperationType,
+} from "@sdp/types";
 import type { Context } from "hono";
 import type { ApiKeyContext } from "@/lib/auth";
 import { conflict } from "@/lib/errors";
@@ -54,6 +59,14 @@ export function buildIssuancePolicyCandidate(input: {
   operationType: IssuancePolicyOperationType;
   amount: string | null;
   destination: string | null;
+  /**
+   * Asset override for operations whose custody outflow is a different asset
+   * than the token itself (APE-831): a metadata update spends signer-paid SOL
+   * fees and rent, so its candidate is judged as a SOL operation.
+   */
+  assetOverride?: string;
+  /** Extra context merged under the shared context for auditability. */
+  extraContext?: WalletOperationContext;
 }): PolicyCandidate {
   return {
     organizationId: input.auth.organizationId,
@@ -65,13 +78,14 @@ export function buildIssuancePolicyCandidate(input: {
     source: "api",
     operationFamily: "issuance",
     operationType: input.operationType,
-    asset: input.token.symbol,
+    asset: input.assetOverride ?? input.token.symbol,
     amount: input.amount,
     destination: input.destination,
     context: {
       tokenId: input.token.id,
       tokenSymbol: input.token.symbol,
       mintAddress: input.token.mintAddress,
+      ...(input.extraContext ?? {}),
     },
     providerExtensions: {},
   };

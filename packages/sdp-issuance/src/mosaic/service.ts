@@ -18,6 +18,8 @@ import {
   type ConfirmTransactionOptions,
   confirmTransaction,
   createRpcForSdk,
+  getTransactionNetworkFee,
+  type SolanaRpc,
 } from "@sdp/rpc/solana";
 import { parseDecimalAmount } from "@sdp/solana/amount";
 import {
@@ -30,6 +32,7 @@ import {
   fetchEncodedAccount,
   generateKeyPairSigner,
   getBase64EncodedWireTransaction,
+  getBase64Encoder,
   getTransactionEncoder,
   pipe,
   type Rpc,
@@ -132,6 +135,18 @@ export interface MosaicServiceOptions {
  * so we measure and, when needed, set the uri in a follow-up tx instead.
  */
 export const PACKET_DATA_SIZE = 1232;
+
+/**
+ * The native-SOL cost a metadata update can spend from its fee payer: the
+ * transaction's network fee plus any metadata-growth rent the update reallocs
+ * onto the mint.
+ */
+export interface MetadataUpdateSolCostEstimate {
+  /** Rent lamports the update adds on top of the mint's current balance. */
+  additionalRentLamports: bigint;
+  /** Network fee for the built transaction, priced from its compiled message. */
+  networkFeeLamports: bigint;
+}
 
 /**
  * Resolve the mint authority's address from create options, which accepts
@@ -953,6 +968,41 @@ export class MosaicService {
   }
 
   /**
+   * Model the native SOL a metadata update would spend from its fee payer,
+   * without signing or submitting anything.
+   *
+   * Builds the exact message the custodial execution path builds (diffing the
+   * requested fields against on-chain state, reallocing rent when a value
+   * grows) and prices its network fee from the compiled message, so a policy
+   * candidate can account for the fee-payer outflow before the operation is
+   * judged. Returns null when no field actually changes — execution would
+   * submit no transaction and spend nothing.
+   *
+   * @param options - The same metadata update options the execution path takes.
+   * @returns The rent and network-fee lamports, or null when nothing changes.
+   */
+  async estimateUpdateMetadataSOLCost(
+    options: UpdateMetadataOptions
+  ): Promise<MetadataUpdateSolCostEstimate | null> {
+    const plan = await this.planUpdateMetadataMessage(options, options.feePayer);
+
+    if (!plan) {
+      return null;
+    }
+
+    const wire = getBase64EncodedWireTransaction(compileTransaction(plan.message));
+    const networkFeeLamports = await getTransactionNetworkFee(
+      this.rpc as unknown as SolanaRpc,
+      new Uint8Array(getBase64Encoder().encode(wire))
+    );
+
+    return {
+      additionalRentLamports: plan.additionalRentLamports,
+      networkFeeLamports,
+    };
+  }
+
+  /**
    * Prepare an unsigned metadata field-update transaction for client signing.
    *
    * Mirrors `prepareUpdateAuthority`/`prepareMintTo`: the caller (the client's
@@ -986,6 +1036,19 @@ export class MosaicService {
     options: UpdateMetadataOptions,
     feePayer: TransactionSigner
   ): Promise<FullTransaction | null> {
+    const plan = await this.planUpdateMetadataMessage(options, feePayer);
+    return plan?.message ?? null;
+  }
+
+  /**
+   * The metadata field-update plan behind `buildUpdateMetadataMessage`: the
+   * message plus the additional rent lamports its realloc would move onto the
+   * mint, so cost estimation and transaction building cannot drift.
+   */
+  private async planUpdateMetadataMessage(
+    options: UpdateMetadataOptions,
+    feePayer: TransactionSigner
+  ): Promise<{ message: FullTransaction; additionalRentLamports: bigint } | null> {
     const encodedMint = await fetchEncodedAccount(this.rpc, options.mint, {
       commitment: "confirmed",
     });
@@ -1107,12 +1170,15 @@ export class MosaicService {
     ];
 
     const { value: latestBlockhash } = await this.rpc.getLatestBlockhash().send();
-    return pipe(
-      createTransactionMessage({ version: 0 }),
-      (tx) => setTransactionMessageFeePayerSigner(feePayer, tx),
-      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-      (tx) => appendTransactionMessageInstructions(instructions, tx)
-    );
+    return {
+      message: pipe(
+        createTransactionMessage({ version: 0 }),
+        (tx) => setTransactionMessageFeePayerSigner(feePayer, tx),
+        (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+        (tx) => appendTransactionMessageInstructions(instructions, tx)
+      ),
+      additionalRentLamports,
+    };
   }
 
   async preparePauseToken(options: {

@@ -41,6 +41,7 @@ import {
   resolveMetadataAuthority,
   resolvePauseAuthority,
 } from "./authority-resolution";
+import { modelMetadataUpdateSolCost } from "./metadata-fee";
 import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
@@ -540,17 +541,38 @@ export async function extractTokenUpdatePolicyCandidate(
     tokenService,
   });
 
+  // The metadata update spends the fee payer's native SOL for the network fee
+  // and any metadata-growth rent (APE-831), so the candidate is judged as a
+  // SOL operation carrying that modeled cost — never as a zero-amount token
+  // operation that quantitative SOL rules would abstain on.
+  const feeModel = await modelMetadataUpdateSolCost({
+    env: c.env,
+    mintAddress: token.mintAddress as string,
+    authorityAddress: wallet.publicKey,
+    patch,
+  });
+  const candidate = buildIssuancePolicyCandidate({
+    auth,
+    token,
+    custodyWalletId: wallet.custodyWalletId,
+    walletId: wallet.providerWalletId,
+    operationType: "issuance_metadata_update_execute",
+    amount: feeModel.amount,
+    destination: null,
+    assetOverride: "SOL",
+    extraContext: {
+      metadataUpdateFeePayer: feeModel.feePayer,
+      metadataUpdateNetworkFeeLamports: feeModel.networkFeeLamports.toString(),
+      metadataUpdateRentLamports: feeModel.additionalRentLamports.toString(),
+    },
+  });
+
   return {
     ...emptyExtraction,
+    // The fee-paying movement as its own leg: destination rules decide on it,
+    // and the modeled outflow is visible as a movement, not just a total.
+    legs: [{ ...candidate }],
     resolved: { judgedCustodyWalletId: wallet.custodyWalletId },
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId: wallet.custodyWalletId,
-      walletId: wallet.providerWalletId,
-      operationType: "issuance_metadata_update_execute",
-      amount: null,
-      destination: null,
-    }),
+    candidate,
   };
 }
