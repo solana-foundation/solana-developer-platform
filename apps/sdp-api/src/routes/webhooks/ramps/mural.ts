@@ -145,6 +145,17 @@ async function handleAccountCredited(
     getLogger().warn(`[mural webhook] no counterparty for org ${event.organizationId}`);
     return;
   }
+  // Re-check the effective compliance state before moving money: a signed
+  // rejection or review error cached on the counterparty bars settlement even
+  // while Mural still credits the account. Counterparties without cached Mural
+  // organization state keep their existing settlement flow.
+  const complianceStatus = readCachedMuralOrganizationKycStatus(counterparty);
+  if (complianceStatus === "rejected" || complianceStatus === "errored") {
+    getLogger().warn(
+      `[mural webhook] refusing account credit for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
+    );
+    return;
+  }
   const payments = createSystemPaymentsRepository(env);
   const replay = await getDb(env)
     .prepare(
@@ -199,6 +210,10 @@ function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKyc
   if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
     return false;
   }
+  return MURAL_TERMINAL_KYC_STATUSES.has(readCachedMuralOrganizationKycStatus(counterparty) ?? "");
+}
+
+function readCachedMuralOrganizationKycStatus(counterparty: CounterpartyRow): string | undefined {
   const mural = counterparty.provider_data.mural;
   const organization =
     mural && typeof mural === "object" && !Array.isArray(mural)
@@ -208,7 +223,7 @@ function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKyc
     organization && typeof organization === "object" && !Array.isArray(organization)
       ? (organization as Record<string, unknown>).kycStatus
       : undefined;
-  return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
+  return typeof current === "string" ? current : undefined;
 }
 
 async function handleOrganizationLifecycleEvent(
@@ -226,9 +241,16 @@ async function handleOrganizationLifecycleEvent(
     // decision: the inbox can re-apply an old `pending` after `approved` or
     // `rejected` already landed.
     getLogger().info(
-      `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+      `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}${
+        event.source === undefined ? "" : ` (${event.source.kind} ${event.source.id})`
+      }`
     );
     return;
+  }
+  if (event.kind === "kyc_status" && event.source !== undefined) {
+    getLogger().info(
+      `[mural webhook] ${event.source.kind} ${event.source.id} set kyc "${event.kycStatus}" for ${counterparty.id}`
+    );
   }
   const organization: Record<string, unknown> =
     event.kind === "kyc_status" ? { kycStatus: event.kycStatus } : { tosStatus: "ACCEPTED" };

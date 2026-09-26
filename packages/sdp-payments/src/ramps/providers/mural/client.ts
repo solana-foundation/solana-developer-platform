@@ -322,8 +322,20 @@ const muralPayoutRequestSchema = z.object({
   transactionHash: z.string().optional(),
 });
 
+/** The provider compliance object a kyc status arrived through, with its id. */
+export type MuralComplianceEventSource =
+  | { kind: "compliance_review"; id: string }
+  | { kind: "business_verification"; id: string };
+
 export type MuralWebhookEvent =
-  | { kind: "kyc_status"; organizationId: string; kycStatus: MuralKycStatus }
+  | {
+      kind: "kyc_status";
+      organizationId: string;
+      kycStatus: MuralKycStatus;
+      /** Set when the status arrived on a compliance-review event rather than
+       * the plain verification event; carries the review/verification id. */
+      source?: MuralComplianceEventSource;
+    }
   | { kind: "tos_accepted"; organizationId: string }
   | { kind: "account_credited"; organizationId: string; accountId: string; tokenAmount: number }
   | { kind: "payout_settled"; organizationId: string; payoutRequestId: string }
@@ -392,6 +404,72 @@ function parseMuralPayoutWebhookEvent(
   return { kind: "ignore", reason: `payout_status:${status}` };
 }
 
+/**
+ * Mural reports organization compliance decisions under several documented
+ * event names: the compliance review, the business verification, and
+ * category-qualified spellings of the business-verification event
+ * ("business.verification_status_changed",
+ * "BUSINESS_VERIFICATION_STATUS_CHANGED"). Fold the spellings onto the two
+ * compliance event shapes so a signed compliance decision is never classified
+ * as an ignorable event.
+ */
+function parseMuralComplianceEventType(
+  type: string | undefined
+): "compliance_review" | "business_verification" | undefined {
+  if (type === undefined) {
+    return undefined;
+  }
+  const folded = type
+    .trim()
+    .toLowerCase()
+    .replace(/[._\s-]+/g, "_");
+  if (folded === "compliance_review_status_changed") {
+    return "compliance_review";
+  }
+  if (folded === "business_verification_status_changed") {
+    return "business_verification";
+  }
+  return undefined;
+}
+
+/**
+ * Compliance-review status vocabulary mapped onto the Mural KYC status the
+ * existing organization/kyc_wallets mutation path already consumes. `inReview`
+ * is an open review, not a decision; `error` is a provider processing failure
+ * that must clear any cached approval without reading as a rejection.
+ */
+const MURAL_COMPLIANCE_STATUS_TO_KYC: Record<string, MuralKycStatus> = {
+  approved: "approved",
+  rejected: "rejected",
+  inReview: "pending",
+  error: "errored",
+};
+
+function parseMuralComplianceStatusEvent(
+  body: Record<string, unknown>,
+  type: string,
+  organizationId: string,
+  sourceKind: "compliance_review" | "business_verification"
+): MuralWebhookEvent {
+  const currentStatus = readRecord(body.currentStatus);
+  const status = currentStatus === undefined ? undefined : readString(currentStatus.type);
+  if (status === undefined) {
+    throw badRequest(`Mural "${type}" webhook is missing the current status`, {
+      provider: "mural",
+    });
+  }
+  const kycStatus = MURAL_COMPLIANCE_STATUS_TO_KYC[status];
+  if (kycStatus === undefined) {
+    return { kind: "ignore", reason: `unknown_compliance_status:${status}` };
+  }
+  const reviewId = readString(body.complianceReviewId) ?? readString(body.verificationId);
+  const source: MuralComplianceEventSource | undefined =
+    reviewId === undefined ? undefined : { kind: sourceKind, id: reviewId };
+  return source === undefined
+    ? { kind: "kyc_status", organizationId, kycStatus }
+    : { kind: "kyc_status", organizationId, kycStatus, source };
+}
+
 function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
   const root = readRecord(payload);
   const body = root === undefined ? undefined : readRecord(root.payload);
@@ -403,7 +481,8 @@ function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
     type !== "verification_status_changed" &&
     type !== "tos_accepted" &&
     type !== "account_credited" &&
-    type !== "payout_request_status_changed"
+    type !== "payout_request_status_changed" &&
+    parseMuralComplianceEventType(type) === undefined
   ) {
     return { kind: "ignore", reason: `unhandled_event:${type === undefined ? "unknown" : type}` };
   }
@@ -445,6 +524,15 @@ function parseMuralWebhookEvent(payload: unknown): MuralWebhookEvent {
     case "payout_request_status_changed":
       return parseMuralPayoutWebhookEvent(body, organizationId);
   }
+
+  // Compliance-review events share the organization KYC state machine: their
+  // normalized status flows through the same kyc_status handler so a signed
+  // compliance decision can never land as an ignorable event.
+  const complianceEventKind = parseMuralComplianceEventType(type);
+  if (complianceEventKind !== undefined) {
+    return parseMuralComplianceStatusEvent(body, type ?? "", organizationId, complianceEventKind);
+  }
+  return { kind: "ignore", reason: `unhandled_event:${type ?? "unknown"}` };
 }
 
 export class MuralRampClient implements RampProvider {
