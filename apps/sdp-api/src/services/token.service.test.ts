@@ -865,20 +865,113 @@ describe("TokenService", () => {
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1400000000");
     });
 
-    it("leaves the recorded reading slot alone when a refresh has no slot", async () => {
+    it("keeps the recorded reading slot when a held refresh has no slot", async () => {
       // An RPC response without a context slot says nothing about where its
-      // reading sits in the chain, so the last recorded slot keeps governing
-      // settled-burn bookkeeping and the stamp comparison keeps deciding for
-      // rows without one.
+      // reading sits in the chain — but this refresh is a hold: the in-flight
+      // mint kept the figure exactly where it was, and a figure the hold kept
+      // in place absorbed nothing. The last recorded slot still describes the
+      // figure's coverage, so it stays, and the stamp stays with it.
       const tokenId = "tok_cap_slot_unslotted_refresh";
       await insertCappedToken(tokenId, "1000000000", "3000000000");
+      // Anchor the figure's coverage at slot 40 while nothing is in flight.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 40);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
       await tokenService.reserveMintSupply(tokenId, "600000000");
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, serialized_tx, operation_params,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, 'mint', 'pending', NULL, ?, ?, ?)`
+        )
+        .bind(
+          `txn_${tokenId}_pending_executed_0`,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "600" }),
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
 
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1200000000", 40);
+      // The reading is below the figure the in-flight mint holds in place, so
+      // the slotless refresh is a hold twice over — and neither stamp nor slot
+      // moves.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1200000000");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1600000000");
       expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
 
       await tokenService.setSupplyFromBaseUnits(tokenId, "1200000000");
       expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
+    });
+
+    it("clears the reading slot an absorbed slotless refresh outgrew", async () => {
+      // The anchor's promise is "the figure includes every settled effect up to
+      // this slot". A slotless refresh that comes down to its reading re-observed
+      // the chain and absorbed everything settled since — including burns the
+      // recorded slot predates — so keeping the stale slot would let burn
+      // bookkeeping subtract one of those again and run the record below the
+      // chain. The anchor is cleared instead, and the bookkeeping falls back to
+      // the stamp, which this absorbed reading moved.
+      const tokenId = "tok_cap_slot_absorbed_slotless_refresh";
+      const transactionId = "ttx_cap_slot_absorbed_slotless_refresh";
+      await insertCappedToken(tokenId, "1000000000", "3000000000");
+
+      // Anchor the figure's coverage at slot 40 first.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 40);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
+
+      // A burn settles at slot 50 — after the anchor — and its bookkeeping has
+      // not run when the next refresh happens. Its baseline is the stamp the
+      // anchoring refresh left.
+      const baseline = "2026-08-05T00:00:00.000Z";
+      await db
+        .prepare("UPDATE issued_tokens SET total_supply_updated_at = ? WHERE id = ?")
+        .bind(baseline, tokenId)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, slot, operation_params, initiated_by_key_id
+           ) VALUES (?, ?, ?, 'burn', 'confirmed', 50, ?, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ amount: "100", supplyBaselineUpdatedAt: baseline }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      // The slotless refresh reads the chain after the burn settled, so its
+      // figure already includes the burn. Nothing is in flight, so the figure
+      // follows the reading — an absorption, not a hold.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBeNull();
+
+      // The burn was inside the absorbed reading, so the bookkeeping must not
+      // subtract it again: the record would fall below the chain and hand out
+      // mint headroom past the cap.
+      await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
+      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
+    });
+
+    it("re-anchors the reading slot on the next slotted refresh", async () => {
+      // A cleared anchor is not a lost one: the next refresh that learns its
+      // slot records it and slot-ordered bookkeeping resumes from there.
+      const tokenId = "tok_cap_slot_reanchor";
+      await insertCappedToken(tokenId, "1000000000", "3000000000");
+
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 40);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
+
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBeNull();
+
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(60);
     });
 
     it("falls back to the stamp comparison for a burn without a settlement slot", async () => {
@@ -927,10 +1020,12 @@ describe("TokenService", () => {
         .run();
 
       // A slotted refresh records its slot but the burn has no slot to compare.
-      // The in-flight mint holds the cache exactly where it was, so the stamp
-      // stays on the burn's baseline too.
+      // The in-flight mint holds the cache exactly where it was, so the hold
+      // moves neither the stamp nor the read slot: the figure it kept absorbed
+      // nothing, and the burn with no settlement slot keeps deciding from the
+      // stamp, which did not move either.
       await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 90);
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(90);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBeNull();
       expect((await storedSupply(tokenId))?.total_supply_updated_at).toBe(baseline);
 
       await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");

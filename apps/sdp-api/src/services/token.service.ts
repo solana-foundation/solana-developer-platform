@@ -1557,8 +1557,12 @@ export class TokenService {
       // move the burn predated skips a decrement the cache may still owe, and
       // the record runs high until the next refresh past the in-flight window
       // — accepted, because the reverse guess would subtract twice and run
-      // the record low, admitting mints past the cap. See the stamp
-      // discussion on `setSupplyFromBaseUnits`.
+      // the record low, admitting mints past the cap. A refresh that absorbed
+      // its reading without learning a slot clears the anchor outright rather
+      // than leave one the figure outgrew, so exactly this comparison — burn
+      // slot against a slot the reading already passed — cannot subtract a
+      // burn the slotless reading had absorbed. See the stamp discussion on
+      // `setSupplyFromBaseUnits`.
       const burnAlreadyReconciled =
         row.slot !== null && row.total_supply_read_slot !== null
           ? row.slot <= row.total_supply_read_slot
@@ -2216,9 +2220,21 @@ export class TokenService {
    * twice and run the record low, admitting mints past the cap, a hole that
    * does not heal on its own.
    *
+   * The anchor follows the figure, and only where the figure is honest about
+   * its coverage. An absorbed reading advances it to the reading's slot (never
+   * backwards): the figure now includes every settled effect up to that slot.
+   * An absorbed reading without a slot clears the anchor instead of keeping the
+   * stale one — the new figure outgrew the old slot, so ordering a burn against
+   * it would double-subtract a burn the slotless reading already absorbed and
+   * run the record low; clearing it routes the bookkeeping to the stamp
+   * fallback above, which the absorbed refresh advanced. A held reading moves
+   * neither the stamp nor the anchor: the figure it left in place absorbed
+   * nothing, so the previous reading's coverage still describes it exactly.
+   *
    * @param readSlot the chain slot the reading was taken at, from the RPC
-   *   response context. Unknown slots leave `total_supply_read_slot` alone —
-   *   the bookkeeping keeps deciding from the stamp for such rows.
+   *   response context. An unknown slot on an absorbed reading clears
+   *   `total_supply_read_slot` — the figure's coverage is then unknowable by
+   *   slot, and the bookkeeping keeps deciding from the stamp.
    */
   async setSupplyFromBaseUnits(
     tokenId: string,
@@ -2265,24 +2281,37 @@ export class TokenService {
            FROM issued_tokens tok, live
            WHERE tok.id = ?${tenantRead.clause}
          )
-         UPDATE issued_tokens
-         SET total_supply_cached = resolved.supply::text,
-             total_supply_updated_at = CASE
-               WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
-                 AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
-                 THEN issued_tokens.total_supply_updated_at
-               ELSE ?
-             END,
-             -- GREATEST ignores NULL, so an unknown slot leaves the recorded
-             -- one alone and a known slot never moves backwards: the figure
-             -- this statement writes includes every settled effect up to its
-             -- own reading slot, and the previous reading it started from
-             -- covered everything up to the slot before it.
-             total_supply_read_slot = GREATEST(issued_tokens.total_supply_read_slot, ?),
-             updated_at = ?
-         FROM resolved
-         WHERE issued_tokens.id = ?${tenantWrite.clause}
-         RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
+          UPDATE issued_tokens
+          SET total_supply_cached = resolved.supply::text,
+              total_supply_updated_at = CASE
+                WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  THEN issued_tokens.total_supply_updated_at
+                ELSE ?
+              END,
+              -- The read slot is the coverage anchor of the figure and moves
+              -- only where the figure can keep its promise. A hold leaves both
+              -- the stamp and the anchor alone: the figure it kept in place
+              -- absorbed nothing, so the previous reading slot still describes
+              -- it. An absorbed reading re-observed the chain, so its anchor is
+              -- the reading own slot, never backwards, and when that slot is
+              -- unknown the anchor is cleared rather than kept stale: the
+              -- figure outgrew the recorded slot, and ordering burns against
+              -- the stale slot would subtract a burn the reading had already
+              -- absorbed, running the record low and admitting mints past the
+              -- cap. Cleared, the burn bookkeeping falls back to the stamp,
+              -- which this absorbed reading advanced.
+              total_supply_read_slot = CASE
+                WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
+                  THEN issued_tokens.total_supply_read_slot
+                WHEN ?::int IS NULL THEN NULL
+                ELSE GREATEST(issued_tokens.total_supply_read_slot, ?::int)
+              END,
+              updated_at = ?
+          FROM resolved
+          WHERE issued_tokens.id = ?${tenantWrite.clause}
+          RETURNING issued_tokens.total_supply_cached, resolved.reserved::text AS live_reserved`
       )
       .bind(
         tokenId,
@@ -2293,6 +2322,7 @@ export class TokenService {
         tokenId,
         ...tenantRead.values,
         now,
+        readSlot ?? null,
         readSlot ?? null,
         now,
         tokenId,
@@ -2316,9 +2346,11 @@ export class TokenService {
     // that leaves the figure unchanged is not a hold — the chain total meeting
     // the cache can be a settled burn cancelled out by an off-platform mint —
     // and it moves the stamp, because it re-observed the chain all the same.
-    // The read slot moved with the figure either way: it is what settled-burn
-    // bookkeeping slots against, and this reading re-observed the chain up to
-    // its own slot no matter what it did to the figure.
+    // The read slot moves with the stamp, not with the wall clock: it anchors
+    // what settled-burn bookkeeping slots against, so it advances only when the
+    // figure re-observed the chain (to the reading's slot, or to nothing when
+    // the response carried none), and stays put through a hold exactly as the
+    // stamp does.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {
