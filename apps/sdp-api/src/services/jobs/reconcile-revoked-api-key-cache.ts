@@ -26,6 +26,17 @@
  * diverge. Divergence therefore heals within about a minute of Redis
  * recovering, no matter how the original request ended.
  *
+ * The rotated scan is progress-safe: it pages the worklist by a
+ * `(rotation_deadline, key_hash)` keyset and persists a resume cursor, so
+ * converged rows cannot re-occupy every tick's page and starve later
+ * deadlines (SOLA9-554). Each sweep continues where the previous one
+ * stopped; draining the eligible set clears the cursor so the next tick
+ * starts from the newest deadline again. Losing the cursor restarts from
+ * the top — the pre-cursor behavior — so the mechanism can only ever cost
+ * re-inspection, never coverage. Persisted cursors also carry a TTL: a
+ * value that cannot be cleared or resumed from self-expires into that
+ * same safe restart instead of wedging the worklist.
+ *
  * A third pass starts from the cache instead of Postgres: every cached entry
  * whose key row is gone, or whose project is no longer active, is rewritten
  * to the authoritative state (a revoked tombstone when the row is gone). This
@@ -57,6 +68,33 @@ const SWEEP_CONCURRENCY = 25;
 const LIVE_LOOKUP_CHUNK = 500;
 
 const TERMINAL_STATUSES: ReadonlySet<ApiKeyStatus> = new Set(["revoked", "deactivated", "expired"]);
+
+/**
+ * Resume cursor for the rotated-deadline scan, persisted in the apiKeys KV
+ * namespace. The name is deliberately not `key:`-prefixed, so
+ * {@link apiKeyHashFromCacheKey} filters it out of the orphan scan's
+ * enumeration and no cache reader can mistake it for a cached credential.
+ *
+ * Losing it (Redis eviction, failover, a failed write) is always safe: the
+ * scan then resumes from the newest deadline, which is exactly the
+ * pre-cursor behavior, and the next cycle re-establishes progress.
+ */
+export const ROTATED_DEADLINE_CURSOR_CACHE_KEY = "sweep:rotated-deadline-cursor";
+
+/**
+ * Upper bound on how long any persisted cursor value may live. While the
+ * scan keeps making progress each tick rewrites the cursor, so this only
+ * ever bounds a wedge: if clearing (or rewriting) the cursor keeps failing,
+ * the stale value self-expires and the scan restarts from the newest
+ * deadline instead of hiding newly rotated rows behind it indefinitely.
+ */
+const ROTATED_CURSOR_TTL_SECONDS = 15 * 60;
+
+/** Where the previous rotated sweep stopped inspecting. */
+interface RotatedDeadlineCursor {
+  rotationDeadline: string;
+  keyHash: string;
+}
 
 export interface RevokedApiKeyCacheReconciliation {
   scanned: number;
@@ -90,6 +128,10 @@ export async function reconcileRevokedApiKeyCache(
   const kv = createKVStoreSet(env).apiKeys;
   const cutoff = new Date(Date.now() - LOOKBACK_MS).toISOString();
   const scanLimit = options.scanLimit ?? DEFAULT_SCAN_LIMIT;
+  // Read before scanning (guarded): the rotated scan resumes strictly after
+  // this position so converged rows it already inspected cannot monopolize
+  // the top of the deadline ordering.
+  const rotatedCursor = await readRotatedDeadlineCursor(kv);
 
   // revoked_at is TEXT with two writer formats (sdp_datetime_now() and
   // toISOString()); the timestamptz casts make the comparison format-proof.
@@ -107,7 +149,10 @@ export async function reconcileRevokedApiKeyCache(
   // reports no deadline and would honor the old credential past it for the
   // rest of the cache TTL. Newest deadlines first — they belong to the
   // freshest rotations, whose stale entries have the most TTL left to
-  // exploit.
+  // exploit — and pagination resumes strictly after the persisted cursor
+  // (a `(rotation_deadline, key_hash)` tuple), so converged rows can never
+  // occupy every slot of every tick: each sweep continues where the last one
+  // stopped, and every eligible row is eventually inspected.
   const [rows, rotatedRows] = await Promise.all([
     db
       .prepare(
@@ -120,21 +165,11 @@ export async function reconcileRevokedApiKeyCache(
       )
       .bind(cutoff, scanLimit)
       .all<{ key_hash: string }>(),
-    db
-      .prepare(
-        `SELECT key_hash, rotation_deadline FROM api_keys
-       WHERE status = 'active'
-         AND rotation_deadline IS NOT NULL
-         AND rotation_deadline::timestamptz > ?::timestamptz
-       ORDER BY rotation_deadline::timestamptz DESC
-       LIMIT ?`
-      )
-      .bind(cutoff, scanLimit)
-      .all<{ key_hash: string; rotation_deadline: string }>(),
+    listRotatedKeyRows(db, cutoff, scanLimit, rotatedCursor),
   ]);
 
   const recentlyRevoked = rows.results ?? [];
-  const recentlyRotated = rotatedRows.results ?? [];
+  const recentlyRotated = rotatedRows;
   const orphaned = await listOrphanedCacheEntries(db, kv, scanLimit);
 
   // One pass over all scans rather than one pass each: the two Postgres row
@@ -181,6 +216,20 @@ export async function reconcileRevokedApiKeyCache(
   const repaired = repairedTargets.length;
   const scanned = recentlyRevoked.length + recentlyRotated.length + orphaned.length;
 
+  // Advance the resume cursor only after the repair pass has run: a sweep
+  // that fails midway re-inspects its whole page next tick (at-least-once),
+  // never skips past un-repaired rows. A page short of the limit means the
+  // eligible set below the cursor is drained — clear it so the next tick
+  // starts from the newest deadline again and rows landing ahead of the
+  // position are never stranded behind it.
+  const lastRotated = recentlyRotated[recentlyRotated.length - 1];
+  await saveRotatedDeadlineCursor(
+    kv,
+    recentlyRotated.length === scanLimit && lastRotated
+      ? { rotationDeadline: lastRotated.rotation_deadline, keyHash: lastRotated.key_hash }
+      : null
+  );
+
   if (repaired > 0) {
     getLogger().warn(
       { repaired, repairedRevoked, repairedRotated, repairedOrphaned, scanned },
@@ -193,14 +242,150 @@ export async function reconcileRevokedApiKeyCache(
     recentlyRotated.length === scanLimit ||
     orphaned.length === scanLimit
   ) {
-    // Never let a truncated sweep read as full coverage.
+    // Never let a truncated sweep read as full coverage. For the rotated
+    // scan the truncation is where the next tick resumes, so a worklist
+    // that stays at its limit for consecutive ticks shows up as a cursor
+    // that stops moving.
     getLogger().warn(
-      { scanLimit },
+      { scanLimit, rotatedResumedFrom: rotatedCursor?.rotationDeadline ?? null },
       "API key cache sweep hit its scan limit; remaining keys roll into the next tick"
     );
   }
 
   return { scanned, repaired };
+}
+
+/**
+ * The rotated-deadline page for this tick: newest deadlines first, ties
+ * broken by key hash so the order is total and a resume cursor can never
+ * skip past a same-deadline row. With a cursor, only rows strictly after it
+ * in that ordering are returned — already-inspected (converged) rows cannot
+ * re-occupy the page and starve later ones.
+ *
+ * @param db - Database client for the rotated-key scan.
+ * @param cutoff - ISO timestamp; only deadlines newer than it are eligible.
+ * @param scanLimit - Maximum rows this tick may inspect.
+ * @param cursor - Where the previous sweep stopped, or null to start from the newest.
+ * @returns The page of rotated key rows to inspect.
+ */
+async function listRotatedKeyRows(
+  db: ReturnType<typeof getDb>,
+  cutoff: string,
+  scanLimit: number,
+  cursor: RotatedDeadlineCursor | null
+): Promise<{ key_hash: string; rotation_deadline: string }[]> {
+  if (cursor) {
+    try {
+      const resumed = await db
+        .prepare(
+          `SELECT key_hash, rotation_deadline FROM api_keys
+       WHERE status = 'active'
+         AND rotation_deadline IS NOT NULL
+         AND rotation_deadline::timestamptz > ?::timestamptz
+         AND (rotation_deadline::timestamptz, key_hash) < (?::timestamptz, ?::text)
+       ORDER BY rotation_deadline::timestamptz DESC, key_hash DESC
+       LIMIT ?`
+        )
+        .bind(cutoff, cursor.rotationDeadline, cursor.keyHash, scanLimit)
+        .all<{ key_hash: string; rotation_deadline: string }>();
+      return resumed.results ?? [];
+    } catch (error) {
+      // A cursor that passes the shape check can still trip the database's
+      // timestamptz cast (e.g. a calendar-impossible or exotic-format
+      // timestamp). That must never wedge the sweep: degrade to the fresh
+      // scan — the pre-cursor behavior — and let the end-of-sweep save
+      // re-establish a valid cursor or clear it.
+      getLogger().warn(
+        { error, rotationDeadline: cursor.rotationDeadline },
+        "Failed to resume the rotated scan from its persisted cursor; restarting from the newest deadline"
+      );
+    }
+  }
+
+  const fresh = await db
+    .prepare(
+      `SELECT key_hash, rotation_deadline FROM api_keys
+       WHERE status = 'active'
+         AND rotation_deadline IS NOT NULL
+         AND rotation_deadline::timestamptz > ?::timestamptz
+       ORDER BY rotation_deadline::timestamptz DESC, key_hash DESC
+       LIMIT ?`
+    )
+    .bind(cutoff, scanLimit)
+    .all<{ key_hash: string; rotation_deadline: string }>();
+  return fresh.results ?? [];
+}
+
+/**
+ * Read the rotated sweep's resume cursor. Any failure or malformed value —
+ * including a `rotationDeadline` that is not a parseable timestamp — reads
+ * as absent: the scan then starts from the newest deadline, the
+ * pre-cursor behavior, so cursor bookkeeping can never fail the sweep or
+ * widen what it examines.
+ */
+async function readRotatedDeadlineCursor(
+  kv: ReturnType<typeof createKVStoreSet>["apiKeys"]
+): Promise<RotatedDeadlineCursor | null> {
+  try {
+    const parsed = await kv.get<RotatedDeadlineCursor>(ROTATED_DEADLINE_CURSOR_CACHE_KEY, "json");
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.rotationDeadline === "string" &&
+      parsed.rotationDeadline.length > 0 &&
+      !Number.isNaN(Date.parse(parsed.rotationDeadline)) &&
+      typeof parsed.keyHash === "string" &&
+      parsed.keyHash.length > 0
+    ) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist (or clear) the resume cursor. Best-effort: a failed write is
+ * logged and costs one cycle of re-inspection, never repair coverage.
+ *
+ * Every value this writes carries a TTL and is rewritten on each tick, so a
+ * cursor can never sit in Redis without an expiry. That matters most when
+ * clearing: if the delete fails, the stale cursor would keep hiding rows
+ * newer than its position — so the catch overwrites it with a tombstone
+ * that reads as absent and self-expires. If that write fails too, the
+ * stale cursor's own TTL still ends the exclusion within minutes.
+ */
+async function saveRotatedDeadlineCursor(
+  kv: ReturnType<typeof createKVStoreSet>["apiKeys"],
+  cursor: RotatedDeadlineCursor | null
+): Promise<void> {
+  try {
+    if (cursor) {
+      await kv.put(ROTATED_DEADLINE_CURSOR_CACHE_KEY, JSON.stringify(cursor), {
+        expirationTtl: ROTATED_CURSOR_TTL_SECONDS,
+      });
+    } else {
+      await kv.delete(ROTATED_DEADLINE_CURSOR_CACHE_KEY);
+    }
+  } catch (error) {
+    getLogger().warn(
+      { error },
+      "Failed to persist the rotated-deadline sweep cursor; the next tick resumes from the newest deadline"
+    );
+    if (!cursor) {
+      try {
+        await kv.put(
+          ROTATED_DEADLINE_CURSOR_CACHE_KEY,
+          JSON.stringify({ clearedAt: new Date().toISOString() }),
+          { expirationTtl: ROTATED_CURSOR_TTL_SECONDS }
+        );
+      } catch {
+        // Nothing further to do: the stale cursor was written with a TTL
+        // and expires on its own, ending the exclusion.
+      }
+    }
+  }
 }
 
 /**
