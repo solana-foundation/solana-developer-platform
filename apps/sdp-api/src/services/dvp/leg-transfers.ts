@@ -393,9 +393,11 @@ async function readHistorySince(
  * its oldest entry leaves a gap behind it no later read fills. Null unless
  * the walk reached its end.
  */
-function listed(
-  read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean; complete: boolean }
-): { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null {
+function listed(read: {
+  entries: DvpEscrowHistoryEntry[];
+  floorReached: boolean;
+  complete: boolean;
+}): { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null {
   return read.complete ? read : null;
 }
 
