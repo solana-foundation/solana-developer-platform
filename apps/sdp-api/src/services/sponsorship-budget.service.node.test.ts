@@ -489,14 +489,13 @@ describe("BudgetedFeePayment", () => {
     );
 
     expect(lifecycle.markStarted).toHaveBeenCalledOnce();
-    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
     expect(repository.markReleased).toHaveBeenCalledOnce();
     expect(budgetRedis.settle).toHaveBeenCalledWith(
       expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
     );
   });
 
-  it("does not release an owned submission when marker persistence is confirmed", async () => {
+  it("releases an owned submission when the marker commits but its response is lost", async () => {
     const { feePayment, repository, budgetRedis } = harness();
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
@@ -508,12 +507,23 @@ describe("BudgetedFeePayment", () => {
       "marker response lost"
     );
 
-    expect(lifecycle.hasStarted).toHaveBeenCalledOnce();
-    expect(repository.markReleased).not.toHaveBeenCalled();
-    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    // The marker is only a lease for this attempt: the send boundary lives
+    // after prepareOwnedSubmission returns, so the committed marker proves
+    // nothing was broadcast and the reservation must be released.
+    expect(repository.markSubmitted).not.toHaveBeenCalled();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markReleased).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      "marker response lost"
+    );
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
   });
 
-  it("does not release an owned submission when marker persistence is unknown", async () => {
+  it("releases an owned submission when the marker read-back is unreadable", async () => {
     const { feePayment, repository, budgetRedis } = harness();
     const lifecycle = {
       persistSigned: vi.fn().mockResolvedValue(undefined),
@@ -525,8 +535,12 @@ describe("BudgetedFeePayment", () => {
       "marker response lost"
     );
 
-    expect(repository.markReleased).not.toHaveBeenCalled();
-    expect(budgetRedis.settle).not.toHaveBeenCalled();
+    expect(repository.markSubmitted).not.toHaveBeenCalled();
+    expect(repository.markReleased).toHaveBeenCalledOnce();
+    expect(repository.markChargedUnknown).not.toHaveBeenCalled();
+    expect(budgetRedis.settle).toHaveBeenCalledWith(
+      expect.objectContaining({ actualLamports: 0, detectMissingReservation: true })
+    );
   });
 
   it("persists submitted accounting only after the owned marker is durable", async () => {

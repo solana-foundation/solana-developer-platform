@@ -413,17 +413,13 @@ export class BudgetedFeePayment implements SponsorshipFeePayment {
     try {
       await lifecycle.markStarted();
     } catch (error) {
-      let started: boolean;
-      try {
-        started = await lifecycle.hasStarted();
-      } catch {
-        // An unreadable marker is an ambiguous ownership boundary. Releasing
-        // here could refund a submission that has already become sendable.
-        throw error;
-      }
-      if (!started) {
-        await this.releaseDeterministic(reservation, error);
-      }
+      // The submission marker is a lease for this in-flight broadcast attempt,
+      // not proof of an external submission: sendTransaction runs strictly
+      // after prepareOwnedSubmission returns, so a marker failure — even one
+      // whose write committed durably — proves the signed bytes were never
+      // broadcast. Release under the durable owner token so an unsent attempt
+      // cannot hold, or age into, a charged_unknown budget slot.
+      await this.releaseDeterministic(reservation, error);
       throw error;
     }
     let submittedResult: SignaturePersistResult;
