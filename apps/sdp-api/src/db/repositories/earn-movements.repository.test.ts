@@ -162,6 +162,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       lastValidBlockHeight: "123456",
       requestId: `earn-mv-request-${sequence}`,
       idempotencyFingerprint: `earn-mv-fingerprint-${sequence}`,
+      depositIntentFingerprint: `earn-mv-intent-${sequence}`,
       createdBy: USER,
       initiatedByKeyId: null,
       ...overrides,
@@ -1185,6 +1186,258 @@ describe("Unified earn movement ledger (postgres)", () => {
         organizationId: ORG,
       });
       expect(afterClaims?.updated_at).toBe(beforeClaims?.updated_at);
+    });
+  });
+
+  describe("provider-order completion (migration 0120)", () => {
+    beforeEach(async () => {
+      await getDb(env).prepare("DELETE FROM earn_movements").run();
+    });
+
+    const COMPLETED_AT = "2026-09-22T10:00:00.000Z";
+
+    async function chainFinalDeposit(
+      overrides: Partial<CreateSignedVaultDepositIntentInput> = {}
+    ): Promise<EarnMovementRow> {
+      const recorded = await ledger.createSignedVaultDepositIntent(
+        intent({ provider: "wisdomtree", ...overrides })
+      );
+      await ledger.advanceVaultMovement({
+        movementId: recorded.movement.id,
+        organizationId: ORG,
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-19T12:00:00.000Z",
+      });
+      await ledger.recordVaultMovementChainFinalization({
+        movementId: recorded.movement.id,
+        organizationId: ORG,
+        observedAt: "2026-08-19T12:05:00.000Z",
+      });
+      return recorded.movement;
+    }
+
+    it("claims only the chain-final provider-order deposits of the providers the pass serves", async () => {
+      const served = await chainFinalDeposit();
+      // A provider the pass does not serve stays unclaimed even when it is
+      // chain-final: its completion cannot be authenticated by this pass.
+      await chainFinalDeposit({ provider: "kamino" });
+      // A provider-order row the chain has NOT finalized is not the pass's
+      // business yet: its payment leg can still roll back.
+      const unfinalized = await ledger.createSignedVaultDepositIntent(
+        intent({ provider: "wisdomtree" })
+      );
+      await ledger.advanceVaultMovement({
+        movementId: unfinalized.movement.id,
+        organizationId: ORG,
+        toStatus: "confirmed",
+        confirmedAt: "2026-08-19T12:00:00.000Z",
+      });
+
+      const claimed = await ledger.claimUncompletedProviderOrderDeposits({
+        limit: 25,
+        providers: ["wisdomtree"],
+        retryBefore: "2300-01-01T00:00:00.000Z",
+      });
+      expect(claimed.map((movement) => movement.id)).toEqual([served.id]);
+      expect(claimed[0]).toMatchObject({
+        provider: "wisdomtree",
+        status: "confirmed",
+        chain_finalized_at: expect.anything(),
+        provider_completed_at: null,
+      });
+    });
+
+    it("spaces retries on the same fairness cursor the other sweeps use", async () => {
+      await chainFinalDeposit();
+      const retryBefore = "2300-01-01T00:00:00.000Z";
+      const first = await ledger.claimUncompletedProviderOrderDeposits({
+        limit: 25,
+        providers: ["wisdomtree"],
+        retryBefore,
+      });
+      expect(first).toHaveLength(1);
+
+      // The claim stamped an attempt at `now`. A window that ended before that
+      // attempt sees nothing to do: the row sits out its retry spacing.
+      const second = await ledger.claimUncompletedProviderOrderDeposits({
+        limit: 25,
+        providers: ["wisdomtree"],
+        retryBefore: "2000-01-01T00:00:00.000Z",
+      });
+      expect(second).toEqual([]);
+
+      const later = await ledger.claimUncompletedProviderOrderDeposits({
+        limit: 25,
+        providers: ["wisdomtree"],
+        retryBefore: "2400-01-01T00:00:00.000Z",
+      });
+      expect(later).toHaveLength(1);
+    });
+
+    it("stamps the completion fact once, bound to the order that justifies it, and never on a chain-failed row", async () => {
+      const movement = await chainFinalDeposit();
+      const stamped = await ledger.recordVaultMovementProviderCompletion({
+        movementId: movement.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-1",
+      });
+      expect(stamped?.provider_completed_at).toBe(COMPLETED_AT);
+      expect(stamped?.provider_completed_order_reference).toBe("order-1");
+      const reread = await ledger.getMovementById({
+        movementId: movement.id,
+        organizationId: ORG,
+      });
+      expect(reread?.provider_completed_order_reference).toBe("order-1");
+
+      // Idempotent: the first stamp wins, a repeated correlation is inert.
+      const restamped = await ledger.recordVaultMovementProviderCompletion({
+        movementId: movement.id,
+        organizationId: ORG,
+        completedAt: "2026-09-23T10:00:00.000Z",
+        orderReference: "order-1",
+      });
+      expect(restamped).toBeNull();
+      const after = await ledger.getMovementById({ movementId: movement.id, organizationId: ORG });
+      expect(after?.provider_completed_at).toBe(COMPLETED_AT);
+      // The honest chain state is untouched by the fact.
+      expect(after?.status).toBe("confirmed");
+
+      const failed = await ledger.createSignedVaultDepositIntent(intent());
+      await ledger.advanceVaultMovement({
+        movementId: failed.movement.id,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "Transaction blockhash expired before confirmation",
+      });
+      const refused = await ledger.recordVaultMovementProviderCompletion({
+        movementId: failed.movement.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-2",
+      });
+      expect(refused).toBeNull();
+    });
+
+    it("lets one order's completion settle at most one movement", async () => {
+      // The exact false-settle the order identity exists to close: two
+      // chain-final deposits of the same shape, one completed order. The
+      // first stamp takes it; the second movement's claim on the SAME order
+      // does not apply — the row stays open for its own order's truth.
+      const first = await chainFinalDeposit();
+      const second = await chainFinalDeposit();
+
+      const won = await ledger.recordVaultMovementProviderCompletion({
+        movementId: first.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-shared",
+      });
+      expect(won?.provider_completed_order_reference).toBe("order-shared");
+
+      const lost = await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-shared",
+      });
+      expect(lost).toBeNull();
+      await expect(
+        ledger.getMovementById({ movementId: second.id, organizationId: ORG })
+      ).resolves.toMatchObject({
+        provider_completed_at: null,
+        provider_completed_order_reference: null,
+      });
+
+      // The deposit's OWN order settles it, even after the twin's order was
+      // consumed first.
+      const own = await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-own",
+      });
+      expect(own?.provider_completed_order_reference).toBe("order-own");
+    });
+
+    it("feeds the completion reader the order identities the ledger already accepted", async () => {
+      const first = await chainFinalDeposit();
+      const second = await chainFinalDeposit();
+      await ledger.recordVaultMovementProviderCompletion({
+        movementId: first.id,
+        organizationId: ORG,
+        completedAt: "2026-09-22T10:00:00.000Z",
+        orderReference: "order-1",
+      });
+      await ledger.recordVaultMovementProviderCompletion({
+        movementId: second.id,
+        organizationId: ORG,
+        completedAt: "2026-09-23T10:00:00.000Z",
+        orderReference: "order-2",
+      });
+
+      // Newest completions first, and only the providers asked for.
+      await expect(
+        ledger.listCompletedProviderOrderReferences({ providers: ["wisdomtree"], limit: 25 })
+      ).resolves.toEqual([
+        { provider: "wisdomtree", orderReference: "order-2" },
+        { provider: "wisdomtree", orderReference: "order-1" },
+      ]);
+      await expect(
+        ledger.listCompletedProviderOrderReferences({ providers: ["kamino"], limit: 25 })
+      ).resolves.toEqual([]);
+    });
+
+    it("releases the settled surface and the intent claim with the one fact", async () => {
+      const movement = await chainFinalDeposit();
+
+      // Before the fact: the reviewed posture — claimable, never settled.
+      const before = await ledger.findOpenVaultDepositIntentClaim({
+        organizationId: ORG,
+        projectId: PROJECT,
+        depositIntentFingerprint: movement.deposit_intent_fingerprint ?? "",
+        requestedMinSharesOut: null,
+      });
+      expect(before?.id).toBe(movement.id);
+      const unsettledPage = await ledger.listVaultMovements({
+        organizationId: ORG,
+        environment: "sandbox",
+        projectId: PROJECT,
+        custodyWalletIds: [WALLET],
+        direction: "deposit",
+        limit: 10,
+        before: null,
+        settled: true,
+      });
+      expect(unsettledPage.rows.map((row) => row.id)).toEqual([]);
+
+      await ledger.recordVaultMovementProviderCompletion({
+        movementId: movement.id,
+        organizationId: ORG,
+        completedAt: COMPLETED_AT,
+        orderReference: "order-1",
+      });
+
+      // One fact, moved once: the claim releases AND the settled surface closes
+      // with the same stamp.
+      const released = await ledger.findOpenVaultDepositIntentClaim({
+        organizationId: ORG,
+        projectId: PROJECT,
+        depositIntentFingerprint: movement.deposit_intent_fingerprint ?? "",
+        requestedMinSharesOut: null,
+      });
+      expect(released).toBeNull();
+      const settledPage = await ledger.listVaultMovements({
+        organizationId: ORG,
+        environment: "sandbox",
+        projectId: PROJECT,
+        custodyWalletIds: [WALLET],
+        direction: "deposit",
+        limit: 10,
+        before: null,
+        settled: true,
+      });
+      expect(settledPage.rows.map((row) => row.id)).toEqual([movement.id]);
     });
   });
 });

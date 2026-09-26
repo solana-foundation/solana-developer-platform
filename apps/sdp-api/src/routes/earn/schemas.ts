@@ -283,6 +283,14 @@ export const earnVaultDepositSchema = z.object({
     .regex(/^\d+(\.\d+)?$/, "minSharesOut must be a decimal string")
     .refine((value) => /[1-9]/.test(value), "minSharesOut must be greater than zero")
     .optional(),
+  /**
+   * Deliberate duplicate: start a second deposit for an intent that is
+   * already open (same wallet, vault, amount, swap funding) rather than being
+   * answered with the open movement. Set it only on a deliberate re-deposit —
+   * never on an automatic retry, whose twin the cross-key claim exists to
+   * rescue.
+   */
+  allowConcurrentDuplicateIntent: z.boolean().optional(),
   ...earnDepositSwapShape,
   /**
    * Retired on this route: the chain has no request dedupe to anchor a body

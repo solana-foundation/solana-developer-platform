@@ -469,6 +469,14 @@ export interface EarnVaultDeposit {
   status: EarnVaultMovementStatus;
   signature: string;
   failureReason: string | null;
+  /**
+   * The share floor the signed transaction actually enforces. On a cross-key
+   * intent replay this is the CLAIMED movement's floor, which can sit below
+   * the floor the resubmitting request arrived with — the response discloses
+   * it so a caller never believes a stricter floor is in force than the one
+   * the deposit was signed with.
+   */
+  minSharesOut: string | null;
   replayed: boolean;
   strategy: {
     id: string;

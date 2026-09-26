@@ -5,6 +5,10 @@ import {
   reconcileEarnVaultMovementBatch,
   repairUnvaluedWithdrawalPayouts,
 } from "@/services/earn/vault-movement-reconciliation.service";
+import {
+  completeProviderOrderDeposits,
+  type ProviderOrderCompletionStats,
+} from "@/services/earn/vault-provider-order-completion.service";
 import { reconcileEarnVaultQueuedWithdrawals } from "@/services/earn/vault-queued-withdrawal-reconciliation.service";
 import type { Env } from "@/types/env";
 
@@ -42,6 +46,14 @@ const OUTBOX_BATCH_SIZE = 256;
  * (actively harmful: it reads as a drained queue and would CLEAR a firing
  * backlog alert mid-incident). Alert on the absence of the tick, never on a
  * fabricated one.
+ *
+ * Two passes run independently of the movement pipeline and of each other, the
+ * queued-withdrawal sweep and the provider-order completion pass: neither
+ * consumes the pipeline's data, so a pipeline step that throws cannot delay
+ * them — the queued sweep must not be stranded by a movement-ledger failure,
+ * and the completion stamp a provider-order deposit needs to settle (and to
+ * release its cross-key claim) must not wait on one. Each failure is collected
+ * when the pipeline is done and surfaces in the tick and the thrown verdict.
  */
 export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
   // Start the independent queue/PDA projection before touching the instant
@@ -51,6 +63,16 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     () => null,
     (error: unknown) => error
   );
+  // The provider-order completion pass runs on the same independent footing: it
+  // shares no data with the movement pipeline, and a pipeline step that throws
+  // (claim, status read, payout repair) must never delay the completion stamp a
+  // provider-order deposit needs before it can settle and release its cross-key
+  // claim. Its outcome — stats or the failure — is collected below.
+  const providerCompletionRun: Promise<ProviderOrderCompletionStats | Error> =
+    completeProviderOrderDeposits(env).then(
+      (stats) => stats,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
+    );
   let ledger: ReturnType<typeof createPostgresEarnMovementsRepository>;
   let movements: Awaited<ReturnType<typeof ledger.claimUnsettledVaultMovements>>;
   let stats: Awaited<ReturnType<typeof reconcileEarnVaultMovementBatch>>;
@@ -65,16 +87,34 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     payoutRepair = await repairUnvaluedWithdrawalPayouts(env);
     backlogStats = await ledger.getUnsettledVaultMovementStats();
   } catch (movementPipelineFailure) {
-    const queuedWithdrawalFailure = await queuedRun;
-    if (queuedWithdrawalFailure !== null) {
-      throw new AggregateError(
-        [movementPipelineFailure, queuedWithdrawalFailure],
-        "Earn vault movement and queued-withdrawal reconciliation both failed"
-      );
-    }
-    throw movementPipelineFailure;
+    const [providerCompletionFailure, queuedWithdrawalFailure] = await Promise.all([
+      providerCompletionRun,
+      queuedRun,
+    ]);
+    const independentFailures = [
+      ...(providerCompletionFailure instanceof Error ? [providerCompletionFailure] : []),
+      ...(queuedWithdrawalFailure !== null ? [queuedWithdrawalFailure] : []),
+    ];
+    if (independentFailures.length === 0) throw movementPipelineFailure;
+    throw new AggregateError(
+      [movementPipelineFailure, ...independentFailures],
+      "Earn vault movement reconciliation failed alongside its independent passes"
+    );
   }
-  const queuedWithdrawalFailure = await queuedRun;
+  const [providerCompletionFailure, queuedWithdrawalFailure] = await Promise.all([
+    providerCompletionRun,
+    queuedRun,
+  ]);
+  // A thrown completion pass is a failure count for the tick (an unobserved
+  // feed outage must not read as an ok tick), with no stats behind it.
+  const providerCompletion: ProviderOrderCompletionStats =
+    providerCompletionFailure instanceof Error
+      ? { claimed: 0, completed: 0, unobserved: 0, errors: 1 }
+      : providerCompletionFailure;
+  const independentFailures = [
+    ...(providerCompletionFailure instanceof Error ? [providerCompletionFailure] : []),
+    ...(queuedWithdrawalFailure !== null ? [queuedWithdrawalFailure] : []),
+  ];
 
   // Per-movement failures count toward the verdict too, not just chain reads:
   // a Postgres pool exhaustion or a send-side RPC outage makes every
@@ -86,7 +126,8 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     stats.statusReadFailures +
     stats.blockHeightReadFailures +
     stats.movementErrors +
-    payoutRepair.errors;
+    payoutRepair.errors +
+    providerCompletion.errors;
   logEvent(failures > 0 ? "error" : "info", {
     event: "sdp_api_earn_vault_reconciliation_tick",
     claimed: stats.claimed,
@@ -115,25 +156,32 @@ export async function reconcileEarnVaultMovements(env: Env): Promise<void> {
     payout_repair_repaired: payoutRepair.repaired,
     payout_repair_unobserved: payoutRepair.unobserved,
     payout_repair_errors: payoutRepair.errors,
+    provider_completion_claimed: providerCompletion.claimed,
+    provider_completion_completed: providerCompletion.completed,
+    provider_completion_unobserved: providerCompletion.unobserved,
+    provider_completion_errors: providerCompletion.errors,
   });
 
   if (failures > 0) {
     const movementFailure = new Error(
       `Earn vault reconciliation failed ` +
         `(${stats.statusReadFailures} status-read, ${stats.blockHeightReadFailures} block-height, ` +
-        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair failures) ` +
+        `${stats.movementErrors} per-movement failures, ${payoutRepair.errors} payout-repair ` +
+        `failures, ${providerCompletion.errors} provider-completion failures) ` +
         `over ${stats.claimed} claimed movements`
     );
-    if (queuedWithdrawalFailure !== null) {
-      throw new AggregateError(
-        [movementFailure, queuedWithdrawalFailure],
-        "Earn vault movement and queued-withdrawal reconciliation both failed"
-      );
-    }
-    throw movementFailure;
+    if (independentFailures.length === 0) throw movementFailure;
+    throw new AggregateError(
+      [movementFailure, ...independentFailures],
+      "Earn vault movement reconciliation failed alongside its independent passes"
+    );
   }
-  if (queuedWithdrawalFailure !== null) {
-    throw queuedWithdrawalFailure;
+  if (independentFailures.length === 1) throw independentFailures[0];
+  if (independentFailures.length > 1) {
+    throw new AggregateError(
+      independentFailures,
+      "Earn vault reconciliation's independent passes failed"
+    );
   }
 }
 

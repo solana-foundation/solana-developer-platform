@@ -154,7 +154,10 @@ async function createPosition(params: {
     signedTransaction: "AQ==",
     lastValidBlockHeight: "12345",
     requestId: params.requestId ?? crypto.randomUUID(),
-    idempotencyFingerprint: `fingerprint_${providerReference}`,
+    idempotencyFingerprint: `fingerprint_${providerReference}_${walletId}`,
+    // Fixture intents are independent by construction; the cross-key claim
+    // itself is exercised in the deposit service suite.
+    depositIntentFingerprint: `intent_${providerReference}_${walletId}_${params.requestId ?? crypto.randomUUID()}`,
     createdBy: USER,
   });
 }

@@ -593,6 +593,13 @@ const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
   signature: z.string(),
   failureReason: z.string().nullable(),
+  // The floor the SIGNED transaction enforces, disclosed even on a cross-key
+  // replay that never saw this request's own floor. Stripping it here would
+  // hide exactly the fact the field exists to disclose. DEFAULTED, not just
+  // nullable: during a rolling deploy the dashboard can reach an API instance
+  // that predates the field, and rejecting that successful deposit response
+  // would report a signed transaction as invalid.
+  minSharesOut: z.string().nullable().default(null),
   replayed: z.boolean(),
   strategy: z.object({
     id: z.string(),

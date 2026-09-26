@@ -207,6 +207,37 @@ async function getWisdomTreeAccessToken(
   return { token, baseUrl: config.baseUrl, cacheKey };
 }
 
+interface CachedOrdersFeed {
+  orders: unknown[];
+  expiresAtMs: number;
+}
+
+/**
+ * Orders-feed cache, keyed by the same SHA-256 credential digest as the
+ * bearer token: the feed is scoped by that token, so two environments — or
+ * any rotated credential field — can never share entries, and plaintext
+ * secrets stay out of any dump or log of the map.
+ *
+ * The completion correlator is the caller that re-reads this feed in a tight
+ * loop: a refused stamp walks the exclusion set forward and reads again (see
+ * the provider-order completion service), so one deposit's settlement can
+ * legitimately issue several reads within seconds, and a pass over many
+ * deposits re-reads the same tenant's feed throughout. Serving those repeats
+ * from one short-TTL snapshot keeps the provider's order book from bearing
+ * the walk's full weight. The TTL stays far below the completion pass's
+ * retry spacing, and the correlation's fail-closed bindings are unchanged:
+ * a cached feed can only DELAY a demonstrated completion to a later read —
+ * it can never fabricate one.
+ */
+const ordersFeedCache = new Map<string, CachedOrdersFeed>();
+
+/** Test seam: forget the cached orders feed. */
+export function resetWisdomTreeOrdersFeedCache(): void {
+  ordersFeedCache.clear();
+}
+
+const ORDERS_FEED_TTL_MS = 30_000;
+
 async function connectGetJson<TResponse>(
   ctx: EarnRuntimeContext,
   path: string,
@@ -474,11 +505,197 @@ export async function checkWisdomTreeDepositEligibility(
  * this route's envelope. UNVERIFIED.
  */
 export async function _listWisdomTreeOrders(ctx: EarnRuntimeContext): Promise<unknown[]> {
+  const cacheKey = (await getWisdomTreeAccessToken(ctx)).cacheKey;
+  const cached = ordersFeedCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.orders;
   const response = await connectGetJson<unknown>(ctx, "/api/orders/all");
+  const orders = readWisdomTreeOrdersResponse(response);
+  ordersFeedCache.set(cacheKey, { orders, expiresAtMs: Date.now() + ORDERS_FEED_TTL_MS });
+  return orders;
+}
+
+/** Accepts both the bare-array and wrapped shapes because the spec never
+ * prints this route's envelope. UNVERIFIED. */
+function readWisdomTreeOrdersResponse(response: unknown): unknown[] {
   if (Array.isArray(response)) return response;
   if (response && typeof response === "object") {
     const wrapped = (response as { orders?: unknown }).orders;
     if (Array.isArray(wrapped)) return wrapped;
   }
   throw providerUnavailable("WisdomTree returned an orders response in an unrecognized shape");
+}
+
+export interface WisdomTreePurchaseOrderCompletion {
+  orderReference: string;
+  completedAt: string | null;
+}
+
+/**
+ * The order fields the completion correlation reads, one reader per field so
+ * the UNVERIFIED wire fix is one edit (see the module header). Absent means
+ * absent — a missing field can simply fail to match; a WRONG type is a
+ * malformed feed and throws, the same rule every reader in this module applies.
+ */
+interface WisdomTreeOrderRecord {
+  orderId: string | null;
+  tradeType: string | null;
+  status: string | null;
+  walletAddress: string | null;
+  fund: string | null;
+  amount: string | null;
+  completedAt: string | null;
+}
+
+function readWisdomTreeOrderRecord(value: unknown): WisdomTreeOrderRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw providerUnavailable("WisdomTree returned a malformed order entry");
+  }
+  const record = value as Record<string, unknown>;
+  const stringField = (field: string): string | null => {
+    const fieldValue = record[field];
+    if (fieldValue === undefined || fieldValue === null) return null;
+    if (typeof fieldValue !== "string") {
+      throw providerUnavailable(`WisdomTree returned an order with an invalid ${field}`);
+    }
+    const trimmed = fieldValue.trim();
+    return trimmed === "" ? null : trimmed;
+  };
+  return {
+    // The order's own identity: "id" is DRF's default primary key name.
+    orderId: stringField("id"),
+    tradeType: stringField("trade_type"),
+    status: stringField("status"),
+    // The investor wallet that funded the order — same field name the
+    // on-receipt-wallet route answers with.
+    walletAddress: stringField("wallet_address"),
+    fund: stringField("fund"),
+    amount: stringField("amount"),
+    completedAt: stringField("completed_at"),
+  };
+}
+
+/**
+ * The order statuses Connect reports for a completed purchase. Fail-closed on
+ * purpose: the docs type `status` as an open string and never enumerate it
+ * (same posture as the wallet-approval statuses), so anything not spelled here
+ * reads as "still working" until measured against a live tenant.
+ */
+const WISDOMTREE_COMPLETED_ORDER_STATUSES: ReadonlySet<string> = new Set(["completed"]);
+
+/** Unsigned decimal string, the shape every amount in this module compares. */
+const DECIMAL_STRING = /^\d+(?:\.\d+)?$/;
+
+/**
+ * How far an order's completion may PREDATE the deposit's own record and still
+ * correlate to it. The payment leg is broadcast only after SDP writes the
+ * movement row, so a genuine order for that deposit completes after it —
+ * the tolerance exists solely for a provider clock lagging SDP's when the
+ * order completes within moments of the broadcast. An older purchase of the
+ * same wallet, fund, and amount completes materially earlier, far outside it.
+ */
+const ORDER_CORRELATION_CLOCK_SKEW_MS = 10 * 60 * 1_000;
+
+/**
+ * Exact numeric equality of two unsigned decimal strings, with no float on the
+ * money path: "10.00" and "10" are the same order, "0.10" and "0.1" too.
+ * Scales both fractional halves to a common width and compares the integers.
+ */
+function sameDecimalAmount(left: string, right: string): boolean {
+  const [leftUnits, leftFraction = ""] = left.split(".");
+  const [rightUnits, rightFraction = ""] = right.split(".");
+  const width = Math.max(leftFraction.length, rightFraction.length);
+  const scaled = (units: string, fraction: string) => BigInt(units + fraction.padEnd(width, "0"));
+  return scaled(leftUnits, leftFraction) === scaled(rightUnits, rightFraction);
+}
+
+/**
+ * Has Connect completed a Purchase order that this deposit could have opened?
+ *
+ * Authenticated correlation, fail-closed. The provider's own order book — read
+ * with SDP's credentials — must name ALL of: this wallet, a Purchase, this
+ * fund, this amount, a completed status, a readable order identity, and a
+ * completion instant that is not OLDER than this deposit's own record
+ * (`movementCreatedAt`, less a small clock-skew tolerance), for the deposit's
+ * settlement to be demonstrated. The temporal bound is what separates this
+ * deposit's order from an older completed purchase of the same wallet, fund,
+ * and amount: without it, a new deposit whose own order is still pending would
+ * be settled by that older order, its claim would release, and a twin deposit
+ * could double-broadcast. The identity bound completes the separation: an
+ * order that cannot name itself cannot be shown to belong to THIS deposit
+ * rather than an older twin's, and one the ledger has already accepted
+ * (`excludedOrderReferences`) completed a DIFFERENT deposit — one order must
+ * never settle two. Anything less (a miss, a pending order, a match that
+ * cannot be bound in time — no readable `completed_at` — an order with no
+ * readable identity, a malformed feed, an unconfigured credential) answers
+ * null and the row stays open — never a guess that closes a claim on money
+ * already committed.
+ *
+ * UNVERIFIED field names throughout (`trade_type`, `wallet_address`, `fund`,
+ * `amount`, `status`, `completed_at`, `id`): each is a single reader above, so
+ * measuring the live tenant is one edit.
+ */
+export async function readWisdomTreePurchaseOrderCompletion(
+  ctx: EarnRuntimeContext,
+  input: {
+    owner: string;
+    fundExchangeCode: string;
+    amountRequested: string;
+    movementCreatedAt: string;
+    excludedOrderReferences: readonly string[];
+  }
+): Promise<WisdomTreePurchaseOrderCompletion | null> {
+  const movementCreatedMs = Date.parse(input.movementCreatedAt);
+  if (Number.isNaN(movementCreatedMs)) {
+    // This deposit cannot be bound to any order in time: fail closed.
+    return null;
+  }
+  const orders = await _listWisdomTreeOrders(ctx);
+  for (const entry of orders) {
+    const order = readWisdomTreeOrderRecord(entry);
+    if (order.tradeType !== "Purchase") continue;
+    // Same normalization rule as the wallet-approval statuses above: case and
+    // padding are serialization, not semantics.
+    if (
+      order.status === null ||
+      !WISDOMTREE_COMPLETED_ORDER_STATUSES.has(order.status.trim().toLowerCase())
+    ) {
+      continue;
+    }
+    // The identity binding: an order with no readable id cannot be shown to
+    // belong to THIS deposit rather than an older twin purchase — and an
+    // identity the ledger already accepted completed a different deposit.
+    // Both stay open (null), retried on a later tick — never a guess that
+    // releases a claim on committed money.
+    if (order.orderId === null) continue;
+    if (input.excludedOrderReferences.includes(order.orderId)) continue;
+    if (order.walletAddress?.toLowerCase() !== input.owner.toLowerCase()) continue;
+    if (order.fund?.toUpperCase() !== input.fundExchangeCode.toUpperCase()) continue;
+    // Both sides are decimal strings in the settlement currency; a numeric
+    // comparison, never a string one — "10.00" and "10" are the same order.
+    if (
+      order.amount === null ||
+      !DECIMAL_STRING.test(order.amount) ||
+      !DECIMAL_STRING.test(input.amountRequested) ||
+      !sameDecimalAmount(order.amount, input.amountRequested)
+    ) {
+      continue;
+    }
+    // The temporal binding: an order with no readable completion instant
+    // cannot be shown to belong to THIS deposit rather than an older twin
+    // purchase, and one that demonstrably completed before the deposit's
+    // record exists cannot be its order either. Both stay open (null), retried
+    // on a later tick — never a guess that releases a claim on committed money.
+    const completedMs = order.completedAt === null ? Number.NaN : Date.parse(order.completedAt);
+    if (
+      Number.isNaN(completedMs) ||
+      completedMs < movementCreatedMs - ORDER_CORRELATION_CLOCK_SKEW_MS
+    ) {
+      continue;
+    }
+    return {
+      orderReference: order.orderId,
+      completedAt: order.completedAt,
+    };
+  }
+  return null;
 }

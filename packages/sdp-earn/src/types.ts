@@ -1073,6 +1073,85 @@ export interface EarnDepositEligibilityProvider extends EarnVaultProvider {
 }
 
 /**
+ * What an authenticated provider-order completion read answers.
+ *
+ * The provider's own API — reached with SDP's credentials, not inferred from
+ * any chain fact — states that the order a deposit opened has completed. The
+ * ledger stamps this as the movement's durable completion fact
+ * (`provider_completed_at`), which is the ONE fact that closes a provider-order
+ * row on the settled surface and releases its cross-key deposit-intent claim.
+ */
+export interface EarnProviderOrderCompletion {
+  /**
+   * The provider's own identity for the completed order. More than an audit
+   * trail: the ledger binds the durable completion stamp to it, and its
+   * uniqueness (per provider) is what makes one order's completion settle at
+   * most one movement.
+   */
+  orderReference: string;
+  /**
+   * When the provider reports the order completed, if it says. The durable
+   * fact is the ledger's own stamp; this is the provider's corroboration when
+   * it has one, so a clock skew between SDP and the provider never hides.
+   */
+  completedAt: string | null;
+}
+
+export interface EarnProviderOrderCompletionInput {
+  /** The wallet that funded the order — the address the provider knows. */
+  owner: string;
+  /** The strategy's `providerReference` (for WisdomTree, the fund's mint). */
+  providerReference: string;
+  /** The deposit's requested amount, a decimal string in the deposit token. */
+  amountRequested: string;
+  /**
+   * When SDP recorded this deposit (the movement row's `created_at`, ISO). The
+   * payment leg is broadcast only after that row is written, so an order for
+   * THIS deposit cannot have completed before this instant. The completion
+   * read must correlate orders against it: wallet, fund, and amount alone
+   * would match an OLDER completed purchase of the same shape and falsely
+   * settle a deposit whose own order is still pending, releasing its claim
+   * and double-depositing. A provider clock may lag SDP's, so implementations
+   * tolerate a small skew rather than comparing the instants exactly.
+   */
+  movementCreatedAt: string;
+  /**
+   * Order identities the ledger has ALREADY accepted completions from, for
+   * this provider. One order completes at most one movement: a candidate
+   * whose identity appears here settled a DIFFERENT deposit, so the read must
+   * skip it and keep looking for this deposit's own order — accepting it
+   * again would settle the twin while its own order is still pending,
+   * releasing its claim and double-depositing. A candidate that cannot name
+   * an identity at all is equally unbindable and must be refused outright.
+   */
+  excludedOrderReferences: readonly string[];
+}
+
+/**
+ * Optional capability: correlate a recorded provider-order DEPOSIT to the
+ * provider's own order book and report whether that order has completed.
+ *
+ * This is the authenticated provider reconciler the settlement boundary has
+ * always deferred to. Chain finality proves only that a provider-order
+ * deposit's payment leg cannot roll back; until the PROVIDER states completion,
+ * the row stays open — discoverable, claim-holding, never settled — because a
+ * twin released in between would sign and broadcast a second deposit for money
+ * already committed. Discovered via `supportsVaultProviderOrderCompletion`
+ * (capabilities.ts), never provider-id checks.
+ *
+ * Fail closed, like every settlement claim: the answer is the completion or
+ * `null` — "not demonstrated". An unreachable feed, a malformed record, an
+ * ambiguous match, or a provider that reports the order still working all
+ * answer `null` and the row stays exactly as open as it was.
+ */
+export interface EarnProviderOrderCompletionProvider extends EarnVaultProvider {
+  readDepositOrderCompletion(
+    ctx: EarnRuntimeContext,
+    input: EarnProviderOrderCompletionInput
+  ): Promise<EarnProviderOrderCompletion | null>;
+}
+
+/**
  * Optional capability: a live deposit quote (see `EarnVaultDepositQuote`).
  *
  * Separate from `EarnVaultDirectProvider` because a quote is a promise about

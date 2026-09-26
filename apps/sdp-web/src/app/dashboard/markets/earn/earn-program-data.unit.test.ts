@@ -554,6 +554,9 @@ describe("createEarnVaultDeposit", () => {
       status: "submitted",
       signature: "signature_1",
       failureReason: null,
+      // Defaulted in when an API instance predating the field answers; the
+      // floor a signed transaction enforces must reach the caller either way.
+      minSharesOut: null,
       replayed: false,
       strategy: {
         id: "strategy_1",

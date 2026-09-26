@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
 import {
   buildEarnVaultDepositFingerprint,
+  buildEarnVaultDepositIntentFingerprint,
   buildPaymentTransferFingerprint,
   buildTransferBatchFingerprint,
   normalizeForFingerprint,
@@ -32,6 +33,80 @@ describe("buildEarnVaultDepositFingerprint", () => {
   it("keeps different exact decimal magnitudes distinct", () => {
     expect(buildEarnVaultDepositFingerprint(base)).not.toBe(
       buildEarnVaultDepositFingerprint({ ...base, amount: "1.000001" })
+    );
+  });
+});
+
+describe("buildEarnVaultDepositIntentFingerprint", () => {
+  const base = {
+    organizationId: "org_1",
+    projectId: "prj_1",
+    environment: "sandbox",
+    provider: "kamino",
+    providerReference: "vault_1",
+    custodyWalletId: "cwlt_1",
+    tokenMint: "mint_token",
+    shareMint: "mint_share",
+    amount: "1",
+  };
+
+  /**
+   * The cross-key claim's key: two tabs submitting the same unchanged intent
+   * must land on ONE claim even when they re-quoted at different moments, so
+   * the quote-derived floor must never enter this fingerprint. The serialized
+   * shape is pinned against a future field sneaking back in under a
+   * permissive name.
+   */
+  it("carries no quote-derived floor material", () => {
+    expect(buildEarnVaultDepositIntentFingerprint(base)).not.toContain("minSharesOut");
+    // And no swap material at all when the deposit is not swap-funded.
+    expect(buildEarnVaultDepositIntentFingerprint(base)).not.toContain("swapSlippageBps");
+  });
+
+  it("normalizes insignificant decimal zeroes without rounding", () => {
+    expect(buildEarnVaultDepositIntentFingerprint(base)).toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...base, amount: "0001.000000" })
+    );
+  });
+
+  it("differs when any intent-scoping field changes", () => {
+    const variants = [
+      { ...base, organizationId: "org_2" },
+      { ...base, projectId: "prj_2" },
+      { ...base, environment: "production" },
+      { ...base, provider: "veda" },
+      { ...base, providerReference: "vault_2" },
+      { ...base, custodyWalletId: "cwlt_2" },
+      { ...base, tokenMint: "mint_other" },
+      { ...base, shareMint: "mint_other" },
+      { ...base, amount: "2" },
+      { ...base, swapSourceTokenMint: "mint_usdt" },
+    ];
+    for (const variant of variants) {
+      expect(buildEarnVaultDepositIntentFingerprint(base)).not.toBe(
+        buildEarnVaultDepositIntentFingerprint(variant)
+      );
+    }
+  });
+
+  /**
+   * The swap tolerance is a caller term, not a quote derivation (the same-key
+   * deposit fingerprint draws the same line): a caller who TIGHTENS it while a
+   * same-amount, same-source deposit is open must get a fresh swap built, not
+   * a replay of the earlier, looser one — while two tabs carrying the same
+   * tolerance still claim as one intent.
+   */
+  it("keys swap-funded intents on the caller's tolerance, not the quote", () => {
+    const swap = { ...base, swapSourceTokenMint: "mint_usdt", swapSlippageBps: 50 };
+
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 50 })
+    );
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).not.toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 10 })
+    );
+    expect(buildEarnVaultDepositIntentFingerprint(swap)).not.toBe(
+      buildEarnVaultDepositIntentFingerprint({ ...swap, swapSlippageBps: 500 })
     );
   });
 });

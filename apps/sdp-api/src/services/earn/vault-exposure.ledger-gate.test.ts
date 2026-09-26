@@ -185,6 +185,7 @@ describe("vault exposure cap: the ledger write gate", () => {
       lastValidBlockHeight: "123456",
       requestId: `earn-gate-request-${sequence}`,
       idempotencyFingerprint: `earn-gate-fingerprint-${sequence}`,
+      depositIntentFingerprint: `earn-gate-intent-${sequence}`,
       createdBy: USER,
       initiatedByKeyId: null,
       admit: ledgerVaultExposureGate(env, {

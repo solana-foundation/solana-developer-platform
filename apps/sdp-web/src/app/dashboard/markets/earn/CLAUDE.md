@@ -266,7 +266,14 @@ nothing else; the program create still sends the body `requestId` form.
   deposit IDEMPOTENCY KEY, and nothing else (PRO-1692). A retry inside the
   record-before-broadcast window must carry the SAME key or the chain accepts
   the transfer twice — there is no provider-side dedupe behind this route — and
-  a React ref dies with the modal and with the page load.
+  a React ref dies with the modal and with the page load. Being per-tab is also
+  the store's known limit: a SECOND tab mints a different key for the same
+  unchanged intent. The API now closes that from the server side — every custody
+  deposit stamps a cross-key intent claim
+  (`deposit_intent_fingerprint`, migration 0119) and answers a different key
+  submitting the unchanged intent with the still-open movement instead of
+  signing a second one (SOLA9-496, see `routes/earn/CLAUDE.md`) — so the
+  per-tab tier costs durability across tabs, never a second deposit.
   - The fingerprint is `(project, strategy, wallet, amount, toleranceBps)` —
     the USER'S tolerance, never the quote-derived floor, because the
     fingerprint must be reproducible from what the user can re-enter after a

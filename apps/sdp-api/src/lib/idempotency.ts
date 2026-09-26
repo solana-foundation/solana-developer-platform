@@ -255,6 +255,87 @@ export const buildEarnVaultDepositFingerprint = (input: EarnVaultDepositFingerpr
     })
   );
 
+export interface EarnVaultDepositIntentFingerprintInput {
+  organizationId: string;
+  projectId: string;
+  environment: string;
+  provider: string;
+  /** The vault address. */
+  providerReference: string;
+  /** The `custody_wallets` row id that signs and holds the shares. */
+  custodyWalletId: string;
+  /**
+   * The asset identity the request resolved to (catalogue row mints). In
+   * honest data these are functions of the vault address, but a relisted
+   * catalogue row can correct them — and a request whose resolved identity
+   * diverges from the open movement must keep reaching the position claim's
+   * refusal instead of being silently absorbed into it.
+   */
+  tokenMint: string;
+  shareMint: string;
+  /**
+   * Decimal string in the caller's funding units — the SOURCE amount when
+   * swap-funded, matching what the caller sent.
+   */
+  amount: string;
+  /** Swap-funded deposits only: the funding mint changes what leaves the wallet. */
+  swapSourceTokenMint?: string;
+  /**
+   * Swap-funded deposits only, together with the source mint: the caller's
+   * swap tolerance. A caller term (the same line the same-key deposit
+   * fingerprint draws), not a quote derivation — see the builder's note.
+   */
+  swapSlippageBps?: number;
+}
+
+/**
+ * Intent identity for the CROSS-KEY claim on custody vault deposits
+ * (SOLA9-496).
+ *
+ * The caller's `Idempotency-Key` is client-minted per browser tab, so the same
+ * unchanged deposit intent can arrive under two different keys, and the
+ * `(organization_id, request_id)` replay anchor cannot see them. This
+ * fingerprint names the logical intent itself — the authenticated
+ * organization/project scope plus environment, provider, vault, custody
+ * wallet, amount, and the swap funding mint — so the ledger can answer a
+ * different-key twin with the movement that already counts instead of signing
+ * and broadcasting a second one.
+ *
+ * Deliberately OMITS `minSharesOut`: the floor is derived from a live quote
+ * and moves with the rate, so two tabs quoting at different moments carry
+ * different floors for one intent, and keying the claim on it would re-open
+ * the two-tab hole. The swap tolerance is the opposite case and IS included
+ * when the deposit is swap-funded: it is what the caller chose, not what the
+ * quote produced (the same-key deposit fingerprint draws the same line), so a
+ * caller who tightens it must get a fresh swap built rather than a replay of
+ * the earlier, looser one. The same normalization (`1` and `1.000000` are one
+ * intent) applies to `amount`.
+ */
+export const buildEarnVaultDepositIntentFingerprint = (
+  input: EarnVaultDepositIntentFingerprintInput
+): string =>
+  JSON.stringify(
+    normalizeForFingerprint({
+      scope: "earn_vault_deposit_intent",
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      environment: input.environment,
+      provider: input.provider,
+      providerReference: input.providerReference,
+      custodyWalletId: input.custodyWalletId,
+      tokenMint: input.tokenMint,
+      shareMint: input.shareMint,
+      direction: "deposit",
+      amount: normalizeDecimalString(input.amount),
+      ...(input.swapSourceTokenMint === undefined
+        ? {}
+        : {
+            swapSourceTokenMint: input.swapSourceTokenMint,
+            swapSlippageBps: input.swapSlippageBps ?? null,
+          }),
+    })
+  );
+
 export interface EarnVaultWithdrawalFingerprintInput {
   environment: string;
   provider: string;

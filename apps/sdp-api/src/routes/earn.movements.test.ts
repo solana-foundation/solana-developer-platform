@@ -215,6 +215,7 @@ async function seedVaultDeposit(
     lastValidBlockHeight: "12345",
     requestId: crypto.randomUUID(),
     idempotencyFingerprint: `fp_${crypto.randomUUID()}`,
+    depositIntentFingerprint: `intent_${crypto.randomUUID()}`,
     createdBy: USER,
   });
 }

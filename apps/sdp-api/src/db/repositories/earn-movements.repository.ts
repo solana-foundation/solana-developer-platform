@@ -1,3 +1,4 @@
+import { compareDecimalAmounts } from "@sdp/solana/amount";
 import type {
   EarnExecutionModel,
   EarnMovementDirection,
@@ -82,6 +83,60 @@ export function assertMovementIsOwnReplay(
   }
 }
 
+/**
+ * The floor rule for a CROSS-KEY intent replay, and the sibling of
+ * `assertMovementIsOwnReplay`: exported so every site that answers a
+ * different-key twin with a claimed movement enforces the same one, because a
+ * per-site re-implementation is how that earlier rule kept getting lost.
+ *
+ * The intent claim deliberately ignores `minSharesOut` (quote-derived, moves
+ * with the rate), so a twin can arrive demanding a stricter floor than some
+ * open movement for the intent enforces. `claimed` is what the claim lookup
+ * ranked first — the newest open movement honoring the request when one
+ * exists, else the newest open movement outright. This rule replays it in
+ * the first case and refuses in the second, naming the claimed movement's
+ * floor: nothing is signed or broadcast either way, so the double-deposit
+ * protection the claim exists for stays intact. A request with no floor is
+ * answered with whatever open movement the lookup ranked first, as before
+ * this rule existed.
+ *
+ * A claimed movement with NO floor (`min_shares_out === null`) is the weakest
+ * floor there is, so it is refused too when the request demands one. The
+ * providers with optional floors (Kamino — the instruction is
+ * `deposit_with_min_shares_out`) record NULL when the first request omitted
+ * the floor, and replaying such a row for a twin that demands one would
+ * silently sign it up for a transaction enforcing no minimum at all — the
+ * exact terms-drop the floor rule exists to prevent. A provider that cannot
+ * enforce any floor (WisdomTree, Hastra — the builder refuses the field)
+ * records NULL for every row, so its floor-demanding twins are refused until
+ * the open movement settles; that request would be refused at the builder
+ * anyway, and here nothing is signed or broadcast either way.
+ */
+export function resolveDepositIntentReplayClaim(
+  claimed: EarnMovementRow | null,
+  requestedMinSharesOut: string | null | undefined
+): EarnMovementRow | null {
+  if (!claimed) {
+    return null;
+  }
+  if (requestedMinSharesOut === undefined || requestedMinSharesOut === null) {
+    return claimed;
+  }
+  if (
+    claimed.min_shares_out !== null &&
+    compareDecimalAmounts(claimed.min_shares_out, requestedMinSharesOut) >= 0
+  ) {
+    return claimed;
+  }
+  throw conflict(
+    `An identical deposit is already in flight enforcing a lower share floor (${
+      claimed.min_shares_out ?? "none"
+    }) than requested (${requestedMinSharesOut}). The open deposit cannot be upgraded to the ` +
+      "stricter floor; wait for it to settle and submit the deposit again, or resend with the " +
+      "floor the open deposit enforces."
+  );
+}
+
 export interface EarnPositionRow {
   id: string;
   organization_id: string;
@@ -142,6 +197,23 @@ export interface EarnMovementRow {
   confirmed_at: string | null;
   /** Irreversible chain commitment for a provider-order leg; not provider settlement. */
   chain_finalized_at: string | null;
+  /**
+   * When an authenticated provider reconciler correlated this provider-order
+   * movement to the provider's own completion record (migration 0120). The ONE
+   * fact that settles a provider-order row: it releases the `?settled=`
+   * surface and the cross-key deposit-intent claim together. Never a chain
+   * fact — Solana finality does not set it, and neither does a legacy
+   * `settled_at` stamp.
+   */
+  provider_completed_at: string | null;
+  /**
+   * The provider's own identity for the order whose completion stamped
+   * `provider_completed_at` (migration 0121). The fact and the identity that
+   * justifies it move together, and the unique partial index on
+   * (provider, reference) makes one order's completion settle at most one
+   * movement — a twin deposit can never inherit another deposit's completion.
+   */
+  provider_completed_order_reference: string | null;
   /** Success-terminal: finalization (vault) or provider completion (custodial). */
   settled_at: string | null;
   /** `usd`, or the token mint — the unit every amount below is denominated in. */
@@ -175,6 +247,12 @@ export interface EarnMovementRow {
   last_valid_block_height: string | null;
   request_id: string;
   idempotency_fingerprint: string;
+  /**
+   * The CROSS-KEY intent claim's fingerprint (migration 0119), stamped beside
+   * the same-key `idempotency_fingerprint` on deposit writes. Historical rows
+   * keep NULL.
+   */
+  deposit_intent_fingerprint: string | null;
   provider_data: Record<string, unknown>;
   created_by: string | null;
   initiated_by_key_id: string | null;
@@ -300,6 +378,47 @@ export interface EarnMovementsRepository {
   findVaultMovementByRequestId(params: {
     organizationId: string;
     requestId: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
+   * The server-backed claim for an unchanged custody DEPOSIT intent
+   * (SOLA9-496): the newest non-terminal vault-deposit movement carrying this
+   * intent fingerprint under this organization AND project, or null.
+   *
+   * The browser mints its idempotency key per tab, so the same unchanged
+   * intent can arrive under two different keys and the
+   * `(organization_id, request_id)` anchor above cannot see them. This read is
+   * the answer: ownership is enforced IN THE QUERY (organization and exact
+   * project bound, the detail read's own scoping rules), and the claim releases
+   * exactly when the movement is terminal for its settlement model — the same
+   * settled predicate the `?settled=` list filter uses (`failed`, or success
+   * past the provider's atomic settlement boundary). Terminality is the ONLY
+   * release: a still-open movement keeps the claim, whatever key holds it.
+   *
+   * For a provider-order deposit that keeps the claim past Solana finality,
+   * DELIBERATELY: finality proves only that the payment leg cannot be rolled
+   * back, not that the provider finished the order, so a claim released there
+   * lets a cross-key twin sign and broadcast a second deposit for an order
+   * still pending. The release point is the settled boundary itself, so the
+   * future authenticated provider reconciler that can finally close these rows
+   * (see `vaultSettlementFilter`) closes their claims with it — one completion
+   * fact, moved once, for the settled surface and this claim together.
+   *
+   * A twin the caller has flagged DELIBERATE
+   * (`allowConcurrentDuplicateIntent`) never reaches this read: the caller
+   * decides to start a second movement, and the exposure cap still bounds it.
+   * Deliberate duplicates can also leave SEVERAL open movements for one
+   * intent with different floors, which is why the rank below puts the
+   * movements honoring `requestedMinSharesOut` first and recency second, and
+   * returns exactly one row — unbounded either way. Which answer that row
+   * gets (replay or floor conflict) is the floor rule's decision
+   * (`resolveDepositIntentReplayClaim`), shared by every caller.
+   */
+  findOpenVaultDepositIntentClaim(params: {
+    organizationId: string;
+    projectId: string;
+    depositIntentFingerprint: string;
+    /** The request's own floor, or null when the request demands none. */
+    requestedMinSharesOut: string | null;
   }): Promise<EarnMovementRow | null>;
   /** Custodial replay lookup — HOLDING-scoped, matching 0055's wallet anchor. */
   findCustodialMovementByRequestId(params: {
@@ -633,6 +752,45 @@ export interface EarnMovementsRepository {
     observedAt: string;
   }): Promise<EarnMovementRow | null>;
   /**
+   * Provider-order DEPOSIT rows the completion pass still owes a fact:
+   * chain-final (their payment leg is irreversible) with no
+   * `provider_completed_at` yet, among the `providers` whose completion feed
+   * this deployment can authenticate, oldest attempt first, spaced by
+   * `retryBefore`. Stamps `reconciliation_attempted_at` on the claim so a
+   * provider outage retries on later ticks instead of monopolizing this one.
+   */
+  claimUncompletedProviderOrderDeposits(params: {
+    limit: number;
+    providers: readonly string[];
+    retryBefore: string;
+  }): Promise<EarnMovementRow[]>;
+  /**
+   * Stamp the durable provider completion fact on a vault movement, bound to
+   * the order identity that justifies it. Guarded to a non-terminal-chain
+   * vault row (confirmed or finalized) that has no fact yet, so a repeated
+   * correlation never overwrites the first stamp and a row the chain failed
+   * can never read as settled. The unique partial index on
+   * (provider, `orderReference`) refuses a second movement claiming the SAME
+   * order's completion — null means the guard did not hold, the row moved on,
+   * or another movement already consumed that order.
+   */
+  recordVaultMovementProviderCompletion(input: {
+    movementId: string;
+    organizationId: string;
+    completedAt: string;
+    orderReference: string;
+  }): Promise<EarnMovementRow | null>;
+  /**
+   * The order identities the completion pass has ALREADY accepted, per
+   * provider, newest completions first. The completion reader skips these
+   * candidates: an order that completed one movement must never demonstrate
+   * another's settlement, so a twin deposit waits for its own order.
+   */
+  listCompletedProviderOrderReferences(params: {
+    providers: readonly string[];
+    limit: number;
+  }): Promise<{ provider: string; orderReference: string }[]>;
+  /**
    * The sweep's first piece of evidence that a SUBMITTED vault movement did not
    * land (PRO-1904): its signature came back unknown after the blockhash window
    * closed. Idempotent (COALESCE) and status-guarded, so a burst of ticks
@@ -684,6 +842,23 @@ export interface CreateSignedVaultDepositIntentInput
   lastValidBlockHeight: string;
   requestId: string;
   idempotencyFingerprint: string;
+  /**
+   * The CROSS-KEY intent claim (SOLA9-496): a fingerprint of the logical
+   * deposit intent (org, project, environment, provider, vault, custody
+   * wallet, amount, swap source — NOT the quote-derived floor). Stamped on the
+   * row so a different key submitting the same unchanged intent while this
+   * movement is still open is answered with THIS row instead of starting a
+   * second sign/record/broadcast path. See `buildEarnVaultDepositIntentFingerprint`.
+   */
+  depositIntentFingerprint: string;
+  /**
+   * The caller's DELIBERATE duplicate (`allowConcurrentDuplicateIntent`):
+   * skips the cross-key claim check in this transaction so a second movement
+   * for an unchanged intent can be recorded while a prior one is open. The
+   * exposure gate below still runs — the deliberate deposit is bounded by the
+   * cap like any other — and the same-key anchor is untouched.
+   */
+  allowConcurrentDuplicateIntent?: boolean;
   createdBy?: string | null;
   initiatedByKeyId?: string | null;
 }
@@ -959,10 +1134,18 @@ const ATOMIC_SETTLED_STATUSES_BY_DIRECTION = {
 
 /**
  * A failed movement is terminal for every provider. Success is terminal only
- * for a provider whose Solana leg is itself atomic. Provider orders (and
- * unknown historical providers) remain discoverable even if a legacy row says
- * finalized; a future authenticated provider reconciler must introduce its
- * own durable completion fact before this predicate can close those rows.
+ * for a provider whose Solana leg is itself atomic — or, since migration 0120,
+ * for any row carrying the authenticated provider completion fact
+ * (`provider_completed_at`): the stamp the provider-order reconciler writes
+ * when the provider's own API correlates the movement to a completed order.
+ * That fact is the ONE release point for a provider-order row, shared by the
+ * `?settled=` surface and the cross-key intent claim, which read this same
+ * predicate. Chain finality is deliberately NOT a release point: for a
+ * provider-order deposit it coexists with an order the provider has not
+ * completed, and a cross-key twin released there would start a second
+ * sign/record/broadcast path for money already committed. A legacy
+ * `settled_at` stamp is not a release point either — it is a chain-era
+ * artifact, not a provider completion fact.
  */
 function vaultSettlementFilter(
   direction: EarnMovementDirection,
@@ -970,7 +1153,7 @@ function vaultSettlementFilter(
 ): { clause: string; values: readonly unknown[] } {
   if (settled === undefined) return { clause: "", values: [] };
   const predicate =
-    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])))";
+    "(status = 'failed' OR (provider = ANY (?::text[]) AND status = ANY (?::text[])) OR provider_completed_at IS NOT NULL)";
   return {
     clause: settled ? `AND ${predicate}` : `AND NOT ${predicate}`,
     values: [
@@ -978,6 +1161,16 @@ function vaultSettlementFilter(
       [...ATOMIC_SETTLED_STATUSES_BY_DIRECTION[direction]],
     ],
   };
+}
+
+/** A Postgres unique-violation error (`23505`), however the driver surfaces it. */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505"
+  );
 }
 
 function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
@@ -994,6 +1187,12 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     failure_reason: row.failure_reason as string | null,
     confirmed_at: row.confirmed_at as string | null,
     chain_finalized_at: row.chain_finalized_at == null ? null : String(row.chain_finalized_at),
+    provider_completed_at:
+      row.provider_completed_at == null ? null : String(row.provider_completed_at),
+    provider_completed_order_reference:
+      row.provider_completed_order_reference == null
+        ? null
+        : String(row.provider_completed_order_reference),
     settled_at: row.settled_at as string | null,
     denomination: row.denomination as string,
     amount_requested: row.amount_requested as string,
@@ -1014,6 +1213,8 @@ function mapMovementRow(row: Record<string, unknown>): EarnMovementRow {
     last_valid_block_height: row.last_valid_block_height as string | null,
     request_id: row.request_id as string,
     idempotency_fingerprint: row.idempotency_fingerprint as string,
+    deposit_intent_fingerprint:
+      row.deposit_intent_fingerprint == null ? null : String(row.deposit_intent_fingerprint),
     provider_data: (row.provider_data ?? {}) as Record<string, unknown>,
     created_by: row.created_by as string | null,
     initiated_by_key_id: row.initiated_by_key_id as string | null,
@@ -1094,6 +1295,12 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     creates_share_account: false,
     share_ata_rent_funder: null,
     unknown_signature_observed_at: null,
+    // A fulfilled queued withdrawal is a completed provider settlement by
+    // definition; the synthetic projection carries no intent claim and no
+    // completion fact.
+    deposit_intent_fingerprint: null,
+    provider_completed_at: null,
+    provider_completed_order_reference: null,
   };
 }
 
@@ -1186,6 +1393,61 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                AND execution_model = 'vault_direct'`
         )
         .bind(params.organizationId, params.requestId)
+        .first<Record<string, unknown>>();
+      return row ? mapMovementRow(row) : null;
+    },
+
+    async findOpenVaultDepositIntentClaim(params) {
+      // The unsettled predicate of `listVaultMovements`' `?settled=true` —
+      // `failed`, success past the provider's atomic settlement boundary, or a
+      // row carrying the authenticated provider completion fact — is the
+      // definition of "the prior movement is terminal" here. Reuse it rather
+      // than restating it: a settlement-boundary change must move the claim's
+      // release point with it. Chain finality is deliberately NOT a release
+      // point: for a provider-order deposit it coexists with an order the
+      // provider has not completed, and a cross-key twin released there would
+      // start a second sign/record/broadcast path for money already committed.
+      // A legacy `settled_at` stamp is not a release point either — it is a
+      // chain-era artifact, not a provider completion fact. The rank puts
+      // movements whose floor honors the request first (newest of those),
+      // recency second — so the row that comes back honors the request
+      // whenever ANY open movement does, and the floor rule
+      // (`resolveDepositIntentReplayClaim`) refuses it otherwise.
+      const settlement = vaultSettlementFilter("deposit", false);
+      // `TRUE` (not a bare constant) because a bare integer in ORDER BY is a
+      // column ORDINAL in Postgres, not a sort key.
+      const honorsRequestCondition =
+        params.requestedMinSharesOut === null
+          ? // No floor demanded: every open movement qualifies, so recency
+            // alone picks the answer.
+            "TRUE"
+          : // NULL is not honoring: a floor-less movement enforces nothing, the
+            // weakest floor there is, so ranking it as honoring would claim it
+            // ahead of an older movement that does enforce the requested floor
+            // and refuse a twin that movement could have answered.
+            "(min_shares_out IS NOT NULL AND min_shares_out::numeric >= ?::numeric)";
+      const rankBindings =
+        params.requestedMinSharesOut === null ? [] : [params.requestedMinSharesOut];
+      const row = await db
+        .prepare(
+          `SELECT * FROM earn_movements
+             WHERE organization_id = ?
+               AND project_id = ?
+               AND deposit_intent_fingerprint = ?
+               AND direction = 'deposit'
+               AND execution_model = 'vault_direct'
+               ${settlement.clause}
+             ORDER BY CASE WHEN ${honorsRequestCondition} THEN 0 ELSE 1 END,
+                      created_at DESC, id DESC
+             LIMIT 1`
+        )
+        .bind(
+          params.organizationId,
+          params.projectId,
+          params.depositIntentFingerprint,
+          ...settlement.values,
+          ...rankBindings
+        )
         .first<Record<string, unknown>>();
       return row ? mapMovementRow(row) : null;
     },
@@ -2088,6 +2350,42 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           };
         }
 
+        // The cross-key intent claim, decided under the same lock: a
+        // DIFFERENT key submitting this unchanged intent while a prior
+        // movement is still open is answered with that movement instead of
+        // signing and broadcasting a second one (SOLA9-496 — the browser mints
+        // its key per tab). Ownership is enforced in the claim query itself
+        // (organization AND exact project bound); the claim row's own
+        // idempotency fingerprint legitimately differs — it was minted with a
+        // different quote-derived floor — which is the whole reason this
+        // separate fingerprint exists. The lookup ranks the open movements
+        // honoring the request's floor first, and the floor rule
+        // (`resolveDepositIntentReplayClaim`) turns the ranked row into
+        // either a replay or a conflict — never a silent answer with less
+        // than the request asked for. A DELIBERATE duplicate
+        // (caller-flagged) skips the claim entirely — including this floor
+        // refusal — and records a second movement, with the exposure gate
+        // below still bounding it.
+        if (!input.allowConcurrentDuplicateIntent) {
+          const claimTwin = await findOpenDepositIntentClaim(transaction, {
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            depositIntentFingerprint: input.depositIntentFingerprint,
+            requestedMinSharesOut: input.acceptedMinSharesOut ?? null,
+          });
+          const replayedTwin = resolveDepositIntentReplayClaim(
+            claimTwin,
+            input.acceptedMinSharesOut
+          );
+          if (replayedTwin) {
+            return {
+              position: await requireMovementPosition(transaction, replayedTwin),
+              movement: replayedTwin,
+              replayed: true,
+            };
+          }
+        }
+
         // Platform admission, decided on committed rows under the vault lock,
         // before anything is claimed. See `LedgerAdmissionHook`.
         await input.admit?.(executor);
@@ -2452,6 +2750,90 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       return row ? mapMovementRow(row) : null;
     },
 
+    async claimUncompletedProviderOrderDeposits(params) {
+      if (!Number.isInteger(params.limit) || params.limit < 1 || params.limit > 256) {
+        throw new Error(
+          "claimUncompletedProviderOrderDeposits limit must be an integer from 1 to 256"
+        );
+      }
+      if (params.providers.length === 0) return [];
+      // The same fairness cursor the settled claim uses: retry spacing, oldest
+      // attempt first, so a provider outage rotates rows instead of starving.
+      const result = await db
+        .prepare(
+          `UPDATE earn_movements
+              SET reconciliation_attempted_at = sdp_iso_now()
+            WHERE id IN (
+              SELECT id FROM earn_movements
+               WHERE execution_model = 'vault_direct'
+                 AND direction = 'deposit'
+                 AND status = 'confirmed'
+                 AND chain_finalized_at IS NOT NULL
+                 AND provider_completed_at IS NULL
+                 AND provider = ANY (?::text[])
+                 AND COALESCE(reconciliation_attempted_at, created_at) < ?
+               ORDER BY COALESCE(reconciliation_attempted_at, created_at) ASC,
+                        created_at ASC,
+                        id ASC
+               LIMIT ?
+               FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *`
+        )
+        .bind([...params.providers], params.retryBefore, params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map(mapMovementRow);
+    },
+
+    async recordVaultMovementProviderCompletion(input) {
+      try {
+        const row = await db
+          .prepare(
+            `UPDATE earn_movements
+                SET provider_completed_at = ?,
+                    provider_completed_order_reference = ?,
+                    updated_at = sdp_iso_now()
+              WHERE id = ?
+                AND organization_id = ?
+                AND execution_model = 'vault_direct'
+                AND status IN ('confirmed', 'finalized')
+                AND provider_completed_at IS NULL
+              RETURNING *`
+          )
+          .bind(input.completedAt, input.orderReference, input.movementId, input.organizationId)
+          .first<Record<string, unknown>>();
+        return row ? mapMovementRow(row) : null;
+      } catch (error) {
+        // The unique partial index on (provider, order reference) is the
+        // arbiter a concurrent race cannot bypass: another movement stamped
+        // the SAME order's completion between this pass's read and this
+        // write. That is not a failure — one order settled exactly one
+        // movement, and this row keeps its own order's truth — so it reads as
+        // null, like any other guard that did not hold.
+        if (isUniqueViolation(error)) return null;
+        throw error;
+      }
+    },
+
+    async listCompletedProviderOrderReferences(params) {
+      if (params.providers.length === 0) return [];
+      const result = await db
+        .prepare(
+          `SELECT provider, provider_completed_order_reference
+             FROM earn_movements
+              WHERE provider = ANY (?::text[])
+                AND provider_completed_order_reference IS NOT NULL
+              ORDER BY provider_completed_at DESC, id DESC
+              LIMIT ?`
+        )
+        .bind([...params.providers], params.limit)
+        .all<Record<string, unknown>>();
+      return (result.results ?? []).map((row) => ({
+        provider: String(row.provider),
+        orderReference: String(row.provider_completed_order_reference),
+      }));
+    },
+
     async recordUnknownSignatureObservation(input) {
       const row = await db
         .prepare(
@@ -2713,6 +3095,66 @@ async function findVaultMovementByRequest(
         WHERE organization_id = ? AND request_id = ? AND execution_model = 'vault_direct'`
     )
     .bind(organizationId, requestId)
+    .first<Record<string, unknown>>();
+  return row ? mapMovementRow(row) : null;
+}
+
+/**
+ * The ranked intent claim for a deposit write, inside its ledger transaction.
+ *
+ * The vault write lock is already held by the caller, so the twin that
+ * committed while this write waited is visible here: answering it is what
+ * keeps two different keys from recording two movements for one unchanged
+ * intent. Same terminality rule as the interface's claim read: the settled
+ * boundary, never chain finality (a provider order can still be pending
+ * there), and the same rank: movements honoring the request's floor first,
+ * recency second. Callers turn the row into a replay or a floor conflict
+ * with `resolveDepositIntentReplayClaim` and honor the deliberate-duplicate
+ * flag.
+ */
+async function findOpenDepositIntentClaim(
+  db: AppDb,
+  input: {
+    organizationId: string;
+    projectId: string;
+    depositIntentFingerprint: string;
+    requestedMinSharesOut: string | null;
+  }
+): Promise<EarnMovementRow | null> {
+  const settlement = vaultSettlementFilter("deposit", false);
+  // `TRUE` (not a bare constant) because a bare integer in ORDER BY is a
+  // column ORDINAL in Postgres, not a sort key.
+  const honorsRequestCondition =
+    input.requestedMinSharesOut === null
+      ? // No floor demanded: every open movement qualifies, so recency alone
+        // picks the answer.
+        "TRUE"
+      : // NULL is not honoring: a floor-less movement enforces nothing, the
+        // weakest floor there is, so ranking it as honoring would claim it
+        // ahead of an older movement that does enforce the requested floor
+        // and refuse a twin that movement could have answered.
+        "(min_shares_out IS NOT NULL AND min_shares_out::numeric >= ?::numeric)";
+  const rankBindings = input.requestedMinSharesOut === null ? [] : [input.requestedMinSharesOut];
+  const row = await db
+    .prepare(
+      `SELECT * FROM earn_movements
+        WHERE organization_id = ?
+          AND project_id = ?
+          AND deposit_intent_fingerprint = ?
+          AND direction = 'deposit'
+          AND execution_model = 'vault_direct'
+          ${settlement.clause}
+        ORDER BY CASE WHEN ${honorsRequestCondition} THEN 0 ELSE 1 END,
+                 created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .bind(
+      input.organizationId,
+      input.projectId,
+      input.depositIntentFingerprint,
+      ...settlement.values,
+      ...rankBindings
+    )
     .first<Record<string, unknown>>();
   return row ? mapMovementRow(row) : null;
 }
@@ -3139,10 +3581,11 @@ async function insertVaultMovement(
          denomination, amount_requested, min_shares_out,
          custody_wallet_id, vault_address, source_address, destination_address,
          signature, signed_transaction, last_valid_block_height,
-         request_id, idempotency_fingerprint, created_by, initiated_by_key_id,
+         request_id, idempotency_fingerprint, deposit_intent_fingerprint,
+         created_by, initiated_by_key_id,
          creates_share_account, share_ata_rent_funder
        ) VALUES (?, ?, ?, ?, ?, 'vault_direct', 'deposit', ?, 'requested',
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (organization_id, request_id) WHERE execution_model = 'vault_direct'
        DO NOTHING
        RETURNING *`
@@ -3168,6 +3611,8 @@ async function insertVaultMovement(
       input.lastValidBlockHeight,
       input.requestId,
       input.idempotencyFingerprint,
+      // The cross-key intent claim stamped beside the same-key fingerprint.
+      input.depositIntentFingerprint,
       input.createdBy ?? null,
       input.initiatedByKeyId ?? null,
       ...shareAccountClaimBindings(input)
