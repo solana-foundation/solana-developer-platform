@@ -2,11 +2,13 @@
 
 import type { PrivateChannelVerifiedWalletDto } from "@sdp/types";
 import { revalidatePath } from "next/cache";
+import { getTranslations } from "@/i18n/server";
 import {
   deletePrivateChannelVerifiedWallet,
   verifyPrivateChannelWallet,
 } from "@/lib/private-channels";
-import { createSdpApiClient, extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { extractSdpApiErrorMessage } from "@/lib/sdp-api";
+import { bindRenderedProjectClient } from "../private-channels-project-client";
 
 const PRIVATE_CHANNELS_PATH = "/dashboard/integrations/private-channels";
 
@@ -18,16 +20,22 @@ export type VerifyWalletResult =
   | { ok: true; wallet: PrivateChannelVerifiedWalletDto }
   | { ok: false; message: string };
 
-export async function verifyWalletAction(
-  walletId: string,
-  principalId?: string
-): Promise<VerifyWalletResult> {
+export async function verifyWalletAction(input: {
+  walletId: string;
+  projectId: string;
+  principalId?: string;
+}): Promise<VerifyWalletResult> {
+  const { walletId, projectId, principalId } = input;
+  const t = await getTranslations();
   if (!walletId) {
-    return { ok: false, message: "A wallet is required." };
+    return { ok: false, message: t("DashboardPrivateChannels.verifiedWallets.walletRequired") };
   }
   try {
-    const client = await createSdpApiClient();
-    const wallet = await verifyPrivateChannelWallet(client, walletId, { principalId });
+    const bound = await bindRenderedProjectClient(projectId);
+    if (!bound.ok) {
+      return bound;
+    }
+    const wallet = await verifyPrivateChannelWallet(bound.client, walletId, { principalId });
     revalidateWalletViews();
     return { ok: true, wallet };
   } catch (error) {
@@ -37,12 +45,16 @@ export async function verifyWalletAction(
 
 export type DeleteVerifiedWalletResult = { ok: true } | { ok: false; message: string };
 
-export async function deleteVerifiedWalletAction(
-  pubkey: string
-): Promise<DeleteVerifiedWalletResult> {
+export async function deleteVerifiedWalletAction(input: {
+  pubkey: string;
+  projectId: string;
+}): Promise<DeleteVerifiedWalletResult> {
   try {
-    const client = await createSdpApiClient();
-    await deletePrivateChannelVerifiedWallet(client, pubkey);
+    const bound = await bindRenderedProjectClient(input.projectId);
+    if (!bound.ok) {
+      return bound;
+    }
+    await deletePrivateChannelVerifiedWallet(bound.client, input.pubkey);
     revalidateWalletViews();
     return { ok: true };
   } catch (error) {
