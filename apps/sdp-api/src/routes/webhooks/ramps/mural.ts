@@ -4,6 +4,7 @@ import type { MuralKycStatus } from "@sdp/payments/ramps/providers/mural/provide
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { KycStatus, SdpEnvironment } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
+import { asPostgresJsonObject } from "@/db/postgres-utils";
 import {
   createPostgresCounterpartiesRepository,
   createPostgresKycWalletsRepository,
@@ -18,7 +19,7 @@ import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import { AuditService } from "@/services/audit.service";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
@@ -199,10 +200,7 @@ async function handleAccountCredited(
 const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "rejected"]);
 
 /** The denormalized Mural organization record a lifecycle event mutates, or undefined. */
-function readMuralOrganizationRecord(
-  counterparty: CounterpartyRow
-): Record<string, unknown> | undefined {
-  const mural = counterparty.provider_data.mural;
+function readMuralOrganization(mural: unknown): Record<string, unknown> | undefined {
   if (!mural || typeof mural !== "object" || Array.isArray(mural)) {
     return undefined;
   }
@@ -212,12 +210,21 @@ function readMuralOrganizationRecord(
     : undefined;
 }
 
+function readMuralOrganizationRecord(
+  counterparty: CounterpartyRow
+): Record<string, unknown> | undefined {
+  return readMuralOrganization(counterparty.provider_data.mural);
+}
+
 /** A non-decision status arriving after a recorded decision is a replayed stale event. */
-function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
+function isStaleMuralKycStatus(
+  currentOrganization: Record<string, unknown> | undefined,
+  incoming: MuralKycStatus
+): boolean {
   if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
     return false;
   }
-  const current = readMuralOrganizationRecord(counterparty)?.kycStatus;
+  const current = currentOrganization?.kycStatus;
   return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
 }
 
@@ -233,7 +240,10 @@ async function handleOrganizationLifecycleEvent(
     getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
     return;
   }
-  if (event.kind === "kyc_status" && isStaleMuralKycStatus(counterparty, event.kycStatus)) {
+  if (
+    event.kind === "kyc_status" &&
+    isStaleMuralKycStatus(readMuralOrganizationRecord(counterparty), event.kycStatus)
+  ) {
     // A replayed pre-decision event must not undo a delivered compliance
     // decision: the inbox can re-apply an old `pending` after `approved` or
     // `rejected` already landed.
@@ -245,41 +255,76 @@ async function handleOrganizationLifecycleEvent(
 
   // A signed lifecycle webhook outlives its durable inbox row — applyStoredRampWebhookEvent
   // deletes that row once processing succeeds — so the append-only audit ledger is the only
-  // evidence a compliance decision happened. Admit a durable intent BEFORE the mutable write:
-  // if the ledger refuses it, the mutation never happens and the inbox row retries, and the
-  // verified provider delivery id binds the admission to the exact signed event that caused it.
+  // evidence a compliance decision happened. The counterparty row is locked first and the
+  // durable intent is admitted only under that lock: if the ledger refuses it, the mutation
+  // never happens and the inbox row retries, and the verified provider delivery id binds
+  // the admission to the exact signed event that caused it.
   const statusScope = event.kind === "kyc_status" ? "kyc" : "tos";
-  const currentOrganization = readMuralOrganizationRecord(counterparty);
-  const oldStatus =
-    event.kind === "kyc_status" ? currentOrganization?.kycStatus : currentOrganization?.tosStatus;
   const newStatus = event.kind === "kyc_status" ? event.kycStatus : "ACCEPTED";
   const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
-  const intent = await audit.beginCriticalSystem({
-    organizationId: counterparty.organization_id,
-    requestId: event.deliveryId,
-    action: "update",
-    resourceType: "counterparty",
-    resourceId: counterparty.id,
-    metadata: {
-      provider: "mural",
-      trigger: "mural_webhook",
-      eventKind: event.kind,
-      providerEventId: event.deliveryId,
-      muralOrganizationId: event.organizationId,
-      projectId: counterparty.project_id,
-      counterpartyId: counterparty.id,
-      statusScope,
-      oldStatus: oldStatus ?? null,
-      newStatus,
-      walletScope: event.kind === "kyc_status" ? "counterparty_kyc_wallets" : null,
-    },
-  });
+  let intent: AuditIntent | undefined;
+  let skipped = false;
 
   try {
-    // The counterparty patch and the normalized KYC-wallet mirror derive from one
-    // provider event, so they land or roll back together.
     await getDb(env).transaction(async (tx) => {
       const client = asTransactionalClient(tx);
+      // Lock the counterparty row before reading the prior status or admitting
+      // the intent. Concurrent lifecycle deliveries for the same Mural
+      // organization serialize here, so every admission records the prior
+      // status that was actually current when its write landed — the ledger
+      // never retells a transition from a status another writer replaced.
+      const locked = await client
+        .prepare("SELECT provider_data FROM counterparties WHERE id = ? FOR UPDATE")
+        .bind(counterparty.id)
+        .first<{ provider_data: unknown }>();
+      if (!locked) {
+        // The counterparty was archived or removed between the lookup and the
+        // lock; there is nothing left to mutate or admit.
+        skipped = true;
+        return;
+      }
+      const currentOrganization = readMuralOrganization(
+        asPostgresJsonObject(locked.provider_data).mural
+      );
+      if (
+        event.kind === "kyc_status" &&
+        isStaleMuralKycStatus(currentOrganization, event.kycStatus)
+      ) {
+        // Re-checked under the lock: a pre-decision event that raced the
+        // decision delivery must not undo it.
+        skipped = true;
+        getLogger().info(
+          `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+        );
+        return;
+      }
+      const oldStatus =
+        event.kind === "kyc_status"
+          ? currentOrganization?.kycStatus
+          : currentOrganization?.tosStatus;
+      intent = await audit.beginCriticalSystem({
+        organizationId: counterparty.organization_id,
+        requestId: event.deliveryId,
+        action: "update",
+        resourceType: "counterparty",
+        resourceId: counterparty.id,
+        metadata: {
+          provider: "mural",
+          trigger: "mural_webhook",
+          eventKind: event.kind,
+          providerEventId: event.deliveryId,
+          muralOrganizationId: event.organizationId,
+          projectId: counterparty.project_id,
+          counterpartyId: counterparty.id,
+          statusScope,
+          oldStatus: oldStatus ?? null,
+          newStatus,
+          walletScope: event.kind === "kyc_status" ? "counterparty_kyc_wallets" : null,
+        },
+      });
+
+      // The counterparty patch and the normalized KYC-wallet mirror derive from one
+      // provider event, so they land or roll back together.
       const organization: Record<string, unknown> =
         event.kind === "kyc_status" ? { kycStatus: event.kycStatus } : { tosStatus: "ACCEPTED" };
       await createPostgresCounterpartiesRepository(client).patchMuralOrganizationById({
@@ -300,20 +345,39 @@ async function handleOrganizationLifecycleEvent(
       }
     });
   } catch (error) {
-    // The transaction rolled back, so the admitted operation produced no success-shaped
-    // outcome: the durable intent stays unresolved for reconciliation instead of
-    // claiming a mutation that did not happen. The inbox row keeps the payload for retry.
+    // The transaction rolled back, so the admitted operation produced no
+    // success-shaped outcome. Record a failure outcome against the durable
+    // intent — an abort is not a success — so a successful inbox retry does
+    // not strand an earlier intent unresolved, which would fail integrity
+    // verification forever despite the delivery eventually succeeding. If
+    // this outcome write also fails, the intent stays unresolved for
+    // operator reconciliation and the inbox row keeps the payload for retry.
     getLogger().error(
       {
         err: error,
-        audit_intent_id: intent.id,
+        audit_intent_id: intent?.id,
         counterparty_id: counterparty.id,
         event_kind: event.kind,
         provider_event_id: event.deliveryId,
       },
-      "[mural webhook] lifecycle mutation failed after audit admission; intent left unresolved for reconciliation"
+      "[mural webhook] lifecycle mutation failed after audit admission"
     );
+    if (intent) {
+      const resolved = await audit.completeCriticalSystem(intent, {
+        status: "failure",
+        metadata: { result: "aborted" },
+      });
+      if (!resolved) {
+        getLogger().error(
+          { audit_intent_id: intent.id, provider_event_id: event.deliveryId },
+          "[mural webhook] aborted lifecycle outcome was not persisted; intent left unresolved for reconciliation"
+        );
+      }
+    }
     throw error;
+  }
+  if (skipped || !intent) {
+    return;
   }
 
   await audit.completeCriticalSystem(intent, {
