@@ -1,5 +1,8 @@
 import {
   type CreateWalletOperationInput,
+  collectVelocityRules,
+  createVelocityLookup,
+  evaluatePolicyRule,
   enforceWalletOperationPolicy as runPolicyEnforcement,
   type WalletOperationPolicyEnforcement,
 } from "@sdp/policy";
@@ -24,7 +27,7 @@ import {
   type CustodyWalletLookup,
 } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
-import { PostgresPolicyEnforcementStore } from "./enforcement.store";
+import { mapWalletOperation, PostgresPolicyEnforcementStore } from "./enforcement.store";
 
 /**
  * Enforce policy on a wallet operation and translate the decision into the
@@ -178,9 +181,16 @@ export class WalletPolicyEnforcementService {
     resolvedBy?: string | null,
     projectId?: string | null
   ) {
+    const normalizedProjectId = projectId === undefined ? null : projectId;
+    await this.assertApprovalWithinVelocityLimits({
+      organizationId,
+      projectId: normalizedProjectId,
+      approvalRequestId,
+    });
+
     const approvalRequest = await this.repository.updateApprovalRequestStatus({
       organizationId,
-      projectId: projectId === undefined ? null : projectId,
+      projectId: normalizedProjectId,
       approvalRequestId,
       status: "approved",
       operationStatus: "executing",
@@ -188,6 +198,63 @@ export class WalletPolicyEnforcementService {
     });
 
     return requireApprovalRequestStatus(approvalRequest, "approved");
+  }
+
+  /**
+   * An approval moves the parked operation into `executing`, where it joins
+   * the velocity totals, so the totals the approval would spend are measured
+   * now, against the live policies: transfers parked one at a time are each
+   * inside every cap while the others are still parked, and without this gate
+   * approving them in sequence would execute past a deny-action velocity cap.
+   * A measured deny breach refuses the approval and leaves the request
+   * pending — the window can slide back under the cap, or the operator can
+   * cancel. Review- and approval-action breaches are not re-decided here:
+   * their breach response is the approval flow this call completes, and a
+   * rule that cannot produce a measurement decided the parking evaluation the
+   * same way. The measurement cannot be serialized with the status flip, so
+   * concurrent approvals can still overshoot together — the in-flight-bounded
+   * overshoot ADR 0004 prefers over false refusals.
+   *
+   * @param input - The tenant-scoped approval request being approved.
+   */
+  private async assertApprovalWithinVelocityLimits(input: {
+    organizationId: string;
+    projectId: string | null;
+    approvalRequestId: string;
+  }): Promise<void> {
+    const request = await this.repository.getApprovalRequestDetail(input);
+    if (request === null || request.approval_status !== "pending") {
+      // The transition below reports a missing or already-resolved request.
+      return;
+    }
+    const operation = await this.repository.getWalletOperationById(request.wallet_operation_id);
+    if (operation === null) {
+      return;
+    }
+
+    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
+    const candidate = mapWalletOperation(operation);
+    const velocityRules = collectVelocityRules(await store.loadEffectivePolicies(candidate));
+    if (velocityRules.length === 0) {
+      return;
+    }
+    const observations = await store.loadVelocityObservations(candidate, velocityRules);
+    const velocity = createVelocityLookup(observations);
+    for (const rule of velocityRules) {
+      const evaluation = evaluatePolicyRule(rule, candidate, { velocity });
+      if (evaluation?.decision === "deny") {
+        throw new AppError(
+          "FORBIDDEN",
+          "Approving the wallet operation would exceed a policy velocity cap",
+          {
+            walletOperationId: operation.id,
+            approvalRequestId: request.approval_request_id,
+            ruleId: rule.id ?? null,
+            reason: evaluation.reason,
+          }
+        );
+      }
+    }
   }
 
   async cancelApprovalRequest(

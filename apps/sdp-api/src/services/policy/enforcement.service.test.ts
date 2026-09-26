@@ -108,9 +108,12 @@ function createRepository(options: {
   existingApprovalRequestStatus?: ApprovalRequestRow["status"];
   statusUpdateFailures?: number;
   statusUpdateError?: Error;
+  /** Window totals per `sumWalletOperationAmounts` call, last one repeats; "0" when absent. */
+  velocityWindowTotals?: string[];
 }) {
   const operations: WalletOperationRow[] = [];
   const approvalRequests: ApprovalRequestRow[] = [];
+  const velocityWindowTotals = [...(options.velocityWindowTotals ?? [])];
   let statusUpdateFailuresRemaining = options.statusUpdateFailures ?? 0;
 
   const repository = {
@@ -263,6 +266,20 @@ function createRepository(options: {
       return request;
     }),
     listPolicyEvaluationsForOperation: vi.fn(async () => []),
+    getApprovalRequestDetail: vi.fn(async (input) => {
+      const request = approvalRequests.find(
+        (row) => row.id === input.approvalRequestId && row.organization_id === input.organizationId
+      );
+      if (!request) return null;
+      return {
+        approval_request_id: request.id,
+        organization_id: request.organization_id,
+        project_id: request.project_id,
+        wallet_operation_id: request.wallet_operation_id,
+        approval_status: request.status,
+      };
+    }),
+    sumWalletOperationAmounts: vi.fn(async () => velocityWindowTotals.shift() ?? "0"),
     getActiveWalletControlProfileByCustodyWalletId: vi.fn(async () => options.walletPolicy ?? null),
     getActiveApiKeyControlProfileByApiKeyId: vi.fn(async () => options.apiKeyPolicy ?? null),
     listApiKeyWalletPolicyBindings: vi.fn(async (): Promise<ApiKeyWalletPolicyBindingRow[]> => {
@@ -641,6 +658,115 @@ describe("WalletPolicyEnforcementService", () => {
       code: "CONFLICT",
       message: "Approval request is already approved",
     });
+  });
+
+  it("refuses an approval whose operation would join the window past a deny velocity cap", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile(
+        [
+          {
+            id: "org-daily-cap",
+            kind: "velocity",
+            scope: "organization",
+            window: "P1D",
+            max: "100",
+            asset: "USDC",
+          },
+        ],
+        // The transfer parks on the default review, so approving it is the
+        // flow under test; the velocity cap itself never fired at evaluation.
+        "review"
+      ),
+      velocityWindowTotals: ["0", "80"],
+    });
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+
+    // 80 already executed in the window plus this 25 would spend 105 past the
+    // 100 cap: the approval is refused and the request stays pending.
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Approving the wallet operation would exceed a policy velocity cap",
+      details: {
+        walletOperationId: "wop_1",
+        approvalRequestId: "appr_1",
+        ruleId: "org-daily-cap",
+      },
+    });
+    expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
+  });
+
+  it("approves an operation whose projected window total stays inside the deny velocity cap", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile(
+        [
+          {
+            id: "org-daily-cap",
+            kind: "velocity",
+            scope: "organization",
+            window: "P1D",
+            max: "100",
+            asset: "USDC",
+          },
+        ],
+        "review"
+      ),
+      velocityWindowTotals: ["0"],
+    });
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({ status: "approved" });
+    expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "approved", operationStatus: "executing" })
+    );
+  });
+
+  it("does not re-decide review-action velocity breaches at approval time", async () => {
+    const repository = createRepository({
+      walletPolicy: walletProfile([
+        {
+          id: "org-review-cap",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "100",
+          asset: "USDC",
+          action: "review",
+        },
+      ]),
+      // Breaching total: the rule's breach response is the approval flow
+      // itself, so the human clearing it is the designed resolution.
+      velocityWindowTotals: ["90"],
+    });
+    const service = new WalletPolicyEnforcementService(
+      repository,
+      createTenantScope({ organizationId: "org_1", projectId: "prj_1" })
+    );
+
+    await expect(service.enforce(baseOperation)).rejects.toMatchObject({
+      code: "SIGNING_PENDING",
+    });
+
+    await expect(
+      service.approveApprovalRequest("org_1", "appr_1", "usr_approver")
+    ).resolves.toMatchObject({ status: "approved" });
   });
 
   it("fails approval requests and wallet operations together when recording the evaluation fails", async () => {

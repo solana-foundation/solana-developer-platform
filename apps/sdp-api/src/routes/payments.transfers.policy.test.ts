@@ -817,6 +817,9 @@ describe("Payments routes — transfer policy", () => {
       {}
     );
     expect(later.status).toBe(202);
+    const laterDetails = approvalErrorDetailsSchema.parse(
+      (await readErrorResponse(later)).error.details
+    );
     expect(await countTransferRows()).toBe(0);
 
     const adminHeaders = {
@@ -837,6 +840,44 @@ describe("Payments routes — transfer policy", () => {
         executionError: null,
       },
     });
+    expect(await countTransferRows()).toBe(1);
+
+    // Approvals spend velocity too. The parked 4 SOL joins the totals only
+    // when it moves to `executing`, so the completed 7 SOL is already in the
+    // window and approving the parked transfer would push the organization
+    // past the 10 SOL daily cap: the approval is refused, the request stays
+    // pending, and no second transfer row appears.
+    const denied = await app.request(
+      `/v1/wallets/approval-requests/${laterDetails.approvalRequestId}/approve`,
+      { method: "POST", headers: adminHeaders },
+      env
+    );
+    expect(denied.status).toBe(403);
+
+    const deniedOperation = await policyRepository.getWalletOperationById(
+      laterDetails.walletOperationId
+    );
+    expect(deniedOperation).toMatchObject({ status: "pending_approval" });
+    const deniedRequest = await policyRepository.getApprovalRequestDetail({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      approvalRequestId: laterDetails.approvalRequestId,
+    });
+    expect(deniedRequest).toMatchObject({ approval_status: "pending" });
+    expect(
+      await policyRepository.sumWalletOperationAmounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        scope: "organization",
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        apiKeyId: TEST_API_KEY.id,
+        asset: SOL_MINT,
+        operationTypes: null,
+        since: new Date(Date.now() - 86_400_000).toISOString(),
+        excludeWalletOperationId: null,
+      })
+    ).toBe("7");
     expect(await countTransferRows()).toBe(1);
   });
 

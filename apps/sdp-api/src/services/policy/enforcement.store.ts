@@ -269,7 +269,7 @@ const walletOperationTypeSchema = z.enum(WALLET_OPERATION_TYPES);
  * @param row - The persisted row.
  * @returns The domain envelope.
  */
-function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
+export function mapWalletOperation(row: WalletOperationRow): WalletOperationEnvelope {
   return {
     id: row.id,
     organizationId: row.organization_id,

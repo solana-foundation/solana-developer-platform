@@ -2074,9 +2074,10 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         // (possibly never-executable) request spend velocity it never used
         // and deny later distinct operations (SOLA9-608). Only decided,
         // still-live rows count; a parked operation joins the totals when it
-        // is approved into `executing`, and the overshoot that concurrency
-        // can then cause is bounded by the in-flight set and is the failure
-        // direction ADR 0004 prefers over false refusals.
+        // is approved into `executing` — an approval re-checks deny-action
+        // caps first, so sequential approvals cannot spend past them, and the
+        // remaining overshoot is concurrent approvals bounded by the in-flight
+        // set, the failure direction ADR 0004 prefers over false refusals.
         "status NOT IN ('created', 'pending_approval', 'failed', 'canceled')",
         // `amount` is TEXT; only rows that cast cleanly may reach SUM. The
         // write path validates amounts, so this guards history, not input.
