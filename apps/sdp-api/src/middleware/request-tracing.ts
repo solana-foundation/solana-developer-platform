@@ -17,6 +17,23 @@ function appendServerTiming(existingValue: string | null, nextEntry: string): st
   return existingValue ? `${existingValue}, ${nextEntry}` : nextEntry;
 }
 
+/**
+ * Credential-free route identity for telemetry sinks.
+ *
+ * Request paths can embed bearer credentials — the public `/pay/:token`
+ * route authorizes a payment read by the token in the URL alone — so no
+ * telemetry field may carry the concrete pathname. Callers log the matched
+ * route template (e.g. `/pay/:token`) instead: method, status, duration, and
+ * request ids stay joinable while the credential never serializes. The
+ * lookup uses the route that actually responded (`routeIndex`), so
+ * short-circuited middleware and error paths resolve to where the request
+ * stopped, and unmatched requests resolve to the catch-all pattern, which
+ * carries no request data. Never log `c.req.url`/`c.req.path` instead.
+ */
+export function routeTemplateForTelemetry(c: Context<{ Bindings: Env }>): string {
+  return c.req.matchedRoutes.at(c.req.routeIndex)?.path ?? "*";
+}
+
 function normalizeHeaderValue(
   value: string | null | undefined,
   maxLength: number,
@@ -62,7 +79,6 @@ export function requestTracingMiddleware() {
       } finally {
         if (c.res) {
           const durationMs = roundDuration(performance.now() - startedAt);
-          const pathname = new URL(c.req.url).pathname;
 
           c.header(TRACE_ID_HEADER, traceId);
           c.header(
@@ -75,7 +91,7 @@ export function requestTracingMiddleware() {
               event: "sdp_api_request_timing",
               source: requestSource,
               method: c.req.method,
-              path: pathname,
+              path: routeTemplateForTelemetry(c),
               status: c.res.status,
               duration_ms: durationMs,
             },

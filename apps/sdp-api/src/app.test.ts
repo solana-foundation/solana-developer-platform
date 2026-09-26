@@ -11,6 +11,7 @@ import type { MonitorOptions, Observability, ObservabilityScope } from "@/runtim
 import { FeePaymentError } from "@/services/ports";
 import { env as baseEnv } from "@/test/helpers/env";
 
+const BEARER_TOKEN = "TraceLeak9Abc123X";
 const THROW_PATH = "/__internal_error_test_throw";
 const VALIDATED_BODY_PATH = "/__internal_error_test_validated_body";
 const validatedBodySchema = z.object({ name: z.string() });
@@ -31,10 +32,12 @@ function makeObservability(): {
   obs: Observability;
   captureException: ReturnType<typeof vi.fn>;
   withScope: ReturnType<typeof vi.fn>;
+  setTag: ReturnType<typeof vi.fn>;
 } {
   const captureException = vi.fn();
+  const setTag = vi.fn();
   const withScope = vi.fn((cb: (scope: ObservabilityScope) => void) => {
-    cb({ setTag: () => {}, setUser: () => {} });
+    cb({ setTag, setUser: () => {} });
   });
   // Plain async function rather than vi.fn so the generic survives type
   // inference; these tests exercise the onError path, not scheduled, so we
@@ -48,6 +51,7 @@ function makeObservability(): {
     obs: { captureException, withScope, withMonitor },
     captureException,
     withScope,
+    setTag,
   };
 }
 
@@ -57,6 +61,15 @@ function buildApp(observability: Observability) {
   // onError path without modifying the production createApp surface.
   app.all(THROW_PATH, () => {
     throw new Error("test trigger for onError");
+  });
+  // Bearer-token-style public routes: the token is the only authorization
+  // material (mirrors /pay/:token), so it must never reach telemetry fields
+  // derived from the request path.
+  app.all("/__bearer_unexpected_error_test_throw/:token", () => {
+    throw new Error("test trigger for onError");
+  });
+  app.all("/__bearer_rpc_error_test_throw/:token", () => {
+    throw new SdpRpcError("SOLANA_RPC_ERROR", "rpc down", { endpoint: "https://rpc.example" });
   });
   app.all(SECRET_APP_ERROR_PATH, () => {
     throw new AppError("BAD_REQUEST", "Invalid appSecret=privy-secret", {
@@ -237,6 +250,31 @@ describe("createApp onError capture", () => {
     expect(body.error.code).toBe("INTERNAL_ERROR");
     expect(withScope).toHaveBeenCalledTimes(1);
     expect(captureException).toHaveBeenCalledTimes(1);
+  });
+
+  // SOLA9-552: /pay/:token uses a bearer public_token, so any telemetry field
+  // carrying the concrete pathname retains an authorization credential. The
+  // same canonicalization must cover the Sentry `http_path` tag and the
+  // error-trace logs built from `c.req.path`, not just the timing log.
+  it("keeps bearer path tokens out of Sentry tags and error-trace logs", async () => {
+    const loggerError = vi.spyOn(rootLogger, "error").mockImplementation(() => undefined);
+    const { obs, setTag } = makeObservability();
+    const app = buildApp(obs);
+
+    await app.request(`/__bearer_unexpected_error_test_throw/${BEARER_TOKEN}`, {}, baseEnv);
+    await app.request(`/__bearer_rpc_error_test_throw/${BEARER_TOKEN}`, {}, baseEnv);
+
+    const logged = JSON.stringify(loggerError.mock.calls);
+    expect(logged).not.toContain(BEARER_TOKEN);
+    expect(logged).toContain("/__bearer_unexpected_error_test_throw/:token");
+    expect(logged).toContain("/__bearer_rpc_error_test_throw/:token");
+
+    expect(JSON.stringify(setTag.mock.calls)).not.toContain(BEARER_TOKEN);
+    const httpPathTags = setTag.mock.calls
+      .filter(([key]) => key === "http_path")
+      .map(([, value]) => value);
+    expect(httpPathTags).toEqual(["/__bearer_unexpected_error_test_throw/:token"]);
+    loggerError.mockRestore();
   });
 
   it("maps fee payment program errors to product-safe messages", async () => {

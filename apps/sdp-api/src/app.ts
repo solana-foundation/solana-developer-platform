@@ -32,7 +32,7 @@ import { idempotencyKeyMiddleware } from "@/middleware/idempotency-key";
 import { kvStoreMiddleware } from "@/middleware/kv-store";
 import { skipRateLimitPaths } from "@/middleware/rate-limit";
 import { requestIdMiddleware } from "@/middleware/request-id";
-import { requestTracingMiddleware } from "@/middleware/request-tracing";
+import { requestTracingMiddleware, routeTemplateForTelemetry } from "@/middleware/request-tracing";
 import allowlist from "@/routes/allowlist";
 import apiKeys from "@/routes/api-keys";
 import assetProfiles from "@/routes/asset-profiles";
@@ -259,7 +259,7 @@ function captureUnexpectedError(
   const requestId = c.get("requestId");
   const traceId = c.get("traceId");
   const requestSource = c.get("requestSource");
-  const path = new URL(c.req.url).pathname;
+  const path = routeTemplateForTelemetry(c);
 
   observability.withScope((scope) => {
     scope.setTag("request_id", requestId);
@@ -451,7 +451,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         code,
         status,
         method: c.req.method,
-        path: c.req.path,
+        path: routeTemplateForTelemetry(c),
         request_id: requestId,
         ...describeError(err),
       });
@@ -567,7 +567,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
     logEvent("error", {
       event: "sdp_api_internal_error",
       method: c.req.method,
-      path: c.req.path,
+      path: routeTemplateForTelemetry(c),
       request_id: requestId,
       ...describeError(err),
     });
