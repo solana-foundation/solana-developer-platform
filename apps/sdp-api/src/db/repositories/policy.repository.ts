@@ -619,8 +619,10 @@ export interface PolicyRepository {
   createWalletOperation(input: CreateWalletOperationInput): Promise<WalletOperationRow | null>;
   getWalletOperationById(walletOperationId: string): Promise<WalletOperationRow | null>;
   /**
-   * Sum non-failed, non-canceled wallet-operation amounts for one asset in a
-   * rolling window. Returns a decimal string; "0" when nothing matched.
+   * Sum executed-or-executing wallet-operation amounts for one asset in a
+   * rolling window. Rows that never moved value — `created`,
+   * `pending_approval`, `failed`, `canceled` — never count. Returns a decimal
+   * string; "0" when nothing matched.
    */
   sumWalletOperationAmounts(input: SumWalletOperationAmountsInput): Promise<string>;
   updateWalletOperationStatus(

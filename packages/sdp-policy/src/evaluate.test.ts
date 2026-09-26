@@ -323,13 +323,32 @@ describe("evaluateWalletOperationPolicies", () => {
     assert.partialDeepStrictEqual(result, {
       decision: "review",
       reasonCode: "wallet_policy_match",
-      requiresApproval: false,
+      // `review` parks the operation in `pending_approval`, so it is an
+      // approval decision: the persisted evaluation must record the gate the
+      // approval replay later requires.
+      requiresApproval: true,
     });
     assert.partialDeepStrictEqual(result.matchedRules[0], {
       scope: "wallet",
       kind: "amount",
       decision: "review",
     });
+  });
+
+  it("records the approval gate for every decision that parks the operation", () => {
+    for (const decision of ["review", "approval_required", "provider_approval_required"] as const) {
+      const result = evaluateWalletOperationPolicies({
+        operation,
+        legs: [],
+        walletPolicy: walletPolicy([{ kind: "always", action: decision }]),
+        apiKeyPolicy: null,
+      });
+
+      assert.partialDeepStrictEqual(result, {
+        decision,
+        requiresApproval: true,
+      });
+    }
   });
 
   it("denies a multi-leg operation when a destination rule rejects one leg", () => {

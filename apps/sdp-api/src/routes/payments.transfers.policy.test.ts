@@ -717,6 +717,129 @@ describe("Payments routes — transfer policy", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  it("keeps a review-parked transfer approvable and outside velocity totals", async () => {
+    const sessionId = "ses_review_velocity_approver";
+    const approverUserId = "usr_review_velocity_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "review-velocity-approver@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_review_velocity_approver", TEST_ORG.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_review_velocity_approver", TEST_PROJECT.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+    ]);
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "review-payment-execution",
+          kind: "operation_type",
+          operationTypes: ["payment_transfer_execute"],
+          action: "review",
+        },
+        {
+          id: "org-sol-daily-cap",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "10",
+          asset: SOL_MINT,
+        },
+      ],
+    });
+    const policyRepository = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+
+    const pending = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "7",
+      },
+      {}
+    );
+    expect(pending.status).toBe(202);
+    const { approvalRequestId, walletOperationId } = approvalErrorDetailsSchema.parse(
+      (await readErrorResponse(pending)).error.details
+    );
+
+    // A `review` decision parks the operation behind an approval gate, so the
+    // persisted evaluation must record that gate: approving the request has to
+    // replay the payment, not fail the operation as ungated.
+    const evaluations = await policyRepository.listPolicyEvaluationsForOperation(walletOperationId);
+    expect(evaluations.at(-1)).toMatchObject({
+      decision: "review",
+      requires_approval: true,
+      approval_request_id: approvalRequestId,
+    });
+
+    // A parked operation moves no value, so it must not consume organization
+    // velocity: a later distinct transfer may not be denied by phantom volume.
+    expect(
+      await policyRepository.sumWalletOperationAmounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        scope: "organization",
+        custodyWalletId: TEST_CUSTODY_WALLET_ID,
+        walletId: TEST_WALLET_ID,
+        apiKeyId: TEST_API_KEY.id,
+        asset: SOL_MINT,
+        operationTypes: null,
+        since: new Date(Date.now() - 86_400_000).toISOString(),
+        excludeWalletOperationId: null,
+      })
+    ).toBe("0");
+
+    const later = await postTransfer(
+      {
+        sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+        destination: TEST_SOLANA_ADDRESSES.wallet2,
+        token: "SOL",
+        amount: "4",
+      },
+      {}
+    );
+    expect(later.status).toBe(202);
+    expect(await countTransferRows()).toBe(0);
+
+    const adminHeaders = {
+      Cookie: `sdp_session=${sessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const approved = await app.request(
+      `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+      { method: "POST", headers: adminHeaders },
+      env
+    );
+    expect(approved.status).toBe(200);
+    const approvedBody = walletApprovalHttpResponseSchema.parse(await approved.json());
+    expect(approvedBody.data.approvalRequest).toMatchObject({
+      status: "approved",
+      operation: {
+        status: "completed",
+        executionError: null,
+      },
+    });
+    expect(await countTransferRows()).toBe(1);
+  });
+
   // The single-transfer dashboard retries with one stable key per payment. The
   // gate does not collapse a retry into the pending approval (each POST opens
   // its own request), so this pins what the key does guarantee: approving both

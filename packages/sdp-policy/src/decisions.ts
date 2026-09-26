@@ -13,11 +13,20 @@ export const DECISION_RANK = {
 /**
  * Whether a decision pauses the operation for an approval.
  *
+ * Every decision `walletOperationStatusForDecision` maps to
+ * `pending_approval` classifies as an approval decision, so a parked
+ * operation always persists `requires_approval: true` and its approval
+ * request can execute on replay (SOLA9-608).
+ *
  * @param decision - The decision to classify.
  * @returns True for the approval-flavored decisions.
  */
 export function isApprovalDecision(decision: PolicyDecision): boolean {
-  return decision === "approval_required" || decision === "provider_approval_required";
+  return (
+    decision === "approval_required" ||
+    decision === "provider_approval_required" ||
+    decision === "review"
+  );
 }
 
 /**

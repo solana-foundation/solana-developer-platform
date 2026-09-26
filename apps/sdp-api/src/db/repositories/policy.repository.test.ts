@@ -734,10 +734,13 @@ describe("PolicyRepository (postgres)", () => {
     expect(orgRows.map((row) => row.approval_request_id)).toEqual([request?.id]);
   });
 
-  it("sums velocity windows from wallet_operations, skipping failed, canceled and undecided rows and the operation under evaluation", async () => {
+  it("sums velocity windows from wallet_operations, skipping failed, canceled, pending and undecided rows and the operation under evaluation", async () => {
     const service = policyStores(repo);
     const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);
-    const record = (amount: string, status?: "failed" | "canceled" | "evaluated" | "created") =>
+    const record = (
+      amount: string,
+      status?: "failed" | "canceled" | "evaluated" | "created" | "pending_approval"
+    ) =>
       service.recordWalletOperation({
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -759,6 +762,9 @@ describe("PolicyRepository (postgres)", () => {
     // A concurrent contender that has not been decided yet must not count,
     // or two simultaneous requests would each veto the other.
     await record("40000", "created");
+    // A parked operation has moved no value: counting it would let a
+    // never-executed request deny later distinct operations.
+    await record("777", "pending_approval");
     const current = await record("50000");
     await service.recordWalletOperation({
       organizationId: TEST_ORG.id,

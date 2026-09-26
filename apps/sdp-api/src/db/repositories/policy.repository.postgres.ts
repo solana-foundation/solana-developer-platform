@@ -2069,10 +2069,15 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         // `created` is an undecided contender: enforcement inserts the row
         // before it evaluates, so counting that status lets two concurrent
         // same-scope operations each count the other and both breach a window
-        // one of them fits in. Only decided, still-live rows count; the
-        // overshoot that concurrency can then cause is bounded by the in-flight
-        // set and is the failure direction ADR 0004 prefers over false refusals.
-        "status NOT IN ('created', 'failed', 'canceled')",
+        // one of them fits in. `pending_approval` has decided but not
+        // executed: its amount has not moved, so counting it lets a parked
+        // (possibly never-executable) request spend velocity it never used
+        // and deny later distinct operations (SOLA9-608). Only decided,
+        // still-live rows count; a parked operation joins the totals when it
+        // is approved into `executing`, and the overshoot that concurrency
+        // can then cause is bounded by the in-flight set and is the failure
+        // direction ADR 0004 prefers over false refusals.
+        "status NOT IN ('created', 'pending_approval', 'failed', 'canceled')",
         // `amount` is TEXT; only rows that cast cleanly may reach SUM. The
         // write path validates amounts, so this guards history, not input.
         "amount IS NOT NULL",

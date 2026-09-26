@@ -424,7 +424,9 @@ describe("WalletPolicyEnforcementService", () => {
       details: {
         walletOperationId: "wop_1",
         decision: "review",
-        requiresApproval: false,
+        // `review` parks the operation behind an approval gate, so the
+        // evaluation records the gate the approval replay requires.
+        requiresApproval: true,
         approvalRequestId: "appr_1",
       },
     });
