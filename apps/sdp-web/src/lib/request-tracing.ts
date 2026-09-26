@@ -1,3 +1,5 @@
+import { scrubTelemetry } from "@sdp/redaction";
+
 const TRACE_ID_HEADER = "X-SDP-Trace-ID";
 const TRACE_SOURCE_HEADER = "X-SDP-Trace-Source";
 const TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
@@ -34,13 +36,19 @@ function normalizeTraceHeader(value: string | null): string | null {
   return candidate;
 }
 
+// The one scrubbing boundary for every server trace line: callers log upstream
+// response bodies and `Error.message` values here, and `SdpApiResponseError`
+// embeds the full failed API body in its message, so nothing may reach
+// `console.info` without passing `@sdp/redaction` first (SOLA9-658).
 function emitTraceLog(event: string, payload: Record<string, unknown>): void {
   console.info(
-    JSON.stringify({
-      event,
-      timestamp: new Date().toISOString(),
-      ...payload,
-    })
+    JSON.stringify(
+      scrubTelemetry({
+        event,
+        timestamp: new Date().toISOString(),
+        ...payload,
+      })
+    )
   );
 }
 
