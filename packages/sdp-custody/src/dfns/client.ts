@@ -178,6 +178,28 @@ interface DfnsSignatureResult {
 const DFNS_USER_AGENT = "sdp-api-dfns/1.0";
 const IBM_HAVEN_USER_AGENT = "sdp-api-ibm-haven/1.0";
 
+// Response media types reported verbatim in error messages. Anything else
+// collapses to "unrecognized": `Content-Type` is provider-controlled, and the
+// same compact-credential discipline as the body summarizer applies before a
+// header value reaches `contentType=<value>` in a persisted error message.
+const KNOWN_RESPONSE_CONTENT_TYPES = new Set([
+  "application/json",
+  "application/octet-stream",
+  "application/problem+json",
+  "application/xml",
+  "text/html",
+  "text/plain",
+  "text/xml",
+]);
+
+function describeDfnsContentType(contentType: string | null): string {
+  if (!contentType) {
+    return "unknown";
+  }
+  const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+  return KNOWN_RESPONSE_CONTENT_TYPES.has(mediaType) ? mediaType : "unrecognized";
+}
+
 const DFNS_DEFAULT_HEADERS: Readonly<Record<string, string>> = {
   Accept: "application/json",
   "Content-Type": "application/json",
@@ -340,7 +362,7 @@ async function dfnsRequestJson<T>(
   const parsed = parseJsonSafely(rawBody);
   if (!parsed) {
     throw new SigningError(
-      `${ctx.providerLabel} API non-JSON response (${method} ${path}): status=${response.status} contentType=${response.contentType ?? "unknown"}`,
+      `${ctx.providerLabel} API non-JSON response (${method} ${path}): status=${response.status} contentType=${describeDfnsContentType(response.contentType)}`,
       "NETWORK_ERROR"
     );
   }
@@ -387,7 +409,7 @@ async function dfnsRequestRaw(
 
   if (!response.ok) {
     throw new SigningError(
-      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${current.contentType ?? "unknown"} code=${summarizeUpstreamErrorBody(current.rawBody, current.status)}`,
+      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${describeDfnsContentType(current.contentType)} code=${summarizeUpstreamErrorBody(current.rawBody, current.status)}`,
       "NETWORK_ERROR"
     );
   }

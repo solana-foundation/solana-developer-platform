@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { summarizeUpstreamErrorValue } from "@sdp/redaction";
 import { type Address, assertIsAddress } from "@solana/addresses";
 import {
   createSignatureDictionary,
@@ -293,9 +294,14 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       }
 
       if (TERMINAL_FAILURE_STATUSES.has(status)) {
+        // `reason` is a provider-controlled response field on a 200 body, so it
+        // gets the same compact-value discipline as the client's body
+        // summarizer: only an identifier-shaped, non-secret-shaped code is
+        // embedded; prose and credential-shaped values are omitted entirely.
+        const reason = summarizeUpstreamErrorValue(current.reason);
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
-            current.reason ? `: ${current.reason}` : ""
+            reason ? `: ${reason}` : ""
           }`,
         });
       }
