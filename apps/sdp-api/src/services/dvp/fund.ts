@@ -97,8 +97,8 @@ export interface DvpFundingPlan {
   hasClaim(signature: Signature): Promise<boolean>;
   /** Gives it back, when and only when nothing was broadcast. */
   release(signature: Signature): Promise<void>;
-  /** Records the transfer once it is on the wire. */
-  recordFundingTx(signature: Signature): Promise<void>;
+  /** Records the transfer once it is on the wire, with the amount it sent. */
+  recordFundingTx(signature: Signature, amount: string): Promise<void>;
 }
 
 /**
@@ -136,7 +136,8 @@ export function fundingPlan(
       }
     },
     hasClaim: (signature) => claims.hasClaim(trade.id, side, signature),
-    recordFundingTx: (signature) => claims.recordFundingTx(trade.id, side, signature),
+    recordFundingTx: (signature, amount) =>
+      claims.recordFundingTx(trade.id, side, signature, amount),
   };
 }
 
@@ -448,8 +449,10 @@ export async function executeDvpFunding(
   // On the wire, so the receipt is owed regardless of what the claim does next.
   // The row stays as the receipt and keeps the leg taken: a later funding of the
   // same leg conflicts until a reclaim takes the row over (`claimForReclaim`)
-  // or the reconciler deletes a receipt whose transfer never landed.
-  await plan.recordFundingTx(heldSignature);
+  // or the reconciler deletes a receipt whose transfer never landed. The
+  // shortfall rides with the receipt: it is what THIS transfer sent, and the
+  // unified feed shows it per funding rather than the trade-level escrow peak.
+  await plan.recordFundingTx(heldSignature, outstanding.toString());
 
   return { signature: heldSignature, leg: side, amount: outstanding.toString() };
 }

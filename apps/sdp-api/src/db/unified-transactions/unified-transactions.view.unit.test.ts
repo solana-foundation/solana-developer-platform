@@ -13,12 +13,12 @@ describe("unified transactions repeatable view", () => {
 
   it("uses latest-schema custody joins and exact base-unit conversion", () => {
     const view = renderUnifiedTransactionsView();
-    expect(view).toContain(
-      "LEFT JOIN dvp_leg_funding_claims c ON c.trade_id = t.id AND c.side = side.value"
-    );
+    expect(view).toContain("FROM dvp_leg_funding_receipts r");
+    expect(view).not.toContain("FROM dvp_leg_funding_claims c");
+    expect(view).toContain("WHERE w.public_key = t.settlement_authority");
     expect(view).not.toContain("t.sdp_side");
     expect(view).not.toContain("t.sdp_wallet_id");
-    expect(view).toContain("10::numeric ^ CASE c.side");
+    expect(view).toContain("10::numeric ^ CASE r.side");
     expect(view).toContain("LEFT JOIN helius_rings_asset_allowlist al ON al.mint = o.asset_mint");
     expect(view).toContain("o.amount_raw::numeric / (10::numeric ^ al.decimals)");
   });

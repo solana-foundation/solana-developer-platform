@@ -52,6 +52,7 @@ const dvpTradeRowSchema = z.object({
   create_signature: z.string().nullable(),
   create_last_valid_block_height: z.string().nullable(),
   close_signature: z.string().nullable(),
+  close_custody_wallet_id: z.string().nullable(),
   close_claim_signature: z.string().nullable(),
   close_claim_action: z.enum(["settle", "cancel"]).nullable(),
   close_claim_expiry_height: z.string().nullable(),
@@ -103,6 +104,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     decimalsA: parsed.decimals_a,
     decimalsB: parsed.decimals_b,
     closeSignature: parsed.close_signature === null ? null : signature(parsed.close_signature),
+    closeCustodyWalletId: parsed.close_custody_wallet_id,
     closeClaim:
       parsed.close_claim_signature === null ||
       parsed.close_claim_action === null ||
@@ -164,6 +166,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          status, observed_at, observed_cluster_timestamp, closed_at,
          idempotency_key, idempotency_fingerprint,
          create_signature, create_last_valid_block_height, close_signature,
+         close_custody_wallet_id,
          close_claim_signature, close_claim_action, close_claim_expiry_height,
          close_resolution_attempts, close_resolution_after,
          escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
@@ -517,7 +520,12 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
       return row !== null && row !== undefined;
     },
 
-    async recordClose(id: string, status: "settled" | "cancelled", signature: Signature) {
+    async recordClose(
+      id: string,
+      status: "settled" | "cancelled",
+      signature: Signature,
+      custodyWalletId: string | null
+    ) {
       // Only from a status where the trade was still open. A row the reconciler
       // has already moved to a terminal state was decided by something that read
       // the chain, and that beats this caller's expectation.
@@ -526,6 +534,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
           `UPDATE dvp_trades
               SET status = ?,
                   close_signature = ?,
+                  close_custody_wallet_id = ?,
                   closed_at = CASE WHEN closed_at IS NULL THEN sdp_iso_now() ELSE closed_at END,
                   close_claim_signature = NULL,
                   close_claim_action = NULL,
@@ -535,7 +544,7 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
               AND status IN ('created', 'partially_funded', 'funded', 'expired', 'closed_unknown')
             RETURNING ${SELECT_COLUMNS}`
         )
-        .bind(status, signature, id)
+        .bind(status, signature, custodyWalletId, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
     },

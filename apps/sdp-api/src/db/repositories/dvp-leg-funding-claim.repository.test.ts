@@ -228,7 +228,7 @@ describe("DvpLegFundingClaimRepository", () => {
   it("keeps a claim whose transfer was broadcast", async () => {
     await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
       await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
-      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
       await repo.release(TRADE_ID, "a", "sig_sent");
     });
 
@@ -238,13 +238,61 @@ describe("DvpLegFundingClaimRepository", () => {
     expect(blocked).toBe(false);
   });
 
+  /**
+   * The receipt table (0119) is the funding history the unified feed reads. It
+   * is written once with the broadcast and then never rewritten: a rebind, a
+   * reclaim takeover, or a release may do anything to the LOCK row, but the
+   * funding evidence it produced cannot be reassigned or withdrawn.
+   */
+  it("records funding history once, and never lets the lock's lifecycle rewrite it", async () => {
+    await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+      await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
+      const receipt = () =>
+        getDb(env).queryMany<{ signature: string; custody_wallet_id: string; amount: string }>(
+          `SELECT signature, custody_wallet_id, amount FROM dvp_leg_funding_receipts
+            WHERE trade_id = ? AND side = 'a'`,
+          [TRADE_ID]
+        );
+      expect(await receipt()).toEqual([
+        {
+          signature: "sig_sent",
+          custody_wallet_id: walletId(PARTY_A_ORG),
+          amount: "1000000",
+        },
+      ]);
+
+      // A rebroadcast under the same claim (idempotency retry) does not double.
+      await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
+      expect(await receipt()).toHaveLength(1);
+
+      // The reclaim takes the lock over and releases it; the receipt stands.
+      await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_sent");
+      await repo.release(TRADE_ID, "a", "sig_reclaim");
+      expect(await receipt()).toEqual([
+        {
+          signature: "sig_sent",
+          custody_wallet_id: walletId(PARTY_A_ORG),
+          amount: "1000000",
+        },
+      ]);
+
+      // Deleting the receipt needs the exact signature, and only the
+      // reconciler's moved-nothing path or reclaim's may do it.
+      await repo.deleteFundingReceipt(TRADE_ID, "a", "sig_other");
+      expect(await receipt()).toHaveLength(1);
+      await repo.deleteFundingReceipt(TRADE_ID, "a", "sig_sent");
+      expect(await receipt()).toEqual([]);
+    });
+  });
+
   // A reclaim takes the leg the way funding does, so the two can never be in
   // flight together; releasing it is what lets a reclaimed leg be funded again.
   describe("reclaiming a leg", () => {
     it("turns the receipt it checked into the reclaim's lock, blocking funding until released", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
 
         expect(
           await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_sent")
@@ -261,7 +309,7 @@ describe("DvpLegFundingClaimRepository", () => {
     it("refuses to take over a receipt other than the one it checked", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_newer"));
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_newer");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_newer", "1000000");
 
         expect(
           await repo.claimForReclaim(claimInput(PARTY_A_ORG, "a", "sig_reclaim"), "sig_checked")
@@ -332,7 +380,7 @@ describe("DvpLegFundingClaimRepository", () => {
     it("never releases a claim whose transfer was broadcast", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_sent"), expiryHeight: "100" });
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
       });
 
       expect(await repo.releaseExpired(900n)).toBe(0);
@@ -350,9 +398,9 @@ describe("DvpLegFundingClaimRepository", () => {
       await insertTrade("dvp_claim_trade_b");
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_brd_dead"), expiryHeight: "500" });
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_brd_dead");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_brd_dead", "1000000");
         await repo.claim({ ...claimInput(PARTY_A_ORG, "b", "sig_brd_live"), expiryHeight: "5000" });
-        await repo.recordFundingTx(TRADE_ID, "b", "sig_brd_live");
+        await repo.recordFundingTx(TRADE_ID, "b", "sig_brd_live", "1000000");
         // Expired but never broadcast: `releaseExpired`'s domain, not this one.
         await repo.claim({
           tradeId: "dvp_claim_trade_b",
@@ -378,7 +426,7 @@ describe("DvpLegFundingClaimRepository", () => {
           ...claimInput(PARTY_A_ORG, "a", "sig_on_expired"),
           expiryHeight: "500",
         });
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_on_expired");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_on_expired", "1000000");
       });
 
       await getDb(env)
@@ -400,9 +448,9 @@ describe("DvpLegFundingClaimRepository", () => {
       await insertTrade("dvp_claim_trade_b");
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_target"), expiryHeight: "500" });
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_target");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_target", "1000000");
         await repo.claim({ ...claimInput(PARTY_A_ORG, "b", "sig_other"), expiryHeight: "500" });
-        await repo.recordFundingTx(TRADE_ID, "b", "sig_other");
+        await repo.recordFundingTx(TRADE_ID, "b", "sig_other", "1000000");
         await repo.claim({
           tradeId: "dvp_claim_trade_b",
           side: "a",
@@ -434,6 +482,14 @@ describe("DvpLegFundingClaimRepository", () => {
         repo.listForTrade(TRADE_ID)
       );
       expect(afterTarget.map((claim) => claim.signature)).toEqual(["sig_other"]);
+
+      // The deleted receipt's history row goes with it: the chain proved the
+      // transfer moved nothing, so it is evidence of nothing.
+      const receipts = await getDb(env).queryMany<{ signature: string }>(
+        "SELECT signature FROM dvp_leg_funding_receipts WHERE trade_id = ? ORDER BY signature",
+        [TRADE_ID]
+      );
+      expect(receipts.map((row) => row.signature)).toEqual(["sig_other"]);
     });
   });
 
@@ -461,7 +517,7 @@ describe("DvpLegFundingClaimRepository", () => {
     it("does not count a receipt", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
         await repo.claim(claimInput(PARTY_A_ORG, "a", "sig_sent"));
-        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent");
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sent", "1000000");
       });
 
       const live = await runWithTenantDatabaseIdentity({ organizationId: AGENT_ORG }, () =>

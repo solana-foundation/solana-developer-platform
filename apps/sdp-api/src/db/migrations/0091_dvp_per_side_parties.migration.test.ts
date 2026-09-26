@@ -52,6 +52,14 @@ async function rewindPre0091Shape(params: { walletId: string }): Promise<void> {
   await client.query(`UPDATE dvp_trades SET sdp_wallet_id = $1 WHERE sdp_wallet_id IS NULL`, [
     params.walletId,
   ]);
+  // Rows left in this worker's database by other test files (dvp_trades is
+  // never truncated between files) get the re-added columns' defaults:
+  // `trade_kind = 'principal'` and a NULL `sdp_side`. Every pre-0091 trade
+  // recorded its creator's side, so backfill the leftovers to 'a' — re-adding
+  // 0088's kind_side_check below validates every row in the table, not just
+  // this test's own, and the migration under test must deploy over whatever
+  // rows production already has.
+  await client.query(`UPDATE dvp_trades SET sdp_side = 'a' WHERE sdp_side IS NULL`);
   await client.query(`ALTER TABLE dvp_trades ALTER COLUMN sdp_wallet_id SET NOT NULL`);
   // Re-add the named constraints 0088 introduced. PostgreSQL has no
   // ADD CONSTRAINT IF NOT EXISTS, so guard with a DO block.

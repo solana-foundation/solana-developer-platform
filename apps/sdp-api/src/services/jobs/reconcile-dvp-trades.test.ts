@@ -688,7 +688,7 @@ describe("reconcileDvpTrades", () => {
           signature: receipt,
           expiryHeight: "900",
         });
-        await claims.recordFundingTx(tradeId, side, receipt);
+        await claims.recordFundingTx(tradeId, side, receipt, "1000000");
       }
     }
     getSignatureStatusesMock
