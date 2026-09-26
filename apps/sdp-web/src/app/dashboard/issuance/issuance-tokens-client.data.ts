@@ -1,5 +1,6 @@
 "use client";
 
+import { PROJECT_CONTEXT_HEADER_NAME } from "@/lib/project-cookie";
 import { type IssuanceListQuery, toIssuanceListRequestParams } from "./issuance-list-query";
 import type { IssuanceTokenListItem } from "./issuance-tokens.data";
 
@@ -29,7 +30,7 @@ interface IssuanceTokensEnvelope {
  */
 export async function fetchIssuanceTokensClientPage(
   query: IssuanceListQuery,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; projectContextId?: string | null } = {}
 ): Promise<IssuanceTokensClientPage> {
   const params = toIssuanceListRequestParams(query);
   // The URL omits defaults for cleanliness, but the request must always be
@@ -41,6 +42,11 @@ export async function fetchIssuanceTokensClientPage(
     method: "GET",
     cache: "no-store",
     signal: options.signal,
+    // Bind the read to the project the mounted list was rendered with
+    // (SOLA9-564) instead of the shared selection cookie.
+    headers: options.projectContextId
+      ? { [PROJECT_CONTEXT_HEADER_NAME]: options.projectContextId }
+      : undefined,
   });
   const body = (await response.json().catch(() => ({}))) as IssuanceTokensEnvelope;
 

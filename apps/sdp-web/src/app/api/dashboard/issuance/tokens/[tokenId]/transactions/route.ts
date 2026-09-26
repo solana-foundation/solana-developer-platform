@@ -2,7 +2,7 @@ import type { TokenTransaction } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap for the per-token transactions
 // handler. The dashboard pages with a fixed size well under this; the clamp is
@@ -28,7 +28,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       ? Math.min(Math.max(pageSizeRaw, 1), MAX_PAGE_SIZE)
       : DEFAULT_PAGE_SIZE;
 
-    const apiClient = await createSdpApiClient(
+    const apiClient = await createContextBoundSdpApiClient(
+      request,
       trace.childContext("route.dashboard.issuance.token.transactions.api")
     );
 

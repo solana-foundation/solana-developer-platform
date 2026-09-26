@@ -4,12 +4,13 @@ import { revalidatePath } from "next/cache";
 import { assetProfiles } from "@/flags";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createProjectBoundSdpApiClient, createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
 import { buildDraftPayload, draftSchema } from "./draft-model";
 
 export async function saveIssuanceDraft(
-  input: unknown
+  input: unknown,
+  projectContextId?: string | null
 ): Promise<{ state: "success" | "error"; message: string; tokenId: string | null }> {
   const t = await getTranslations();
   if (!(await assetProfiles())) {
@@ -26,7 +27,12 @@ export async function saveIssuanceDraft(
   const isStablecoin = draft.assetClass === "stablecoin";
   const payload = buildDraftPayload(draft);
   try {
-    const client = await createSdpApiClient();
+    // Bind the draft to the project the mounted form was rendered with
+    // (SOLA9-564); the shared selection cookie can be flipped by a sibling tab
+    // between render and submit.
+    const client = await (projectContextId
+      ? createProjectBoundSdpApiClient(projectContextId)
+      : createSdpApiClient());
     const wallets = await fetchPaymentsWallets(client.request, {
       view: "summary",
       includeBalances: false,

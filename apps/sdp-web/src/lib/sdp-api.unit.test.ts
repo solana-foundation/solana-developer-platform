@@ -300,6 +300,111 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
+
+  // SOLA9-564: a rendered project context must win over the shared selection
+  // cookie (which a sibling tab can flip between render and submit), and an
+  // unusable context must fail closed instead of falling back to the cookie.
+  describe("boundProjectId", () => {
+    const boundRequest = () =>
+      new Request("https://dashboard.example.test/api/dashboard/issuance/tokens/tok_1/mint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mint: { destination: "dest", amount: "1" } }),
+      });
+
+    it("binds the upstream request to the rendered context while the cookie names another project", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_other"));
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+
+      const response = await proxyToSdpApi({
+        request: boundRequest(),
+        traceSource: "test.proxy.bound",
+        path: "/v1/issuance/tokens/tok_1/mint",
+        boundProjectId: "project_test",
+      });
+
+      expect(response.status).toBe(200);
+      const upstream = callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint");
+      expect(upstream).toHaveLength(1);
+      expect(headersOf(upstream[0]).get("x-project-id")).toBe("project_test");
+    });
+
+    it("fails closed with 403 and no upstream request when the context is not listed", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+
+      const response = await proxyToSdpApi({
+        request: boundRequest(),
+        traceSource: "test.proxy.bound",
+        path: "/v1/issuance/tokens/tok_1/mint",
+        boundProjectId: "project_unlisted",
+      });
+
+      expect(response.status).toBe(403);
+      expect(callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint")).toHaveLength(0);
+      expect(await response.json()).toMatchObject({
+        error: { message: "Requested project is not available for this organization" },
+      });
+    });
+
+    it("fails closed with 500 and no upstream request when the project list cannot be loaded", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      const fetchMock = apiFetchMock({
+        projects: () => new Response("temporarily unavailable", { status: 503 }),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+
+      const response = await proxyToSdpApi({
+        request: boundRequest(),
+        traceSource: "test.proxy.bound",
+        path: "/v1/issuance/tokens/tok_1/mint",
+        boundProjectId: "project_test",
+      });
+
+      expect(response.status).toBe(500);
+      expect(callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint")).toHaveLength(0);
+    });
+
+    it("does not require the selection cookie when a context is bound", async () => {
+      mocks.cookies.mockResolvedValue(cookieJar());
+      const fetchMock = apiFetchMock();
+      vi.stubGlobal("fetch", fetchMock);
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+
+      const response = await proxyToSdpApi({
+        request: boundRequest(),
+        traceSource: "test.proxy.bound",
+        path: "/v1/issuance/tokens/tok_1/mint",
+        boundProjectId: "project_test",
+      });
+
+      expect(response.status).toBe(200);
+      expect(
+        headersOf(callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint")[0]).get("x-project-id")
+      ).toBe("project_test");
+    });
+  });
 });
 
 // A cookie can name a project this organization does not list: two local stacks

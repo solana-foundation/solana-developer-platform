@@ -11,7 +11,7 @@ import {
 } from "@/app/dashboard/issuance/issuance-tokens.data";
 import { assetProfiles } from "@/flags";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
 
 // Paged asset list for the issuance workspace. The workspace re-fetches through
 // here on every search/filter/sort/page change, so a keystroke costs one token
@@ -42,7 +42,12 @@ export async function GET(request: Request) {
   try {
     query = parseIssuanceListRequestQuery(new URL(request.url).searchParams);
     const [apiClient, assetProfilesEnabled] = await Promise.all([
-      createSdpApiClient(trace.childContext("route.dashboard.issuance.tokens.api")),
+      // The list a stale tab renders must stay bound to the project it was
+      // rendered with (SOLA9-564), not re-resolved from the shared cookie.
+      createContextBoundSdpApiClient(
+        request,
+        trace.childContext("route.dashboard.issuance.tokens.api")
+      ),
       assetProfiles(),
     ]);
 

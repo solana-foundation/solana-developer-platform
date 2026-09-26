@@ -1,4 +1,5 @@
 import { readApiErrorMessage } from "./api-error";
+import { PROJECT_CONTEXT_HEADER_NAME } from "./project-cookie";
 
 export type DashboardFetchResult<T> =
   | { ok: true; data: T; status: number }
@@ -10,16 +11,25 @@ export interface DashboardFetchOptions {
   headers?: HeadersInit;
   body?: unknown;
   signal?: AbortSignal;
+  /**
+   * The project id the calling surface was rendered with, sent as the project
+   * context header so the BFF binds the request to it (SOLA9-564) instead of
+   * re-reading the shared selection cookie a sibling tab can flip.
+   */
+  projectContextId?: string | null;
 }
 
 export async function dashboardFetch<T = unknown>(
   path: string,
   options: DashboardFetchOptions = {}
 ): Promise<DashboardFetchResult<T>> {
-  const { method = "GET", headers: suppliedHeaders, body, signal } = options;
+  const { method = "GET", headers: suppliedHeaders, body, signal, projectContextId } = options;
   const headers = new Headers(suppliedHeaders);
   if (body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+  if (projectContextId) {
+    headers.set(PROJECT_CONTEXT_HEADER_NAME, projectContextId);
   }
 
   let response: Response;

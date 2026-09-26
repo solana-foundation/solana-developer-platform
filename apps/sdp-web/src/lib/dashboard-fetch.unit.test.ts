@@ -43,4 +43,28 @@ describe("dashboardFetch", () => {
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get("Content-Type")).toBe("application/merge-patch+json");
   });
+
+  it("sends a rendered project context as the project context header", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dashboardFetch("/api/test", { projectContextId: "prj_rendered" });
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-sdp-project-context")).toBe("prj_rendered");
+  });
+
+  it("omits the project context header when no context is supplied", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 204 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dashboardFetch("/api/test", { projectContextId: null });
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.has("x-sdp-project-context")).toBe(false);
+  });
 });

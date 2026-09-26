@@ -22,7 +22,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
-import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import {
+  useDashboardWorkspace,
+  useOptionalDashboardWorkspace,
+} from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { shortenAddress } from "../wallet-identity";
@@ -98,6 +101,9 @@ export function IssuanceDraftForm({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  // The project the mounted form was rendered with; the draft save binds to it
+  // (SOLA9-564) instead of re-reading the shared selection cookie.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const initialStep = Math.min(4, Math.max(0, Number(searchParams.get("step") ?? 0) || 0));
   const [step, setStepState] = useState(initialStep);
   const [draft, setDraft] = useState<DraftState>(() => ({
@@ -147,7 +153,7 @@ export function IssuanceDraftForm({
   const saveDraft = async () => {
     setSavingDraft(true);
     try {
-      const result = await saveIssuanceDraft(draft);
+      const result = await saveIssuanceDraft(draft, selectedProjectId);
       if (result.state === "error") {
         toast.error(result.message, { position: "bottom-right" });
         return;

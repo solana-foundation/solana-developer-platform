@@ -4,6 +4,7 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
@@ -40,6 +41,8 @@ export function useAssetProfileForm({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  // The project the mounted form was rendered with; the save binds to it.
+  const { selectedProjectId } = useOptionalDashboardWorkspace() ?? {};
   // The save action returns the updated profile; keep the freshest copy so the
   // baseline re-derives without waiting for a server re-render.
   const [assetProfile, setAssetProfile] = useState(initialAssetProfile);
@@ -159,6 +162,7 @@ export function useAssetProfileForm({
       const result = await updateAssetProfileAction({
         tokenId: token.id,
         profileId: assetProfile.id,
+        projectContextId: selectedProjectId,
         rebuiltMetadata: buildIssuanceMetadata(draft),
         tokenPatch: {
           signingCustodyWalletId: requiresMetadataSigner ? metadataSignerWalletId : undefined,

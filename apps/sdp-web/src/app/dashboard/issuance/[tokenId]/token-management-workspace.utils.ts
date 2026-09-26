@@ -570,11 +570,14 @@ export function getExplorerHref(mintAddress: string | null): string | null {
 
 export async function executeActionRequest(
   input: ActionExecutionInput,
-  t: Translate
+  t: Translate,
+  projectContextId?: string | null
 ): Promise<ActionExecutionResult> {
   const result = await dashboardFetch<unknown>(input.path, {
     method: input.method,
     body: input.body,
+    // Bind the action to the project the mounted surface was rendered with.
+    projectContextId,
   });
 
   if (!result.ok) {

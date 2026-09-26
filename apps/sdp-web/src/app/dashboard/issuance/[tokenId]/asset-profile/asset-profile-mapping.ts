@@ -51,6 +51,9 @@ export const CHAIN_OWNED_KEYS = ["decimals"] as const;
 export interface UpdateAssetProfileActionInput {
   tokenId: string;
   profileId: string;
+  // The project the mounted form was rendered with (SOLA9-564): the save binds
+  // to it instead of re-reading the shared selection cookie.
+  projectContextId?: string | null;
   // buildIssuanceMetadata(draft) — contains only form-owned keys; merged over
   // the freshly fetched profile server-side before the PATCH.
   rebuiltMetadata: IssuanceMetadata;

@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.allowlist_labels", request);
 
   try {
     const { tokenId } = await params;
-    const apiClient = await createSdpApiClient(
+    const apiClient = await createContextBoundSdpApiClient(
+      request,
       trace.childContext("route.dashboard.issuance.token.allowlist_labels.api")
     );
 

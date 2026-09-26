@@ -2,7 +2,7 @@ import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createSdpApiClient, proxyToSdpApi } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient, proxyToSdpApi, readProjectContextId } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap for the allowlist list handler.
 const MAX_PAGE_SIZE = 500;
@@ -26,7 +26,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
       ? Math.min(Math.max(pageSizeRaw, 1), MAX_PAGE_SIZE)
       : DEFAULT_PAGE_SIZE;
 
-    const apiClient = await createSdpApiClient(
+    const apiClient = await createContextBoundSdpApiClient(
+      request,
       trace.childContext("route.dashboard.issuance.token.allowlist.api")
     );
 
@@ -92,5 +93,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     request,
     traceSource: "route.dashboard.issuance.token.allowlist.add",
     path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist`,
+    boundProjectId: readProjectContextId(request),
   });
 }

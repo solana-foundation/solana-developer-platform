@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   apiRequest: vi.fn(),
   assetProfiles: vi.fn(),
   createSdpApiClient: vi.fn(),
+  createContextBoundSdpApiClient: vi.fn(),
 }));
 
 vi.mock("@/flags", () => ({ assetProfiles: mocks.assetProfiles }));
@@ -14,7 +15,10 @@ vi.mock("@/lib/request-tracing", () => ({
     step: (_name: string, task: () => unknown) => task(),
   }),
 }));
-vi.mock("@/lib/sdp-api", () => ({ createSdpApiClient: mocks.createSdpApiClient }));
+vi.mock("@/lib/sdp-api", () => ({
+  createSdpApiClient: mocks.createSdpApiClient,
+  createContextBoundSdpApiClient: mocks.createContextBoundSdpApiClient,
+}));
 
 import { GET } from "./route";
 
@@ -26,6 +30,7 @@ describe("GET /api/dashboard/issuance/tokens", () => {
       Response.json({ data: [], meta: { total: 0, page: 1, pageSize: 24, hasMore: false } })
     );
     mocks.createSdpApiClient.mockResolvedValue({ request: mocks.apiRequest });
+    mocks.createContextBoundSdpApiClient.mockResolvedValue({ request: mocks.apiRequest });
   });
 
   it("round-trips the exact Smoky SQL-shaped unicode search as a 200 empty page", async () => {
@@ -62,6 +67,20 @@ describe("GET /api/dashboard/issuance/tokens", () => {
       error: "Invalid encoded issuance search",
     });
     expect(mocks.createSdpApiClient).not.toHaveBeenCalled();
+    expect(mocks.createContextBoundSdpApiClient).not.toHaveBeenCalled();
     expect(mocks.apiRequest).not.toHaveBeenCalled();
+  });
+
+  // SOLA9-564: the workspace list is read through the project context its
+  // surface was rendered with, not re-resolved from the shared cookie.
+  it("builds the client from the request so a rendered project context can bind it", async () => {
+    const request = new Request("https://dashboard.example.test/api/dashboard/issuance/tokens", {
+      headers: { "x-sdp-project-context": "project_rendered" },
+    });
+
+    await GET(request);
+
+    expect(mocks.createContextBoundSdpApiClient).toHaveBeenCalledWith(request, undefined);
+    expect(mocks.apiRequest).toHaveBeenCalledOnce();
   });
 });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { proxyToSdpApi } from "@/lib/sdp-api";
+import { proxyToSdpApi, readProjectContextId } from "@/lib/sdp-api";
 
 const TOKEN_POST_ACTIONS = {
   deploy: "deploy",
@@ -43,5 +43,9 @@ export async function POST(request: Request, context: RouteContext) {
     request,
     traceSource: `route.dashboard.issuance.token.${action}`,
     path: `/v1/issuance/tokens/${encodeURIComponent(tokenId)}/${TOKEN_POST_ACTIONS[action]}`,
+    // Bind the action to the project the mounted surface was rendered with
+    // (SOLA9-564): the shared selection cookie can be flipped by a sibling tab
+    // between render and submit.
+    boundProjectId: readProjectContextId(request),
   });
 }

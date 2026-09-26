@@ -4,6 +4,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import type {
   ActionConfirmationState,
@@ -32,6 +33,10 @@ function withActionSigner(
 export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[]) {
   const t = useTranslations();
   const router = useRouter();
+  // The project the mounted surface was rendered with. Sent with every action
+  // so the BFF binds the upstream request to it (SOLA9-564) instead of the
+  // shared selection cookie a sibling tab can flip between render and submit.
+  const { selectedProjectId } = useOptionalDashboardWorkspace() ?? {};
   const [isPending, setIsPending] = useState(false);
   const [actionConfirmation, setActionConfirmation] = useState<ActionConfirmationState | null>(
     null
@@ -65,7 +70,7 @@ export function useTokenActionRunner(authorityWallets?: PaymentsDashboardWallet[
 
     setIsPending(true);
     try {
-      const result = await executeActionRequest(input, t);
+      const result = await executeActionRequest(input, t, selectedProjectId);
 
       if (result.ok) {
         setActionConfirmation(null);

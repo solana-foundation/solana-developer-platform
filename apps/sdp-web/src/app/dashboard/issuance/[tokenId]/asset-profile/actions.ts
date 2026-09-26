@@ -4,7 +4,7 @@ import type { AssetProfile } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
-import { sdpApiRequest } from "@/lib/sdp-api";
+import { createProjectBoundSdpApiClient, sdpApiRequest } from "@/lib/sdp-api";
 import {
   mergeIssuanceMetadataForUpdate,
   type UpdateAssetProfileActionInput,
@@ -24,10 +24,17 @@ export async function updateAssetProfileAction(
   input: UpdateAssetProfileActionInput
 ): Promise<UpdateAssetProfileActionResult> {
   const t = await getTranslations();
-  const { tokenId, profileId, rebuiltMetadata, tokenPatch } = input;
+  const { tokenId, profileId, rebuiltMetadata, tokenPatch, projectContextId } = input;
 
   try {
-    const profileResponse = await sdpApiRequest(`/v1/issuance/asset-profiles/${profileId}`, {
+    // Bind the save to the project the mounted form was rendered with
+    // (SOLA9-564); the shared selection cookie can be flipped by a sibling tab
+    // between render and submit.
+    const request = projectContextId
+      ? (await createProjectBoundSdpApiClient(projectContextId)).request
+      : sdpApiRequest;
+
+    const profileResponse = await request(`/v1/issuance/asset-profiles/${profileId}`, {
       method: "GET",
     });
     if (!profileResponse.ok) {
@@ -60,7 +67,7 @@ export async function updateAssetProfileAction(
 
     // Token row first — it is what the rest of the dashboard displays. If the
     // profile PATCH then fails, retrying re-sends the same values (idempotent).
-    const tokenResponse = await sdpApiRequest(`/v1/issuance/tokens/${tokenId}`, {
+    const tokenResponse = await request(`/v1/issuance/tokens/${tokenId}`, {
       method: "PATCH",
       body: JSON.stringify(tokenPatch),
     });
@@ -76,7 +83,7 @@ export async function updateAssetProfileAction(
       };
     }
 
-    const updateResponse = await sdpApiRequest(`/v1/issuance/asset-profiles/${profileId}`, {
+    const updateResponse = await request(`/v1/issuance/asset-profiles/${profileId}`, {
       method: "PATCH",
       body: JSON.stringify({ issuanceMetadata: mergedMetadata }),
     });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PROJECT_CONTEXT_HEADER_NAME } from "@/lib/project-cookie";
 
 const mocks = vi.hoisted(() => ({
   proxyToSdpApi: vi.fn(),
@@ -6,6 +7,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/sdp-api", () => ({
   proxyToSdpApi: mocks.proxyToSdpApi,
+  readProjectContextId: (request: Request) => {
+    const value = request.headers.get(PROJECT_CONTEXT_HEADER_NAME)?.trim();
+    return value ? value : null;
+  },
 }));
 
 import { POST } from "./route";
@@ -60,6 +65,46 @@ describe("POST /api/dashboard/issuance/tokens/[tokenId]/[action]", () => {
       request,
       traceSource: `route.dashboard.issuance.token.${action}`,
       path: `/v1/issuance/tokens/tok_1/${sdpApiSegment}`,
+      boundProjectId: null,
     });
+  });
+
+  it("forwards the rendered project context header as the bound project", async () => {
+    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
+    const request = new Request(
+      "https://dashboard.example.com/api/dashboard/issuance/tokens/tok_1/mint",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-sdp-project-context": "project_rendered",
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    await POST(request, { params: Promise.resolve({ tokenId: "tok_1", action: "mint" }) });
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({ boundProjectId: "project_rendered" })
+    );
+  });
+
+  it("ignores a blank rendered project context header", async () => {
+    mocks.proxyToSdpApi.mockResolvedValue(new Response(null, { status: 200 }));
+    const request = new Request(
+      "https://dashboard.example.com/api/dashboard/issuance/tokens/tok_1/mint",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-sdp-project-context": "   " },
+        body: JSON.stringify({}),
+      }
+    );
+
+    await POST(request, { params: Promise.resolve({ tokenId: "tok_1", action: "mint" }) });
+
+    expect(mocks.proxyToSdpApi).toHaveBeenCalledWith(
+      expect.objectContaining({ boundProjectId: null })
+    );
   });
 });

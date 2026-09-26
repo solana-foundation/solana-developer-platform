@@ -5,7 +5,11 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { resolveProjectFromList } from "./dashboard-project-selection";
-import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
+import {
+  PROJECT_CONTEXT_HEADER_NAME,
+  PROJECT_COOKIE_NAME,
+  PROJECT_HEADER_NAME,
+} from "./project-cookie";
 import {
   createTimedTrace,
   logRouteResult,
@@ -404,6 +408,34 @@ export async function sdpApiRequest(path: string, options: RequestInit = {}): Pr
 }
 
 /**
+ * The rendered project context a dashboard client presented for this request, or
+ * `null` when the request carries none (older clients, surfaces outside the
+ * issuance workspace).
+ */
+export function readProjectContextId(request: Request): string | null {
+  const value = request.headers.get(PROJECT_CONTEXT_HEADER_NAME)?.trim();
+  return value ? value : null;
+}
+
+/**
+ * Project client for dashboard BFF routes serving a mounted surface: when the
+ * client presents a rendered project context, the upstream client binds to it
+ * (validated against this organization's project list) instead of re-reading
+ * the shared selection cookie a sibling tab can change between render and
+ * submit. Requests without a context keep the cookie-based resolution.
+ */
+export async function createContextBoundSdpApiClient(
+  request: Request,
+  traceContext?: TraceContext
+): Promise<SdpApiClient> {
+  const contextProjectId = readProjectContextId(request);
+  if (contextProjectId) {
+    return createProjectBoundSdpApiClient(contextProjectId, traceContext);
+  }
+  return createSdpApiClient(traceContext);
+}
+
+/**
  * Creates an org-scoped SDP API client (no project header) for the endpoints
  * that exist outside any project: projects, members, allowlist, organizations.
  */
@@ -435,12 +467,19 @@ export function proxyFailure(
  * body to `path` and streams the upstream response back with trace headers.
  * Unauthenticated callers get 401/403; other local failures 500, with the
  * standard `{ error: { message } }` envelope.
+ *
+ * When `boundProjectId` names the project context the client's surface was
+ * rendered with, the upstream client binds to it (validated against this
+ * organization's project list) instead of the shared selection cookie. An
+ * unusable context fails closed with 403 — it never falls back to the cookie —
+ * while an upstream failure loading the validating project list stays a 500.
  */
 export async function proxyToSdpApi({
   request,
   traceSource,
   path,
   upstreamHeaders,
+  boundProjectId = null,
 }: {
   request: Request;
   traceSource: string;
@@ -451,6 +490,8 @@ export async function proxyToSdpApi({
    * remain server-owned, while endpoint-specific metadata is opt-in.
    */
   upstreamHeaders?: HeadersInit;
+  /** Rendered project context to bind the upstream request to, when presented. */
+  boundProjectId?: string | null;
 }): Promise<NextResponse> {
   const trace = createTimedTrace(traceSource, request);
 
@@ -461,6 +502,43 @@ export async function proxyToSdpApi({
   if (!orgId) {
     return proxyFailure(trace, 403, "Active organization required");
   }
+
+  if (boundProjectId) {
+    let boundClient: SdpApiClient;
+    try {
+      boundClient = await createProjectBoundSdpApiClient(
+        boundProjectId,
+        trace.childContext(`${traceSource}.api`)
+      );
+    } catch (error) {
+      // Fail closed: a rendered context that no longer validates never falls
+      // back to the mutable shared cookie.
+      if (error instanceof SdpApiResponseError) {
+        return proxyFailure(trace, 500, error.message);
+      }
+      return proxyFailure(
+        trace,
+        403,
+        error instanceof Error ? error.message : "Rendered project context is not available"
+      );
+    }
+    try {
+      return await proxyThroughClient({
+        apiClient: boundClient,
+        request,
+        trace,
+        path,
+        upstreamHeaders,
+      });
+    } catch (error) {
+      return proxyFailure(
+        trace,
+        500,
+        error instanceof Error ? error.message : "SDP API proxy request failed"
+      );
+    }
+  }
+
   const projectId = await getSelectedProjectId();
   if (!projectId) {
     return proxyFailure(trace, 400, "Selected project required");
@@ -468,26 +546,7 @@ export async function proxyToSdpApi({
 
   try {
     const apiClient = await createSdpApiClient(trace.childContext(`${traceSource}.api`));
-    const method = request.method;
-    const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
-    const response = await apiClient.request(path, {
-      method,
-      body: rawBody === "" ? undefined : rawBody,
-      headers: upstreamHeaders,
-    });
-
-    logRouteResult(trace, response.status);
-
-    return new NextResponse(response.body, {
-      status: response.status,
-      headers: {
-        "Content-Type": response.headers.get("Content-Type") ?? "application/json",
-        // Per-org financial state: never storable by browsers or intermediaries.
-        "Cache-Control": "private, no-store",
-        "X-SDP-Trace-ID": trace.traceId,
-        "Server-Timing": trace.serverTiming(),
-      },
-    });
+    return await proxyThroughClient({ apiClient, request, trace, path, upstreamHeaders });
   } catch (error) {
     return proxyFailure(
       trace,
@@ -495,4 +554,39 @@ export async function proxyToSdpApi({
       error instanceof Error ? error.message : "SDP API proxy request failed"
     );
   }
+}
+
+async function proxyThroughClient({
+  apiClient,
+  request,
+  trace,
+  path,
+  upstreamHeaders,
+}: {
+  apiClient: SdpApiClient;
+  request: Request;
+  trace: ReturnType<typeof createTimedTrace>;
+  path: string;
+  upstreamHeaders?: HeadersInit;
+}): Promise<NextResponse> {
+  const method = request.method;
+  const rawBody = method === "GET" || method === "HEAD" ? "" : await request.text();
+  const response = await apiClient.request(path, {
+    method,
+    body: rawBody === "" ? undefined : rawBody,
+    headers: upstreamHeaders,
+  });
+
+  logRouteResult(trace, response.status);
+
+  return new NextResponse(response.body, {
+    status: response.status,
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+      // Per-org financial state: never storable by browsers or intermediaries.
+      "Cache-Control": "private, no-store",
+      "X-SDP-Trace-ID": trace.traceId,
+      "Server-Timing": trace.serverTiming(),
+    },
+  });
 }

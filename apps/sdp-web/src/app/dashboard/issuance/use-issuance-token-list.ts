@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { useDebounce } from "@/lib/use-debounce";
 import {
@@ -77,7 +78,7 @@ export const ISSUANCE_UNFILTERED_QUERY: IssuanceListQuery = {
  * Deliberately opportunistic: a failed prefetch is forgotten rather than
  * surfaced, so the click that follows fetches for real and reports its own error.
  */
-function useAdjacentPagePrefetch() {
+function useAdjacentPagePrefetch(projectContextId: string | null) {
   const { mutate: writeCache } = useSWRConfig();
   // Pages already in the cache, per result set. Filters changing means a
   // different list, so the page numbers collected under the old one are dropped.
@@ -104,7 +105,7 @@ function useAdjacentPagePrefetch() {
 
       // Claimed before the request goes out so two renders can't both fetch it.
       markCached(target);
-      void fetchIssuanceTokensClientPage(target)
+      void fetchIssuanceTokensClientPage(target, { projectContextId })
         .then((result) =>
           writeCache(issuanceQueryKeys.tokens({ query: target }), result, { revalidate: false })
         )
@@ -114,7 +115,7 @@ function useAdjacentPagePrefetch() {
           }
         });
     },
-    [markCached, writeCache]
+    [markCached, projectContextId, writeCache]
   );
 
   return { markCached, prefetch };
@@ -170,7 +171,11 @@ export function useIssuanceTokenList({
 }: UseIssuanceTokenListOptions): UseIssuanceTokenListResult {
   const { replaceSearchParams } = useDashboardUrlState();
   const { mutate: writeCache } = useSWRConfig();
-  const { markCached, prefetch } = useAdjacentPagePrefetch();
+  // The project this mounted list was rendered with. Sent with every page fetch
+  // so the BFF binds the read to it (SOLA9-564) instead of the shared selection
+  // cookie a sibling tab can flip.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
+  const { markCached, prefetch } = useAdjacentPagePrefetch(selectedProjectId);
   const [query, setQuery] = useState<IssuanceListQuery>(initialQuery);
   const [search, setSearch] = useState(initialQuery.search);
   const debouncedSearch = useDebounce(search.trim(), SEARCH_DEBOUNCE_MS);
@@ -226,7 +231,8 @@ export function useIssuanceTokenList({
     // The key is the query itself — no timestamp in it, so relative date filters
     // stay cacheable and repeat requests dedupe.
     issuanceQueryKeys.tokens({ query }),
-    ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
+    ([, listQuery]) =>
+      fetchIssuanceTokensClientPage(listQuery, { projectContextId: selectedProjectId }),
     {
       // The server already rendered this exact page; don't re-fetch on mount.
       fallbackData: isSameIssuanceListQuery(query, initialQuery) ? initialPage : undefined,
@@ -349,9 +355,11 @@ export function useIssuanceTokenList({
  * fetches once the playground tab is actually open.
  */
 export function useIssuancePlaygroundTokens(enabled: boolean): IssuanceTokenView[] | null {
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const { data } = useSWR(
     enabled ? issuanceQueryKeys.tokens({ query: ISSUANCE_UNFILTERED_QUERY }) : null,
-    ([, listQuery]) => fetchIssuanceTokensClientPage(listQuery),
+    ([, listQuery]) =>
+      fetchIssuanceTokensClientPage(listQuery, { projectContextId: selectedProjectId }),
     { revalidateOnFocus: false, keepPreviousData: true }
   );
 

@@ -11,6 +11,13 @@ import { useTokenActionRunner } from "./use-token-action-runner";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("sonner", () => ({ toast: { loading: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 
+const workspaceMock = vi.hoisted(() => ({
+  value: undefined as { selectedProjectId: string | null } | undefined,
+}));
+vi.mock("@/contexts/dashboard-workspace-context", () => ({
+  useOptionalDashboardWorkspace: () => workspaceMock.value,
+}));
+
 const wallets: PaymentsDashboardWallet[] = [
   {
     id: "cwlt_a",
@@ -120,5 +127,46 @@ describe("token action signer selection", () => {
       "/token/allowlist/entry?existing=1&signingCustodyWalletId=cwlt_a"
     );
     expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+  });
+});
+
+// SOLA9-564: actions must carry the project context the mounted surface was
+// rendered with, so the BFF binds them to it instead of the shared cookie.
+describe("token action project context binding", () => {
+  beforeEach(() => {
+    fetchMock
+      .mockReset()
+      .mockResolvedValue(new Response(JSON.stringify({ data: {} }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("sends the rendered project context header with every action request", async () => {
+    workspaceMock.value = { selectedProjectId: "prj_rendered" };
+    const { result } = renderHook(() => useTokenActionRunner(), { wrapper });
+    await act(async () =>
+      result.current.runActionImmediately({
+        label: "Mint",
+        method: "POST",
+        path: "/token/mint",
+        body: {},
+      })
+    );
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(headers.get("x-sdp-project-context")).toBe("prj_rendered");
+  });
+
+  it("sends no project context header outside the workspace provider", async () => {
+    workspaceMock.value = undefined;
+    const { result } = renderHook(() => useTokenActionRunner(), { wrapper });
+    await act(async () =>
+      result.current.runActionImmediately({
+        label: "Mint",
+        method: "POST",
+        path: "/token/mint",
+        body: {},
+      })
+    );
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(headers.has("x-sdp-project-context")).toBe(false);
   });
 });
