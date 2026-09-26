@@ -129,16 +129,26 @@ export async function resolvePrivateChannelCustodyWallet(
 /**
  * Fresh wallet-scope decision for the verified-wallet seams: re-reads the
  * key's liveness, permissions, and per-wallet bindings from the database so a
- * binding revoked inside the auth-cache window is honored immediately.
- * Dashboard actors pass through unchanged.
+ * binding or top-level permission revoked inside the auth-cache window is
+ * honored immediately. `requiredPermissions` is asserted against the FRESH
+ * top-level permission set, before any wallet-binding decision is made from
+ * the returned context. Dashboard actors pass through unchanged (their session
+ * permissions are checked per request by the route middleware).
  */
 export async function loadFreshWalletScopedAuth(
   env: Env,
   auth: ApiKeyContext,
-  projectId: string
+  projectId: string,
+  requiredPermissions: Permission[]
 ): Promise<ApiKeyContext> {
   const current = await refreshPrivateChannelAuth(env, auth, projectId);
   if (current.authType !== "api_key") return current;
+  if (!hasAllPermissions(current.permissions, requiredPermissions)) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      `Required permissions: ${requiredPermissions.join(", ")}`
+    );
+  }
   const authorization = await loadApiKeyWalletAuthorization(
     getDb(env),
     current.apiKeyId,
