@@ -14,9 +14,7 @@
 ALTER TABLE private_channel_events
     ADD COLUMN IF NOT EXISTS wallet_id TEXT;
 
--- Wallet-scoped project feed: the same (occurred_at, id) DESC cursor as
--- idx_private_channel_events_project_occurred, with wallet_id after the project
--- test so a wallet-scoped key reads only its wallets' rows in index order
--- instead of scanning past every other wallet's events to fill a page.
-CREATE INDEX IF NOT EXISTS idx_private_channel_events_project_wallet_occurred
-    ON private_channel_events (project_id, wallet_id, occurred_at DESC, id DESC);
+-- The supporting index for wallet-scoped project feeds is built separately in
+-- 0120 with CREATE INDEX CONCURRENTLY: a plain build here would hold locks on
+-- this busy event table (and, in the same transaction, the column change)
+-- while it runs, blocking live event reads and writes.
