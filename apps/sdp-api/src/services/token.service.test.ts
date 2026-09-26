@@ -489,7 +489,7 @@ describe("TokenService", () => {
       });
       const before = await storedSupply("tok_cap_refresh_inflight");
 
-      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_inflight", "0");
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_inflight", "0", 60);
 
       const row = await storedSupply("tok_cap_refresh_inflight");
       expect(row?.total_supply_cached).toBe("600000000");
@@ -513,7 +513,7 @@ describe("TokenService", () => {
         amount: "600",
       });
 
-      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_failed", "0");
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_failed", "0", 60);
 
       expect((await storedSupply("tok_cap_refresh_failed"))?.total_supply_cached).toBe("600000000");
     });
@@ -603,7 +603,7 @@ describe("TokenService", () => {
       // The chain snapshot observes the settled burn, but the in-flight mint
       // holds the cache above it — and the reading moves the stamp off the
       // burn's baseline even though the figure it leaves behind is held.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1500000000");
 
       await expect(
@@ -743,7 +743,7 @@ describe("TokenService", () => {
 
       // The chain reading has not seen the burn (it settles afterward), and the
       // in-flight mint holds the cache exactly where it was.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1600000000");
       expect((await storedSupply(tokenId))?.total_supply_updated_at).toBe(baseline);
 
@@ -865,56 +865,47 @@ describe("TokenService", () => {
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1400000000");
     });
 
-    it("keeps the recorded reading slot when a held refresh has no slot", async () => {
-      // An RPC response without a context slot says nothing about where its
-      // reading sits in the chain — but this refresh is a hold: the in-flight
-      // mint kept the figure exactly where it was, and a figure the hold kept
-      // in place absorbed nothing. The last recorded slot still describes the
-      // figure's coverage, so it stays, and the stamp stays with it.
-      const tokenId = "tok_cap_slot_unslotted_refresh";
+    it("refuses to apply a reading whose slot cannot be determined", async () => {
+      // A reading without a slot cannot be ordered against settled-burn
+      // bookkeeping: an absorption it cannot prove would make the bookkeeping
+      // either subtract a burn the reading had already absorbed (the record
+      // runs low, admitting mints past the cap) or skip a burn that settles
+      // after it (the record runs high until a separate refresh). The refresh
+      // route bounds a slotless response with the current confirmed slot and
+      // fails closed when even that lookup fails; the service refuses what a
+      // direct caller that skips the bound would have applied, and nothing is
+      // written.
+      const tokenId = "tok_cap_slot_refuses_slotless_refresh";
       await insertCappedToken(tokenId, "1000000000", "3000000000");
-      // Anchor the figure's coverage at slot 40 while nothing is in flight.
+      // Anchor the figure's coverage at slot 40 first.
       await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 40);
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
-      await tokenService.reserveMintSupply(tokenId, "600000000");
-      await db
-        .prepare(
-          `INSERT INTO issuance_transactions (
-             id, token_id, organization_id, type, status, serialized_tx, operation_params,
-             created_at, updated_at
-           ) VALUES (?, ?, ?, 'mint', 'pending', NULL, ?, ?, ?)`
-        )
-        .bind(
-          `txn_${tokenId}_pending_executed_0`,
-          tokenId,
-          TEST_ORG.id,
-          JSON.stringify({ amount: "600" }),
-          new Date().toISOString(),
-          new Date().toISOString()
-        )
-        .run();
+      const anchored = await storedSupply(tokenId);
+      expect(anchored?.total_supply_read_slot).toBe(40);
 
-      // The reading is below the figure the in-flight mint holds in place, so
-      // the slotless refresh is a hold twice over — and neither stamp nor slot
-      // moves.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1200000000");
-      expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1600000000");
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
+      await expect(tokenService.setSupplyFromBaseUnits(tokenId, "900000000", -1)).rejects.toThrow(
+        "SUPPLY_READING_SLOT_REQUIRED"
+      );
+      await expect(tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 40.5)).rejects.toThrow(
+        "SUPPLY_READING_SLOT_REQUIRED"
+      );
 
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1200000000");
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
+      // The refused readings changed nothing: the figure, its stamp, and the
+      // anchor are exactly as the last good reading left them.
+      const refused = await storedSupply(tokenId);
+      expect(refused?.total_supply_cached).toBe(anchored?.total_supply_cached);
+      expect(refused?.total_supply_updated_at).toBe(anchored?.total_supply_updated_at);
+      expect(refused?.total_supply_read_slot).toBe(40);
     });
 
-    it("clears the reading slot an absorbed slotless refresh outgrew", async () => {
+    it("skips the decrement of a settled burn an absorbed reading already included", async () => {
       // The anchor's promise is "the figure includes every settled effect up to
-      // this slot". A slotless refresh that comes down to its reading re-observed
-      // the chain and absorbed everything settled since — including burns the
-      // recorded slot predates — so keeping the stale slot would let burn
-      // bookkeeping subtract one of those again and run the record below the
-      // chain. The anchor is cleared instead, and the bookkeeping falls back to
-      // the stamp, which this absorbed reading moved.
-      const tokenId = "tok_cap_slot_absorbed_slotless_refresh";
-      const transactionId = "ttx_cap_slot_absorbed_slotless_refresh";
+      // this slot". An absorbed refresh re-observed the chain — including burns
+      // the previous anchor predates — so the new figure's anchor is the
+      // reading's own slot, and burn bookkeeping orders against it by slot
+      // instead of subtracting one of those burns again and running the record
+      // below the chain.
+      const tokenId = "tok_cap_slot_absorbed_slot_refresh";
+      const transactionId = "ttx_cap_slot_absorbed_slot_refresh";
       await insertCappedToken(tokenId, "1000000000", "3000000000");
 
       // Anchor the figure's coverage at slot 40 first.
@@ -944,33 +935,35 @@ describe("TokenService", () => {
         )
         .run();
 
-      // The slotless refresh reads the chain after the burn settled, so its
+      // The refresh at slot 60 reads the chain after the burn settled, so its
       // figure already includes the burn. Nothing is in flight, so the figure
-      // follows the reading — an absorption, not a hold.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      // follows the reading.
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBeNull();
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(60);
 
-      // The burn was inside the absorbed reading, so the bookkeeping must not
-      // subtract it again: the record would fall below the chain and hand out
-      // mint headroom past the cap.
+      // The burn was inside the absorbed reading — its slot is at or below the
+      // reading's slot — so the bookkeeping must not subtract it again: the
+      // record would fall below the chain and hand out mint headroom past the cap.
       await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
     });
 
-    it("re-anchors the reading slot on the next slotted refresh", async () => {
-      // A cleared anchor is not a lost one: the next refresh that learns its
-      // slot records it and slot-ordered bookkeeping resumes from there.
-      const tokenId = "tok_cap_slot_reanchor";
+    it("never moves the reading slot backwards on a lagging reading", async () => {
+      // The anchor advances to the absorbed reading's slot and never below the
+      // coverage the figure has already promised: a retry that lands on a
+      // lagging node can report an older slot, and ordering burns against a
+      // rewind would subtract burns the current figure had already absorbed.
+      const tokenId = "tok_cap_slot_monotonic";
       await insertCappedToken(tokenId, "1000000000", "3000000000");
 
       await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 40);
       expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(40);
 
-      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
-      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBeNull();
-
       await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
+      expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(60);
+
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 30);
       expect((await storedSupply(tokenId))?.total_supply_read_slot).toBe(60);
     });
 
@@ -1085,7 +1078,11 @@ describe("TokenService", () => {
         ageMs: 10 * 60 * 1000,
       });
 
-      const refreshed = await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_expired", "0");
+      const refreshed = await tokenService.setSupplyFromBaseUnits(
+        "tok_cap_refresh_expired",
+        "0",
+        60
+      );
 
       expect(refreshed.totalSupply).toBe("0");
       expect(
@@ -1111,7 +1108,7 @@ describe("TokenService", () => {
       });
       await insertMintTransaction("tok_cap_refresh_leak", "pending", { amount: "10" });
 
-      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_leak", "0");
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_leak", "0", 60);
 
       const row = await storedSupply("tok_cap_refresh_leak");
       // The live mint's 10 tokens are still protected; the abandoned 900k is gone.
@@ -1128,7 +1125,7 @@ describe("TokenService", () => {
       await insertCappedToken("tok_cap_refresh_higher", "600000000", "2000000000");
       await insertMintTransaction("tok_cap_refresh_higher", "pending", { prepared: false });
 
-      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_higher", "1500000000");
+      await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_higher", "1500000000", 60);
 
       expect((await storedSupply("tok_cap_refresh_higher"))?.total_supply_cached).toBe(
         "1500000000"
@@ -1143,7 +1140,7 @@ describe("TokenService", () => {
       const warn = vi.spyOn(getLogger(), "warn");
 
       try {
-        await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_over", "1500000000");
+        await tokenService.setSupplyFromBaseUnits("tok_cap_refresh_over", "1500000000", 60);
 
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -1241,7 +1238,7 @@ describe("TokenService", () => {
         .run();
 
       // The chain snapshot already observes the burn's 100-token reduction.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
       await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
 
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("900000000");
@@ -1281,7 +1278,7 @@ describe("TokenService", () => {
 
       // The reading observes the settled burn, but the in-flight mint holds
       // the cache above the figure it read.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "900000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1500000000");
 
       await tokenService.applySettledBurnSupply(transactionId, tokenId, "100");
@@ -1324,7 +1321,7 @@ describe("TokenService", () => {
 
       // The reading observes the settled burn, and the off-platform mint that
       // landed with it leaves the total where the cache already had it.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_cached).toBe("1000000000");
       expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
 
@@ -1367,7 +1364,7 @@ describe("TokenService", () => {
 
       // The refresh reads the chain before the burn settles; the reading takes
       // effect and moves the stamp off the burn's admission baseline.
-      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000");
+      await tokenService.setSupplyFromBaseUnits(tokenId, "1000000000", 60);
       expect((await storedSupply(tokenId))?.total_supply_updated_at).not.toBe(baseline);
 
       // The burn settles afterward, and its bookkeeping — trusting the stamp —

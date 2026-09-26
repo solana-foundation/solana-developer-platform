@@ -1557,12 +1557,11 @@ export class TokenService {
       // move the burn predated skips a decrement the cache may still owe, and
       // the record runs high until the next refresh past the in-flight window
       // — accepted, because the reverse guess would subtract twice and run
-      // the record low, admitting mints past the cap. A refresh that absorbed
-      // its reading without learning a slot clears the anchor outright rather
-      // than leave one the figure outgrew, so exactly this comparison — burn
-      // slot against a slot the reading already passed — cannot subtract a
-      // burn the slotless reading had absorbed. See the stamp discussion on
-      // `setSupplyFromBaseUnits`.
+      // the record low, admitting mints past the cap. The anchor is null only
+      // when no slotted reading has been applied yet — a token never refreshed,
+      // or a refresh that could not learn its slot, which the service refuses
+      // to apply rather than record a figure it cannot order burns against.
+      // See the stamp discussion on `setSupplyFromBaseUnits`.
       const burnAlreadyReconciled =
         row.slot !== null && row.total_supply_read_slot !== null
           ? row.slot <= row.total_supply_read_slot
@@ -2223,33 +2222,32 @@ export class TokenService {
    * The anchor follows the figure, and only where the figure is honest about
    * its coverage. An absorbed reading advances it to the reading's slot (never
    * backwards): the figure now includes every settled effect up to that slot.
-   * An absorbed reading without a slot clears the anchor instead of keeping the
-   * stale one — the new figure outgrew the old slot, so ordering a burn against
-   * it would double-subtract a burn the slotless reading already absorbed and
-   * run the record low; clearing it routes the bookkeeping to the stamp
-   * fallback above, which the absorbed refresh advanced. A held reading moves
-   * neither the stamp nor the anchor: the figure it left in place absorbed
-   * nothing, so the previous reading's coverage still describes it exactly.
+   * A held reading moves neither the stamp nor the anchor: the figure it left
+   * in place absorbed nothing, so the previous reading's coverage still
+   * describes it exactly.
    *
    * @param readSlot the chain slot the reading was taken at, from the RPC
-   *   response context. An unknown slot on an absorbed reading clears
-   *   `total_supply_read_slot` — the figure's coverage is then unknowable by
-   *   slot, and the bookkeeping keeps deciding from the stamp. The refresh
-   *   route treats that bound as mandatory — a slotless response is bounded
-   *   with the current confirmed slot, and if even that lookup fails the
-   *   refresh fails closed rather than apply a reading it cannot order
-   *   against later-settling burns — so a null here is a defensive path for
-   *   direct callers that skip the bound: the stamp fallback then errs toward
-   *   skipping a decrement it cannot order (the record runs high and the next
-   *   refresh heals it) rather than subtracting one twice.
+   *   response context. The slot is what orders settled-burn bookkeeping
+   *   against this figure, so it is mandatory at the service boundary, not
+   *   only in the refresh route: a reading whose slot cannot be determined is
+   *   never applied, because an absorption that cannot be ordered would make
+   *   burn bookkeeping either subtract a burn the reading had already absorbed
+   *   (the record runs low, admitting mints past the cap) or skip a burn that
+   *   settles after it (the record runs high until a separate refresh). The
+   *   route bounds a slotless response with the current confirmed slot and
+   *   fails closed when even that lookup fails; this guard only refuses what
+   *   such a direct caller would have applied.
    */
   async setSupplyFromBaseUnits(
     tokenId: string,
     supplyBaseUnits: string,
-    readSlot?: number | null
+    readSlot: number
   ): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
+    }
+    if (!Number.isInteger(readSlot) || readSlot < 0) {
+      throw new Error("SUPPLY_READING_SLOT_REQUIRED");
     }
 
     const now = new Date().toISOString();
@@ -2301,18 +2299,11 @@ export class TokenService {
               -- the stamp and the anchor alone: the figure it kept in place
               -- absorbed nothing, so the previous reading slot still describes
               -- it. An absorbed reading re-observed the chain, so its anchor is
-              -- the reading own slot, never backwards, and when that slot is
-              -- unknown the anchor is cleared rather than kept stale: the
-              -- figure outgrew the recorded slot, and ordering burns against
-              -- the stale slot would subtract a burn the reading had already
-              -- absorbed, running the record low and admitting mints past the
-              -- cap. Cleared, the burn bookkeeping falls back to the stamp,
-              -- which this absorbed reading advanced.
+              -- the reading own slot, never backwards.
               total_supply_read_slot = CASE
                 WHEN resolved.supply = COALESCE(issued_tokens.total_supply_cached, '0')::numeric
                   AND resolved.reading < COALESCE(issued_tokens.total_supply_cached, '0')::numeric
                   THEN issued_tokens.total_supply_read_slot
-                WHEN ?::int IS NULL THEN NULL
                 ELSE GREATEST(issued_tokens.total_supply_read_slot, ?::int)
               END,
               updated_at = ?
@@ -2329,8 +2320,7 @@ export class TokenService {
         tokenId,
         ...tenantRead.values,
         now,
-        readSlot ?? null,
-        readSlot ?? null,
+        readSlot,
         now,
         tokenId,
         ...tenantWrite.values
