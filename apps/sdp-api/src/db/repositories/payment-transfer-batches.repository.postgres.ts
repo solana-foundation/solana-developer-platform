@@ -783,7 +783,7 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND organization_id = ?
                 AND project_id IS NOT DISTINCT FROM ?
                 AND status = 'processing'
-              RETURNING id`
+              RETURNING id, custody_wallet_id`
           )
           .bind(
             input.transferStatus,
@@ -797,10 +797,22 @@ export function createPostgresPaymentTransferBatchesRepository(
             input.organizationId,
             input.projectId
           )
-          .all<{ id: string }>();
+          .all<{ id: string; custody_wallet_id: string | null }>();
 
         if (claimed.results.length === 0) {
           return;
+        }
+        const transferCustodyWalletId = claimed.results[0].custody_wallet_id;
+
+        const mismatchedLink = await findMismatchedLinkedRecipient(
+          tx,
+          input,
+          transferCustodyWalletId
+        );
+        if (mismatchedLink) {
+          throw internalError(
+            "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+          );
         }
 
         const recipientStatus = input.transferStatus === "failed" ? "failed" : "confirmed";
@@ -814,6 +826,15 @@ export function createPostgresPaymentTransferBatchesRepository(
                 AND project_id = ?
                 AND transfer_id = ?
                 AND status = 'processing'
+                AND EXISTS (
+                  SELECT 1
+                    FROM payment_transfer_batches batch
+                   WHERE batch.id = payment_transfer_recipients.batch_id
+                     AND batch.organization_id = payment_transfer_recipients.organization_id
+                     AND batch.project_id IS NOT DISTINCT FROM payment_transfer_recipients.project_id
+                     AND batch.status <> 'archived'
+                     AND batch.source_custody_wallet_id IS NOT DISTINCT FROM ?
+                )
               RETURNING *`
           )
           .bind(
@@ -821,12 +842,30 @@ export function createPostgresPaymentTransferBatchesRepository(
             recipientStatus === "failed" ? input.error : null,
             input.organizationId,
             input.projectId,
-            input.transferId
+            input.transferId,
+            transferCustodyWalletId
           )
           .all<{ batch_id: string }>();
 
         if (recipients.results.length === 0) {
-          throw internalError("Transfer batch recipients not found for settlement");
+          throw await transferBatchSettlementRefusal(tx, input, transferCustodyWalletId);
+        }
+
+        // Last gate before the settlement commits. Recipient links are not
+        // constrained to one batch and the link writers do not check batch
+        // identity, so a processing recipient relinked onto a mismatched
+        // batch after the probe above (and skipped by the matched-only
+        // update) must still refuse the whole transaction instead of
+        // committing a terminal transfer that leaves it processing.
+        const mismatchedLinkAfterUpdate = await findMismatchedLinkedRecipient(
+          tx,
+          input,
+          transferCustodyWalletId
+        );
+        if (mismatchedLinkAfterUpdate) {
+          throw internalError(
+            "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+          );
         }
 
         await recomputeBatchStatusInTransaction(tx, {
@@ -841,6 +880,96 @@ export function createPostgresPaymentTransferBatchesRepository(
       return db.transaction((tx) => recomputeBatchStatusInTransaction(tx, input));
     },
   };
+}
+
+/**
+ * Probes for a processing recipient of the transfer that is linked to a
+ * non-archived batch whose exact source custody wallet disagrees with the
+ * chunk transfer's custody wallet — including one side unresolved and the
+ * other pinned. Both identities unresolved (null on both sides) is the
+ * legacy ambiguous shape and is allowed through.
+ *
+ * Settlement runs this gate twice: once before the recipient update so an
+ * all-mismatched link refuses without a pointless write, and again after it,
+ * immediately before the commit, because the update only touches
+ * wallet-matched rows — a recipient relinked onto a mismatched batch while
+ * settlement runs would otherwise commit the transfer terminal and stay
+ * processing.
+ *
+ * @param tx - Transaction executor the settlement runs in.
+ * @param input - Settlement input being gated.
+ * @param transferCustodyWalletId - Exact custody wallet claimed off the transfer row.
+ * @returns The mismatched link, or null when every linked batch agrees.
+ */
+async function findMismatchedLinkedRecipient(
+  tx: DatabaseExecutor,
+  input: SettlePaymentTransferBatchInput,
+  transferCustodyWalletId: string | null
+): Promise<{ batchId: string } | null> {
+  return tx
+    .prepare(
+      `SELECT batch.id AS batch_id
+         FROM payment_transfer_recipients recipient
+         JOIN payment_transfer_batches batch
+           ON batch.id = recipient.batch_id
+          AND batch.organization_id = recipient.organization_id
+          AND batch.project_id IS NOT DISTINCT FROM recipient.project_id
+        WHERE recipient.transfer_id = ?
+          AND recipient.organization_id = ?
+          AND recipient.project_id IS NOT DISTINCT FROM ?
+          AND recipient.status = 'processing'
+          AND batch.status <> 'archived'
+          AND batch.source_custody_wallet_id IS DISTINCT FROM ?
+        LIMIT 1`
+    )
+    .bind(input.transferId, input.organizationId, input.projectId, transferCustodyWalletId)
+    .first<{ batch_id: string }>()
+    .then((row) => (row ? { batchId: row.batch_id } : null));
+}
+
+/**
+ * Explains why a settlement claimed a transfer but settled none of its
+ * recipients. A linked (non-archived) batch whose exact source custody wallet
+ * disagrees with the chunk transfer's custody wallet — including one side
+ * unresolved and the other pinned — is refused: the caller's transaction
+ * rolls back, leaving every row processing instead of committing terminal
+ * state the detail read would reject as CONFLICT. Both identities unresolved
+ * (null on both sides) is the legacy ambiguous shape and still settles.
+ *
+ * @param tx - Transaction executor the settlement runs in.
+ * @param input - Settlement input that was refused.
+ * @param transferCustodyWalletId - Exact custody wallet claimed off the transfer row.
+ * @returns The error to throw so the settlement transaction rolls back.
+ */
+async function transferBatchSettlementRefusal(
+  tx: DatabaseExecutor,
+  input: SettlePaymentTransferBatchInput,
+  transferCustodyWalletId: string | null
+): Promise<Error> {
+  const link = await tx
+    .prepare(
+      `SELECT batch.source_custody_wallet_id
+         FROM payment_transfer_recipients recipient
+         JOIN payment_transfer_batches batch
+           ON batch.id = recipient.batch_id
+          AND batch.organization_id = recipient.organization_id
+          AND batch.project_id IS NOT DISTINCT FROM recipient.project_id
+        WHERE recipient.transfer_id = ?
+          AND recipient.organization_id = ?
+          AND recipient.project_id IS NOT DISTINCT FROM ?
+          AND recipient.status <> 'archived'
+          AND batch.status <> 'archived'
+        LIMIT 1`
+    )
+    .bind(input.transferId, input.organizationId, input.projectId)
+    .first<{ source_custody_wallet_id: string | null }>();
+
+  if (link && link.source_custody_wallet_id !== transferCustodyWalletId) {
+    return internalError(
+      "Transfer batch settlement refused: linked batch source custody wallet does not match the transfer custody wallet"
+    );
+  }
+  return internalError("Transfer batch recipients not found for settlement");
 }
 
 /**

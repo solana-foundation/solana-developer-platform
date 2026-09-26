@@ -92,9 +92,11 @@ function partitionByValidStoredSignature(transfers: PaymentTransferRow[]) {
  * settleTransferBatch, which atomically claims the transfer row from
  * processing, settles its recipients, and recomputes the parent batch — a
  * concurrent run that already settled the chunk makes this a no-op, so a
- * delayed observation can never regress a newer terminal status. Other
- * transfers settle through a processing-guarded update with the same
- * no-op-on-conflict semantics.
+ * delayed observation can never regress a newer terminal status. A chunk
+ * whose custody wallet disagrees with its parent batch is refused instead:
+ * the settlement rolls back and the rows stay processing until the identity
+ * mismatch is repaired. Other transfers settle through a processing-guarded
+ * update with the same no-op-on-conflict semantics.
  */
 async function updateTerminalTransfer(
   env: Env,
