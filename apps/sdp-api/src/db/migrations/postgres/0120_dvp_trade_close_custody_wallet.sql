@@ -31,3 +31,48 @@ ALTER TABLE dvp_trades
 
 COMMENT ON COLUMN dvp_trades.close_custody_wallet_id IS
   'The custody wallet that signed the close, recorded by the close flow. NULL for closes observed from the chain and for closes recorded before this column existed; the unified feed resolves those through settlement_authority.';
+
+-- Closes the audit ledger can already name, copied onto the trade at deploy.
+--
+-- Everything recorded before this column existed — and every close the
+-- reconciler lifted from `closed_unknown`, which records no wallet — would
+-- otherwise stay on the feed's fallback: resolving `settlement_authority`
+-- through today's wallets and today's mapping, the re-resolution this column
+-- exists to avoid, and the one a rotated mapping or a same-key duplicate
+-- answers wrongly. The audit ledger has held the durable answer since
+-- PRO-1992: every settle and cancel that returned a signature logged one row
+-- naming the wallet the handler authorized, whose key signed. The signature
+-- match pins the row to the close that landed — an unconfirmed broadcast
+-- carries a different signature than the close the trade recorded — and the
+-- audited organization must be the trade's own, because a close is only ever
+-- resolved and signed inside the trade's tenant, as is the wallet it names.
+-- A recorded wallet is never second-guessed, and attribution is the only fact
+-- that changes, so `updated_at` stands.
+UPDATE dvp_trades t
+   SET close_custody_wallet_id = a.metadata::jsonb ->> 'settlementCustodyWalletId'
+  FROM audit_logs a
+ WHERE a.resource_type = 'dvp_trade'
+   AND a.resource_id = t.id
+   AND a.action IN ('settle', 'cancel')
+   AND a.status = 'success'
+   AND a.organization_id = t.organization_id
+   AND a.metadata IS NOT NULL
+   AND pg_input_is_valid(a.metadata, 'jsonb')
+   AND a.metadata::jsonb ->> 'signature' IS NOT NULL
+   AND a.metadata::jsonb ->> 'signature' = t.close_signature
+   AND a.metadata::jsonb ->> 'settlementCustodyWalletId' IS NOT NULL
+   AND t.close_signature IS NOT NULL
+   AND t.close_custody_wallet_id IS NULL
+   AND EXISTS (
+     -- The named wallet must still exist and still belong to the trade's
+     -- tenant: the close row carries the id into every tenant-scoped read of
+     -- the feed, so a stale or foreign id must not be copied even from an
+     -- audit row that otherwise matches.
+     SELECT 1
+       FROM custody_wallets w
+       LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+       LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+      WHERE w.id = (a.metadata::jsonb ->> 'settlementCustodyWalletId')
+        AND (cfg.organization_id = t.organization_id
+             OR conn.organization_id = t.organization_id)
+   );
