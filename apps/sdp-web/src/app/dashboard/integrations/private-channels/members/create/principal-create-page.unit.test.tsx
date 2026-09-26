@@ -126,10 +126,11 @@ describe("PrincipalCreatePage lost-response resume", () => {
 
     // The retry surfaces the resume choice and writes nothing: the ordinary
     // retry is disabled and only the callout's "Resume identity" confirms.
+    // The waiting query also rides out the transition's pending window, where
+    // the footer button still reads "Verifying wallet…".
     await screen.findByRole("button", { name: "Resume identity" });
-    expect(
-      screen.getByRole("button", { name: "Retry verification" }).hasAttribute("disabled")
-    ).toBe(true);
+    const retry = await screen.findByRole("button", { name: "Retry verification" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "Resume identity" }));
     await waitFor(() => expect(mocks.routerPush).toHaveBeenCalled());
