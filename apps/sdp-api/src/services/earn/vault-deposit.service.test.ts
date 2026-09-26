@@ -530,6 +530,98 @@ describe("depositIntoVault — idempotency", () => {
   });
 
   /**
+   * A floor-LESS open movement is the weakest floor there is. On a provider
+   * with an optional-but-enforceable floor (Kamino: the instruction is
+   * `deposit_with_min_shares_out`), a first request that omits `minSharesOut`
+   * records a NULL-floor row — and a twin that DEMANDS a floor must not be
+   * answered with it: the signed transaction would enforce no minimum at all,
+   * strictly less than the twin asked for. The claim refuses it until the open
+   * movement settles, exactly as for a numeric-but-lower floor; nothing is
+   * signed or broadcast either way.
+   */
+  it("refuses a different-key twin demanding a floor when the open movement enforces none", async () => {
+    // The default `plan()` reports no accepted minSharesOut, so the open row's
+    // floor is NULL.
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_floorless_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const first = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111" })
+    );
+    expect(first.movement.min_shares_out).toBeNull();
+
+    await expect(
+      depositIntoVault(
+        env,
+        depositInput({ requestId: "22222222-2222-4222-8222-222222222222", minSharesOut: "1" })
+      )
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    expect(signVaultPlan).toHaveBeenCalledTimes(1);
+    expect(await tableCount("earn_movements")).toBe(1);
+    expect(await tableCount("earn_positions")).toBe(1);
+    expect(broadcastVaultTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * ...and the rank agrees: a floor-less movement must not be CLAIMED ahead of
+   * an older one that does enforce the requested floor. Ranking NULL as
+   * honoring would hand the twin the newest (floor-less) row and refuse it,
+   * even though an open movement honoring its floor exists — the older-
+   * qualifying-deposit guarantee this claim already makes.
+   */
+  it("answers a floor-demanding twin with an older honoring deposit rather than a newer floorless one", async () => {
+    buildVaultDeposit.mockImplementation(async (_runtime, args) =>
+      plan({
+        accepted: {
+          amount: args.amount,
+          ...(args.minSharesOut ? { minSharesOut: args.minSharesOut } : {}),
+        },
+      })
+    );
+    let signCount = 0;
+    signVaultPlan.mockImplementation(async () => {
+      signCount += 1;
+      return {
+        bytes: new Uint8Array([signCount]),
+        signature: `sig_floorless_rank_${signCount}`,
+        lastValidBlockHeight: "12345",
+      };
+    });
+
+    const older = await depositIntoVault(
+      env,
+      depositInput({ requestId: "11111111-1111-4111-8111-111111111111", minSharesOut: "0.5" })
+    );
+    // A deliberate duplicate leaves a SECOND open movement for the same
+    // intent, newer and floor-less.
+    await depositIntoVault(
+      env,
+      depositInput({
+        requestId: "22222222-2222-4222-8222-222222222222",
+        allowConcurrentDuplicateIntent: true,
+      })
+    );
+
+    const twin = await depositIntoVault(
+      env,
+      depositInput({ requestId: "33333333-3333-4333-8333-333333333333", minSharesOut: "0.5" })
+    );
+    expect(twin).toMatchObject({ replayed: true });
+    expect(twin.movement.id).toBe(older.movement.id);
+    expect(twin.movement.min_shares_out).toBe("0.5");
+    expect(await tableCount("earn_movements")).toBe(2);
+  });
+
+  /**
    * The wire cannot separate a deliberate second identical deposit from the
    * two-tab twin, so the claim answers both with the open movement — unless
    * the caller says this one is deliberate. `allowConcurrentDuplicateIntent`

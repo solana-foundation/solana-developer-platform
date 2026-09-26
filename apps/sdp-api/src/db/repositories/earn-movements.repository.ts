@@ -99,6 +99,18 @@ export function assertMovementIsOwnReplay(
  * protection the claim exists for stays intact. A request with no floor is
  * answered with whatever open movement the lookup ranked first, as before
  * this rule existed.
+ *
+ * A claimed movement with NO floor (`min_shares_out === null`) is the weakest
+ * floor there is, so it is refused too when the request demands one. The
+ * providers with optional floors (Kamino — the instruction is
+ * `deposit_with_min_shares_out`) record NULL when the first request omitted
+ * the floor, and replaying such a row for a twin that demands one would
+ * silently sign it up for a transaction enforcing no minimum at all — the
+ * exact terms-drop the floor rule exists to prevent. A provider that cannot
+ * enforce any floor (WisdomTree, Hastra — the builder refuses the field)
+ * records NULL for every row, so its floor-demanding twins are refused until
+ * the open movement settles; that request would be refused at the builder
+ * anyway, and here nothing is signed or broadcast either way.
  */
 export function resolveDepositIntentReplayClaim(
   claimed: EarnMovementRow | null,
@@ -111,7 +123,7 @@ export function resolveDepositIntentReplayClaim(
     return claimed;
   }
   if (
-    claimed.min_shares_out === null ||
+    claimed.min_shares_out !== null &&
     compareDecimalAmounts(claimed.min_shares_out, requestedMinSharesOut) >= 0
   ) {
     return claimed;
@@ -1409,7 +1421,11 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           ? // No floor demanded: every open movement qualifies, so recency
             // alone picks the answer.
             "TRUE"
-          : "(min_shares_out IS NULL OR min_shares_out::numeric >= ?::numeric)";
+          : // NULL is not honoring: a floor-less movement enforces nothing, the
+            // weakest floor there is, so ranking it as honoring would claim it
+            // ahead of an older movement that does enforce the requested floor
+            // and refuse a twin that movement could have answered.
+            "(min_shares_out IS NOT NULL AND min_shares_out::numeric >= ?::numeric)";
       const rankBindings =
         params.requestedMinSharesOut === null ? [] : [params.requestedMinSharesOut];
       const row = await db
@@ -3113,7 +3129,11 @@ async function findOpenDepositIntentClaim(
       ? // No floor demanded: every open movement qualifies, so recency alone
         // picks the answer.
         "TRUE"
-      : "(min_shares_out IS NULL OR min_shares_out::numeric >= ?::numeric)";
+      : // NULL is not honoring: a floor-less movement enforces nothing, the
+        // weakest floor there is, so ranking it as honoring would claim it
+        // ahead of an older movement that does enforce the requested floor
+        // and refuse a twin that movement could have answered.
+        "(min_shares_out IS NOT NULL AND min_shares_out::numeric >= ?::numeric)";
   const rankBindings = input.requestedMinSharesOut === null ? [] : [input.requestedMinSharesOut];
   const row = await db
     .prepare(
