@@ -1,11 +1,17 @@
-import { type UnifiedTransactionModule, wellKnownMint } from "@sdp/types";
+import {
+  EARN_TERMINAL_MOVEMENT_STATUSES,
+  type UnifiedTransactionModule,
+  wellKnownMint,
+} from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
+import { movementStatusOnWire } from "@/routes/earn/handlers/movement-settlement-wire";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
+import { createPostgresEarnMovementsRepository } from "./earn-movements.repository";
 import { createPostgresUnifiedTransactionsRepository } from "./unified-transactions.repository.postgres";
 
 const PROJECT = "prj_unified_transactions";
@@ -385,5 +391,136 @@ describe("UnifiedTransactionsRepository (postgres)", () => {
         limit: 25,
       })
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  describe("earn vault-direct confirmed projection", () => {
+    const TOKEN_MINT = "UnifiedEarnConfirmedMint11111111111111111111";
+    const VAULT = "UnifiedEarnConfirmedVault1111111111111111111";
+
+    async function seedVaultDepositMovement(id: string): Promise<void> {
+      const db = getDb(env);
+      await db
+        .prepare(
+          `INSERT INTO earn_positions
+             (id, organization_id, project_id, environment, provider, kind, custody_wallet_id,
+              vault_address, share_mint, token_mint, label, created_by, activated_at)
+           VALUES ('earn_position_unified_confirmed', ?, ?, 'sandbox', 'kamino', 'vault_direct',
+                   ?, ?, 'share-mint-unified', ?, 'Unified confirmed', ?, ?)
+           ON CONFLICT (id) DO NOTHING`
+        )
+        .bind(TEST_ORG.id, PROJECT, CUSTODY_WALLET, VAULT, TOKEN_MINT, TEST_USER.id, CREATED_AT)
+        .run();
+      await db
+        .prepare(
+          `INSERT INTO earn_movements
+             (id, organization_id, project_id, environment, provider, execution_model, direction,
+              position_id, status, denomination, amount_requested, custody_wallet_id, vault_address,
+              signature, signed_transaction, last_valid_block_height, request_id,
+              idempotency_fingerprint, created_by, created_at, updated_at)
+           VALUES (?, ?, ?, 'sandbox', 'kamino', 'vault_direct', 'deposit',
+                   'earn_position_unified_confirmed', 'requested', ?, '10', ?, ?,
+                   ?, 'AQ==', 100, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          TEST_ORG.id,
+          PROJECT,
+          TOKEN_MINT,
+          CUSTODY_WALLET,
+          VAULT,
+          `signature-${id}`,
+          `request-${id}`,
+          `fingerprint-${id}`,
+          TEST_USER.id,
+          CREATED_AT,
+          CREATED_AT
+        )
+        .run();
+    }
+
+    it("keeps a nonterminal confirmed movement out of the succeeded class until finality", async () => {
+      // The invariant: vault-direct `confirmed` is an optimistic commitment a
+      // fork can still drop; the unified projection may only claim `succeeded`
+      // for economically terminal settlement. The direct Earn feed keeps
+      // reporting `confirmed` with no settlement timestamp, so the unified
+      // view must agree (`pending`) until the row reaches `finalized`.
+      expect(EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct).not.toContain("confirmed");
+
+      await seedVaultDepositMovement("earn_unified_confirmed");
+      await seedVaultDepositMovement("earn_unified_finalized");
+      const movements = createPostgresEarnMovementsRepository(getDb(env));
+      const confirmed = await movements.advanceVaultMovement({
+        movementId: "earn_unified_confirmed",
+        organizationId: TEST_ORG.id,
+        toStatus: "confirmed",
+        sharesOut: "9.5",
+        confirmedAt: CREATED_AT,
+      });
+      expect(confirmed).toMatchObject({ status: "confirmed", settled_at: null });
+      const finalized = await movements.advanceVaultMovement({
+        movementId: "earn_unified_finalized",
+        organizationId: TEST_ORG.id,
+        toStatus: "finalized",
+        confirmedAt: CREATED_AT,
+        settledAt: CREATED_AT,
+      });
+      expect(finalized).toMatchObject({ status: "finalized", settled_at: CREATED_AT });
+
+      // The direct Earn feed still reports the honest nonterminal fact.
+      const directRows = await movements.listMovements({
+        organizationId: TEST_ORG.id,
+        environment: "sandbox",
+        projectId: PROJECT,
+        custodyWalletIds: [CUSTODY_WALLET],
+        limit: 50,
+        before: null,
+        status: "confirmed",
+      });
+      const direct = directRows.rows.find((row) => row.id === "earn_unified_confirmed");
+      expect(direct).toBeDefined();
+      expect(movementStatusOnWire(direct!)).toEqual({ status: "confirmed", settledAt: null });
+
+      const repository = createPostgresUnifiedTransactionsRepository(getDb(env));
+      const all = await repository.list({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT,
+        modules: ["earn"],
+        module: "earn",
+        limit: 50,
+      });
+      expect(all.rows.find((row) => row.id === "earn_unified_confirmed")).toMatchObject({
+        id: "earn_unified_confirmed",
+        moduleStatus: "confirmed",
+        status: "pending",
+        amount: "10",
+      });
+      expect(all.rows.find((row) => row.id === "earn_unified_finalized")).toMatchObject({
+        id: "earn_unified_finalized",
+        moduleStatus: "finalized",
+        status: "succeeded",
+        amount: "10",
+      });
+
+      const succeeded = await repository.list({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT,
+        modules: ["earn"],
+        module: "earn",
+        status: "succeeded",
+        limit: 50,
+      });
+      expect(succeeded.rows.map((row) => row.id)).not.toContain("earn_unified_confirmed");
+      expect(succeeded.rows.map((row) => row.id)).toContain("earn_unified_finalized");
+
+      const pending = await repository.list({
+        organizationId: TEST_ORG.id,
+        projectId: PROJECT,
+        modules: ["earn"],
+        module: "earn",
+        status: "pending",
+        limit: 50,
+      });
+      expect(pending.rows.map((row) => row.id)).toContain("earn_unified_confirmed");
+    });
   });
 });

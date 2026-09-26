@@ -65,7 +65,11 @@ export const UNIFIED_TRANSACTION_MODULE_CONTRACTS = {
       processing: "pending",
       pending_approval: "pending",
       submitted: "pending",
-      confirmed: "succeeded",
+      // Vault-direct `confirmed` is an optimistic, fork-droppable commitment —
+      // only `finalized` and `failed` are terminal for that model (and the
+      // custodial vocabulary has no `confirmed`), so a pre-finality movement
+      // must never read as succeeded here.
+      confirmed: "pending",
       finalized: "succeeded",
       completed: "succeeded",
       partially_completed: "succeeded",
