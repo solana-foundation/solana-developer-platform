@@ -88,7 +88,7 @@ SELECT
     WHEN 'processing' THEN 'pending'
     WHEN 'pending_approval' THEN 'pending'
     WHEN 'submitted' THEN 'pending'
-    WHEN 'confirmed' THEN 'succeeded'
+    WHEN 'confirmed' THEN 'pending'
     WHEN 'finalized' THEN 'succeeded'
     WHEN 'completed' THEN 'succeeded'
     WHEN 'partially_completed' THEN 'succeeded'
@@ -110,7 +110,7 @@ SELECT
     ELSE em.denomination
   END AS token,
   CASE
-    WHEN em.status IN ('completed', 'partially_completed', 'confirmed', 'finalized')
+    WHEN em.status IN ('completed', 'partially_completed', 'finalized')
       THEN COALESCE(em.token_amount_settled, em.amount_settled)
     ELSE em.amount_requested
   END AS amount,
