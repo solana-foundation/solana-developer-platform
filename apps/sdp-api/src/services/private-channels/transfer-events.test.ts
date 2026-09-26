@@ -53,6 +53,7 @@ describe("emitTransferEvent", () => {
       instanceId: "pci_event_test",
       channelId: null,
       sdpUserId: "usr_sender",
+      walletId: "wallet_sender",
       family: "transfer",
       type: "transfer.transfer.submitted",
       status: "pending",

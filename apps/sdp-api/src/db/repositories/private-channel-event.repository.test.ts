@@ -456,4 +456,83 @@ describe("PrivateChannelEventRepository (postgres)", () => {
     });
     expect(other.rows).toHaveLength(0);
   });
+
+  it("persists and returns the wallet attribution on write", async () => {
+    const inserted = await repo.insert(
+      baseEvent({
+        id: "pce_wallet_attributed",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        channelId: null,
+        walletId: "wallet_transfer_test",
+        payload: { senderWalletId: "wallet_transfer_test" },
+      })
+    );
+    expect(inserted.wallet_id).toBe("wallet_transfer_test");
+  });
+
+  it("limits wallet-scoped project feeds to the viewer's wallets", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_wallet_a",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        channelId: null,
+        walletId: "wallet_a",
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_wallet_b",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        channelId: null,
+        walletId: "wallet_b",
+      })
+    );
+    // Wallet-less events (lifecycle, membership, legacy rows) carry no wallet
+    // attribution and stay invisible to wallet-scoped viewers.
+    await repo.insert(
+      baseEvent({
+        id: "pce_wallet_less",
+        channelId: null,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_CONNECTED,
+      })
+    );
+
+    const { rows } = await repo.listByProject({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      viewer: { scope: "wallets", walletIds: ["wallet_b"] },
+      limit: 10,
+    });
+    expect(rows.map((row) => row.id)).toEqual(["pce_wallet_b"]);
+  });
+
+  it("limits wallet-scoped channel feeds to the viewer's wallets", async () => {
+    await repo.insert(
+      baseEvent({
+        id: "pce_channel_wallet_a",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        walletId: "wallet_a",
+      })
+    );
+    await repo.insert(
+      baseEvent({
+        id: "pce_channel_wallet_b",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        walletId: "wallet_b",
+      })
+    );
+
+    const { rows } = await repo.listByChannel({
+      channelId: TEST_CHANNEL_ID,
+      instanceId: TEST_INSTANCE_ID,
+      viewer: { scope: "wallets", walletIds: ["wallet_b"] },
+      limit: 10,
+    });
+    expect(rows.map((row) => row.id)).toEqual(["pce_channel_wallet_b"]);
+  });
 });

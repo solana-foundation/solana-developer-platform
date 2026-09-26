@@ -48,13 +48,69 @@ function dependencies() {
 }
 
 describe("resolveEventViewerForAuth", () => {
-  it("gives API keys full event visibility", async () => {
+  it("gives all-wallet API keys full event visibility", async () => {
     const deps = dependencies();
 
-    const viewer = await resolveEventViewerForAuth(apiKeyAuth(), PROJECT_ID, deps);
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({ walletScope: "all", walletBindings: [] }),
+      PROJECT_ID,
+      deps
+    );
 
     expect(viewer).toEqual({ scope: "all" });
     expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
+  });
+
+  it("scopes selected-wallet API keys to the wallets their bindings authorize for reads", async () => {
+    const deps = dependencies();
+
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({
+        walletScope: "selected",
+        walletBindings: [
+          { walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["payments:read"] },
+          { walletId: "wallet_c", custodyWalletId: "cwlt_c", permissions: ["payments:write"] },
+        ],
+      }),
+      PROJECT_ID,
+      deps
+    );
+
+    expect(viewer).toEqual({ scope: "wallets", walletIds: ["wallet_b"] });
+    expect(deps.findPrivateChannelUser).not.toHaveBeenCalled();
+  });
+
+  it("treats a selected-wallet key with no read-authorized bindings as seeing nothing", async () => {
+    const deps = dependencies();
+
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({
+        walletScope: "selected",
+        walletBindings: [
+          { walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["payments:write"] },
+        ],
+      }),
+      PROJECT_ID,
+      deps
+    );
+
+    expect(viewer).toEqual({ scope: "none" });
+  });
+
+  it("resolves legacy selected keys without an explicit wallet scope from their bindings", async () => {
+    const deps = dependencies();
+
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({
+        walletScope: undefined,
+        signingWalletId: "wallet_b",
+        walletBindings: [{ walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["*"] }],
+      }),
+      PROJECT_ID,
+      deps
+    );
+
+    expect(viewer).toEqual({ scope: "wallets", walletIds: ["wallet_b"] });
   });
 
   it("rejects API keys whose project does not match the requested project", async () => {

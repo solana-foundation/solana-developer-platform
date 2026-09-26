@@ -16,6 +16,8 @@ export interface PrivateChannelEventRow {
   instance_id: string;
   channel_id: string | null;
   sdp_user_id: string | null;
+  /** Normalized wallet attribution: the custody wallet this event belongs to. */
+  wallet_id: string | null;
   family: PrivateChannelEventFamily;
   type: PrivateChannelEventType;
   status: PrivateChannelEventStatus;
@@ -31,6 +33,13 @@ export interface PrivateChannelEventWriteInput {
   instanceId: string;
   channelId: string | null;
   sdpUserId: string | null;
+  /**
+   * The custody wallet this event belongs to, taken from the authoritative
+   * movement row at emit time. Never derived from payload text: wallet-scoped
+   * API-key visibility is decided from this column, and unattributed events
+   * stay invisible to wallet-scoped viewers.
+   */
+  walletId?: string | null;
   family: PrivateChannelEventFamily;
   type: PrivateChannelEventType;
   status: PrivateChannelEventStatus;
@@ -41,6 +50,11 @@ export interface PrivateChannelEventWriteInput {
 
 export type PrivateChannelEventViewerScope =
   | { scope: "all" }
+  /**
+   * Wallet-scoped API-key viewer: only events attributed to these custody
+   * wallets are visible, and unattributed events are never visible.
+   */
+  | { scope: "wallets"; walletIds: string[] }
   | { scope: "member"; channelIds: string[]; userId: string };
 
 export interface ListPrivateChannelEventsParams {
@@ -100,7 +114,8 @@ export interface PrivateChannelEventRepository {
   /**
    * Project feed: every event for the project regardless of instance/channel.
    * Instance-independent (survives instance deletion), so this is the durable
-   * history read path.
+   * history read path. Wallet-scoped viewers see only events attributed to
+   * their authorized wallets.
    */
   listByProject(
     params: ListProjectPrivateChannelEventsParams

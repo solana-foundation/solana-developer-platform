@@ -1,11 +1,13 @@
 import { hasPermission } from "@sdp/types";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
+import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import type { AppContext } from "./context";
 import { getPrivateChannelUserRepository } from "./context";
 
 export type EventViewer =
   | { scope: "all" }
+  | { scope: "wallets"; walletIds: string[] }
   | { scope: "member"; channelIds: string[]; userId: string }
   | { scope: "none" };
 
@@ -26,7 +28,18 @@ export async function resolveEventViewerForAuth(
     if (auth.projectId !== projectId) {
       throw forbidden("API key is not scoped to the requested project");
     }
-    return { scope: "all" };
+    // The same selected-wallet authorization the custody and event-reference
+    // routes apply: a wallet-scoped key reads only the wallets its bindings
+    // authorize for reads, and project-wide visibility is reserved for
+    // explicitly all-wallet keys. `null` means the key is not wallet-scoped.
+    const allowedWalletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
+    if (allowedWalletIds === null) {
+      return { scope: "all" };
+    }
+    if (allowedWalletIds.length === 0) {
+      return { scope: "none" };
+    }
+    return { scope: "wallets", walletIds: allowedWalletIds };
   }
   if (hasPermission(auth.permissions, "projects:write")) {
     return { scope: "all" };

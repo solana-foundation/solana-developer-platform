@@ -1,5 +1,6 @@
 import {
   type CachedSession,
+  type Permission,
   PRIVATE_CHANNEL_EVENT_FAMILIES,
   PRIVATE_CHANNEL_EVENT_STATUSES,
   PRIVATE_CHANNEL_EVENT_TYPES,
@@ -45,7 +46,12 @@ function buildApp(userId: string, permissions: CachedSession["permissions"] = ["
   return app;
 }
 
-function buildApiKeyApp() {
+function buildApiKeyApp(
+  overrides: Partial<{
+    walletScope: "all" | "selected";
+    walletBindings: Array<{ walletId: string; custodyWalletId: string; permissions: Permission[] }>;
+  }> = {}
+) {
   const app = new Hono<{ Bindings: Env }>();
   app.use("*", async (c, next) => {
     c.set("apiKey", {
@@ -56,6 +62,8 @@ function buildApiKeyApp() {
       permissions: ["*"],
       environment: "sandbox",
       signingWalletId: null,
+      walletScope: overrides.walletScope,
+      walletBindings: overrides.walletBindings,
     });
     c.set("projectId", PROJECT_ID);
     await next();
@@ -283,6 +291,96 @@ describe("Private Channels event handlers", () => {
       amount: "12.50",
       signature: "sig_private",
     });
+  });
+
+  it("limits selected-wallet API keys to the events of their bound wallets", async () => {
+    const db = getDb(env);
+    const eventRepository = createPostgresPrivateChannelEventRepository(db);
+    await eventRepository.insert({
+      id: "pce_scoped_wallet_a",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      instanceId: INSTANCE_ID,
+      channelId: null,
+      sdpUserId: null,
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+      payload: { senderWalletId: "wallet_a", amount: "5.00", recipient: "wallet-a-pubkey" },
+      walletId: "wallet_a",
+      occurredAt: NOW,
+      createdAt: NOW,
+    });
+    await eventRepository.insert({
+      id: "pce_scoped_wallet_b",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      instanceId: INSTANCE_ID,
+      channelId: null,
+      sdpUserId: null,
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+      payload: { senderWalletId: "wallet_b", amount: "7.00", recipient: "wallet-b-pubkey" },
+      walletId: "wallet_b",
+      occurredAt: NOW,
+      createdAt: NOW,
+    });
+
+    const res = await buildApiKeyApp({
+      walletScope: "selected",
+      walletBindings: [
+        { walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["payments:read"] },
+      ],
+    }).request("/events", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    const ids = body.data.events.map((event) => event.id);
+    expect(ids).toContain("pce_scoped_wallet_b");
+    expect(ids).not.toContain("pce_scoped_wallet_a");
+  });
+
+  it("keeps project-wide visibility for explicitly all-wallet API keys", async () => {
+    const db = getDb(env);
+    const eventRepository = createPostgresPrivateChannelEventRepository(db);
+    await eventRepository.insert({
+      id: "pce_allwallet_wallet_a",
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      instanceId: INSTANCE_ID,
+      channelId: null,
+      sdpUserId: null,
+      family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
+      type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+      status: PRIVATE_CHANNEL_EVENT_STATUSES.PENDING,
+      payload: { senderWalletId: "wallet_a", amount: "5.00" },
+      walletId: "wallet_a",
+      occurredAt: NOW,
+      createdAt: NOW,
+    });
+
+    const res = await buildApiKeyApp({ walletScope: "all", walletBindings: [] }).request(
+      "/events",
+      {},
+      env
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    const ids = body.data.events.map((event) => event.id);
+    expect(ids).toContain("pce_allwallet_wallet_a");
+    expect(ids).toContain("pce_member_match");
+  });
+
+  it("returns an empty feed to a selected-wallet key whose bindings grant no read permission", async () => {
+    const res = await buildApiKeyApp({
+      walletScope: "selected",
+      walletBindings: [
+        { walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["payments:write"] },
+      ],
+    }).request("/events", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: PrivateChannelEventListEnvelope };
+    expect(body.data).toEqual({ events: [], hasMore: false, nextCursor: null });
   });
 
   it("uses the project's default identity when the actor has no legacy PC user", async () => {

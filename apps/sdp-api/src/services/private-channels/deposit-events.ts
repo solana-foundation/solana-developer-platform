@@ -30,6 +30,7 @@ export async function emitDepositEvent(
     instanceId: deposit.instance_id,
     channelId: null,
     sdpUserId: deposit.context.actingUserId ?? null,
+    walletId: deposit.wallet_id,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
     type,
     status,

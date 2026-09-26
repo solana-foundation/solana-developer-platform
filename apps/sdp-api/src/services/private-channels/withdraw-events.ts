@@ -30,6 +30,7 @@ export async function emitWithdrawalEvent(
     instanceId: withdrawal.instance_id,
     channelId: null,
     sdpUserId: withdrawal.context.actingUserId ?? null,
+    walletId: withdrawal.wallet_id,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
     type,
     status,

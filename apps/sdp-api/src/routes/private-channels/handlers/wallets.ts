@@ -83,6 +83,7 @@ export async function verifyWallet(c: ValidatedBodyContext<typeof verifyWalletBo
       },
       PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
       {
+        walletId: row.wallet_id,
         payload: { walletId: row.wallet_id, pubkey: row.pubkey, principalId: row.user_id },
       }
     );

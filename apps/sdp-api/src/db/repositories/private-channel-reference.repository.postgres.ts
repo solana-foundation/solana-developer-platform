@@ -117,8 +117,11 @@ export function createPostgresPrivateChannelReferenceRepository(
       }
 
       // Members with a channel can see channel-less instance lifecycle events;
-      // members without one cannot.
-      if (viewer.scope === "all" || viewer.channelIds.length > 0) {
+      // members without one cannot. Wallet-scoped API keys see no instance
+      // lifecycle events, so they resolve no instance names either.
+      const canResolveInstances =
+        viewer.scope === "all" || (viewer.scope === "member" && viewer.channelIds.length > 0);
+      if (canResolveInstances) {
         branches.push({
           sql: `SELECT 'instance' AS kind, pci.id AS key, pci.gateway_url AS name
                   FROM private_channel_instances pci

@@ -525,4 +525,108 @@ describe("Private Channels — event routes", () => {
       )
     ).toBe(true);
   });
+
+  it("limits a selected-wallet API key to its bound wallets' project events", async () => {
+    const walletBKey = {
+      id: "key_pce_wallet_b",
+      raw: "sk_test_pc_events_wallet_b",
+      prefix: "sk_test_pcewb",
+    };
+    const keyHash = await hashString(walletBKey.raw, env.API_KEY_PEPPER);
+    await seedCachedApiKey(env, keyHash, {
+      ...TEST_CACHED_API_KEY,
+      id: walletBKey.id,
+      signingWalletId: "wallet_b",
+      walletScope: "selected",
+      walletBindings: [
+        {
+          walletId: "wallet_b",
+          custodyWalletId: "cwlt_pce_wallet_b",
+          permissions: ["*"] as CachedApiKey["permissions"],
+        },
+      ],
+    });
+    await getDb(env)
+      .prepare(
+        `INSERT INTO api_keys
+           (id, organization_id, project_id, created_by, name, key_prefix, key_hash, role, permissions, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`
+      )
+      .bind(
+        walletBKey.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_USER.id,
+        "PC Events Wallet B Key",
+        walletBKey.prefix,
+        keyHash,
+        "api_admin",
+        JSON.stringify(["*"])
+      )
+      .run();
+
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_instances
+           (id, organization_id, project_id, gateway_url,
+            escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active)
+         VALUES ('pci_pce_wallet_scope', ?, ?, 'http://gw', 'prog1', 'prog2', 'escrow1', 'http://auth', true)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO private_channel_events
+           (id, organization_id, project_id, instance_id, channel_id, family, type, status,
+            payload, wallet_id, occurred_at)
+         VALUES
+           ('pce_wallet_a_leak', ?, ?, 'pci_pce_wallet_scope', NULL, 'transfer',
+            'transfer.transfer.submitted', 'pending',
+            '{"senderWalletId":"wallet_a","amount":"5.00","recipient":"wallet-a-pubkey"}'::jsonb,
+            'wallet_a', '2026-07-30T12:00:00.000Z'),
+           ('pce_wallet_b_allowed', ?, ?, 'pci_pce_wallet_scope', NULL, 'transfer',
+            'transfer.transfer.submitted', 'pending',
+            '{"senderWalletId":"wallet_b","amount":"7.00","recipient":"wallet-b-pubkey"}'::jsonb,
+            'wallet_b', '2026-07-30T12:01:00.000Z'),
+           ('pce_wallet_less_lifecycle', ?, ?, 'pci_pce_wallet_scope', NULL, 'lifecycle',
+            'lifecycle.instance.connected', 'info', '{}'::jsonb,
+            NULL, '2026-07-30T12:02:00.000Z')`
+      )
+      .bind(
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id,
+        TEST_ORG.id,
+        TEST_PROJECT.id
+      )
+      .run();
+
+    // A key bound to wallet B must not read wallet A's events...
+    const scoped = await app.request(
+      "/v1/private-channels/events",
+      { headers: { Authorization: `Bearer ${walletBKey.raw}` } },
+      env
+    );
+    expect(scoped.status).toBe(200);
+    const scopedBody = (await scoped.json()) as { data: PrivateChannelEventListEnvelope };
+    const scopedIds = scopedBody.data.events.map((event) => event.id);
+    expect(scopedIds).toContain("pce_wallet_b_allowed");
+    expect(scopedIds).not.toContain("pce_wallet_a_leak");
+    expect(scopedIds).not.toContain("pce_wallet_less_lifecycle");
+
+    // ...while an explicitly all-wallet key keeps project-wide visibility.
+    const allWallet = await app.request(
+      "/v1/private-channels/events",
+      { headers: authHeaders() },
+      env
+    );
+    expect(allWallet.status).toBe(200);
+    const allWalletBody = (await allWallet.json()) as { data: PrivateChannelEventListEnvelope };
+    const allWalletIds = allWalletBody.data.events.map((event) => event.id);
+    expect(allWalletIds).toEqual(
+      expect.arrayContaining(["pce_wallet_a_leak", "pce_wallet_b_allowed"])
+    );
+  });
 });

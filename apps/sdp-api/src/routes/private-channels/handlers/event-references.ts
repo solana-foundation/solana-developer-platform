@@ -29,7 +29,13 @@ export async function listPrivateChannelEventReferences(c: AppContext) {
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
   const viewer = await resolveEventViewer(c);
-  if (viewer.scope === "none") {
+  // The events feed's wallet-scoped viewer narrows financial events. References
+  // are display metadata whose wallet labels are scoped separately above the
+  // repository call, so every API-key viewer that could previously resolve
+  // names keeps that ability; sessions and Clerk viewers pass through unchanged.
+  const referenceViewer =
+    auth.authType === "api_key" && viewer.scope !== "member" ? ({ scope: "all" } as const) : viewer;
+  if (referenceViewer.scope === "none") {
     return success(c, { references: {} });
   }
 
@@ -37,7 +43,7 @@ export async function listPrivateChannelEventReferences(c: AppContext) {
     organizationId: auth.organizationId,
     projectId,
     walletScope: resolveWalletScope(auth),
-    viewer,
+    viewer: referenceViewer,
   });
 
   // One flat namespace: ids are prefixed per entity (pch_, pcu_, usr_, pci_) and

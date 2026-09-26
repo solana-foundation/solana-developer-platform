@@ -91,6 +91,8 @@ export function emitMember(
   type: PrivateChannelEventType,
   extra?: {
     channelId?: string | null;
+    /** Wallet attribution for wallet-family member events (e.g. wallet_verified). */
+    walletId?: string | null;
     payload?: Record<string, unknown>;
   }
 ): Promise<void> {
@@ -101,6 +103,7 @@ export function emitMember(
     instanceId: scope.instanceId,
     channelId: extra?.channelId ?? null,
     sdpUserId: auth.userId ?? null,
+    walletId: extra?.walletId ?? null,
     family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
     type,
     status: PRIVATE_CHANNEL_EVENT_STATUSES.INFO,

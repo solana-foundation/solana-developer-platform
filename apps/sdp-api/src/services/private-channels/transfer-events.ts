@@ -23,6 +23,7 @@ export async function emitTransferEvent(
       // Transfers belong to their initiating user and wallets, not a single channel.
       channelId: null,
       sdpUserId,
+      walletId: transfer.sender_wallet_id,
       family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
       type,
       status,

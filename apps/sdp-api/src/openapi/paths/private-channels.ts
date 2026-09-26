@@ -532,7 +532,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List activity events for a channel",
     operationId: "listPrivateChannelEvents",
     description:
-      "Paginated activity feed for a channel (newest first). Includes instance-level lifecycle events (channel_id null) for the active instance. Paginate with the opaque `before` cursor from `nextCursor`.",
+      "Paginated activity feed for a channel (newest first). Includes instance-level lifecycle events (channel_id null) for the active instance. Wallet-scoped API keys read only the events of the custody wallets their bindings authorize. Paginate with the opaque `before` cursor from `nextCursor`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -576,7 +576,7 @@ export function registerPrivateChannelsPaths(registry: OpenAPIRegistry) {
     summary: "List activity events for the project",
     operationId: "listProjectPrivateChannelEvents",
     description:
-      "Project-scoped activity feed across all instances and channels (newest first). Instance-independent, so retained history stays readable after an instance is deleted. Paginate with the opaque `before` cursor from `nextCursor`.",
+      "Project-scoped activity feed across all instances and channels (newest first). Instance-independent, so retained history stays readable after an instance is deleted. Wallet-scoped API keys read only the events of the custody wallets their bindings authorize; project-wide visibility requires an all-wallet key. Paginate with the opaque `before` cursor from `nextCursor`.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

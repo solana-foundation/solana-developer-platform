@@ -22,6 +22,7 @@ function mapPrivateChannelEventRow(row: Record<string, unknown>): PrivateChannel
     instance_id: row.instance_id as string,
     channel_id: (row.channel_id as string | null) ?? null,
     sdp_user_id: (row.sdp_user_id as string | null) ?? null,
+    wallet_id: (row.wallet_id as string | null) ?? null,
     family: row.family as PrivateChannelEventFamily,
     type: row.type as PrivateChannelEventType,
     status: row.status as PrivateChannelEventStatus,
@@ -39,6 +40,7 @@ function bindWriteArgs(input: PrivateChannelEventWriteInput) {
     input.instanceId,
     input.channelId,
     input.sdpUserId,
+    input.walletId ?? null,
     input.family,
     input.type,
     input.status,
@@ -57,8 +59,8 @@ export function createPostgresPrivateChannelEventRepository(
         .prepare(
           `INSERT INTO private_channel_events (
              id, organization_id, project_id, instance_id, channel_id, sdp_user_id,
-             family, type, status, payload, occurred_at, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+             wallet_id, family, type, status, payload, occurred_at, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
            RETURNING *`
         )
         .bind(...bindWriteArgs(input))
@@ -84,6 +86,13 @@ export function createPostgresPrivateChannelEventRepository(
       const binds: (string | number | string[])[] = [params.instanceId, params.channelId];
       if (params.viewer.scope === "member") {
         binds.push(params.viewer.userId);
+      }
+      if (params.viewer.scope === "wallets") {
+        // Wallet-scoped API keys read only their bound wallets' events. The
+        // wallet_id column is written from the authoritative movement row at
+        // emit time; unattributed rows never match.
+        clauses.push("wallet_id = ANY(?::text[])");
+        binds.push(params.viewer.walletIds);
       }
 
       if (params.family) {
@@ -140,6 +149,14 @@ export function createPostgresPrivateChannelEventRepository(
       if (params.status) {
         clauses.push("status = ?");
         binds.push(params.status);
+      }
+      if (params.viewer.scope === "wallets") {
+        // Wallet-scoped API keys read only their bound wallets' events. The
+        // wallet_id column is written from the authoritative movement row at
+        // emit time — never inferred from payload text — and unattributed
+        // rows (lifecycle, membership, legacy) never match.
+        clauses.push("wallet_id = ANY(?::text[])");
+        binds.push(params.viewer.walletIds);
       }
       if (params.viewer.scope === "member") {
         // Instance lifecycle context comes with channel membership; a viewer who

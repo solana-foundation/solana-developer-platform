@@ -23,6 +23,13 @@ export interface PrivateChannelEventInput {
   instanceId: string;
   channelId?: string | null;
   sdpUserId?: string | null;
+  /**
+   * The custody wallet this event belongs to, copied from the authoritative
+   * movement or verified-wallet row. Wallet-scoped API-key visibility is
+   * decided from this attribution, never from payload text; events without
+   * one are invisible to wallet-scoped viewers.
+   */
+  walletId?: string | null;
   family: PrivateChannelEventFamily;
   type: PrivateChannelEventType;
   status: PrivateChannelEventStatus;
@@ -63,6 +70,7 @@ function toRecord(input: PrivateChannelEventInput): PrivateChannelEventRecord {
     instanceId: input.instanceId,
     channelId: input.channelId ?? null,
     sdpUserId: input.sdpUserId ?? null,
+    walletId: input.walletId ?? null,
     family: input.family,
     type: input.type,
     status: input.status,
