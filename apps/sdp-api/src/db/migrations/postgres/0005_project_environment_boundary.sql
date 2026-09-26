@@ -10,10 +10,14 @@
 --   4. Ensure all active org members are members of both default projects
 --   5. Backfill api_keys.project_id from api_keys.environment where still NULL
 --   6. Make api_keys.project_id NOT NULL and tighten FK to ON DELETE RESTRICT
---   7. Drop api_keys.environment
---   8. Add CHECK constraint on projects.environment narrowing it to sandbox|production
---   9. Backfill remaining org-scoped resources (custody_configs, custody_scope_defaults,
---      payment_transfers, counterparties) onto each org's default-sandbox project
+--   7. Backfill payment_transfers.project_id from the initiating api_key's
+--      environment while that column still exists; quarantine rows whose
+--      origin cannot be established as project_id NULL instead of sending
+--      them to default-sandbox
+--   8. Drop api_keys.environment
+--   9. Add CHECK constraint on projects.environment narrowing it to sandbox|production
+--  10. Backfill remaining org-scoped resources (custody_configs, custody_scope_defaults,
+--      counterparties) onto each org's default-sandbox project
 
 
 -- ─── 1. Rename default-project → default-sandbox ─────────────────────────────
@@ -159,17 +163,50 @@ ALTER TABLE api_keys ADD CONSTRAINT api_keys_project_id_fkey
     FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT;
 
 
--- ─── 7. Drop api_keys.environment ────────────────────────────────────────────
+-- ─── 7. Backfill payment_transfers from the initiating key's environment ─────
+-- Runs before api_keys.environment is dropped: a legacy transfer's
+-- trustworthy provenance is the key that initiated it, so resolve the
+-- destination project from that key's environment using the same preference
+-- order as the api_keys backfill. Rows whose origin cannot be established
+-- (no initiating key, or the key no longer exists) are quarantined with
+-- project_id NULL — invisible under every project scope — rather than being
+-- reassigned to default-sandbox, which would surface legacy production
+-- history under sandbox scope.
+UPDATE payment_transfers pt
+SET    project_id = (
+    SELECT p.id
+    FROM   api_keys ak
+    JOIN   projects p
+           ON  p.organization_id = ak.organization_id
+           AND p.environment     = ak.environment
+    WHERE  ak.id              = pt.initiated_by_key_id
+      AND  ak.organization_id = pt.organization_id
+    ORDER  BY
+        CASE
+            WHEN p.slug = 'default-sandbox'    AND p.environment = 'sandbox'    THEN 0
+            WHEN p.slug = 'default-production' AND p.environment = 'production' THEN 0
+            ELSE 1
+        END,
+        p.created_at ASC
+    LIMIT  1
+)
+WHERE  pt.project_id IS NULL
+  AND  pt.initiated_by_key_id IS NOT NULL;
+
+
+-- ─── 8. Drop api_keys.environment ────────────────────────────────────────────
 ALTER TABLE api_keys DROP COLUMN IF EXISTS environment;
 
 
--- ─── 8. Narrow projects.environment to sandbox | production ──────────────────
+-- ─── 9. Narrow projects.environment to sandbox | production ──────────────────
 ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_environment_check;
 ALTER TABLE projects ADD CONSTRAINT projects_environment_check
     CHECK (environment IN ('sandbox', 'production'));
 
 
--- ─── 9. Backfill remaining org-scoped resources to default-sandbox ───────────
+-- ─── 10. Backfill remaining org-scoped resources to default-sandbox ──────────
+-- payment_transfers is intentionally absent: its NULL-project rows were
+-- resolved from key provenance in step 7 or quarantined as NULL.
 UPDATE custody_configs cc
 SET    project_id = (
     SELECT p.id FROM projects p
@@ -185,14 +222,6 @@ SET    project_id = (
       AND  p.slug = 'default-sandbox'
 )
 WHERE  csd.project_id IS NULL;
-
-UPDATE payment_transfers pt
-SET    project_id = (
-    SELECT p.id FROM projects p
-    WHERE  p.organization_id = pt.organization_id
-      AND  p.slug = 'default-sandbox'
-)
-WHERE  pt.project_id IS NULL;
 
 UPDATE counterparties c
 SET    project_id = (
