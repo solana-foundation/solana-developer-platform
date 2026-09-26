@@ -1969,6 +1969,7 @@ describe("Custody wallet scope routes", () => {
         }),
         "Signer-check fee payer address lookup refused"
       );
+      warn.mockRestore();
     });
 
     it("keeps rate-limited fee errors on the fixed sponsor copy", async () => {
