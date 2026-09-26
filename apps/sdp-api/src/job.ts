@@ -33,6 +33,7 @@ import { waitForEgress } from "@/services/jobs/egress-warmup";
 import { pollRingsIndexing } from "@/services/jobs/poll-rings-indexing";
 import { reconcileDvpTrades } from "@/services/jobs/reconcile-dvp-trades";
 import { reconcileEarnVaultMovements } from "@/services/jobs/reconcile-earn-vault-movements";
+import { reconcileLightsparkProvisioning } from "@/services/jobs/reconcile-lightspark-provisioning";
 import { reconcileRevokedApiKeyCache } from "@/services/jobs/reconcile-revoked-api-key-cache";
 import { reconcileSponsorshipBudgets } from "@/services/jobs/reconcile-sponsorship-budgets";
 import { retireOrphanedSecrets } from "@/services/jobs/retire-orphaned-secrets";
@@ -191,6 +192,7 @@ export async function runCronJob(): Promise<void> {
                 await recoverApprovedWalletOperations(env);
               })(),
               reconcileSponsorshipBudgets(env),
+              reconcileLightsparkProvisioning(env),
             ]);
             throwCollected(
               rejectionReasons(outcomes),

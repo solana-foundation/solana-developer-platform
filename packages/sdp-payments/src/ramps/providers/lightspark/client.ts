@@ -1058,6 +1058,42 @@ export class LightsparkRampClient implements RampProvider {
   }
 
   /**
+   * Finds a customer's fiat external account by its SDP platform id. The
+   * provisioning reconciliation sweep uses it to bind a provider account
+   * created before a crash back to the local reservation row that minted the
+   * platform id.
+   */
+  async findExternalAccountByPlatformId(
+    { env, mode }: RampRuntimeContext,
+    input: {
+      customerId: string;
+      currency: string;
+      platformAccountId: string;
+    }
+  ): Promise<LightsparkExternalAccountResolution | null> {
+    const config = readLightsparkConfig(env, mode);
+    const existing = await this.findCustomerExternalAccount(
+      config,
+      input.customerId,
+      input.currency,
+      (account) => account.platformAccountId === input.platformAccountId
+    );
+    return existing?.id && existing.status ? { id: existing.id, status: existing.status } : null;
+  }
+
+  /**
+   * Finds a Grid customer by its SDP platform id. The provisioning
+   * reconciliation sweep uses it to link a customer created before a crash
+   * back to the counterparty that owns the platform id.
+   */
+  async lookupCustomerByPlatformId(
+    { env, mode }: RampRuntimeContext,
+    input: { platformCustomerId: string }
+  ): Promise<LightsparkCustomer | null> {
+    return this.findCustomerByPlatformId(readLightsparkConfig(env, mode), input.platformCustomerId);
+  }
+
+  /**
    * Creates a just-in-time (real-time funded) off-ramp quote: the customer
    * funds it by sending crypto to the returned payment instructions, and Grid
    * auto-executes into the fiat payout account at the locked rate.

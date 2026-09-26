@@ -151,6 +151,10 @@ vi.mock("@/services/jobs/reconcile-sponsorship-budgets", () => ({
   reconcileSponsorshipBudgets: vi.fn(async () => {}),
 }));
 
+vi.mock("@/services/jobs/reconcile-lightspark-provisioning", () => ({
+  reconcileLightsparkProvisioning: vi.fn(async () => 0),
+}));
+
 vi.mock("@/services/jobs/detect-orphaned-earn-split-swaps", () => ({
   detectOrphanedEarnSplitSwaps: vi.fn(async () => {}),
 }));

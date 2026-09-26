@@ -970,6 +970,310 @@ describe("Counterparties Routes", () => {
       }
     });
 
+    it("seals Grid customer provisioning with an audit intent and outcome", async () => {
+      const created = await createCounterparty({ externalId: "requirements_ls_audit_customer" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "Customer:cus_audit_123" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "lightspark",
+              direction: "onramp",
+              collectedData: {
+                "customer.fullName": "Ada Lovelace",
+                "customer.birthDate": "1990-01-01",
+                "customer.nationality": "US",
+                "customer.region": "US",
+                "customer.email": "ada@example.com",
+                "customer.address.line1": "1 Main St",
+                "customer.address.city": "San Francisco",
+                "customer.address.postalCode": "94105",
+                "customer.address.countryCode": "US",
+                purposeOfPayment: "GOODS_OR_SERVICES",
+              },
+            }),
+          },
+          env
+        );
+        expect(res.status).toBe(200);
+
+        const intent = await getDb(env)
+          .prepare(
+            `SELECT resource_id AS intent_id, organization_id, api_key_id, request_id, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'audit_ledger'
+               AND metadata::jsonb ->> 'auditPhase' = 'intent'
+               AND metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = 'lightspark_customer_created'
+               AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+          )
+          .bind(counterparty.id)
+          .first<{
+            intent_id: string;
+            organization_id: string;
+            api_key_id: string;
+            request_id: string;
+            metadata: Record<string, unknown>;
+          }>();
+        expect(intent).not.toBeNull();
+        expect(intent?.organization_id).toBe(TEST_ORG.id);
+        expect(intent?.api_key_id).toBe(TEST_API_KEY.id);
+        expect(intent?.request_id).not.toBeNull();
+        expect(intent?.metadata).toMatchObject({
+          target: {
+            metadata: {
+              provider: "lightspark",
+              counterpartyId: counterparty.id,
+              effect: { platformCustomerId: counterparty.id },
+            },
+          },
+        });
+
+        const outcome = await getDb(env)
+          .prepare(
+            `SELECT status, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'counterparty'
+               AND resource_id = ?
+               AND metadata::jsonb ->> 'auditPhase' = 'outcome'
+               AND metadata::jsonb ->> 'auditIntentId' = ?`
+          )
+          .bind(counterparty.id, intent?.intent_id)
+          .first<{ status: string; metadata: Record<string, unknown> }>();
+        expect(outcome?.status).toBe("success");
+        expect(outcome?.metadata).toMatchObject({
+          action: "lightspark_customer_created",
+          providerCustomerReference: "Customer:cus_audit_123",
+        });
+        expect(JSON.stringify(intent?.metadata)).not.toContain("ada@example.com");
+        expect(JSON.stringify(intent?.metadata)).not.toContain("Ada Lovelace");
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("seals Lightspark payout-account provisioning with an audit intent and outcome", async () => {
+      const created = await createCounterparty({ externalId: "requirements_ls_audit_payout" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_audit_payout",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "ExternalAccount:audit_new", status: "ACTIVE" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "lightspark",
+              direction: "offramp",
+              assetRail: "usdc.solana",
+              fiatCurrency: "USD",
+              collectedData: {
+                destinationCountry: "US",
+                paymentRails: "ACH",
+                purposeOfPayment: "SELF",
+                "bankAccount.accountNumber": "123456789",
+                "bankAccount.routingNumber": "021000021",
+              },
+            }),
+          },
+          env
+        );
+        expect(res.status).toBe(200);
+
+        const pendingRow = await getDb(env)
+          .prepare(
+            `SELECT id, external_account_reference FROM counterparty_provider_accounts
+             WHERE counterparty_id = ? AND provider = 'lightspark' AND kind = 'payout_account'`
+          )
+          .bind(counterparty.id)
+          .first<{ id: string; external_account_reference: string }>();
+        expect(pendingRow?.external_account_reference).toBe("ExternalAccount:audit_new");
+
+        const intent = await getDb(env)
+          .prepare(
+            `SELECT resource_id AS intent_id, api_key_id, request_id, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'audit_ledger'
+               AND metadata::jsonb ->> 'auditPhase' = 'intent'
+               AND metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = 'lightspark_payout_account_created'
+               AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+          )
+          .bind(counterparty.id)
+          .first<{
+            intent_id: string;
+            api_key_id: string;
+            request_id: string;
+            metadata: Record<string, unknown>;
+          }>();
+        expect(intent).not.toBeNull();
+        expect(intent?.api_key_id).toBe(TEST_API_KEY.id);
+        expect(intent?.request_id).not.toBeNull();
+        expect(intent?.metadata).toMatchObject({
+          target: {
+            metadata: {
+              provider: "lightspark",
+              counterpartyId: counterparty.id,
+              localRowId: pendingRow?.id,
+              corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+              effect: { platformAccountId: pendingRow?.id },
+            },
+          },
+        });
+        expect(JSON.stringify(intent?.metadata).toLowerCase()).not.toContain(
+          "bankaccount.accountnumber"
+        );
+        expect(JSON.stringify(intent?.metadata)).not.toContain("021000021");
+
+        const outcome = await getDb(env)
+          .prepare(
+            `SELECT status, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'counterparty'
+               AND resource_id = ?
+               AND metadata::jsonb ->> 'auditPhase' = 'outcome'
+               AND metadata::jsonb ->> 'auditIntentId' = ?`
+          )
+          .bind(counterparty.id, intent?.intent_id)
+          .first<{ status: string; metadata: Record<string, unknown> }>();
+        expect(outcome?.status).toBe("success");
+        expect(outcome?.metadata).toMatchObject({
+          action: "lightspark_payout_account_created",
+          localRowId: pendingRow?.id,
+          externalAccountReference: "ExternalAccount:audit_new",
+        });
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
+    it("records an unverified failure outcome when Lightspark payout-account provisioning fails", async () => {
+      const created = await createCounterparty({ externalId: "requirements_ls_audit_fail" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_audit_fail",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: "provider down" } }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "lightspark",
+              direction: "offramp",
+              assetRail: "usdc.solana",
+              fiatCurrency: "USD",
+              collectedData: {
+                destinationCountry: "US",
+                paymentRails: "ACH",
+                purposeOfPayment: "SELF",
+                "bankAccount.accountNumber": "123456789",
+                "bankAccount.routingNumber": "021000021",
+              },
+            }),
+          },
+          env
+        );
+        expect(res.status).toBeGreaterThanOrEqual(500);
+
+        const archivedRow = await getDb(env)
+          .prepare(
+            `SELECT id FROM counterparty_provider_accounts
+             WHERE counterparty_id = ? AND provider = 'lightspark' AND kind = 'payout_account'
+               AND status = 'archived'`
+          )
+          .bind(counterparty.id)
+          .first<{ id: string }>();
+        expect(archivedRow).not.toBeNull();
+
+        const intent = await getDb(env)
+          .prepare(
+            `SELECT resource_id AS intent_id, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'audit_ledger'
+               AND metadata::jsonb ->> 'auditPhase' = 'intent'
+               AND metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = 'lightspark_payout_account_created'
+               AND metadata::jsonb -> 'target' ->> 'resourceId' = ?`
+          )
+          .bind(counterparty.id)
+          .first<{ intent_id: string; metadata: Record<string, unknown> }>();
+        expect(intent).not.toBeNull();
+        expect(intent?.metadata).toMatchObject({
+          target: { metadata: { localRowId: archivedRow?.id } },
+        });
+
+        const outcome = await getDb(env)
+          .prepare(
+            `SELECT status, metadata::jsonb AS metadata
+             FROM audit_logs
+             WHERE resource_type = 'counterparty'
+               AND resource_id = ?
+               AND metadata::jsonb ->> 'auditPhase' = 'outcome'
+               AND metadata::jsonb ->> 'auditIntentId' = ?`
+          )
+          .bind(counterparty.id, intent?.intent_id)
+          .first<{ status: string; metadata: Record<string, unknown> }>();
+        expect(outcome?.status).toBe("failure");
+        expect(outcome?.metadata).toMatchObject({
+          action: "lightspark_payout_account_created",
+          providerOutcome: "unverified",
+        });
+        expect(outcome?.metadata.externalAccountReference).toBeUndefined();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it("returns the BVNK residence step for a fresh counterparty", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk" });
       expect(created.status).toBe(201);

@@ -38,6 +38,7 @@ import {
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { logEvent } from "@/runtime/money-path-events";
+import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { mapPayoutRequirementAccounts } from "@/services/payments/payout-requirement-accounts";
 import { enrichCounterpartyProviderAccounts } from "@/services/payments/provider-account-enrichment";
 import { type AppContext, rampRuntime } from "../../context";
@@ -69,6 +70,59 @@ async function persistLightsparkData(
       };
     },
   });
+}
+
+/**
+ * Admits and resolves a Lightspark provisioning step in the tamper-evident
+ * ledger: `begin` writes a durable intent before the effect (a refused write
+ * aborts the still-retryable step), `complete` resolves it once local state is
+ * persisted, and `fail` records a failed attempt.
+ */
+export interface LightsparkProvisioningAudit {
+  begin(event: { action: string; metadata: Record<string, unknown> }): Promise<AuditIntent>;
+  complete(intent: AuditIntent, metadata: Record<string, unknown>): Promise<void>;
+  /** Resolves the intent as a failed attempt, so a routine provider error
+   * does not strand an unresolved intent; ambiguous errors carry
+   * providerOutcome: "unverified". */
+  fail(intent: AuditIntent, error: unknown): Promise<void>;
+}
+
+/**
+ * Binds a Lightspark provisioning step to the tamper-evident ledger for a
+ * counterparty. The ledger write carries the request's actor, API key, and
+ * request id through the shared audit persistence path.
+ *
+ * @param c - Request context used for ledger access.
+ * @param counterparty - Counterparty whose provisioning steps are admitted.
+ * @returns The audit facade admitting begin/complete/fail.
+ */
+export function requestLightsparkProvisioningAudit(
+  c: AppContext,
+  counterparty: CounterpartyRow
+): LightsparkProvisioningAudit {
+  const service = new AuditService(getDb(c.env));
+  return {
+    async begin({ action, metadata }) {
+      return service.beginCritical(c, {
+        action: "update",
+        resourceType: "counterparty",
+        resourceId: counterparty.id,
+        metadata: { action, provider: "lightspark", ...metadata },
+      });
+    },
+    async complete(intent, metadata) {
+      await service.completeCritical(c, intent, { metadata });
+    },
+    async fail(intent, error) {
+      await service.completeCritical(c, intent, {
+        status: "failure",
+        metadata: {
+          error: error instanceof Error ? error.message : String(error),
+          providerOutcome: "unverified",
+        },
+      });
+    },
+  };
 }
 
 /**
@@ -120,35 +174,63 @@ export async function ensureLightsparkCustomer(
     return { customerId: existing.provider_customer_reference };
   }
 
-  const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(
-    rampRuntime(c),
-    input.counterparty.entity_type === "individual"
-      ? {
-          platformCustomerId: input.counterparty.id,
-          customerType: "INDIVIDUAL",
-          individualInfo: buildLightsparkIndividualInfo(input.collectedData),
-        }
-      : {
-          platformCustomerId: input.counterparty.id,
-          customerType: "BUSINESS",
-          businessInfo: buildLightsparkBusinessInfo(input.collectedData),
-        }
-  );
-  await repository.upsertProviderAccount({
-    organizationId: input.counterparty.organization_id,
-    projectId: input.projectId,
-    counterpartyId: input.counterparty.id,
-    provider: "lightspark",
-    providerCustomerReference: customer.id,
+  const audit = requestLightsparkProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "lightspark_customer_created",
+    metadata: {
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      // Redacted effect descriptor: no collected identity fields, only the
+      // idempotency key and the customer type the provider call declares.
+      effect: {
+        kind: "customer_link",
+        platformCustomerId: input.counterparty.id,
+        customerType: input.counterparty.entity_type === "individual" ? "INDIVIDUAL" : "BUSINESS",
+      },
+    },
   });
-  logEvent("info", {
-    event: "sdp_api_lightspark_customer_created",
-    organization_id: input.counterparty.organization_id,
-    project_id: input.projectId,
-    counterparty_id: input.counterparty.id,
-    provider_customer_reference: customer.id,
-  });
-  return { customerId: customer.id };
+  try {
+    const customer = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateCustomer(
+      rampRuntime(c),
+      input.counterparty.entity_type === "individual"
+        ? {
+            platformCustomerId: input.counterparty.id,
+            customerType: "INDIVIDUAL",
+            individualInfo: buildLightsparkIndividualInfo(input.collectedData),
+          }
+        : {
+            platformCustomerId: input.counterparty.id,
+            customerType: "BUSINESS",
+            businessInfo: buildLightsparkBusinessInfo(input.collectedData),
+          }
+    );
+    const linked = await repository.upsertProviderAccount({
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: customer.id,
+    });
+    // The external reference is recorded only after the local link row is
+    // durably bound; anything else resolves the intent as an unverified
+    // failure for reconciliation.
+    await audit.complete(intent, {
+      providerCustomerReference: customer.id,
+      localRowId: linked.id,
+    });
+    logEvent("info", {
+      event: "sdp_api_lightspark_customer_created",
+      organization_id: input.counterparty.organization_id,
+      project_id: input.projectId,
+      counterparty_id: input.counterparty.id,
+      provider_customer_reference: customer.id,
+    });
+    return { customerId: customer.id };
+  } catch (error) {
+    await audit.fail(intent, error);
+    throw error;
+  }
 }
 
 /**
@@ -330,7 +412,28 @@ export async function ensureLightsparkPayoutAccount(
     }
     throw error;
   }
-  let completed: CounterpartyProviderAccountRow | null;
+  const audit = requestLightsparkProvisioningAudit(c, input.counterparty);
+  const intent = await audit.begin({
+    action: "lightspark_payout_account_created",
+    metadata: {
+      organizationId: input.counterparty.organization_id,
+      projectId: input.projectId,
+      counterpartyId: input.counterparty.id,
+      localRowId: pending.id,
+      providerCustomerReference: input.customer.customerId,
+      // Redacted effect descriptor: the corridor and platform identity, never
+      // the submitted bank details.
+      corridor: {
+        fiatCurrency: input.fiatCurrency,
+        destinationCountry,
+        paymentRail,
+      },
+      effect: {
+        kind: "payout_account",
+        platformAccountId: pending.id,
+      },
+    },
+  });
   try {
     const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
       rampRuntime(c),
@@ -341,7 +444,7 @@ export async function ensureLightsparkPayoutAccount(
         accountInfo,
       }
     );
-    completed = await repository.completeExternalAccount({
+    const completed = await repository.completeExternalAccount({
       organizationId: input.counterparty.organization_id,
       projectId: input.projectId,
       counterpartyId: input.counterparty.id,
@@ -350,7 +453,31 @@ export async function ensureLightsparkPayoutAccount(
       externalAccountReference: created.id,
       providerStatus: created.status,
     });
+    if (completed === null) {
+      throw internalError("Lightspark external-account completion lost its parent scope.");
+    }
+    // The external reference is recorded only after the local row is durably
+    // completed; anything else resolves the intent as an unverified failure
+    // for reconciliation.
+    await audit.complete(intent, {
+      localRowId: completed.id,
+      externalAccountReference: created.id,
+      providerStatus: created.status,
+    });
+    logEvent("info", {
+      event: "sdp_api_lightspark_external_account_completed",
+      organization_id: input.counterparty.organization_id,
+      project_id: input.projectId,
+      counterparty_id: input.counterparty.id,
+      provider_account_id: completed.id,
+      external_account_reference: completed.external_account_reference,
+      provider_status: completed.provider_status,
+      fiat_currency: completed.fiat_currency,
+      destination_country: completed.destination_country,
+    });
+    return completed;
   } catch (error) {
+    await audit.fail(intent, error);
     try {
       await repository.archiveExternalAccount({
         organizationId: input.counterparty.organization_id,
@@ -371,21 +498,6 @@ export async function ensureLightsparkPayoutAccount(
     }
     throw error;
   }
-  if (completed === null) {
-    throw internalError("Lightspark external-account completion lost its parent scope.");
-  }
-  logEvent("info", {
-    event: "sdp_api_lightspark_external_account_completed",
-    organization_id: input.counterparty.organization_id,
-    project_id: input.projectId,
-    counterparty_id: input.counterparty.id,
-    provider_account_id: completed.id,
-    external_account_reference: completed.external_account_reference,
-    provider_status: completed.provider_status,
-    fiat_currency: completed.fiat_currency,
-    destination_country: completed.destination_country,
-  });
-  return completed;
 }
 
 type ScopedLightsparkRequirementsInput = Extract<
