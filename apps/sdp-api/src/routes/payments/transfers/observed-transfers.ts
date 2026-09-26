@@ -269,8 +269,8 @@ function readTokenAmountInfo(
  *   through the extension, so a decimals-only amount would misreport the
  *   transfer while the row still claims to be confirmed. Both carry enough
  *   state to reconstruct the conversion at the confirming block's clock; a
- *   scaled mint whose pending schedule postdates the transfer cannot be
- *   reconstructed and is dropped instead.
+ *   scaled mint without a schedule timestamp, or whose pending schedule
+ *   postdates the transfer, cannot be reconstructed and is dropped instead.
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
  *   holder sees.
@@ -418,32 +418,35 @@ function convertObservedTokenAmount(input: {
   }
 
   if (state.kind === "scaled") {
+    // Without a schedule timestamp the account exposes no anchor for the
+    // multiplier that governed the confirming block: initialization and an
+    // update already applied (the processor sets multiplier and newMultiplier
+    // together when the effective timestamp has passed) are indistinguishable,
+    // so whether the multiplier was replaced since the transfer confirmed
+    // cannot be ruled out. Drop the row instead of guessing.
+    if (state.newMultiplierEffectiveTimestamp === 0n) {
+      return null;
+    }
+
     // A schedule that had not matured when the transfer confirmed leaves the
     // historical multiplier unrecoverable: whether this pending schedule (or
     // an older one, since replaced) governed the confirming block cannot be
     // distinguished from the current mint account. Drop the row instead of
     // guessing.
-    if (
-      state.newMultiplierEffectiveTimestamp !== 0n &&
-      BigInt(timestampSeconds) < state.newMultiplierEffectiveTimestamp
-    ) {
+    if (BigInt(timestampSeconds) < state.newMultiplierEffectiveTimestamp) {
       return null;
     }
 
     // At or after maturity the schedule predates the transfer, so the
-    // scheduled multiplier governed the confirming block. With no schedule
-    // pending, the on-chain processor guarantees multiplier and
-    // newMultiplier are equal (initialization and immediate updates set
-    // both atomically), so the current multiplier is the only conversion
-    // the account exposes; a multiplier replaced between the transfer and
-    // this read cannot be ruled out from the account alone, which is the
-    // documented approximation of this best-effort synthesis.
-    const effectiveMultiplier =
-      state.newMultiplierEffectiveTimestamp !== 0n ? state.newMultiplier : state.multiplier;
+    // scheduled multiplier governed the confirming block. A schedule replaced
+    // since the transfer surfaces as a later effective timestamp and is
+    // dropped above; a multiplier applied with an effective timestamp at or
+    // before the transfer cannot be distinguished from one that governed it,
+    // which is the documented approximation of this best-effort synthesis.
     return amountToUiAmountForScaledUiAmountMintWithoutSimulation(
       rawAmount,
       decimals,
-      effectiveMultiplier
+      state.newMultiplier
     );
   }
 

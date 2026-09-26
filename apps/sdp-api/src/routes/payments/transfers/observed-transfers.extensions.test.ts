@@ -55,6 +55,9 @@ const DECIMALS = 6;
 const BLOCK_TIME = 1_700_000_000;
 const SLOT = 123_456;
 const RAW_AMOUNT = 1_000_000n;
+// A schedule that matured before BLOCK_TIME: the transfer confirms at or
+// after it, so the scheduled multiplier is the one the confirming block used.
+const MATURED_EFFECTIVE_TIMESTAMP = 1_690_000_000n;
 
 interface RpcTokenBalance {
   accountIndex: number;
@@ -75,6 +78,14 @@ interface TestRpcOptions {
   failAccountInfoReads?: boolean;
   /** Serve the first N `getAccountInfo` calls with a 500 (a transient outage), after counting the read. */
   failFirstAccountInfoReads?: number;
+  /**
+   * Withhold the first `getAccountInfo` response until this many
+   * `getTransaction` responses have been served. Since every signature
+   * fetches its transaction before requesting mint state, this synchronizes
+   * the concurrent signatures onto the one shared in-flight mint read before
+   * it can fail and be evicted.
+   */
+  holdFirstAccountInfoReadUntilTransactions?: number;
 }
 
 interface ParsedTransferTestTransaction {
@@ -155,6 +166,8 @@ function startTokenRpcServer(
   options: TestRpcOptions = {}
 ): Promise<{ url: string; close: () => Promise<void>; getAccountInfoCalls: () => string[] }> {
   const accountInfoCalls: string[] = [];
+  let transactionCalls = 0;
+  let heldAccountInfoRespond: (() => void) | null = null;
   const server: Server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => {
@@ -163,6 +176,7 @@ function startTokenRpcServer(
     request.on("end", () => {
       const rpcRequest = JSON.parse(body) as { method?: string; params?: unknown[] };
       if (rpcRequest.method === "getTransaction") {
+        transactionCalls += 1;
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(
           JSON.stringify({
@@ -197,6 +211,17 @@ function startTokenRpcServer(
             },
           })
         );
+        // The withheld mint read can only be released once every concurrent
+        // signature's transaction response has been served.
+        if (
+          heldAccountInfoRespond &&
+          options.holdFirstAccountInfoReadUntilTransactions !== undefined &&
+          transactionCalls >= options.holdFirstAccountInfoReadUntilTransactions
+        ) {
+          const respond = heldAccountInfoRespond;
+          heldAccountInfoRespond = null;
+          respond();
+        }
         return;
       }
 
@@ -206,38 +231,50 @@ function startTokenRpcServer(
         const failTransiently =
           options.failFirstAccountInfoReads !== undefined &&
           accountInfoCalls.length <= options.failFirstAccountInfoReads;
-        if (options.failAccountInfoReads || failTransiently) {
-          response.writeHead(500, { "Content-Type": "application/json" });
+        const failRead = Boolean(options.failAccountInfoReads) || failTransiently;
+        const respondToAccountInfo = () => {
+          if (failRead) {
+            response.writeHead(500, { "Content-Type": "application/json" });
+            response.end(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                error: { message: "upstream mint-read outage" },
+              })
+            );
+            return;
+          }
+          const account = options.mintAccountsByAddress?.[mint];
+          response.writeHead(200, { "Content-Type": "application/json" });
           response.end(
             JSON.stringify({
               jsonrpc: "2.0",
               id: 1,
-              error: { message: "upstream mint-read outage" },
+              result: {
+                context: { slot: SLOT },
+                value: account
+                  ? {
+                      data: [account.data, "base64"],
+                      executable: false,
+                      lamports: 1_461_600,
+                      owner: account.owner,
+                      rentEpoch: 0,
+                      space: 286,
+                    }
+                  : null,
+              },
             })
           );
+        };
+
+        if (
+          options.holdFirstAccountInfoReadUntilTransactions !== undefined &&
+          transactionCalls < options.holdFirstAccountInfoReadUntilTransactions
+        ) {
+          heldAccountInfoRespond = respondToAccountInfo;
           return;
         }
-        const account = options.mintAccountsByAddress?.[mint];
-        response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            result: {
-              context: { slot: SLOT },
-              value: account
-                ? {
-                    data: [account.data, "base64"],
-                    executable: false,
-                    lamports: 1_461_600,
-                    owner: account.owner,
-                    rentEpoch: 0,
-                    space: 286,
-                  }
-                : null,
-            },
-          })
-        );
+        respondToAccountInfo();
         return;
       }
 
@@ -323,7 +360,14 @@ function plainTransfer(mint: string): ParsedTransferTestTransaction {
   };
 }
 
-const SCALED_MINT_ACCOUNT = scaledMintAccount(2);
+// A scaled mint whose schedule matured before the test's BLOCK_TIME, so the
+// scheduled multiplier is the one the confirming block used and the
+// conversion can be published (a mint with no schedule timestamp exposes no
+// anchor for the historical multiplier and drops its rows instead).
+const SCALED_MINT_ACCOUNT = scaledMintAccount(2, {
+  multiplier: 2,
+  effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
+});
 const STATIC_2022_MINT_ACCOUNT = encodeMintAccount([]);
 const CLASSIC_MINT_ACCOUNT = encodeMintAccount([]);
 
@@ -382,7 +426,13 @@ describe("observed Token-2022 transfer amount conversion", () => {
   it("converts a scaled mint below one the same way", async () => {
     const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
       mintAccountsByAddress: {
-        [MINT_SCALED]: { data: scaledMintAccount(0.5), owner: TOKEN_2022_PROGRAM_ADDRESS },
+        [MINT_SCALED]: {
+          data: scaledMintAccount(0.5, {
+            multiplier: 0.5,
+            effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
+          }),
+          owner: TOKEN_2022_PROGRAM_ADDRESS,
+        },
       },
     });
 
@@ -398,7 +448,10 @@ describe("observed Token-2022 transfer amount conversion", () => {
   });
 
   it("converts with the scheduled multiplier once matured and drops the pre-maturity row", async () => {
-    const mintAccount = scaledMintAccount(1, { multiplier: 3, effectiveTimestamp: 1_690_000_000n });
+    const mintAccount = scaledMintAccount(1, {
+      multiplier: 3,
+      effectiveTimestamp: MATURED_EFFECTIVE_TIMESTAMP,
+    });
     const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: mintAccount, owner: TOKEN_2022_PROGRAM_ADDRESS },
@@ -421,6 +474,27 @@ describe("observed Token-2022 transfer amount conversion", () => {
       ]);
       // The shared batch-wide resolver reads the mint once for both
       // signatures instead of once per signature.
+      expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops the row when the scaled mint carries no schedule timestamp to anchor the historical multiplier", async () => {
+    // Initialization and an already-applied multiplier update are
+    // indistinguishable when the account carries no schedule timestamp, so
+    // whether the multiplier was replaced since the transfer confirmed cannot
+    // be ruled out. The row is dropped instead of confirmed with a
+    // possibly-wrong amount.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
       expect(rpcServer.getAccountInfoCalls()).toEqual([MINT_SCALED]);
     } finally {
       await rpcServer.close();
@@ -600,6 +674,7 @@ describe("observed Token-2022 transfer amount conversion", () => {
     // the rest of the batch.
     const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
       failFirstAccountInfoReads: 1,
+      holdFirstAccountInfoReadUntilTransactions: 5,
       mintAccountsByAddress: {
         [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
       },
@@ -611,7 +686,9 @@ describe("observed Token-2022 transfer amount conversion", () => {
       );
       const rows = await buildObservedRows(rpcServer, signatures);
 
-      // Concurrency bounds the fan-out at 5, so the first five signatures
+      // Concurrency bounds the fan-out at 5, and the server withholds the
+      // first mint-read response until all five concurrent signatures have
+      // received their transaction responses, so the first five deterministically
       // share the one failed read and only the sixth retries it.
       expect(rows.map((row) => row.signature)).toEqual([String(signatures[5].signature)]);
       expect(rows[0]?.amount).toBe(
