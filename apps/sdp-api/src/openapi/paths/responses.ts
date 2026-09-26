@@ -13,6 +13,7 @@ import {
   apiKeyResponseSchema,
   assetProfileFieldOptionsResponseSchema,
   assetProfileResponseSchema,
+  assetProfileUpdateResponseSchema,
   counterpartyAccountResponseSchema,
   counterpartyFieldOptionsResponseSchema,
   counterpartyRequirementsResponseSchema,
@@ -136,6 +137,7 @@ export const apiKeyPolicyBindingsResponse = successResponseSchema(
 );
 
 export const assetProfileResponse = successResponseSchema(assetProfileResponseSchema);
+export const assetProfileUpdateResponse = successResponseSchema(assetProfileUpdateResponseSchema);
 export const assetProfileFieldOptionsResponse = successResponseSchema(
   assetProfileFieldOptionsResponseSchema
 );

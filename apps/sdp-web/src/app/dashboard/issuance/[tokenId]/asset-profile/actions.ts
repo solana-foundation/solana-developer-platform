@@ -1,6 +1,6 @@
 "use server";
 
-import type { AssetProfile } from "@sdp/types";
+import type { AssetProfile, Token } from "@sdp/types";
 import { revalidatePath } from "next/cache";
 import { getTranslations } from "@/i18n/server";
 import { parseErrorMessage } from "@/lib/api-error";
@@ -39,6 +39,7 @@ export async function updateAssetProfileAction(
           error: parseErrorMessage(body),
         }),
         assetProfile: null,
+        token: null,
       };
     }
     const profileJson = (await profileResponse.json()) as {
@@ -50,6 +51,7 @@ export async function updateAssetProfileAction(
         state: "error",
         message: t("DashboardIssuance.errors.assetProfileNotFound"),
         assetProfile: null,
+        token: null,
       };
     }
 
@@ -73,6 +75,7 @@ export async function updateAssetProfileAction(
           error: parseErrorMessage(body),
         }),
         assetProfile: null,
+        token: null,
       };
     }
 
@@ -89,11 +92,12 @@ export async function updateAssetProfileAction(
           error: parseErrorMessage(body),
         }),
         assetProfile: null,
+        token: null,
       };
     }
 
     const updateJson = (await updateResponse.json()) as {
-      data?: { assetProfile?: AssetProfile };
+      data?: { assetProfile?: AssetProfile; token?: Token };
     };
 
     revalidatePath(`/dashboard/issuance/${tokenId}`);
@@ -103,6 +107,7 @@ export async function updateAssetProfileAction(
       state: "success",
       message: t("DashboardIssuance.errors.changesSaved"),
       assetProfile: updateJson?.data?.assetProfile ?? null,
+      token: updateJson?.data?.token ?? null,
     };
   } catch (error) {
     return {
@@ -110,6 +115,7 @@ export async function updateAssetProfileAction(
       message:
         error instanceof Error ? error.message : t("DashboardIssuance.errors.unableToSaveChanges"),
       assetProfile: null,
+      token: null,
     };
   }
 }

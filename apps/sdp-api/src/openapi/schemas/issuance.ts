@@ -878,6 +878,18 @@ export const tokenWithAssetProfileResponseSchema = z
   })
   .openapi({ description: "Token + asset profile response payload." });
 
+export const assetProfileUpdateResponseSchema = z
+  .object({
+    assetProfile: assetProfileSchema.openapi({ description: "The updated asset profile." }),
+    token: tokenSchema.optional().openapi({
+      description:
+        "Present when the save re-resolved a pending token's deployment snapshot from the " +
+        "profile's advanced settings: the token fields a deploy will consume now match the " +
+        "reviewed selection.",
+    }),
+  })
+  .openapi({ description: "Asset profile update response payload." });
+
 export const getTokenQueryOpenApiSchema = getTokenQuerySchemaBase.extend({
   includeAllowlistAuthority: withOpenApi(getTokenQuerySchemaBase.shape.includeAllowlistAuthority, {
     description:

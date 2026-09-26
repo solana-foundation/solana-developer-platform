@@ -10,14 +10,16 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, type Token } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { createAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
+import { profileSnapshotMatchesToken } from "@/lib/issuance/profile-deployment-snapshot";
 import { success } from "@/lib/response";
-import { getRequestTenantScope } from "@/lib/tenant-scope";
+import { getRequestTenantScope, type TenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
 import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -419,6 +421,51 @@ async function fenceApprovedUnsettledDeployReplay(
   }
 }
 
+/**
+ * APE-848 (SOLA9-632) deploy-time backstop: refuse to deploy a pending token
+ * whose reviewed asset profile no longer resolves to the snapshot this mint
+ * would initialize. The profile save re-syncs a pending snapshot, so a
+ * mismatch means pre-fix drift or a lost save — either way the mint is
+ * irreversible and must not freeze the disagreement in place. The operator
+ * fixes it by re-saving the profile (which rewrites the pending snapshot) and
+ * retrying.
+ */
+async function assertProfileSnapshotConsistent(params: {
+  env: Env;
+  tenantScope: TenantScope;
+  organizationId: string;
+  projectId: string;
+  tokenId: string;
+  token: Token;
+}): Promise<void> {
+  const profile = await createAssetProfilesRepository(
+    params.env,
+    params.tenantScope
+  ).getActiveAssetProfileByTokenId({
+    tokenId: params.tokenId,
+    organizationId: params.organizationId,
+    projectId: params.projectId,
+  });
+  if (!profile) {
+    return;
+  }
+  if (
+    !profileSnapshotMatchesToken(
+      {
+        assetCategory: profile.asset_category,
+        assetType: profile.asset_type,
+        issuanceMetadata: profile.issuance_metadata,
+      },
+      params.token
+    )
+  ) {
+    throw conflict(
+      "Token deployment snapshot no longer matches its asset profile's advanced settings; " +
+        "re-save the asset profile and retry"
+    );
+  }
+}
+
 export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -463,6 +510,15 @@ export const deployToken = async (c: ValidatedBodyContext<typeof deployTokenSche
   if (token.mintAddress) {
     throw badRequest("Token already has a mint address");
   }
+
+  await assertProfileSnapshotConsistent({
+    env: c.env,
+    tenantScope: getRequestTenantScope(c),
+    organizationId: orgId,
+    projectId,
+    tokenId,
+    token,
+  });
 
   const requestedCustodyWalletId = body.signingCustodyWalletId ?? token.signingCustodyWalletId;
   if (!requestedCustodyWalletId) {
@@ -802,6 +858,15 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     throw badRequest("Token already has a mint address");
   }
 
+  await assertProfileSnapshotConsistent({
+    env: c.env,
+    tenantScope: getRequestTenantScope(c),
+    organizationId: orgId,
+    projectId,
+    tokenId,
+    token,
+  });
+
   const signingWalletId = resolveApiKeySigningWalletId(
     auth,
     body.signingWalletId ?? token.signingWalletId,
@@ -1006,6 +1071,20 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   let deploymentRecorded = false;
 
   try {
+    // The profile could have changed between prepare and confirm; the claim
+    // froze the snapshot the mint will carry, so hold it to the reviewed
+    // profile the same way the other deploy paths do. Throwing here releases
+    // the claim in the catch below, leaving the draft pending and
+    // re-deployable after a re-save.
+    await assertProfileSnapshotConsistent({
+      env: c.env,
+      tenantScope: getRequestTenantScope(c),
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      token: claimed,
+    });
+
     // Verify the deploy actually landed before recording it: any tokens:write
     // caller could otherwise pin an arbitrary mint to this token and poison the
     // public metadata.json. See verifyTransactionLanded for why each of the

@@ -247,6 +247,16 @@ export interface AssetProfileResponse {
   assetProfile: AssetProfile;
 }
 
+export interface AssetProfileUpdateResponse {
+  assetProfile: AssetProfile;
+  /**
+   * Present when the save re-resolved a pending token's deployment snapshot
+   * from the profile's advanced settings (APE-848): the token fields a deploy
+   * will consume now match the reviewed selection.
+   */
+  token?: PublicToken;
+}
+
 export interface TokenWithAssetProfileResponse {
   token: PublicToken;
   assetProfile: AssetProfile;

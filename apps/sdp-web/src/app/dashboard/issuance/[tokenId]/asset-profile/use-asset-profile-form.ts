@@ -193,10 +193,13 @@ export function useAssetProfileForm({
         setAssetProfile(result.assetProfile);
         setBaselineKey(result.assetProfile.updatedAt);
         setDraft(
-          profileToDraftState(result.assetProfile, {
-            ...token,
-            ...draftTokenPatch(draft),
-          })
+          profileToDraftState(
+            result.assetProfile,
+            // The API's token row wins when present: a pending save re-resolves
+            // the deployment snapshot (APE-848), so it — not the optimistic
+            // patch — is what a deploy will consume.
+            result.token ?? { ...token, ...draftTokenPatch(draft) }
+          )
         );
       }
       router.refresh();

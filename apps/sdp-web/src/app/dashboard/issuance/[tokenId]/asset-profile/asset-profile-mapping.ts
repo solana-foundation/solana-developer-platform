@@ -75,6 +75,13 @@ export interface UpdateAssetProfileActionResult {
   state: "success" | "error";
   message: string;
   assetProfile: AssetProfile | null;
+  /**
+   * The API's authoritative token row after the save. Present when the save
+   * re-resolved a pending token's deployment snapshot from the profile's
+   * advanced settings (APE-848) — it is what a deploy will now consume, so the
+   * form re-hydrates from it instead of the optimistic patch.
+   */
+  token: Token | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

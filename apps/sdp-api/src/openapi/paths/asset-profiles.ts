@@ -13,6 +13,7 @@ import { errorResponses, jsonContent, projectScopeHeaders } from "./helpers";
 import {
   assetProfileFieldOptionsResponse,
   assetProfileResponse,
+  assetProfileUpdateResponse,
   listAssetProfilesResponse,
   tokenWithAssetProfileResponse,
 } from "./responses";
@@ -138,7 +139,7 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     summary: "Update asset profile",
     operationId: "updateAssetProfile",
     description:
-      "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes; set issuanceMetadata.visibility.public to control which fields are exposed (asset.* and chain.decimals only).",
+      "Updates an asset profile. At least one field must be provided. The resulting category/type pair must be supported. Public metadata is recomputed when metadata or the asset type changes; set issuanceMetadata.visibility.public to control which fields are exposed (asset.* and chain.decimals only). While the profile's token is still pending, its advanced-settings selection is re-resolved through the creation-time resolver and the token's deployment snapshot (template, freeze-authority flag, allowlist flag, extensions) is persisted atomically with the profile; that token is returned alongside the profile. Compliance-policy changes are refused once the token has deployed.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -153,9 +154,9 @@ export function registerAssetProfilePaths(registry: OpenAPIRegistry) {
     responses: {
       200: {
         description: "Asset profile updated",
-        content: jsonContent(assetProfileResponse),
+        content: jsonContent(assetProfileUpdateResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 

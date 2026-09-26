@@ -1,16 +1,21 @@
 import {
   ASSET_CATEGORIES,
   ASSET_TYPES,
+  type AssetCategory,
   type AssetProfile,
   type AssetProfileFieldOptionsResponse,
   type AssetProfileResponse,
+  type AssetProfileUpdateResponse,
   getAssetTypeRegistryEntry,
   hasPermission,
+  type IssuanceMetadata,
   isAssetTypeSupported,
   type ListAssetProfilesResponse,
+  type Token,
 } from "@sdp/types";
 import { z } from "zod";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
+import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { AssetProfileRow } from "@/db/repositories/asset-profile.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
@@ -18,18 +23,28 @@ import {
   badRequest,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
   notFound,
 } from "@/lib/errors";
 import {
   resolveAdvancedSettings,
+  selectedAuthorityValuedSettings,
   stampAdvancedSettingsVersion,
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
+import {
+  profileUsesAdvancedSettings,
+  resolveProfileDeploymentSnapshot,
+} from "@/lib/issuance/profile-deployment-snapshot";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
 import { noContent, success } from "@/lib/response";
+import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
+import { TokenService } from "@/services/token.service";
+import { resolveIssuanceWallet } from "../issuance/handlers/authority-resolution";
+import { toPublicToken } from "../issuance/handlers/public-response";
 import { type AppContext, getAssetProfilesRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
@@ -219,6 +234,96 @@ export const getAssetProfileByTokenId = async (c: AppContext) => {
   return success(c, response);
 };
 
+/** The deployment-snapshot fields a pending-token save writes, as resolved. */
+interface PendingSnapshotSync {
+  template: Token["template"];
+  isFreezable: boolean;
+  requiresAllowlist: boolean;
+  extensions: Token["extensions"];
+}
+
+/**
+ * Decide what a profile save does to its pending token's deployment snapshot.
+ *
+ * A token that already deployed (or is mid-claim) has an immutable mint: a
+ * compliance-policy change can never reach it, so refuse instead of letting the
+ * reviewed profile silently diverge from what was initialized. A pending token
+ * re-resolves the saved selection through the creation-time resolver — the same
+ * authority validation included — so the reviewed settings and the snapshot
+ * commit together.
+ *
+ * Returns null when there is nothing to sync: the token is not pending, or the
+ * profile never asserted advanced settings (legacy template + overrides).
+ */
+async function resolvePendingSnapshotSync(params: {
+  env: Parameters<typeof resolveIssuanceWallet>[0]["env"];
+  auth: ReturnType<typeof getAuth>;
+  token: Token;
+  policyChanged: boolean;
+  usesAdvancedSettings: boolean;
+  assetCategory: AssetCategory;
+  assetType: string;
+  metadata: IssuanceMetadata;
+}): Promise<PendingSnapshotSync | null> {
+  const { token } = params;
+  if (token.status !== "pending" || token.mintAddress) {
+    if (params.policyChanged) {
+      throw conflict(
+        "This asset profile's compliance policy can no longer be changed because its token has already been deployed"
+      );
+    }
+    return null;
+  }
+  if (!params.usesAdvancedSettings) {
+    return null;
+  }
+
+  // Authority-valued settings resolve to a real wallet exactly like creation:
+  // reuse the delegate already stamped on the pending token, else the signing
+  // custody wallet it will deploy from, else refuse rather than brick the mint
+  // with a missing authority.
+  const authoritySettings = selectedAuthorityValuedSettings(params.metadata);
+  let permanentDelegateAuthority: string | undefined;
+  if (authoritySettings.length > 0) {
+    if (typeof token.extensions?.permanentDelegate === "string") {
+      permanentDelegateAuthority = token.extensions.permanentDelegate;
+    } else if (token.signingCustodyWalletId) {
+      const signingWallet = await resolveIssuanceWallet({
+        env: params.env,
+        auth: params.auth,
+        custodyWalletId: token.signingCustodyWalletId,
+        requiredWalletPermissions: ["tokens:write"],
+      });
+      permanentDelegateAuthority = signingWallet.publicKey;
+    } else {
+      throw badRequest("A signing wallet is required for the selected advanced settings", {
+        errors: authoritySettings.map((settingKey) => ({
+          settingKey,
+          reason: "signing_wallet_required",
+        })),
+      });
+    }
+  }
+
+  const resolved = resolveProfileDeploymentSnapshot({
+    assetCategory: params.assetCategory,
+    assetType: params.assetType,
+    issuanceMetadata: params.metadata,
+    decimals: token.decimals,
+    requiresAllowlist: token.requiresAllowlist,
+    permanentDelegateAuthority,
+  });
+  if (resolved.errors.length > 0) {
+    throw badRequest("Invalid advanced settings combination", { errors: resolved.errors });
+  }
+  return {
+    template: resolved.template,
+    isFreezable: resolved.isFreezable,
+    requiresAllowlist: resolved.requiresAllowlist,
+    extensions: resolved.extensions,
+  };
+}
+
 export const updateAssetProfile = async (
   c: ValidatedBodyContext<typeof updateAssetProfileSchema>
 ) => {
@@ -301,22 +406,88 @@ export const updateAssetProfile = async (
       ? projectPublicMetadata(nextCategory, nextType, nextMetadata)
       : undefined;
 
-  const updated = await repo.updateAssetProfile({
-    profileId,
-    organizationId: auth.organizationId,
-    projectId,
-    assetCategory: body.assetCategory,
-    assetType: body.assetType,
-    assetTypeVersion: typeChanged ? registryEntry.version : undefined,
-    issuanceMetadata: persistedMetadata,
-    publicMetadata,
+  // APE-848: a pending token deploys from its issued_tokens snapshot (template,
+  // freeze-authority flag, allowlist flag, extension rows), while the reviewed
+  // profile above is what the dashboard shows. Resolve the saved advanced
+  // settings through the creation-time resolver and persist the resulting
+  // snapshot atomically with the profile row, so the two can never diverge.
+  // Profiles that never asserted settings (legacy template + overrides) and
+  // tokens that already deployed (their mint is immutable) keep the previous
+  // behavior; a policy change on the latter is refused rather than silently
+  // diverging from the mint it cannot reach.
+  const db = getDb(c.env);
+  const tenantScope = getRequestTenantScope(c);
+  const policyChanged =
+    body.issuanceMetadata !== undefined &&
+    compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata);
+  const usesAdvancedSettings =
+    profileUsesAdvancedSettings(nextMetadata) ||
+    profileUsesAdvancedSettings(current.issuance_metadata);
+
+  const { updated, syncedToken } = await db.transaction(async (tx) => {
+    const client = asTransactionalClient(tx);
+    const transactionalProfilesRepo = createPostgresAssetProfilesRepository(client);
+    const tokenService = new TokenService(client, tenantScope);
+
+    // Inside the transaction so the deployed/pending decision reads the same
+    // snapshot the guarded writes below contend with.
+    const profileToken = await tokenService.getToken({
+      tokenId: current.token_id,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+
+    const snapshot = profileToken
+      ? await resolvePendingSnapshotSync({
+          env: c.env,
+          auth,
+          token: profileToken,
+          policyChanged,
+          usesAdvancedSettings,
+          assetCategory: nextCategory,
+          assetType: nextType,
+          metadata: nextMetadata,
+        })
+      : null;
+
+    const profileRow = await transactionalProfilesRepo.updateAssetProfile({
+      profileId,
+      organizationId: auth.organizationId,
+      projectId,
+      assetCategory: body.assetCategory,
+      assetType: body.assetType,
+      assetTypeVersion: typeChanged ? registryEntry.version : undefined,
+      issuanceMetadata: persistedMetadata,
+      publicMetadata,
+    });
+
+    if (!profileRow) {
+      throw notFound("Asset profile");
+    }
+
+    let syncedTokenRow: Token | null = null;
+    if (snapshot) {
+      // Guarded on pending + no mint inside the same transaction: losing the
+      // guard means a deploy claimed the token mid-save, so neither side of the
+      // reviewed agreement may land.
+      syncedTokenRow = await tokenService.syncPendingTokenDeploymentSnapshot({
+        tokenId: current.token_id,
+        template: snapshot.template,
+        isFreezable: snapshot.isFreezable,
+        requiresAllowlist: snapshot.requiresAllowlist,
+        extensions: snapshot.extensions,
+      });
+      if (!syncedTokenRow) {
+        throw conflict(
+          "Token deployment state changed while saving the asset profile; re-fetch and retry"
+        );
+      }
+    }
+
+    return { updated: profileRow, syncedToken: syncedTokenRow };
   });
 
-  if (!updated) {
-    throw notFound("Asset profile");
-  }
-
-  const auditService = new AuditService(getDb(c.env));
+  const auditService = new AuditService(db);
   await auditService.log(c, {
     organizationId: auth.organizationId,
     userId: auth.userId ?? undefined,
@@ -324,10 +495,18 @@ export const updateAssetProfile = async (
     action: "update",
     resourceType: "asset_profile",
     resourceId: profileId,
-    metadata: { changedFields: Object.keys(body) },
+    metadata: {
+      changedFields: Object.keys(body),
+      ...(syncedToken ? { syncedTokenSnapshot: true } : {}),
+    },
   });
 
-  const response: AssetProfileResponse = { assetProfile: mapToAssetProfile(updated) };
+  // The updated token snapshot rides along when the save re-resolved it, so
+  // callers see exactly what a deploy would now initialize.
+  const response: AssetProfileUpdateResponse = {
+    assetProfile: mapToAssetProfile(updated),
+    ...(syncedToken ? { token: toPublicToken(syncedToken) } : {}),
+  };
   return success(c, response);
 };
 

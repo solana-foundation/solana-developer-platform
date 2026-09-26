@@ -1300,6 +1300,68 @@ export class TokenService {
   }
 
   /**
+   * Rewrite a pending token's deployment snapshot — the fields a deploy reads
+   * (`template`, `freeze_authority_enabled`, `allowlist_enabled`) plus its
+   * `issued_token_extensions` rows — to the values the asset-profile resolver
+   * produced from the profile's saved advanced settings (APE-848).
+   *
+   * Guarded on `status = 'pending' AND mint_address IS NULL`, the same
+   * undeployed window the deploy claim reads: a concurrent deploy makes this
+   * match zero rows instead of mutating a mint that is already in flight.
+   * Runs on the caller's transactional client so the profile row and the
+   * snapshot it reviews commit atomically.
+   *
+   * @returns The refreshed token, or null when the undeployed guard matched
+   * no rows (the caller must roll its transaction back).
+   */
+  async syncPendingTokenDeploymentSnapshot(input: {
+    tokenId: string;
+    template: TokenTemplate;
+    isFreezable: boolean;
+    requiresAllowlist: boolean;
+    extensions: TokenExtensionsConfig | null;
+  }): Promise<Token | null> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET template = ?,
+             freeze_authority_enabled = ?,
+             allowlist_enabled = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'pending' AND mint_address IS NULL`
+      )
+      .bind(
+        input.template,
+        input.isFreezable ? 1 : 0,
+        input.requiresAllowlist ? 1 : 0,
+        now,
+        input.tokenId,
+        ...tenant.values
+      )
+      .run();
+
+    if (rowsAffected === 0) {
+      return null;
+    }
+
+    // The extension rows are the rest of the snapshot: replace them wholesale
+    // so removed settings drop their rows exactly as a fresh create would.
+    // Pending tokens carry no authority bookkeeping rows (those are stamped at
+    // deploy time), so nothing else lives here to preserve.
+    await this.db
+      .prepare("DELETE FROM issued_token_extensions WHERE token_id = ?")
+      .bind(input.tokenId)
+      .run();
+    if (input.extensions) {
+      await this.insertTokenExtensions(input.tokenId, input.extensions, now);
+    }
+
+    return this._getTokenById(input.tokenId);
+  }
+
+  /**
    * Commit a deploy: record the mint and flip the claimed token to `active`.
    *
    * Guarded on `deploying`/no-mint so it only completes a claim taken via
