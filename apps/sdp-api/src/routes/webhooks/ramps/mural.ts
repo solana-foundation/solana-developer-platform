@@ -26,6 +26,14 @@ import type { WebhookProcessor } from "./processor";
 
 const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
 
+/**
+ * How many times one lifecycle delivery re-resolves the active owner of its
+ * Mural organization after the lock shows that the row it locked no longer
+ * owns it. Bounded so a pathological reassignment loop parks the inbox row
+ * for replay instead of looping forever.
+ */
+const MURAL_LIFECYCLE_OWNER_RECHECKS = 3;
+
 type MuralProcessorEvent =
   | Exclude<MuralWebhookEvent, { kind: "account_credited" | "kyc_status" | "tos_accepted" }>
   | (Extract<MuralWebhookEvent, { kind: "account_credited" }> & { deliveryId: string })
@@ -236,17 +244,26 @@ function isStaleMuralKycStatus(
   return typeof current === "string" && MURAL_TERMINAL_KYC_STATUSES.has(current);
 }
 
-async function handleOrganizationLifecycleEvent(
+/**
+ * One lookup-lock-apply pass against the current active owner of the event's
+ * Mural organization. `"owner-changed"` means the row locked was removed,
+ * archived, or no longer owns the organization: nothing was mutated or
+ * admitted, and the caller re-resolves the owner and tries again.
+ */
+async function applyMuralLifecycleToCurrentOwner(
   env: Env,
   event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & {
     deliveryId: string;
   }
-): Promise<void> {
-  const repo = createSystemCounterpartiesRepository(env);
-  const counterparty = await repo.findCounterpartyByMuralOrganizationId(event.organizationId);
+): Promise<"done" | "owner-changed"> {
+  const counterparty = await createSystemCounterpartiesRepository(
+    env
+  ).findCounterpartyByMuralOrganizationId(event.organizationId);
   if (!counterparty) {
+    // No active counterparty owns the organization: nothing to mutate, and a
+    // retry would resolve the same way, so the delivery is acknowledged.
     getLogger().warn(`[mural webhook] no counterparty for organization ${event.organizationId}`);
-    return;
+    return "done";
   }
   if (
     event.kind === "kyc_status" &&
@@ -258,7 +275,7 @@ async function handleOrganizationLifecycleEvent(
     getLogger().info(
       `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
     );
-    return;
+    return "done";
   }
 
   // A signed lifecycle webhook outlives its durable inbox row — applyStoredRampWebhookEvent
@@ -271,7 +288,7 @@ async function handleOrganizationLifecycleEvent(
   const newStatus = event.kind === "kyc_status" ? event.kycStatus : "ACCEPTED";
   const audit = new AuditService(getDb(env), createKVStoreSet(env).cache);
   let intent: AuditIntent | undefined;
-  let skipped = false;
+  let ownerChanged = false;
 
   try {
     await getDb(env).transaction(async (tx) => {
@@ -292,9 +309,10 @@ async function handleOrganizationLifecycleEvent(
           provider_data: unknown;
         }>();
       if (!locked) {
-        // The counterparty was removed between the lookup and the lock;
-        // there is nothing left to mutate or admit.
-        skipped = true;
+        // The counterparty was removed between the lookup and the lock:
+        // re-resolve the organization's current owner instead of admitting
+        // anything against a row that no longer exists.
+        ownerChanged = true;
         return;
       }
       const currentOrganization = readMuralOrganization(
@@ -313,9 +331,9 @@ async function handleOrganizationLifecycleEvent(
         (locked.mural_organization_id ?? readMuralOrganizationId(currentOrganization)) !==
           event.organizationId
       ) {
-        skipped = true;
+        ownerChanged = true;
         getLogger().info(
-          `[mural webhook] ignoring lifecycle event: counterparty ${counterparty.id} is no longer the active owner of Mural organization ${event.organizationId}`
+          `[mural webhook] counterparty ${counterparty.id} is no longer the active owner of Mural organization ${event.organizationId}; re-resolving its owner`
         );
         return;
       }
@@ -324,8 +342,8 @@ async function handleOrganizationLifecycleEvent(
         isStaleMuralKycStatus(currentOrganization, event.kycStatus)
       ) {
         // Re-checked under the lock: a pre-decision event that raced the
-        // decision delivery must not undo it.
-        skipped = true;
+        // decision delivery must not undo it. Acknowledged: the event is
+        // stale for the current owner, and re-resolving cannot freshen it.
         getLogger().info(
           `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
         );
@@ -409,18 +427,44 @@ async function handleOrganizationLifecycleEvent(
     }
     throw error;
   }
-  if (skipped || !intent) {
-    return;
+  if (ownerChanged) {
+    return "owner-changed";
   }
+  if (intent) {
+    await audit.completeCriticalSystem(intent, {
+      metadata: {
+        result: "applied",
+        ...(event.kind === "kyc_status"
+          ? { normalizedKycStatus: mapMuralKycStatusToSdp(event.kycStatus) }
+          : {}),
+      },
+    });
+  }
+  return "done";
+}
 
-  await audit.completeCriticalSystem(intent, {
-    metadata: {
-      result: "applied",
-      ...(event.kind === "kyc_status"
-        ? { normalizedKycStatus: mapMuralKycStatusToSdp(event.kycStatus) }
-        : {}),
-    },
-  });
+async function handleOrganizationLifecycleEvent(
+  env: Env,
+  event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & {
+    deliveryId: string;
+  }
+): Promise<void> {
+  for (let attempt = 0; attempt < MURAL_LIFECYCLE_OWNER_RECHECKS; attempt += 1) {
+    if ((await applyMuralLifecycleToCurrentOwner(env, event)) === "done") {
+      return;
+    }
+    getLogger().info(
+      `[mural webhook] Mural organization ${event.organizationId} changed owner while applying ${event.kind} ${event.deliveryId}; re-applying to its current owner`
+    );
+  }
+  // The owner kept changing through every bounded re-resolve. Fail the apply
+  // (non-terminal): the inbox keeps the verified payload and retries, so the
+  // signed compliance decision lands on whichever counterparty owns the
+  // organization once the reassignment settles — or parks as failed and
+  // pages — instead of being acknowledged unapplied.
+  throw new Error(
+    `[mural webhook] Mural organization ${event.organizationId} changed owners on every re-resolve while applying ${event.kind} ${event.deliveryId}; leaving the delivery pending for retry`
+  );
 }
 
 export class MuralWebhookProcessor implements WebhookProcessor<unknown, MuralProcessorEvent> {

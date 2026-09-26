@@ -1,5 +1,6 @@
 import { createSign, generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresRampWebhookEventsRepository } from "@/db/repositories/ramp-webhook-event.repository";
 import { MuralWebhookProcessor } from "@/routes/webhooks/ramps/mural";
@@ -11,12 +12,15 @@ import { seedTestDatabase } from "@/test/mocks/db";
 /**
  * Simulates a concurrent writer winning the race between the counterparty
  * lookup and the transaction lock inside the lifecycle handler: the wrapped
- * lookup returns the real row after archiving it ("archive") or after
- * pointing its denormalized Mural organization id elsewhere ("reassign").
- * Off by default, so every other test exercises the unmocked flow.
+ * lookup returns the real row after archiving it ("archive"), after pointing
+ * its denormalized Mural organization id elsewhere ("reassign"), or after
+ * archiving it and handing the organization to a successor counterparty
+ * ("handover"). Off by default, so every other test exercises the unmocked
+ * flow.
  */
 const concurrentWriter = vi.hoisted(() => ({
-  mode: "off" as "off" | "archive" | "reassign",
+  mode: "off" as "off" | "archive" | "reassign" | "handover",
+  handover: { organizationId: "", successorId: "" },
 }));
 
 vi.mock("@/db/repositories", async (importOriginal) => {
@@ -35,6 +39,20 @@ vi.mock("@/db/repositories", async (importOriginal) => {
       repo.findCounterpartyByMuralOrganizationId = async (organizationId: string) => {
         const found = await lookup(organizationId);
         if (!found) {
+          return found;
+        }
+        if (concurrentWriter.mode === "handover") {
+          // One-shot: the organization changes owners exactly once, so the
+          // handler's re-resolve sees the settled ownership.
+          concurrentWriter.mode = "off";
+          await getDb(mockEnv)
+            .prepare("UPDATE counterparties SET status = 'archived' WHERE id = ?")
+            .bind(found.id)
+            .run();
+          await getDb(mockEnv)
+            .prepare("UPDATE counterparties SET mural_organization_id = ? WHERE id = ?")
+            .bind(concurrentWriter.handover.organizationId, concurrentWriter.handover.successorId)
+            .run();
           return found;
         }
         await getDb(mockEnv)
@@ -75,6 +93,13 @@ interface AuditRow {
 function parseMetadata(row: AuditRow): Record<string, unknown> {
   return row.metadata === null ? {} : (JSON.parse(row.metadata) as Record<string, unknown>);
 }
+
+/**
+ * The verified Mural webhook envelope: `verify()` stamps every verified body
+ * with the delivery digest it signed. Parsed, not asserted — a verified body
+ * without its delivery id is an envelope violation and fails loudly.
+ */
+const verifiedMuralWebhook = z.object({ __sdpDeliveryId: z.string().min(1) });
 
 /** The one row a filter must produce; fails the test with the list length otherwise. */
 function sole<T>(rows: T[]): T {
@@ -227,7 +252,7 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       rawBody: body,
       requestUrl: "http://localhost/webhooks/payments/ramps/sandbox/mural",
     });
-    const deliveryId = (verified as Record<string, string>).__sdpDeliveryId;
+    const deliveryId = verifiedMuralWebhook.parse(verified).__sdpDeliveryId;
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const stored = await events.insertEvent({
       provider: "mural",
@@ -553,5 +578,120 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
       .first<{ count: number }>();
     expect(inbox?.count).toBe(0);
+  });
+
+  /**
+   * An archive-and-reassign racing the lookup window must not discard a
+   * signed compliance decision: when the locked row stopped owning the Mural
+   * organization, the handler re-resolves its current active owner and
+   * applies the event there, so the approval lands on the successor's
+   * compliance state with an audit trail naming the counterparty it mutated.
+   */
+  it("applies the lifecycle event to the successor counterparty when the organization changes owner between lookup and lock", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    const successorId = "cp_mural_audit_successor";
+    const successorWalletId = "kyc_mural_audit_successor";
+    // The successor is active but claims no Mural organization yet, so the
+    // first lookup resolves only the original counterparty.
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO counterparties (
+             id, organization_id, project_id, entity_type, display_name,
+             status, created_by, provider_data
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb)`
+        )
+        .bind(
+          successorId,
+          organizationId,
+          projectId,
+          "business",
+          "Mural Audit Regression Successor",
+          "active",
+          userId,
+          {}
+        ),
+      getDb(env)
+        .prepare(
+          `INSERT INTO kyc_wallets (
+             id, organization_id, project_id, wallet_address, network,
+             counterparty_id, kyc_status, created_by
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          successorWalletId,
+          organizationId,
+          projectId,
+          "11111111111111111111111111111112",
+          "solana",
+          successorId,
+          "pending",
+          userId
+        ),
+    ]);
+
+    concurrentWriter.handover = { organizationId: muralOrganizationId, successorId };
+    concurrentWriter.mode = "handover";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_handover",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    expect(applied).toBe(true);
+
+    const original = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const successor = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(successorId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(successorWalletId)
+      .first<{ kyc_status: string }>();
+    expect(original?.provider_data.mural?.organization?.kycStatus).toBe("pending");
+    expect(successor?.provider_data.mural?.organization?.kycStatus).toBe("approved");
+    expect(wallet?.kyc_status).toBe("verified");
+
+    // One admission, and it names the successor as the counterparty mutated.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(intents).toHaveLength(1);
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).resource_id).toBe(successorId);
+    const intentMetadata = parseMetadata(sole(intents)) as {
+      target?: { metadata?: Record<string, unknown> };
+    };
+    expect(intentMetadata.target?.metadata).toMatchObject({
+      counterpartyId: successorId,
+      muralOrganizationId,
+      oldStatus: null,
+      newStatus: "approved",
+    });
   });
 });
