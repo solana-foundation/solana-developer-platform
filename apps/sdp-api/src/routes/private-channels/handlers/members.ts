@@ -1,4 +1,5 @@
 import {
+  hasPermission,
   PRIVATE_CHANNEL_EVENT_TYPES,
   type PrivateChannelMembershipChannelDto,
   type PrivateChannelPrincipalDto,
@@ -89,6 +90,26 @@ export const listPrivateChannelPrincipals = async (c: AppContext) => {
       throw mapPrivateChannelError(error);
     }
   }
+
+  // One directory visibility policy for dashboard and API-key callers alike
+  // (SOLA9-662): the full principal directory — every principal plus its
+  // channel assignments — is administrative and requires the same
+  // `projects:write` (or `org:admin`) authority as the directory mutations
+  // above. Any other authenticated caller, including payments:read-only API
+  // keys, is scoped to the project's default movement principal: the identity
+  // its Private Channels payments flows act through (transfers resolve the
+  // same actor). Its own channel memberships stay visible so the transfer
+  // flow can intersect them with active channels.
+  const directoryAdmin =
+    hasPermission(auth.permissions, "projects:write") ||
+    hasPermission(auth.permissions, "org:admin");
+  if (!directoryAdmin) {
+    const memberships = await repo.listMembershipsForUser(defaultPrincipal.id);
+    return success(c, {
+      principals: [toDto(defaultPrincipal, memberships)],
+    });
+  }
+
   const [rows, memberships] = await Promise.all([
     repo.listPrincipals(scope, instance.id),
     repo.listMembershipsByProject(scope),
