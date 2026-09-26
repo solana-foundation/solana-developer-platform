@@ -293,6 +293,7 @@ interface TokenRow {
   template: string;
   total_supply_cached: string;
   total_supply_updated_at: string | null;
+  total_supply_read_slot: number | null;
   max_supply: string | null;
   is_mintable: number;
   freeze_authority_enabled: number;
@@ -1422,13 +1423,14 @@ export class TokenService {
    * record stands for `POST /supply/refresh` to reconcile. Returning false is
    * the caller's signal to keep the retained-reservation posture.
    *
-   * The subtraction deliberately does not advance `total_supply_updated_at`.
-   * That stamp is the settled-burn bookkeeping's signal that a chain reading
-   * has happened — a refresh re-observes the chain, so a burn admitted before
-   * it is already inside the figure it read. A release is not a chain reading:
-   * advancing the stamp here would let a burn whose bookkeeping follows the
-   * release mistake it for the reconciliation that absorbed it, skip its own
-   * decrement, and leave the cache high until a separate supply refresh.
+   * The subtraction deliberately does not advance `total_supply_updated_at`,
+   * nor `total_supply_read_slot`. That stamp is the settled-burn bookkeeping's
+   * signal that a chain reading has happened — a refresh re-observes the
+   * chain, so a burn admitted before it is already inside the figure it read.
+   * A release is not a chain reading: advancing either signal here would let
+   * a burn whose bookkeeping follows the release mistake it for the
+   * reconciliation that absorbed it, skip its own decrement, and leave the
+   * cache high until a separate supply refresh.
    *
    * @returns whether the reservation was released and the row cleared.
    */
@@ -1518,8 +1520,8 @@ export class TokenService {
     await this.db.transaction(async (tx) => {
       const row = await tx
         .prepare(
-          `SELECT it.supply_bookkeeping_applied_at, it.operation_params,
-                  t.decimals, t.total_supply_updated_at
+          `SELECT it.supply_bookkeeping_applied_at, it.operation_params, it.slot,
+                  t.decimals, t.total_supply_updated_at, t.total_supply_read_slot
            FROM issuance_transactions it
            JOIN issued_tokens t ON t.id = it.token_id
            WHERE it.id = ? AND it.token_id = ?${tokenScope.clause}
@@ -1529,8 +1531,10 @@ export class TokenService {
         .first<{
           supply_bookkeeping_applied_at: string | null;
           operation_params: string;
+          slot: number | null;
           decimals: number;
           total_supply_updated_at: string | null;
+          total_supply_read_slot: number | null;
         }>();
       if (!row) throw new Error("TOKEN_TRANSACTION_NOT_FOUND");
       if (row.supply_bookkeeping_applied_at !== null) return;
@@ -1542,16 +1546,24 @@ export class TokenService {
       const hasBaseline = baseline === null || typeof baseline === "string";
       const supplyChangedSinceAdmission = hasBaseline && baseline !== row.total_supply_updated_at;
 
-      // A chain reconciliation after this burn was admitted already includes
-      // the settled burn. Subtracting again would undercount supply and create
-      // false mint headroom, so in that case only consume the retry marker.
-      // The comparison is deliberately one-sided: a stamp move the burn
-      // predated (the burn settled after the last reading) skips a decrement
-      // the cache still owes, and the record runs high until the next refresh
-      // past the in-flight window — accepted, because the reverse guess would
-      // subtract twice and run the record low, admitting mints past the cap.
-      // See the stamp discussion on `setSupplyFromBaseUnits`.
-      if (!supplyChangedSinceAdmission) {
+      // A chain reconciliation taken at slot S includes every settled effect
+      // with a slot at or below S, so a burn that settled at or before the
+      // last reading's slot is already inside the figure — subtracting again
+      // would undercount supply and create false mint headroom, and a burn
+      // that settled after it is not inside the figure no matter how the
+      // stamps line up. Slots order the burn against the reading exactly,
+      // which is what the wall-clock comparison below cannot do for rows that
+      // predate the read slot: there the comparison stays one-sided — a stamp
+      // move the burn predated skips a decrement the cache may still owe, and
+      // the record runs high until the next refresh past the in-flight window
+      // — accepted, because the reverse guess would subtract twice and run
+      // the record low, admitting mints past the cap. See the stamp
+      // discussion on `setSupplyFromBaseUnits`.
+      const burnAlreadyReconciled =
+        row.slot !== null && row.total_supply_read_slot !== null
+          ? row.slot <= row.total_supply_read_slot
+          : supplyChangedSinceAdmission;
+      if (!burnAlreadyReconciled) {
         const tokenMutation = this.tenantMutationScope();
         const updatedToken = await tx
           .prepare(
@@ -2189,22 +2201,30 @@ export class TokenService {
    * chain had already applied, including any burn whose bookkeeping had not run
    * yet — and so did a reading that leaves the figure unchanged, because the
    * chain total matching the cache can be a settled burn cancelled out by an
-   * off-platform mint, which the reading absorbed all the same. Settled-burn
-   * bookkeeping reads that off `total_supply_updated_at`.
+   * off-platform mint, which the reading absorbed all the same.
    *
    * The stamp is one wall-clock figure and cannot say whether a given burn
-   * settled before the reading or after it. When the order goes the wrong way
-   * — a burn admitted before a reading but settled after it, on a figure the
-   * reading took effect on — the bookkeeping skips a decrement the cache still
-   * owes and the record runs high until the next refresh past the in-flight
-   * window. That is the accepted side of the trade: the opposite order (a
-   * settled burn inside a reading the stamp refuses to acknowledge) would make
-   * the bookkeeping subtract twice and run the record low, admitting mints
-   * past the cap — a hole that does not heal on its own. Telling the two
-   * orders apart needs the chain slot each side observed, which the record
-   * does not carry.
+   * settled before the reading or after it, so settled-burn bookkeeping does
+   * not have to guess from it: every refresh also records the slot the reading
+   * was taken at (`total_supply_read_slot`, never moved backwards), and a burn
+   * with a settlement slot at or below that reading is inside this figure by
+   * slot order — no wall-clock ambiguity. The stamp comparison survives only
+   * as the fallback for rows recorded before the slot existed, where it keeps
+   * its one-sided trade: a stamp move the burn predated skips a decrement the
+   * cache may still owe, and the record runs high until the next refresh past
+   * the in-flight window — accepted, because the reverse guess would subtract
+   * twice and run the record low, admitting mints past the cap, a hole that
+   * does not heal on its own.
+   *
+   * @param readSlot the chain slot the reading was taken at, from the RPC
+   *   response context. Unknown slots leave `total_supply_read_slot` alone —
+   *   the bookkeeping keeps deciding from the stamp for such rows.
    */
-  async setSupplyFromBaseUnits(tokenId: string, supplyBaseUnits: string): Promise<Token> {
+  async setSupplyFromBaseUnits(
+    tokenId: string,
+    supplyBaseUnits: string,
+    readSlot?: number | null
+  ): Promise<Token> {
     if (!/^\d+$/.test(supplyBaseUnits)) {
       throw new Error("INVALID_SUPPLY");
     }
@@ -2253,6 +2273,12 @@ export class TokenService {
                  THEN issued_tokens.total_supply_updated_at
                ELSE ?
              END,
+             -- GREATEST ignores NULL, so an unknown slot leaves the recorded
+             -- one alone and a known slot never moves backwards: the figure
+             -- this statement writes includes every settled effect up to its
+             -- own reading slot, and the previous reading it started from
+             -- covered everything up to the slot before it.
+             total_supply_read_slot = GREATEST(issued_tokens.total_supply_read_slot, ?),
              updated_at = ?
          FROM resolved
          WHERE issued_tokens.id = ?${tenantWrite.clause}
@@ -2267,6 +2293,7 @@ export class TokenService {
         tokenId,
         ...tenantRead.values,
         now,
+        readSlot ?? null,
         now,
         tokenId,
         ...tenantWrite.values
@@ -2289,10 +2316,9 @@ export class TokenService {
     // that leaves the figure unchanged is not a hold — the chain total meeting
     // the cache can be a settled burn cancelled out by an off-platform mint —
     // and it moves the stamp, because it re-observed the chain all the same.
-    // The stamp is what settled-burn bookkeeping trusts to mean the chain was
-    // re-observed; moving it on an unchanged hold would make such a burn skip
-    // the one decrement the cache still owes, and the next refresh past the
-    // window would be the only thing that finished its reconciliation.
+    // The read slot moved with the figure either way: it is what settled-burn
+    // bookkeeping slots against, and this reading re-observed the chain up to
+    // its own slot no matter what it did to the figure.
     if (applied && applied.total_supply_cached !== supplyBaseUnits) {
       getLogger().warn(
         {

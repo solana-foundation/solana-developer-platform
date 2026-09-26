@@ -15,13 +15,19 @@ interface TokenSupplyRpcResponse {
     value?: {
       amount?: string;
     };
+    context?: {
+      slot?: number;
+    };
   };
   error?: {
     message?: string;
   };
 }
 
-async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): Promise<string> {
+async function fetchTokenSupplyBaseUnits(
+  rpcUrl: string,
+  mintAddress: string
+): Promise<{ amount: string; slot: number | null }> {
   const rpcResponse = await fetch(rpcUrl, {
     method: "POST",
     headers: {
@@ -49,7 +55,18 @@ async function fetchTokenSupplyBaseUnits(rpcUrl: string, mintAddress: string): P
     throw new Error("RPC returned an invalid token supply");
   }
 
-  return amount;
+  // The response context carries the slot the reading was taken at. Supply
+  // reconciliation records it so settled-burn bookkeeping can order a burn's
+  // settlement against this reading by slot instead of guessing from
+  // wall-clock stamps. A response without one simply leaves the recorded
+  // slot alone.
+  const contextSlot = payload.result?.context?.slot;
+  const slot =
+    typeof contextSlot === "number" && Number.isInteger(contextSlot) && contextSlot >= 0
+      ? contextSlot
+      : null;
+
+  return { amount, slot };
 }
 
 export const refreshTokenSupply = async (c: AppContext) => {
@@ -71,10 +88,10 @@ export const refreshTokenSupply = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token must be deployed before refreshing supply");
   }
 
-  let supplyBaseUnits: string;
+  let supply: { amount: string; slot: number | null };
   try {
     const { rpcUrl } = getSolanaConfig(c.env);
-    supplyBaseUnits = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
+    supply = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);
   } catch (error) {
     throw new AppError(
       "SOLANA_RPC_ERROR",
@@ -82,7 +99,11 @@ export const refreshTokenSupply = async (c: AppContext) => {
     );
   }
 
-  const refreshedToken = await tokenService.setSupplyFromBaseUnits(tokenId, supplyBaseUnits);
+  const refreshedToken = await tokenService.setSupplyFromBaseUnits(
+    tokenId,
+    supply.amount,
+    supply.slot
+  );
 
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
@@ -91,7 +112,8 @@ export const refreshTokenSupply = async (c: AppContext) => {
     resourceId: tokenId,
     metadata: {
       mintAddress: token.mintAddress,
-      supplyBaseUnits,
+      supplyBaseUnits: supply.amount,
+      supplyReadSlot: supply.slot,
     },
   });
 
