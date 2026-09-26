@@ -430,8 +430,14 @@ function convertObservedTokenAmount(input: {
       return null;
     }
 
-    // At or after maturity (or with no schedule pending), the extension
-    // converts through the scheduled multiplier.
+    // At or after maturity the schedule predates the transfer, so the
+    // scheduled multiplier governed the confirming block. With no schedule
+    // pending, the on-chain processor guarantees multiplier and
+    // newMultiplier are equal (initialization and immediate updates set
+    // both atomically), so the current multiplier is the only conversion
+    // the account exposes; a multiplier replaced between the transfer and
+    // this read cannot be ruled out from the account alone, which is the
+    // documented approximation of this best-effort synthesis.
     const effectiveMultiplier =
       state.newMultiplierEffectiveTimestamp !== 0n ? state.newMultiplier : state.multiplier;
     return amountToUiAmountForScaledUiAmountMintWithoutSimulation(

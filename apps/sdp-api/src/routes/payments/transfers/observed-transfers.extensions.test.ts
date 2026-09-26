@@ -73,6 +73,8 @@ interface TestRpcOptions {
   mintAccountsByAddress?: Record<string, MintAccountPayload | null>;
   /** Serve every `getAccountInfo` with a 500 (a persistent RPC outage), after counting the read. */
   failAccountInfoReads?: boolean;
+  /** Serve the first N `getAccountInfo` calls with a 500 (a transient outage), after counting the read. */
+  failFirstAccountInfoReads?: number;
 }
 
 interface ParsedTransferTestTransaction {
@@ -201,7 +203,10 @@ function startTokenRpcServer(
       if (rpcRequest.method === "getAccountInfo") {
         const mint = (rpcRequest.params as [string])[0];
         accountInfoCalls.push(mint);
-        if (options.failAccountInfoReads) {
+        const failTransiently =
+          options.failFirstAccountInfoReads !== undefined &&
+          accountInfoCalls.length <= options.failFirstAccountInfoReads;
+        if (options.failAccountInfoReads || failTransiently) {
           response.writeHead(500, { "Content-Type": "application/json" });
           response.end(
             JSON.stringify({
@@ -583,6 +588,36 @@ describe("observed Token-2022 transfer amount conversion", () => {
 
       expect(rows).toEqual([]);
       expect(rpcServer.getAccountInfoCalls().length).toBe(MAX_MINT_AMOUNT_STATE_READ_ATTEMPTS);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("retries a transiently failed mint read for a later signature", async () => {
+    // The first mint read fails transiently: the signatures already awaiting
+    // the shared in-flight read drop their rows, but the eviction lets a
+    // later signature retry the read instead of inheriting the omission for
+    // the rest of the batch.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      failFirstAccountInfoReads: 1,
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: SCALED_MINT_ACCOUNT, owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+    });
+
+    try {
+      const signatures = Array.from({ length: 6 }, (_, index) =>
+        signatureEntry({ signature: `sig_transient_${index}` })
+      );
+      const rows = await buildObservedRows(rpcServer, signatures);
+
+      // Concurrency bounds the fan-out at 5, so the first five signatures
+      // share the one failed read and only the sixth retries it.
+      expect(rows.map((row) => row.signature)).toEqual([String(signatures[5].signature)]);
+      expect(rows[0]?.amount).toBe(
+        amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 2)
+      );
+      expect(rpcServer.getAccountInfoCalls().length).toBe(2);
     } finally {
       await rpcServer.close();
     }
