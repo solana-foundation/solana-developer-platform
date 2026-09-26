@@ -5441,6 +5441,9 @@ describe("Issuance Routes", () => {
               value: {
                 amount: "1500000000",
               },
+              context: {
+                slot: 42,
+              },
             },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
@@ -5507,6 +5510,59 @@ describe("Issuance Routes", () => {
         .bind(activeTokenId)
         .first<{ total_supply_read_slot: number | null }>();
       expect(stored?.total_supply_read_slot).toBe(77);
+    });
+
+    it("fails closed when the reading's slot cannot be determined", async () => {
+      // A slotless supply response whose bounding slot lookup also fails
+      // cannot be ordered against settled-burn bookkeeping: an absorbed
+      // slotless reading would leave a burn that settles after the refresh
+      // skipping its decrement, and the record above the chain until a
+      // separate refresh. The refresh is a retryable error instead — the
+      // recorded figure, stamp, and anchor are left exactly as they were.
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+        const method = JSON.parse(String(init?.body)).method;
+        if (method === "getSlot") {
+          return new Response("node unavailable", { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: "1",
+            result: { value: { amount: "1500000000" } },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${activeTokenId}/supply/refresh`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      fetchSpy.mockRestore();
+
+      expect(res.status).toBe(502);
+      const body = await res.json();
+      expect(body.error.code).toBe("SOLANA_RPC_ERROR");
+
+      const db = getDb(env);
+      const stored = await db
+        .prepare(
+          "SELECT total_supply_cached, total_supply_updated_at, total_supply_read_slot FROM issued_tokens WHERE id = ?"
+        )
+        .bind(activeTokenId)
+        .first<{
+          total_supply_cached: string;
+          total_supply_updated_at: string | null;
+          total_supply_read_slot: number | null;
+        }>();
+      expect(stored?.total_supply_cached).toBe("0");
+      expect(stored?.total_supply_updated_at).toBeNull();
+      expect(stored?.total_supply_read_slot).toBeNull();
     });
 
     it("returns 400 for undeployed token", async () => {

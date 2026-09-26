@@ -54,7 +54,7 @@ async function fetchCurrentConfirmedSlot(rpcUrl: string): Promise<number | null>
 async function fetchTokenSupplyBaseUnits(
   rpcUrl: string,
   mintAddress: string
-): Promise<{ amount: string; slot: number | null }> {
+): Promise<{ amount: string; slot: number }> {
   const rpcResponse = await fetch(rpcUrl, {
     method: "POST",
     headers: {
@@ -89,15 +89,24 @@ async function fetchTokenSupplyBaseUnits(
   // confirmed slot: it bounds the reading from above, so a burn the reading
   // absorbed is recognized as absorbed (its slot is at or below the bound)
   // and a burn settling after the refresh still subtracts its decrement
-  // exactly. The bound can only over-cover a burn that settles inside the
-  // one round trip between the two calls — the record then runs high until
-  // the next refresh, never low. If even the slot lookup fails, the reading
-  // is passed without a slot and reconciliation keeps the recorded anchor.
+  // exactly. The bound is mandatory, not best-effort: a reading whose slot
+  // cannot be determined is never applied, because a slotless absorption
+  // cannot be ordered against a burn that settles after the refresh — the
+  // bookkeeping would skip that burn's decrement and leave the record above
+  // the chain until a separate refresh. Failing here turns the refresh into
+  // a retryable error with the recorded figure untouched; if even the slot
+  // lookup fails, this throws and nothing is written.
   const contextSlot = payload.result?.context?.slot;
   const slot =
     typeof contextSlot === "number" && Number.isInteger(contextSlot) && contextSlot >= 0
       ? contextSlot
       : await fetchCurrentConfirmedSlot(rpcUrl);
+
+  if (slot === null) {
+    throw new Error(
+      "Could not determine the slot the supply reading was taken at; retry the refresh"
+    );
+  }
 
   return { amount, slot };
 }
@@ -121,7 +130,7 @@ export const refreshTokenSupply = async (c: AppContext) => {
     throw new AppError("TOKEN_NOT_DEPLOYED", "Token must be deployed before refreshing supply");
   }
 
-  let supply: { amount: string; slot: number | null };
+  let supply: { amount: string; slot: number };
   try {
     const { rpcUrl } = getSolanaConfig(c.env);
     supply = await fetchTokenSupplyBaseUnits(rpcUrl, token.mintAddress);

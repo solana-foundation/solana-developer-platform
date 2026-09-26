@@ -2235,11 +2235,13 @@ export class TokenService {
    *   response context. An unknown slot on an absorbed reading clears
    *   `total_supply_read_slot` — the figure's coverage is then unknowable by
    *   slot, and the bookkeeping keeps deciding from the stamp. The refresh
-   *   route bounds a slotless response with the current confirmed slot before
-   *   it reaches here, so a null is a defensive path for callers that skip
-   *   that bound: the stamp fallback then errs toward skipping a decrement it
-   *   cannot order (the record runs high and the next refresh heals it) rather
-   *   than subtracting one twice.
+   *   route treats that bound as mandatory — a slotless response is bounded
+   *   with the current confirmed slot, and if even that lookup fails the
+   *   refresh fails closed rather than apply a reading it cannot order
+   *   against later-settling burns — so a null here is a defensive path for
+   *   direct callers that skip the bound: the stamp fallback then errs toward
+   *   skipping a decrement it cannot order (the record runs high and the next
+   *   refresh heals it) rather than subtracting one twice.
    */
   async setSupplyFromBaseUnits(
     tokenId: string,
