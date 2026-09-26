@@ -1,5 +1,8 @@
 // Re-exported so consumers can name shielded-pool custom errors (e.g. 7009 ->
-// InvalidSettlementAccounts) without pulling in @heliuslabs/zolana directly.
+// InvalidSettlementAccounts) and the user-registry program the wire format is
+// pinned to, without pulling in @heliuslabs/zolana directly.
+
+export { USER_REGISTRY_PROGRAM_ID } from "@heliuslabs/zolana";
 export { decodeShieldedPoolError } from "@heliuslabs/zolana/interface";
 /**
  * The assets a spend may name, as SDP spells them. Exported so the route

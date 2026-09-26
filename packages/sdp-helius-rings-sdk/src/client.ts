@@ -2,6 +2,7 @@ import { createZolanaClient } from "@heliuslabs/zolana";
 import type { ZolanaClient } from "@heliuslabs/zolana/client";
 import { address } from "@solana/kit";
 import { withConfiguredAddressErrorBridge } from "./error-bridge.js";
+import { createGuardedSolanaRpcTransport } from "./solana-transport.js";
 
 export interface RingsClientConfig {
   /** Full Helius RPC URL, API key included. */
@@ -16,8 +17,9 @@ export interface RingsClientConfig {
    */
   readonly allowInsecureHttp?: boolean;
   /**
-   * Carries the indexer and prover legs; the client's own Solana RPC leg
-   * builds its transport internally and cannot take one (upstream gap).
+   * Carries every leg this package dials directly — health probes, the
+   * indexer, the prover, and the Zolana client's Solana RPC leg, which rides
+   * a transport built over this fetch rather than the process-global one.
    */
   readonly fetch?: typeof globalThis.fetch;
 }
@@ -34,6 +36,14 @@ export function createRingsClient(config: RingsClientConfig): Promise<ZolanaClie
     proverUrl: config.proverUrl,
     tree: tree === undefined ? undefined : withConfiguredAddressErrorBridge(() => address(tree)),
     allowInsecureHttp: config.allowInsecureHttp ?? false,
-    ...(config.fetch === undefined ? {} : { fetch: config.fetch }),
+    ...(config.fetch === undefined
+      ? {}
+      : {
+          fetch: config.fetch,
+          solanaRpcTransport: createGuardedSolanaRpcTransport({
+            url: config.solanaRpcUrl,
+            fetch: config.fetch,
+          }),
+        }),
   });
 }

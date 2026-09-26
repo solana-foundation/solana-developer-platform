@@ -1,0 +1,97 @@
+diff --git a/dist/client/client.d.ts b/dist/client/client.d.ts
+index a696998ff6133e0a3f96c9d80317748274725792..cd80d63a39796c38a98e0769957d0b08bf094c24 100644
+--- a/dist/client/client.d.ts
++++ b/dist/client/client.d.ts
+@@ -1,4 +1,4 @@
+-import { type Address, type Commitment, type Instruction, type Signature, type Transaction } from "@solana/kit";
++import { type Address, type Commitment, type Instruction, type RpcTransport, type Signature, type Transaction } from "@solana/kit";
+ import { type MergeTransactInstructionData } from "../interface/instructions/index.js";
+ import type { Bytes32, RequestContext, TransactInstructionData, TransactWithdrawal } from "../interface/types.js";
+ import { PreparedMerge } from "../transaction/instructions/builders.js";
+@@ -26,6 +26,14 @@ export interface ZolanaClientConfig {
+     readonly indexerConfig?: IndexerRpcConfig;
+     readonly proverAsyncPoll?: AsyncPollConfig;
+     readonly fetch?: typeof globalThis.fetch;
++    /**
++     * Replaces the Solana RPC HTTP transport the client would otherwise build
++     * from `solanaRpcUrl` and the process-global `fetch`. Supply it wherever the
++     * request needs an egress guard: DNS-checked connections, redirects refused,
++     * bounded reads. The indexer and prover legs already honor `fetch`; this is
++     * the Solana RPC leg's equivalent.
++     */
++    readonly solanaRpcTransport?: RpcTransport;
+     /**
+      * Permit plain http to non-loopback indexer and prover URLs.
+      *
+diff --git a/dist/client/client.js b/dist/client/client.js
+index 438e48a0ba270c513067b4998d5c6c258d3e3be2..e071ab06d3b6eb6420cc054611dbee81e633f1f9 100644
+--- a/dist/client/client.js
++++ b/dist/client/client.js
+@@ -47,12 +47,21 @@ export class ZolanaClient {
+         if (input.fetch !== undefined && typeof input.fetch !== "function") {
+             throw new ClientError("CLIENT_INVALID_CONFIG", { details: { field: "fetch" } });
+         }
++        if (input.solanaRpcTransport !== undefined &&
++            typeof input.solanaRpcTransport !== "function") {
++            throw new ClientError("CLIENT_INVALID_CONFIG", {
++                details: { field: "solanaRpcTransport" },
++            });
++        }
+         const endpoints = resolveClientEndpoints(input);
+         const kit = createKitClients({
+             solanaRpcUrl: endpoints.solana,
+             ...(endpoints.solanaRpcSubscriptions === undefined
+                 ? {}
+                 : { solanaRpcSubscriptionsUrl: endpoints.solanaRpcSubscriptions }),
++            ...(input.solanaRpcTransport === undefined
++                ? {}
++                : { solanaRpcTransport: input.solanaRpcTransport }),
+         });
+         const allowInsecureHttp = input.allowInsecureHttp ?? false;
+         const indexerUrl = checkedServiceUrl(endpoints.photon, endpoints.photonField, allowInsecureHttp);
+diff --git a/dist/client/kit.d.ts b/dist/client/kit.d.ts
+index edf206aafaabff0f6b9fbda5dd4a91e02671ce86..2d321d959188e3c7fbe71ef2a3791a47d1e859e8 100644
+--- a/dist/client/kit.d.ts
++++ b/dist/client/kit.d.ts
+@@ -1,4 +1,4 @@
+-import { setTransactionMessageLifetimeUsingBlockhash, type Rpc, type RpcSubscriptions, type SolanaRpcApi, type SolanaRpcSubscriptionsApi } from "@solana/kit";
++import { setTransactionMessageLifetimeUsingBlockhash, type Rpc, type RpcSubscriptions, type RpcTransport, type SolanaRpcApi, type SolanaRpcSubscriptionsApi } from "@solana/kit";
+ import type { RequestContext } from "../interface/types.js";
+ export type SolanaRpc = Rpc<SolanaRpcApi>;
+ export type SolanaRpcSubscriptions = RpcSubscriptions<SolanaRpcSubscriptionsApi>;
+@@ -9,6 +9,7 @@ export interface LatestBlockhash {
+ export declare function createKitClients(input: Readonly<{
+     solanaRpcUrl: string | URL;
+     solanaRpcSubscriptionsUrl?: string | URL;
++    solanaRpcTransport?: RpcTransport;
+ }>): Readonly<{
+     solanaRpc: SolanaRpc;
+     solanaRpcSubscriptions: SolanaRpcSubscriptions;
+diff --git a/dist/client/kit.js b/dist/client/kit.js
+index 7a20f23728eaf16ee3bcf9cc23ebaef31f23262a..da1ac5e0dd4e5ec5f9ac0ad581d83f723afc4a95 100644
+--- a/dist/client/kit.js
++++ b/dist/client/kit.js
+@@ -1,4 +1,4 @@
+-import { createSolanaRpc, createSolanaRpcSubscriptions, isSolanaError, setTransactionMessageLifetimeUsingBlockhash, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND, } from "@solana/kit";
++import { createSolanaRpc, createSolanaRpcFromTransport, createSolanaRpcSubscriptions, isSolanaError, setTransactionMessageLifetimeUsingBlockhash, SOLANA_ERROR__JSON_RPC__METHOD_NOT_FOUND, } from "@solana/kit";
+ import { ClientError, isClientError } from "./error.js";
+ import { composeSignal } from "./internal.js";
+ export function createKitClients(input) {
+@@ -6,8 +6,16 @@ export function createKitClients(input) {
+     const subscriptionsUrl = input.solanaRpcSubscriptionsUrl === undefined
+         ? defaultSolanaRpcSubscriptionsUrl(rpcUrl)
+         : urlString(input.solanaRpcSubscriptionsUrl, "solanaRpcSubscriptionsUrl", ["ws:", "wss:"]);
++    if (input.solanaRpcTransport !== undefined && typeof input.solanaRpcTransport !== "function") {
++        throw new ClientError("CLIENT_INVALID_CONFIG", { details: { field: "solanaRpcTransport" } });
++    }
+     return Object.freeze({
+-        solanaRpc: createSolanaRpc(rpcUrl),
++        // A supplied transport replaces the URL-based transport entirely, so the
++        // caller's fetch (guarded egress, redirects refused) carries the Solana
++        // RPC leg the same way it carries the indexer and prover.
++        solanaRpc: input.solanaRpcTransport === undefined
++            ? createSolanaRpc(rpcUrl)
++            : createSolanaRpcFromTransport(input.solanaRpcTransport),
+         solanaRpcSubscriptions: createSolanaRpcSubscriptions(subscriptionsUrl),
+     });
+ }

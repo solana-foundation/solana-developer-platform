@@ -63,6 +63,9 @@ overrides:
 packageExtensionsChecksum: sha256-Hq4aG11euVLISXl/NBcyj4016UlEcDZd8BZXkelHdyM=
 
 patchedDependencies:
+  '@heliuslabs/zolana@0.1.6-alpha':
+    hash: 651e08ff4e7159c5c682d5a5b833446d4332515d73ef607fb9b03c5e80cef9bb
+    path: patches/@heliuslabs__zolana@0.1.6-alpha.patch
   brace-expansion@5.0.9:
     hash: cb7f184e2dafcba994a55ee67b21ef5a2cb11e980f3bce73203d9d93f42018c3
     path: patches/brace-expansion@5.0.9.patch
@@ -711,7 +714,7 @@ importers:
     dependencies:
       '@heliuslabs/zolana':
         specifier: 0.1.6-alpha
-        version: 0.1.6-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
+        version: 0.1.6-alpha(patch_hash=651e08ff4e7159c5c682d5a5b833446d4332515d73ef607fb9b03c5e80cef9bb)(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))
       '@sdp/helius-rings':
         specifier: workspace:*
         version: link:../sdp-helius-rings
@@ -727,6 +730,9 @@ importers:
       '@solana/kit':
         specifier: 7.1.1
         version: 7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6)
+      '@solana/rpc-spec-types':
+        specifier: 7.1.1
+        version: 7.1.1(typescript@6.0.3)
     devDependencies:
       '@types/node':
         specifier: 26.5.1
@@ -10683,7 +10689,7 @@ snapshots:
       protobufjs: 7.6.5
       yargs: 17.7.3
 
-  '@heliuslabs/zolana@0.1.6-alpha(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
+  '@heliuslabs/zolana@0.1.6-alpha(patch_hash=651e08ff4e7159c5c682d5a5b833446d4332515d73ef607fb9b03c5e80cef9bb)(@solana/kit@7.1.1(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@6.0.3)(utf-8-validate@6.0.6))':
     dependencies:
       '@lightprotocol/hasher.rs': 0.2.1
       '@noble/ciphers': 2.3.0
