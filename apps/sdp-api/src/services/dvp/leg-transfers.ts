@@ -355,12 +355,10 @@ function historyFloor(leg: DvpLegEscrow): bigint {
  * creation: the read then saw depth below every slot it lists, which is proof
  * no later read has to see again. `complete` says whether the walk reached its
  * end — the bound, the floor, or the node running out of history. A walk the
- * page cap cut off returns what it saw with `complete` false: resolving the
- * oldest of a truncated read would leave a gap behind it no later read fills,
- * so the caller of a read the position advances over drops the listing whole,
- * while a read that only records what it finds may keep the truncated pages.
- * `from` starts the walk below a signature instead of at the top, which is how
- * a bounded read reaches the region its bound excludes.
+ * page cap cut off returns what it saw with `complete` false, since resolving
+ * the oldest of a truncated read would leave a gap behind it no later read
+ * fills. `from` starts the walk below a signature instead of at the top,
+ * which is how a bounded read reaches the region its bound excludes.
  */
 async function readHistorySince(
   reader: DvpEscrowHistoryReader,
@@ -388,6 +386,34 @@ async function readHistorySince(
     before = oldest.signature;
   }
   return { entries: newestFirst, floorReached: false, complete: false };
+}
+
+/**
+ * The one listing a walk the page cap cut off would resolve nothing from:
+ * its oldest entry leaves a gap behind it no later read fills. Null unless
+ * the walk reached its end.
+ */
+function listed(
+  read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean; complete: boolean }
+): { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null {
+  return read.complete ? read : null;
+}
+
+/**
+ * Why a signature stopped the walk: the sweep's budget ran out, which ends
+ * the walk outright, or the node would not serve the transaction, which the
+ * region behind the cursor reads past.
+ */
+type EntryStop = "budget" | "unread";
+
+/**
+ * Whether a stopped signature ends the walk: a budget stop does, and so does
+ * one in the read the position advances over — the position never moves past
+ * an unresolved signature. Behind the cursor a transaction the node will not
+ * serve stops only itself: the probe records what it can and reads on.
+ */
+function endsTheWalk(reason: EntryStop, mayAdvance: boolean): boolean {
+  return reason === "budget" || mayAdvance;
 }
 
 /**
@@ -435,8 +461,6 @@ async function readOnPastCap(
     whole: older.complete,
   };
 }
-
-type EntryStep = "resolved" | "stop";
 
 /**
  * The watermark for the position's new slot: a move within the slot the
@@ -498,7 +522,7 @@ async function resolveEntry(
   entry: DvpEscrowHistoryEntry,
   known: ReadonlyMap<Signature, DvpLegTransfer>,
   budget: DvpLegTransferBudget
-): Promise<{ step: EntryStep; recorded: boolean }> {
+): Promise<{ step: "resolved"; recorded: boolean } | { step: "stop"; reason: EntryStop }> {
   // A transaction that failed moved no token; no need to read it.
   if (entry.failed) {
     return { step: "resolved", recorded: false };
@@ -512,7 +536,7 @@ async function resolveEntry(
     return { step: "resolved", recorded: false };
   }
   if (budget.remaining <= 0) {
-    return { step: "stop", recorded: false };
+    return { step: "stop", reason: "budget" };
   }
   budget.remaining -= 1;
   let read: DvpLegTransactionRead;
@@ -523,10 +547,10 @@ async function resolveEntry(
       { error, tradeId: leg.tradeId, side: leg.side, signature: entry.signature },
       "dvp transfers: transaction could not be read; the next sweep asks again"
     );
-    return { step: "stop", recorded: false };
+    return { step: "stop", reason: "unread" };
   }
   if (read.kind === "not_served") {
-    return { step: "stop", recorded: false };
+    return { step: "stop", reason: "unread" };
   }
   const reading =
     read.kind === "malformed"
@@ -691,12 +715,9 @@ export async function syncDvpLegTransfers(
   // How many of the read's entries the position may advance over; null unless
   // the fallback stitched two listings together.
   let bounded: number | null = null;
-  const walked = await readHistorySince(reader, leg, since);
   // A walk that ran past the scan cap is dropped whole: resolving the oldest
   // of a truncated read would leave a gap behind it no later read fills.
-  let read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null = walked.complete
-    ? walked
-    : null;
+  let read = listed(await readHistorySince(reader, leg, since));
   if (read === null && stored !== null && since === null) {
     // The walk from the top ran past the scan cap. Resolving the oldest of a
     // truncated read would leave a gap behind it, but giving up here stalls
@@ -747,27 +768,28 @@ export async function syncDvpLegTransfers(
   let cursorSlotComplete = scan?.cursorSlotComplete ?? false;
   let finalizedSoFar = true;
   let complete = wholeHistory;
+  // Whether the probe of the region behind the cursor ran to its end: it did
+  // unless the fallback's read was interrupted — by the cap, or by a
+  // transaction the node would not serve.
+  let probeEnded = wholeHistory;
   let recorded = 0;
-  // The walk resolves each listing oldest first, and the position-advancing
-  // read before the probe: a transaction behind the cursor that the node will
-  // not serve must not hold the movements ahead of it hostage, and the
-  // probe's finds record wherever the walk reaches them.
-  const walk = [
-    ...newestFirst
-      .slice(0, advancing)
-      .reverse()
-      .map((entry) => ({ entry, mayAdvance: true })),
-    ...newestFirst
-      .slice(advancing)
-      .reverse()
-      .map((entry) => ({ entry, mayAdvance: false })),
-  ];
+  // The walk resolves the listings oldest first — the probe of the region
+  // behind the cursor before the bounded read ahead of it, so the ledger's
+  // sequence keeps the transfers in the order the chain lists them.
+  const walk = [...newestFirst].reverse().map((entry, position) => ({
+    entry,
+    mayAdvance: newestFirst.length - 1 - position < advancing,
+  }));
   for (const { entry, mayAdvance } of walk) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
     const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget);
     if (outcome.step === "stop") {
       complete = false;
-      break;
+      if (endsTheWalk(outcome.reason, mayAdvance)) {
+        break;
+      }
+      probeEnded = false;
+      continue;
     }
     recorded += outcome.recorded ? 1 : 0;
     if (finalizedSoFar && entry.finalized) {
@@ -798,7 +820,11 @@ export async function syncDvpLegTransfers(
   await transfers.saveScan(leg.tradeId, {
     side: leg.side,
     cursor,
-    cursorSlotComplete: cursor === null ? false : cursorSlotComplete,
+    // A probe that did not run to its end leaves the next sweep asking for the
+    // whole history: the position may stand, but the region behind it is not
+    // yet accounted for, and the probe is the one read that reaches what a
+    // walk bounded at the position never lists again.
+    cursorSlotComplete: cursor === null ? false : cursorSlotComplete && probeEnded,
     scannedAt: settled ? new Date(now).toISOString() : null,
   });
   return recorded;

@@ -769,12 +769,15 @@ describe("syncDvpLegTransfers", () => {
     );
     const probePage = [
       ...history([6]),
-      ...history(Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index), {
-        failed: true,
-        // Failed transactions need no read, which keeps this test to the
-        // paging; their block times stay above the trade's creation floor.
-        blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
-      }),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
     ];
     listSignatures
       .mockResolvedValueOnce(fullPage)
@@ -808,6 +811,96 @@ describe("syncDvpLegTransfers", () => {
       {
         side: "a",
         cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
+  // The probe's finds are older than anything the bounded read lists, and the
+  // ledger's sequence is the order the walk records them in: the probe is
+  // resolved first, so an omitted movement keeps its place in the leg's
+  // history instead of landing after the transfers that followed it.
+  it("records the probe's finds ahead of the newer movements", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+    served.set(sig(8), transaction({ post: "200" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The omitted movement sits behind the newer one in the ledger's order.
+    expect([...rows.keys()]).toEqual([sig(6), sig(8)]);
+  });
+
+  // A probe the cap cut off leaves the region behind the cursor unaccounted
+  // for, and the position's proof does not travel: the next sweep asks for
+  // the whole history and probes again, instead of bounding itself at a
+  // cursor whose behind it has not seen.
+  it("does not let the position's proof travel when the probe did not run to its end", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([9, 8], { failed: true }) : fullPage
+      );
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read continued below slot 9 into slot 8, but the probe of
+    // the region behind the cursor was cut off: the position moved, unproven.
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(9), slot: "9" },
         cursorSlotComplete: false,
         scannedAt: null,
       },
