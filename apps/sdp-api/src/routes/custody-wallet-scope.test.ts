@@ -10,6 +10,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { clearWalletCaches } from "@/routes/custody/handlers/wallets";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
+import { getLogger } from "@/runtime/logger";
 import { upsertApiKeyWalletBinding } from "@/services/api-key-wallets.service";
 import * as signingServiceModule from "@/services/domain/signing.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
@@ -1938,6 +1939,7 @@ describe("Custody wallet scope routes", () => {
           "PROVIDER_REJECTED"
         )
       );
+      const warn = vi.spyOn(getLogger(), "warn").mockImplementation(() => {});
 
       const response = await requestSignerCheck({ walletId: "privy_fee_error" }, "session");
 
@@ -1956,6 +1958,17 @@ describe("Custody wallet scope routes", () => {
           "The fee sponsor refused the fee payer address lookup. Verify the sponsor configuration.",
       });
       expect(signerCheckMocks.signAndSend).not.toHaveBeenCalled();
+      // The fixed-copy AppError bypasses the global fee-payment log, so the
+      // route records the refusal (message + cause) on the scrubbed server-side
+      // telemetry path itself; only the HTTP body hides the provider detail.
+      expect(warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "sdp_api_signer_check_fee_payer_refusal",
+          code: "PROVIDER_REJECTED",
+          error: expect.stringContaining("RPC Error -32001"),
+        }),
+        "Signer-check fee payer address lookup refused"
+      );
     });
 
     it("keeps rate-limited fee errors on the fixed sponsor copy", async () => {

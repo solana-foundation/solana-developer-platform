@@ -1,4 +1,5 @@
 import { SigningError } from "@sdp/custody/signing";
+import { redactCredentialSecrets } from "@sdp/redaction";
 import { resolveRpcTarget } from "@sdp/rpc/relay";
 import { createRpcFromTransport, getRecentBlockhash, simulateTransaction } from "@sdp/rpc/solana";
 import { MEMO_PROGRAM_ADDRESS } from "@sdp/types";
@@ -23,6 +24,7 @@ import { AppError, badRequest, conflict } from "@/lib/errors";
 import { success } from "@/lib/response";
 import { getRequestTenantScope } from "@/lib/tenant-scope";
 import type { ValidatedBodyContext } from "@/middleware/validate";
+import { getLogger } from "@/runtime/logger";
 import {
   assertFreshApiKeyCustodyWalletAccess,
   resolveApiKeySigningWalletId,
@@ -202,6 +204,21 @@ export const signerCheck = async (c: ValidatedBodyContext<typeof signerCheckSche
       // a fixed sponsor-side copy instead; the provider's diagnostics stay on
       // the scrubbed telemetry path.
       if (error.code === "PROVIDER_REJECTED") {
+        // The fixed-copy AppError below never reaches the global fee-payment
+        // handler, so its message-and-cause log entry would not fire and the
+        // refusal reason would be invisible to operators investigating the 503.
+        // Record it here on the scrubbed server-side telemetry path; the HTTP
+        // body stays free of provider-supplied details.
+        getLogger().warn(
+          redactCredentialSecrets({
+            event: "sdp_api_signer_check_fee_payer_refusal",
+            request_id: c.get("requestId"),
+            code: error.code,
+            error: error.message,
+            cause: error.cause?.message,
+          }),
+          "Signer-check fee payer address lookup refused"
+        );
         throw new AppError(
           "PROVIDER_UNAVAILABLE",
           "The fee sponsor refused the fee payer address lookup. Verify the sponsor configuration."
