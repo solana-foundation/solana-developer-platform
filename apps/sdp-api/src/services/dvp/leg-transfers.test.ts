@@ -32,6 +32,7 @@ import {
   type DvpEscrowHistoryReader,
   type DvpLegEscrow,
   type DvpLegTransaction,
+  HISTORY_AUDIT_MS,
   HISTORY_PAGE_LIMIT,
   parseDvpLegTransaction,
   readDvpLegTransfer,
@@ -46,6 +47,12 @@ const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /** 2026-09-10T00:00:00Z, when the trade row was created. */
 const CREATED_AT_SECONDS = 1_789_000_000;
+/**
+ * The instant this sweep runs at, half past the audit hour: as far from
+ * either boundary of the audit's hour block as an instant gets, so a test
+ * that stamps a scan with it and reads at it cannot straddle a boundary.
+ */
+const NOW = Date.parse("2026-09-15T00:30:00.000Z");
 const LEG: DvpLegEscrow = {
   tradeId: "dvp_ledger",
   side: "a",
@@ -368,7 +375,12 @@ describe("syncDvpLegTransfers", () => {
     ]);
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(3), slot: "3" }, scannedAt: expect.any(String) },
+      {
+        side: "a",
+        cursor: { signature: sig(3), slot: "3" },
+        cursorSlotComplete: true,
+        scannedAt: expect.any(String),
+      },
     ]);
   });
 
@@ -387,9 +399,14 @@ describe("syncDvpLegTransfers", () => {
       {
         side: "a",
         cursor: { signature: sig(5), slot: "5" },
-        scannedAt: "2026-09-15T00:00:00.000Z",
+        cursorSlotComplete: true,
+        // Scanned this sweep, at half past the audit hour: the proof is fresh
+        // and the audit does not fall due, so the read bounds itself at the
+        // cursor.
+        scannedAt: new Date(NOW).toISOString(),
       },
-      { remaining: 10 }
+      { remaining: 10 },
+      NOW
     );
 
     expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
@@ -434,6 +451,462 @@ describe("syncDvpLegTransfers", () => {
     expect(saved).toEqual([]);
   });
 
+  // A leg whose whole history exceeds the scan cap can never finish the
+  // unbounded read an unproven cursor asks for, and giving up would stall it:
+  // every later sweep would ask for the same whole history. The sweep reads on
+  // from the saved cursor instead — the bound legs read behind before the
+  // watermark — and stays due, so the next sweep still asks for the whole
+  // history first.
+  it("reads on from the saved cursor when the whole history exceeds the scan cap", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      // Failed transactions need no read, which keeps this test to the paging.
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) => (page.until === sig(7) ? history([8]) : []));
+    served.set(sig(8), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
+      { before: null, until: null },
+      { before: sig(2_001), until: null },
+      { before: sig(2_001), until: null },
+      // The fourth read is the fallback, bounded at the saved cursor; the
+      // fifth is the probe of the region below it.
+      { before: null, until: sig(7) },
+      { before: sig(7), until: null },
+    ]);
+    // The fallback records what is new behind the cursor and saves the
+    // position, so the leg keeps moving instead of stalling.
+    expect(rows.has(sig(8))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // The region below the cursor is where a node's omission sits, and the
+  // probe of it is the one read a walk from the top cannot reach once the
+  // history exceeds the scan cap: the node serves what it omitted there once
+  // its index catches up, and the walk bounded at the cursor alone never
+  // lists it again.
+  it("probes below the saved cursor for a movement the node omitted", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? [] : page.before === sig(7) ? history([6]) : []
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The probe found the omitted movement behind the cursor and recorded
+    // it. The position stays where it was: the cursor only ever moves
+    // forward, and the PostgreSQL repository refuses the backward write the
+    // probe's find would ask for.
+    expect(rows.has(sig(6))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // A probe that cannot reach the floor has not seen the whole of what the
+  // node holds, so the scan does not settle: the leg stays due and the next
+  // sweep asks again.
+  it("leaves the leg due when the region below the cursor also exceeds the scan cap", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(history([8]))
+      .mockResolvedValue(fullPage);
+    served.set(sig(8), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The newer region is still recorded, but the read was not complete.
+    expect(rows.has(sig(8))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
+  // The probe of the region below the cursor is a listing of its own. What
+  // it saw says nothing about the bounded read above the cursor, so its
+  // entries record their transfers but neither move the position nor prove
+  // its slot: a watermark from the probe's depth would qualify the cursor on
+  // evidence the bounded read never offered, fencing an omitted movement
+  // behind it out of every read that follows.
+  it("neither moves the position nor proves its slot on the probe's evidence", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(3_002)
+          ? history([3_003])
+          : [
+              // The probe failed transaction needs no read, and its slot sits
+              // below the bounded read's advance: under a watermark that read
+              // the two listings as one, it would prove the cursor's slot on
+              // the probe's say-so.
+              ...history([3_001], {
+                failed: true,
+                blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+              }),
+              // An hour before the row: a previous life of the address. The
+              // probe ran past the trade's creation; the bounded read above
+              // the cursor never saw that floor.
+              ...history([1], { blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS - 3_600)) }),
+            ]
+      );
+    served.set(sig(3_003), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(3_002), slot: "3002" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read's advance to slot 3003 is recorded, but unproven: the
+    // probe's depth and its earlier slot are not its listing.
+    expect(rows.has(sig(3_003))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(3_003), slot: "3003" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // A probe the cap cut off has still seen the newest of what lies below the
+  // cursor, and what it saw is recorded: discarding its entries would leave
+  // a movement the node omitted — the one thing the probe is read for —
+  // unrecorded for as long as the history stays over the cap.
+  it("records what the probe saw when the cap cut it off", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? [] : page.before === sig(7) ? probePage : fullPage
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The omitted movement was in the probe's first page and was recorded;
+    // the scan does not settle, because the probe did not reach its end.
+    expect(rows.has(sig(6))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
+  // The probe resolves what it finds behind the cursor and the position
+  // stays exactly where it was — even when the find sits in the cursor's own
+  // slot, where the PostgreSQL repository's guard could not tell a backward
+  // write from a forward one.
+  it("leaves the position and its watermark alone when the probe finds a same-slot movement", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const behind = {
+      ...history([1])[0],
+      slot: 420n,
+      blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+    };
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(2) ? [] : page.before === sig(2) ? [behind] : []
+      );
+    served.set(sig(1), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "420" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    expect(rows.has(sig(1))).toBe(true);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "420" },
+        cursorSlotComplete: false,
+        scannedAt: expect.any(String),
+      },
+    ]);
+  });
+
+  // The walk resolves the listings oldest first — the probe before the
+  // bounded read — so a transaction behind the cursor that the node will not
+  // serve stops only itself: the walk reads on to the movements ahead of the
+  // cursor instead of leaving the position stale for every later sweep to
+  // stop at the same transaction.
+  it("records the newer movements when the probe hits a transaction the node will not serve", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+      );
+    // sig(6) is served nothing: reading it fails, and the walk stops there.
+    served.set(sig(8), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read's movement was recorded and the position advanced onto
+    // it; the probe's silence leaves the read incomplete, so the leg stays
+    // due and the next sweep asks again.
+    expect(rows.has(sig(8))).toBe(true);
+    expect(rows.has(sig(6))).toBe(false);
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "8" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
+  // The probe's finds are older than anything the bounded read lists, and the
+  // ledger's sequence is the order the walk records them in: the probe is
+  // resolved first, so an omitted movement keeps its place in the leg's
+  // history instead of landing after the transfers that followed it.
+  it("records the probe's finds ahead of the newer movements", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    const probePage = [
+      ...history([6]),
+      ...history(
+        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        {
+          failed: true,
+          // Failed transactions need no read, which keeps this test to the
+          // paging; their block times stay above the trade's creation floor.
+          blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+        }
+      ),
+    ];
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+      );
+    served.set(sig(6), transaction({ post: "100" }));
+    served.set(sig(8), transaction({ post: "200" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The omitted movement sits behind the newer one in the ledger's order.
+    expect([...rows.keys()]).toEqual([sig(6), sig(8)]);
+  });
+
+  // A probe the cap cut off leaves the region behind the cursor unaccounted
+  // for, and the position's proof does not travel: the next sweep asks for
+  // the whole history and probes again, instead of bounding itself at a
+  // cursor whose behind it has not seen.
+  it("does not let the position's proof travel when the probe did not run to its end", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockImplementation(async (_escrow, page) =>
+        page.until === sig(7) ? history([9, 8], { failed: true }) : fullPage
+      );
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The bounded read continued below slot 9 into slot 8, but the probe of
+    // the region behind the cursor was cut off: the position moved, unproven.
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(9), slot: "9" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
+    ]);
+  });
+
   it("records nothing and saves nothing when listing the history fails mid-page", async () => {
     listSignatures
       .mockResolvedValueOnce(history(Array.from({ length: HISTORY_PAGE_LIMIT }, (_, i) => 900 - i)))
@@ -457,9 +930,16 @@ describe("syncDvpLegTransfers", () => {
     await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
 
     expect([...rows.keys()]).toEqual([sig(1)]);
-    // Not a complete read, so the leg stays due for the next sweep.
+    // Not a complete read, so the leg stays due for the next sweep. The stop
+    // left the position on a slot the listing never continued below, so the
+    // watermark says the next read takes the whole overlap from the top.
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+      {
+        side: "a",
+        cursor: { signature: sig(1), slot: "1" },
+        cursorSlotComplete: false,
+        scannedAt: null,
+      },
     ]);
   });
 
@@ -472,12 +952,19 @@ describe("syncDvpLegTransfers", () => {
       reader,
       transfers,
       LEG,
-      { side: "a", cursor: null, scannedAt: "2026-09-15T00:00:00.000Z" },
+      {
+        side: "a",
+        cursor: null,
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
       { remaining: 10 }
     );
 
     expect(rows.size).toBe(0);
-    expect(saved).toEqual([{ side: "a", cursor: null, scannedAt: null }]);
+    expect(saved).toEqual([
+      { side: "a", cursor: null, cursorSlotComplete: false, scannedAt: null },
+    ]);
   });
 
   it("skips an unreadable transaction without recording it, and moves past it", async () => {
@@ -506,7 +993,12 @@ describe("syncDvpLegTransfers", () => {
     expect(budget.remaining).toBe(0);
     expect([...rows.keys()]).toEqual([sig(1), sig(2)]);
     expect(saved).toEqual([
-      { side: "a", cursor: { signature: sig(2), slot: "2" }, scannedAt: null },
+      {
+        side: "a",
+        cursor: { signature: sig(2), slot: "2" },
+        cursorSlotComplete: true,
+        scannedAt: null,
+      },
     ]);
   });
 
@@ -523,7 +1015,12 @@ describe("syncDvpLegTransfers", () => {
 
       expect(rows.get(sig(2))?.finalized).toBe(false);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: false,
+          scannedAt: null,
+        },
       ]);
     });
 
@@ -553,7 +1050,12 @@ describe("syncDvpLegTransfers", () => {
         reader,
         transfers,
         LEG,
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: null,
+        },
         { remaining: 10 }
       );
 
@@ -561,7 +1063,14 @@ describe("syncDvpLegTransfers", () => {
       expect(knowsSignatures).not.toHaveBeenCalled();
       expect(rows.get(sig(2))?.finalized).toBe(true);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(2), slot: "2" }, scannedAt: expect.any(String) },
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "2" },
+          // The listing showed nothing below slot 2, so the watermark does not
+          // travel: the next read takes the overlap and looks again.
+          cursorSlotComplete: false,
+          scannedAt: expect.any(String),
+        },
       ]);
     });
 
@@ -574,14 +1083,24 @@ describe("syncDvpLegTransfers", () => {
         reader,
         transfers,
         LEG,
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: null },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: null,
+        },
         { remaining: 10 }
       );
 
       expect(knowsSignatures).toHaveBeenCalledWith([sig(2)]);
       expect(deleted).toEqual([sig(2)]);
       expect(saved).toEqual([
-        { side: "a", cursor: { signature: sig(1), slot: "1" }, scannedAt: expect.any(String) },
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "1" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
       ]);
     });
 
@@ -630,6 +1149,257 @@ describe("syncDvpLegTransfers", () => {
 
       expect(knowsSignatures).not.toHaveBeenCalled();
       expect(rows.has(sig(2))).toBe(true);
+    });
+  });
+
+  // Two movements can share a slot, and a node caught mid-index can list the
+  // newer one while omitting the older (SOLA9-676). A cursor parked on the
+  // newer signature would exclude the older one from every later read, so the
+  // read position only moves onto a slot the listing was seen to continue
+  // below, and a page that stops inside a slot is re-read with overlap until
+  // the node shows what it omitted.
+  describe("same-slot history watermark", () => {
+    /** A movement in the shared slot, above the trade's creation floor. */
+    function sameSlot(n: number): DvpEscrowHistoryEntry {
+      return {
+        ...history([n])[0],
+        slot: 420n,
+        blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+      };
+    }
+
+    it("recovers an omitted same-slot movement on the overlap read", async () => {
+      // First read: the index race lists only the newer movement. Second read:
+      // the node caught up, but only a listing unbounded by the raced cursor
+      // can show it — a walk bounded at the newer signature never lists the
+      // older one again.
+      const pages = [[sameSlot(2)], [sameSlot(2), sameSlot(1)]];
+      listSignatures.mockImplementation(async (_escrow, page) =>
+        page.until === null ? (pages.shift() ?? []) : []
+      );
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+      await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+      expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
+        { before: null, until: null },
+        // The second read must not bind itself to the raced signature.
+        { before: null, until: null },
+      ]);
+      expect(rows.has(sig(1))).toBe(true);
+      expect(rows.has(sig(2))).toBe(true);
+    });
+
+    // An entry at an earlier slot convinces the watermark the cursor's slot
+    // is complete even while the node still hides an older movement inside
+    // that slot, so the read that follows bounds itself at the cursor and
+    // cannot list what sits behind it. The proof ages out with the audit,
+    // whose unbounded walk from the top is what recovers the omission.
+    it("recovers a same-slot movement at the audit after an earlier-slot proof hid it", async () => {
+      let nodeHoldsTheOmission = false;
+      listSignatures.mockImplementation(async (_escrow, page) => {
+        if (page.until === sig(3)) {
+          return history([1]);
+        }
+        if (page.until !== null || page.before !== null) {
+          return [];
+        }
+        return nodeHoldsTheOmission
+          ? [sameSlot(3), sameSlot(2), ...history([1])]
+          : [sameSlot(3), ...history([1])];
+      });
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+      served.set(sig(3), transaction({ pre: "1000", post: "900" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW);
+      // The movement at the earlier slot proved the cursor's slot, so the
+      // next read binds itself to the cursor and the hidden movement stays
+      // hidden.
+      await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 }, NOW);
+
+      expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: sig(3) });
+      expect(rows.has(sig(2))).toBe(false);
+
+      // The audit falls due and walks the whole history from the top, where
+      // the node now serves the movement it had omitted.
+      nodeHoldsTheOmission = true;
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        saved[1],
+        { remaining: 10 },
+        NOW + 2 * HISTORY_AUDIT_MS
+      );
+
+      expect(listSignatures).toHaveBeenLastCalledWith(ESCROW, { before: null, until: null });
+      expect(rows.has(sig(2))).toBe(true);
+      expect(saved[2]).toEqual({
+        side: "a",
+        cursor: { signature: sig(3), slot: "420" },
+        cursorSlotComplete: true,
+        scannedAt: expect.any(String),
+      });
+    });
+
+    it("re-reads from the top while the stored cursor's slot is unproven", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: false,
+          scannedAt: "2026-09-15T00:00:00.000Z",
+        },
+        { remaining: 10 }
+      );
+
+      expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
+    });
+
+    it("marks a slot the listing never continued below as unproven", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      // The position carries the newest finalized signature, but the watermark
+      // says the listing stopped inside its slot: the next read may not bound
+      // itself at it.
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: false,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("records both same-slot movements when the page is complete", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2), sameSlot(1)]);
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(rows.has(sig(1))).toBe(true);
+      expect(rows.has(sig(2))).toBe(true);
+    });
+
+    it("advances the cursor over a slot the listing continued below", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2), ...history([1])]);
+      served.set(sig(1), transaction({ post: "100" }));
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("keeps a proven slot's watermark as the cursor moves within it", async () => {
+      listSignatures.mockResolvedValueOnce([sameSlot(2)]);
+      served.set(sig(2), transaction({ pre: "100", post: "0" }));
+
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        {
+          side: "a",
+          cursor: { signature: sig(1), slot: "420" },
+          cursorSlotComplete: true,
+          // Scanned this sweep, at half past the audit hour: the audit does
+          // not fall due, so the read bounds itself at the cursor.
+          scannedAt: new Date(NOW).toISOString(),
+        },
+        { remaining: 10 },
+        NOW
+      );
+
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    // A proven slot can still hide an omitted movement: the listing that
+    // proved it may have listed straight past a hole the node holds. The
+    // proof therefore ages out, and the audit walks the whole history from
+    // the top, where the node serves what it omitted once its index catches
+    // up — a walk bounded at the cursor never lists it again.
+    it("audits a proven cursor against the whole history once the proof ages out", async () => {
+      rows.set(sig(1), recordedRow(1, true));
+      rows.set(sig(2), recordedRow(2, true));
+      listSignatures.mockResolvedValueOnce([sameSlot(2), sameSlot(1)]);
+
+      await syncDvpLegTransfers(
+        reader,
+        transfers,
+        LEG,
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: new Date(NOW - 2 * HISTORY_AUDIT_MS).toISOString(),
+        },
+        { remaining: 10 },
+        NOW
+      );
+
+      expect(readTransaction).not.toHaveBeenCalled();
+      expect(listSignatures).toHaveBeenCalledTimes(1);
+      // The audit is unbounded, despite the proven cursor.
+      expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
+    });
+
+    it("treats a listing that ran past the trade's creation as proof of depth", async () => {
+      listSignatures.mockResolvedValueOnce([
+        sameSlot(2),
+        // An hour before the row: a previous life of the address, dropped from
+        // the walk — but the listing reached past the creation floor.
+        ...history([1], { blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS - 3_600)) }),
+      ]);
+      served.set(sig(2), transaction({ post: "100" }));
+
+      await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 });
+
+      expect(readTransaction.mock.calls.map(([requested]) => requested)).toEqual([sig(2)]);
+      expect(saved).toEqual([
+        {
+          side: "a",
+          cursor: { signature: sig(2), slot: "420" },
+          cursorSlotComplete: true,
+          scannedAt: expect.any(String),
+        },
+      ]);
     });
   });
 });

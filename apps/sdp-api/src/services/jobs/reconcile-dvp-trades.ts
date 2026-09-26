@@ -215,7 +215,8 @@ async function syncTradeTransfers(
         ledger.transfers,
         { tradeId: trade.id, createdAt: trade.createdAt, ...leg },
         scan,
-        ledger.budget
+        ledger.budget,
+        now
       );
     }
   } catch (error) {

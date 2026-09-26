@@ -47,9 +47,21 @@ export interface DvpLegTransferScan {
   side: "a" | "b";
   /**
    * The newest finalized signature every older one was resolved behind, with
-   * its slot; null before any.
+   * its slot; null before any. Within the cursor's own slot that resolution
+   * extends to every older signature only when `cursorSlotComplete` says the
+   * listing continued below the slot.
    */
   cursor: { signature: Signature; slot: string } | null;
+  /**
+   * Whether the read that set the cursor saw the listing continue below the
+   * cursor's slot — an entry at an earlier slot, or history past the trade's
+   * creation. A page that stops inside the slot proves nothing: a node caught
+   * mid-index can list the newest of two same-slot movements and omit the
+   * older, and a later read bounded at the cursor would never be offered it
+   * again. False reads the whole overlap from the top next time, where the
+   * omission can still surface.
+   */
+  cursorSlotComplete: boolean;
   /**
    * When a read last got through to the newest signature with nothing left
    * provisional; null when none has, which makes the leg due.
@@ -87,6 +99,7 @@ const scanRowSchema = z.object({
   side: z.enum(["a", "b"]),
   cursor_signature: z.string().nullable(),
   cursor_slot: z.string().regex(/^\d+$/).nullable(),
+  cursor_slot_complete: z.boolean(),
   scanned_at: z.string().nullable(),
 });
 
@@ -118,6 +131,7 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
       parsed.cursor_signature === null || parsed.cursor_slot === null
         ? null
         : { signature: signature(parsed.cursor_signature), slot: parsed.cursor_slot },
+    cursorSlotComplete: parsed.cursor_slot_complete,
     scannedAt: parsed.scanned_at,
   };
 }
@@ -152,7 +166,8 @@ export interface DvpLegTransferRepository {
   /**
    * Stores where a leg's history read stopped. The cursor never moves back to
    * an earlier slot than the one stored, so an overlapping slower sweep cannot
-   * undo a faster one's progress.
+   * undo a faster one's progress, and the slot's watermark travels with the
+   * cursor it qualifies.
    */
   saveScan(tradeId: string, scan: DvpLegTransferScan): Promise<void>;
 }
@@ -252,7 +267,7 @@ export function createPostgresDvpLegTransferRepository(
     async listScans(tradeId) {
       const result = await db
         .prepare(
-          `SELECT side, cursor_signature, cursor_slot, scanned_at
+          `SELECT side, cursor_signature, cursor_slot, cursor_slot_complete, scanned_at
              FROM dvp_leg_transfer_scans
             WHERE trade_id = ?`
         )
@@ -264,29 +279,34 @@ export function createPostgresDvpLegTransferRepository(
     async saveScan(tradeId, scan) {
       const cursorSignature = scan.cursor === null ? null : scan.cursor.signature;
       const cursorSlot = scan.cursor === null ? null : scan.cursor.slot;
-      // Both CASEs read the stored row as it was before this statement, so the
-      // signature and its slot always move together.
+      // The watermark qualifies the cursor, so a naked one is never stored.
+      const cursorSlotComplete = scan.cursor === null ? false : scan.cursorSlotComplete;
+      // All three CASEs read the stored row as it was before this statement,
+      // so the signature, its slot and the slot's watermark move together.
+      const cursorAdvances = `EXCLUDED.cursor_slot IS NOT NULL
+               AND (dvp_leg_transfer_scans.cursor_slot IS NULL
+                    OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)`;
       await db
         .prepare(
-          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, scanned_at)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, scanned_at)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT (trade_id, side)
            DO UPDATE SET
              cursor_signature = CASE
-               WHEN EXCLUDED.cursor_slot IS NOT NULL
-                AND (dvp_leg_transfer_scans.cursor_slot IS NULL
-                     OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)
+               WHEN ${cursorAdvances}
                THEN EXCLUDED.cursor_signature
                ELSE dvp_leg_transfer_scans.cursor_signature END,
              cursor_slot = CASE
-               WHEN EXCLUDED.cursor_slot IS NOT NULL
-                AND (dvp_leg_transfer_scans.cursor_slot IS NULL
-                     OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)
+               WHEN ${cursorAdvances}
                THEN EXCLUDED.cursor_slot
                ELSE dvp_leg_transfer_scans.cursor_slot END,
+             cursor_slot_complete = CASE
+               WHEN ${cursorAdvances}
+               THEN EXCLUDED.cursor_slot_complete
+               ELSE dvp_leg_transfer_scans.cursor_slot_complete END,
              scanned_at = EXCLUDED.scanned_at`
         )
-        .bind(tradeId, scan.side, cursorSignature, cursorSlot, scan.scannedAt)
+        .bind(tradeId, scan.side, cursorSignature, cursorSlot, cursorSlotComplete, scan.scannedAt)
         .run();
     },
   };
