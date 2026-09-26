@@ -757,11 +757,11 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
-  // The walk resolves the position-advancing read before the probe: a
-  // transaction behind the cursor that the node will not serve must not hold
-  // the movements ahead of the cursor hostage — the position would stay stale
-  // and every later sweep would stop at the same transaction instead of
-  // recording what the bounded read listed.
+  // The walk resolves the listings oldest first — the probe before the
+  // bounded read — so a transaction behind the cursor that the node will not
+  // serve stops only itself: the walk reads on to the movements ahead of the
+  // cursor instead of leaving the position stale for every later sweep to
+  // stop at the same transaction.
   it("records the newer movements when the probe hits a transaction the node will not serve", async () => {
     const fullPage = history(
       Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
