@@ -113,6 +113,40 @@ describe("resolveEventViewerForAuth", () => {
     expect(viewer).toEqual({ scope: "wallets", walletIds: ["wallet_b"] });
   });
 
+  it("keeps a legacy signing-wallet key's events visible when it has no binding rows", async () => {
+    const deps = dependencies();
+
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({
+        walletScope: undefined,
+        signingWalletId: "wallet_b",
+        walletBindings: [],
+      }),
+      PROJECT_ID,
+      deps
+    );
+
+    expect(viewer).toEqual({ scope: "wallets", walletIds: ["wallet_b"] });
+  });
+
+  it("unions a legacy signing wallet with its read-authorized bindings", async () => {
+    const deps = dependencies();
+
+    const viewer = await resolveEventViewerForAuth(
+      apiKeyAuth({
+        walletScope: "selected",
+        signingWalletId: "wallet_legacy",
+        walletBindings: [
+          { walletId: "wallet_b", custodyWalletId: "cwlt_b", permissions: ["payments:read"] },
+        ],
+      }),
+      PROJECT_ID,
+      deps
+    );
+
+    expect(viewer).toEqual({ scope: "wallets", walletIds: ["wallet_b", "wallet_legacy"] });
+  });
+
   it("rejects API keys whose project does not match the requested project", async () => {
     const deps = dependencies();
 

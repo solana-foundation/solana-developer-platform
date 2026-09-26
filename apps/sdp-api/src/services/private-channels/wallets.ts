@@ -271,14 +271,16 @@ export async function verifyPrivateChannelWallet(
 
 /**
  * Revoke a wallet verification with SPC, then remove the SDP mirror row. Returns
- * the instance (the handler emits events) and whether a mirror row was removed.
+ * the instance (the handler emits events), whether a mirror row was removed, and
+ * the revoked wallet's SDP wallet ID (the handler attributes the event with it —
+ * null when there was no mirror row).
  */
 export async function deletePrivateChannelWallet(
   env: Env,
   auth: ApiKeyContext,
   projectId: string,
   pubkey: string
-): Promise<{ instance: PrivateChannelInstanceRow; deleted: boolean }> {
+): Promise<{ instance: PrivateChannelInstanceRow; deleted: boolean; walletId: string | null }> {
   const scope = { organizationId: auth.organizationId, projectId };
   const instance = await createPrivateChannelInstanceRepository(env).getActiveByProject(scope);
   requireActiveInstance(instance);
@@ -287,12 +289,12 @@ export async function deletePrivateChannelWallet(
     instance.id,
     pubkey
   );
-  if (!mirror) return { instance, deleted: false };
+  if (!mirror) return { instance, deleted: false, walletId: null };
 
   const session = await resolveWalletSession(env, auth, projectId, mirror.user_id, true);
   const deleted = await revokeWalletWithSession(env, session, pubkey);
 
-  return { instance, deleted };
+  return { instance, deleted, walletId: mirror.wallet_id };
 }
 
 /** Revoke every wallet owned by one identity before removing its channel access. */

@@ -510,19 +510,37 @@ describe("PrivateChannelEventRepository (postgres)", () => {
   });
 
   it("limits wallet-scoped channel feeds to the viewer's wallets", async () => {
+    // Production wallet attribution is channel-less: movement events (transfer,
+    // deposit, withdrawal) always emit with channelId null and never belong to a
+    // channel feed, and the wallet events that do surface there are member-family
+    // wallet verifications. Fixtures match those production shapes.
     await repo.insert(
       baseEvent({
         id: "pce_channel_wallet_a",
-        family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
-        type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+        channelId: null,
         walletId: "wallet_a",
+        payload: { pubkey: "a" },
       })
     );
     await repo.insert(
       baseEvent({
         id: "pce_channel_wallet_b",
+        family: PRIVATE_CHANNEL_EVENT_FAMILIES.MEMBER,
+        type: PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFIED,
+        channelId: null,
+        walletId: "wallet_b",
+        payload: { pubkey: "b" },
+      })
+    );
+    // Even a wallet-attributed channel-less transfer stays out of the channel feed.
+    await repo.insert(
+      baseEvent({
+        id: "pce_channel_transfer_b",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         type: PRIVATE_CHANNEL_EVENT_TYPES.TRANSFER_TRANSFER_SUBMITTED,
+        channelId: null,
         walletId: "wallet_b",
       })
     );

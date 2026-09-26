@@ -434,6 +434,7 @@ describe("Private Channels — event routes", () => {
         project_id: TEST_PROJECT.id,
       },
       deleted: true,
+      walletId: "wallet_event_test",
     } as never);
 
     let res: Response;
@@ -449,14 +450,18 @@ describe("Private Channels — event routes", () => {
 
     expect(res.status).toBe(200);
     const event = await getDb(env)
-      .prepare("SELECT payload FROM private_channel_events WHERE type = ?")
+      .prepare("SELECT payload, wallet_id FROM private_channel_events WHERE type = ?")
       .bind(PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED)
-      .first<{ payload: { pubkey: string; actorId: string; actorType: string } }>();
+      .first<{
+        payload: { pubkey: string; actorId: string; actorType: string };
+        wallet_id: string | null;
+      }>();
     expect(event?.payload).toEqual({
       pubkey,
       actorId: TEST_API_KEY.id,
       actorType: "api_key",
     });
+    expect(event?.wallet_id).toBe("wallet_event_test");
   });
 
   it("does not emit a wallet revocation event when no verification was deleted", async () => {
@@ -468,6 +473,7 @@ describe("Private Channels — event routes", () => {
         project_id: TEST_PROJECT.id,
       },
       deleted: false,
+      walletId: null,
     } as never);
 
     let res: Response;

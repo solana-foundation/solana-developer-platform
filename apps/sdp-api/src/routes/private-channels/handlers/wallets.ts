@@ -109,7 +109,12 @@ export async function deleteVerifiedWallet(c: AppContext) {
   }
 
   try {
-    const { instance, deleted } = await deletePrivateChannelWallet(c.env, auth, projectId, pubkey);
+    const { instance, deleted, walletId } = await deletePrivateChannelWallet(
+      c.env,
+      auth,
+      projectId,
+      pubkey
+    );
     if (deleted) {
       await emitMember(
         c,
@@ -119,7 +124,9 @@ export async function deleteVerifiedWallet(c: AppContext) {
           instanceId: instance.id,
         },
         PRIVATE_CHANNEL_EVENT_TYPES.MEMBER_WALLET_VERIFICATION_REVOKED,
-        { payload: { pubkey } }
+        // Attribute the event to the revoked wallet so a key bound to it keeps
+        // seeing the revocation in its wallet-scoped feed.
+        { walletId, payload: { pubkey } }
       );
     }
     return success(c, { deleted });

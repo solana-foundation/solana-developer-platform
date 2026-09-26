@@ -1,7 +1,10 @@
 import { hasPermission } from "@sdp/types";
 import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { forbidden } from "@/lib/errors";
-import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
+import {
+  getAllowedApiKeyWalletIdsForPermissions,
+  legacySigningWalletBinding,
+} from "@/services/api-key-scope.service";
 import type { AppContext } from "./context";
 import { getPrivateChannelUserRepository } from "./context";
 
@@ -36,10 +39,17 @@ export async function resolveEventViewerForAuth(
     if (allowedWalletIds === null) {
       return { scope: "all" };
     }
-    if (allowedWalletIds.length === 0) {
+    // A legacy key with a signing wallet but no binding rows predates
+    // per-wallet bindings and holds full access to that wallet — the same
+    // fallback the custody routes apply; its events must not go dark.
+    const legacyWalletIds = legacySigningWalletBinding(
+      auth.signingWalletId,
+      auth.walletBindings
+    ).flatMap((binding) => (binding.walletId ? [binding.walletId] : []));
+    if (allowedWalletIds.length === 0 && legacyWalletIds.length === 0) {
       return { scope: "none" };
     }
-    return { scope: "wallets", walletIds: allowedWalletIds };
+    return { scope: "wallets", walletIds: [...allowedWalletIds, ...legacyWalletIds] };
   }
   if (hasPermission(auth.permissions, "projects:write")) {
     return { scope: "all" };

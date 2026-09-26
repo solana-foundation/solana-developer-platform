@@ -469,7 +469,7 @@ describe("deletePrivateChannelWallet", () => {
     });
     principalRepo.getById.mockResolvedValue(selectedPrincipal);
 
-    const { deleted } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
+    const { deleted, walletId } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
 
     expect(principalRepo.getById).toHaveBeenCalledWith(
       { organizationId: "org_1", projectId: "prj_1" },
@@ -488,14 +488,16 @@ describe("deletePrivateChannelWallet", () => {
       PUBKEY
     );
     expect(deleted).toBe(true);
+    expect(walletId).toBe(WALLET_ID);
   });
 
   it("returns false without calling SPC when the local wallet mirror is absent", async () => {
     verifiedRepo.findByInstanceAndPubkey.mockResolvedValue(null);
 
-    const { deleted } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
+    const { deleted, walletId } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
 
     expect(deleted).toBe(false);
+    expect(walletId).toBeNull();
     expect(client.deleteWallet).not.toHaveBeenCalled();
     expect(principalRepo.getById).not.toHaveBeenCalled();
   });
