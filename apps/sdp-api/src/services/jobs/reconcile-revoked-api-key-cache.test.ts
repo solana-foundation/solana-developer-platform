@@ -16,7 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Gauge for the sweep's Redis fan-out: tracks how many kv.get calls are in
 // flight at once so the tests can prove the loop is not one-row-at-a-time.
-const kvGauge = vi.hoisted(() => ({ inflightGets: 0, maxInflightGets: 0 }));
+// `failDeletes` simulates a Redis outage on DEL so tests can exercise the
+// sweep's cursor-clear failure path.
+const kvGauge = vi.hoisted(() => ({ inflightGets: 0, maxInflightGets: 0, failDeletes: false }));
 
 vi.mock("@/runtime/kv-redis", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/runtime/kv-redis")>();
@@ -40,6 +42,14 @@ vi.mock("@/runtime/kv-redis", async (importOriginal) => {
             }
           };
         }
+        if (prop === "delete") {
+          return async (...args: unknown[]) => {
+            if (kvGauge.failDeletes) {
+              throw new Error("simulated Redis outage: DEL failed");
+            }
+            return (target.delete as (...inner: unknown[]) => Promise<unknown>).apply(target, args);
+          };
+        }
         const value = Reflect.get(target, prop, receiver);
         return typeof value === "function" ? value.bind(target) : value;
       },
@@ -58,7 +68,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { apiKeyCacheKey } from "@/lib/api-key-cache";
 import { isRotationDeadlineReached } from "@/lib/api-key-rotation";
-import { createKVStoreSet } from "@/runtime/kv-redis";
+import { createKVStoreSet, getRedisClient } from "@/runtime/kv-redis";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -348,6 +358,7 @@ describe("rotated scan starvation (SOLA9-554)", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
+    kvGauge.failDeletes = false;
     await getDb(env).batch([
       getDb(env)
         .prepare("INSERT INTO organizations (id, name, slug, tier, status) VALUES (?, ?, ?, ?, ?)")
@@ -365,6 +376,7 @@ describe("rotated scan starvation (SOLA9-554)", () => {
   });
 
   afterEach(async () => {
+    kvGauge.failDeletes = false;
     await clearKVStores(env);
   });
 
@@ -488,5 +500,121 @@ describe("rotated scan starvation (SOLA9-554)", () => {
       "json"
     );
     expect(repaired?.rotationDeadline).toBe(deadline);
+  });
+
+  it("treats a cursor with a non-timestamp deadline as absent", async () => {
+    // Valid JSON, plausible shape — but the deadline is not a timestamp at
+    // all. If such a cursor were resumed, the timestamptz cast would fail on
+    // every tick, before any repair or cursor cleanup: a permanent wedge.
+    const deadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const targetHash = await seedActiveRotatedKey(TARGET, deadline);
+    await seedStalePreRotationEntry(TARGET.id, targetHash);
+    await createKVStoreSet(env).apiKeys.put(
+      ROTATED_DEADLINE_CURSOR_CACHE_KEY,
+      JSON.stringify({ rotationDeadline: "not-a-timestamp", keyHash: "abc" })
+    );
+
+    const outcome = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(1);
+
+    const repaired = await createKVStoreSet(env).apiKeys.get<CachedApiKey>(
+      apiKeyCacheKey(targetHash),
+      "json"
+    );
+    expect(repaired?.rotationDeadline).toBe(deadline);
+  });
+
+  it("survives a cursor whose deadline passes the shape check but fails the database cast", async () => {
+    // JavaScript normalizes an impossible calendar date (Feb 30) instead of
+    // rejecting it, so this cursor passes every shape check and reaches the
+    // resumed query — where Postgres rejects the cast. The sweep must
+    // degrade to a fresh scan and re-establish a valid cursor, not fail
+    // every tick on the same poisoned value.
+    const deadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const targetHash = await seedActiveRotatedKey(TARGET, deadline);
+    await seedStalePreRotationEntry(TARGET.id, targetHash);
+    await createKVStoreSet(env).apiKeys.put(
+      ROTATED_DEADLINE_CURSOR_CACHE_KEY,
+      JSON.stringify({ rotationDeadline: "2026-02-30T00:00:00.000Z", keyHash: "abc" })
+    );
+
+    const outcome = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(outcome.scanned).toBe(1);
+    expect(outcome.repaired).toBe(1);
+
+    // The poisoned cursor is gone: the sweep's end-of-tick save replaced it
+    // with the position it actually stopped at.
+    const rawCursor = await createKVStoreSet(env).apiKeys.get(ROTATED_DEADLINE_CURSOR_CACHE_KEY);
+    expect(rawCursor).toContain(deadline);
+  });
+
+  it("keeps newly rotated rows reachable when clearing the cursor keeps failing", async () => {
+    // If the end-of-sweep delete failed and the stale cursor survived without
+    // an expiry, every key rotated after that position — with a newer
+    // deadline, i.e. sorted ahead of it — would stay uninspected while the
+    // failures continued. The clear must therefore replace the cursor with
+    // something that reads as absent and cannot hide rows.
+    const newer = { id: "key_rotated_newer", raw: "sk_test_rotated_newer" };
+    const newerDeadline = new Date(Date.now() + 120 * 60 * 1000).toISOString();
+    const newest = { id: "key_rotated_newest", raw: "sk_test_rotated_newest" };
+    const newestDeadline = new Date(Date.now() + 150 * 60 * 1000).toISOString();
+    const blockerDeadline = new Date(Date.now() + 90 * 60 * 1000).toISOString();
+    const targetDeadline = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    const newerHash = await seedActiveRotatedKey(newer, newerDeadline);
+    const blockerHash = await seedActiveRotatedKey(BLOCKER, blockerDeadline);
+    const targetHash = await seedActiveRotatedKey(TARGET, targetDeadline);
+    await seedCachedApiKey(env, blockerHash, starvationEntry(BLOCKER.id, blockerDeadline));
+    await seedStalePreRotationEntry(TARGET.id, targetHash);
+    await seedStalePreRotationEntry(newer.id, newerHash);
+
+    // Walk the one-row worklist down so the cursor parks at the oldest
+    // position: newest → repaired, blocker → converged skip, target → repaired.
+    expect((await reconcileRevokedApiKeyCache(env, { scanLimit: 1 })).repaired).toBe(1);
+    expect((await reconcileRevokedApiKeyCache(env, { scanLimit: 1 })).repaired).toBe(0);
+    expect((await reconcileRevokedApiKeyCache(env, { scanLimit: 1 })).repaired).toBe(1);
+
+    // The page under the cursor is now empty, so the next sweep drains and
+    // clears the cursor — and the delete fails.
+    kvGauge.failDeletes = true;
+    const drained = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(drained.scanned).toBe(0);
+
+    // The failed delete did not leave the old position in charge: the slot
+    // now holds the self-expiring clear tombstone, which reads as absent.
+    const rawCursor = await createKVStoreSet(env).apiKeys.get(ROTATED_DEADLINE_CURSOR_CACHE_KEY);
+    expect(JSON.parse(rawCursor ?? "{}")).toHaveProperty("clearedAt");
+
+    // A key rotated after the wedge — newest deadline, sorts ahead of the
+    // stale position — is picked up by the very next tick.
+    const newestHash = await seedActiveRotatedKey(newest, newestDeadline);
+    await seedStalePreRotationEntry(newest.id, newestHash);
+    const next = await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+    expect(next.scanned).toBe(1);
+    expect(next.repaired).toBe(1);
+
+    const newestCache = await createKVStoreSet(env).apiKeys.get<CachedApiKey>(
+      apiKeyCacheKey(newestHash),
+      "json"
+    );
+    expect(newestCache?.rotationDeadline).toBe(newestDeadline);
+  });
+
+  it("persists every cursor with an expiry so a wedge cannot outlive it", async () => {
+    // The review failure mode: a cursor "in Redis without an expiry". While
+    // the scan makes progress each tick rewrites the cursor — with a TTL, so
+    // even repeated clear/write failures end within minutes.
+    const deadline = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    await seedActiveRotatedKey(TARGET, deadline);
+
+    await reconcileRevokedApiKeyCache(env, { scanLimit: 1 });
+
+    const client = await getRedisClient(env);
+    const namespaced = await client.keys(`*${ROTATED_DEADLINE_CURSOR_CACHE_KEY}`);
+    expect(namespaced).toHaveLength(1);
+    // ioredis PTTL: -1 = no expiry, -2 = missing. The cursor must have a
+    // live one.
+    expect(await client.pttl(namespaced[0])).toBeGreaterThan(0);
   });
 });
