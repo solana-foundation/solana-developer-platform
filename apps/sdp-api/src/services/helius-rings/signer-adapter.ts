@@ -21,6 +21,7 @@ import {
 } from "@solana/signers";
 import { getDb } from "@/db";
 import type { SigningProviderType } from "@/services/adapters/signing";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
 import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
@@ -285,43 +286,91 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * a signature valid is that it comes from the key the transaction names. The
  * lookup is scoped to the organization and to active wallets, so an owner
  * custody no longer controls fails here rather than at the chain.
+ *
+ * The config store only sees `custody_configs` wallets, so when it misses, the
+ * resolver re-queries through the connection-aware custody path before giving
+ * up: an owner provisioned under an active custody connection (the BYOK path)
+ * is otherwise unreachable and every provisioning attempt strands its Rings
+ * row in `pending`. Either way the signer is built from one exact custody-wallet
+ * row and must still hold the owner's key.
  */
 async function resolveOwnerSigner(
   input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
 ): Promise<TransactionSigner> {
-  const wallet = await new CustodyConfigStore(
+  const configWallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
   ).findActiveWalletByPublicKey(input.organizationId, input.projectId, input.owner);
-  if (!wallet) {
+  if (configWallet) {
+    assertRawMessageSigningProvider(configWallet.provider);
+    return ownerSignerForWalletRecord(input, configWallet.id);
+  }
+  return resolveConnectionOwnerSigner(input);
+}
+
+/**
+ * Fallback for owners held by connection-owned custody wallets, resolved
+ * through the same tenant-scoped, connection-aware path every runtime flow
+ * uses. Candidates already carry the owner's key, so the only choice is which
+ * row to build the signer from; the projection's deterministic order (default
+ * wallet first, then oldest) picks it, and the resolved signer's key is
+ * verified below either way.
+ */
+async function resolveConnectionOwnerSigner(
+  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
+): Promise<TransactionSigner> {
+  const connectionWallets = (
+    await new CustodyRuntimeTargets(getDb(input.env), input.env, new Map()).listWallets({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      includeAllProviders: true,
+    })
+  ).filter(
+    (wallet) => wallet.publicKey === input.owner && wallet.custodyConnectionId !== undefined
+  );
+
+  const candidate = connectionWallets[0];
+  if (!candidate) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }
-  if (!RAW_MESSAGE_SIGNING_PROVIDERS.has(wallet.provider)) {
-    // Raised as its own failure code rather than as a signer failure: nothing
-    // signed and nothing broke, so "custody could not sign" would send an
-    // operator looking for an outage. Names the provider, the requirement it
-    // does not meet, and the providers that do — the only fix is moving the
-    // wallet, and the message has to be able to say so on its own.
-    throw new RingsAdapterError(
-      "provider_unsupported",
-      `custody provider ${wallet.provider} cannot back a Rings private wallet: its shielded keys are re-derived from an owner custody signature on every use, which needs a provider that signs raw messages and returns the same signature every time. Providers that do: ${[...RAW_MESSAGE_SIGNING_PROVIDERS].join(", ")}.`,
-      { retryable: false }
-    );
-  }
+  assertRawMessageSigningProvider(candidate.provider);
+  return ownerSignerForWalletRecord(input, candidate.id);
+}
 
+function assertRawMessageSigningProvider(provider: SigningProviderType): void {
+  if (RAW_MESSAGE_SIGNING_PROVIDERS.has(provider)) {
+    return;
+  }
+  // Raised as its own failure code rather than as a signer failure: nothing
+  // signed and nothing broke, so "custody could not sign" would send an
+  // operator looking for an outage. Names the provider, the requirement it
+  // does not meet, and the providers that do — the only fix is moving the
+  // wallet, and the message has to be able to say so on its own.
+  throw new RingsAdapterError(
+    "provider_unsupported",
+    `custody provider ${provider} cannot back a Rings private wallet: its shielded keys are re-derived from an owner custody signature on every use, which needs a provider that signs raw messages and returns the same signature every time. Providers that do: ${[...RAW_MESSAGE_SIGNING_PROVIDERS].join(", ")}.`,
+    { retryable: false }
+  );
+}
+
+/** Builds the signer for one exact custody-wallet row, verified against the owner. */
+async function ownerSignerForWalletRecord(
+  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">,
+  custodyWalletId: string
+): Promise<TransactionSigner> {
   const signer = await createOrgSignerForCustodyWallet(
     input.env,
     input.organizationId,
     input.projectId,
-    wallet.id
+    custodyWalletId
   );
 
-  // Unreachable via the public-key lookup, but the cost of being wrong is
+  // Unreachable via the scoped lookups above, but the cost of being wrong is
   // signing someone else's transfer. Names the row so an operator can find the
   // divergence between it and its provider.
   if (signer.address !== input.owner) {
     throw new SigningError(
-      `custody wallet ${wallet.id} resolved ${signer.address} for owner ${input.owner}`,
+      `custody wallet ${custodyWalletId} resolved ${signer.address} for owner ${input.owner}`,
       "WALLET_NOT_FOUND"
     );
   }
