@@ -44,7 +44,11 @@ import type { AppContext } from "../context";
  *   crash between the money effect and the audit write is repaired on the
  *   retry: a replayed movement with no audit row gets one, marked
  *   `backfilledOnReplay`, so the ledger cannot stay permanently silent about
- *   a movement that exists. One-event-per-movement is enforced by the
+ *   a movement that exists. The backfilled row seals no request correlation
+ *   (SOLA9-646): the effect-causing request's `X-Request-ID` is not
+ *   recoverable from durable state, and the retry's own correlation is kept
+ *   as `repairRequestId` metadata instead of being written into the
+ *   immutable `request_id` column. One-event-per-movement is enforced by the
  *   database (migration 0083's partial unique index), so concurrent replays
  *   racing past the existence check cannot append twice: the losing insert's
  *   unique violation is treated as "already audited".
@@ -141,6 +145,15 @@ export async function concludeEarnDepositAuditOnError(
  * `replayed: true` switches to repair mode: write only when the movement has
  * no audit row yet (the original attempt crashed between the money effect
  * and its audit write), marked `backfilledOnReplay`.
+ *
+ * Request correlation (SOLA9-646): the row's `request_id` column names the
+ * HTTP request that caused the money effect. On the initial append that is
+ * this request's own correlation, passed explicitly so the entry never
+ * silently inherits whichever context executes the write. On the repair
+ * append the original correlation was never durable
+ * (`earn_movements.request_id` holds the business idempotency key), so the
+ * backfilled row records NULL rather than attributing the effect to the
+ * retry; the retry's own correlation is kept as `repairRequestId` metadata.
  */
 export async function recordEarnWithdrawalAudit(
   c: AppContext,
@@ -150,7 +163,9 @@ export async function recordEarnWithdrawalAudit(
   options: { replayed?: boolean } = {}
 ): Promise<void> {
   try {
+    const effectRequestId = c.get("requestId") ?? null;
     let entryMetadata = metadata;
+    let entryRequestId: string | null = effectRequestId;
     if (options.replayed) {
       const existing = await getDb(c.env)
         .prepare(
@@ -162,12 +177,17 @@ export async function recordEarnWithdrawalAudit(
         .bind(actor.organizationId, resourceId)
         .first<{ present: number }>();
       if (existing) return;
-      entryMetadata = { ...metadata, backfilledOnReplay: true };
+      entryRequestId = null;
+      entryMetadata = {
+        ...metadata,
+        backfilledOnReplay: true,
+        ...(effectRequestId === null ? {} : { repairRequestId: effectRequestId }),
+      };
     }
-    await new AuditService(getDb(c.env)).log(
-      c,
-      earnMovementEntry("withdraw", actor, entryMetadata, resourceId)
-    );
+    await new AuditService(getDb(c.env)).log(c, {
+      ...earnMovementEntry("withdraw", actor, entryMetadata, resourceId),
+      requestId: entryRequestId,
+    });
   } catch (error) {
     // Migration 0083's partial unique index is the atomic form of the
     // existence check above: a concurrent writer already audited this

@@ -1497,7 +1497,12 @@ an exit (ADR 0002). A replayed exit backfills a missing audit row
 (`backfilledOnReplay`) and never duplicates an existing one; migration 0083's
 partial unique index makes the insert itself the atomic existence check, so
 concurrent replays cannot append twice and the losing writer's unique
-violation reads as "already audited". A failed exit audit logs
+violation reads as "already audited". The backfilled row seals no
+`audit_logs.request_id` (SOLA9-646): the effect-causing request's
+`X-Request-ID` is not recoverable from durable state, so writing the retry's
+own would misattribute the effect — the repair keeps it as `repairRequestId`
+metadata, and `AuditLogEntry.requestId` is the explicit immutable correlation
+field that makes this possible. A failed exit audit logs
 `earn_audit_write_failed` and the movement row stays the authoritative money
 record. Each seam's suite pins its half: parity rows in all four route files,
 fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open

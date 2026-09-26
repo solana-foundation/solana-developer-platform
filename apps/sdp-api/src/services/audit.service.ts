@@ -118,11 +118,25 @@ export interface AuditLogEntry {
   resourceId?: string;
   metadata?: Record<string, unknown>;
   status?: "success" | "failure";
+  /**
+   * Immutable HTTP correlation of the request that caused the audited effect.
+   * Absent (undefined), `log()` falls back to the calling request context —
+   * the behavior every non-earn caller relies on. Set explicitly, it wins:
+   * a string pins the correlation, and an explicit null records "not
+   * attributable to the request now executing" (SOLA9-646), so a repair
+   * append that runs inside a later retry can never seal the retry's
+   * `X-Request-ID` as the correlation of an effect it did not cause.
+   */
+  requestId?: string | null;
 }
 
 export interface SystemAuditLogEntry extends AuditLogEntry {
-  /** Correlation id supplied by a scheduled job or other non-request caller. */
-  requestId?: string;
+  /**
+   * Correlation id supplied by a scheduled job or other non-request caller.
+   * Null records "not attributable to a request" (SOLA9-646), like the base
+   * field.
+   */
+  requestId?: string | null;
 }
 
 /**
@@ -384,7 +398,6 @@ export class AuditService {
     const auth = c.get("apiKey");
     const clerk = c.get("clerk");
     const session = c.get("session");
-    const requestId = c.get("requestId");
 
     const organizationId =
       entry.organizationId ||
@@ -394,6 +407,11 @@ export class AuditService {
       null;
     const userId = entry.userId || clerk?.userId || session?.userId || null;
     const apiKeyId = entry.apiKeyId || auth?.id || null;
+
+    // An explicit entry correlation is immutable: only its absence falls back
+    // to the request now executing (see AuditLogEntry.requestId).
+    const requestId =
+      entry.requestId === undefined ? (c.get("requestId") ?? null) : entry.requestId;
 
     const ipAddress = getClientIp(c);
     const userAgent = c.req.header("user-agent") || null;
