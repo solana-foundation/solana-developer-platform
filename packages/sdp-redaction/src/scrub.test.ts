@@ -98,6 +98,33 @@ describe("scrubTelemetry", () => {
     );
   });
 
+  it("redacts an unlabelled account number written into error prose", () => {
+    // An upstream failure folds the instrument number straight into its
+    // message: there is no key, assignment, or quoted field to catch it, so
+    // recognition has to be by shape.
+    assert.equal(
+      scrubTelemetryString("Transfer rejected for account 000123456789"),
+      "Transfer rejected for account [REDACTED]"
+    );
+    const scrubbed = scrubTelemetry({
+      error: "Wire for 000123456789 declined: insufficient funds",
+    });
+
+    assert.equal(
+      (scrubbed as { error: string }).error,
+      "Wire for [REDACTED] declined: insufficient funds"
+    );
+  });
+
+  it("leaves the short numbers prose legitimately carries readable", () => {
+    // Over-redaction guard: statuses, ports, postal codes, and short resource
+    // numbers are operational context, and a Solana address has no digit run
+    // for the shape rule to bite on.
+    const message = `status 500 on port 8080, postal code 75001, ref 1234567, vault ${SOLANA_ADDRESS}`;
+
+    assert.equal(scrubTelemetryString(message), message);
+  });
+
   it("survives a circular payload rather than throwing inside a send path", () => {
     const payload: Record<string, unknown> = { email: "jane.doe@example.com" };
     payload.self = payload;

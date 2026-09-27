@@ -47,6 +47,20 @@ const PII_ASSIGNMENT_PATTERN = new RegExp(
   "gi"
 );
 
+// The one shape-based PII rule. Bank instrument numbers are the single value
+// class that reaches a sink both self-labelling ("account 000123456789") and
+// bare — a provider folds them into error prose where no key, assignment, or
+// serialization can vouch for them, so recognition has to be by shape. A run
+// of 8+ digits is long enough to exclude the numbers prose legitimately
+// carries (statuses, ports, postal codes, compact dates) and cannot be a
+// Solana public key: base58 excludes `0`, and a 32-byte key whose encoding
+// is a bare digit run would encode a near-zero value. Structured numeric
+// fields (slots, amounts, timestamps) pass through untouched — this only
+// rewrites digit runs *inside strings* — and resource ids stay readable under
+// their `*Id` keys. The bounded quantifier is linear: one match consumes the
+// whole run, so there is nothing to rescan (the EMAIL_PATTERN DoS note above).
+const PII_DIGIT_RUN_PATTERN = /\d{8,}/g;
+
 /**
  * `jane.doe@example.com` → `j***@example.com`.
  *
@@ -79,7 +93,8 @@ function scrubString(value: string, emails: EmailMode): string {
     .replace(
       PII_ASSIGNMENT_PATTERN,
       (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-    );
+    )
+    .replace(PII_DIGIT_RUN_PATTERN, REDACTED);
 }
 
 function scrubSensitive(value: unknown, emails: EmailMode): unknown {

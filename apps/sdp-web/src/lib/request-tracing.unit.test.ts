@@ -123,6 +123,22 @@ describe("dashboard trace sink scrubbing (SOLA9-658)", () => {
     expect(line).toContain("Transfer rejected for");
   });
 
+  it("scrubs an unlabelled account number quoted in prose, with no key to vouch for it", () => {
+    // The labelled forms are caught by the assignment rules; a provider that
+    // folds the number into free text ("Transfer rejected for account …")
+    // leaves nothing but the digit shape to recognize.
+    createTimedTrace("dashboard.issuance.token.page").log({
+      ok: false,
+      error: "Transfer rejected for account 000123456789",
+    });
+
+    const line = lastLine();
+    for (const forbidden of FORBIDDEN) {
+      expect(line).not.toContain(forbidden);
+    }
+    expect(line).toContain("Transfer rejected for account");
+  });
+
   it("scrubs logRouteResult extras carrying an upstream body", () => {
     const trace = createTimedTrace("dashboard.proxy");
     logRouteResult(trace, 502, { error: new SdpApiResponseError(502, PROVIDER_BODY).message });
