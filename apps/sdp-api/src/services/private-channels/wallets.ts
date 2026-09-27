@@ -9,10 +9,15 @@
  *   5. persist the verification (idempotent per (user, instance, pubkey))
  *
  * The persist step is conditional on the durable revocation epoch for
- * (instance, pubkey): a revocation advances it in the same transaction that
+ * the identity's (user, instance, pubkey): a revocation advances it in the
+ * same transaction that
  * removes the mirror, so an in-flight verification whose upstream binding was
  * concurrently revoked cannot recreate `private_channel_verified_wallets`
- * after `deleteWallet` succeeded (SOLA9-664). When the epoch race is lost, the
+ * after `deleteWallet` succeeded (SOLA9-664). The epoch is identity-scoped —
+ * another identity's claims or revocations for the same pubkey advance their
+ * own epoch row — so the pending-cleanup latch, which compares the epoch
+ * against a marker's claim epoch, can never be released by another
+ * identity's advance. When the epoch race is lost, the
  * upstream binding this request created is revoked again (idempotent) unless a
  * newer verification has already re-created the mirror or another rejected
  * verification's cleanup for the same binding is still pending (one binding
@@ -262,6 +267,7 @@ async function rejectedMirrorState(
   try {
     revokedWhileVerifying =
       (await createPrivateChannelVerifiedWalletRepository(env).getRevocationEpoch(
+        pcUser.id,
         instance.id,
         pubkey
       )) !== observedRevocationEpoch;
@@ -482,12 +488,19 @@ export async function verifyPrivateChannelWallet(
 
   const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
   // The revocation barrier (SOLA9-664): observe the durable revocation epoch
-  // for (instance, pubkey) BEFORE the SPC handshake, and let the final mirror
-  // upsert refuse unless the epoch is unchanged. A revocation that commits
-  // while this verification is in flight advances the epoch, so the stale
-  // verification continuation cannot resurrect the mirror after the
-  // revocation's SPC delete and mirror removal succeeded.
-  const observedRevocationEpoch = await verifiedWalletRepo.getRevocationEpoch(instance.id, pubkey);
+  // for this identity's (user, instance, pubkey) BEFORE the SPC handshake, and
+  // let the final mirror upsert refuse unless the epoch is unchanged. A
+  // revocation that commits while this verification is in flight advances the
+  // epoch, so the stale verification continuation cannot resurrect the mirror
+  // after the revocation's SPC delete and mirror removal succeeded. The epoch
+  // is identity-scoped so another identity's claims or revocations for the
+  // same pubkey cannot release this identity's cleanup-claim latch (see
+  // compensateRejectedVerification).
+  const observedRevocationEpoch = await verifiedWalletRepo.getRevocationEpoch(
+    pcUser.id,
+    instance.id,
+    pubkey
+  );
 
   // Retry unit is challenge → sign → verify (restarted from challenge on 401).
   // The nonce is challenge-scoped; never retry verify alone with a fresh token.

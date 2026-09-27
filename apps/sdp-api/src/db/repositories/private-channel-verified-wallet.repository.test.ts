@@ -217,7 +217,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBeTypeOf("string");
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
 
     // A successful compensating revoke removes the marker again with the
     // mirror; the epoch never resets. This is a real delete (no claim
@@ -231,7 +231,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(2);
   });
 
   it("the cleanup claim stands down while the same identity's mirror exists", async () => {
@@ -257,7 +257,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     ).resolves.toBeNull();
     await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toHaveLength(1);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
   it("a second cleanup claim stands down while the first claim's marker is fresh", async () => {
@@ -269,7 +269,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       pubkey: PUBKEY_A,
     });
     expect(watermark).toBeTypeOf("string");
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
 
     // A second stale verification of the same wallet claims cleanup: SPC
     // keeps one binding per (SPC user, pubkey), so the first claim's single
@@ -286,7 +286,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         pubkey: PUBKEY_A,
       })
     ).resolves.toBeNull();
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
 
     // Once the pending cleanup completes (its compensating revoke clears the
@@ -308,7 +308,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         pubkey: PUBKEY_A,
       })
     ).resolves.toBeTypeOf("string");
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(3);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(3);
   });
 
   it("a cleanup claim takes over a marker whose lease has expired", async () => {
@@ -348,7 +348,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         pubkey: PUBKEY_A,
       })
     ).resolves.toBeTypeOf("string");
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
     const markers = await repo.listPendingRevocations(PCU_ID, instanceA);
     expect(markers).toHaveLength(1);
     expect(Date.now() - new Date(markers[0].updated_at).getTime()).toBeLessThan(60_000);
@@ -475,7 +475,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBe(false);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(2);
 
     // The live epoch has moved past the marker's claim_epoch: the owner's
     // convergence committed, so the marker no longer latches the mirror
@@ -633,7 +633,11 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       user_id: PCU_ID,
     });
     await expect(repo.listPendingRevocations(SECOND_PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    // The claim advanced the second identity's own epoch row; the mirror
+    // owner's epoch is untouched — each identity's latch observes only its
+    // own advances.
+    await expect(repo.getRevocationEpoch(SECOND_PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
   it("the pending-revocation marker latches the conditional mirror upsert", async () => {
@@ -712,7 +716,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
   it("recordPendingRevocation skips the marker when this identity's mirror owns the pubkey", async () => {
@@ -771,11 +775,13 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(SECOND_PCU_ID, instanceA)).resolves.toHaveLength(1);
-    // The owning identity's mirror and epoch are untouched.
+    // The owning identity's mirror and epoch are untouched; the record
+    // created the second identity's own epoch row at 0 (it advances nothing).
     await expect(repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).resolves.toMatchObject({
       user_id: PCU_ID,
     });
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(SECOND_PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
   it("lists wallets by user and instance", async () => {
@@ -792,6 +798,15 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
   });
 
   it("revokeVerifiedWallet removes only the named pubkey and advances its epoch; stale → false", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_users (
+           id, organization_id, project_id, instance_id, name, is_default
+         ) VALUES (?, ?, ?, ?, 'Second', FALSE)`
+      )
+      .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
+      .run();
     await repo.upsert({
       ...scope,
       userId: PCU_ID,
@@ -812,7 +827,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(
       await repo.revokeVerifiedWallet({
         ...scope,
-        userId: "pcu_missing",
+        userId: SECOND_PCU_ID,
         instanceId: instanceA,
         pubkey: PUBKEY_A,
       })
@@ -828,11 +843,13 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
 
     const rows = await repo.listByUserAndInstance(PCU_ID, instanceA);
     expect(rows.map((r) => r.pubkey)).toEqual([PUBKEY_B]);
-    // The epoch is (instance, pubkey)-scoped and advances on every committed
-    // revocation, even one that removed no mirror row for this identity.
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+    // The epoch is (user_id, instance_id, pubkey)-scoped and advances on
+    // every committed revocation by that identity, even one that removed no
+    // mirror row for it.
+    await expect(repo.getRevocationEpoch(SECOND_PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
     // A different pubkey on the same instance has its own epoch.
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_B)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_B)).resolves.toBe(0);
   });
 
   it("the revocation epoch advances monotonically and gates the conditional upsert", async () => {
@@ -844,7 +861,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       pubkey: PUBKEY_A,
       expectedRevocationEpoch: 0,
     });
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(0);
 
     await repo.revokeVerifiedWallet({
       ...scope,
@@ -858,7 +875,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       pubkey: PUBKEY_A,
     });
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(2);
 
     // A verification that observed epoch 0 (stale continuation) loses.
     await expect(
@@ -957,13 +974,13 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       await tx
         .prepare(
           `INSERT INTO private_channel_wallet_revocation_epochs (
-               organization_id, project_id, instance_id, pubkey, epoch
+               organization_id, project_id, user_id, instance_id, pubkey, epoch
              )
-             VALUES (?, ?, ?, ?, 1)
-           ON CONFLICT (instance_id, pubkey) DO UPDATE
+             VALUES (?, ?, ?, ?, ?, 1)
+           ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
              SET epoch = private_channel_wallet_revocation_epochs.epoch + 1`
         )
-        .bind(scope.organizationId, scope.projectId, instanceA, PUBKEY_A)
+        .bind(scope.organizationId, scope.projectId, PCU_ID, instanceA, PUBKEY_A)
         .run();
       await tx
         .prepare(
@@ -984,6 +1001,6 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     await revocation;
 
     await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(1);
   });
 });

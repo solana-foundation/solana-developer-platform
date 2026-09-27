@@ -29,38 +29,44 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
   return {
     async upsert(input: ConditionalUpsertVerifiedWalletInput) {
       const row = await db.transaction(async (tx) => {
-        // Barrier half 1 (SOLA9-664): make sure the epoch row exists. A
-        // first-ever revocation inserts this row in its own transaction, so a
-        // plain `SELECT ... FOR UPDATE` of an absent row would lock nothing
-        // and that revocation could still interleave with the mirror write.
+        // Barrier half 1 (SOLA9-664): make sure the identity's epoch row
+        // exists. A first-ever revocation inserts this row in its own
+        // transaction, so a plain `SELECT ... FOR UPDATE` of an absent row
+        // would lock nothing and that revocation could still interleave with
+        // the mirror write.
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
-                 organization_id, project_id, instance_id, pubkey, epoch
+                 organization_id, project_id, user_id, instance_id, pubkey, epoch
                )
-               VALUES (?, ?, ?, ?, 0)
-             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+               VALUES (?, ?, ?, ?, ?, 0)
+             ON CONFLICT (user_id, instance_id, pubkey) DO NOTHING`
           )
-          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .bind(input.organizationId, input.projectId, input.userId, input.instanceId, input.pubkey)
           .run();
 
-        // Barrier half 2: lock the epoch row for the rest of the transaction.
-        // Every revocation advances this row before it removes a mirror, so
-        // either it committed first (this read observes the advanced epoch and
-        // the write below is refused) or it blocks until this transaction
-        // commits and then removes the mirror it writes. Reading the epoch
-        // without this lock would let an uncommitted revocation's mirror
-        // delete absorb the insert's conflict wait and resurrect the mirror
-        // with a stale epoch check.
+        // Barrier half 2: lock the identity's epoch row for the rest of the
+        // transaction. Every revocation of this identity's binding advances
+        // this row before it removes a mirror, so either it committed first
+        // (this read observes the advanced epoch and the write below is
+        // refused) or it blocks until this transaction commits and then
+        // removes the mirror it writes. Reading the epoch without this lock
+        // would let an uncommitted revocation's mirror delete absorb the
+        // insert's conflict wait and resurrect the mirror with a stale epoch
+        // check. The row is identity-scoped: the marker latch below compares
+        // the epoch against a per-identity `claim_epoch`, so another
+        // identity's advances on a shared counter could not be told apart
+        // from this identity's own convergence.
         const epochRow = await tx
           .prepare(
             `SELECT epoch
                 FROM private_channel_wallet_revocation_epochs
-               WHERE instance_id = ?
+               WHERE user_id = ?
+                 AND instance_id = ?
                  AND pubkey = ?
                FOR UPDATE`
           )
-          .bind(input.instanceId, input.pubkey)
+          .bind(input.userId, input.instanceId, input.pubkey)
           .first<{ epoch: number }>();
         if ((epochRow?.epoch ?? 0) !== input.expectedRevocationEpoch) {
           return null;
@@ -73,13 +79,16 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         // would create — so while the marker is pending the mirror must not
         // land: a verification refused here loses with a retryable conflict
         // instead of handing a live binding to the compensating delete. The
-        // marker is written only by transactions holding this same epoch row
-        // lock, so this serialized read cannot miss one.
+        // marker is written only by transactions holding this same identity's
+        // epoch row lock, so this serialized read cannot miss one.
         //
         // The latch drops once the marker's owner has converged: the marker
         // records the epoch its claim advanced to (`claim_epoch`), and the
         // owner's convergence — the compensating delete plus the epoch
-        // advance of its local half — moves the live epoch past it. An
+        // advance of its local half — moves the identity's epoch past it. The
+        // epoch is this identity's own row, so the comparison cannot be
+        // fooled by another identity's claim or revocation for the same
+        // pubkey: only this identity's own transactions advance it. An
         // epoch-stale marker can no longer be matched by an outstanding
         // delete (the delete returned before that advance committed), so a
         // verification that observed the live epoch lands its mirror safely;
@@ -147,14 +156,15 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       return mapPrivateChannelVerifiedWalletRow(row);
     },
 
-    async getRevocationEpoch(instanceId: string, pubkey: string) {
+    async getRevocationEpoch(userId: string, instanceId: string, pubkey: string) {
       const row = await db
         .prepare(
           `SELECT epoch FROM private_channel_wallet_revocation_epochs
-            WHERE instance_id = ?
+            WHERE user_id = ?
+              AND instance_id = ?
               AND pubkey = ?`
         )
-        .bind(instanceId, pubkey)
+        .bind(userId, instanceId, pubkey)
         .first<{ epoch: number }>();
       return row?.epoch ?? 0;
     },
@@ -162,7 +172,10 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
     async revokeVerifiedWallet(input: RevokeVerifiedWalletInput) {
       // One transaction: the epoch advance is the barrier that makes an
       // in-flight verification's conditional upsert lose, so it must commit
-      // together with the mirror and retry-marker removal.
+      // together with the mirror and retry-marker removal. The epoch row is
+      // the identity's own: the marker latch compares it against this
+      // identity's `claim_epoch`, so only this identity's own advances may
+      // release that latch.
       //
       // The marker clear of a compensating delete is scoped to the claim's
       // own watermark: a stand-down whose bounded wait timed out re-owns the
@@ -175,14 +188,20 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         db
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
-                 organization_id, project_id, instance_id, pubkey, epoch
+                 organization_id, project_id, user_id, instance_id, pubkey, epoch
                )
-               VALUES (?, ?, ?, ?, 1)
-               ON CONFLICT (instance_id, pubkey) DO UPDATE
+               VALUES (?, ?, ?, ?, ?, 1)
+               ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
                  SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
                      updated_at = sdp_iso_now()`
           )
-          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey),
+          .bind(
+            input.organizationId,
+            input.projectId,
+            input.userId,
+            input.instanceId,
+            input.pubkey
+          ),
         db
           .prepare(
             `DELETE FROM private_channel_verified_wallets
@@ -217,40 +236,42 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
     async claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<string | null> {
       // The compensating SPC delete of a stale verification must never race a
       // fresh verification: both it and the conditional upsert serialize on
-      // the epoch row lock, so whichever transaction commits first decides.
-      // Holding that lock while reading the mirror makes the stand-down check
-      // exact — a mirror row that belongs to this identity can only be a
-      // newer verification's (the revocation this request lost to removed the
-      // caller's own row), so its binding must not be deleted. When the claim
-      // wins, the epoch advance refuses any verification that has not landed
-      // yet, and the retry marker is recorded in the same transaction: if the
-      // compensating delete then fails or the process dies, the next
-      // principal-disable cleanup still finds the late upstream binding. The
-      // claim also stands down while another stale verification's cleanup for
-      // the same binding is still pending (a fresh marker), so the latch can
-      // only ever be cleared by the single delete it covers.
+      // the identity's epoch row lock, so whichever transaction commits first
+      // decides. Holding that lock while reading the mirror makes the
+      // stand-down check exact — a mirror row that belongs to this identity
+      // can only be a newer verification's (the revocation this request lost
+      // to removed the caller's own row), so its binding must not be deleted.
+      // When the claim wins, the epoch advance refuses any verification that
+      // has not landed yet, and the retry marker is recorded in the same
+      // transaction: if the compensating delete then fails or the process
+      // dies, the next principal-disable cleanup still finds the late
+      // upstream binding. The claim also stands down while another stale
+      // verification's cleanup for the same binding is still pending (a fresh
+      // marker), so the latch can only ever be cleared by the single delete
+      // it covers.
       return db.transaction(async (tx) => {
         let currentEpoch = 0;
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
-                 organization_id, project_id, instance_id, pubkey, epoch
+                 organization_id, project_id, user_id, instance_id, pubkey, epoch
                )
-               VALUES (?, ?, ?, ?, 0)
-             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+               VALUES (?, ?, ?, ?, ?, 0)
+             ON CONFLICT (user_id, instance_id, pubkey) DO NOTHING`
           )
-          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .bind(input.organizationId, input.projectId, input.userId, input.instanceId, input.pubkey)
           .run();
 
         await tx
           .prepare(
             `SELECT epoch
                  FROM private_channel_wallet_revocation_epochs
-                WHERE instance_id = ?
+                WHERE user_id = ?
+                  AND instance_id = ?
                   AND pubkey = ?
               FOR UPDATE`
           )
-          .bind(input.instanceId, input.pubkey)
+          .bind(input.userId, input.instanceId, input.pubkey)
           .first<{ epoch: number }>()
           .then((row) => {
             currentEpoch = row?.epoch ?? 0;
@@ -280,12 +301,15 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         // mirror to the outstanding delete. Stand down while the marker's
         // owner can still converge: its delete is in flight until its own
         // local half advances the epoch past the marker's `claim_epoch`, and
-        // the lease bounds that wait when the owner dies mid-cleanup. A
-        // marker the live epoch has already moved past (its owner converged)
-        // or that is older than the lease cannot have a delete in flight, so
-        // taking it over is safe: that covers an owner that died mid-cleanup
-        // and the undecided-cleanup fallback marker, either of which would
-        // otherwise latch verifications here forever.
+        // the lease bounds that wait when the owner dies mid-cleanup. The
+        // epoch here is this identity's own — another identity's claims or
+        // revocations for the same pubkey advance their own epoch row and
+        // cannot fake this owner's convergence. A marker the live epoch has
+        // already moved past (its owner converged) or that is older than the
+        // lease cannot have a delete in flight, so taking it over is safe:
+        // that covers an owner that died mid-cleanup and the
+        // undecided-cleanup fallback marker, either of which would otherwise
+        // latch verifications here forever.
         const pendingMarker = await tx
           .prepare(
             `SELECT (sdp_iso_now()::timestamptz - updated_at::timestamptz)
@@ -303,25 +327,28 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           return null;
         }
 
-        // The claim wins: advance the epoch — the same barrier a revocation
-        // uses, so any verification that has not landed yet is refused — and
-        // (re)record the retry marker in the same transaction, freshening its
-        // lease. The stored updated_at doubles as the claim's ownership
-        // watermark: the compensating clear only removes the marker while it
-        // still carries this exact value, so a fallback that re-owns the row
-        // meanwhile (a stand-down that timed out) survives this request's
-        // clear and keeps its binding discoverable. The marker also records
-        // the epoch this claim advanced to, so everyone reading it can tell
-        // whether this claim's own convergence has committed.
+        // The claim wins: advance the identity's epoch — the same barrier a
+        // revocation uses, so any verification that has not landed yet is
+        // refused — and (re)record the retry marker in the same transaction,
+        // freshening its lease. The stored updated_at doubles as the claim's
+        // ownership watermark: the compensating clear only removes the marker
+        // while it still carries this exact value, so a fallback that re-owns
+        // the row meanwhile (a stand-down that timed out) survives this
+        // request's clear and keeps its binding discoverable. The marker also
+        // records the epoch this claim advanced to, so everyone reading it
+        // can tell whether this claim's own convergence has committed — a
+        // comparison that stays exact because the epoch row is this
+        // identity's own, moved only by this identity's own transactions.
         await tx
           .prepare(
             `UPDATE private_channel_wallet_revocation_epochs
                   SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
                       updated_at = sdp_iso_now()
-                WHERE instance_id = ?
+                WHERE user_id = ?
+                  AND instance_id = ?
                   AND pubkey = ?`
           )
-          .bind(input.instanceId, input.pubkey)
+          .bind(input.userId, input.instanceId, input.pubkey)
           .run();
         const marker = await tx
           .prepare(
@@ -394,23 +421,24 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
-                 organization_id, project_id, instance_id, pubkey, epoch
+                 organization_id, project_id, user_id, instance_id, pubkey, epoch
                )
-               VALUES (?, ?, ?, ?, 0)
-             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+               VALUES (?, ?, ?, ?, ?, 0)
+             ON CONFLICT (user_id, instance_id, pubkey) DO NOTHING`
           )
-          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .bind(input.organizationId, input.projectId, input.userId, input.instanceId, input.pubkey)
           .run();
 
         await tx
           .prepare(
             `SELECT epoch
                  FROM private_channel_wallet_revocation_epochs
-                WHERE instance_id = ?
+                WHERE user_id = ?
+                  AND instance_id = ?
                   AND pubkey = ?
               FOR UPDATE`
           )
-          .bind(input.instanceId, input.pubkey)
+          .bind(input.userId, input.instanceId, input.pubkey)
           .first<{ epoch: number }>()
           .then((row) => {
             currentEpoch = row?.epoch ?? 0;

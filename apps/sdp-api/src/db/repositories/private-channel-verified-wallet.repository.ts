@@ -81,33 +81,39 @@ export interface PrivateChannelVerifiedWalletRepository {
    * SPC verify.
    *
    * The write is conditional on the revocation epoch (see
-   * `getRevocationEpoch`): when a revocation committed after the caller
-   * observed `expectedRevocationEpoch`, the mirror is not written and this
-   * rejects, so a stale verification continuation can never resurrect a mirror
-   * that a completed revocation removed. The check is not a plain read: the
-   * upsert creates the epoch row if absent and takes its row lock for the rest
-   * of the transaction, so a revocation that overlaps this write either
-   * commits before the locked epoch read (the write is refused) or blocks
-   * until the write commits and removes the mirror afterwards — the mirror can
-   * never outlive a revocation it overlaps.
+   * `getRevocationEpoch`): when a revocation of this identity's binding
+   * committed after the caller observed `expectedRevocationEpoch`, the mirror
+   * is not written and this rejects, so a stale verification continuation can
+   * never resurrect a mirror that a completed revocation removed. The check is
+   * not a plain read: the upsert creates the identity's epoch row if absent and
+   * takes its row lock for the rest of the transaction, so a revocation that
+   * overlaps this write either commits before the locked epoch read (the write
+   * is refused) or blocks until the write commits and removes the mirror
+   * afterwards — the mirror can never outlive a revocation it overlaps.
    */
   upsert(input: ConditionalUpsertVerifiedWalletInput): Promise<PrivateChannelVerifiedWalletRow>;
   /**
-   * The durable revocation epoch for one (instance, pubkey): 0 when the wallet
-   * was never revoked, otherwise a count of committed revocations. Read it
-   * BEFORE the SPC verify handshake and pass it to `upsert` as
-   * `expectedRevocationEpoch`.
+   * The durable revocation epoch for one identity's (user_id, instance_id,
+   * pubkey): 0 when the wallet was never revoked, otherwise a count of
+   * committed revocations by that identity. The epoch is identity-scoped
+   * because it is compared against pending-revocation markers'
+   * `claim_epoch` (see `claimStaleVerificationCleanup`): only the claiming
+   * identity's own convergence may advance the epoch past a marker's
+   * `claim_epoch`, so another identity's claim or revocation for the same
+   * pubkey must never release that marker's latch. Read it BEFORE the SPC
+   * verify handshake and pass it to `upsert` as `expectedRevocationEpoch`.
    */
-  getRevocationEpoch(instanceId: string, pubkey: string): Promise<number>;
+  getRevocationEpoch(userId: string, instanceId: string, pubkey: string): Promise<number>;
   /**
-   * The local half of a revocation, atomically: advance the revocation epoch
-   * for (instance_id, pubkey), remove the verified-wallet mirror keyed on the
-   * unique (user_id, instance_id, pubkey), and remove the pending-revocation
-   * retry marker. A pubkey verified under another instance (or by another
-   * identity) is untouched. The epoch advance is the barrier an in-flight
-   * verification's conditional upsert compares against, so it must commit
-   * together with the mirror removal. Returns true if a mirror row or retry
-   * marker was removed. Single-writer contract as for upsert.
+   * The local half of a revocation, atomically: advance the identity's
+   * revocation epoch for (user_id, instance_id, pubkey), remove the
+   * verified-wallet mirror keyed on the unique (user_id, instance_id, pubkey),
+   * and remove the pending-revocation retry marker. A pubkey verified under
+   * another instance (or by another identity) is untouched. The epoch advance
+   * is the barrier an in-flight verification's conditional upsert compares
+   * against, so it must commit together with the mirror removal. Returns true
+   * if a mirror row or retry marker was removed. Single-writer contract as for
+   * upsert.
    */
   revokeVerifiedWallet(input: RevokeVerifiedWalletInput): Promise<boolean>;
   /**

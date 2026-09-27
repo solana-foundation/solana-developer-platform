@@ -202,12 +202,12 @@ async function readPendingRevocationMarkers(instanceId: string, pubkey: string) 
   return result.results ?? [];
 }
 
-async function readRevocationEpoch(instanceId: string, pubkey: string) {
+async function readRevocationEpoch(userId: string, instanceId: string, pubkey: string) {
   const row = await getDb(env)
     .prepare(
-      "SELECT epoch FROM private_channel_wallet_revocation_epochs WHERE instance_id = ? AND pubkey = ?"
+      "SELECT epoch FROM private_channel_wallet_revocation_epochs WHERE user_id = ? AND instance_id = ? AND pubkey = ?"
     )
-    .bind(instanceId, pubkey)
+    .bind(userId, instanceId, pubkey)
     .first<{ epoch: number }>();
   return row?.epoch ?? 0;
 }
@@ -572,7 +572,7 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
     expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
     const lingeringMarkers = await readPendingRevocationMarkers(INSTANCE_ID, signerAddress);
     expect(lingeringMarkers).toHaveLength(1);
-    expect(await readRevocationEpoch(INSTANCE_ID, signerAddress)).toBeGreaterThan(0);
+    expect(await readRevocationEpoch(PRINCIPAL_ID, INSTANCE_ID, signerAddress)).toBeGreaterThan(0);
 
     // The system converged: a verification started now succeeds end to end —
     // the epoch-stale marker no longer latches the mirror upsert.
