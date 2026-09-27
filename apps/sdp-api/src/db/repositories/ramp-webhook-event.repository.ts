@@ -73,10 +73,11 @@ export interface RampWebhookEventsRepository {
    * Records a policy deferral (a `DeferrableRampWebhookError`): the event
    * stays `pending` with its attempt budget restored, so a deferral never
    * parks the row — the replay retries it on every pass until the external
-   * state it waits on allows the apply to succeed. Restoring (not winding
-   * back) the budget is safe here: the claim's lease guarantees no other pass
-   * advanced `attempts` while this apply was running, and an understated count
-   * only means one extra replay before parking for a genuinely failing row.
+   * state it waits on allows the apply to succeed. The update only matches a
+   * still-`pending` row: a claim's lease can expire while its apply runs and
+   * another pass may have genuinely failed and parked the row in the
+   * meantime, and a stale deferral must not resurrect it (that would lose the
+   * failed-event alert and the release-aware recovery the park carries).
    */
   recordDeferral(input: { id: string; error: string }): Promise<void>;
   /**
@@ -84,6 +85,10 @@ export interface RampWebhookEventsRepository {
    * same statement. `SKIP LOCKED` keeps two concurrently running replay passes
    * from applying the same event; the settlement CAS makes a double apply
    * harmless, so the lock only avoids wasted work and double-counted attempts.
+   * Least-recently-touched rows are claimed first: a row a pass just deferred
+   * or failed rotates to the back of the queue instead of squatting at the
+   * head, so a backlog of events waiting on external state cannot crowd fresh
+   * settlements out of the batch.
    */
   claimReplayable(input: ClaimReplayableRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
   /**
@@ -182,7 +187,7 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
                   last_error = ?,
                   status = 'pending',
                   updated_at = sdp_iso_now()
-            WHERE id = ?`
+            WHERE id = ? AND status = 'pending'`
         )
         .bind(input.error, input.id)
         .run();
@@ -192,15 +197,15 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
       const result = await db
         .prepare(
           `UPDATE ramp_webhook_events
-             SET attempts = attempts + 1, updated_at = sdp_iso_now()
-           WHERE id IN (
-             SELECT id FROM ramp_webhook_events
-              WHERE status = 'pending' AND created_at <= ? AND updated_at <= ? AND attempts < ?
-              ORDER BY created_at ASC
-              LIMIT ?
-              FOR UPDATE SKIP LOCKED
-           )
-           RETURNING *`
+              SET attempts = attempts + 1, updated_at = sdp_iso_now()
+            WHERE id IN (
+              SELECT id FROM ramp_webhook_events
+               WHERE status = 'pending' AND created_at <= ? AND updated_at <= ? AND attempts < ?
+               ORDER BY updated_at ASC
+               LIMIT ?
+               FOR UPDATE SKIP LOCKED
+            )
+            RETURNING *`
         )
         .bind(input.createdBefore, input.createdBefore, input.maxAttempts, input.limit)
         .all<Record<string, unknown>>();

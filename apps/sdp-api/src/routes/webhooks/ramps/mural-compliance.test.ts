@@ -3,7 +3,10 @@ import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories";
-import type { RampWebhookEventRow } from "@/db/repositories/ramp-webhook-event.repository";
+import {
+  createPostgresRampWebhookEventsRepository,
+  type RampWebhookEventRow,
+} from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
 import {
   applyStoredRampWebhookEvent,
@@ -665,5 +668,91 @@ describe("Mural compliance-review webhooks update cached KYC and gate settlement
     await expect(applyStoredRampWebhookEvent(env, row, 1)).resolves.toBe(true);
     expect(await transferStatus("xfr_mural_compliance_deferred")).toBe("completed");
     expect(await inboxCount()).toBe(0);
+  });
+
+  it("does not let a stale deferral resurrect a parked event", async () => {
+    await seedAwaitingTransfer("xfr_mural_deferred_parked");
+    await setCachedKycStatus("errored");
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    const stored = await events.insertEvent({
+      provider: "mural",
+      environment: "sandbox",
+      // The exact shape `verify` persists: the event envelope plus the
+      // verified delivery id `parse` requires.
+      payload: {
+        payload: {
+          type: "account_credited",
+          organizationId: muralOrganizationId,
+          accountId,
+          tokenAmount: { tokenAmount: 100, tokenSymbol: "USDC" },
+        },
+        __sdpDeliveryId: "delivery_deferred_parked",
+      },
+    });
+
+    // Another pass claimed the event after our apply's lease expired, failed
+    // it for real, and parked it.
+    await events.recordFailure({
+      id: stored.id,
+      error: "genuine processing failure",
+      attempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+      appRevision: "rev-a",
+    });
+
+    // Our now-stale deferral must not un-park it: the park carries the
+    // failed-event alert and the release-aware recovery state.
+    await expect(applyStoredRampWebhookEvent(env, stored, 1)).resolves.toBe(false);
+    const parked = await getDb(env)
+      .prepare("SELECT status, attempts, last_error FROM ramp_webhook_events WHERE id = ?")
+      .bind(stored.id)
+      .first<{ status: string; attempts: number; last_error: string | null }>();
+    expect(parked?.status).toBe("failed");
+    expect(Number(parked?.attempts)).toBe(RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS);
+    expect(parked?.last_error).toBe("genuine processing failure");
+  });
+
+  it("rotates deferred events out of the replay claim head", async () => {
+    const now = Date.now();
+    const iso = (offsetMinutes: number) => new Date(now - offsetMinutes * 60_000).toISOString();
+    const events = createPostgresRampWebhookEventsRepository(getDb(env));
+    // Created earlier but touched more recently: the chronologically-first
+    // event, repeatedly deferred by compliance, while a later event waits
+    // untouched.
+    const deferredEarly = await events.insertEvent({
+      provider: "mural",
+      environment: "sandbox",
+      payload: { payload: { type: "account_credited", organizationId: muralOrganizationId } },
+    });
+    const settlementLate = await events.insertEvent({
+      provider: "mural",
+      environment: "sandbox",
+      payload: { payload: { type: "account_credited", organizationId: muralOrganizationId } },
+    });
+    await getDb(env)
+      .prepare(
+        `UPDATE ramp_webhook_events
+            SET created_at = ?, updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(iso(30), iso(3), deferredEarly.id)
+      .run();
+    await getDb(env)
+      .prepare(
+        `UPDATE ramp_webhook_events
+            SET created_at = ?, updated_at = ?
+          WHERE id = ?`
+      )
+      .bind(iso(20), iso(10), settlementLate.id)
+      .run();
+
+    // Least-recently-touched first: the untouched settlement event goes out
+    // ahead of the event a pass just deferred, however old that deferral is.
+    const [claimed] = await events.claimReplayable({
+      createdBefore: iso(2),
+      maxAttempts: 10,
+      limit: 1,
+    });
+    expect(claimed?.id).toBe(settlementLate.id);
   });
 });

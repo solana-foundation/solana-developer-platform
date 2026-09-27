@@ -97,8 +97,18 @@ export async function applyStoredRampWebhookEvent(
       // once an external state changes, so it stays pending with its attempt
       // budget restored and the replay retries it every pass — parking it
       // would strand the provider's only signed signal on a state no deploy
-      // can fix.
+      // can fix. The distinct event keeps the backlog observable: a growing
+      // deferral rate is alertable without parking rows a later approval can
+      // still settle.
       await events.recordDeferral({ id: row.id, error: message });
+      logEvent("warn", {
+        event: "sdp_api_ramp_webhook_event_deferred",
+        flow: "ramp-settlement",
+        webhook_event_id: row.id,
+        provider: row.provider,
+        environment: row.environment,
+        error: message,
+      });
       return false;
     }
     const terminal = error instanceof TerminalRampWebhookError;
