@@ -64,6 +64,10 @@ const pcUser = {
 const originalPrivy = { appId: env.PRIVY_APP_ID, appSecret: env.PRIVY_APP_SECRET };
 let originalByok: string | undefined;
 
+// A successful cleanup claim returns its marker's `updated_at` as an ownership
+// watermark; the compensating clear is scoped to it.
+const CLAIM_WATERMARK = "2026-09-27T00:00:00.000Z";
+
 let client: {
   challengeWallet: ReturnType<typeof vi.fn>;
   verifyWallet: ReturnType<typeof vi.fn>;
@@ -126,7 +130,7 @@ beforeEach(async () => {
     }),
     getRevocationEpoch: vi.fn().mockResolvedValue(0),
     revokeVerifiedWallet: vi.fn().mockResolvedValue(true),
-    claimStaleVerificationCleanup: vi.fn().mockResolvedValue(true),
+    claimStaleVerificationCleanup: vi.fn().mockResolvedValue(CLAIM_WATERMARK),
     hasPendingRevocation: vi.fn().mockResolvedValue(false),
     recordPendingRevocation: vi.fn().mockResolvedValue(true),
     listPendingRevocations: vi.fn().mockResolvedValue([]),
@@ -371,8 +375,17 @@ describe("verifyPrivateChannelWallet", () => {
       })
     );
     expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    // The compensating local half is scoped to the claim's ownership
+    // watermark: a stand-down that re-owns the marker through the fallback
+    // record (backdated) survives this clear, so the pending cleaner's
+    // convergence can never orphan this request's still-owed delete.
     expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+      expect.objectContaining({
+        userId: "pcu_1",
+        instanceId: "pci_1",
+        pubkey: PUBKEY,
+        claimedMarkerUpdatedAt: CLAIM_WATERMARK,
+      })
     );
   });
 
@@ -403,7 +416,7 @@ describe("verifyPrivateChannelWallet", () => {
     verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
     // A newer verification of the same identity landed after the revocation:
     // the mirror is back, so the compensating delete would remove ITS binding.
-    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(null);
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
       code: "CONFLICT",
@@ -444,7 +457,7 @@ describe("verifyPrivateChannelWallet", () => {
   it("leaves the mirror-owned stand-down decision to the fallback record's own mirror check", async () => {
     verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
     verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
-    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(null);
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
       code: "CONFLICT",
@@ -495,7 +508,9 @@ describe("verifyPrivateChannelWallet", () => {
     // rejected verification's cleanup left behind, so the first claim stands
     // down — but that cleaner's delete then finishes and its marker clears.
     verifiedRepo.hasPendingRevocation.mockResolvedValueOnce(true).mockResolvedValue(false);
-    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValueOnce(false).mockResolvedValue(true);
+    verifiedRepo.claimStaleVerificationCleanup
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(CLAIM_WATERMARK);
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
       code: "CONFLICT",
@@ -519,7 +534,7 @@ describe("verifyPrivateChannelWallet", () => {
     // (the second only after the bounded wait), and nothing is deleted — two
     // concurrent deletes would let the first finisher clear the shared marker
     // while the second delete is still outstanding.
-    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(null);
 
     await expect(
       verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID, undefined, {
@@ -534,8 +549,10 @@ describe("verifyPrivateChannelWallet", () => {
     expect(client.deleteWallet).not.toHaveBeenCalled();
     expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
     // The timed-out stand-down still records the fallback marker (best
-    // effort): the real record no-ops while this pending cleaner's marker is
-    // present, but the attempt keeps every non-claimed exit covered.
+    // effort): the real record re-owns the pending cleaner's marker (backdated
+    // so the next claim takes the cleanup over immediately) instead of
+    // leaving this request's own binding undiscoverable, keeping every
+    // non-claimed exit covered.
     expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "pcu_1",
@@ -553,7 +570,7 @@ describe("verifyPrivateChannelWallet", () => {
     // succeeds, so the cleanup proceeds without any fallback marker.
     verifiedRepo.claimStaleVerificationCleanup
       .mockRejectedValueOnce(new Error("database unavailable"))
-      .mockResolvedValue(true);
+      .mockResolvedValue(CLAIM_WATERMARK);
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
       code: "CONFLICT",
@@ -576,7 +593,7 @@ describe("verifyPrivateChannelWallet", () => {
     // upstream with no mirror and no marker.
     verifiedRepo.hasPendingRevocation.mockResolvedValueOnce(true).mockResolvedValue(false);
     verifiedRepo.claimStaleVerificationCleanup
-      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(null)
       .mockRejectedValue(new Error("database unavailable"));
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({

@@ -215,12 +215,13 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_1",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
 
     // A successful compensating revoke removes the marker again with the
-    // mirror; the epoch never resets.
+    // mirror; the epoch never resets. This is a real delete (no claim
+    // watermark), so it clears whatever marker is present.
     await expect(
       repo.revokeVerifiedWallet({
         ...scope,
@@ -253,22 +254,21 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_1",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(false);
+    ).resolves.toBeNull();
     await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toHaveLength(1);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
   it("a second cleanup claim stands down while the first claim's marker is fresh", async () => {
-    await expect(
-      repo.claimStaleVerificationCleanup({
-        ...scope,
-        userId: PCU_ID,
-        instanceId: instanceA,
-        walletId: "wal_1",
-        pubkey: PUBKEY_A,
-      })
-    ).resolves.toBe(true);
+    const watermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+    expect(watermark).toBeTypeOf("string");
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
 
     // A second stale verification of the same wallet claims cleanup: SPC
@@ -285,7 +285,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_2",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(false);
+    ).resolves.toBeNull();
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
 
@@ -307,7 +307,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_2",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(3);
   });
 
@@ -347,14 +347,14 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_1",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
     const markers = await repo.listPendingRevocations(PCU_ID, instanceA);
     expect(markers).toHaveLength(1);
     expect(Date.now() - new Date(markers[0].updated_at).getTime()).toBeLessThan(60_000);
   });
 
-  it("the fallback marker is recorded outside the cleanup lease and never refreshes a pending claim", async () => {
+  it("the fallback marker is recorded outside the cleanup lease and re-owns a pending claim's marker", async () => {
     // The undecided-cleanup fallback records a marker with no compensating
     // delete in flight: it is written already outside the lease, so the next
     // refused verification takes the cleanup over immediately.
@@ -378,11 +378,16 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_1",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
 
-    // A marker that belongs to a cleanup claim keeps its lease: the fallback
-    // must not refresh it (that would extend the pending cleaner's stand-down
-    // window), and a claim that sees it still stands down.
+    // A claimed marker is lease-fresh, so a second claim stands down. The
+    // fallback record on the standing-down request RE-OWNS the marker instead
+    // of leaving it: the claim's owner may be a delete that already returned
+    // while its watermark-scoped clear has not landed, and that clear must
+    // not destroy the record of the standing-down request's still-owed
+    // delete. The re-own refreshes the lease (a claim must keep standing down
+    // while the owner's delete can still be in flight) and preserves the
+    // owner's claim_epoch, so the latch drops as soon as the owner converges.
     await expect(
       repo.revokeVerifiedWallet({
         ...scope,
@@ -391,18 +396,17 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         pubkey: PUBKEY_A,
       })
     ).resolves.toBe(true);
-    await expect(
-      repo.claimStaleVerificationCleanup({
-        ...scope,
-        userId: PCU_ID,
-        instanceId: instanceA,
-        walletId: "wal_2",
-        pubkey: PUBKEY_A,
-      })
-    ).resolves.toBe(true);
+    const watermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_2",
+      pubkey: PUBKEY_A,
+    });
+    expect(watermark).toBeTypeOf("string");
     const claimed = await repo.listPendingRevocations(PCU_ID, instanceA);
     expect(claimed).toHaveLength(1);
-    const leasedAt = claimed[0].updated_at;
+    expect(claimed[0].updated_at).toBe(watermark);
     await expect(
       repo.recordPendingRevocation({
         ...scope,
@@ -411,11 +415,14 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_2",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(
-      repo.listPendingRevocations(PCU_ID, instanceA).then((rows) => rows[0].updated_at)
-    ).resolves.toBe(leasedAt);
+    const reOwned = await repo.listPendingRevocations(PCU_ID, instanceA);
+    expect(reOwned[0].updated_at).not.toBe(watermark);
+    // Lease-fresh: a second claim must keep standing down — the owner's
+    // delete can still be in flight and the epoch has not moved past the
+    // marker's claim_epoch.
+    expect(Date.now() - new Date(reOwned[0].updated_at).getTime()).toBeLessThan(30_000);
     await expect(
       repo.claimStaleVerificationCleanup({
         ...scope,
@@ -424,7 +431,170 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_3",
         pubkey: PUBKEY_A,
       })
+    ).resolves.toBeNull();
+  });
+
+  it("a re-owned marker survives a watermark-scoped clear and stops latching once its owner converges", async () => {
+    // The stand-down's bounded wait timed out while the pending cleaner's
+    // marker was still fresh; the fallback re-owns the marker. The pending
+    // cleaner's delete has already returned, and its watermark-scoped clear
+    // runs afterwards: it must NOT remove the re-owned record, because the
+    // standing-down request's own handshake may have created a binding the
+    // pending delete never covered — with no mirror and no marker that late
+    // binding would escape every later cleanup.
+    const claimedWatermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+    expect(claimedWatermark).toBeTypeOf("string");
+
+    // The timed-out stand-down re-owns the marker (lease-fresh, same
+    // claim_epoch: the owner's delete can still be in flight).
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+
+    // The pending cleaner's convergence: its clear misses the re-owned
+    // marker, so the marker survives (the epoch advance still commits).
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+        claimedMarkerUpdatedAt: claimedWatermark as string,
+      })
     ).resolves.toBe(false);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+
+    // The live epoch has moved past the marker's claim_epoch: the owner's
+    // convergence committed, so the marker no longer latches the mirror
+    // upsert — a verification that observed the live epoch lands safely and
+    // re-owns the (possibly re-created) binding.
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 2,
+      })
+    ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_2" });
+
+    // The lingering row is harmless discovery: a claim stands down for the
+    // landed mirror (it belongs to this identity), and the principal-disable
+    // cleanup still enumerates it.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBeNull();
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+  });
+
+  it("an epoch-stale re-owned marker is taken over immediately when no mirror landed", async () => {
+    const claimedWatermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+    expect(claimedWatermark).toBeTypeOf("string");
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+        claimedMarkerUpdatedAt: claimedWatermark as string,
+      })
+    ).resolves.toBe(false);
+
+    // No mirror landed, so a further rejected verification must finish the
+    // owed cleanup: the owner's convergence moved the epoch past the marker's
+    // claim_epoch, so the claim takes the marker over immediately instead of
+    // standing down for the rest of the lease.
+    const takeoverWatermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_2",
+      pubkey: PUBKEY_A,
+    });
+    expect(takeoverWatermark).toBeTypeOf("string");
+    expect(takeoverWatermark).not.toBe(claimedWatermark);
+
+    // The takeover's compensating clear (matching watermark) converges: the
+    // marker is removed and the pubkey is verifiable again.
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+        claimedMarkerUpdatedAt: takeoverWatermark as string,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 4,
+      })
+    ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_2" });
+  });
+
+  it("a compensating clear removes its own claimed marker while it still owns it", async () => {
+    const watermark = await repo.claimStaleVerificationCleanup({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+    expect(watermark).toBeTypeOf("string");
+
+    // No re-own happened: the claim's clear still owns the marker and
+    // removes it together with the epoch advance.
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+        claimedMarkerUpdatedAt: watermark as string,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
   });
 
   it("the cleanup claim records cleanup independently when another identity owns the same pubkey", async () => {
@@ -457,7 +627,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_stale",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
 
     await expect(repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).resolves.toMatchObject({
       user_id: PCU_ID,
@@ -491,7 +661,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         walletId: "wal_1",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toBe(true);
+    ).resolves.toBeTypeOf("string");
 
     // A fresh verification that observed the advanced epoch must STILL lose:
     // while the marker is pending, the compensating delete targets the

@@ -75,17 +75,27 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         // instead of handing a live binding to the compensating delete. The
         // marker is written only by transactions holding this same epoch row
         // lock, so this serialized read cannot miss one.
+        //
+        // The latch drops once the marker's owner has converged: the marker
+        // records the epoch its claim advanced to (`claim_epoch`), and the
+        // owner's convergence — the compensating delete plus the epoch
+        // advance of its local half — moves the live epoch past it. An
+        // epoch-stale marker can no longer be matched by an outstanding
+        // delete (the delete returned before that advance committed), so a
+        // verification that observed the live epoch lands its mirror safely;
+        // the row itself lingers only as discovery for the principal-disable
+        // cleanup until a claim takes it over or a real delete clears it.
         const pendingRevocation = await tx
           .prepare(
-            `SELECT 1
+            `SELECT claim_epoch
                 FROM private_channel_wallet_revocations
                WHERE user_id = ?
                  AND instance_id = ?
                  AND pubkey = ?`
           )
           .bind(input.userId, input.instanceId, input.pubkey)
-          .first<{ "1": number }>();
-        if (pendingRevocation) {
+          .first<{ claim_epoch: number }>();
+        if (pendingRevocation && (epochRow?.epoch ?? 0) <= pendingRevocation.claim_epoch) {
           return null;
         }
 
@@ -153,6 +163,14 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       // One transaction: the epoch advance is the barrier that makes an
       // in-flight verification's conditional upsert lose, so it must commit
       // together with the mirror and retry-marker removal.
+      //
+      // The marker clear of a compensating delete is scoped to the claim's
+      // own watermark: a stand-down whose bounded wait timed out re-owns the
+      // marker through the fallback record (backdated), and that re-owned
+      // record documents a late binding this delete never covered — it must
+      // survive here so the next claim takes the cleanup over. A real delete
+      // (no watermark) covers the binding outright and clears whatever marker
+      // is present.
       const results = await db.batch([
         db
           .prepare(
@@ -173,20 +191,30 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
                 AND pubkey = ?`
           )
           .bind(input.userId, input.instanceId, input.pubkey),
-        db
-          .prepare(
-            `DELETE FROM private_channel_wallet_revocations
-              WHERE user_id = ?
-                AND instance_id = ?
-                AND pubkey = ?`
-          )
-          .bind(input.userId, input.instanceId, input.pubkey),
+        input.claimedMarkerUpdatedAt === undefined
+          ? db
+              .prepare(
+                `DELETE FROM private_channel_wallet_revocations
+                  WHERE user_id = ?
+                    AND instance_id = ?
+                    AND pubkey = ?`
+              )
+              .bind(input.userId, input.instanceId, input.pubkey)
+          : db
+              .prepare(
+                `DELETE FROM private_channel_wallet_revocations
+                  WHERE user_id = ?
+                    AND instance_id = ?
+                    AND pubkey = ?
+                    AND updated_at = ?`
+              )
+              .bind(input.userId, input.instanceId, input.pubkey, input.claimedMarkerUpdatedAt),
       ]);
       const [, mirrorDeleted, markerDeleted] = results;
       return mirrorDeleted > 0 || markerDeleted > 0;
     },
 
-    async claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput) {
+    async claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<string | null> {
       // The compensating SPC delete of a stale verification must never race a
       // fresh verification: both it and the conditional upsert serialize on
       // the epoch row lock, so whichever transaction commits first decides.
@@ -202,6 +230,7 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       // the same binding is still pending (a fresh marker), so the latch can
       // only ever be cleared by the single delete it covers.
       return db.transaction(async (tx) => {
+        let currentEpoch = 0;
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
@@ -216,13 +245,16 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         await tx
           .prepare(
             `SELECT epoch
-                FROM private_channel_wallet_revocation_epochs
-               WHERE instance_id = ?
-                 AND pubkey = ?
-               FOR UPDATE`
+                 FROM private_channel_wallet_revocation_epochs
+                WHERE instance_id = ?
+                  AND pubkey = ?
+              FOR UPDATE`
           )
           .bind(input.instanceId, input.pubkey)
-          .first<{ epoch: number }>();
+          .first<{ epoch: number }>()
+          .then((row) => {
+            currentEpoch = row?.epoch ?? 0;
+          });
 
         const mirror = await tx
           .prepare(
@@ -234,7 +266,7 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           .bind(input.instanceId, input.pubkey)
           .first<{ user_id: string }>();
         if (mirror?.user_id === input.userId) {
-          return false;
+          return null;
         }
 
         // SPC keeps ONE binding per (SPC user, pubkey), so every stale
@@ -245,52 +277,64 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         // its own delete, because the first finisher would clear this shared
         // latch while the second delete is still in flight and a fresh
         // verification landing in that window would lose its new binding and
-        // mirror to the outstanding delete. Stand down while the marker is
-        // fresh; the pending cleaner converges the binding. A marker older
-        // than the lease cannot have a delete in flight (its owner's calls
-        // are timeout-bounded), so taking it over is safe: that covers an
-        // owner that died mid-cleanup and the undecided-cleanup fallback
-        // marker, either of which would otherwise latch verifications here
-        // forever.
+        // mirror to the outstanding delete. Stand down while the marker's
+        // owner can still converge: its delete is in flight until its own
+        // local half advances the epoch past the marker's `claim_epoch`, and
+        // the lease bounds that wait when the owner dies mid-cleanup. A
+        // marker the live epoch has already moved past (its owner converged)
+        // or that is older than the lease cannot have a delete in flight, so
+        // taking it over is safe: that covers an owner that died mid-cleanup
+        // and the undecided-cleanup fallback marker, either of which would
+        // otherwise latch verifications here forever.
         const pendingMarker = await tx
           .prepare(
             `SELECT (sdp_iso_now()::timestamptz - updated_at::timestamptz)
-                  < interval '${CLEANUP_CLAIM_LEASE}' AS lease_active
+                  < interval '${CLEANUP_CLAIM_LEASE}' AS lease_active,
+                    claim_epoch
                FROM private_channel_wallet_revocations
               WHERE user_id = ?
                 AND instance_id = ?
                 AND pubkey = ?`
           )
           .bind(input.userId, input.instanceId, input.pubkey)
-          .first<{ lease_active: boolean }>();
-        if (pendingMarker?.lease_active) {
-          return false;
+          .first<{ lease_active: boolean; claim_epoch: number }>();
+        const ownerConverged = currentEpoch > (pendingMarker?.claim_epoch ?? 0);
+        if (pendingMarker?.lease_active && !ownerConverged) {
+          return null;
         }
 
         // The claim wins: advance the epoch — the same barrier a revocation
         // uses, so any verification that has not landed yet is refused — and
         // (re)record the retry marker in the same transaction, freshening its
-        // lease.
+        // lease. The stored updated_at doubles as the claim's ownership
+        // watermark: the compensating clear only removes the marker while it
+        // still carries this exact value, so a fallback that re-owns the row
+        // meanwhile (a stand-down that timed out) survives this request's
+        // clear and keeps its binding discoverable. The marker also records
+        // the epoch this claim advanced to, so everyone reading it can tell
+        // whether this claim's own convergence has committed.
         await tx
           .prepare(
             `UPDATE private_channel_wallet_revocation_epochs
-                 SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
-                     updated_at = sdp_iso_now()
-               WHERE instance_id = ?
-                 AND pubkey = ?`
+                  SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
+                      updated_at = sdp_iso_now()
+                WHERE instance_id = ?
+                  AND pubkey = ?`
           )
           .bind(input.instanceId, input.pubkey)
           .run();
-        await tx
+        const marker = await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocations (
                  id, organization_id, project_id, user_id, instance_id,
-                 wallet_id, pubkey
+                 wallet_id, pubkey, claim_epoch
                )
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
-                   updated_at = sdp_iso_now()`
+                   updated_at = sdp_iso_now(),
+                   claim_epoch = excluded.claim_epoch
+           RETURNING updated_at`
           )
           .bind(
             generatePrivateChannelVerifiedWalletId(),
@@ -299,10 +343,11 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
             input.userId,
             input.instanceId,
             input.walletId,
-            input.pubkey
+            input.pubkey,
+            currentEpoch + 1
           )
-          .run();
-        return true;
+          .first<{ updated_at: string }>();
+        return marker?.updated_at ?? null;
       });
     },
 
@@ -331,14 +376,21 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       // marker is recorded — recording one would latch the mirror upsert
       // against a mirror that already exists.
       //
-      // The record is also skipped when a marker already exists: it may belong
-      // to a cleanup claim whose compensating delete is still in flight, and
-      // refreshing that marker's lease is the claim's job. A marker this
-      // fallback creates fresh is written already outside the cleanup lease —
-      // no compensating delete is in flight for it, so the next refused
-      // verification takes the cleanup over immediately instead of standing
-      // down for a whole lease.
+      // When a marker already exists, the fallback re-owns it instead of
+      // skipping: the marker's owner may be a cleanup claim whose compensating
+      // delete already returned while its watermark-scoped clear has not
+      // landed yet, and that owner's clear would otherwise remove the shared
+      // row and orphan a binding this request's own handshake created behind
+      // the delete's back — no mirror and no marker for later cleanup to find.
+      // The re-own refreshes `updated_at` (so the owner's watermark-scoped
+      // clear misses it and a claim stands down while the owner's delete can
+      // still be in flight) and preserves `claim_epoch`, so the latch drops as
+      // soon as that owner converges and the next refused verification takes
+      // the cleanup over immediately. A marker this fallback creates fresh is
+      // written already outside the cleanup lease (backdated — the fallback
+      // never has a delete in flight), so it is takeover-able right away.
       return db.transaction(async (tx) => {
+        let currentEpoch = 0;
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocation_epochs (
@@ -353,20 +405,23 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         await tx
           .prepare(
             `SELECT epoch
-                FROM private_channel_wallet_revocation_epochs
-               WHERE instance_id = ?
-                 AND pubkey = ?
-               FOR UPDATE`
+                 FROM private_channel_wallet_revocation_epochs
+                WHERE instance_id = ?
+                  AND pubkey = ?
+              FOR UPDATE`
           )
           .bind(input.instanceId, input.pubkey)
-          .first<{ epoch: number }>();
+          .first<{ epoch: number }>()
+          .then((row) => {
+            currentEpoch = row?.epoch ?? 0;
+          });
 
         const mirror = await tx
           .prepare(
             `SELECT user_id
-                FROM private_channel_verified_wallets
-               WHERE instance_id = ?
-                 AND pubkey = ?`
+                 FROM private_channel_verified_wallets
+                WHERE instance_id = ?
+                  AND pubkey = ?`
           )
           .bind(input.instanceId, input.pubkey)
           .first<{ user_id: string }>();
@@ -375,14 +430,16 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         }
 
         const backdated = new Date(Date.now() - 3_600_000).toISOString();
-        const inserted = await tx
+        const recorded = await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocations (
                  id, organization_id, project_id, user_id, instance_id,
-                 wallet_id, pubkey, created_at, updated_at
+                 wallet_id, pubkey, claim_epoch, created_at, updated_at
                )
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (user_id, instance_id, pubkey) DO NOTHING`
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
+               SET wallet_id = excluded.wallet_id,
+                   updated_at = sdp_iso_now()`
           )
           .bind(
             generatePrivateChannelVerifiedWalletId(),
@@ -392,11 +449,12 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
             input.instanceId,
             input.walletId,
             input.pubkey,
+            currentEpoch,
             backdated,
             backdated
           )
           .run();
-        return inserted > 0;
+        return recorded > 0;
       });
     },
 

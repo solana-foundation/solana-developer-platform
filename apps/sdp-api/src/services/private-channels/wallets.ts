@@ -17,8 +17,12 @@
  * newer verification has already re-created the mirror or another rejected
  * verification's cleanup for the same binding is still pending (one binding
  * per SPC user and pubkey — its single compensating delete covers them all),
- * and the cleanup claim records a durable retry marker either way, so no late
- * binding survives a completed cleanup. The retry marker also latches the
+ * and the cleanup claim records a durable retry marker either way, so no
+ * late binding survives a completed cleanup. The claim's marker carries an
+ * ownership watermark: the compensating clear only removes the marker while
+ * it still carries that watermark, so a fallback that re-owns the marker on
+ * behalf of a newer rejected verification survives the older cleaner's
+ * convergence. The retry marker also latches the
  * mirror upsert while a compensating delete is still owed — a verification it
  * refuses is told to retry and finishes the owed cleanup itself when the
  * claim is free or stale, so the compensating delete can never take a fresh
@@ -118,7 +122,8 @@ async function resolveWalletSession(
 async function revokeWalletWithSession(
   env: Env,
   session: WalletSession,
-  pubkey: string
+  pubkey: string,
+  claimedMarkerUpdatedAt?: string
 ): Promise<boolean> {
   const { scope, instance, pcUser, client, spcAuth } = session;
   // SPC returns 400 when the wallet is already unlinked. Treat that response as
@@ -136,11 +141,15 @@ async function revokeWalletWithSession(
   // The local half is atomic: advancing the revocation epoch together with the
   // mirror removal is what makes an in-flight verification's conditional upsert
   // lose, so a completed revocation can never be undone by a stale mirror write.
+  // The compensating cleanup scopes its marker clear to its claim's watermark
+  // (see compensateRejectedVerification); a real delete covers the binding
+  // outright and clears whatever marker is present.
   return createPrivateChannelVerifiedWalletRepository(env).revokeVerifiedWallet({
     ...scope,
     userId: pcUser.id,
     instanceId: instance.id,
     pubkey,
+    ...(claimedMarkerUpdatedAt !== undefined && { claimedMarkerUpdatedAt }),
   });
 }
 
@@ -313,9 +322,10 @@ async function rejectedMirrorState(
  * before returning. The record is the repository's decision: it is skipped
  * under the epoch row lock when a mirror that belongs to this identity
  * already exists (a newer verification's binding must survive), so the
- * fallback never latches a mirror that is already there, and it no-ops when
- * the marker this request stood down on is still present — whose cleaner's
- * single delete covers this request's binding too.
+ * fallback never latches a mirror that is already there, and it re-owns an
+ * existing marker (lease-fresh, preserving the owner's claim epoch) so the
+ * pending cleaner's watermark-scoped clear cannot drop the record of this
+ * request's still-owed delete.
  */
 async function compensateRejectedVerification(
   env: Env,
@@ -333,10 +343,25 @@ async function compensateRejectedVerification(
     pubkey,
   };
   let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
+  // The claimed marker's ownership watermark: the compensating clear only
+  // removes the marker while it still carries this value. A stand-down whose
+  // bounded wait timed out re-owns the marker through the fallback record —
+  // lease-fresh, so claims keep standing down while the pending cleaner's
+  // delete can still be in flight, and preserving its claim epoch, so the
+  // latch drops as soon as that owner converges — which is what keeps this
+  // request's own late binding recoverable even when the pending cleaner
+  // converges after the wait gives up.
+  let claimedMarkerUpdatedAt: string | undefined;
+  const tryClaim = async (): Promise<"claimed" | "superseded"> => {
+    const watermark = await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput);
+    if (watermark === null) {
+      return "superseded";
+    }
+    claimedMarkerUpdatedAt = watermark;
+    return "claimed";
+  };
   try {
-    cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
-      ? "claimed"
-      : "superseded";
+    cleanup = await tryClaim();
     if (cleanup === "superseded" && pendingRevocation) {
       // The pending cleaner's delete may already have returned while its
       // marker is still latched, so standing down here could strand a
@@ -346,9 +371,7 @@ async function compensateRejectedVerification(
       // mirror that re-appeared meanwhile makes the re-claim stand down
       // for the newer verification instead.
       if (await waitForPendingRevocationClear(env, pcUser.id, instance.id, pubkey, cleanupWaitMs)) {
-        cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
-          ? "claimed"
-          : "superseded";
+        cleanup = await tryClaim();
       }
     }
   } catch (claimError) {
@@ -364,9 +387,7 @@ async function compensateRejectedVerification(
     // created a binding that neither a mirror nor the pending cleaner's
     // delete covers.
     try {
-      cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
-        ? "claimed"
-        : "superseded";
+      cleanup = await tryClaim();
     } catch (claimRetryError) {
       getLogger().warn(
         { principalId: pcUser.id, instanceId: instance.id, claimRetryError },
@@ -376,7 +397,12 @@ async function compensateRejectedVerification(
   }
   if (cleanup === "claimed") {
     try {
-      await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
+      await revokeWalletWithSession(
+        env,
+        { scope, instance, pcUser, client, spcAuth },
+        pubkey,
+        claimedMarkerUpdatedAt
+      );
     } catch (cleanupError) {
       getLogger().warn(
         { principalId: pcUser.id, instanceId: instance.id, cleanupError },
@@ -389,10 +415,12 @@ async function compensateRejectedVerification(
   // marker (best effort): a wait that timed out on a still-fresh marker, a
   // re-claim that lost to a newer claimant, or an undecided claim must all
   // leave the late upstream binding recoverable instead of stranding it with
-  // no mirror and no marker. The record skips itself when this identity's
-  // mirror already owns the binding and no-ops while the marker this request
-  // stood down on is still present (its cleaner's delete covers this
-  // request too), so it is safe on every path that reaches it.
+  // no mirror and no marker. The record re-owns an existing marker (keeping
+  // its claim epoch, refreshing its lease) so the pending cleaner's
+  // watermark-scoped clear cannot remove the record of this request's
+  // still-owed delete, and it skips itself when this identity's mirror
+  // already owns the binding — it never latches a mirror that is already
+  // there.
   await recordPendingRevocation(env, claimInput);
 }
 

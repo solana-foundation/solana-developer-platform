@@ -560,16 +560,22 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
     // Release A's parked compensating delete: it removes the binding that
     // C's and D's handshakes had (re)created, and its completion clears the
     // shared marker only after that delete returned — the latch and an
-    // outstanding delete are never open at the same time.
+    // outstanding delete are never open at the same time. C's and D's timed-
+    // out stand-downs re-owned the marker (its watermark changed, so A's
+    // clear no longer matches): the row lingers as epoch-stale discovery for
+    // the principal-disable cleanup, but it no longer latches — the live
+    // epoch moved past its claim_epoch when A converged.
     harness.releaseLateDelete();
     const verifyResponseA = await verifyPromiseA;
     expect(verifyResponseA.status).toBe(409);
     expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
     expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
-    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toEqual([]);
+    const lingeringMarkers = await readPendingRevocationMarkers(INSTANCE_ID, signerAddress);
+    expect(lingeringMarkers).toHaveLength(1);
     expect(await readRevocationEpoch(INSTANCE_ID, signerAddress)).toBeGreaterThan(0);
 
-    // The system converged: a verification started now succeeds end to end.
+    // The system converged: a verification started now succeeds end to end —
+    // the epoch-stale marker no longer latches the mirror upsert.
     const retryResponse = await app.request(
       `/v1/private-channels/wallets/${WALLET_ID}/verify`,
       { method: "POST", headers: apiHeaders(), body: "{}" },

@@ -57,6 +57,18 @@ export interface RevokeVerifiedWalletInput extends VerifiedWalletScope {
   userId: string;
   instanceId: string;
   pubkey: string;
+  /**
+   * The `updated_at` watermark returned by `claimStaleVerificationCleanup` for
+   * the compensating delete of a stale verification. When set, the marker
+   * clear only removes the marker while it still carries that watermark: a
+   * stand-down that timed out re-owns the marker through
+   * `recordPendingRevocation` (backdated, immediately takeover-able), and that
+   * re-owned record must survive this clear — it documents a late binding this
+   * delete never covered. A real delete (user request or principal disable)
+   * leaves it unset and clears whatever marker is present: its own delete
+   * covers the binding outright.
+   */
+  claimedMarkerUpdatedAt?: string;
 }
 
 export interface PrivateChannelVerifiedWalletRepository {
@@ -100,10 +112,10 @@ export interface PrivateChannelVerifiedWalletRepository {
   revokeVerifiedWallet(input: RevokeVerifiedWalletInput): Promise<boolean>;
   /**
    * Decide — under the revocation-epoch row lock — whether a stale
-   * verification's compensating SPC delete may still run. Returns false when
+   * verification's compensating SPC delete may still run. Returns null when
    * a newer verification of the same identity has already re-created the
    * mirror: its upstream binding is the one the compensating delete would
-   * remove, so the caller must stand down. Returns false as well when another
+   * remove, so the caller must stand down. Returns null as well when another
    * stale verification's cleanup for this binding is still pending (a fresh
    * retry marker): SPC keeps one binding per (SPC user, pubkey), so the
    * pending cleaner's single delete covers them all, and a second concurrent
@@ -113,14 +125,22 @@ export interface PrivateChannelVerifiedWalletRepository {
    * marker older than the cleanup lease (longer than any timeout-bounded
    * compensating delete) cannot have a delete in flight, so the claim takes
    * it over: that converges an owner that died mid-cleanup and the
-   * undecided-cleanup fallback marker. Otherwise advances the epoch — the
-   * same barrier a revocation uses, so any verification that has not landed
-   * yet is refused — and records the pending-revocation retry marker for the
-   * binding in the same transaction, so a failed or interrupted compensation
-   * stays recoverable by the principal-disable cleanup that enumerates these
-   * markers. Single-writer contract as for upsert.
+   * undecided-cleanup fallback marker. Otherwise advances the epoch —
+   * the same barrier a revocation uses, so any verification that has not
+   * landed yet is refused — and records the pending-revocation retry marker
+   * for the binding in the same transaction, so a failed or interrupted
+   * compensation stays recoverable by the principal-disable cleanup that
+   * enumerates these markers.
+   *
+   * On success returns the claimed marker's `updated_at` as an ownership
+   * watermark: the compensating clear passes it back via
+   * `revokeVerifiedWallet` so it only ever removes the marker it still owns.
+   * A marker re-owned by a later fallback (see `recordPendingRevocation`)
+   * carries a different watermark and survives this request's clear, keeping
+   * the binding it documents discoverable. Single-writer contract as for
+   * upsert.
    */
-  claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<boolean>;
+  claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<string | null>;
   /**
    * Whether a pending-revocation retry marker exists for this identity's
    * (user_id, instance_id, pubkey). A pending marker means a stale
@@ -139,13 +159,21 @@ export interface PrivateChannelVerifiedWalletRepository {
    * (returning false) when a mirror that belongs to this identity already
    * exists: that mirror is a newer verification's, its binding must survive,
    * and a marker would latch the mirror upsert against a row that is already
-   * there. It is also skipped when a marker already exists — it may belong to
-   * a cleanup claim whose compensating delete is still in flight, and
-   * refreshing that marker's lease is the claim's job. A marker this fallback
-   * creates is written already outside the cleanup lease (no compensating
-   * delete is in flight for it), so the next refused verification takes the
-   * cleanup over immediately instead of standing down for a whole lease.
-   * Single-writer contract as for upsert.
+   * there.
+   *
+   * When a marker already exists, the fallback re-owns it instead of skipping:
+   * the marker's owner may be a cleanup claim whose compensating delete has
+   * already returned while its watermark-scoped clear has not landed yet, and
+   * that owner's clear would otherwise remove the shared row and orphan a
+   * binding this request's own handshake created behind the delete's back —
+   * no mirror and no marker for later cleanup to find. The re-own refreshes
+   * `updated_at` (so the owner's clear misses it and claims keep standing
+   * down while the owner's delete can still be in flight) and preserves the
+   * owner's `claim_epoch`, so the latch drops as soon as that owner converges
+   * and the next refused verification takes the cleanup over. A marker this
+   * fallback creates is written already outside the cleanup lease (backdated
+   * — no compensating delete is in flight for it), so it is takeover-able
+   * right away. Single-writer contract as for upsert.
    */
   recordPendingRevocation(input: UpsertVerifiedWalletInput): Promise<boolean>;
   /** Pending upstream revocations for one identity and instance. */
