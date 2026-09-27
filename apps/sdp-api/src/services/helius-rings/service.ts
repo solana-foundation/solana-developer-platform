@@ -93,7 +93,10 @@ export interface HeliusRingsActor {
 
 export interface HeliusRingsServiceDependencies {
   gateway?: RingsGatewayPort;
-  resolveGateway?: (connectionId?: string) => Promise<RingsGatewayPort>;
+  resolveGateway?: (
+    connectionId?: string,
+    custodyWalletId?: string | null
+  ) => Promise<RingsGatewayPort>;
   resolveConnectionId?: () => Promise<string>;
   resolveRpcUrl?: (connectionId?: string) => Promise<string | undefined>;
   wallets?: HeliusRingsWalletRepository;
@@ -201,7 +204,10 @@ export function createHeliusRingsService(
 }
 
 export class HeliusRingsService {
-  private readonly resolveGateway: (connectionId?: string) => Promise<RingsGatewayPort>;
+  private readonly resolveGateway: (
+    connectionId?: string,
+    custodyWalletId?: string | null
+  ) => Promise<RingsGatewayPort>;
   private readonly resolveConnectionId: () => Promise<string>;
   private readonly resolveRpcUrl: (connectionId?: string) => Promise<string | undefined>;
   private readonly wallets: HeliusRingsWalletRepository;
@@ -247,14 +253,25 @@ export class HeliusRingsService {
       ? dependencies.resolveGateway
       : dependencies.gateway
         ? async () => dependencies.gateway as RingsGatewayPort
-        : async (connectionId) => {
+        : async (connectionId, custodyWalletId) => {
+            // The recorded custody-wallet row of the rings wallet in play, so
+            // the gateway's signing callbacks prefer that row over any other
+            // custody row holding the owner's key. Undefined here means no
+            // wallet is in play (health probes, ring bring-up), and signing
+            // falls back to key-based resolution.
+            const gatewayTenant = { ...tenant, custodyWalletId };
             if (connectionId !== undefined) {
-              return resolvePersistedRingsGateway(env, tenant, connectionId, gatewayDependencies);
+              return resolvePersistedRingsGateway(
+                env,
+                gatewayTenant,
+                connectionId,
+                gatewayDependencies
+              );
             }
             try {
               return await resolvePersistedRingsGateway(
                 env,
-                tenant,
+                gatewayTenant,
                 undefined,
                 gatewayDependencies
               );
@@ -326,7 +343,9 @@ export class HeliusRingsService {
       return mapHeliusRingsWalletRow(wallet);
     }
 
-    const provision = await (await this.resolveGateway()).provisionIdentity({
+    const provision = await (
+      await this.resolveGateway(undefined, wallet.custody_wallet_id)
+    ).provisionIdentity({
       walletId: wallet.id,
       sdpAddress: input.sdpAddress,
     });
@@ -410,7 +429,9 @@ export class HeliusRingsService {
       );
     }
 
-    const published = await (await this.resolveGateway()).readIdentity({
+    const published = await (
+      await this.resolveGateway(undefined, wallet.custody_wallet_id)
+    ).readIdentity({
       walletId: wallet.id,
       owner,
     });
@@ -495,7 +516,9 @@ export class HeliusRingsService {
           return claimed;
         },
         async () => {
-          const rotated = await (await this.resolveGateway()).rekeyIdentity({
+          const rotated = await (
+            await this.resolveGateway(undefined, wallet.custody_wallet_id)
+          ).rekeyIdentity({
             walletId: wallet.id,
             owner,
           });
@@ -618,7 +641,9 @@ export class HeliusRingsService {
       );
     }
 
-    const identity = await (await this.resolveGateway()).readIdentity({
+    const identity = await (
+      await this.resolveGateway(undefined, wallet.custody_wallet_id)
+    ).readIdentity({
       walletId: wallet.id,
       owner,
     });
@@ -1377,7 +1402,13 @@ export class HeliusRingsService {
       if (knownAssetsResult.status === "rejected") throw knownAssetsResult.reason;
       const recipient = recipientResult.value;
       const ring = ringResult.value;
-      const gateway = await this.resolveGateway(current.rings_connection_id);
+      // The wallet row is in scope above, so the gateway's derivation signing
+      // (a signMessage inside the SDK's build) prefers this wallet's recorded
+      // custody row over any other row holding the owner's key.
+      const gateway = await this.resolveGateway(
+        current.rings_connection_id,
+        wallet.custody_wallet_id
+      );
 
       // Merging is gated on chain and registration cannot set it, so a wallet
       // provisioned before merge shipped refuses every merge until this lands.
@@ -2094,6 +2125,11 @@ const GATEWAY_FAILURES: Record<HeliusRingsErrorCode, { code: FailureCode; retrya
   // which is a gateway failure, so this is the only place the row can learn
   // that custody is the reason. Nothing recovers it but moving the wallet.
   provider_unsupported: { code: "provider_unsupported", retryable: false },
+  // Kept as itself for the same reason: nothing signed and Rings is up, but
+  // the wallet's recorded custody connection cannot serve a signature right
+  // now — paused, unavailable, or not entitled on this tier. The message
+  // names which, and no retry recovers it until custody (or the tier) changes.
+  custody_unavailable: { code: "custody_unavailable", retryable: false },
   // Reserved for post-sign recovery, where persisted signed bytes may already
   // have settled and a fresh operation could pay twice.
   manual_reconciliation_required: {

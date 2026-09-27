@@ -16,6 +16,15 @@ import { signRingsMessage, signRingsOuterTransaction } from "./signer-adapter";
 export interface RingsGatewayTenant {
   organizationId: string;
   projectId: string;
+  /**
+   * The custody-wallet row the rings wallet in play was provisioned against,
+   * when the caller has one recorded. Forwarded to both signing callbacks so
+   * signing prefers that row over any other custody row holding the owner's
+   * key — including when its connection is paused or otherwise unavailable,
+   * where the recorded row's own runtime admission must be the thing that
+   * refuses instead of a different row's connection serving the signature.
+   */
+  custodyWalletId?: string | null;
 }
 
 export interface ResolveRingsGatewayDependencies {
@@ -101,6 +110,7 @@ export function createConfiguredRingsGateway(
           projectId: tenant.projectId,
           owner,
           unsignedTxBase64,
+          custodyWalletId: tenant.custodyWalletId ?? null,
         })
       ),
     signMessage: (messageBase64: string, owner: string) =>
@@ -111,6 +121,7 @@ export function createConfiguredRingsGateway(
           projectId: tenant.projectId,
           owner,
           messageBase64,
+          custodyWalletId: tenant.custodyWalletId ?? null,
         })
       ),
     submitTransaction: (signedTxBase64: string) =>
@@ -146,8 +157,11 @@ const ADAPTER_FAILURE_MESSAGES = {
   // `provider_unsupported` is deliberately absent: it is the one adapter
   // failure whose own message is written for the operator, and replacing it
   // with a fixed string here would drop the provider name and the remedy.
+  // `custody_unavailable` is absent for the same reason: its message names the
+  // custody state (paused, unavailable, or not entitled) and the way out, and
+  // a fixed "custody could not sign" would drop exactly that.
 } as const satisfies Record<
-  Exclude<RingsAdapterError["failureCode"], "provider_unsupported">,
+  Exclude<RingsAdapterError["failureCode"], "provider_unsupported" | "custody_unavailable">,
   string
 >;
 
@@ -165,6 +179,15 @@ async function asDomainFailure<T>(work: () => Promise<T>): Promise<T> {
       // this boundary, and collapsing to invalid_input would file a custody
       // problem as a malformed request.
       throw new HeliusRingsError("provider_unsupported", error.message);
+    }
+    if (error.failureCode === "custody_unavailable") {
+      // Same shape as provider_unsupported: the message names the custody
+      // state and the way out (paused, unavailable, or not entitled), built in
+      // this codebase and redacted by the adapter, so a fixed string here
+      // would drop the state the caller has to act on. The code keeps the
+      // classification intact through the boundary — a paused connection is
+      // not a malformed request and not a Rings outage.
+      throw new HeliusRingsError("custody_unavailable", error.message);
     }
     throw new HeliusRingsError(
       error.retryable ? "gateway_unavailable" : "invalid_input",

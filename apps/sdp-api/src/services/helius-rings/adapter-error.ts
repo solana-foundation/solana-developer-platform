@@ -70,6 +70,11 @@ export type RingsAdapterFailureCode = Extract<
   // and what Rings needs from it, and is built here rather than quoted from an
   // upstream, so it is the one adapter message safe to surface verbatim.
   | "provider_unsupported"
+  // Carries an operator-facing message by construction as well: the runtime
+  // admission builds it for the operator ("Wallet execution is paused. Retry
+  // after wallet execution is available."), and nothing signed — so collapsing
+  // it into signer_failed would file a custody state as a signer bug.
+  | "custody_unavailable"
   | "submit_failed"
   | "manual_reconciliation_required"
 >;

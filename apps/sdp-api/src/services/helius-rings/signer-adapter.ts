@@ -425,10 +425,11 @@ async function ownerSignerForWalletRecord(
  * Runtime admission refusals, raised while building the signer for one exact
  * custody-wallet row: the connection is paused or otherwise unavailable, or
  * the provider is not entitled on this tier. Nothing signed and nothing broke,
- * and no retry fixes them — custody (or the tier) has to change first. Mapping
- * them like any other unknown error would file a paused connection as a
- * retryable signing failure, which Rings reports as a service outage instead
- * of the custody state that names the fix.
+ * and no retry fixes them — custody (or the tier) has to change first. They
+ * therefore carry their own failure code rather than signer_failed: filing
+ * them as a signing failure (retryable or not) reads as a signer bug or a
+ * service outage, when the row has to name the custody state that names the
+ * fix.
  */
 const RUNTIME_ADMISSION_FAILURE_REASONS = new Set([
   "runtime_execution_paused",
@@ -449,7 +450,12 @@ function toSignerFailure(error: unknown): RingsAdapterError {
     typeof error.details?.reason === "string" &&
     RUNTIME_ADMISSION_FAILURE_REASONS.has(error.details.reason)
   ) {
-    return new RingsAdapterError("signer_failed", error.message, {
+    // The admission messages are built for the operator in this codebase and
+    // are redacted again below, so they are safe to carry verbatim — the row
+    // (and the caller) learns whether the wallet is paused, the connection is
+    // unavailable, or the tier is not entitled, instead of a generic custody
+    // signing failure.
+    return new RingsAdapterError("custody_unavailable", error.message, {
       retryable: false,
       cause: error,
     });

@@ -16,6 +16,12 @@ export type HeliusRingsErrorCode =
   // gateway boundary and reaches the operation row: the request was well
   // formed, and only changing custody provider changes the outcome.
   | "provider_unsupported"
+  // The wallet's recorded custody connection cannot serve a signature right
+  // now — paused, unavailable, or not entitled on this tier. Distinct from
+  // `gateway_unavailable` so the classification survives the gateway boundary
+  // and reaches the operation row: Rings is up, and only custody (or the
+  // tier) can change the outcome.
+  | "custody_unavailable"
   | "manual_reconciliation_required";
 
 export class HeliusRingsError extends Error {

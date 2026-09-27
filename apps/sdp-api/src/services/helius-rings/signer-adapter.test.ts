@@ -478,7 +478,7 @@ describe("signRingsOuterTransaction", () => {
       );
       expect(findActiveWalletByPublicKey).not.toHaveBeenCalled();
       expect(findConnectionWalletsByAddress).not.toHaveBeenCalled();
-      expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+      expect(error).toMatchObject({ failureCode: "custody_unavailable", retryable: false });
       expect((error as Error).message).toContain("paused");
     });
 
@@ -531,8 +531,9 @@ describe("signRingsOuterTransaction", () => {
     /**
      * Runtime admission refused the exact custody-wallet row: the connection is
      * paused or unavailable, or the provider is not entitled. Nothing signed
-     * and nothing broke, and no retry fixes it — so it must not read as the
-     * retryable outage a generic failure would become.
+     * and nothing broke, and no retry fixes it — so it carries its own failure
+     * code instead of the signer failure (or the retryable outage) a generic
+     * mapping would give it.
      */
     it.each([
       ["paused", "FORBIDDEN", "runtime_execution_paused"] as const,
@@ -549,7 +550,7 @@ describe("signRingsOuterTransaction", () => {
 
         const error = await rejection(signRingsOuterTransaction(signInput()));
 
-        expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+        expect(error).toMatchObject({ failureCode: "custody_unavailable", retryable: false });
         expect((error as Error).message).toContain(_state);
       }
     );

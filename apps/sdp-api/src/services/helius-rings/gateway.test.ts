@@ -149,6 +149,30 @@ describe("createConfiguredRingsGateway", () => {
     });
   });
 
+  // The other adapter failure that keeps both its code and its message. The
+  // message names the custody state (paused, unavailable, or not entitled) and
+  // the way out; a fixed string would drop exactly that, and collapsing the
+  // code to invalid_input/gateway_unavailable would file a custody state as a
+  // malformed request or a Rings outage — on the path that carries derivation
+  // failures to the row.
+  it("keeps a custody_unavailable code and message rather than replacing them", async () => {
+    const reason = "Wallet execution is paused. Retry after wallet execution is available.";
+    const { captured, createGateway } = capturingCreate();
+    create({
+      createGateway,
+      signMessage: async () => {
+        throw new RingsAdapterError("custody_unavailable", reason, { retryable: false });
+      },
+    });
+
+    const config = captured[0];
+    if (!config) throw new Error("no gateway config was captured");
+    await expect(config.signMessage?.("attestation", "OwnerPublicKey")).rejects.toMatchObject({
+      code: "custody_unavailable",
+      message: reason,
+    });
+  });
+
   it("does not expose an upstream URL from an adapter error", async () => {
     const { captured, createGateway } = capturingCreate();
     create({
@@ -214,6 +238,7 @@ describe("createConfiguredRingsGateway", () => {
       projectId: tenant.projectId,
       owner: "OwnerPublicKey",
       unsignedTxBase64: "unsigned",
+      custodyWalletId: null,
     });
     expect(submitCalls[0]).toMatchObject({
       signedTxBase64: "signed",
@@ -242,7 +267,42 @@ describe("createConfiguredRingsGateway", () => {
       projectId: tenant.projectId,
       owner: "OwnerPublicKey",
       messageBase64: "attestation",
+      custodyWalletId: null,
     });
+  });
+
+  /**
+   * Regression (Greptile head review, "wrong custody row for message
+   * signing"): the SDK's signing callbacks only carry the owner key, so
+   * without the recorded row forwarded here, derivation and registration
+   * signing resolve by key alone — and with two custody rows holding one
+   * key, a paused recorded connection could be bypassed through a live
+   * duplicate. The tenant's recorded row must reach both sign calls.
+   */
+  it("forwards the recorded custody wallet to both signing callbacks", async () => {
+    const { captured, createGateway } = capturingCreate();
+    const txCalls: unknown[] = [];
+    const messageCalls: unknown[] = [];
+    createConfiguredRingsGateway(env, { ...tenant, custodyWalletId: "cwlt_recorded" }, connection, {
+      createGateway,
+      signOuterTransaction: async (input) => {
+        txCalls.push(input);
+        return "signed";
+      },
+      signMessage: async (input) => {
+        messageCalls.push(input);
+        return "message-signature";
+      },
+    });
+
+    const config = captured[0];
+    if (!config) throw new Error("no gateway config was captured");
+    await expect(config.signTransaction("unsigned", "OwnerPublicKey")).resolves.toBe("signed");
+    await expect(config.signMessage?.("attestation", "OwnerPublicKey")).resolves.toBe(
+      "message-signature"
+    );
+    expect(txCalls[0]).toMatchObject({ custodyWalletId: "cwlt_recorded" });
+    expect(messageCalls[0]).toMatchObject({ custodyWalletId: "cwlt_recorded" });
   });
 });
 

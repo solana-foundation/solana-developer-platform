@@ -120,6 +120,12 @@ const RINGS_ERROR_CODES: Record<HeliusRingsError["code"], ErrorCode> = {
   // serve Rings at all. A bad request rather than an outage, because the fix
   // is a different custody provider and not a retry.
   provider_unsupported: "BAD_REQUEST",
+  // Nothing signed and nothing broke either: the wallet's recorded custody
+  // connection cannot serve a signature right now — paused, unavailable, or
+  // not entitled on this tier. Service-unavailable rather than a bad request,
+  // because the request was well formed and the message names the custody
+  // state (and the way out) instead of blaming the caller.
+  custody_unavailable: "SERVICE_UNAVAILABLE",
   // A conflict a caller cannot resolve: an operator has to reconcile the
   // signature against the chain before anything else happens to this wallet.
   manual_reconciliation_required: "CONFLICT",

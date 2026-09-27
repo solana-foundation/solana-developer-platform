@@ -19,6 +19,14 @@ export const FAILURE_CODES = [
   // so no retry and no upstream recovery changes the outcome — the wallet has to
   // move providers.
   "provider_unsupported",
+  // Distinct from signer_failed and gateway_unavailable: nothing signed and
+  // Rings itself is fine, but the wallet's recorded custody connection cannot
+  // serve a signature right now — paused, unavailable, or not entitled on this
+  // tier. Filing these as signer_failed reads as a signer bug and as
+  // gateway_unavailable reads as a Rings outage; the row has to name custody
+  // as the part that is unavailable, because custody (or the tier) is the
+  // only thing that can change the outcome.
+  "custody_unavailable",
   "submit_failed",
   "indexing_timeout",
   "gateway_unavailable",
