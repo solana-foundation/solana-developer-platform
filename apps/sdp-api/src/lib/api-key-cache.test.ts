@@ -22,9 +22,10 @@
 import type { CachedApiKey } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import type { KVStore } from "@/runtime/kv";
-import { fillApiKeyCache, refreshApiKeyCache } from "./api-key-cache";
+import { apiKeyCacheKey, fillApiKeyCache, refreshApiKeyCache } from "./api-key-cache";
 
 const KEY_HASH = "hash_fill_race_exhaustion";
+const TOKEN_KEY_HASH = "hash_install_token_fence";
 
 function entryWithStatus(status: CachedApiKey["status"]): CachedApiKey {
   return {
@@ -601,5 +602,226 @@ describe("refreshApiKeyCache convergence contract", () => {
     expect(converged).toBe(true);
     expect(puts).toHaveLength(1);
     expect((JSON.parse(puts[0] ?? "{}") as CachedApiKey).status).toBe("revoked");
+  });
+});
+
+/**
+ * Deterministic reproduction of the SOLA9-624 interleaving: two fills whose
+ * DB reads return the same pre-revocation snapshot install byte-identical
+ * pendingVerification markers, so a fill's publish CAS cannot tell its own
+ * marker from another fill's. After the revocation's terminal entry is
+ * written and then evicted, the older fill — whose verify read predates the
+ * revocation — can publish trusted active state over the newer fill's
+ * marker, re-authorizing a revoked key from cache until the newer fill's
+ * repair lands.
+ *
+ * The gates below pin the interleaving the same way the event loop would:
+ * `armReadGate` suspends a fill at its Postgres verify read, and
+ * `armCasGate` suspends the newer fill's repair mid-CAS — leaving the
+ * newer fill's pending marker in the slot when the older fill resumes.
+ */
+describe("fillApiKeyCache install fencing (SOLA9-624)", () => {
+  interface Deferred<T> {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+  }
+
+  function createDeferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((given) => {
+      resolve = given;
+    });
+    return { promise, resolve };
+  }
+
+  /** Yield until every runnable microtask has blocked on a gate. */
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  type Row = Record<string, unknown>;
+
+  /**
+   * In-memory slot store. `armCasGate` suspends the next winning
+   * compareAndSet before it applies, modeling repair contention, and
+   * returns that CAS's release handle. Only applied writes are recorded in
+   * `writes` — a losing CAS must not read as a cache write.
+   */
+  function gatedKV() {
+    const slot = new Map<string, string>();
+    const writes: Array<{ expected: string | null; value: string }> = [];
+    const casGates: Array<Deferred<void>> = [];
+    const kv = {
+      get: async (key: string) => slot.get(key) ?? null,
+      put: async (key: string, value: string) => {
+        slot.set(key, value);
+        writes.push({ expected: null, value });
+      },
+      delete: async (key: string) => {
+        slot.delete(key);
+      },
+      compareAndSet: async (key: string, expected: string | null, value: string) => {
+        if ((slot.get(key) ?? null) !== expected) {
+          return false;
+        }
+        const gate = casGates.shift();
+        if (gate) {
+          await gate.promise;
+        }
+        slot.set(key, value);
+        writes.push({ expected, value });
+        return true;
+      },
+      compareAndDelete: async () => false,
+      list: async () => ({ keys: [] }),
+      admitSlidingWindow: async () => ({ admitted: true, current: 0, previous: 0 }),
+    } as KVStore;
+    return {
+      kv,
+      slot,
+      writes,
+      armCasGate(): () => void {
+        const gate = createDeferred<void>();
+        casGates.push(gate);
+        return () => gate.resolve();
+      },
+    };
+  }
+
+  /**
+   * Key-row source: ungated reads serve the pre- or post-revocation row per
+   * the revocation flag; `armReadGate` suspends the next row read in arming
+   * order until its release handle hands it an explicit row (a verify read
+   * whose result was fixed before the revocation committed).
+   */
+  function gatedDb(activeRow: Row, revokedRowValue: Row) {
+    let revoked = false;
+    const gateQueue: Array<Deferred<Row>> = [];
+    const db = {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => {
+            const gate = gateQueue.shift();
+            if (gate) {
+              return await gate.promise;
+            }
+            return revoked ? revokedRowValue : activeRow;
+          },
+          all: async () => ({ results: [] }),
+        }),
+      }),
+    } as unknown as DatabaseClient;
+    return {
+      db,
+      revoke() {
+        revoked = true;
+      },
+      armReadGate(): (row: Row) => void {
+        const gate = createDeferred<Row>();
+        gateQueue.push(gate);
+        return (row: Row) => gate.resolve(row);
+      },
+    };
+  }
+
+  it("does not publish an older fill's trusted active value over a newer fill's pending marker", async () => {
+    const entry = entryWithStatus("active");
+    const activeRow = { ...revokedRow(), status: "active" };
+    const deactivatedRow = { ...revokedRow(), status: "deactivated" };
+    const cacheKey = apiKeyCacheKey(TOKEN_KEY_HASH);
+    const { kv, slot, writes, armCasGate } = gatedKV();
+    const dbCtl = gatedDb(activeRow, deactivatedRow);
+
+    // Fill A wins the install and suspends mid-verify: its Postgres verify
+    // read has returned the pre-revocation snapshot, but its publish has
+    // not run yet.
+    const releaseAVerify = dbCtl.armReadGate();
+    const promiseA = fillApiKeyCache(dbCtl.db, kv, TOKEN_KEY_HASH, entry);
+    await flush();
+    expect(JSON.parse(slot.get(cacheKey) ?? "{}")).toMatchObject({
+      pendingVerification: true,
+      status: "active",
+    });
+
+    // The revocation commits and its cache refresh lands the terminal entry,
+    // overwriting A's pending marker...
+    dbCtl.revoke();
+    expect(await refreshApiKeyCache(dbCtl.db, kv, TOKEN_KEY_HASH)).toBe(true);
+    expect(JSON.parse(slot.get(cacheKey) ?? "{}")).toMatchObject({ status: "deactivated" });
+
+    // ...which Redis then evicts.
+    await kv.delete(cacheKey);
+
+    // Fill C read the same pre-revocation snapshot. It claims the emptied
+    // slot with its own pending marker, its verify read sees the revocation,
+    // and its repair CAS is suspended mid-flight — leaving C's pending
+    // marker in the slot.
+    const releaseCVerify = dbCtl.armReadGate();
+    const promiseC = fillApiKeyCache(dbCtl.db, kv, TOKEN_KEY_HASH, entry);
+    await flush();
+    expect(JSON.parse(slot.get(cacheKey) ?? "{}")).toMatchObject({
+      pendingVerification: true,
+      status: "active",
+    });
+    const releaseCRepair = armCasGate();
+    releaseCVerify(deactivatedRow);
+    await flush();
+    expect(JSON.parse(slot.get(cacheKey) ?? "{}")).toMatchObject({
+      pendingVerification: true,
+      status: "active",
+    });
+
+    // A's suspended verify resumes and tries to publish trusted active state
+    // over the marker it finds in the slot. That marker is C's, not A's: the
+    // publish must lose, and A must resolve against Postgres — which reports
+    // the revocation.
+    releaseAVerify(activeRow);
+    const adoptedA = await promiseA;
+    expect(adoptedA.status).toBe("deactivated");
+
+    // No trusted non-terminal value may reach the slot after the
+    // revocation's terminal write: readers would authorize from it.
+    const trustedActiveWrites = writes.filter(({ value }) => {
+      const parsed = JSON.parse(value) as CachedApiKey;
+      return !parsed.pendingVerification && parsed.status === "active";
+    });
+    expect(trustedActiveWrites).toHaveLength(0);
+
+    // C's repair converges the slot to the terminal state.
+    releaseCRepair();
+    const adoptedC = await promiseC;
+    expect(adoptedC.status).toBe("deactivated");
+    expect(JSON.parse(slot.get(cacheKey) ?? "{}")).toMatchObject({ status: "deactivated" });
+  });
+
+  it("installs distinct pending markers for distinct fills of the same snapshot", async () => {
+    // The publish CAS is the only proof that a fill's own marker is still
+    // the one in the slot. Two fills reading the same snapshot must
+    // therefore never install byte-identical pending markers — otherwise
+    // one fill's publish can be satisfied by the other's marker, which the
+    // eviction race above turns into a trusted-active resurrection.
+    const entry = entryWithStatus("active");
+    const activeRow = { ...revokedRow(), status: "active" };
+    const cacheKey = apiKeyCacheKey(TOKEN_KEY_HASH);
+    const { kv, writes } = gatedKV();
+
+    const first = await fillApiKeyCache(dbReturning(activeRow), kv, TOKEN_KEY_HASH, entry);
+    // writes[0] is the install CAS, writes[1] the verified publish.
+    const markerA = writes[0]?.value;
+    expect(JSON.parse(markerA ?? "{}")).toMatchObject({
+      pendingVerification: true,
+      status: "active",
+    });
+
+    // Reset the slot so the second fill re-runs the full install path
+    // against the same snapshot.
+    await kv.delete(cacheKey);
+    const second = await fillApiKeyCache(dbReturning(activeRow), kv, TOKEN_KEY_HASH, entry);
+    const markerB = writes[2]?.value;
+
+    expect(second).toBe(first);
+    expect(JSON.parse(markerB ?? "{}")).toMatchObject({
+      pendingVerification: true,
+      status: "active",
+    });
+    expect(markerA).not.toBe(markerB);
   });
 });

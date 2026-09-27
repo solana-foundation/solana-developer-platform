@@ -107,6 +107,14 @@ export interface CachedApiKey {
    * comes back clean.
    */
   pendingVerification?: true;
+  /**
+   * Opaque per-install nonce embedded in a pendingVerification marker. Two
+   * fills of the same snapshot would otherwise install byte-identical
+   * markers, and one fill's publish CAS could be satisfied by the other's
+   * marker — publishing trusted state over an install it cannot prove is
+   * its own. The token never appears in a trusted entry.
+   */
+  installToken?: string;
 }
 
 // API Request/Response types

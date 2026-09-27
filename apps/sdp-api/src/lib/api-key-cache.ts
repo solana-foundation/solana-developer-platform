@@ -217,8 +217,19 @@ export async function fillApiKeyCache(
   // Installs go in marked pending: readers treat them as misses until the
   // post-install Postgres read clears them. Publishing a trusted entry
   // straight from the CAS would let concurrent cache-hit readers authorize
-  // from a snapshot whose win proves nothing under eviction.
-  const pending: CachedApiKey = { ...entry, pendingVerification: true };
+  // from a snapshot whose win proves nothing under eviction. The marker
+  // also carries a unique per-fill install token: two fills of the same
+  // snapshot would otherwise install byte-identical markers, and the
+  // publish CAS below could be satisfied by another fill's marker —
+  // letting a fill whose verify read predates a revocation publish trusted
+  // active state over it once the revocation's terminal entry has been
+  // evicted. Fencing on the token pins the publish to the exact install
+  // this fill made.
+  const pending: CachedApiKey = {
+    ...entry,
+    pendingVerification: true,
+    installToken: crypto.randomUUID(),
+  };
   const pendingValue = JSON.stringify(pending);
   let expected: string | null = null;
 
@@ -317,13 +328,16 @@ async function resolveContendedFill(
  *
  * So installs are two-phase. The CAS lands a pendingVerification-marked
  * entry that every reader treats as a miss, then this verify re-reads
- * Postgres and only a clean result publishes the trusted entry. The verify
- * read postdates the install, so any revocation it cannot see must commit
- * later — and from the install onward the slot is occupied, so that later
- * revocation's unconditional cache write always has this entry to
- * overwrite; eviction anywhere in the chain only ever degrades to a miss.
- * Drifted installs are repaired and the caller authenticates against the
- * verified state.
+ * Postgres and only a clean result publishes the trusted entry. The publish
+ * CAS expects this fill's own token-bearing marker — markers are unique per
+ * fill, so it can only fire while that exact install is still in the slot;
+ * another fill's pending marker or a legacy payload can never satisfy it.
+ * The verify read postdates the install, so any revocation it cannot see
+ * must commit later — and from the install onward the slot is occupied, so
+ * that later revocation's unconditional cache write always has this entry
+ * to overwrite; eviction anywhere in the chain only ever degrades to a
+ * miss. Drifted installs are repaired and the caller authenticates against
+ * the verified state.
  */
 async function verifyInstalledFill(
   db: DatabaseClient,
