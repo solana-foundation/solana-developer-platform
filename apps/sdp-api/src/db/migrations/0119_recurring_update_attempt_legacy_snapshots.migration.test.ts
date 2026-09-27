@@ -16,10 +16,13 @@ function migrationPath(fileName: string): string {
  * parents but left predecessor-written, in-flight source-changing replacement
  * attempts with the legacy `sourceWalletId` snapshot vocabulary and a NULL
  * replacement custody-wallet identity. The 0119 backfill must resolve those
- * identities tenant-scoped from the legacy snapshots, normalize the snapshot
+ * identities tenant-scoped from the legacy snapshots and, for recorded
+ * replacement work the wallet_id alone cannot resolve, from the recorded
+ * replacement plan owner (wallet_id plus public key), normalize the snapshot
  * vocabulary, quarantine ambiguous or incomplete rows that have recorded no
- * replacement side effects, and keep side-effected rows in flight so the
- * recovery path resumes them instead of repeating replacement operations.
+ * replacement side effects, and keep the remaining side-effected rows in
+ * flight so the recovery path resumes them instead of repeating replacement
+ * operations.
  */
 it("backfills, normalizes, and quarantines legacy recurring update attempts", async () => {
   const identitySql = readFileSync(
@@ -65,6 +68,10 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
       updated_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00.000Z'
     )`);
 
+    await client.query(`CREATE TEMP TABLE payment_subscription_plans (
+      id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, project_id TEXT NOT NULL,
+      owner_wallet_id TEXT NOT NULL, owner_address TEXT NOT NULL
+    )`);
     await client.query(`INSERT INTO custody_configs (id, organization_id, project_id) VALUES
       ('cfg_project', 'org_a', 'prj_a'),
       ('cfg_dup_a', 'org_a', 'prj_a'),
@@ -78,8 +85,8 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
       (id, custody_config_id, custody_connection_id, wallet_id, public_key) VALUES
       ('cw_old', 'cfg_project', NULL, 'wallet_old', 'addr_old'),
       ('cw_new', 'cfg_project', NULL, 'wallet_new', 'addr_new'),
-      ('cw_dup_a', 'cfg_dup_a', NULL, 'wallet_dup', 'addr_dup'),
-      ('cw_dup_b', 'cfg_dup_b', NULL, 'wallet_dup', 'addr_dup'),
+      ('cw_dup_a', 'cfg_dup_a', NULL, 'wallet_dup', 'addr_dup_a'),
+      ('cw_dup_b', 'cfg_dup_b', NULL, 'wallet_dup', 'addr_dup_b'),
       ('cw_org_wide', 'cfg_org_wide', NULL, 'wallet_org', 'addr_org'),
       ('cw_foreign_org', 'cfg_foreign_org', NULL, 'wallet_new', 'addr_new'),
       ('cw_foreign_project', 'cfg_foreign_project', NULL, 'wallet_foreign', 'addr_foreign'),
@@ -108,6 +115,10 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
        'create_plan', ARRAY['amount', 'sourceWalletId']::text[],
        '{"sourceWalletId":"wallet_old","amount":"25.00"}'::jsonb,
        '{"sourceWalletId":"wallet_new","amount":"35.00"}'::jsonb),
+      ('a_side_effected_stuck', 'org_a', 'prj_a', 'rp_ok', 'replacement', 'processing',
+       'create_plan', ARRAY['sourceWalletId']::text[],
+       '{"sourceWalletId":"wallet_old"}'::jsonb,
+       '{"sourceWalletId":"wallet_dup"}'::jsonb),
       ('a_connection', 'org_a', 'prj_a', 'rp_ok', 'replacement', 'processing',
        'create_plan', ARRAY['sourceWalletId']::text[],
        '{"sourceWalletId":"wallet_old"}'::jsonb,
@@ -141,7 +152,14 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
        '{"sourceWalletId":"wallet_new"}'::jsonb)`);
 
     // Recorded replacement work on the side-effected rows: a created plan and
-    // its on-chain creation signature.
+    // its on-chain creation signature. The plan owner (wallet_id plus public
+    // key) is the exact custody identity the original attempt selected, so it
+    // disambiguates rows the wallet_id snapshot alone cannot resolve.
+    await client.query(`INSERT INTO payment_subscription_plans
+      (id, organization_id, project_id, owner_wallet_id, owner_address) VALUES
+      ('psp_side_effected', 'org_a', 'prj_a', 'wallet_dup', 'addr_dup_a'),
+      ('psp_side_effected_resolvable', 'org_a', 'prj_a', 'wallet_new', 'addr_new'),
+      ('psp_side_effected_stuck', 'org_a', 'prj_a', 'wallet_dup', 'addr_ghost_owner')`);
     await client.query(`UPDATE payment_recurring_payment_update_attempts
           SET new_plan_id = 'psp_side_effected',
               plan_creation_signature = 'sig_side_effected_plan'
@@ -150,6 +168,10 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
           SET new_plan_id = 'psp_side_effected_resolvable',
               plan_creation_signature = 'sig_side_effected_resolvable_plan'
         WHERE id = 'a_side_effected_resolvable'`);
+    await client.query(`UPDATE payment_recurring_payment_update_attempts
+          SET new_plan_id = 'psp_side_effected_stuck',
+              plan_creation_signature = 'sig_side_effected_stuck_plan'
+        WHERE id = 'a_side_effected_stuck'`);
 
     await client.query(legacySnapshotSql);
 
@@ -243,10 +265,10 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
         id: "a_side_effected",
         status: "processing",
         error: null,
-        new_source_custody_wallet_id: null,
-        changed_fields: ["sourceWalletId"],
-        before_values: { sourceWalletId: "wallet_old" },
-        after_values: { sourceWalletId: "wallet_dup" },
+        new_source_custody_wallet_id: "cw_dup_a",
+        changed_fields: ["sourceCustodyWalletId"],
+        before_values: { sourceCustodyWalletId: "cw_old" },
+        after_values: { sourceCustodyWalletId: "cw_dup_a" },
       },
       {
         id: "a_side_effected_resolvable",
@@ -256,6 +278,15 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
         changed_fields: ["amount", "sourceCustodyWalletId"],
         before_values: { sourceCustodyWalletId: "cw_old", amount: "25.00" },
         after_values: { sourceCustodyWalletId: "cw_new", amount: "35.00" },
+      },
+      {
+        id: "a_side_effected_stuck",
+        status: "processing",
+        error: null,
+        new_source_custody_wallet_id: null,
+        changed_fields: ["sourceWalletId"],
+        before_values: { sourceWalletId: "wallet_old" },
+        after_values: { sourceWalletId: "wallet_dup" },
       },
       {
         id: "a_unpinned",
@@ -282,7 +313,7 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
     }>(
       `SELECT id, new_plan_id, plan_creation_signature
          FROM payment_recurring_payment_update_attempts
-        WHERE id IN ('a_side_effected', 'a_side_effected_resolvable')
+        WHERE id IN ('a_side_effected', 'a_side_effected_resolvable', 'a_side_effected_stuck')
         ORDER BY id`
     );
     expect(sideEffected.rows).toEqual([
@@ -296,12 +327,18 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
         new_plan_id: "psp_side_effected_resolvable",
         plan_creation_signature: "sig_side_effected_resolvable_plan",
       },
+      {
+        id: "a_side_effected_stuck",
+        new_plan_id: "psp_side_effected_stuck",
+        plan_creation_signature: "sig_side_effected_stuck_plan",
+      },
     ]);
 
     // Quarantined rows left the in-flight set, so a retry creates a fresh,
-    // exactly-pinned attempt instead of failing recovery forever. The only
-    // legacy source-changing row still in flight is the ambiguous one that
-    // already recorded replacement work: it stays recoverable instead of
+    // exactly-pinned attempt instead of failing recovery forever. Side-effected
+    // rows the plan owner resolves are backfilled; the only legacy
+    // source-changing row still in flight is the one whose recorded work no
+    // identity can prove — it stays recoverable-by-repair instead of
     // repeating completed replacement operations.
     const inFlight = await client.query<{ id: string }>(
       `SELECT id
@@ -309,7 +346,7 @@ it("backfills, normalizes, and quarantines legacy recurring update attempts", as
         WHERE status = 'processing'
           AND changed_fields @> ARRAY['sourceWalletId']::text[]`
     );
-    expect(inFlight.rows).toEqual([{ id: "a_side_effected" }]);
+    expect(inFlight.rows).toEqual([{ id: "a_side_effected_stuck" }]);
   } finally {
     await client.query("ROLLBACK");
     await client.end();

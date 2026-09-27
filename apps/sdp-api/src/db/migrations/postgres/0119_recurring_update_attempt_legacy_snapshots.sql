@@ -4,16 +4,19 @@
 -- vocabulary (wallet_id values) and a NULL `new_source_custody_wallet_id`, so
 -- update recovery permanently rejects the exact replacement wallet. Backfill
 -- resolvable rows from the legacy snapshots using tenant-scoped wallet
--- resolution, normalize the legacy `sourceWalletId` snapshot vocabulary to
--- `sourceCustodyWalletId` (custody ids, before value from the parent pin),
--- and quarantine ambiguous or incomplete rows that have recorded no
--- replacement side effects; side-effected rows stay in flight so the
--- recovery path resumes them instead of restarting completed work.
+-- resolution, then from the replacement plan owner (wallet_id plus public
+-- key) for recorded work the wallet_id alone cannot resolve, normalize the
+-- legacy `sourceWalletId` snapshot vocabulary to `sourceCustodyWalletId`
+-- (custody ids, before value from the parent pin), and quarantine ambiguous
+-- or incomplete rows that have recorded no replacement side effects;
+-- side-effected rows stay in flight so the recovery path resumes them
+-- instead of restarting completed work.
 
 CREATE TEMP VIEW recurring_attempt_wallet_scope AS
 SELECT
     wallet.id,
     wallet.wallet_id,
+    wallet.public_key,
     config.organization_id,
     config.project_id,
     'config'::TEXT AS owner_kind
@@ -23,6 +26,7 @@ UNION ALL
 SELECT
     wallet.id,
     wallet.wallet_id,
+    wallet.public_key,
     connection.organization_id,
     connection.project_id,
     'connection'::TEXT AS owner_kind
@@ -53,6 +57,56 @@ unique_matches AS (
           (wallet.owner_kind = 'connection' AND wallet.project_id = legacy.project_id)
      )
      AND wallet.wallet_id = legacy.new_wallet_id
+    GROUP BY legacy.attempt_id
+    HAVING COUNT(*) = 1
+)
+UPDATE payment_recurring_payment_update_attempts attempt
+SET new_source_custody_wallet_id = unique_matches.custody_wallet_id,
+    changed_fields = array_replace(attempt.changed_fields, 'sourceWalletId', 'sourceCustodyWalletId'),
+    before_values = (attempt.before_values - 'sourceWalletId')
+                    || jsonb_build_object('sourceCustodyWalletId', recurring.source_custody_wallet_id),
+    after_values = (attempt.after_values - 'sourceWalletId')
+                   || jsonb_build_object('sourceCustodyWalletId', unique_matches.custody_wallet_id)
+FROM legacy_attempts legacy
+JOIN unique_matches ON unique_matches.attempt_id = legacy.attempt_id
+JOIN payment_recurring_payments recurring ON recurring.id = legacy.recurring_payment_id
+WHERE attempt.id = legacy.attempt_id
+  AND recurring.source_custody_wallet_id IS NOT NULL;
+
+-- Attempts the wallet_id snapshot alone could not resolve but that already
+-- created their replacement plan: the plan owner records the exact custody
+-- wallet the original attempt selected (wallet_id plus public key, the same
+-- identity pair migration 0073 pins parents by). Resolve those identities so
+-- recorded replacement work stays recoverable instead of stuck behind a
+-- retry that can never prove which custody wallet to pin.
+WITH legacy_attempts AS (
+    SELECT attempt.id AS attempt_id,
+           attempt.organization_id,
+           attempt.project_id,
+           attempt.recurring_payment_id,
+           attempt.after_values ->> 'sourceWalletId' AS new_wallet_id,
+           plan.owner_address AS new_public_key
+    FROM payment_recurring_payment_update_attempts attempt
+    JOIN payment_subscription_plans plan ON plan.id = attempt.new_plan_id
+    WHERE attempt.status = 'processing'
+      AND attempt.new_source_custody_wallet_id IS NULL
+      AND attempt.changed_fields @> ARRAY['sourceWalletId']::text[]
+      AND attempt.after_values ? 'sourceWalletId'
+      AND plan.owner_wallet_id = attempt.after_values ->> 'sourceWalletId'
+),
+unique_matches AS (
+    SELECT legacy.attempt_id, MIN(wallet.id) AS custody_wallet_id
+    FROM legacy_attempts legacy
+    JOIN recurring_attempt_wallet_scope wallet
+      ON wallet.organization_id = legacy.organization_id
+     AND (
+          (wallet.owner_kind = 'config'
+           AND (wallet.project_id = legacy.project_id OR wallet.project_id IS NULL))
+          OR
+          (wallet.owner_kind = 'connection' AND wallet.project_id = legacy.project_id)
+     )
+     AND wallet.wallet_id = legacy.new_wallet_id
+     AND wallet.public_key = legacy.new_public_key
     GROUP BY legacy.attempt_id
     HAVING COUNT(*) = 1
 )
