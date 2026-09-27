@@ -1263,20 +1263,25 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     throw new AppError("CONFLICT", "Token deployment is already in progress");
   }
 
-  // The prepare marker this confirm corresponds to, when prepare recorded one
-  // (APE-848) — pending, or already auto-expired by the save fence (a landed
-  // mint built from it is still recoverable). Confirmed in place on success,
-  // never closed on error, so it never lingers as a live fence after a real
-  // deploy and its agreement survives for the recovery path.
-  const preparedTransaction = await tokenService.findRecoverablePreparedDeploy(tokenId, body.mint);
-  const preparedSnapshot = parsePreparedDeploySnapshot(preparedTransaction);
-
   const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;
 
   try {
+    // The prepare marker this confirm corresponds to, when prepare recorded
+    // one (APE-848) — pending, or already auto-expired by the save fence (a
+    // landed mint built from it is still recoverable). Confirmed in place on
+    // success, never closed on error, so it never lingers as a live fence
+    // after a real deploy and its agreement survives for the recovery path.
+    // Inside the try: a lookup failure here must release the claim in the
+    // catch below, not strand the token mid-claim.
+    const preparedTransaction = await tokenService.findRecoverablePreparedDeploy(
+      tokenId,
+      body.mint
+    );
+    const preparedSnapshot = parsePreparedDeploySnapshot(preparedTransaction);
+
     // Verify the deploy actually landed before recording it: any tokens:write
     // caller could otherwise pin an arbitrary mint to this token and poison the
     // public metadata.json. See verifyTransactionLanded for why each of the
