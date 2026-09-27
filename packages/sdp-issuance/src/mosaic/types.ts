@@ -212,6 +212,26 @@ export interface ForceTransferOptions {
 }
 
 /**
+ * Thrown before any signing or submission when a metadata update's priced
+ * native-SOL cost (network fee + metadata-growth rent) exceeds the
+ * `maxFeePayerSolLamports` bound its caller passed — the cost the policy gate
+ * approved (APE-831). Nothing was signed or submitted.
+ */
+export class MetadataUpdateCostExceededError extends Error {
+  constructor(
+    readonly attemptedLamports: bigint,
+    readonly maxLamports: bigint,
+    options?: { cause?: unknown }
+  ) {
+    super(
+      `Metadata update would spend ${attemptedLamports} lamports from its fee payer, exceeding the ${maxLamports} lamports its policy approved`,
+      options
+    );
+    this.name = "MetadataUpdateCostExceededError";
+  }
+}
+
+/**
  * Options for updating on-chain token metadata fields.
  */
 export interface UpdateMetadataOptions {
@@ -222,6 +242,14 @@ export interface UpdateMetadataOptions {
   imageUrl?: string | null;
   updateAuthority: TransactionSigner;
   feePayer: TransactionSigner;
+  /**
+   * The maximum native SOL (network fee + metadata-growth rent) the fee payer
+   * may spend on this update, in lamports. When set, execution prices the
+   * exact transaction it built and throws MetadataUpdateCostExceededError —
+   * before signing — when the cost exceeds the bound, so an executed update
+   * can never spend more than the cost its policy gate approved (APE-831).
+   */
+  maxFeePayerSolLamports?: bigint;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

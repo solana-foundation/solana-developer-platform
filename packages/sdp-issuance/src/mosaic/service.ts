@@ -88,6 +88,7 @@ import {
   DEFAULT_ACL_MODE,
   type ExecuteTransferOptions,
   type FreezeThawOptions,
+  MetadataUpdateCostExceededError,
   MintMetadataUpdateError,
   type MintToOptions,
   type MosaicTransaction,
@@ -958,13 +959,40 @@ export class MosaicService {
   async updateMetadata(options: UpdateMetadataOptions): Promise<MosaicTransactionResult | null> {
     // Custodial path: custody signs, Kora sponsors the fee when configured.
     const feePayer = await this.resolveFeePayerSigner(options.feePayer);
-    const message = await this.buildUpdateMetadataMessage(options, feePayer);
+    const plan = await this.planUpdateMetadataMessage(options, feePayer);
 
-    if (!message) {
+    if (!plan) {
       return null;
     }
 
-    return this.signAndSubmit(message);
+    if (options.maxFeePayerSolLamports !== undefined) {
+      await this.assertUpdateMetadataCostWithinBound(plan, options.maxFeePayerSolLamports);
+    }
+
+    return this.signAndSubmit(plan.message);
+  }
+
+  /**
+   * Price the exact metadata-update message about to be signed and refuse it
+   * when its fee-payer cost (network fee + growth rent) exceeds the bound the
+   * policy gate approved. Priced from the compiled message itself, so the
+   * check cannot drift from the transaction that would be submitted — a fee
+   * or rent that rose after the policy model fails closed here instead of
+   * spending more than approved (APE-831).
+   */
+  private async assertUpdateMetadataCostWithinBound(
+    plan: { message: FullTransaction; additionalRentLamports: bigint },
+    maxFeePayerSolLamports: bigint
+  ): Promise<void> {
+    const wire = getBase64EncodedWireTransaction(compileTransaction(plan.message));
+    const networkFeeLamports = await getTransactionNetworkFee(
+      this.rpc as unknown as SolanaRpc,
+      new Uint8Array(getBase64Encoder().encode(wire))
+    );
+    const attemptedLamports = networkFeeLamports + plan.additionalRentLamports;
+    if (attemptedLamports > maxFeePayerSolLamports) {
+      throw new MetadataUpdateCostExceededError(attemptedLamports, maxFeePayerSolLamports);
+    }
   }
 
   /**

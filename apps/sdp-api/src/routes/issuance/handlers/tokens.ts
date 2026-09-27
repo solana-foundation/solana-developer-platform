@@ -1,3 +1,4 @@
+import { MetadataUpdateCostExceededError } from "@sdp/issuance/mosaic";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Token } from "@sdp/types";
@@ -6,10 +7,17 @@ import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
+import {
+  badRequest,
+  badRequestQuery,
+  conflict,
+  forbidden,
+  internalError,
+  notFound,
+} from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
-import type { PolicyGateExtraction } from "@/middleware/policy-gate";
+import { getPolicyGateContext, type PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
 import {
@@ -41,7 +49,7 @@ import {
   resolveMetadataAuthority,
   resolvePauseAuthority,
 } from "./authority-resolution";
-import { modelMetadataUpdateSolCost } from "./metadata-fee";
+import { metadataUpdateExecutionCostBound, modelMetadataUpdateSolCost } from "./metadata-fee";
 import { assertJudgedCustodyWallet, buildIssuancePolicyCandidate } from "./policy";
 import { toPublicToken } from "./public-response";
 
@@ -427,12 +435,30 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
 
       const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
       await beginApprovedWalletOperationEffect(c);
-      const result = await mosaic.updateMetadata({
-        mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
-        ...metadataUpdate.patch,
-        updateAuthority: signer,
-        feePayer: signer,
-      });
+      let result: Awaited<ReturnType<typeof mosaic.updateMetadata>>;
+      try {
+        result = await mosaic.updateMetadata({
+          mint: assertValidAddress(existing.mintAddress as string, "mintAddress"),
+          ...metadataUpdate.patch,
+          updateAuthority: signer,
+          feePayer: signer,
+          // Bound the rebuilt transaction's real cost by the approved model:
+          // fee or rent that rose after the policy evaluation fails closed
+          // here instead of spending more SOL than policy allowed (APE-831).
+          maxFeePayerSolLamports: metadataUpdateExecutionCostBound({
+            env: c.env,
+            judgedCandidate: getPolicyGateContext(c).candidate,
+          }),
+        });
+      } catch (error) {
+        if (error instanceof MetadataUpdateCostExceededError) {
+          throw forbidden("Metadata update cost exceeded the policy-approved SOL bound", {
+            attemptedLamports: error.attemptedLamports.toString(),
+            approvedLamports: error.maxLamports.toString(),
+          });
+        }
+        throw error;
+      }
       authoritativeEffectCompleted = true;
 
       metadataUpdateSignature = result?.signature ?? null;

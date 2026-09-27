@@ -12,6 +12,7 @@
 
 import { assertValidAddress } from "@sdp/solana/address";
 import { formatDecimalAmount } from "@sdp/solana/amount";
+import type { PolicyCandidate } from "@sdp/types";
 import { type Address, createNoopSigner, type TransactionSigner } from "@solana/kit";
 import { AppError } from "@/lib/errors";
 import { createMosaicService } from "@/services/issuance/mosaic";
@@ -112,4 +113,51 @@ export async function modelMetadataUpdateSolCost(params: {
     networkFeeLamports,
     additionalRentLamports,
   };
+}
+
+/**
+ * The native-SOL cost bound policy approved for a metadata update, read from
+ * the judged candidate's context, so execution can be refused when the
+ * transaction it rebuilds from fresh on-chain state would spend more than the
+ * approved model (APE-831 follow-up: executed cost must never exceed the
+ * approved amount).
+ *
+ * Sponsored execution swaps the Kora fee payer in for both the network fee
+ * and the rent transfer, so the custody wallet's outflow is exactly zero and
+ * there is nothing to bound; the returned bound is undefined. In signer-paid
+ * mode a missing or malformed judged cost throws instead — an update that
+ * cannot state the cost policy approved must never sign.
+ *
+ * @param params - The request env and the policy gate's judged candidate.
+ * @returns The maximum fee-payer lamports execution may spend, or undefined
+ * when the sponsor pays.
+ */
+export function metadataUpdateExecutionCostBound(params: {
+  env: Env;
+  judgedCandidate: PolicyCandidate | null;
+}): bigint | undefined {
+  // Mirrors modelMetadataUpdateSolCost's fee-payer branch: the same Kora
+  // configuration decides both the modeled mode and execution's mode.
+  if (params.env.KORA_RPC_URL) {
+    return undefined;
+  }
+
+  const candidate = params.judgedCandidate;
+  const context = candidate?.context;
+  if (
+    candidate === null ||
+    candidate.operationType !== "issuance_metadata_update_execute" ||
+    context?.metadataUpdateFeePayer !== "custody_signer" ||
+    typeof context?.metadataUpdateNetworkFeeLamports !== "string" ||
+    typeof context?.metadataUpdateRentLamports !== "string"
+  ) {
+    throw new AppError(
+      "CONFLICT",
+      "Metadata update execution has no policy-approved SOL cost to bound it"
+    );
+  }
+
+  return (
+    BigInt(context.metadataUpdateNetworkFeeLamports) + BigInt(context.metadataUpdateRentLamports)
+  );
 }

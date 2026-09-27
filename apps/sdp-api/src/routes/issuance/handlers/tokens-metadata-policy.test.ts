@@ -11,10 +11,11 @@
  */
 
 import { MosaicService } from "@sdp/issuance/mosaic/service";
+import { MetadataUpdateCostExceededError } from "@sdp/issuance/mosaic/types";
 import { evaluateCandidatePolicies } from "@sdp/policy";
 import * as RpcModule from "@sdp/rpc/solana";
 import { formatDecimalAmount } from "@sdp/solana/amount";
-import type { EffectiveWalletPolicy, PolicyRule, Token } from "@sdp/types";
+import type { EffectiveWalletPolicy, PolicyCandidate, PolicyRule, Token } from "@sdp/types";
 import * as Kit from "@solana/kit";
 import { type Address, generateKeyPairSigner, type TransactionSigner } from "@solana/kit";
 import * as MosaicSdk from "@solana/mosaic-sdk";
@@ -27,6 +28,7 @@ import { env as testEnv } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
 import type { updateTokenSchema } from "../schemas";
 import { resolveAuthorityWallet } from "./authority-resolution";
+import { metadataUpdateExecutionCostBound } from "./metadata-fee";
 import { extractTokenUpdatePolicyCandidate } from "./tokens";
 
 vi.mock("@solana-program/token-2022", async (importOriginal) => ({
@@ -535,5 +537,91 @@ describe("extractTokenUpdatePolicyCandidate — metadata SOL accounting (APE-831
       apiKeyPolicy: null,
     });
     expect(blocklistAbstains.decision).toBe("allow");
+  });
+});
+
+/**
+ * Execution rebuilds the transaction from fresh on-chain state after the gate
+ * judged the modeled cost, so the rebuilt transaction is priced and refused
+ * before signing when it would spend more SOL than the approved model — the
+ * custody wallet can never out-spend an amount or velocity rule (Greptile P1).
+ */
+describe("metadata update execution is bounded by the approved SOL cost (APE-831)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  async function boundedMetadataService(params: { mint: Address; signer: TransactionSigner }) {
+    stubOnChainReads({
+      mint: params.mint,
+      currentMintSizeBytes: 100,
+      targetMintSize: 200,
+    });
+    const submitSpy = vi
+      .spyOn(MosaicService.prototype as unknown as PrivateSubmit, "signAndSubmit")
+      .mockResolvedValue({ signature: "bounded-signature", slot: 1n });
+    const service = new MosaicService(
+      signerPaidEnv as unknown as ConstructorParameters<typeof MosaicService>[0],
+      params.signer
+    );
+    return { service, submitSpy };
+  }
+
+  it("refuses to sign a rebuilt transaction whose priced cost exceeds the approved model", async () => {
+    const signer = await generateKeyPairSigner();
+    const mint = (await generateKeyPairSigner()).address;
+    const { service, submitSpy } = await boundedMetadataService({ mint, signer });
+
+    // The approved model is network fee (5000) + growth rent (900); one lamport
+    // of drift on the rebuilt transaction must fail closed before any signing.
+    await expect(
+      service.updateMetadata({
+        mint,
+        name: SIZE_INCREASING_NAME,
+        updateAuthority: signer,
+        feePayer: signer,
+        maxFeePayerSolLamports: NETWORK_FEE_LAMPORTS + 899n,
+      })
+    ).rejects.toBeInstanceOf(MetadataUpdateCostExceededError);
+    expect(submitSpy).not.toHaveBeenCalled();
+  });
+
+  it("executes a rebuilt transaction whose priced cost is within the approved model", async () => {
+    const signer = await generateKeyPairSigner();
+    const mint = (await generateKeyPairSigner()).address;
+    const { service, submitSpy } = await boundedMetadataService({ mint, signer });
+
+    const result = await service.updateMetadata({
+      mint,
+      name: SIZE_INCREASING_NAME,
+      updateAuthority: signer,
+      feePayer: signer,
+      maxFeePayerSolLamports: NETWORK_FEE_LAMPORTS + 900n,
+    });
+    expect(result).toMatchObject({ signature: "bounded-signature" });
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("derives the execution bound from the judged candidate and fails closed without one", () => {
+    const candidate = {
+      operationType: "issuance_metadata_update_execute",
+      context: {
+        metadataUpdateFeePayer: "custody_signer",
+        metadataUpdateNetworkFeeLamports: NETWORK_FEE_LAMPORTS.toString(),
+        metadataUpdateRentLamports: "900",
+      },
+    } as unknown as PolicyCandidate;
+
+    expect(
+      metadataUpdateExecutionCostBound({ env: signerPaidEnv, judgedCandidate: candidate })
+    ).toBe(NETWORK_FEE_LAMPORTS + 900n);
+
+    // Sponsored execution spends nothing from the custody wallet.
+    expect(
+      metadataUpdateExecutionCostBound({ env: testEnv as Env, judgedCandidate: candidate })
+    ).toBeUndefined();
+
+    // A signer-paid execution with no judged cost must never sign unbounded.
+    expect(() =>
+      metadataUpdateExecutionCostBound({ env: signerPaidEnv, judgedCandidate: null })
+    ).toThrow();
   });
 });
