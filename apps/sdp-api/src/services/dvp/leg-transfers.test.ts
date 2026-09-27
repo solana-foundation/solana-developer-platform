@@ -28,6 +28,7 @@ import type {
   DvpLegTransferScan,
 } from "@/db/repositories/dvp-leg-transfer.repository";
 import {
+  createDvpLegTransferReadMemo,
   type DvpEscrowHistoryEntry,
   type DvpEscrowHistoryReader,
   type DvpLegEscrow,
@@ -911,6 +912,208 @@ describe("syncDvpLegTransfers", () => {
     // probe had ever listed. The region behind the position is accounted for,
     // so the resume point is dropped and the scan settles.
     expect(rows.has(sig(1))).toBe(true);
+    expect(saved[2]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_000), slot: "7000" },
+      cursorSlotComplete: false,
+      probe: null,
+      scannedAt: expect.any(String),
+    });
+  });
+
+  // When the region above the cursor outgrows the scan cap, the position is
+  // stood at the deepest signature its own listing reached — and the region
+  // behind that position, down to the cursor the probe probed below, was
+  // never listed by anything. A resume point from below the old cursor would
+  // start the next probe past that region, so it is dropped and the next
+  // probe starts behind the position, where the unlisted region is.
+  it("drops the resume point when the position stands before an unlisted region", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(13_000, 12_001);
+      }
+      if (before === sig(12_001)) {
+        return page(12_000, 11_001);
+      }
+      if (before === sig(11_001)) {
+        return page(11_000, 10_001);
+      }
+      // The region above the cursor alone exceeds the scan cap: the read is
+      // cut off three pages down, and the position is stood at the deepest
+      // signature it listed.
+      if (until === sig(4_000)) {
+        if (before === null) {
+          return page(10_000, 9_001);
+        }
+        if (before === sig(9_001)) {
+          return page(9_000, 8_001);
+        }
+        return page(8_000, 7_001);
+      }
+      // The probe of the region behind the position: three full pages, so it
+      // stops at the cap with the region's oldest end unlisted.
+      if (before === sig(4_000)) {
+        return page(3_999, 3_000);
+      }
+      if (before === sig(3_000)) {
+        return page(2_999, 2_000);
+      }
+      return page(1_999, 1_000);
+    });
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(4_000), slot: "4000" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The position stands at the deepest signature the region's own listing
+    // reached, and no resume point travels with it: the next probe must start
+    // behind the position, where the region nothing listed sits.
+    expect(saved).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(7_001), slot: "7001" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: null,
+      },
+    ]);
+    // The probe read its three pages below the old cursor and no deeper.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(2_000), until: null });
+    expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, { before: sig(1_000), until: null });
+  });
+
+  // A region of the history full of transactions that moved nothing — an
+  // escrow anyone may transact with collects them — costs the sweep a read
+  // out of its budget for each one every time it is listed. Nothing here
+  // records them, so without a memory of the answer the probe of the region
+  // stops at the same page every sweep, never reaching the older movements
+  // behind it and spending the budget every other leg shares. With the memo,
+  // the second sweep walks the pages it already read for the cost of the
+  // listing, the probe runs to the end of its pages, and the resume point
+  // carries the next sweep below them.
+  it("walks a region of no-transfer transactions through on the memo's answers", async () => {
+    const memo = createDvpLegTransferReadMemo();
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    // Fifteen transactions that moved nothing, at the oldest end of the
+    // probe's first page: one more than the sweep's budget, so the walk
+    // through them stops part way.
+    const nonePage = [
+      ...page(6_999, 6_015),
+      ...history([
+        6_014, 6_013, 6_012, 6_011, 6_010, 6_009, 6_008, 6_007, 6_006, 6_005, 6_004, 6_003, 6_002,
+        6_001, 6_000,
+      ]),
+    ];
+    for (const n of [
+      6_014, 6_013, 6_012, 6_011, 6_010, 6_009, 6_008, 6_007, 6_006, 6_005, 6_004, 6_003, 6_002,
+      6_001, 6_000,
+    ]) {
+      served.set(sig(n), transaction({ pre: "400", post: "400" }));
+    }
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(13_000, 12_001);
+      }
+      if (before === sig(12_001)) {
+        return page(12_000, 11_001);
+      }
+      if (before === sig(11_001)) {
+        return page(11_000, 10_001);
+      }
+      // The region above the cursor lists nothing new.
+      if (until === sig(7_000)) {
+        return [];
+      }
+      // The probe of the region behind the position: three full pages, the
+      // no-transfer transactions at the oldest end of the first one.
+      if (before === sig(7_000)) {
+        return nonePage;
+      }
+      if (before === sig(6_000)) {
+        return page(5_999, 5_000);
+      }
+      if (before === sig(5_000)) {
+        return page(4_999, 4_000);
+      }
+      // Past the third page, the movement the probe is read for.
+      return history([3_999]);
+    });
+    served.set(sig(3_999), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7_000), slot: "7000" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 },
+      NOW,
+      memo
+    );
+
+    // The budget ran out among the no-transfer transactions, so the walk
+    // stopped there: ten reads spent, the leg stays due, and no resume point
+    // the next probe could skip the unresolved finds over.
+    expect(readTransaction.mock.calls).toHaveLength(10);
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_000), slot: "7000" },
+      cursorSlotComplete: false,
+      probe: null,
+      scannedAt: null,
+    });
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 }, NOW, memo);
+
+    // The second sweep re-listed the same pages and resolved the first ten
+    // transactions from the memo without reading them again, read the five
+    // that were left, and walked the probe through to the end of its pages —
+    // so the resume point carries, and the next sweep probes past them.
+    expect(readTransaction.mock.calls).toHaveLength(15);
+    expect(saved[1]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_000), slot: "7000" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(4_000), slot: "4000" },
+      scannedAt: null,
+    });
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[1], { remaining: 10 }, NOW, memo);
+
+    // The third sweep's probe resumed below the saved point and recorded the
+    // movement no sweep had reached before.
+    expect(rows.has(sig(3_999))).toBe(true);
+    expect(readTransaction.mock.calls).toHaveLength(16);
     expect(saved[2]).toEqual({
       side: "a",
       cursor: { signature: sig(7_000), slot: "7000" },

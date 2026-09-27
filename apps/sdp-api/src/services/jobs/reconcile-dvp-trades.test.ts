@@ -24,6 +24,7 @@ const syncDvpLegTransfers = vi.hoisted(() => vi.fn());
 vi.mock("@/services/dvp/leg-transfers", () => ({
   syncDvpLegTransfers,
   createDvpEscrowHistoryReader: () => ({}),
+  createDvpLegTransferReadMemo: () => ({ recall: () => null, remember: () => undefined }),
 }));
 
 const { reconcileDvpTrades } = await import("./reconcile-dvp-trades");

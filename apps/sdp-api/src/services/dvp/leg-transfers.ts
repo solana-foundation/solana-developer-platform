@@ -74,6 +74,18 @@ const HISTORY_PAGE_CAP = 3;
 export const HISTORY_AUDIT_MS = 60 * 60_000;
 /** `getSignatureStatuses` answers at most this many signatures per call. */
 const SIGNATURE_STATUS_LIMIT = 256;
+/**
+ * Signatures whose read outcome the process remembers. An escrow anyone may
+ * send transactions to can collect thousands that moved none of its tokens or
+ * cannot be read with confidence, and a region of the history full of them is
+ * re-listed by every probe until it is walked through. Reading each one again
+ * every sweep would spend the budget shared by every leg on answers already
+ * known, and stop the walk at the same page each time; remembering the answer
+ * lets the walk pass a page it has already read for the cost of the listing.
+ * The cap keeps a spammy escrow's whole history from being held in memory; an
+ * evicted signature is read again, which costs a read and nothing else.
+ */
+const READ_MEMO_CAP = 20_000;
 
 /** One signature in an escrow's history, newest first as the cluster lists them. */
 export interface DvpEscrowHistoryEntry {
@@ -343,6 +355,51 @@ export interface DvpLegTransferBudget {
   remaining: number;
 }
 
+/**
+ * What reading a transaction came to, for the signatures whose answer never
+ * changes: it moved none of the escrow's tokens, or its balances cannot be
+ * read with confidence. A transaction's own data is fixed once the cluster
+ * serves it, so the outcome is the same every time it is listed, and a
+ * re-listed page is resolved from the memo without spending the sweep's
+ * budget on the read again.
+ */
+export type DvpLegTransferReadOutcome = { kind: "none" } | { kind: "unreadable" };
+
+/** Signatures whose read outcome this process already knows. */
+export interface DvpLegTransferReadMemo {
+  /** The outcome the signature was read to, or null for one never read. */
+  recall(signature: Signature): DvpLegTransferReadOutcome | null;
+  remember(signature: Signature, outcome: DvpLegTransferReadOutcome): void;
+}
+
+/**
+ * A bounded memo of read outcomes, shared by every leg in the process. The
+ * oldest entry falls out of the memo past the cap, and a recalled one is
+ * moved to the newest end so a region the sweep walks repeatedly stays in it.
+ */
+export function createDvpLegTransferReadMemo(cap: number = READ_MEMO_CAP): DvpLegTransferReadMemo {
+  const outcomes = new Map<Signature, DvpLegTransferReadOutcome>();
+  return {
+    recall(signature) {
+      const outcome = outcomes.get(signature);
+      if (outcome === undefined) {
+        return null;
+      }
+      outcomes.delete(signature);
+      outcomes.set(signature, outcome);
+      return outcome;
+    },
+    remember(signature, outcome) {
+      outcomes.delete(signature);
+      outcomes.set(signature, outcome);
+      const oldest = outcomes.keys().next().value;
+      if (outcomes.size > cap && oldest !== undefined) {
+        outcomes.delete(oldest);
+      }
+    },
+  };
+}
+
 /** The earliest block time, in Unix seconds, a transaction for this trade can carry. */
 function historyFloor(leg: DvpLegEscrow): bigint {
   const createdAtMs = Date.parse(leg.createdAt);
@@ -567,7 +624,8 @@ async function resolveEntry(
   leg: DvpLegEscrow,
   entry: DvpEscrowHistoryEntry,
   known: ReadonlyMap<Signature, DvpLegTransfer>,
-  budget: DvpLegTransferBudget
+  budget: DvpLegTransferBudget,
+  memo: DvpLegTransferReadMemo
 ): Promise<{ step: "resolved"; recorded: boolean } | { step: "stop"; reason: EntryStop }> {
   // A transaction that failed moved no token; no need to read it.
   if (entry.failed) {
@@ -579,6 +637,14 @@ async function resolveEntry(
     if (entry.finalized && !existing.finalized) {
       await transfers.markFinalized(leg.tradeId, leg.side, entry.signature);
     }
+    return { step: "resolved", recorded: false };
+  }
+  // A transaction read before this process was asked about it again: its
+  // outcome never changes, so it is resolved for the cost of the listing and
+  // the sweep's budget is spent only on reads that could still record
+  // something.
+  const remembered = memo.recall(entry.signature);
+  if (remembered !== null) {
     return { step: "resolved", recorded: false };
   }
   if (budget.remaining <= 0) {
@@ -613,9 +679,11 @@ async function resolveEntry(
       },
       "dvp transfers: skipped a transaction whose escrow balances could not be read"
     );
+    memo.remember(entry.signature, { kind: "unreadable" });
     return { step: "resolved", recorded: false };
   }
   if (reading.kind === "none") {
+    memo.remember(entry.signature, { kind: "none" });
     return { step: "resolved", recorded: false };
   }
   await transfers.record(reading.transfer);
@@ -816,21 +884,39 @@ function settledRead(
 }
 
 /**
+ * Whether the position was stood at the deepest signature a chunked read
+ * listed: the region immediately behind it was never listed by anything, and
+ * the next probe must start there rather than below a point an earlier probe
+ * saved further down.
+ */
+function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean): boolean {
+  return chunked && deepestReached;
+}
+
+/**
  * Where the next sweep's probe of the region behind the position resumes. A
  * probe the cap stopped saves the signature below which it stopped, so the
  * region's oldest end is reached a few pages further down with every sweep;
  * a probe that ran to its end covered the whole region, so the next one
  * starts over from the position. An interrupted walk through the probe's
  * finds saves nothing: the finds above the deepest page were never resolved,
- * and a resume point below them would leave them skipped.
+ * and a resume point below them would leave them skipped. Nor does a sweep
+ * whose read the cap cut off save one when it stood the position at the
+ * deepest signature the read listed: the region behind that position — down
+ * to the cursor the probe probed below — was never listed, and a point below
+ * the cursor would have the next probe start past it, so the next probe
+ * starts behind the position instead, where the region is.
  */
 function resumePoint(
   fallbackRan: boolean,
   probeComplete: boolean,
   probeEnded: boolean,
-  probeDeepest: { signature: Signature; slot: string } | null
+  probeDeepest: { signature: Signature; slot: string } | null,
+  unlistedBehindPosition: boolean
 ): { signature: Signature; slot: string } | null {
-  return fallbackRan && !probeComplete && probeEnded ? probeDeepest : null;
+  return fallbackRan && !probeComplete && probeEnded && !unlistedBehindPosition
+    ? probeDeepest
+    : null;
 }
 
 /**
@@ -851,6 +937,11 @@ function resumePoint(
  * @param now - The instant this sweep runs at, which stamps the scan and
  *   paces the audit; defaults to the clock. The sweep passes its own so every
  *   leg in it agrees on the time.
+ * @param memo - Signatures whose read outcome this process already knows,
+ *   so a region full of transactions that move nothing costs a listing and
+ *   not a read; defaults to a memo no sweep shares. The reconciler passes
+ *   one process-wide, which is what lets the probe walk the same pages
+ *   again without spending the sweep's budget on answers it already has.
  * @returns How many transfers were recorded.
  */
 export async function syncDvpLegTransfers(
@@ -859,7 +950,8 @@ export async function syncDvpLegTransfers(
   leg: DvpLegEscrow,
   scan: DvpLegTransferScan | null,
   budget: DvpLegTransferBudget,
-  now: number = Date.now()
+  now: number = Date.now(),
+  memo: DvpLegTransferReadMemo = createDvpLegTransferReadMemo()
 ): Promise<number> {
   const stored = scan?.cursor ?? null;
   const probe = scan?.probe ?? null;
@@ -921,7 +1013,7 @@ export async function syncDvpLegTransfers(
   }));
   for (const { entry, mayAdvance } of walk) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
-    const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget);
+    const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget, memo);
     if (outcome.step === "stop") {
       complete = false;
       // A stop anywhere in the probe's region leaves what it listed behind it
@@ -993,7 +1085,13 @@ export async function syncDvpLegTransfers(
       cursor === null
         ? false
         : provenPosition(cursorSlotComplete, probeEnded, chunked, probeComplete),
-    probe: resumePoint(bounded !== null, probeComplete, probeEnded, probeDeepest),
+    probe: resumePoint(
+      bounded !== null,
+      probeComplete,
+      probeEnded,
+      probeDeepest,
+      standsBeforeAnUnlistedRegion(chunked, deepestReached)
+    ),
     scannedAt: settled ? new Date(now).toISOString() : null,
   });
   return recorded;

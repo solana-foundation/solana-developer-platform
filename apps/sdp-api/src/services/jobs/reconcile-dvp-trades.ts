@@ -29,8 +29,10 @@ import { resolveDvpClose } from "@/services/dvp/closing-transaction";
 import { classifyDvpFundingReceipt } from "@/services/dvp/funding-receipt";
 import {
   createDvpEscrowHistoryReader,
+  createDvpLegTransferReadMemo,
   type DvpEscrowHistoryReader,
   type DvpLegTransferBudget,
+  type DvpLegTransferReadMemo,
   syncDvpLegTransfers,
 } from "@/services/dvp/leg-transfers";
 import { closeIsKnown, deriveDvpTradeState } from "@/services/dvp/observe";
@@ -47,6 +49,16 @@ const BATCH_SIZE = 64;
  * leg left unread carries on from its read position next sweep.
  */
 const TRANSFER_TRANSACTION_BUDGET = 128;
+/**
+ * Signatures whose read outcome this process remembers, for as long as it
+ * lives. Sweeps re-list the pages behind a leg's read position until the
+ * probe has walked the region through, and an escrow anyone may transact
+ * with can hold pages of transactions that move none of its tokens; without
+ * the memo every sweep would pay a read out of the shared budget for each
+ * one again, and a region with more of them than a sweep's budget would
+ * stop the walk at the same page every sweep for good.
+ */
+const transferReadMemo = createDvpLegTransferReadMemo();
 /**
  * A leg whose trade looks unchanged is still re-read this often: a deposit and
  * a reclaim between two sweeps leave the balance where it was.
@@ -158,6 +170,7 @@ export async function reconcileDvpTrades(env: Env): Promise<void> {
     transfers: createPostgresDvpLegTransferRepository(getDb(env)),
     reader: createDvpEscrowHistoryReader(rpc),
     budget: { remaining: TRANSFER_TRANSACTION_BUDGET },
+    readMemo: transferReadMemo,
   };
   for (const trade of trades) {
     try {
@@ -180,6 +193,8 @@ interface TransferLedger {
   reader: DvpEscrowHistoryReader;
   /** Shared by every leg in the sweep. */
   budget: DvpLegTransferBudget;
+  /** Shared by every sweep this process runs. */
+  readMemo: DvpLegTransferReadMemo;
 }
 
 /**
@@ -216,7 +231,8 @@ async function syncTradeTransfers(
         { tradeId: trade.id, createdAt: trade.createdAt, ...leg },
         scan,
         ledger.budget,
-        now
+        now,
+        ledger.readMemo
       );
     }
   } catch (error) {
