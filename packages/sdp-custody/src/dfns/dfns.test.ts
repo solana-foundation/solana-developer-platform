@@ -17,7 +17,7 @@ const AUTH_TOKEN = "dfns-auth-token-value";
 const CREDENTIAL_ID = "credential_poc";
 const API_BASE_URL = "https://api.dfns.test";
 
-type FetchHandler = (url: URL, init?: RequestInit) => Response | null;
+type FetchHandler = (url: URL, init?: RequestInit) => Response | null | Promise<Response | null>;
 
 function jsonResponse(body: unknown, status: number, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
@@ -42,7 +42,7 @@ function stubFetch(handler: FetchHandler): void {
 }
 
 function serveHandshake(
-  handler: (url: URL, init?: RequestInit) => Response | null,
+  handler: FetchHandler,
   options?: { userActionTokens?: () => string }
 ): void {
   stubFetch((url, init) => {
@@ -516,5 +516,82 @@ describe("dfns signer upstream error redaction", () => {
         secret.startsWith("user_action_later")
       )
     );
+  });
+
+  it("keeps a pending signature's token held past any time cap until its result is handled", async () => {
+    // Greptile verdict on this PR: a time cap on holds strips a still-pending
+    // signature's token of protection — a sweep deletes it, and the eventual
+    // failed result echoing the token back survives vetting. Holds are never
+    // capped in time: the token stays held until the signer releases it,
+    // however long the result takes.
+    let clock = 1_000_000_000;
+    let signatureToken = "";
+    let polls = 0;
+    let mint = 0;
+    let created!: () => void;
+    const createdPromise = new Promise<void>((resolve) => {
+      created = resolve;
+    });
+    let releasePoll!: () => void;
+    const releasePollPromise = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    serveHandshake(
+      async (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+        }
+        if (method === "GET" && url.pathname === "/keys/key_poc/signatures/sig_poc") {
+          polls += 1;
+          if (polls < 2) {
+            // The create has minted and pinned the token by its first poll.
+            created();
+            return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+          }
+          // Hold the failed result until the sweeps below have run.
+          await releasePollPromise;
+          return jsonResponse({ id: "sig_poc", status: "Failed", reason: signatureToken }, 200);
+        }
+        if (method === "POST" && url.pathname === "/wallets") {
+          return jsonResponse({ id: `wa_${clock}`, network: "SolanaDevnet" }, 200);
+        }
+        return null;
+      },
+      {
+        // The signature create mints first; later mints use other values so a
+        // sweep cannot be fooled into holding the token by a re-recorded
+        // entry minted after the pending one.
+        userActionTokens: () => {
+          mint += 1;
+          if (mint === 1) {
+            signatureToken = "user_action_poc";
+            return signatureToken;
+          }
+          return `user_action_later_${mint}`;
+        },
+      }
+    );
+
+    const { client, signer } = await createTestClientAndSigner({ now: () => clock });
+    let caught: unknown;
+    const signing = signer
+      .signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }])
+      .catch((error) => {
+        caught = error;
+      });
+
+    await createdPromise;
+    // A day later, a new mint triggers a sweep — a 24-hour hold cap would
+    // have deleted the pending signature's pinned token by now.
+    clock += 25 * 3_600_000;
+    await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes("user_action_poc"));
+
+    releasePoll();
+    await signing;
+    assert.ok(caught instanceof SignerError);
+    assert.match(caught.message, /signature request failed \(Failed\)(?!:)/);
+    assert.ok(!caught.message.includes("user_action_poc"));
   });
 });

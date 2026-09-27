@@ -182,9 +182,11 @@ interface DfnsClientContext {
    * Every user action token this context has minted in the current retention
    * window, mapped to its mint time and hold count. Unpinned tokens age out
    * of the window; a token held by a signature request stays in the map
-   * until that request's result is handled (or the hold cap expires it),
-   * however long the request takes and however many newer requests are
-   * minted meanwhile.
+   * until that request's result is handled, however long the request takes
+   * and however many newer requests are minted meanwhile. Holds are never
+   * capped in time: a cap would silently strip protection from a signature
+   * whose result is still pending, letting a provider echo of the token
+   * dodge vetting in the eventual failure.
    */
   readonly heldUserActionTokens: Map<string, { mintedAt: number; pinCount: number }>;
   /** Last time expired unpinned tokens were swept, to keep mints O(1) amortized. */
@@ -344,11 +346,6 @@ const USER_ACTION_TOKEN_RETENTION_MS = 3_600_000;
 // Sweeps are throttled so a mint's cost is O(1) amortized instead of a scan
 // over everything held.
 const USER_ACTION_TOKEN_SWEEP_INTERVAL_MS = 60_000;
-// A pin is meant to last exactly as long as the signature result takes to be
-// handled. This cap bounds the hold for callers that never release (the
-// signer always does): far beyond any realistic poll, it keeps a long-lived
-// client from accumulating pins without end.
-const MAX_USER_ACTION_TOKEN_HOLD_MS = 24 * 3_600_000;
 
 function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
   const now = ctx.now();
@@ -356,8 +353,7 @@ function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string):
     ctx.lastUserActionTokenSweepAt = now;
     for (const [token, entry] of ctx.heldUserActionTokens) {
       const expired = now - entry.mintedAt >= USER_ACTION_TOKEN_RETENTION_MS;
-      const holdCapped = now - entry.mintedAt >= MAX_USER_ACTION_TOKEN_HOLD_MS;
-      if (expired && (entry.pinCount === 0 || holdCapped)) {
+      if (expired && entry.pinCount === 0) {
         ctx.heldUserActionTokens.delete(token);
       }
     }
