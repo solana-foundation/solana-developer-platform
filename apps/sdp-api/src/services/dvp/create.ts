@@ -363,30 +363,39 @@ function frozenEscrowRefusal(tradeId: string, escrows: readonly Address[]): AppE
 }
 
 /**
- * The escrows of a replayed trade its latest observation shows frozen, empty
- * when the trade is closed, failed, not seen frozen, or was not REFUSED.
+ * The escrows of a replayed trade that still have no working funding path,
+ * empty when the trade is closed, was never refused, or was observed thawed.
  *
  * Only a born-frozen trade — one whose create response the refusal was thrown
  * on, recorded durably by `markBornFrozen` — replays that refusal. The frozen
  * flags are the escrow's current state, refreshed by every observation, so a
  * trade created healthy and frozen by the mint authority later must NOT be
  * read as born-frozen: its first response was a success, and its keyed retry
- * answers with the same trade the first response gave. A null flag — never
- * observed, or an unreadable chain — is not evidence of frozen and passes,
- * the same best-effort reading the create path itself uses.
+ * answers with the same trade the first response gave.
+ *
+ * For a refused trade, a flag that is not affirmatively false keeps the
+ * funding path closed. A null — the refusal-time observation failing, or the
+ * retry's own refresh failing on the still-unobserved row — must not pass
+ * for a trade we KNOW was born frozen: replaying the success it was never
+ * given would undo the admission rule. Only an observation recording
+ * `frozen = false` reopens it, which is the thaw the refusal message points
+ * to; the reconciler records it within a minute and the retry goes through.
  *
  * @param row - The trade row as last observed.
  * @returns The frozen escrows' addresses.
  */
 function observedFrozenEscrows(row: DvpTradeRow): Address[] {
-  if (!row.bornFrozen || (row.status !== "creating" && row.status !== "created")) {
+  if (row.status !== "creating" && row.status !== "created") {
+    return [];
+  }
+  if (!row.bornFrozen) {
     return [];
   }
   const frozen: Address[] = [];
-  if (row.escrowAFrozen === true) {
+  if (row.escrowAFrozen !== false) {
     frozen.push(row.escrowA);
   }
-  if (row.escrowBFrozen === true) {
+  if (row.escrowBFrozen !== false) {
     frozen.push(row.escrowB);
   }
   return frozen;

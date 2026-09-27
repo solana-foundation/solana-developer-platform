@@ -717,6 +717,27 @@ describe("createDvpTrade", () => {
     expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "creating"]);
   });
 
+  // The refusal must survive its own observation failing. When the read right
+  // after the refusal cannot record the frozen flags, the row carries the
+  // born-frozen marker with null flags — and a retry whose refresh also fails
+  // would read those nulls as "not frozen" and answer a success for a trade
+  // still frozen on chain. A refused trade stays refused until an observation
+  // affirmatively records the thaw.
+  it("replays the refusal when the refusal-time observation never recorded the freeze", async () => {
+    acceptSend();
+    readEscrowState.mockResolvedValueOnce({ amount: 0n, frozen: true });
+    observeDvpTradeNow.mockResolvedValueOnce(null);
+    const input = { ...tradeInput(), idempotencyKey: "key-frozen-unobserved" };
+
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
+    await expect(rowsInDb()).resolves.toMatchObject([{ create_signature: expect.anything() }]);
+
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
   // Best effort by design: a failed verdict read must not break the create.
   // The trade stays exactly where the pre-flight world left it, and the
   // reconciler logs a frozen escrow on every sweep if one is there.
