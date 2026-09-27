@@ -826,7 +826,10 @@ async function retryUnreadableReads(
       { error, tradeId: leg.tradeId, side: leg.side, signatures: owed.map((r) => r.signature) },
       "dvp transfers: could not ask how far the cluster has finalized the owed reads"
     );
-    return owed;
+    // The status read failing does not stop the asks: each one is replayed
+    // with the finality its listing carried, and a transaction finalized
+    // since is settled by a later sweep's ask, whose status read succeeds.
+    finalized = [];
   }
   for (const [index, retry] of owed.entries()) {
     if (budget.remaining <= 0 || spent >= share) {
