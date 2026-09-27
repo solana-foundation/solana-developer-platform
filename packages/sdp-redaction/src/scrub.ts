@@ -52,14 +52,38 @@ const PII_ASSIGNMENT_PATTERN = new RegExp(
 // bare — a provider folds them into error prose where no key, assignment, or
 // serialization can vouch for them, so recognition has to be by shape. A run
 // of 8+ digits is long enough to exclude the numbers prose legitimately
-// carries (statuses, ports, postal codes, compact dates) and cannot be a
-// Solana public key: base58 excludes `0`, and a 32-byte key whose encoding
-// is a bare digit run would encode a near-zero value. Structured numeric
-// fields (slots, amounts, timestamps) pass through untouched — this only
-// rewrites digit runs *inside strings* — and resource ids stay readable under
-// their `*Id` keys. The bounded quantifier is linear: one match consumes the
-// whole run, so there is nothing to rescan (the EMAIL_PATTERN DoS note above).
-const PII_DIGIT_RUN_PATTERN = /\d{8,}/g;
+// carries (statuses, ports, postal codes, compact dates).
+//
+// Two guards keep the run from reaching past the prose it is meant for:
+//
+// - The lookarounds demand prose delimiters (whitespace, sentence
+//   punctuation, a string boundary) on both sides. A digit run inside a
+//   longer token is part of an identifier, not a bare value: base58 mints and
+//   wallets, base64 signatures (`+/=` padding included), and UUID- or
+//   prefix-styled resource ids (`pcred_…-ff3129488570`, `aint_11549796-…`)
+//   all carry long digit runs, and that digit evidence is exactly what audit
+//   metadata and replay recovery have to keep readable.
+// - A value that is nothing but digits is a structured numeric field, not
+//   prose. Issuance outcomes persist the Solana slot as a string and replay
+//   recovery re-parses it; labelled storage (`accountNumber: "…"`) is caught
+//   by key before this runs, so a bare number alone in a string is never the
+//   only evidence of an instrument.
+//
+// The bounded quantifier is linear: one match consumes the whole run, so
+// there is nothing to rescan (the EMAIL_PATTERN DoS note above).
+const PII_DIGIT_RUN_PATTERN = /(?<![A-Za-z0-9_+/=-])\d{8,}(?![A-Za-z0-9_+/=-])/g;
+
+/**
+ * Applies `PII_DIGIT_RUN_PATTERN` to prose. A value that is a single digit run
+ * end to end is a numeric field serialized as a string — a slot, an amount, an
+ * epoch — and passes through untouched.
+ */
+function scrubDigitRuns(value: string): string {
+  if (/^\d+$/.test(value.trim())) {
+    return value;
+  }
+  return value.replace(PII_DIGIT_RUN_PATTERN, REDACTED);
+}
 
 /**
  * `jane.doe@example.com` → `j***@example.com`.
@@ -84,17 +108,18 @@ function scrubString(value: string, emails: EmailMode): string {
 
   // Quoted form first, so the assignment pattern cannot cut a JSON value in
   // half at its opening quote.
-  return withoutAddresses
-    .replace(
-      PII_JSON_FIELD_PATTERN,
-      (_match, quote: string, key: string, valueQuote: string) =>
-        `${quote}${key}${quote}:${valueQuote}${REDACTED}${valueQuote}`
-    )
-    .replace(
-      PII_ASSIGNMENT_PATTERN,
-      (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-    )
-    .replace(PII_DIGIT_RUN_PATTERN, REDACTED);
+  return scrubDigitRuns(
+    withoutAddresses
+      .replace(
+        PII_JSON_FIELD_PATTERN,
+        (_match, quote: string, key: string, valueQuote: string) =>
+          `${quote}${key}${quote}:${valueQuote}${REDACTED}${valueQuote}`
+      )
+      .replace(
+        PII_ASSIGNMENT_PATTERN,
+        (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
+      )
+  );
 }
 
 function scrubSensitive(value: unknown, emails: EmailMode): unknown {

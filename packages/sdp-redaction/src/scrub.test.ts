@@ -125,6 +125,49 @@ describe("scrubTelemetry", () => {
     assert.equal(scrubTelemetryString(message), message);
   });
 
+  it("keeps digit runs inside identifier tokens readable", () => {
+    // Identifiers carry digit evidence that recovery depends on: a base58
+    // mint (LST mints are almost all digits), a credential id whose UUID ends
+    // in a ten-digit run, an intent id whose first UUID group is all digits,
+    // and a signature whose digits abut base64 `+`/`/`. None of these is
+    // prose, so the shape rule must not touch them.
+    const values = [
+      "So11111111111111111111111111111111111111112",
+      "pcred_df284854-a2a2-4a93-a1b6-ff3129488570",
+      "aint_11549796-ad0d-44dc-942e-6fffc8e76ced",
+      "ab+12345678/ef==",
+      "tx_7f3c9d2e-98765432-fedcba98",
+    ];
+
+    for (const value of values) {
+      assert.equal(scrubTelemetryString(`executed against ${value}`), `executed against ${value}`);
+      assert.equal(
+        scrubTelemetry({ detail: value }).detail,
+        value,
+        `over-redacted identifier ${value}`
+      );
+    }
+  });
+
+  it("keeps a numeric string value readable as structured evidence", () => {
+    // Issuance outcomes persist the Solana slot as a string and replay
+    // recovery re-parses it; the same shape carries amounts and epochs. A
+    // whole-string number is a field value, not prose, and survives.
+    assert.equal(scrubTelemetryString("343425201"), "343425201");
+    assert.deepEqual(
+      scrubAuditMetadata({ slot: "343425201", ledgerSequence: "343425202", amount: "10000000" }),
+      { slot: "343425201", ledgerSequence: "343425202", amount: "10000000" }
+    );
+  });
+
+  it("redacts an account number delimited by sentence punctuation", () => {
+    // Prose delimiters other than whitespace still bound a bare value.
+    assert.equal(
+      scrubTelemetryString("Transfer rejected (account 000123456789); contact support"),
+      "Transfer rejected (account [REDACTED]); contact support"
+    );
+  });
+
   it("survives a circular payload rather than throwing inside a send path", () => {
     const payload: Record<string, unknown> = { email: "jane.doe@example.com" };
     payload.self = payload;
