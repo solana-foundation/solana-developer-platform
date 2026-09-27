@@ -71,22 +71,22 @@ describe("recurringPaymentCurrencyOptions", () => {
   const eligible = [option(DEVNET_USDC)];
   const savedToken = { value: ISSUED_MINT, label: "ITT", badge: "Current" };
 
-  it("keeps a saved token that is no longer offered visible while it is selected", () => {
+  it("keeps a no-longer-offered saved token restorable on the saved wallet", () => {
     expect(
-      recurringPaymentCurrencyOptions({ eligible, selectedToken: ISSUED_MINT, savedToken })
+      recurringPaymentCurrencyOptions({ eligible, savedToken, fundsFromSavedWallet: true })
     ).toEqual([option(DEVNET_USDC), savedToken]);
   });
 
-  it("drops the saved token once another currency is selected", () => {
+  it("offers only eligible assets once another wallet funds the payment", () => {
     expect(
-      recurringPaymentCurrencyOptions({ eligible, selectedToken: DEVNET_USDC, savedToken })
+      recurringPaymentCurrencyOptions({ eligible, savedToken, fundsFromSavedWallet: false })
     ).toEqual(eligible);
   });
 
   it("does not duplicate a saved token that is still offered", () => {
     const offered = [option(DEVNET_USDC), option(ISSUED_MINT)];
     expect(
-      recurringPaymentCurrencyOptions({ eligible: offered, selectedToken: ISSUED_MINT, savedToken })
+      recurringPaymentCurrencyOptions({ eligible: offered, savedToken, fundsFromSavedWallet: true })
     ).toEqual(offered);
   });
 });

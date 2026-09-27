@@ -464,12 +464,13 @@ describe("Recurring Payment exact source selection", () => {
     });
   });
 
-  it("shows a saved currency that is no longer eligible instead of an empty picker", async () => {
+  it("keeps a saved currency that is no longer eligible visible and restorable", async () => {
     const pausedIssuedMint = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
     const holder = {
       ...source,
       balances: [
         { token: "HALT", mint: pausedIssuedMint, amount: "5", uiAmount: "5", decimals: 6 },
+        { token: "USDC", mint: MINT, amount: "5", uiAmount: "5", decimals: 6 },
       ],
     };
     const saved = { ...recurring, token: pausedIssuedMint };
@@ -507,5 +508,14 @@ describe("Recurring Payment exact source selection", () => {
 
     expect(within(editor).getByText("HALT")).toBeTruthy();
     expect(within(editor).queryByText("Select a currency")).toBeNull();
+
+    // Picking another currency must not strand the saved one: it stays
+    // restorable while the payment's own wallet funds it.
+    await user.click(within(editor).getByRole("button", { name: "Currency" }));
+    await user.click(screen.getByRole("button", { name: /USDC/ }));
+    await waitFor(() => expect(within(editor).queryByText("HALT")).toBeNull());
+    await user.click(within(editor).getByRole("button", { name: "Currency" }));
+    await user.click(screen.getByRole("button", { name: /HALT/ }));
+    await waitFor(() => expect(within(editor).getByText("HALT")).toBeTruthy());
   });
 });

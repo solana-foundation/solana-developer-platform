@@ -37,20 +37,18 @@ export function fallbackRecurringPaymentToken(token: string, eligible: ComboboxO
 }
 
 /**
- * The eligible assets plus the payment's saved token while it is still selected,
- * even if it is no longer offered, so an unrelated edit never hides the currency
- * the payment keeps.
+ * The eligible assets plus, while the editor still funds from the payment's own
+ * wallet, its saved token even if it is no longer offered, so an unrelated edit
+ * never hides the currency the payment keeps and a changed mind can restore it.
+ * A different funding wallet gets eligible assets only.
  */
 export function recurringPaymentCurrencyOptions(input: {
   eligible: ComboboxOption[];
-  selectedToken: string;
   savedToken: ComboboxOption;
+  fundsFromSavedWallet: boolean;
 }): ComboboxOption[] {
-  const { eligible, selectedToken, savedToken } = input;
-  if (
-    selectedToken !== savedToken.value ||
-    eligible.some((asset) => asset.value === selectedToken)
-  ) {
+  const { eligible, savedToken, fundsFromSavedWallet } = input;
+  if (!fundsFromSavedWallet || eligible.some((asset) => asset.value === savedToken.value)) {
     return eligible;
   }
   return [...eligible, savedToken];

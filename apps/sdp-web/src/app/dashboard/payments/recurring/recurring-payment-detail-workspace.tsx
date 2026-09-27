@@ -468,12 +468,12 @@ export function RecurringPaymentDetailWorkspace({
     );
   const assetOptions = recurringPaymentCurrencyOptions({
     eligible: editorAssetOptions(selectedWallet ?? null),
-    selectedToken,
     savedToken: {
       value: recurringPayment.token,
       label: resolvedToken.tokenName,
       badge: t("Shared.SharedComponents.current"),
     },
+    fundsFromSavedWallet: selectedCustodyWalletId === recurringPayment.sourceCustodyWalletId,
   });
   const foundReceivingAccount = counterpartyAccounts.find(
     (account) => account.id === recurringPayment.counterpartyAccountId
