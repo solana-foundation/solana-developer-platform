@@ -435,10 +435,11 @@ function endsTheWalk(reason: EntryStop, mayAdvance: boolean): boolean {
  * read while its escrow kept moving — cannot be read on from in one sweep,
  * and giving up would stall the leg for good: an unproven cursor un-bounds
  * every later sweep, so each would ask for the same region and drop it whole.
- * The newest page of the region is read instead, and `chunked` says so: the
- * advance it offers the walk jumped the region the read never listed, so the
- * sweep must save the position unproven — the skipped region sits behind the
- * new cursor, where only the next sweep's probe sees it.
+ * Everything the region's read listed is kept, and `chunked` says the
+ * listing did not run to its end: the sweep resolves what it saw and saves
+ * the position at the deepest listed signature, unproven, so the region the
+ * read never listed sits immediately behind the position — within the next
+ * sweep's probe, not beyond every probe the cap allows.
  *
  * @param reader - The chain.
  * @param leg - The escrow to read.
@@ -455,10 +456,12 @@ async function readOnPastCap(
   chunked: boolean;
 } | null> {
   const newer = await readHistorySince(reader, leg, cursor.signature);
-  // A read the cap cut off filled every page, so its newest page is a full
-  // one; a complete read is kept whole.
+  // A read the cap cut off is kept whole: every signature it listed is
+  // resolved, and the position it offers the walk stands at the deepest of
+  // them, so nothing the read saw is thrown away and nothing it skipped sits
+  // further behind the position than the next sweep's probe reaches.
   const chunked = !newer.complete;
-  const boundedNewestFirst = chunked ? newer.entries.slice(0, HISTORY_PAGE_LIMIT) : newer.entries;
+  const boundedNewestFirst = newer.entries;
   const older = await readHistorySince(reader, leg, null, cursor.signature);
   return {
     read: {
@@ -677,6 +680,80 @@ async function removeDroppedTransfers(
 }
 
 /**
+ * The bound the stored cursor offers this sweep. A cursor is a safe `until`
+ * only when the read that reached it saw the listing continue below its slot:
+ * a page that stops inside the cursor's own slot can be a node caught
+ * mid-index, one that listed the newest of two same-slot movements and omitted
+ * the older — and a later read bounded at the cursor would never be offered it
+ * again. An unproven cursor is not trusted as a bound: the read takes the
+ * whole overlap from the top, where the omission can still surface. A proven
+ * cursor is trusted only until the audit falls due, for the same reason: the
+ * node that proved the slot could have been listing straight past a hole it
+ * holds, and only an unbounded walk serves what a bounded one never lists
+ * again.
+ */
+function historyBound(scan: DvpLegTransferScan | null, now: number): Signature | null {
+  if (scan?.cursorSlotComplete !== true) {
+    return null;
+  }
+  const scannedAt = scan.scannedAt;
+  if (
+    scannedAt !== null &&
+    Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) < Math.floor(now / HISTORY_AUDIT_MS)
+  ) {
+    return null;
+  }
+  return scan.cursor?.signature ?? null;
+}
+
+/**
+ * What the sweep reads: the walk from the top when it fits under the scan
+ * cap, or — when the walk ran past the cap and the leg has a saved cursor to
+ * read on from — the fallback's stitch of the region above the cursor and the
+ * probe of the region below it.
+ *
+ * A walk that ran past the scan cap is dropped whole on its own: resolving
+ * the oldest of a truncated read would leave a gap behind it no later read
+ * fills. Giving up entirely would stall the leg on a read it can never finish
+ * — an unproven cursor un-bounds every later sweep too — so the saved cursor,
+ * the bound this leg read behind before the watermark existed, is where the
+ * sweep reads on from, and the region below it is probed, keeping what the
+ * probe saw: that is where the node's omission sits. The probe never moves
+ * the position nor proves it, and the watermark keeps the next sweep asking
+ * for the whole history; the audit keeps that ask alive for a proven one.
+ */
+async function readTheSweep(
+  reader: DvpEscrowHistoryReader,
+  leg: DvpLegEscrow,
+  since: Signature | null,
+  stored: { signature: Signature; slot: string } | null
+): Promise<{
+  read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean } | null;
+  bounded: number | null;
+  whole: boolean;
+  chunked: boolean;
+}> {
+  const read = listed(await readHistorySince(reader, leg, since));
+  if (read !== null || stored === null || since !== null) {
+    return { read, bounded: null, whole: true, chunked: false };
+  }
+  getLogger().warn(
+    { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
+    "dvp transfers: escrow history from the top exceeds the scan cap; reading on from the saved cursor"
+  );
+  const fallback = await readOnPastCap(reader, leg, stored);
+  if (fallback === null) {
+    return { read: null, bounded: null, whole: true, chunked: false };
+  }
+  return {
+    read: fallback.read,
+    bounded: fallback.bounded,
+    whole: fallback.whole,
+    chunked: fallback.chunked,
+  };
+}
+
+/**
  * Reads a leg's escrow history from where the last read stopped, records every
  * transfer in it, and moves the read position forward.
  *
@@ -704,61 +781,17 @@ export async function syncDvpLegTransfers(
   budget: DvpLegTransferBudget,
   now: number = Date.now()
 ): Promise<number> {
-  // A cursor is a safe `until` only when the read that reached it saw the
-  // listing continue below its slot. A page that stops inside the cursor's own
-  // slot can be a node caught mid-index, one that listed the newest of two
-  // same-slot movements and omitted the older — and a later read bounded at
-  // the cursor would never be offered it again. An unproven cursor is not
-  // trusted as a bound: the read takes the whole overlap from the top, where
-  // the omission can still surface. A proven cursor is trusted only until the
-  // audit falls due, for the same reason: the node that proved the slot could
-  // have been listing straight past a hole it holds, and only an unbounded
-  // walk serves what a bounded one never lists again.
   const stored = scan?.cursor ?? null;
-  const scannedAt = scan?.scannedAt ?? null;
-  const auditDue =
-    scan?.cursorSlotComplete === true &&
-    scannedAt !== null &&
-    Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) < Math.floor(now / HISTORY_AUDIT_MS);
-  const since = scan?.cursorSlotComplete === true && !auditDue ? (stored?.signature ?? null) : null;
-  // Whether the sweep saw the leg's whole history. The fallback below reads
-  // what it can of a history the cap cut off, and a probe that could not reach
-  // the floor leaves this false, so the leg stays due and asks again.
-  let wholeHistory = true;
-  // How many of the read's entries the position may advance over; null unless
-  // the fallback stitched two listings together.
-  let bounded: number | null = null;
-  // Whether that fallback's bounded read was the newest page of a region that
-  // exceeds the cap on its own: the advance it offers the walk jumped the
-  // region the read never listed, so the position is saved unproven.
-  let chunked = false;
-  // A walk that ran past the scan cap is dropped whole: resolving the oldest
-  // of a truncated read would leave a gap behind it no later read fills.
-  let read = listed(await readHistorySince(reader, leg, since));
-  if (read === null && stored !== null && since === null) {
-    // The walk from the top ran past the scan cap. Resolving the oldest of a
-    // truncated read would leave a gap behind it, but giving up here stalls
-    // the leg on a read it can never finish — an unproven cursor un-bounds
-    // every later sweep too. The saved cursor is the bound this leg read
-    // behind before the watermark existed, so the sweep reads on from there,
-    // and probes the region below it, keeping what the probe saw: that is
-    // where the node's omission sits. The probe never moves the position nor
-    // proves it, and the watermark keeps the next sweep asking for the whole
-    // history; the audit keeps that ask alive for a proven one.
-    getLogger().warn(
-      { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
-      "dvp transfers: escrow history from the top exceeds the scan cap; reading on from the saved cursor"
-    );
-    const fallback = await readOnPastCap(reader, leg, stored);
-    if (fallback === null) {
-      read = null;
-    } else {
-      read = fallback.read;
-      bounded = fallback.bounded;
-      wholeHistory = fallback.whole;
-      chunked = fallback.chunked;
-    }
-  }
+  const since = historyBound(scan, now);
+  // Whether the sweep saw the leg's whole history. The fallback reads what it
+  // can of a history the cap cut off, and a probe that could not reach the
+  // floor leaves this false, so the leg stays due and asks again.
+  const {
+    read,
+    bounded,
+    whole: wholeHistory,
+    chunked,
+  } = await readTheSweep(reader, leg, since, stored);
   if (read === null) {
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
@@ -773,6 +806,11 @@ export async function syncDvpLegTransfers(
   // what the bounded read listed above the cursor.
   const advancing = bounded ?? newestFirst.length;
   const evidence = newestFirst.slice(0, advancing);
+  // The deepest signature the bounded read listed. When the read was cut by
+  // the cap, this is where the position must stand: nothing deeper was listed,
+  // and a position higher up would fence the region behind it past every
+  // probe the cap allows.
+  const deepestListed = chunked ? (newestFirst[advancing - 1] ?? null) : null;
 
   const known = new Map(
     (await transfers.listForLeg(leg.tradeId, leg.side)).map((transfer) => [
@@ -791,6 +829,9 @@ export async function syncDvpLegTransfers(
   // transaction the node would not serve.
   let probeEnded = wholeHistory;
   let recorded = 0;
+  // Whether the walk advanced onto the deepest listed signature: only then
+  // may the position stand there.
+  let deepestReached = false;
   // The walk resolves the listings oldest first — the probe of the region
   // behind the cursor before the bounded read ahead of it, so the ledger's
   // sequence keeps the transfers in the order the chain lists them.
@@ -811,17 +852,30 @@ export async function syncDvpLegTransfers(
     }
     recorded += outcome.recorded ? 1 : 0;
     if (finalizedSoFar && entry.finalized) {
-      ({ cursor, cursorSlotComplete } = advancedPosition(
+      const advanced = advancedPosition(
         cursor,
         cursorSlotComplete,
         entry,
         mayAdvance,
         read.floorReached,
         evidence
-      ));
+      );
+      ({ cursor, cursorSlotComplete } = advanced);
+      if (deepestListed !== null && entry.signature === deepestListed.signature) {
+        deepestReached = advanced.cursor?.signature === deepestListed.signature;
+      }
     } else {
       finalizedSoFar = false;
     }
+  }
+
+  // A chunked read kept everything its bounded listing reached, and the walk
+  // resolved it oldest first. When the walk got through the deepest of it,
+  // the position stands there: the region the read never listed sits
+  // immediately behind the position, within the next sweep's probe, instead
+  // of beyond every probe the cap allows.
+  if (deepestReached && deepestListed !== null) {
+    cursor = { signature: deepestListed.signature, slot: deepestListed.slot.toString() };
   }
 
   const unaccounted = await removeDroppedTransfers(
@@ -833,8 +887,9 @@ export async function syncDvpLegTransfers(
   );
 
   // Only a read that got through to the newest signature with nothing left
-  // provisional counts as a scan. Anything less leaves the leg due next sweep.
-  const settled = complete && finalizedSoFar && unaccounted === 0;
+  // provisional and nothing skipped in the middle counts as a scan. Anything
+  // less leaves the leg due next sweep.
+  const settled = complete && finalizedSoFar && unaccounted === 0 && !chunked;
   await transfers.saveScan(leg.tradeId, {
     side: leg.side,
     cursor,
@@ -842,8 +897,9 @@ export async function syncDvpLegTransfers(
     // whole history: the position may stand, but the region behind it is not
     // yet accounted for, and the probe is the one read that reaches what a
     // walk bounded at the position never lists again. A chunked read never
-    // proves the position it jumped into either: the region it skipped sits
-    // behind the new cursor, where only the next sweep's probe sees it.
+    // proves the position it read on to either: the region it skipped sits
+    // immediately behind the position, where only the next sweep's probe
+    // sees it.
     cursorSlotComplete: cursor === null ? false : cursorSlotComplete && probeEnded && !chunked,
     scannedAt: settled ? new Date(now).toISOString() : null,
   });
