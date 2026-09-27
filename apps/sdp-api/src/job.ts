@@ -86,7 +86,9 @@ const MAX_EGRESS_WARMUP_MS = 120_000;
  *    webhook event replay + sponsorship budget reconciliation. The transfer
  *    legs settle before their tick reports failure. Webhook replay claims
  *    rows only while the run's deadline leaves time — the rest stay pending
- *    for the next execution. Fatal.
+ *    for the next execution, and a pass whose budget was spent before it
+ *    started fails the tick loudly rather than succeed over a skipped
+ *    backlog. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
@@ -217,7 +219,9 @@ export async function runCronJob(): Promise<void> {
               // strand its transfer here forever. Applying is idempotent and
               // the age cutoff keeps fresh rows with the request's own pass.
               // Bounded by this run's remaining time: rows the deadline leaves
-              // stay pending for the next execution.
+              // stay pending for the next execution, and a pass that starts
+              // with the budget spent fails this tick loudly instead of
+              // reporting success over a skipped backlog.
               replayRampWebhookEvents(env, { deadlineMs: runDeadlineMs }),
             ]);
             throwCollected(

@@ -77,6 +77,13 @@ export interface RampWebhookEventsRepository {
    */
   claimReplayable(input: ClaimReplayableRampWebhookEventsInput): Promise<RampWebhookEventRow[]>;
   /**
+   * Read-only check whether any row would be claimable right now — the same
+   * predicate `claimReplayable` selects with, without claiming anything. The
+   * bounded replay uses it to tell an empty-inbox deadline (a no-op pass) from
+   * a skipped backlog (a pass that must not report success).
+   */
+  hasReplayable(input: { createdBefore: string; maxAttempts: number }): Promise<boolean>;
+  /**
    * Parks pending rows whose attempts are already spent — the state a crash
    * leaves when the final claim committed but the apply or its failure record
    * never ran. Without this sweep such rows stay pending forever while every
@@ -181,6 +188,19 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
         .bind(input.createdBefore, input.createdBefore, input.maxAttempts, input.limit)
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
+    },
+
+    async hasReplayable(input) {
+      const row = await db
+        .prepare(
+          `SELECT EXISTS(
+             SELECT 1 FROM ramp_webhook_events
+              WHERE status = 'pending' AND created_at <= ? AND updated_at <= ? AND attempts < ?
+           ) AS has`
+        )
+        .bind(input.createdBefore, input.createdBefore, input.maxAttempts)
+        .first<{ has: boolean }>();
+      return row?.has === true;
     },
 
     async parkExhausted(input) {

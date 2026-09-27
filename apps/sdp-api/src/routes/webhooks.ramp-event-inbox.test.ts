@@ -215,10 +215,12 @@ describe("Ramp webhook event inbox", () => {
     expect(await readTransferStatus()).toBe("awaiting_payment");
   });
 
-  it("claims nothing once the pass deadline has passed", async () => {
+  it("fails loudly when the pass deadline has passed while a claimable row waits", async () => {
     // The managed job bounds replay by its run's remaining time: a deadline
-    // already in the past must leave even an aged row untouched, because
-    // claiming it would spend an attempt the abandoned apply cannot use.
+    // already in the past must leave even an aged row unclaimed, because
+    // claiming it would spend an attempt the abandoned apply cannot use. The
+    // managed job is the deployment's only replay pass, so skipping the
+    // backlog there must fail the tick loudly, never report success.
     const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
       provider: "moonpay",
       environment: "sandbox",
@@ -229,13 +231,35 @@ describe("Ramp webhook event inbox", () => {
       .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
       .run();
 
-    const applied = await replayRampWebhookEvents(env, { deadlineMs: performance.now() - 1 });
+    await expect(
+      replayRampWebhookEvents(env, { deadlineMs: performance.now() - 1 })
+    ).rejects.toThrow(
+      "ramp webhook replay reached its deadline before claiming any event while claimable events remain"
+    );
 
-    expect(applied).toBe(0);
     const rows = await readInboxRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "pending", attempts: 0 });
     expect(await readTransferStatus()).toBe("awaiting_payment");
+  });
+
+  it("treats a deadline already passed with nothing claimable as a no-op pass", async () => {
+    // A fresh row inside the background pass's window is not claimable, so an
+    // expired deadline skips nothing: the pass ends quietly instead of
+    // failing the tick for work it never owned.
+    await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+
+    const applied = await replayRampWebhookEvents(env, { deadlineMs: performance.now() - 1 });
+
+    expect(applied).toBe(0);
+    expect(await readTransferStatus()).toBe("awaiting_payment");
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "pending", attempts: 0 });
   });
 
   it("replays a pending event the background apply never ran for", async () => {

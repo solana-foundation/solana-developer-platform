@@ -132,7 +132,10 @@ export async function applyStoredRampWebhookEvent(
  * claimed only while time remains — whatever the deadline leaves stays pending
  * for the next pass. The managed reconciliation job passes its run's remaining
  * budget so a busy inbox cannot push later ticks into the platform's kill
- * window; the in-process passes run unbounded, as before.
+ * window; the in-process passes run unbounded, as before. A pass that starts
+ * with its budget already spent fails loudly instead of reporting success: the
+ * managed job is the only replay pass a Cloud Run deployment gets, so a
+ * silently skipped backlog would stay invisible until its transfers strand.
  */
 export async function replayRampWebhookEvents(
   env: Env,
@@ -189,7 +192,9 @@ export async function replayRampWebhookEvents(
     // abandoning a claimed row would waste it — and claiming once the budget
     // is gone would start that apply inside the platform's kill window,
     // where a killed apply burns the attempt for nothing. Callers guarantee
-    // the pass real time instead (the managed job caps egress warmup).
+    // the pass real time instead (the managed job caps egress warmup); one
+    // that still reaches the deadline before the first claim fails loudly
+    // below rather than reporting a success that skipped the backlog.
     if (deadlineMs !== undefined && performance.now() >= deadlineMs) {
       deadlineReached = true;
       break;
@@ -206,6 +211,22 @@ export async function replayRampWebhookEvents(
     // `claimReplayable` already spent this attempt.
     if (await applyStoredRampWebhookEvent(env, row, row.attempts)) {
       applied += 1;
+    }
+  }
+  // The deadline check above runs before the first claim, so a pass here with
+  // nothing claimed started with its budget already spent. Read-only probe:
+  // an empty inbox made the pass a harmless no-op, but claimable rows it must
+  // leave behind mean the deployment's only replay pass did nothing — fail
+  // the tick loudly rather than report success over a skipped backlog.
+  if (deadlineReached && claimed === 0) {
+    const skipped = await events.hasReplayable({
+      createdBefore: cutoff,
+      maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+    });
+    if (skipped) {
+      throw new Error(
+        "ramp webhook replay reached its deadline before claiming any event while claimable events remain: the pass's replay budget was spent before it started"
+      );
     }
   }
   if (claimed > 0) {
