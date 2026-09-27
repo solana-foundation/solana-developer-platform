@@ -590,21 +590,40 @@ describe("createDvpTrade", () => {
   // mint authority flipping the default to frozen mid-flight leaves the escrow
   // frozen at birth — fundable by no one, since funding refuses a frozen
   // escrow and no settle, cancel or reclaim thaws one. The create re-checks
-  // the landed escrows and refuses the trade rather than publishing it.
+  // the landed escrows and refuses the RESPONSE — but the trade is on chain,
+  // so the row stays on its normal observation path rather than being marked
+  // `create_failed`, which would orphan a landed trade from reconciliation.
   it("refuses a trade whose escrow was created frozen after the pre-flight read", async () => {
     acceptSend();
     readEscrowState.mockResolvedValueOnce({ amount: 0n, frozen: true });
 
     await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(/created frozen/);
 
+    // The create landed, so the signature is on the record and the row keeps
+    // its live lifecycle: the immediate observation ran, and the reconciler
+    // (and a thaw) can still move the row forward from here.
     const rows = await rowsInDb();
     expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe("create_failed");
-    // The create landed, so the signature is on the record; what was refused
-    // is the publication, and the observation that would show the trade as
-    // live never ran.
     expect(rows[0].create_signature).not.toBeNull();
-    expect(observeDvpTradeNow).not.toHaveBeenCalled();
+    expect(observeDvpTradeNow).toHaveBeenCalledOnce();
+  });
+
+  // A keyed retry after the refusal must replay the SAME trade. The escrow is
+  // frozen but the trade is on chain; marking the row failed would free the
+  // key and sign a second trade with a fresh nonce on top of the first.
+  it("replays the refused trade on a keyed retry rather than creating a second one", async () => {
+    acceptSend();
+    readEscrowState.mockResolvedValue({ amount: 0n, frozen: true });
+    const input = { ...tradeInput(), idempotencyKey: "key-frozen" };
+
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
+    const retried = await createDvpTrade(env, auditContext, input);
+
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(retried.id).toBeTypeOf("string");
+    const rows = await rowsInDb();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(retried.id);
   });
 
   // Best effort by design: a failed verdict read must not break the create.

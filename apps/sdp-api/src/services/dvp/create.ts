@@ -300,10 +300,15 @@ type EscrowLeg = {
  * no one. This re-check runs where the rule can no longer race: on the escrow
  * accounts themselves, after the transaction that created them has confirmed.
  *
- * Best effort by design. A failed read skips the check and leaves the trade to
- * the reconciler, which logs a frozen escrow on every sweep — the same trade
- * the pre-flight world produced, rather than a broken create. An escrow that
- * reads as absent passes: a create that did not land has no escrow to freeze.
+ * The caller's remedy for a hit is the REFUSAL, not a rewritten row. The trade
+ * is on chain — no API status can make it not be — so the row stays on its
+ * normal observation and recovery path (`created`, frozen flags recorded, the
+ * reconciler watching, funding working again if the freeze authority thaws the
+ * escrow), and marking it `create_failed` would orphan a landed trade from
+ * both. A keyed retry replays the same trade rather than signing a second one
+ * on top. Best effort by design: a failed read skips the check and leaves the
+ * trade exactly where the pre-flight world left it. An escrow that reads as
+ * absent passes: a create that did not land has no escrow to freeze.
  *
  * @param rpc - Solana RPC to confirm the create and read the escrows from.
  * @param tradeId - The row id, for logs and `readEscrowState` refusals.
@@ -617,12 +622,20 @@ export async function createDvpTrade(
     throw error;
   }
 
+  const claimed = await repository.getById(
+    { organizationId: input.organizationId, projectId: input.projectId },
+    id
+  );
+  if (claimed === null) {
+    throw new Error("DvP claim disappeared after sponsored submission");
+  }
+
   // The last leg of the frozen-default admission rule. The pre-flight checked
   // the mint before anything was signed; this checks the escrows the landed
   // create just made, so a mint that flipped its default to frozen in between
-  // cannot leave a published trade nobody can fund. Runs only on a clean
-  // submission — an ambiguous send stays at `creating` for the chain to settle,
-  // exactly as the catch above leaves it.
+  // cannot hand back a "created" trade nobody can fund without saying so.
+  // Runs only on a clean submission — an ambiguous send stays at `creating`
+  // for the chain to settle, exactly as the catch above leaves it.
   const bornFrozen =
     createSignature === null
       ? []
@@ -637,25 +650,16 @@ export async function createDvpTrade(
           createSignature
         );
   if (bornFrozen.length > 0) {
-    const resolved = await repository.resolveCreate(id, "create_failed");
-    if (resolved === null) {
-      getLogger().warn(
-        { tradeId: id },
-        "dvp create: escrow created frozen but the row already advanced; the reconciler owns it now"
-      );
-    }
+    // The trade is live on chain, so the row records it as such — status,
+    // balances and the frozen flags — and keeps its reconciler and its
+    // recovery path. What is refused is this create's RESPONSE: the creator
+    // learns the trade cannot be funded, not a success to build on.
+    await observeDvpTradeNow(env, claimed);
     throw conflict(
-      `DvP trade ${id}: ${bornFrozen.join(", ")} was created frozen — the mint began defaulting new accounts to frozen between the pre-flight check and the create landing — so no transfer can ever fund it, and SDP refuses to publish the trade. Retry once the mint no longer defaults accounts to frozen.`
+      `DvP trade ${id}: ${bornFrozen.join(", ")} was created frozen — the mint began defaulting new accounts to frozen between the pre-flight check and the create landing — so no transfer can fund this trade unless the mint's freeze authority thaws ${bornFrozen.join(", ")} first. A new request once the mint no longer defaults accounts to frozen creates a fresh trade.`
     );
   }
 
-  const claimed = await repository.getById(
-    { organizationId: input.organizationId, projectId: input.projectId },
-    id
-  );
-  if (claimed === null) {
-    throw new Error("DvP claim disappeared after sponsored submission");
-  }
   const observed = await observeDvpTradeNow(env, claimed);
   return observed === null ? claimed : observed;
 }
