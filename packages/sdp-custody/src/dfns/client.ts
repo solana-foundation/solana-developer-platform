@@ -719,22 +719,31 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
     keySignatures: {
       createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) => {
         let userActionToken: string | undefined;
-        const signatureRequest = await dfnsRequestJson<DfnsSignatureRequest>(
-          ctx,
-          "POST",
-          `/keys/${encodeURIComponent(request.keyId)}/signatures`,
-          request.body,
-          {
-            onUserActionToken: (token) => {
-              userActionToken = token;
-              // Pinned the moment it exists: the create response may take
-              // arbitrarily long (the fetch has no timeout), and a sweep
-              // triggered by another request's mint must not evict the token
-              // before its own response arrives.
-              pinUserActionToken(ctx, token);
-            },
-          }
-        );
+        let signatureRequest: DfnsSignatureRequest;
+        try {
+          signatureRequest = await dfnsRequestJson<DfnsSignatureRequest>(
+            ctx,
+            "POST",
+            `/keys/${encodeURIComponent(request.keyId)}/signatures`,
+            request.body,
+            {
+              onUserActionToken: (token) => {
+                userActionToken = token;
+                // Pinned the moment it exists: the create response may take
+                // arbitrarily long (the fetch has no timeout), and a sweep
+                // triggered by another request's mint must not evict the
+                // token before its own response arrives.
+                pinUserActionToken(ctx, token);
+              },
+            }
+          );
+        } catch (error) {
+          // The create failed, so no signature result this token backs will
+          // ever be handled and no release handle gets attached. Drop the pin
+          // and let the token age out of the retention window normally.
+          unpinUserActionToken(ctx, userActionToken);
+          throw error;
+        }
         if (userActionToken && signatureRequest && typeof signatureRequest === "object") {
           // The signer drops the pin through this handle once it has handled
           // the request's result; after that the token simply ages out of the
@@ -743,6 +752,10 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
             value: () => unpinUserActionToken(ctx, userActionToken),
             enumerable: false,
           });
+        } else {
+          // An unusable response means no signature result can ever be
+          // handled for this token; nothing needs the pin.
+          unpinUserActionToken(ctx, userActionToken);
         }
         return signatureRequest;
       },

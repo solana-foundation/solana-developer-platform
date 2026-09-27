@@ -464,4 +464,27 @@ describe("dfns signer upstream error redaction", () => {
     // rather than being swept while a signature is still pending.
     assert.ok(secrets().includes("user_action_dup"));
   });
+
+  it("drops a failed signature create's hold on its token", async () => {
+    // Greptile finding on this PR (P2): a create that fails (HTTP error,
+    // non-JSON body) never attaches a release handle, so its pin would stick
+    // until the hold cap. The failure path drops the pin instead, and the
+    // token keeps ordinary retention-window coverage for echoes.
+    serveHandshake((url, init) => {
+      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
+        return jsonResponse({ code: "sk_live_platform_secret" }, 403);
+      }
+      return null;
+    });
+
+    const { client } = await createTestClientAndSigner();
+    await assert.rejects(
+      client.keySignatures.createSignature({
+        keyId: "key_poc",
+        body: { kind: "Message", message: "0x010203" },
+      })
+    );
+    // Still covered for the retention window, no longer pinned.
+    assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes("user_action_poc"));
+  });
 });
