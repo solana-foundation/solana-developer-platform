@@ -21,6 +21,9 @@ import { ApprovalInbox } from "./approval-inbox";
  * 3. A project switch re-binds the inbox to the new scope's page props, so a
  *    new project whose initial load failed shows the error panel instead of
  *    an empty inbox hiding the failure.
+ * 4. A load error stays up until a refresh actually applies: an answer that
+ *    establishes nothing may neither repaint the rows nor clear the error
+ *    state.
  */
 
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -223,5 +226,40 @@ describe("ApprovalInbox project-scoped refreshes", () => {
 
     expect(screen.getByText("Unable to load approval requests")).toBeTruthy();
     expect(screen.queryByText("Treasury")).toBeNull();
+  });
+
+  it("keeps the load error until a refresh actually applies", async () => {
+    // A failed initial load must not be papered over by a refresh that
+    // establishes nothing: an echoless empty pair (an older proxy build)
+    // proves nothing about the mounted project, so the error panel and its
+    // Reload button stay up. Only a refresh that applies — here the echo-
+    // proven empty answer — may clear the error state.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse())
+    );
+
+    renderInbox({ initialRequests: [], loadError: true });
+    expect(screen.getByText("Unable to load approval requests")).toBeTruthy();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByText("Unable to load approval requests")).toBeTruthy();
+
+    // The proxy recovers and proves the empty answer is bound to the mounted
+    // project: the refresh applies, and the error state legitimately clears.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => emptyBatchResponse("project-a"))
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.queryByText("Unable to load approval requests")).toBeNull();
+    expect(screen.getByText("No requests are waiting for approval")).toBeTruthy();
   });
 });

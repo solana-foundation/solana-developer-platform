@@ -190,11 +190,14 @@ function useInboxRefresh(options: {
       // genuinely no longer has.
       const merged = await fetchApprovalRequests(options.projectId);
       // Functional so a response that resolves after the scope moved on is
-      // dropped rather than written into the new scope's inbox.
+      // dropped rather than written into the new scope's inbox. An answer
+      // that establishes nothing repaints nothing at all — including the
+      // load-error state, which only a refresh that actually applied can
+      // clear (a proven-empty project legitimately does).
       options.setInbox((prev) => {
         if (prev.scope !== scope) return prev;
-        const repaint = merged ? { requests: merged, relativeTimeBase: Date.now() } : {};
-        return { ...prev, ...repaint, loadError: false };
+        if (!merged) return prev;
+        return { ...prev, requests: merged, relativeTimeBase: Date.now(), loadError: false };
       });
       if (merged) window.dispatchEvent(new Event("sdp:approval-requests-updated"));
     } catch {
