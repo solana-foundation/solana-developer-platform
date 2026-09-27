@@ -57,7 +57,11 @@ WHERE  pt.project_id = (
   AND  (
         pt.initiated_by_key_id IS NOT NULL
         OR pt.created_at::timestamptz < (
-            SELECT sm.applied_at::timestamptz
+            -- applied_at is stored as naive UTC text without a zone marker
+            -- (timezone('UTC', now())::text), so pin it to UTC explicitly: a
+            -- non-UTC session would otherwise shift the boundary and
+            -- misclassify rows created close to the 0005 application.
+            SELECT sm.applied_at::timestamp AT TIME ZONE 'UTC'
             FROM   schema_migrations sm
             WHERE  sm.version = '0005_project_environment_boundary.sql'
         )

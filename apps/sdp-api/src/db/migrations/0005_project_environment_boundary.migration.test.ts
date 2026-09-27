@@ -268,6 +268,11 @@ describe("0005 project environment boundary", () => {
   });
 
   it("0119 is a no-op on databases that applied the corrected 0005", async () => {
+    // The repair must be session-time-zone safe: applied_at is stored as
+    // naive UTC text, and misreading it shifts the 0005 boundary and breaks
+    // the no-op. Run 0119 under a non-UTC session to pin that down.
+    await freshClient.query("SET TIME ZONE 'America/New_York'");
+
     // Seeded after 0005 was applied in the test above: on a corrected database
     // a no-key default-sandbox row can only be a post-boundary creation.
     await seedPostBoundarySandboxTransfer(freshClient);
@@ -322,6 +327,13 @@ describe("0119 payment transfer provenance repair", () => {
     // A sandbox on-ramp created without an API key after 0005 ran: scoped by
     // the application itself, never NULL-project, never blanket-assigned.
     await seedPostBoundarySandboxTransfer(legacyClient);
+
+    // The repair must be session-time-zone safe: applied_at is stored as
+    // naive UTC text, and misreading it shifts the 0005 boundary enough to
+    // misclassify rows created close to the migration — including the
+    // just-seeded on-ramp above. Run 0119 under a non-UTC session to pin
+    // that down.
+    await legacyClient.query("SET TIME ZONE 'America/New_York'");
 
     await applyMigrationFile(legacyClient, REPAIR_MIGRATION);
 
