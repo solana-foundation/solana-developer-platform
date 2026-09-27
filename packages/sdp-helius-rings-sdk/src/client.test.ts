@@ -136,7 +136,10 @@ describe("createRingsClient Solana RPC transport", () => {
 
     // A bigint param: plain JSON.stringify cannot serialize a bigint at all,
     // so the exact digits on the wire prove the request rode the same
-    // bigint-aware codec the responses are parsed with.
+    // bigint-aware codec the responses are parsed with. (Kit's own request
+    // transformer refuses bigint params past MAX_SAFE_INTEGER, so 2^32 is the
+    // largest class of legal request param; the codec's job on this side is
+    // keeping the digits raw rather than throwing on the bigint.)
     await expect(client.solanaRpc.getBlock(4294967296n).send()).resolves.toBeNull();
     const payload = JSON.parse(calls[0]?.body ?? "{}") as { method: string };
     expect(payload.method).toBe("getBlock");
