@@ -99,6 +99,8 @@ interface ParsedTransferTestTransaction {
   program?: string;
   type: "transfer" | "transferChecked" | "mintTo" | "mintToChecked";
   info: Record<string, unknown>;
+  /** Extra top-level instructions the transaction carries alongside the transfer. */
+  extraInstructions?: Array<{ program?: string; type: string; info: Record<string, unknown> }>;
   preTokenBalances?: RpcTokenBalance[];
   postTokenBalances?: RpcTokenBalance[];
   blockTime?: number | null;
@@ -212,6 +214,10 @@ function startTokenRpcServer(
                       program: transaction.program ?? "spl-token-2022",
                       parsed: { type: transaction.type, info: transaction.info },
                     },
+                    ...(transaction.extraInstructions ?? []).map((extra) => ({
+                      program: extra.program ?? "spl-token-2022",
+                      parsed: { type: extra.type, info: extra.info },
+                    })),
                   ],
                 },
               },
@@ -684,6 +690,46 @@ describe("observed Token-2022 transfer amount conversion", () => {
       expect(observed?.amount).toBe(
         amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 2)
       );
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("drops a scaled mint's row when the transfer's own transaction updates the multiplier", async () => {
+    // The transaction is the mint's newest touch and also carries an
+    // updateMultiplier for the mint: the transfer may have run before the
+    // update inside the same transaction, so the current schedule cannot
+    // prove what the transfer converted with — the row is dropped rather
+    // than confirmed with the later multiplier.
+    const rpcServer = await startTokenRpcServer(
+      {
+        ...plainTransfer(MINT_SCALED),
+        extraInstructions: [
+          {
+            program: "spl-token-2022",
+            type: "updateMultiplier",
+            info: {
+              mint: MINT_SCALED,
+              newMultiplier: "4",
+              newMultiplierTimestamp: 1_800_000_000,
+              authority: MINT_AUTHORITY,
+            },
+          },
+        ],
+      },
+      {
+        mintAccountsByAddress: {
+          [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+        },
+        mintSignaturesByAddress: {
+          [MINT_SCALED]: [{ slot: SLOT }],
+        },
+      }
+    );
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(rows).toEqual([]);
     } finally {
       await rpcServer.close();
     }

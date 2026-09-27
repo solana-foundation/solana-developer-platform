@@ -272,7 +272,8 @@ function readTokenAmountInfo(
  *   multiplier replacement is a transaction touching the mint account, so
  *   every scaled mint's conversion is anchored to the mint's own transaction
  *   history, and a mint touched after the transfer confirmed — or in the
- *   transfer's own slot by anything but the transfer itself — or with an
+ *   transfer's own slot by anything but the transfer itself, or whose
+ *   multiplier the transfer's own transaction updated — or with an
  *   unreadable history drops its rows instead (see convertObservedTokenAmount).
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
@@ -461,12 +462,22 @@ function convertObservedTokenAmount(input: {
   rpcUiAmount: string | null;
   mint: string | null;
   mintStates: Map<string, ObservedMintAmountState>;
+  multiplierUpdatedMints: ReadonlySet<string>;
   timestampSeconds: number | null;
   slot: number | null;
   signature: string;
 }): string | null {
-  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds, slot, signature } =
-    input;
+  const {
+    rawAmount,
+    decimals,
+    rpcUiAmount,
+    mint,
+    mintStates,
+    multiplierUpdatedMints,
+    timestampSeconds,
+    slot,
+    signature,
+  } = input;
 
   const state = mint ? mintStates.get(mint) : undefined;
   if (!state || state.kind === "unresolved") {
@@ -507,6 +518,16 @@ function convertObservedTokenAmount(input: {
     // in that case the current account state is exactly the state the
     // transfer converted with.
     if (slot === state.lastModifiedSlot && state.lastModifiedSignature !== signature) {
+      return null;
+    }
+
+    // Even when the transfer's own transaction is the newest touch, a scaled
+    // multiplier update inside that same transaction keeps the multiplier at
+    // the transfer ambiguous: the transfer may have run before the update, and
+    // instruction order inside the transaction is not visible in the mint
+    // account. The row is dropped rather than confirmed with the later
+    // multiplier.
+    if (mint !== null && multiplierUpdatedMints.has(mint)) {
       return null;
     }
 
@@ -853,6 +874,41 @@ function collectObservedMintAddresses(parsedTransaction: ParsedTransaction): Add
 }
 
 /**
+ * The distinct mints whose scaled multiplier the transaction itself updates
+ * (the `ScaledUiAmountConfig` extension's `updateMultiplier`, or its
+ * initialization). A multiplier replacement inside the transfer's own
+ * transaction leaves the multiplier at the transfer ambiguous — the update may
+ * have followed the transfer — even when the transaction is the mint's newest
+ * touch (see convertObservedTokenAmount).
+ */
+function collectMintMultiplierUpdateAddresses(parsedTransaction: ParsedTransaction): Set<string> {
+  const mints = new Set<string>();
+
+  for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
+    const parsedType = instruction.parsed?.type;
+    const info = instruction.parsed?.info;
+
+    if (!parsedType || !info) {
+      continue;
+    }
+
+    const normalizedProgram = (instruction.program ?? "").toLowerCase();
+    if (!normalizedProgram.includes("token")) {
+      continue;
+    }
+
+    if (parsedType === "updateMultiplier" || parsedType === "initializeScaledUiAmountConfig") {
+      const mint = readInstructionInfoString(info, "mint");
+      if (mint) {
+        mints.add(mint);
+      }
+    }
+  }
+
+  return mints;
+}
+
+/**
  * Cap on mint extension-state read attempts per mint within one batch. A
  * failed read is evicted so a later signature can retry it, but a persistent
  * outage must not re-bill the same mint for every signature in the
@@ -937,6 +993,7 @@ function buildObservedTransferRows(
   const status: TransferStatus = parsedTransaction.meta?.err ? "failed" : "confirmed";
 
   const tokenAccountMetadata = buildTokenAccountMetadataMap(parsedTransaction);
+  const multiplierUpdatedMints = collectMintMultiplierUpdateAddresses(parsedTransaction);
   const observedRows = new Map<string, TransferRow>();
   for (const instruction of flattenParsedInstructions({ result: parsedTransaction })) {
     const parsedType = instruction.parsed?.type;
@@ -1056,6 +1113,7 @@ function buildObservedTransferRows(
         rpcUiAmount: tokenAmount?.uiAmountString ?? null,
         mint,
         mintStates,
+        multiplierUpdatedMints,
         timestampSeconds,
         slot,
         signature,
@@ -1165,6 +1223,7 @@ function buildObservedTransferRows(
       rpcUiAmount: tokenAmount?.uiAmountString ?? null,
       mint,
       mintStates,
+      multiplierUpdatedMints,
       timestampSeconds,
       slot,
       signature,
