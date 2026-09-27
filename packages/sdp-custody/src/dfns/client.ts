@@ -189,6 +189,8 @@ interface DfnsClientContext {
   readonly heldUserActionTokens: Map<string, { mintedAt: number; pinCount: number }>;
   /** Last time expired unpinned tokens were swept, to keep mints O(1) amortized. */
   lastUserActionTokenSweepAt: number;
+  /** Wall clock (injectable for tests): drives retention windows and sweeps. */
+  readonly now: () => number;
 }
 
 interface DfnsRequestOptions {
@@ -349,7 +351,7 @@ const USER_ACTION_TOKEN_SWEEP_INTERVAL_MS = 60_000;
 const MAX_USER_ACTION_TOKEN_HOLD_MS = 24 * 3_600_000;
 
 function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
-  const now = Date.now();
+  const now = ctx.now();
   if (now - ctx.lastUserActionTokenSweepAt >= USER_ACTION_TOKEN_SWEEP_INTERVAL_MS) {
     ctx.lastUserActionTokenSweepAt = now;
     for (const [token, entry] of ctx.heldUserActionTokens) {
@@ -420,7 +422,10 @@ function toBase64Url(data: Uint8Array): string {
     .replace(/=+$/g, "");
 }
 
-function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): DfnsClientContext {
+function resolveDfnsContext(
+  env: DfnsEnv,
+  options?: { apiBaseUrl?: string; now?: () => number }
+): DfnsClientContext {
   const authToken = env.DFNS_AUTH_TOKEN;
   const credentialId = env.DFNS_CREDENTIAL_ID;
   const privateKey = env.DFNS_PRIVATE_KEY ? normalizePrivateKey(env.DFNS_PRIVATE_KEY) : undefined;
@@ -444,6 +449,7 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     userAgent: DFNS_USER_AGENT,
     heldUserActionTokens: new Map(),
     lastUserActionTokenSweepAt: 0,
+    now: options?.now ?? Date.now,
   };
 }
 
@@ -773,7 +779,7 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
 
 export async function createDfnsApiClient(
   env: DfnsEnv,
-  options?: { apiBaseUrl?: string }
+  options?: { apiBaseUrl?: string; now?: () => number }
 ): Promise<DfnsApiClient> {
   return buildDfnsApiClient(resolveDfnsContext(env, options));
 }
@@ -782,7 +788,7 @@ export async function createDfnsApiClient(
 // IBM-hosted credentials (IBM_HAVEN_*) and base URL — same wire protocol.
 function resolveIbmHavenContext(
   env: IbmHavenEnv,
-  options?: { apiBaseUrl?: string }
+  options?: { apiBaseUrl?: string; now?: () => number }
 ): DfnsClientContext {
   const authToken = env.IBM_HAVEN_AUTH_TOKEN;
   const credentialId = env.IBM_HAVEN_CREDENTIAL_ID;
@@ -809,12 +815,13 @@ function resolveIbmHavenContext(
     userAgent: IBM_HAVEN_USER_AGENT,
     heldUserActionTokens: new Map(),
     lastUserActionTokenSweepAt: 0,
+    now: options?.now ?? Date.now,
   };
 }
 
 export async function createIbmHavenApiClient(
   env: IbmHavenEnv,
-  options?: { apiBaseUrl?: string }
+  options?: { apiBaseUrl?: string; now?: () => number }
 ): Promise<DfnsApiClient> {
   return buildDfnsApiClient(resolveIbmHavenContext(env, options));
 }

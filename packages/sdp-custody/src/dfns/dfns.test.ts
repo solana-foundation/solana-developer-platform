@@ -78,7 +78,9 @@ function serveHandshake(
   });
 }
 
-async function createTestClientAndSigner(): Promise<{ client: DfnsApiClient; signer: DfnsSigner }> {
+async function createTestClientAndSigner(options?: {
+  now?: () => number;
+}): Promise<{ client: DfnsApiClient; signer: DfnsSigner }> {
   const { privateKey } = generateKeyPairSync("ed25519");
   const client = await createDfnsApiClient(
     {
@@ -86,7 +88,7 @@ async function createTestClientAndSigner(): Promise<{ client: DfnsApiClient; sig
       DFNS_CREDENTIAL_ID: CREDENTIAL_ID,
       DFNS_PRIVATE_KEY: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     },
-    { apiBaseUrl: API_BASE_URL }
+    { apiBaseUrl: API_BASE_URL, now: options?.now }
   );
   return { client, signer: await DfnsSigner.create({ client, walletId: "wa_poc" }) };
 }
@@ -469,15 +471,32 @@ describe("dfns signer upstream error redaction", () => {
     // Greptile finding on this PR (P2): a create that fails (HTTP error,
     // non-JSON body) never attaches a release handle, so its pin would stick
     // until the hold cap. The failure path drops the pin instead, and the
-    // token keeps ordinary retention-window coverage for echoes.
-    serveHandshake((url, init) => {
-      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
-        return jsonResponse({ code: "sk_live_platform_secret" }, 403);
+    // token keeps ordinary retention-window coverage for echoes — then ages
+    // out of it on a later sweep, proving the hold was dropped.
+    let clock = 1_000_000_000;
+    let mint = 0;
+    serveHandshake(
+      (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          return jsonResponse({ code: "sk_live_platform_secret" }, 403);
+        }
+        if (method === "POST" && url.pathname === "/wallets") {
+          return jsonResponse({ id: "wa_later", network: "SolanaDevnet" }, 200);
+        }
+        return null;
+      },
+      {
+        // The failed create mints first; any later mint uses another value so
+        // the sweep below cannot be fooled by a re-recorded entry.
+        userActionTokens: () => {
+          mint += 1;
+          return mint === 1 ? "user_action_poc" : `user_action_later_${mint}`;
+        },
       }
-      return null;
-    });
+    );
 
-    const { client } = await createTestClientAndSigner();
+    const { client } = await createTestClientAndSigner({ now: () => clock });
     await assert.rejects(
       client.keySignatures.createSignature({
         keyId: "key_poc",
@@ -486,5 +505,16 @@ describe("dfns signer upstream error redaction", () => {
     );
     // Still covered for the retention window, no longer pinned.
     assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes("user_action_poc"));
+    // Two hours later a new mint (a different token value) sweeps the
+    // aged-out, unpinned token: had the failed create leaked its hold, the
+    // token would still be in the set.
+    clock += 2 * 3_600_000;
+    await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    assert.ok(!(client.getKnownUpstreamSecrets?.() ?? []).includes("user_action_poc"));
+    assert.ok(
+      (client.getKnownUpstreamSecrets?.() ?? []).some((secret) =>
+        secret.startsWith("user_action_later")
+      )
+    );
   });
 });
