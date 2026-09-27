@@ -396,13 +396,15 @@ async function applyMuralLifecycleToCurrentOwner(
       }
     });
   } catch (error) {
-    // The transaction rolled back, so the admitted operation produced no
-    // success-shaped outcome. Record a failure outcome against the durable
-    // intent — an abort is not a success — so a successful inbox retry does
-    // not strand an earlier intent unresolved, which would fail integrity
-    // verification forever despite the delivery eventually succeeding. If
-    // this outcome write also fails, the intent stays unresolved for
-    // operator reconciliation and the inbox row keeps the payload for retry.
+    // The transaction threw, but that alone cannot tell an aborted mutation
+    // from a committed one whose COMMIT acknowledgment was lost — the
+    // counterparty patch and the KYC-wallet mirror may already be in effect.
+    // The durable outcome is therefore evidence-based (see the helper): a
+    // successful inbox retry does not strand this intent unresolved, which
+    // would fail integrity verification forever, and a landed compliance
+    // change is never misrecorded as aborted. If the outcome cannot be
+    // determined or persisted, the intent stays unresolved for operator
+    // reconciliation and the inbox row keeps the payload for retry.
     getLogger().error(
       {
         err: error,
@@ -414,14 +416,18 @@ async function applyMuralLifecycleToCurrentOwner(
       "[mural webhook] lifecycle mutation failed after audit admission"
     );
     if (intent) {
-      const resolved = await audit.completeCriticalSystem(intent, {
-        status: "failure",
-        metadata: { result: "aborted" },
-      });
+      const resolved = await recordLifecycleIntentOutcomeAfterFailure(
+        env,
+        audit,
+        intent,
+        counterparty.id,
+        event,
+        newStatus
+      );
       if (!resolved) {
         getLogger().error(
           { audit_intent_id: intent.id, provider_event_id: event.deliveryId },
-          "[mural webhook] aborted lifecycle outcome was not persisted; intent left unresolved for reconciliation"
+          "[mural webhook] lifecycle outcome was not persisted; intent left unresolved for reconciliation"
         );
       }
     }
@@ -441,6 +447,68 @@ async function applyMuralLifecycleToCurrentOwner(
     });
   }
   return "done";
+}
+
+/**
+ * Evidence-based durable outcome for an intent whose business transaction
+ * threw. A thrown transaction cannot distinguish an aborted mutation from a
+ * committed one whose COMMIT acknowledgment was lost, so the counterparty's
+ * current state decides: state matching the admitted transition is recorded
+ * as applied, anything else as aborted. Returns false — leaving the intent
+ * unresolved for the reconciliation runbook — when the post-failure state is
+ * unreadable and no outcome write would be evidence-based.
+ */
+async function recordLifecycleIntentOutcomeAfterFailure(
+  env: Env,
+  audit: AuditService,
+  intent: AuditIntent,
+  counterpartyId: string,
+  event: Extract<MuralWebhookEvent, { kind: "kyc_status" | "tos_accepted" }> & {
+    deliveryId: string;
+  },
+  newStatus: string
+): Promise<boolean> {
+  let committed: boolean;
+  try {
+    const survivor = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: unknown }>();
+    const currentOrganization = survivor
+      ? readMuralOrganization(asPostgresJsonObject(survivor.provider_data).mural)
+      : undefined;
+    const effectiveStatus =
+      event.kind === "kyc_status" ? currentOrganization?.kycStatus : currentOrganization?.tosStatus;
+    committed = survivor !== undefined && effectiveStatus === newStatus;
+  } catch (verifyError) {
+    getLogger().error(
+      {
+        err: verifyError,
+        audit_intent_id: intent.id,
+        counterparty_id: counterpartyId,
+        provider_event_id: event.deliveryId,
+      },
+      "[mural webhook] could not read the counterparty state after the failed lifecycle transaction; leaving the admitted intent unresolved for reconciliation"
+    );
+    return false;
+  }
+  return audit.completeCriticalSystem(
+    intent,
+    committed
+      ? {
+          metadata: {
+            result: "applied",
+            commitVerifiedAfterFailure: true,
+            ...(event.kind === "kyc_status"
+              ? { normalizedKycStatus: mapMuralKycStatusToSdp(event.kycStatus) }
+              : {}),
+          },
+        }
+      : {
+          status: "failure",
+          metadata: { result: "aborted" },
+        }
+  );
 }
 
 async function handleOrganizationLifecycleEvent(

@@ -17,13 +17,45 @@ import { seedTestDatabase } from "@/test/mocks/db";
  * archiving it and handing the organization to a successor counterparty
  * ("handover"). "fail-wallet-mirror" instead makes the normalized KYC-wallet
  * write inside the business transaction fail, so the transaction aborts after
- * the audit admission. Off by default, so every other test exercises the
- * unmocked flow.
+ * the audit admission. "commit-ack-lost" (via the wrapped getDb below) makes
+ * the business transaction's call throw after its real COMMIT, so the writes
+ * are durable even though the caller saw a failure. Off by default, so every
+ * other test exercises the unmocked flow.
  */
 const concurrentWriter = vi.hoisted(() => ({
-  mode: "off" as "off" | "archive" | "reassign" | "handover" | "fail-wallet-mirror",
+  mode: "off" as
+    | "off"
+    | "archive"
+    | "reassign"
+    | "handover"
+    | "fail-wallet-mirror"
+    | "commit-ack-lost",
   handover: { organizationId: "", successorId: "" },
 }));
+
+/**
+ * Lost-COMMIT-acknowledgment simulation: the business transaction runs to its
+ * real commit and only then does the call throw, leaving the writes durable
+ * though the caller never observed success. Mode-gated so the wrapped client
+ * passes every other test through untouched.
+ */
+vi.mock("@/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db")>();
+  return {
+    ...actual,
+    getDb: (...args: Parameters<typeof actual.getDb>) => {
+      const db = actual.getDb(...args);
+      const originalTransaction = db.transaction.bind(db);
+      db.transaction = (async (callback: Parameters<typeof originalTransaction>[0]) => {
+        await originalTransaction(callback);
+        if (concurrentWriter.mode === "commit-ack-lost") {
+          throw new Error("commit acknowledgment lost (simulated)");
+        }
+      }) as typeof db.transaction;
+      return db;
+    },
+  };
+});
 
 vi.mock("@/db/repositories", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db/repositories")>();
@@ -538,6 +570,83 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
     };
     expect(outcomeMetadata.auditIntentId).toBe(sole(intents).resource_id);
     expect(outcomeMetadata.result).toBe("aborted");
+  });
+
+  /**
+   * A thrown transaction call cannot distinguish an aborted mutation from a
+   * committed one whose COMMIT acknowledgment was lost. When the durable
+   * state already carries the admitted transition, the abort must not be
+   * recorded: the outcome reads the landed state and records the intent as
+   * applied, so the append-only ledger describes the compliance change that
+   * actually took effect.
+   */
+  it("records the admitted intent as applied when the failed transaction had actually committed", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    concurrentWriter.mode = "commit-ack-lost";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_commit_ack_lost",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    // The handler still fails the delivery — the throw is all it saw — so
+    // the inbox row keeps the verified payload for an idempotent retry.
+    expect(applied).toBe(false);
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(1);
+
+    // Both effects of the business transaction are durable despite the
+    // lost acknowledgment.
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("approved");
+    expect(wallet?.kyc_status).toBe("verified");
+
+    // The ledger records what landed: the outcome is success-shaped and
+    // links back to the intent, not an abort misstating a committed change.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(intents).toHaveLength(1);
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).status).toBe("success");
+    const outcomeMetadata = parseMetadata(sole(outcomes)) as {
+      auditIntentId?: string;
+      result?: string;
+      commitVerifiedAfterFailure?: boolean;
+    };
+    expect(outcomeMetadata.auditIntentId).toBe(sole(intents).resource_id);
+    expect(outcomeMetadata.result).toBe("applied");
+    expect(outcomeMetadata.commitVerifiedAfterFailure).toBe(true);
   });
 
   it("ignores a stale replayed status without a new mutation or admission", async () => {
