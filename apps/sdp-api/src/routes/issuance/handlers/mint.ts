@@ -1,6 +1,6 @@
 import { createRpc, simulateTransaction } from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
-import type { TokenTransaction } from "@sdp/types";
+import type { PolicyCandidate, TokenTransaction } from "@sdp/types";
 import { findAssociatedTokenPda, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
 import type { Context } from "hono";
 import type { z } from "zod";
@@ -32,6 +32,7 @@ import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
+import { type MintAtaRent, preflightMintAtaRent } from "./ata-rent";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -742,17 +743,25 @@ export async function extractMintPolicyCandidate(
     destination,
   });
 
+  // Represent every value-moving effect of mint execution before enforcement:
+  // when the destination ATA does not exist yet, the pinned Mosaic mint builder
+  // prepends an ATA create the resolved fee payer funds, and that rent-exempt
+  // SOL outflow rides the candidate as a native SOL leg so amount, approval and
+  // velocity rules bind fresh-destination mints (SOLA9-464).
+  const ataRent = await preflightMintAtaRent({ env: c.env, mint: mintAddress, destination });
+  const candidate = buildIssuancePolicyCandidate({
+    auth,
+    token,
+    custodyWalletId,
+    walletId: providerWalletId,
+    operationType: "issuance_mint_execute",
+    amount: input.mint.amount,
+    destination: input.mint.destination,
+  });
+
   return {
-    candidate: buildIssuancePolicyCandidate({
-      auth,
-      token,
-      custodyWalletId,
-      walletId: providerWalletId,
-      operationType: "issuance_mint_execute",
-      amount: input.mint.amount,
-      destination: input.mint.destination,
-    }),
-    legs: [],
+    candidate,
+    legs: ataRent === null ? [] : [buildMintAtaRentLeg(candidate, ataRent)],
     body: input,
     resolved: {
       tokenId,
@@ -773,12 +782,37 @@ export async function extractMintPolicyCandidate(
       destination: input.mint.destination,
       amount: input.mint.amount,
       memo: input.mint.memo === undefined ? null : input.mint.memo,
+      ...(ataRent === null ? {} : { ataRent }),
     },
     executionRequestBody: {
       ...input,
       signingCustodyWalletId: custodyWalletId,
     },
     idempotencyKey: null,
+  };
+}
+
+/**
+ * The native SOL leg representing a mint's fee-payer-funded ATA rent: the same
+ * governed operation viewed as the rent outflow, so SOL amount, approval and
+ * velocity rules evaluate it alongside the token leg.
+ *
+ * @param candidate - The aggregate mint candidate the leg belongs to.
+ * @param ataRent - The preflighted ATA rent the resolved fee payer funds.
+ * @returns The policy candidate view of the rent outflow.
+ */
+function buildMintAtaRentLeg(candidate: PolicyCandidate, ataRent: MintAtaRent): PolicyCandidate {
+  return {
+    ...candidate,
+    asset: "SOL",
+    amount: ataRent.solAmount,
+    context: {
+      ...candidate.context,
+      purpose: "ata_rent",
+      tokenAccount: ataRent.tokenAccount,
+      rentLamports: ataRent.rentLamports,
+      payer: ataRent.payer,
+    },
   };
 }
 

@@ -418,6 +418,12 @@ describe("Issuance Routes", () => {
       }
     );
 
+    // The mint gate preflights the destination ATA to represent fee-payer rent
+    // (SOLA9-464). These routes govern the token amount, so default to an
+    // existing ATA (no rent leg); the dedicated mint-policy suite covers the
+    // rent leg itself.
+    vi.spyOn(SolanaRpc, "accountExists").mockResolvedValue(true);
+
     vi.spyOn(MosaicSdk, "getListConfig").mockResolvedValue({
       authority: TEST_ACTIVE_TOKEN.mintAuthority,
     } as never);
