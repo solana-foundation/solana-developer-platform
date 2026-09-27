@@ -152,6 +152,7 @@ describe("external-wallet withdrawal audit request attribution", () => {
     await seedTestDatabase(env);
     await clearKVStores(env);
     await seedAuth();
+    submitExternalWalletWithdrawal.mockReset();
     submitExternalWalletWithdrawal
       .mockResolvedValueOnce({
         position: { id: "earn_position_audit_attr", token_mint: "USDC" },
