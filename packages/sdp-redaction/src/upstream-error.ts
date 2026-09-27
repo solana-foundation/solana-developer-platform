@@ -63,6 +63,24 @@ function isSecretShapedUpstreamValue(value: string): boolean {
   return value.length >= 32 && !/[_.:]/.test(value) && /[a-z]/i.test(value) && /[0-9]/.test(value);
 }
 
+// A credential the caller itself holds (a bearer token, a credential id) has no
+// shape of its own: a short, separator-friendly value like a DFNS auth token
+// carries no known prefix and looks exactly like a provider enum code. Shape
+// filters cannot catch it, so callers that know their own secrets vet the
+// candidate against them by exact value — a provider echoing back what we
+// sent it must collapse to `unavailable`. Compared case-insensitively.
+function isKnownUpstreamSecret(trimmed: string, knownSecrets?: readonly string[]): boolean {
+  if (!knownSecrets || knownSecrets.length === 0) {
+    return false;
+  }
+
+  const lowered = trimmed.toLowerCase();
+  return knownSecrets.some(
+    (secret) =>
+      typeof secret === "string" && secret.length > 0 && secret.trim().toLowerCase() === lowered
+  );
+}
+
 /**
  * Reduce an upstream error body to a single machine-readable code that is safe
  * to surface in error messages. Free-form prose (anything with whitespace),
@@ -72,8 +90,17 @@ function isSecretShapedUpstreamValue(value: string): boolean {
  * `httpStatus` is used to drop code fields that merely repeat the HTTP status,
  * so Google-style `{ error: { code: 400, status: "INVALID_ARGUMENT" } }` bodies
  * report the descriptive status instead of the redundant number.
+ *
+ * `knownSecrets` are credentials the caller holds (bearer tokens, credential
+ * ids, key material): a candidate that equals one of them collapses to
+ * `unavailable` even when it is identifier-shaped and short, because a
+ * compromised provider can echo back exactly what it was sent.
  */
-export function summarizeUpstreamErrorBody(rawBody: string, httpStatus?: number): string {
+export function summarizeUpstreamErrorBody(
+  rawBody: string,
+  httpStatus?: number,
+  knownSecrets?: readonly string[]
+): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawBody);
@@ -88,7 +115,7 @@ export function summarizeUpstreamErrorBody(rawBody: string, httpStatus?: number)
 
     const record = candidate as Record<string, unknown>;
     for (const key of UPSTREAM_ERROR_CODE_KEYS) {
-      const code = normalizeUpstreamErrorCode(record[key], httpStatus);
+      const code = normalizeUpstreamErrorCode(record[key], httpStatus, knownSecrets);
       if (code) {
         return code;
       }
@@ -102,11 +129,16 @@ export function summarizeUpstreamErrorBody(rawBody: string, httpStatus?: number)
  * Value-level sibling of `summarizeUpstreamErrorBody` for callers that already
  * hold one parsed upstream field (not a raw body). Returns the value only when
  * it is safe to embed in an error message — identifier-shaped, not
- * credential-shaped — and `null` for everything else, so callers fail closed
- * by omitting the fragment instead of echoing provider-controlled prose.
+ * credential-shaped, and not a caller-held secret — and `null` for everything
+ * else, so callers fail closed by omitting the fragment instead of echoing
+ * provider-controlled prose.
  */
-export function summarizeUpstreamErrorValue(value: unknown, httpStatus?: number): string | null {
-  return normalizeUpstreamErrorCode(value, httpStatus);
+export function summarizeUpstreamErrorValue(
+  value: unknown,
+  httpStatus?: number,
+  knownSecrets?: readonly string[]
+): string | null {
+  return normalizeUpstreamErrorCode(value, httpStatus, knownSecrets);
 }
 
 function readErrorEnvelope(parsed: unknown): unknown {
@@ -116,13 +148,19 @@ function readErrorEnvelope(parsed: unknown): unknown {
   return (parsed as Record<string, unknown>).error;
 }
 
-function normalizeUpstreamErrorCode(value: unknown, httpStatus?: number): string | null {
+function normalizeUpstreamErrorCode(
+  value: unknown,
+  httpStatus?: number,
+  knownSecrets?: readonly string[]
+): string | null {
   if (typeof value === "number") {
     if (!Number.isInteger(value) || value === httpStatus) {
       return null;
     }
     const asString = String(value);
-    return isSecretShapedUpstreamValue(asString) ? null : asString;
+    return isSecretShapedUpstreamValue(asString) || isKnownUpstreamSecret(asString, knownSecrets)
+      ? null
+      : asString;
   }
 
   if (typeof value !== "string") {
@@ -134,5 +172,7 @@ function normalizeUpstreamErrorCode(value: unknown, httpStatus?: number): string
     return null;
   }
 
-  return isSecretShapedUpstreamValue(trimmed) ? null : trimmed;
+  return isSecretShapedUpstreamValue(trimmed) || isKnownUpstreamSecret(trimmed, knownSecrets)
+    ? null
+    : trimmed;
 }

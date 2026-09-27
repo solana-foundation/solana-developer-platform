@@ -84,6 +84,61 @@ describe("summarizeUpstreamErrorBody", () => {
     }
   });
 
+  it("fails closed when the value matches a caller-held secret", () => {
+    // Greptile finding on this PR: the shape filter accepts a short bare token
+    // like the DFNS auth-token fixture value (no prefix, under 32 chars, has
+    // separators), so a controlled provider echoing back exactly the credential
+    // it was sent would surface it as `code=<token>`. Callers therefore vet the
+    // candidate against their own held secrets by exact value.
+    for (const key of [
+      "errorCode",
+      "error_code",
+      "errorType",
+      "code",
+      "status",
+      "type",
+      "reason",
+    ]) {
+      assert.equal(
+        summarizeUpstreamErrorBody(JSON.stringify({ [key]: "dfns-auth-token-value" }), undefined, [
+          "dfns-auth-token-value",
+        ]),
+        "unavailable",
+        `held-secret echo must not surface via field ${key}`
+      );
+    }
+    assert.equal(
+      summarizeUpstreamErrorBody('{"error":{"code":"credential_poc"}}', undefined, [
+        "dfns-auth-token-value",
+        "credential_poc",
+      ]),
+      "unavailable"
+    );
+    // Matching is case-insensitive and trims the candidate.
+    assert.equal(
+      summarizeUpstreamErrorBody('{"code":"  DFNS-AUTH-TOKEN-VALUE  "}', undefined, [
+        "dfns-auth-token-value",
+      ]),
+      "unavailable"
+    );
+    assert.equal(
+      summarizeUpstreamErrorValue("dfns-auth-token-value", undefined, ["dfns-auth-token-value"]),
+      null
+    );
+    // Enum codes keep surfacing when no held secret is involved.
+    assert.equal(
+      summarizeUpstreamErrorBody('{"code":"WALLET_NOT_FOUND"}', undefined, [
+        "dfns-auth-token-value",
+      ]),
+      "WALLET_NOT_FOUND"
+    );
+    assert.equal(
+      summarizeUpstreamErrorBody('{"code":"dfns-auth-token-value"}'),
+      "dfns-auth-token-value"
+    );
+    assert.equal(summarizeUpstreamErrorValue("dfns-auth-token-value"), "dfns-auth-token-value");
+  });
+
   it("still surfaces provider enum codes that are not secret-shaped", () => {
     assert.equal(
       summarizeUpstreamErrorBody('{"code":"NOT_ENOUGH_PRECISION"}'),

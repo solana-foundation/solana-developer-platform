@@ -148,6 +148,14 @@ export interface DfnsApiClient {
       signatureId: string;
     }) => Promise<DfnsSignatureRequest>;
   };
+  /**
+   * Credentials this client authenticates with (bearer token, credential id,
+   * private key material). A compromised provider can echo back exactly what
+   * it was sent, and a short bare token carries no shape a filter could
+   * recognize, so provider-controlled fragments are also vetted against these
+   * values by exact match before they may surface in an error message.
+   */
+  readonly knownUpstreamSecrets?: readonly string[];
 }
 
 interface DfnsClientContext {
@@ -284,6 +292,18 @@ function normalizeDfnsPath(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+/**
+ * Every credential this client context holds, including the per-request user
+ * action token. Fed to the upstream error summarizer so a controlled provider
+ * echoing one of them back in an error `code` (or a failed-signature `reason`)
+ * collapses to `unavailable` even when the value is short and unprefix-shaped.
+ */
+function heldUpstreamSecrets(ctx: DfnsClientContext, userActionToken?: string): readonly string[] {
+  return [ctx.authToken, ctx.credentialId, ctx.privateKey, userActionToken].filter(
+    (secret): secret is string => typeof secret === "string" && secret.length > 0
+  );
+}
+
 function applyDfnsQueryParams(url: URL, query?: Record<string, string | number | undefined>): void {
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value !== undefined) {
@@ -409,7 +429,7 @@ async function dfnsRequestRaw(
 
   if (!response.ok) {
     throw new SigningError(
-      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${describeDfnsContentType(current.contentType)} code=${summarizeUpstreamErrorBody(current.rawBody, current.status)}`,
+      `${ctx.providerLabel} API error (${method} ${normalizedPath}): status=${current.status} contentType=${describeDfnsContentType(current.contentType)} code=${summarizeUpstreamErrorBody(current.rawBody, current.status, heldUpstreamSecrets(ctx, userActionToken))}`,
       "NETWORK_ERROR"
     );
   }
@@ -461,7 +481,7 @@ async function followDfnsRedirect(
   }
 
   throw new SigningError(
-    `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath}): status=${follow.status} code=${summarizeUpstreamErrorBody(follow.rawBody, follow.status)}`,
+    `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath}): status=${follow.status} code=${summarizeUpstreamErrorBody(follow.rawBody, follow.status, heldUpstreamSecrets(ctx))}`,
     "NETWORK_ERROR"
   );
 }
@@ -585,6 +605,7 @@ export function resolveDfnsNetwork(
 
 function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   return {
+    knownUpstreamSecrets: heldUpstreamSecrets(ctx),
     wallets: {
       getWallet: async (request: { walletId: string }) =>
         dfnsRequestJson<DfnsWallet>(ctx, "GET", `/wallets/${encodeURIComponent(request.walletId)}`),

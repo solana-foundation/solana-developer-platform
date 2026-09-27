@@ -667,7 +667,7 @@ export async function provisionUtilaWallet(
   );
 
   if (!response.ok) {
-    const errorCode = await safeReadUtilaError(response);
+    const errorCode = await safeReadUtilaError(response, [token]);
     throw new SigningError(
       `Utila CreateWallet failed (${response.status}): code=${errorCode}`,
       "NETWORK_ERROR"
@@ -744,11 +744,16 @@ function extractUtilaWalletId(name?: string): string | undefined {
 
 /**
  * Utila error bodies can echo the request (including the service-account bearer
- * token), so only a whitelisted upstream error code is surfaced.
+ * token), so only a whitelisted upstream error code is surfaced, and the minted
+ * access token is vetted by exact value: a controlled provider echoing it back
+ * fails closed even when the value is short and carries no token prefix.
  */
-async function safeReadUtilaError(response: Response): Promise<string> {
+async function safeReadUtilaError(
+  response: Response,
+  knownSecrets?: readonly string[]
+): Promise<string> {
   try {
-    return summarizeUpstreamErrorBody(await response.text(), response.status);
+    return summarizeUpstreamErrorBody(await response.text(), response.status, knownSecrets);
   } catch {
     return "unavailable";
   }

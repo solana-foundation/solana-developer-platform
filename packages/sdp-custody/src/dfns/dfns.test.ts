@@ -130,6 +130,42 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok(!error.message.includes("sk_live_platform_secret"));
   });
 
+  it("collapses a provider echo of the configured auth token to unavailable", async () => {
+    // Greptile finding on this PR: the auth token (`dfns-auth-token-value`) is
+    // short, separator-friendly, and carries no known credential prefix, so the
+    // shape filter alone accepts it — only exact matching against the held
+    // secret closes the echo of exactly what the provider was sent.
+    serveHandshake((url, init) => {
+      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
+        return jsonResponse({ code: AUTH_TOKEN }, 403);
+      }
+      return null;
+    });
+
+    const signer = await createSigner();
+    const error = await captureSignerError(signer);
+
+    assert.ok(error instanceof SignerError);
+    assert.match(error.message, /code=unavailable/);
+    assert.ok(!error.message.includes(AUTH_TOKEN));
+  });
+
+  it("omits a provider echo of the configured auth token from a failed signature request", async () => {
+    serveHandshake((url, init) => {
+      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
+        return jsonResponse({ id: "sig_poc", status: "Failed", reason: AUTH_TOKEN }, 200);
+      }
+      return null;
+    });
+
+    const signer = await createSigner();
+    const error = await captureSignerError(signer);
+
+    assert.ok(error instanceof SignerError);
+    assert.match(error.message, /signature request failed \(Failed\)(?!:)/);
+    assert.ok(!error.message.includes(AUTH_TOKEN));
+  });
+
   it("keeps an identifier-shaped reason from a failed signature request", async () => {
     serveHandshake((url, init) => {
       if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {

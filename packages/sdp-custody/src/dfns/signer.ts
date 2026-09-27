@@ -296,9 +296,15 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       if (TERMINAL_FAILURE_STATUSES.has(status)) {
         // `reason` is a provider-controlled response field on a 200 body, so it
         // gets the same compact-value discipline as the client's body
-        // summarizer: only an identifier-shaped, non-secret-shaped code is
-        // embedded; prose and credential-shaped values are omitted entirely.
-        const reason = summarizeUpstreamErrorValue(current.reason);
+        // summarizer — only an identifier-shaped, non-secret-shaped code is
+        // embedded — plus exact matching against the credentials the client
+        // holds: a provider echoing back its own bearer token or credential id
+        // is omitted entirely, even when the value is short and unprefix-shaped.
+        const reason = summarizeUpstreamErrorValue(
+          current.reason,
+          undefined,
+          this.client.knownUpstreamSecrets
+        );
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
             reason ? `: ${reason}` : ""
