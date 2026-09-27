@@ -338,4 +338,92 @@ describe("dfns signer upstream error redaction", () => {
     // the held secrets entirely.
     assert.ok(!(client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
   });
+
+  it("does not release another signature's held token when a poll response names a different ID", async () => {
+    // Greptile finding on this PR (re-review of the token retention): the
+    // token store is shared across concurrent signatures, and a poll response
+    // naming another pending signature's ID must not release that
+    // signature's token.
+    let mint = 0;
+    let lastMintedToken = "";
+    let signatureToken = "";
+    serveHandshake(
+      (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          signatureToken = lastMintedToken;
+          return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+        }
+        if (method === "GET" && url.pathname === "/keys/key_poc/signatures/sig_poc") {
+          // Hostile poll response: terminal, for a different signature.
+          return jsonResponse({ id: "sig_other", status: "Failed", reason: "unrelated" }, 200);
+        }
+        if (method === "POST" && url.pathname === "/wallets") {
+          return jsonResponse({ id: `wa_${mint}`, network: "SolanaDevnet" }, 200);
+        }
+        return null;
+      },
+      { userActionTokens: () => (lastMintedToken = `user_action_${++mint}`) }
+    );
+
+    const { client, signer } = await createTestClientAndSigner();
+    let caught: unknown;
+    const signing = signer
+      .signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }])
+      .catch((error) => {
+        caught = error;
+      });
+    for (let index = 0; index < 16; index += 1) {
+      await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    }
+    await signing;
+
+    assert.ok(caught instanceof SignerError);
+    assert.ok(signatureToken.length > 0);
+    assert.match(caught.message, /poll returned a different request ID/);
+    assert.ok(!caught.message.includes(signatureToken));
+    // sig_poc's token was not released by the mismatched response, and stays
+    // held even though the register alone would have evicted it.
+    assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
+  });
+
+  it("keeps the original token when a create response reuses a pending signature's ID", async () => {
+    let mint = 0;
+    let lastMintedToken = "";
+    const createdTokens: string[] = [];
+    serveHandshake(
+      (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          createdTokens.push(lastMintedToken);
+          return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+        }
+        if (method === "POST" && url.pathname === "/wallets") {
+          return jsonResponse({ id: `wa_${mint}`, network: "SolanaDevnet" }, 200);
+        }
+        return null;
+      },
+      { userActionTokens: () => (lastMintedToken = `user_action_${++mint}`) }
+    );
+
+    const { client } = await createTestClientAndSigner();
+    await client.keySignatures.createSignature({
+      keyId: "key_poc",
+      body: { kind: "Message", message: "0x010203" },
+    });
+    await client.keySignatures.createSignature({
+      keyId: "key_poc",
+      body: { kind: "Message", message: "0x010204" },
+    });
+    for (let index = 0; index < 16; index += 1) {
+      await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    }
+
+    const secrets = client.getKnownUpstreamSecrets?.() ?? [];
+    // The first signature's token is still held under the reused id...
+    assert.ok(secrets.includes(createdTokens[0]));
+    // ...while the second one, which the id refused to hold, aged out of the
+    // short-term register.
+    assert.ok(!secrets.includes(createdTokens[1]));
+  });
 });

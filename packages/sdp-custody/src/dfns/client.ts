@@ -706,8 +706,13 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
         if (userActionToken && signatureRequest?.id) {
           // Hold this request's token until its result is handled: newer
           // requests must not evict it from the register while the signature
-          // is still pending.
-          ctx.signatureUserActionTokens.set(signatureRequest.id, userActionToken);
+          // is still pending. A create response naming an id that is already
+          // pending must not clobber that signature's held token, so the
+          // first token stored under an id wins.
+          ctx.signatureUserActionTokens.set(
+            signatureRequest.id,
+            ctx.signatureUserActionTokens.get(signatureRequest.id) ?? userActionToken
+          );
         }
         return signatureRequest;
       },

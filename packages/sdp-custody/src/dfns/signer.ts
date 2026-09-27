@@ -285,12 +285,29 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     initial: DfnsSignatureRequest
   ): Promise<DfnsSignatureRequest> {
     let current = initial;
+    // The create response's id is this flow's signature id: it keys the token
+    // the client holds, and every poll is issued for it. Only this id's token
+    // is ever released, and responses naming a different id are refused —
+    // the client is shared, so it may hold tokens for other pending
+    // signatures whose echoes must stay covered.
+    const signatureId = current.id;
 
     for (let attempt = 0; attempt <= SIGNATURE_MAX_POLL_ATTEMPTS; attempt += 1) {
       const status = current.status;
 
+      if (signatureId && current.id && current.id !== signatureId) {
+        // Fail closed on a poll response that does not correspond to the
+        // request being polled: honoring (or releasing state for) another
+        // pending signature's result would let a provider unset or evade
+        // that signature's token protection. This flow's result is never
+        // handled, so its own token stays held too.
+        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+          message: `${this.providerLabel} signature request poll returned a different request ID`,
+        });
+      }
+
       if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
-        this.releaseSignatureUserActionToken(current);
+        this.releaseSignatureUserActionToken(signatureId);
         return current;
       }
 
@@ -308,7 +325,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
           undefined,
           this.client.getKnownUpstreamSecrets?.() ?? []
         );
-        this.releaseSignatureUserActionToken(current);
+        this.releaseSignatureUserActionToken(signatureId);
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
             reason ? `: ${reason}` : ""
@@ -316,7 +333,6 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         });
       }
 
-      const signatureId = current.id;
       if (!signatureId) {
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request is '${status}' but missing request ID`,
@@ -331,15 +347,17 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       current = await this.getSignatureRequest(keyId, signatureId);
     }
 
-    this.releaseSignatureUserActionToken(current);
+    // Timed out without a handled result: the token stays held, since the
+    // signature may still be resolved provider-side and its token echoed
+    // back later.
     throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
       message: `Timed out while waiting for ${this.providerLabel} signature request to complete`,
     });
   }
 
-  private releaseSignatureUserActionToken(request: DfnsSignatureRequest): void {
-    if (request.id) {
-      this.client.releaseSignatureUserActionToken?.(request.id);
+  private releaseSignatureUserActionToken(signatureId?: string): void {
+    if (signatureId) {
+      this.client.releaseSignatureUserActionToken?.(signatureId);
     }
   }
 }
