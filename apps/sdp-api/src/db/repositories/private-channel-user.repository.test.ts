@@ -109,6 +109,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
     await walletRepo.upsert({
       ...scope,
@@ -116,6 +117,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       instanceId: instanceA,
       walletId: "wal_2",
       pubkey: PUBKEY_B,
+      expectedRevocationEpoch: 0,
     });
 
     const [listed] = await repo.listByProject(scope);
@@ -133,6 +135,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     // Reconnect to a new instance: A is deactivated, B becomes the active one.
@@ -144,6 +147,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       instanceId: instanceB,
       walletId: "wal_2",
       pubkey: PUBKEY_B,
+      expectedRevocationEpoch: 0,
     });
 
     const [listed] = await repo.listByProject(scope);
@@ -159,6 +163,7 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
     await instanceRepo.deactivateActive(scope);
 

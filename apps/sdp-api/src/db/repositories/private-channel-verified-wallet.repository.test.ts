@@ -33,6 +33,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
   beforeEach(async () => {
     const db = getDb(env);
     await db.prepare("DELETE FROM private_channel_verified_wallets").run();
+    await db.prepare("DELETE FROM private_channel_wallet_revocation_epochs").run();
     await db.prepare("DELETE FROM private_channel_users").run();
     await db.prepare("DELETE FROM private_channel_instances").run();
     await db.prepare("DELETE FROM projects").run();
@@ -86,6 +87,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
     await repo.upsert({
       ...scope,
@@ -93,6 +95,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_2",
       pubkey: PUBKEY_B,
+      expectedRevocationEpoch: 0,
     });
     // Re-verify PUBKEY_A under a new wallet id: refresh, not a new row.
     await repo.upsert({
@@ -101,6 +104,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_1b",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     const rows = await repo.listByUserAndInstance(PCU_ID, instanceA);
@@ -126,6 +130,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     await expect(
@@ -135,6 +140,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         instanceId: instanceA,
         walletId: "wal_1",
         pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 0,
       })
     ).rejects.toMatchObject({
       code: "CONFLICT",
@@ -149,6 +155,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     expect(await repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).toMatchObject({
@@ -172,6 +179,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         instanceId: instanceA,
         walletId: "wal_1",
         pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 0,
       })
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(await repo.listByUserAndInstance(PCU_ID, instanceA)).toEqual([]);
@@ -195,8 +203,17 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(marker).toMatchObject({ user_id: PCU_ID, instance_id: instanceA, pubkey: PUBKEY_A });
     await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    await expect(repo.deletePendingRevocation(PCU_ID, instanceA, PUBKEY_A)).resolves.toBe(true);
+    // The revoke removes the retry marker with the mirror and advances the epoch.
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
   });
 
   it("records cleanup independently when another identity owns the same pubkey", async () => {
@@ -215,6 +232,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_active",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     await expect(
@@ -240,18 +258,20 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
 
     expect(await repo.listByUserAndInstance(PCU_ID, instanceA)).toHaveLength(1);
   });
 
-  it("deleteByUserInstanceAndPubkey removes only the named pubkey; stale pubkey → false", async () => {
+  it("revokeVerifiedWallet removes only the named pubkey and advances its epoch; stale → false", async () => {
     await repo.upsert({
       ...scope,
       userId: PCU_ID,
       instanceId: instanceA,
       walletId: "wal_1",
       pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
     });
     await repo.upsert({
       ...scope,
@@ -259,12 +279,84 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       instanceId: instanceA,
       walletId: "wal_2",
       pubkey: PUBKEY_B,
+      expectedRevocationEpoch: 0,
     });
 
-    expect(await repo.deleteByUserInstanceAndPubkey(PCU_ID, "pci_missing", PUBKEY_A)).toBe(false);
-    expect(await repo.deleteByUserInstanceAndPubkey(PCU_ID, instanceA, PUBKEY_A)).toBe(true);
+    expect(
+      await repo.revokeVerifiedWallet({
+        ...scope,
+        userId: "pcu_missing",
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+      })
+    ).toBe(false);
+    expect(
+      await repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+      })
+    ).toBe(true);
 
     const rows = await repo.listByUserAndInstance(PCU_ID, instanceA);
     expect(rows.map((r) => r.pubkey)).toEqual([PUBKEY_B]);
+    // The epoch is (instance, pubkey)-scoped and advances on every committed
+    // revocation, even one that removed no mirror row for this identity.
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+    // A different pubkey on the same instance has its own epoch.
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_B)).resolves.toBe(0);
+  });
+
+  it("the revocation epoch advances monotonically and gates the conditional upsert", async () => {
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+
+    await repo.revokeVerifiedWallet({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      pubkey: PUBKEY_A,
+    });
+    await repo.revokeVerifiedWallet({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      pubkey: PUBKEY_A,
+    });
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
+
+    // A verification that observed epoch 0 (stale continuation) loses.
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 0,
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
+
+    // A verification that observed the current epoch lands and refreshes the
+    // mirror: a fresh verify after a revocation stays supported.
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 2,
+      })
+    ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_1" });
   });
 });

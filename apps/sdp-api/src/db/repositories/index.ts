@@ -410,8 +410,10 @@ export {
 } from "./private-channel-user.repository";
 export { createPostgresPrivateChannelUserRepository } from "./private-channel-user.repository.postgres";
 export type {
+  ConditionalUpsertVerifiedWalletInput,
   PrivateChannelVerifiedWalletRepository,
   PrivateChannelVerifiedWalletRow,
+  RevokeVerifiedWalletInput,
   UpsertVerifiedWalletInput,
   VerifiedWalletScope,
 } from "./private-channel-verified-wallet.repository";

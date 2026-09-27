@@ -1,0 +1,42 @@
+-- Durable revocation epoch for Private Channels wallet verifications
+-- (SOLA9-664 / APE-812).
+--
+-- `private_channel_verified_wallets` is the SDP mirror of an SPC wallet
+-- binding, and the value-movement gates trust it. A verification request spends
+-- seconds inside its SPC challenge → sign → verify handshake before it upserts
+-- the mirror, so a concurrent revocation could complete its SPC `deleteWallet`
+-- plus mirror removal in that window and the stale verification continuation
+-- would then recreate the mirror row while SPC stayed unbound — a row the gates
+-- accept even though the upstream authority has no binding.
+--
+-- This table is the revocation barrier that survives mirror deletion: a
+-- revocation advances `epoch` in the same transaction that removes the mirror,
+-- and a verification records the epoch it observed before its SPC handshake so
+-- its conditional mirror upsert only lands when the epoch is unchanged. An
+-- epoch that advanced means a revocation committed after the verification read
+-- it, so the verification's local write must lose.
+--
+-- The epoch is keyed by (instance_id, pubkey) — the same identity as the mirror
+-- conflict target — and never resets: higher is always newer.
+
+CREATE TABLE IF NOT EXISTS private_channel_wallet_revocation_epochs (
+    organization_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    instance_id TEXT NOT NULL,
+    pubkey TEXT NOT NULL,
+    epoch BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+    updated_at TEXT NOT NULL DEFAULT sdp_iso_now(),
+
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES private_channel_instances(id) ON DELETE CASCADE,
+
+    PRIMARY KEY (instance_id, pubkey)
+);
+
+ALTER TABLE private_channel_wallet_revocation_epochs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private_channel_wallet_revocation_epochs FORCE ROW LEVEL SECURITY;
+CREATE POLICY sdp_tenant_isolation ON private_channel_wallet_revocation_epochs
+  USING (sdp_tenant_isolation_allows(organization_id))
+  WITH CHECK (sdp_tenant_isolation_allows(organization_id));

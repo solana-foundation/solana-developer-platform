@@ -1,10 +1,12 @@
 import type { AppDb } from "@/db";
 import { conflict } from "@/lib/errors";
 import {
+  type ConditionalUpsertVerifiedWalletInput,
   generatePrivateChannelVerifiedWalletId,
   mapPrivateChannelVerifiedWalletRow,
   mapPrivateChannelWalletRevocationRow,
   type PrivateChannelVerifiedWalletRepository,
+  type RevokeVerifiedWalletInput,
   type UpsertVerifiedWalletInput,
 } from "./private-channel-verified-wallet.repository";
 
@@ -12,19 +14,28 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
   db: AppDb
 ): PrivateChannelVerifiedWalletRepository {
   return {
-    async upsert(input: UpsertVerifiedWalletInput) {
+    async upsert(input: ConditionalUpsertVerifiedWalletInput) {
       const row = await db
         .prepare(
           `WITH active_principal AS (
              SELECT id
-               FROM private_channel_users
-              WHERE id = ?
-                AND organization_id = ?
-                AND project_id = ?
-                AND instance_id = ?
-                AND disabled_at IS NULL
-                AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
-              FOR UPDATE
+                FROM private_channel_users
+               WHERE id = ?
+                 AND organization_id = ?
+                 AND project_id = ?
+                 AND instance_id = ?
+                 AND disabled_at IS NULL
+                 AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+               FOR UPDATE
+           ),
+           revocation_epoch AS (
+             SELECT COALESCE(
+                      (SELECT epoch
+                         FROM private_channel_wallet_revocation_epochs
+                        WHERE instance_id = ?
+                          AND pubkey = ?),
+                      0
+                    ) AS epoch
            )
            INSERT INTO private_channel_verified_wallets (
                id, organization_id, project_id, user_id, instance_id,
@@ -32,24 +43,28 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
              )
              SELECT ?, ?, ?, id, ?, ?, ?
                FROM active_principal
+              WHERE (SELECT epoch FROM revocation_epoch) = ?
              ON CONFLICT (instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    verified_at = sdp_iso_now(),
                    updated_at = sdp_iso_now()
              WHERE private_channel_verified_wallets.user_id = excluded.user_id
-          RETURNING *`
+           RETURNING *`
         )
         .bind(
           input.userId,
           input.organizationId,
           input.projectId,
           input.instanceId,
+          input.instanceId,
+          input.pubkey,
           generatePrivateChannelVerifiedWalletId(),
           input.organizationId,
           input.projectId,
           input.instanceId,
           input.walletId,
-          input.pubkey
+          input.pubkey,
+          input.expectedRevocationEpoch
         )
         .first<Record<string, unknown>>();
       if (!row) {
@@ -58,6 +73,55 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         );
       }
       return mapPrivateChannelVerifiedWalletRow(row);
+    },
+
+    async getRevocationEpoch(instanceId: string, pubkey: string) {
+      const row = await db
+        .prepare(
+          `SELECT epoch FROM private_channel_wallet_revocation_epochs
+            WHERE instance_id = ?
+              AND pubkey = ?`
+        )
+        .bind(instanceId, pubkey)
+        .first<{ epoch: number }>();
+      return row?.epoch ?? 0;
+    },
+
+    async revokeVerifiedWallet(input: RevokeVerifiedWalletInput) {
+      // One transaction: the epoch advance is the barrier that makes an
+      // in-flight verification's conditional upsert lose, so it must commit
+      // together with the mirror and retry-marker removal.
+      const results = await db.batch([
+        db
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocation_epochs (
+                 organization_id, project_id, instance_id, pubkey, epoch
+               )
+               VALUES (?, ?, ?, ?, 1)
+               ON CONFLICT (instance_id, pubkey) DO UPDATE
+                 SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
+                     updated_at = sdp_iso_now()`
+          )
+          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey),
+        db
+          .prepare(
+            `DELETE FROM private_channel_verified_wallets
+              WHERE user_id = ?
+                AND instance_id = ?
+                AND pubkey = ?`
+          )
+          .bind(input.userId, input.instanceId, input.pubkey),
+        db
+          .prepare(
+            `DELETE FROM private_channel_wallet_revocations
+              WHERE user_id = ?
+                AND instance_id = ?
+                AND pubkey = ?`
+          )
+          .bind(input.userId, input.instanceId, input.pubkey),
+      ]);
+      const [, mirrorDeleted, markerDeleted] = results;
+      return mirrorDeleted > 0 || markerDeleted > 0;
     },
 
     async recordPendingRevocation(input: UpsertVerifiedWalletInput) {
@@ -100,34 +164,6 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         .bind(userId, instanceId)
         .all<Record<string, unknown>>();
       return (result.results ?? []).map(mapPrivateChannelWalletRevocationRow);
-    },
-
-    async deletePendingRevocation(userId: string, instanceId: string, pubkey: string) {
-      const row = await db
-        .prepare(
-          `DELETE FROM private_channel_wallet_revocations
-             WHERE user_id = ?
-               AND instance_id = ?
-               AND pubkey = ?
-          RETURNING id`
-        )
-        .bind(userId, instanceId, pubkey)
-        .first<Record<string, unknown>>();
-      return row !== null;
-    },
-
-    async deleteByUserInstanceAndPubkey(userId: string, instanceId: string, pubkey: string) {
-      const row = await db
-        .prepare(
-          `DELETE FROM private_channel_verified_wallets
-             WHERE user_id = ?
-               AND instance_id = ?
-               AND pubkey = ?
-          RETURNING id`
-        )
-        .bind(userId, instanceId, pubkey)
-        .first<Record<string, unknown>>();
-      return row !== null;
     },
 
     async findByInstanceAndPubkey(scope, instanceId, pubkey) {

@@ -72,10 +72,10 @@ let client: {
 };
 let verifiedRepo: {
   upsert: ReturnType<typeof vi.fn>;
+  getRevocationEpoch: ReturnType<typeof vi.fn>;
+  revokeVerifiedWallet: ReturnType<typeof vi.fn>;
   recordPendingRevocation: ReturnType<typeof vi.fn>;
   listPendingRevocations: ReturnType<typeof vi.fn>;
-  deletePendingRevocation: ReturnType<typeof vi.fn>;
-  deleteByUserInstanceAndPubkey: ReturnType<typeof vi.fn>;
   findByInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
 };
@@ -122,14 +122,14 @@ beforeEach(async () => {
       pubkey: PUBKEY,
       verified_at: "2026-07-20T00:00:00Z",
     }),
+    getRevocationEpoch: vi.fn().mockResolvedValue(0),
+    revokeVerifiedWallet: vi.fn().mockResolvedValue(true),
     recordPendingRevocation: vi.fn().mockResolvedValue({
       id: "pcvw_cleanup",
       wallet_id: WALLET_ID,
       pubkey: PUBKEY,
     }),
     listPendingRevocations: vi.fn().mockResolvedValue([]),
-    deletePendingRevocation: vi.fn().mockResolvedValue(false),
-    deleteByUserInstanceAndPubkey: vi.fn().mockResolvedValue(true),
     findByInstanceAndPubkey: vi.fn().mockResolvedValue({
       id: "pcvw_1",
       organization_id: "org_1",
@@ -366,12 +366,9 @@ describe("verifyPrivateChannelWallet", () => {
     expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
     );
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
-      "pcu_1",
-      "pci_1",
-      PUBKEY
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
     );
-    expect(verifiedRepo.deletePendingRevocation).toHaveBeenCalledWith("pcu_1", "pci_1", PUBKEY);
   });
 
   it("keeps a cleanup marker when late-binding revocation fails", async () => {
@@ -389,8 +386,7 @@ describe("verifyPrivateChannelWallet", () => {
     });
 
     expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledTimes(1);
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
-    expect(verifiedRepo.deletePendingRevocation).not.toHaveBeenCalled();
+    expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
   });
 
   it("does not revoke SPC on an unrelated persistence failure for an active identity", async () => {
@@ -482,10 +478,8 @@ describe("deletePrivateChannelWallet", () => {
       selectedPrincipal,
       expect.anything()
     );
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
-      selectedPrincipal.id,
-      "pci_1",
-      PUBKEY
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: selectedPrincipal.id, instanceId: "pci_1", pubkey: PUBKEY })
     );
     expect(deleted).toBe(true);
   });
@@ -508,10 +502,8 @@ describe("deletePrivateChannelWallet", () => {
     const { deleted } = await deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY);
 
     expect(client.deleteWallet).toHaveBeenCalledTimes(1);
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledWith(
-      "pcu_1",
-      "pci_1",
-      PUBKEY
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
     );
     expect(deleted).toBe(true);
   });
@@ -537,7 +529,7 @@ describe("deletePrivateChannelWallet", () => {
     await expect(deletePrivateChannelWallet(env, auth, "prj_1", PUBKEY)).rejects.toMatchObject({
       code: "AUTH_UNAVAILABLE",
     });
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).not.toHaveBeenCalled();
+    expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
   });
 });
 
@@ -553,7 +545,7 @@ describe("revokePrivateChannelPrincipalWallets", () => {
 
     expect(client.deleteWallet).toHaveBeenNthCalledWith(1, "jwt", PUBKEY);
     expect(client.deleteWallet).toHaveBeenNthCalledWith(2, "jwt", secondPubkey);
-    expect(verifiedRepo.deleteByUserInstanceAndPubkey).toHaveBeenCalledTimes(2);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledTimes(2);
     expect(revoked).toEqual([PUBKEY, secondPubkey]);
   });
 
@@ -562,13 +554,15 @@ describe("revokePrivateChannelPrincipalWallets", () => {
     verifiedRepo.listPendingRevocations.mockResolvedValue([
       { user_id: "pcu_1", instance_id: "pci_1", pubkey: PUBKEY },
     ]);
-    verifiedRepo.deletePendingRevocation.mockResolvedValue(true);
+    verifiedRepo.revokeVerifiedWallet.mockResolvedValue(true);
 
     await expect(
       revokePrivateChannelPrincipalWallets(env, auth, "prj_1", "pcu_1")
     ).resolves.toEqual([PUBKEY]);
 
     expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
-    expect(verifiedRepo.deletePendingRevocation).toHaveBeenCalledWith("pcu_1", "pci_1", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
   });
 });

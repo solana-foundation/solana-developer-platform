@@ -8,6 +8,12 @@
  *   4. `challenge-wallet` → sign the challenge with THAT wallet → `verify-wallet`
  *   5. persist the verification (idempotent per (user, instance, pubkey))
  *
+ * The persist step is conditional on the durable revocation epoch for
+ * (instance, pubkey): a revocation advances it in the same transaction that
+ * removes the mirror, so an in-flight verification whose upstream binding was
+ * concurrently revoked cannot recreate `private_channel_verified_wallets`
+ * after `deleteWallet` succeeded (SOLA9-664).
+ *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
  * resolved signer is a message-partial-signer at runtime; we sign the challenge
@@ -30,7 +36,7 @@ import {
   type PrivateChannelVerifiedWalletRow,
 } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { AppError, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
+import { AppError, conflict, forbidden, notFound, providerNotConfigured } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
@@ -101,7 +107,7 @@ async function revokeWalletWithSession(
   session: WalletSession,
   pubkey: string
 ): Promise<boolean> {
-  const { instance, pcUser, client, spcAuth } = session;
+  const { scope, instance, pcUser, client, spcAuth } = session;
   // SPC returns 400 when the wallet is already unlinked. Treat that response as
   // convergence and still remove the local mirror; all other failures abort.
   await withSpcAuth(spcAuth, async (token) => {
@@ -114,12 +120,15 @@ async function revokeWalletWithSession(
     }
   });
 
-  const repo = createPrivateChannelVerifiedWalletRepository(env);
-  const [mirrorDeleted, markerDeleted] = await Promise.all([
-    repo.deleteByUserInstanceAndPubkey(pcUser.id, instance.id, pubkey),
-    repo.deletePendingRevocation(pcUser.id, instance.id, pubkey),
-  ]);
-  return mirrorDeleted || markerDeleted;
+  // The local half is atomic: advancing the revocation epoch together with the
+  // mirror removal is what makes an in-flight verification's conditional upsert
+  // lose, so a completed revocation can never be undone by a stale mirror write.
+  return createPrivateChannelVerifiedWalletRepository(env).revokeVerifiedWallet({
+    ...scope,
+    userId: pcUser.id,
+    instanceId: instance.id,
+    pubkey,
+  });
 }
 
 /**
@@ -177,6 +186,15 @@ export async function verifyPrivateChannelWallet(
   // The exact signer is retained across the challenge retry.
   const pubkey = signer.address;
 
+  const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
+  // The revocation barrier (SOLA9-664): observe the durable revocation epoch
+  // for (instance, pubkey) BEFORE the SPC handshake, and let the final mirror
+  // upsert refuse unless the epoch is unchanged. A revocation that commits
+  // while this verification is in flight advances the epoch, so the stale
+  // verification continuation cannot resurrect the mirror after the
+  // revocation's SPC delete and mirror removal succeeded.
+  const observedRevocationEpoch = await verifiedWalletRepo.getRevocationEpoch(instance.id, pubkey);
+
   // Retry unit is challenge → sign → verify (restarted from challenge on 401).
   // The nonce is challenge-scoped; never retry verify alone with a fresh token.
   await withSpcAuth(spcAuth, async (token) => {
@@ -220,7 +238,6 @@ export async function verifyPrivateChannelWallet(
   });
 
   let row: PrivateChannelVerifiedWalletRow;
-  const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
   try {
     row = await verifiedWalletRepo.upsert({
       ...scope,
@@ -228,8 +245,30 @@ export async function verifyPrivateChannelWallet(
       instanceId: instance.id,
       walletId,
       pubkey,
+      expectedRevocationEpoch: observedRevocationEpoch,
     });
   } catch (error) {
+    // A revocation can win while the remote verification is in flight: its
+    // epoch advance rejects this upsert. Re-read the epoch to tell that race
+    // apart from a persistence failure — the SPC binding this request created
+    // was already removed by the winning revocation, so no compensating call
+    // is needed and the mirror stays deleted.
+    let revokedWhileVerifying = false;
+    try {
+      revokedWhileVerifying =
+        (await verifiedWalletRepo.getRevocationEpoch(instance.id, pubkey)) !==
+        observedRevocationEpoch;
+    } catch (statusError) {
+      getLogger().warn(
+        { principalId: pcUser.id, instanceId: instance.id, statusError },
+        "private-channel wallet: could not check the revocation epoch after a rejected mirror"
+      );
+    }
+    if (revokedWhileVerifying) {
+      throw conflict(
+        "This wallet verification was revoked while it was being verified. Start the verification again."
+      );
+    }
     // A disable can win while the remote verification is in flight. Only undo
     // the SPC binding after a fresh read confirms that exact identity is now
     // disabled; ordinary persistence failures must not remove a valid binding.
