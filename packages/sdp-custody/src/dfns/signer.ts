@@ -285,11 +285,10 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     initial: DfnsSignatureRequest
   ): Promise<DfnsSignatureRequest> {
     let current = initial;
-    // The create response's id is this flow's signature id: it keys the token
-    // the client holds, and every poll is issued for it. Only this id's token
-    // is ever released, and responses naming a different id are refused —
-    // the client is shared, so it may hold tokens for other pending
-    // signatures whose echoes must stay covered.
+    // The create response's id is this flow's signature id, and every poll is
+    // issued for it. Responses naming a different id are refused — a shared
+    // client holds tokens for other pending signatures too, and a poll result
+    // for a different request must never be honored as this one's.
     const signatureId = current.id;
 
     for (let attempt = 0; attempt <= SIGNATURE_MAX_POLL_ATTEMPTS; attempt += 1) {
@@ -297,17 +296,14 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
 
       if (signatureId && current.id && current.id !== signatureId) {
         // Fail closed on a poll response that does not correspond to the
-        // request being polled: honoring (or releasing state for) another
-        // pending signature's result would let a provider unset or evade
-        // that signature's token protection. This flow's result is never
-        // handled, so its own token stays held too.
+        // request being polled: honoring another pending signature's result
+        // here would let a provider smuggle its state into this error.
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request poll returned a different request ID`,
         });
       }
 
       if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
-        this.releaseSignatureUserActionToken(signatureId);
         return current;
       }
 
@@ -317,15 +313,13 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         // summarizer — only an identifier-shaped, non-secret-shaped code is
         // embedded — plus exact matching against the credentials the client
         // holds, read live so it includes the user action token minted for
-        // this very request. That token is held for the signature's whole
-        // lifetime (however many newer requests are minted meanwhile), and is
-        // released only after the reason has been vetted against it.
+        // this very request and for any request minted within the retention
+        // window: nothing echoed back can dodge vetting by aging out.
         const reason = summarizeUpstreamErrorValue(
           current.reason,
           undefined,
           this.client.getKnownUpstreamSecrets?.() ?? []
         );
-        this.releaseSignatureUserActionToken(signatureId);
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
             reason ? `: ${reason}` : ""
@@ -347,18 +341,9 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       current = await this.getSignatureRequest(keyId, signatureId);
     }
 
-    // Timed out without a handled result: the token stays held, since the
-    // signature may still be resolved provider-side and its token echoed
-    // back later.
     throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
       message: `Timed out while waiting for ${this.providerLabel} signature request to complete`,
     });
-  }
-
-  private releaseSignatureUserActionToken(signatureId?: string): void {
-    if (signatureId) {
-      this.client.releaseSignatureUserActionToken?.(signatureId);
-    }
   }
 }
 

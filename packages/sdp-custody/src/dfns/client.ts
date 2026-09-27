@@ -149,23 +149,15 @@ export interface DfnsApiClient {
     }) => Promise<DfnsSignatureRequest>;
   };
   /**
-   * Drop the token held for a signature request once its result has been
-   * handled (its `reason` vetted on failure, or a non-failure result
-   * returned). Until then the token stays held even if newer requests evict
-   * it from the short-term register, so a provider echo of an in-flight
-   * signature's token still fails closed.
-   */
-  readonly releaseSignatureUserActionToken?: (signatureId: string) => void;
-  /**
    * Credentials this client authenticates with (bearer token, credential id,
-   * private key material, and every user action token it has minted or is
-   * still holding for a pending signature). A compromised provider can echo
-   * back exactly what it was sent, and a short bare token carries no shape a
-   * filter could recognize, so provider-controlled fragments are also vetted
-   * against these values by exact match before they may surface in an error
-   * message. A function, not a snapshot: per-request user action tokens are
-   * minted after construction, and the failed-signature `reason` vetting must
-   * see the token of the very request that produced the signature.
+   * private key material, and every user action token it has minted in the
+   * current retention window). A compromised provider can echo back exactly
+   * what it was sent, and a short bare token carries no shape a filter could
+   * recognize, so provider-controlled fragments are also vetted against these
+   * values by exact match before they may surface in an error message. A
+   * function, not a snapshot: per-request user action tokens are minted after
+   * construction, and the failed-signature `reason` vetting must see the
+   * token of the very request that produced the signature.
    */
   readonly getKnownUpstreamSecrets?: () => readonly string[];
 }
@@ -179,28 +171,18 @@ interface DfnsClientContext {
   providerLabel: string;
   userAgent: string;
   /**
-   * User action tokens this context has minted, oldest first, bounded to the
-   * most recent few. A provider echoing one back in a later response — an
-   * error `code`, or a 200-body `reason` on the signature request it was sent
-   * with — must fail closed even though the value is short and prefix-less.
+   * Every user action token this context has minted in the current retention
+   * window, mapped to its mint time. Held far beyond the maximum signature
+   * poll window, so no in-flight signature's token can be evicted before its
+   * result is vetted — however many newer requests are minted meanwhile, and
+   * whatever IDs a provider returns for them.
    */
-  readonly userActionTokens: string[];
-  /**
-   * Tokens minted for signature requests whose result has not been handled
-   * yet, keyed by signature request id. The register above can evict a token
-   * while its signature is still pending, so each request's token is held
-   * here for its whole lifetime and dropped when the signer handles the
-   * result. Bounded by the number of unresolved signature flows, not by time
-   * or request count.
-   */
-  readonly signatureUserActionTokens: Map<string, string>;
+  readonly heldUserActionTokens: Map<string, number>;
 }
 
 interface DfnsRequestOptions {
   requireUserAction?: boolean;
   query?: Record<string, string | number | undefined>;
-  /** Invoked as soon as this request's user action token has been minted. */
-  onUserActionToken?: (userActionToken: string) => void;
 }
 
 interface DfnsRawResponse {
@@ -323,42 +305,36 @@ function normalizeDfnsPath(path: string): string {
 }
 
 /**
- * Every credential this client context holds, plus the user action tokens it
- * has minted so far, the ones still held for pending signature requests, and
- * the per-request one, if it is still in flight. Fed to the upstream error
- * summarizer so a controlled provider echoing one of them back in an error
- * `code` (or a failed-signature `reason`) collapses to `unavailable` even
- * when the value is short and unprefix-shaped.
+ * Every credential this client context holds, plus every user action token it
+ * has minted in the current retention window (and the per-request one, if it
+ * is still in flight). Fed to the upstream error summarizer so a controlled
+ * provider echoing one of them back in an error `code` (or a failed-signature
+ * `reason`) collapses to `unavailable` even when the value is short and
+ * unprefix-shaped.
  */
 function heldUpstreamSecrets(ctx: DfnsClientContext, userActionToken?: string): readonly string[] {
   return [
     ctx.authToken,
     ctx.credentialId,
     ctx.privateKey,
-    ...ctx.userActionTokens,
-    ...ctx.signatureUserActionTokens.values(),
+    ...ctx.heldUserActionTokens.keys(),
     userActionToken,
   ].filter((secret): secret is string => typeof secret === "string" && secret.length > 0);
 }
 
-// A long-lived client mints one token per write request, so the register is
-// bounded to the most recent few. It is only a short-term net for echoes in
-// unrelated requests' error bodies; a signature request's own token is held
-// for its whole lifetime via `signatureUserActionTokens`, however many newer
-// requests are minted while it is pending.
-const MAX_HELD_USER_ACTION_TOKENS = 8;
+// Every token minted in the last hour is held, so a token can never age out
+// before the result of the request it authorized is vetted: the maximum
+// signature poll window is 30 seconds, 120x shorter than this retention.
+const USER_ACTION_TOKEN_RETENTION_MS = 3_600_000;
 
 function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
-  const tokens = ctx.userActionTokens;
-  const existing = tokens.indexOf(userActionToken);
-  if (existing >= 0) {
-    tokens.splice(existing, 1);
+  const now = Date.now();
+  for (const [token, mintedAt] of ctx.heldUserActionTokens) {
+    if (now - mintedAt >= USER_ACTION_TOKEN_RETENTION_MS) {
+      ctx.heldUserActionTokens.delete(token);
+    }
   }
-  tokens.push(userActionToken);
-  const overflow = tokens.length - MAX_HELD_USER_ACTION_TOKENS;
-  if (overflow > 0) {
-    tokens.splice(0, overflow);
-  }
+  ctx.heldUserActionTokens.set(userActionToken, now);
 }
 
 function applyDfnsQueryParams(url: URL, query?: Record<string, string | number | undefined>): void {
@@ -419,8 +395,7 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     ),
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
-    userActionTokens: [],
-    signatureUserActionTokens: new Map(),
+    heldUserActionTokens: new Map(),
   };
 }
 
@@ -469,9 +444,8 @@ async function dfnsRequestRaw(
   if (userActionToken) {
     // Recorded before the request goes out: any response to this request —
     // error body, redirect follow-up, or a later signature status — may echo
-    // the token back, and every summarizer site vets against the register.
+    // the token back, and every summarizer site vets against the held tokens.
     recordUserActionToken(ctx, userActionToken);
-    options?.onUserActionToken?.(userActionToken);
   }
   const headers = createDfnsRequestHeaders(ctx, userActionToken);
   const response = await fetch(url, {
@@ -694,28 +668,13 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
         dfnsRequestJson<DfnsWallet>(ctx, "POST", "/wallets", request.body),
     },
     keySignatures: {
-      createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) => {
-        let userActionToken: string | undefined;
-        const signatureRequest = await dfnsRequestJson<DfnsSignatureRequest>(
+      createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) =>
+        dfnsRequestJson<DfnsSignatureRequest>(
           ctx,
           "POST",
           `/keys/${encodeURIComponent(request.keyId)}/signatures`,
-          request.body,
-          { onUserActionToken: (token) => (userActionToken = token) }
-        );
-        if (userActionToken && signatureRequest?.id) {
-          // Hold this request's token until its result is handled: newer
-          // requests must not evict it from the register while the signature
-          // is still pending. A create response naming an id that is already
-          // pending must not clobber that signature's held token, so the
-          // first token stored under an id wins.
-          ctx.signatureUserActionTokens.set(
-            signatureRequest.id,
-            ctx.signatureUserActionTokens.get(signatureRequest.id) ?? userActionToken
-          );
-        }
-        return signatureRequest;
-      },
+          request.body
+        ),
       getSignature: async (request: { keyId: string; signatureId: string }) =>
         dfnsRequestJson<DfnsSignatureRequest>(
           ctx,
@@ -724,9 +683,6 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
             request.signatureId
           )}`
         ),
-    },
-    releaseSignatureUserActionToken: (signatureId: string) => {
-      ctx.signatureUserActionTokens.delete(signatureId);
     },
   };
 }
@@ -767,8 +723,7 @@ function resolveIbmHavenContext(
     ),
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
-    userActionTokens: [],
-    signatureUserActionTokens: new Map(),
+    heldUserActionTokens: new Map(),
   };
 }
 

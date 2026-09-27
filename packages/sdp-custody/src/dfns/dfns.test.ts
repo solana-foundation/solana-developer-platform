@@ -281,12 +281,11 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok(!error.message.includes("user_action_poc"));
   });
 
-  it("holds a pending signature's token even as newer requests evict the register", async () => {
-    // Greptile finding on this PR (re-review of the token-vetting fix): a
-    // bounded register evicts a pending signature's token once enough newer
-    // requests are minted, so the failed result's `reason` echo of that token
-    // would survive vetting. Each request's token must instead be held until
-    // its signature result is handled.
+  it("holds a pending signature's token however many newer requests are minted", async () => {
+    // Greptile finding on this PR: a short-lived register evicts a pending
+    // signature's user action token once enough newer requests are minted, so
+    // the failed result's `reason` echo of that token would survive vetting.
+    // Tokens are therefore held for a retention window far beyond any poll.
     let mint = 0;
     let lastMintedToken = "";
     let signatureToken = "";
@@ -310,16 +309,11 @@ describe("dfns signer upstream error redaction", () => {
         }
         return null;
       },
-      {
-        userActionTokens: () => (lastMintedToken = `user_action_${++mint}`),
-      }
+      { userActionTokens: () => (lastMintedToken = `user_action_${++mint}`) }
     );
 
     const { client, signer } = await createTestClientAndSigner();
     let caught: unknown;
-    // The signature request's own token is minted first; the createWallet
-    // mints below run while it is pending and push it out of the short-term
-    // register (more than its 8 slots, whatever the interleaving).
     const signing = signer
       .signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }])
       .catch((error) => {
@@ -334,9 +328,9 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok(signatureToken.length > 0);
     assert.match(caught.message, /signature request failed \(Failed\)(?!:)/);
     assert.ok(!caught.message.includes(signatureToken));
-    // The result has been handled, so the token is released and drops out of
-    // the held secrets entirely.
-    assert.ok(!(client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
+    // The token is held for the whole retention window, so it stays covered
+    // against echoes in later responses too.
+    assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
   });
 
   it("does not release another signature's held token when a poll response names a different ID", async () => {
@@ -387,7 +381,11 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok((client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
   });
 
-  it("keeps the original token when a create response reuses a pending signature's ID", async () => {
+  it("holds both tokens when two signature requests receive the same provider ID", async () => {
+    // Greptile finding on this PR (re-review of the keyed retention): a
+    // provider reusing a pending signature's ID must not be able to unprotect
+    // either signature's token. Retention is keyed by token value and time,
+    // not by provider-supplied IDs, so both stay held.
     let mint = 0;
     let lastMintedToken = "";
     const createdTokens: string[] = [];
@@ -420,10 +418,7 @@ describe("dfns signer upstream error redaction", () => {
     }
 
     const secrets = client.getKnownUpstreamSecrets?.() ?? [];
-    // The first signature's token is still held under the reused id...
     assert.ok(secrets.includes(createdTokens[0]));
-    // ...while the second one, which the id refused to hold, aged out of the
-    // short-term register.
-    assert.ok(!secrets.includes(createdTokens[1]));
+    assert.ok(secrets.includes(createdTokens[1]));
   });
 });
