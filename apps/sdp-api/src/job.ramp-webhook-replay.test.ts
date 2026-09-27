@@ -316,11 +316,11 @@ describe("managed reconciliation job replays the ramp webhook inbox", () => {
     await seedAgedPendingInboxRow();
     vi.mocked(trackPendingTransfers).mockRejectedValue(new Error("transfers down"));
 
-    // The replay leg runs beside the transfers chain: its sibling still ran,
-    // and the tick's failure surfaces instead of being swallowed.
-    vi.mocked(reconcileSponsorshipBudgets).mockClear();
-
     await expect(runCronJob()).rejects.toThrow("transfers down");
+
+    // The replay leg runs beside the transfers chain: its sibling still ran
+    // (once — the beforeEach reset kept earlier tests' calls out of the
+    // count), and the tick's failure surfaces instead of being swallowed.
 
     expect(reconcileSponsorshipBudgets).toHaveBeenCalledTimes(1);
   });
