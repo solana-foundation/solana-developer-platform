@@ -15,11 +15,13 @@ import {
  * stale verification's compensating delete. Must exceed the worst-case
  * compensating delete — every SPC call times out at 8s
  * (SPC_AUTH_TIMEOUT_MS in services/private-channels/wallets.ts) and the delete
- * chain is at most a token refresh plus the delete (~24s) — so a marker older
+ * chain is at most a 401 token refresh plus the delete — so a marker older
  * than the lease cannot have a compensating delete still in flight, and
- * taking it over is safe.
+ * taking it over is safe. The exception is the undecided-cleanup fallback
+ * marker, which never has a delete in flight and is therefore written already
+ * outside the lease.
  */
-const CLEANUP_CLAIM_LEASE = "60 seconds";
+const CLEANUP_CLAIM_LEASE = "30 seconds";
 
 export function createPostgresPrivateChannelVerifiedWalletRepository(
   db: AppDb
@@ -327,10 +329,15 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       // (the same serialization the claim uses): a mirror that belongs to this
       // identity is a newer verification's, its binding must survive, and no
       // marker is recorded — recording one would latch the mirror upsert
-      // against a mirror that already exists. The lock closes the read-then-
-      // insert race against a verification that is landing right now: it
-      // cannot commit its mirror while this transaction holds the lock, so it
-      // sees the marker and is refused instead.
+      // against a mirror that already exists.
+      //
+      // The record is also skipped when a marker already exists: it may belong
+      // to a cleanup claim whose compensating delete is still in flight, and
+      // refreshing that marker's lease is the claim's job. A marker this
+      // fallback creates fresh is written already outside the cleanup lease —
+      // no compensating delete is in flight for it, so the next refused
+      // verification takes the cleanup over immediately instead of standing
+      // down for a whole lease.
       return db.transaction(async (tx) => {
         await tx
           .prepare(
@@ -367,16 +374,15 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           return false;
         }
 
-        await tx
+        const backdated = new Date(Date.now() - 3_600_000).toISOString();
+        const inserted = await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocations (
                  id, organization_id, project_id, user_id, instance_id,
-                 wallet_id, pubkey
+                 wallet_id, pubkey, created_at, updated_at
                )
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
-               SET wallet_id = excluded.wallet_id,
-                   updated_at = sdp_iso_now()`
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, instance_id, pubkey) DO NOTHING`
           )
           .bind(
             generatePrivateChannelVerifiedWalletId(),
@@ -385,10 +391,12 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
             input.userId,
             input.instanceId,
             input.walletId,
-            input.pubkey
+            input.pubkey,
+            backdated,
+            backdated
           )
           .run();
-        return true;
+        return inserted > 0;
       });
     },
 

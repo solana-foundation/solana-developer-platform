@@ -354,6 +354,79 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(Date.now() - new Date(markers[0].updated_at).getTime()).toBeLessThan(60_000);
   });
 
+  it("the fallback marker is recorded outside the cleanup lease and never refreshes a pending claim", async () => {
+    // The undecided-cleanup fallback records a marker with no compensating
+    // delete in flight: it is written already outside the lease, so the next
+    // refused verification takes the cleanup over immediately.
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    const markers = await repo.listPendingRevocations(PCU_ID, instanceA);
+    expect(markers).toHaveLength(1);
+    expect(Date.now() - new Date(markers[0].updated_at).getTime()).toBeGreaterThan(30_000);
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+
+    // A marker that belongs to a cleanup claim keeps its lease: the fallback
+    // must not refresh it (that would extend the pending cleaner's stand-down
+    // window), and a claim that sees it still stands down.
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    const claimed = await repo.listPendingRevocations(PCU_ID, instanceA);
+    expect(claimed).toHaveLength(1);
+    const leasedAt = claimed[0].updated_at;
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(
+      repo.listPendingRevocations(PCU_ID, instanceA).then((rows) => rows[0].updated_at)
+    ).resolves.toBe(leasedAt);
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_3",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(false);
+  });
+
   it("the cleanup claim records cleanup independently when another identity owns the same pubkey", async () => {
     const db = getDb(env);
     await db

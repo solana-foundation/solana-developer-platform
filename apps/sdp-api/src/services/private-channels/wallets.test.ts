@@ -474,6 +474,69 @@ describe("verifyPrivateChannelWallet", () => {
     );
   });
 
+  it("re-claims the owed cleanup once the pending cleaner's marker clears", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    // The upsert was refused by the pending-revocation marker another
+    // rejected verification's cleanup left behind, so the first claim stands
+    // down — but that cleaner's delete then finishes and its marker clears.
+    verifiedRepo.hasPendingRevocation.mockResolvedValueOnce(true).mockResolvedValue(false);
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValueOnce(false).mockResolvedValue(true);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
+    });
+
+    // Standing down while the shared marker is fresh must not strand this
+    // request's own binding: after the marker clears, the re-claim finishes
+    // the owed cleanup here instead of leaving it undiscoverable.
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(2);
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+  });
+
+  it("stands down without deleting while another cleaner's marker stays pending", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    verifiedRepo.hasPendingRevocation.mockResolvedValue(true);
+    // The pending cleaner's delete is still in flight: both claims stand down
+    // (the second only after the bounded wait), and nothing is deleted — two
+    // concurrent deletes would let the first finisher clear the shared marker
+    // while the second delete is still outstanding.
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
+    });
+
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(1);
+    expect(client.deleteWallet).not.toHaveBeenCalled();
+    expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it("retries the claim once before recording the fallback marker", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
+    // The first claim attempt hits a transient persistence failure; the retry
+    // succeeds, so the cleanup proceeds without any fallback marker.
+    verifiedRepo.claimStaleVerificationCleanup
+      .mockRejectedValueOnce(new Error("database unavailable"))
+      .mockResolvedValue(true);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
+    });
+
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+    expect(verifiedRepo.recordPendingRevocation).not.toHaveBeenCalled();
+  });
+
   it("keeps the claimed cleanup recoverable when the compensating SPC delete fails", async () => {
     verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
     principalRepo.getById.mockResolvedValue({

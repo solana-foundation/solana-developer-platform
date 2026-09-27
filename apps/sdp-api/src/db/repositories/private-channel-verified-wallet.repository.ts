@@ -139,7 +139,13 @@ export interface PrivateChannelVerifiedWalletRepository {
    * (returning false) when a mirror that belongs to this identity already
    * exists: that mirror is a newer verification's, its binding must survive,
    * and a marker would latch the mirror upsert against a row that is already
-   * there. Single-writer contract as for upsert.
+   * there. It is also skipped when a marker already exists — it may belong to
+   * a cleanup claim whose compensating delete is still in flight, and
+   * refreshing that marker's lease is the claim's job. A marker this fallback
+   * creates is written already outside the cleanup lease (no compensating
+   * delete is in flight for it), so the next refused verification takes the
+   * cleanup over immediately instead of standing down for a whole lease.
+   * Single-writer contract as for upsert.
    */
   recordPendingRevocation(input: UpsertVerifiedWalletInput): Promise<boolean>;
   /** Pending upstream revocations for one identity and instance. */

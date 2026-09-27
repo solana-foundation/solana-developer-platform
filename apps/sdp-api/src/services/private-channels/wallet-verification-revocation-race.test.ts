@@ -581,7 +581,7 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
       wallet_id: WALLET_ID,
       pubkey: signerAddress,
     });
-  });
+  }, 30_000);
 
   it("still allows a fresh verification after a completed revocation", async () => {
     harness = await createAuthHarness(false);

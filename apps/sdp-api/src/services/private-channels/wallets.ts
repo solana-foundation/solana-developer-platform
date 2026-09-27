@@ -197,6 +197,183 @@ async function recordPendingRevocation(
   }
 }
 
+// How long a stand-down cleanup waits for the pending cleaner's marker to
+// clear before re-claiming. The pending compensating delete is timeout-bounded
+// (every SPC call times out at SPC_AUTH_TIMEOUT_MS), so a short wait covers
+// the usual overlap; past it, the request reports the retryable revocation
+// and the marker's lease bounds the pending cleaner instead.
+const CLEANUP_PENDING_WAIT_MS = 2_000;
+const CLEANUP_PENDING_POLL_MS = 150;
+
+/**
+ * Whether the pending cleaner's marker for this pubkey cleared within a short
+ * bounded wait. Unreadable state is treated as "did not clear": the caller
+ * stands down and reports the retryable revocation.
+ */
+async function waitForPendingRevocationClear(
+  env: Env,
+  principalId: string,
+  instanceId: string,
+  pubkey: string
+): Promise<boolean> {
+  const deadline = Date.now() + CLEANUP_PENDING_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, CLEANUP_PENDING_POLL_MS));
+    if (!(await hasPendingRevocation(env, principalId, instanceId, pubkey))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * After a rejected mirror write, re-read the state that decides the
+ * compensating cleanup: whether a revocation won the epoch race while the
+ * verification was in flight, whether the identity was disabled meanwhile,
+ * and whether a pending-revocation marker still owes a compensating SPC
+ * delete (the marker latched this mirror write out, so this request must not
+ * surface the raw identity conflict and instead reports the revocation as
+ * retryable). Each check is best-effort: a transient read failure leaves the
+ * flag undetected.
+ */
+async function rejectedMirrorState(
+  env: Env,
+  session: WalletSession,
+  observedRevocationEpoch: number,
+  pubkey: string
+): Promise<{ revokedWhileVerifying: boolean; disabled: boolean; pendingRevocation: boolean }> {
+  const { scope, instance, pcUser } = session;
+  let revokedWhileVerifying = false;
+  try {
+    revokedWhileVerifying =
+      (await createPrivateChannelVerifiedWalletRepository(env).getRevocationEpoch(
+        instance.id,
+        pubkey
+      )) !== observedRevocationEpoch;
+  } catch (statusError) {
+    getLogger().warn(
+      { principalId: pcUser.id, instanceId: instance.id, statusError },
+      "private-channel wallet: could not check the revocation epoch after a rejected mirror"
+    );
+  }
+  // Only undo the SPC binding after a fresh read confirms that exact identity
+  // is now disabled; ordinary persistence failures must not remove a valid
+  // binding.
+  let disabled = false;
+  try {
+    const current = await createPrivateChannelUserRepository(env).getById(scope, pcUser.id);
+    disabled = Boolean(current?.disabled_at);
+  } catch (statusError) {
+    getLogger().warn(
+      { principalId: pcUser.id, instanceId: instance.id, statusError },
+      "private-channel wallet: could not check identity state after a rejected mirror"
+    );
+  }
+  const pendingRevocation = await hasPendingRevocation(env, pcUser.id, instance.id, pubkey);
+  return { revokedWhileVerifying, disabled, pendingRevocation };
+}
+
+/**
+ * The compensating cleanup a rejected verification runs after a lost race:
+ * claim the cleanup (under the revocation-epoch row lock), and when claimed,
+ * revoke the upstream binding this request's verify-wallet created.
+ *
+ * The winning revocation's SPC delete may have run BEFORE this request's
+ * verify-wallet created the upstream binding, so the completed cleanup did not
+ * necessarily cover the binding this request just created. The compensating
+ * delete is idempotent (SPC answers 400 for an already unlinked wallet and
+ * that converges), so it must run after a lost race — but never over a newer
+ * verification: the claim stands down when a fresh verification of this
+ * identity has already re-created the mirror, and otherwise advances the epoch
+ * and records the durable retry marker in the same transaction, so a failed or
+ * interrupted SPC delete leaves the late binding recoverable by the next
+ * principal-disable cleanup. The claim also stands down while another rejected
+ * verification's cleanup for the same binding is still pending (a fresh
+ * marker): SPC keeps one binding per (SPC user, pubkey), so that cleaner's
+ * single delete covers this request too, and a second concurrent delete would
+ * let the first finisher clear the shared marker while the second delete is
+ * still in flight — a fresh verification landing in that window would lose its
+ * binding and mirror to the outstanding delete. The marker latches the mirror
+ * upsert the whole time: a verification that lands afterwards is refused with
+ * a retryable conflict and finishes the owed cleanup itself once the claim is
+ * free or stale, so the compensating delete can never take a fresh
+ * verification's binding.
+ *
+ * Single best effort: failures are logged; the durable retry marker recorded
+ * by the claim keeps the late upstream binding recoverable either way.
+ */
+async function compensateRejectedVerification(
+  env: Env,
+  session: WalletSession,
+  input: { walletId: string; pubkey: string; pendingRevocation: boolean }
+): Promise<void> {
+  const { scope, instance, pcUser, client, spcAuth } = session;
+  const { walletId, pubkey, pendingRevocation } = input;
+  const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
+  const claimInput = {
+    ...scope,
+    userId: pcUser.id,
+    instanceId: instance.id,
+    walletId,
+    pubkey,
+  };
+  let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
+  try {
+    cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
+      ? "claimed"
+      : "superseded";
+    if (cleanup === "superseded" && pendingRevocation) {
+      // The pending cleaner's delete may already have returned while its
+      // marker is still latched, so standing down here could strand a
+      // binding this request's own handshake just created with no mirror
+      // and no marker. Wait briefly for the marker to clear — the pending
+      // delete is timeout-bounded — and re-claim once, finishing the owed
+      // cleanup here. A mirror that re-appeared meanwhile makes the
+      // re-claim stand down for the newer verification instead.
+      if (await waitForPendingRevocationClear(env, pcUser.id, instance.id, pubkey)) {
+        cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
+          ? "claimed"
+          : "superseded";
+      }
+    }
+  } catch (claimError) {
+    getLogger().warn(
+      { principalId: pcUser.id, instanceId: instance.id, claimError },
+      "private-channel wallet: could not claim the late-binding cleanup after a rejected mirror"
+    );
+    // The claim failed, so cleanup stays undecided and nothing is deleted.
+    // Retry the claim once first — a transient persistence failure should
+    // not latch verifications for a whole marker lease — and only then
+    // record the retry marker without advancing the epoch (best effort).
+    // The marker is skipped for a mirror this identity already re-created,
+    // whose binding must survive, and for a marker whose cleaner may still
+    // be running.
+    try {
+      cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
+        ? "claimed"
+        : "superseded";
+    } catch (claimRetryError) {
+      getLogger().warn(
+        { principalId: pcUser.id, instanceId: instance.id, claimRetryError },
+        "private-channel wallet: cleanup claim retry failed after a rejected mirror"
+      );
+    }
+    if (cleanup === "undecided") {
+      await recordPendingRevocation(env, claimInput);
+    }
+  }
+  if (cleanup === "claimed") {
+    try {
+      await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
+    } catch (cleanupError) {
+      getLogger().warn(
+        { principalId: pcUser.id, instanceId: instance.id, cleanupError },
+        "private-channel wallet: could not revoke a late binding after a rejected mirror"
+      );
+    }
+  }
+}
+
 /**
  * The default identity's verified wallets for the project's active instance
  * (empty when no instance is connected). Scoped to the active
@@ -314,104 +491,16 @@ export async function verifyPrivateChannelWallet(
       expectedRevocationEpoch: observedRevocationEpoch,
     });
   } catch (error) {
-    // A revocation or a principal disable can win while the remote
-    // verification is in flight; its epoch advance rejects this upsert.
-    // Re-read the epoch to tell that race apart from a persistence failure.
-    let revokedWhileVerifying = false;
-    try {
-      revokedWhileVerifying =
-        (await verifiedWalletRepo.getRevocationEpoch(instance.id, pubkey)) !==
-        observedRevocationEpoch;
-    } catch (statusError) {
-      getLogger().warn(
-        { principalId: pcUser.id, instanceId: instance.id, statusError },
-        "private-channel wallet: could not check the revocation epoch after a rejected mirror"
-      );
+    const session: WalletSession = { scope, instance, pcUser, client, spcAuth };
+    const state = await rejectedMirrorState(env, session, observedRevocationEpoch, pubkey);
+    if (state.revokedWhileVerifying || state.disabled || state.pendingRevocation) {
+      await compensateRejectedVerification(env, session, {
+        walletId,
+        pubkey,
+        pendingRevocation: state.pendingRevocation,
+      });
     }
-    // A disable can win while the remote verification is in flight. Only undo
-    // the SPC binding after a fresh read confirms that exact identity is now
-    // disabled; ordinary persistence failures must not remove a valid binding.
-    let disabled = false;
-    try {
-      const current = await createPrivateChannelUserRepository(env).getById(scope, pcUser.id);
-      disabled = Boolean(current?.disabled_at);
-    } catch (statusError) {
-      getLogger().warn(
-        { principalId: pcUser.id, instanceId: instance.id, statusError },
-        "private-channel wallet: could not check identity state after a rejected mirror"
-      );
-    }
-    // A pending-revocation marker for this pubkey means another rejected
-    // verification's compensating cleanup is still owed the upstream SPC
-    // delete. The marker latched this mirror write out (the upsert refuses
-    // while a marker exists), so this request must not surface the raw
-    // identity conflict: it owns a share of the owed cleanup and reports the
-    // revocation as retryable instead.
-    const pendingRevocation = await hasPendingRevocation(env, pcUser.id, instance.id, pubkey);
-    if (revokedWhileVerifying || disabled || pendingRevocation) {
-      // The winning revocation's SPC delete may have run BEFORE this request's
-      // verify-wallet created the upstream binding, so the completed cleanup
-      // did not necessarily cover the binding this request just created. The
-      // compensating delete is idempotent (SPC answers 400 for an already
-      // unlinked wallet and that converges), so it must run after a lost race
-      // — but never over a newer verification: the claim takes the
-      // revocation-epoch row lock and stands down when a fresh verification
-      // of this identity has already re-created the mirror, and otherwise
-      // advances the epoch and records the durable retry marker in the same
-      // transaction, so a failed or interrupted SPC delete leaves the late
-      // binding recoverable by the next principal-disable cleanup. The claim
-      // also stands down while another rejected verification's cleanup for
-      // the same binding is still pending (a fresh marker): SPC keeps one
-      // binding per (SPC user, pubkey), so that cleaner's single delete
-      // covers this request too, and a second concurrent delete would let
-      // the first finisher clear the shared marker while the second delete
-      // is still in flight — a fresh verification landing in that window
-      // would lose its binding and mirror to the outstanding delete. The
-      // marker latches the mirror upsert the whole time: a verification that
-      // lands afterwards is refused with a retryable conflict and finishes
-      // the owed cleanup itself once the claim is free or stale, so the
-      // compensating delete can never take a fresh verification's binding.
-      let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
-      try {
-        cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup({
-          ...scope,
-          userId: pcUser.id,
-          instanceId: instance.id,
-          walletId,
-          pubkey,
-        }))
-          ? "claimed"
-          : "superseded";
-      } catch (claimError) {
-        getLogger().warn(
-          { principalId: pcUser.id, instanceId: instance.id, claimError },
-          "private-channel wallet: could not claim the late-binding cleanup after a rejected mirror"
-        );
-        // The claim failed, so cleanup stays undecided and nothing is deleted
-        // — but the late upstream binding must stay recoverable. Record the
-        // retry marker without advancing the epoch (best effort). It is
-        // skipped for a mirror this identity already re-created, whose
-        // binding must survive.
-        await recordPendingRevocation(env, {
-          ...scope,
-          userId: pcUser.id,
-          instanceId: instance.id,
-          walletId,
-          pubkey,
-        });
-      }
-      if (cleanup === "claimed") {
-        try {
-          await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
-        } catch (cleanupError) {
-          getLogger().warn(
-            { principalId: pcUser.id, instanceId: instance.id, cleanupError },
-            "private-channel wallet: could not revoke a late binding after a rejected mirror"
-          );
-        }
-      }
-    }
-    if (revokedWhileVerifying || pendingRevocation) {
+    if (state.revokedWhileVerifying || state.pendingRevocation) {
       throw conflict(
         "This wallet verification was revoked while it was being verified. Start the verification again."
       );
