@@ -390,7 +390,7 @@ export function registerIssuancePaths(registry: OpenAPIRegistry) {
     summary: "Update token",
     operationId: "updateToken",
     description:
-      "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
+      "Updates stored token fields. For deployed tokens, metadata fields (name, description, uri, imageUrl) are also written on-chain through the current metadata authority, which requires the tokens:admin permission; callers holding only tokens:write are rejected with 403. Undeployed drafts stay editable with tokens:write.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,

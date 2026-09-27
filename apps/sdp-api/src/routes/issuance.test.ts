@@ -5010,6 +5010,282 @@ describe("Issuance Routes", () => {
       }
     });
 
+    // SOLA9-500: deployed-token metadata is canonical token identity, and the
+    // dashboard only exposes its edit affordance to `tokens:admin`. The API must
+    // enforce the same authority, so a `tokens:write` key can reach neither the
+    // signer nor `MosaicService.updateMetadata` for deployed metadata.
+    it("rejects deployed-token metadata updates from a tokens:write key without tokens:admin", async () => {
+      const db = getDb(env);
+      const writeKey = {
+        id: "key_issuance_write_only",
+        raw: "sk_test_issuance_write_only",
+        prefix: "sk_test_wri",
+      } as const;
+      const readKey = {
+        id: "key_issuance_read_only",
+        raw: "sk_test_issuance_read_only",
+        prefix: "sk_test_rea",
+      } as const;
+      const writeHash = await seedProjectApiKey(db, env, {
+        key: writeKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+      });
+      const readHash = await seedProjectApiKey(db, env, {
+        key: readKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_readonly",
+        permissions: ["tokens:read"],
+      });
+      await Promise.all([
+        seedCachedApiKey(env, writeHash, {
+          id: writeKey.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          role: "api_developer",
+          permissions: ["tokens:read", "tokens:write"],
+          environment: "sandbox",
+          rateLimitTier: "standard",
+          allowedIps: null,
+          signingWalletId: null,
+          status: "active",
+          expiresAt: null,
+          rotationDeadline: null,
+          organizationStatus: "active",
+        }),
+        seedCachedApiKey(env, readHash, {
+          id: readKey.id,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+          role: "api_readonly",
+          permissions: ["tokens:read"],
+          environment: "sandbox",
+          rateLimitTier: "standard",
+          allowedIps: null,
+          signingWalletId: null,
+          status: "active",
+          expiresAt: null,
+          rotationDeadline: null,
+          organizationStatus: "active",
+        }),
+      ]);
+
+      const token = await seedIssuedToken({
+        id: "tok_metadata_admin_gate",
+        name: "Canonical name",
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata").mockResolvedValue({
+        signature: "sig_should_never_sign",
+        slot: 1n,
+      });
+
+      try {
+        const patch = {
+          name: "Attacker-controlled canonical name",
+          description: "Changed without tokens:admin",
+          uri: "https://attacker.example/redirected.json",
+          imageUrl: "https://attacker.example/logo.png",
+        };
+        const denied = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${writeKey.raw}`,
+            },
+            body: JSON.stringify(patch),
+          },
+          env
+        );
+
+        expect(denied.status).toBe(403);
+        expect(signer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+        const row = await db
+          .prepare("SELECT name, description, uri, image_url FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{
+            name: string;
+            description: string | null;
+            uri: string | null;
+            image_url: string | null;
+          }>();
+        expect(row).toEqual({
+          name: "Canonical name",
+          description: "A test token",
+          uri: null,
+          image_url: null,
+        });
+
+        const readOnly = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${readKey.raw}`,
+            },
+            body: JSON.stringify(patch),
+          },
+          env
+        );
+        expect(readOnly.status).toBe(403);
+        expect(signer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+      } finally {
+        updateMetadata.mockRestore();
+      }
+    });
+
+    it("keeps draft-only metadata edits available to a tokens:write key without tokens:admin", async () => {
+      const db = getDb(env);
+      const writeKey = {
+        id: "key_issuance_draft_write",
+        raw: "sk_test_issuance_draft_write",
+        prefix: "sk_test_dra",
+      } as const;
+      const writeHash = await seedProjectApiKey(db, env, {
+        key: writeKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+      });
+      await seedCachedApiKey(env, writeHash, {
+        id: writeKey.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+        environment: "sandbox",
+        rateLimitTier: "standard",
+        allowedIps: null,
+        signingWalletId: null,
+        status: "active",
+        expiresAt: null,
+        rotationDeadline: null,
+        organizationStatus: "active",
+      });
+
+      const createRes = await app.request(
+        "/v1/issuance/tokens",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${writeKey.raw}`,
+          },
+          body: JSON.stringify({ name: "Draft Token", symbol: "DRAFT" }),
+        },
+        env
+      );
+      expect(createRes.status).toBe(201);
+      const { id: draftId } = (await createRes.json()).data.token;
+
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata");
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${draftId}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${writeKey.raw}`,
+            },
+            body: JSON.stringify({ name: "Draft Renamed", description: "Draft description" }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(updateMetadata).not.toHaveBeenCalled();
+        const row = await db
+          .prepare("SELECT name, description FROM issued_tokens WHERE id = ?")
+          .bind(draftId)
+          .first<{ name: string; description: string }>();
+        expect(row).toEqual({ name: "Draft Renamed", description: "Draft description" });
+      } finally {
+        updateMetadata.mockRestore();
+      }
+    });
+
+    it("still allows deployed-token non-metadata updates from a tokens:write key without tokens:admin", async () => {
+      const db = getDb(env);
+      const writeKey = {
+        id: "key_issuance_supply_write",
+        raw: "sk_test_issuance_supply_write",
+        prefix: "sk_test_sup",
+      } as const;
+      const writeHash = await seedProjectApiKey(db, env, {
+        key: writeKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+      });
+      await seedCachedApiKey(env, writeHash, {
+        id: writeKey.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+        environment: "sandbox",
+        rateLimitTier: "standard",
+        allowedIps: null,
+        signingWalletId: null,
+        status: "active",
+        expiresAt: null,
+        rotationDeadline: null,
+        organizationStatus: "active",
+      });
+
+      const token = await seedIssuedToken({
+        id: "tok_metadata_nongated_field",
+        name: "Canonical name",
+        decimals: 0,
+      });
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata");
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${writeKey.raw}`,
+            },
+            body: JSON.stringify({ maxSupply: "1000000" }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(200);
+        expect(updateMetadata).not.toHaveBeenCalled();
+        const row = await db
+          .prepare("SELECT max_supply FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ max_supply: string | null }>();
+        expect(row?.max_supply).toBe("1000000");
+      } finally {
+        updateMetadata.mockRestore();
+      }
+    });
+
     it("rejects revoked metadata updates before signing, audit intent, or token mutation", async () => {
       const token = await seedIssuedToken({ name: "Immutable metadata" });
       vi.mocked(AuthorityResolution.resolveCurrentAuthorityForRole).mockRestore();

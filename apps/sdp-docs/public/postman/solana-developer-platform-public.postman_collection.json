@@ -770,7 +770,7 @@
               }
             ],
             "url": "{{baseUrl}}/v1/issuance/tokens/{{tokenId}}",
-            "description": "Updates stored token fields. For deployed tokens, metadata fields are also written on-chain through the current metadata authority.",
+            "description": "Updates stored token fields. For deployed tokens, metadata fields (name, description, uri, imageUrl) are also written on-chain through the current metadata authority, which requires the tokens:admin permission; callers holding only tokens:write are rejected with 403. Undeployed drafts stay editable with tokens:write.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"signingCustodyWalletId\": \"cwlt_example\",\n  \"name\": \"Example Token Updated\",\n  \"symbol\": \"\",\n  \"decimals\": 0,\n  \"description\": \"Updated token description.\",\n  \"uri\": \"https://example.com/metadata.json\",\n  \"imageUrl\": \"https://example.com/token.png\",\n  \"requiresAllowlist\": true,\n  \"maxSupply\": \"1000000\"\n}",

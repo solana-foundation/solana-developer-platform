@@ -6,9 +6,17 @@ import { z } from "zod";
 import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
-import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
+import {
+  badRequest,
+  badRequestQuery,
+  conflict,
+  insufficientPermissions,
+  internalError,
+  notFound,
+} from "@/lib/errors";
 import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
+import { grantedPermissions } from "@/middleware/auth";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { AuditService } from "@/services/audit.service";
@@ -76,19 +84,52 @@ function getOnChainMetadataPatch(input: {
   return patch;
 }
 
+type OnChainMetadataPatch = ReturnType<typeof getOnChainMetadataPatch>;
+
+/**
+ * True when a PATCH body mutates canonical metadata of a deployed token and
+ * therefore signs on-chain through the live metadata authority. Draft tokens
+ * (no mint, or still `pending`) are database-only edits and stay excluded.
+ */
+function isDeployedMetadataUpdate(
+  token: Pick<TokenRecord, "mintAddress" | "status">,
+  patch: OnChainMetadataPatch
+) {
+  return Boolean(token.mintAddress) && token.status !== "pending" && Object.keys(patch).length > 0;
+}
+
+/**
+ * Deployed metadata is the token's public identity: the dashboard only exposes
+ * its edit affordance to `tokens:admin`, so the API enforces the same authority
+ * before any authority resolution, admission, or signer creation. Enforced in
+ * both the handler and the policy-extraction path (SOLA9-500).
+ */
+function assertDeployedMetadataAdmin(
+  c: AppContext,
+  token: Pick<TokenRecord, "mintAddress" | "status">,
+  patch: OnChainMetadataPatch
+) {
+  if (!isDeployedMetadataUpdate(token, patch)) {
+    return;
+  }
+  const permissions = grantedPermissions(c);
+  if (permissions === "*" || permissions.includes("tokens:admin")) {
+    return;
+  }
+  throw insufficientPermissions(
+    "Updating deployed token metadata requires the tokens:admin permission"
+  );
+}
+
 async function resolveMetadataUpdate(params: {
   c: AppContext;
   auth: ApiKeyContext;
   tokenService: TokenService;
   token: TokenRecord;
-  patch: ReturnType<typeof getOnChainMetadataPatch>;
+  patch: OnChainMetadataPatch;
   signingCustodyWalletId?: string;
 }) {
-  if (
-    !params.token.mintAddress ||
-    params.token.status === "pending" ||
-    Object.keys(params.patch).length === 0
-  ) {
+  if (!isDeployedMetadataUpdate(params.token, params.patch)) {
     return null;
   }
 
@@ -380,6 +421,9 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
     throw badRequest("Provide token changes when selecting a signing wallet after deployment");
   }
 
+  const metadataPatch = getOnChainMetadataPatch(body);
+  assertDeployedMetadataAdmin(c, existing, metadataPatch);
+
   let draftWallet: ResolvedIssuanceWallet | null = null;
   if (signingCustodyWalletId && !existing.mintAddress && existing.status === "pending") {
     draftWallet = await resolveIssuanceWallet({
@@ -397,7 +441,6 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
   let authoritativeEffectCompleted = false;
 
   try {
-    const metadataPatch = getOnChainMetadataPatch(body);
     const metadataUpdate = await resolveMetadataUpdate({
       c,
       auth,
@@ -493,6 +536,7 @@ export async function extractTokenUpdatePolicyCandidate(
   }
 
   const patch = getOnChainMetadataPatch(body);
+  assertDeployedMetadataAdmin(c, token, patch);
   const emptyExtraction = {
     legs: [],
     body: c.req.valid("json") as Record<string, unknown>,
@@ -511,7 +555,7 @@ export async function extractTokenUpdatePolicyCandidate(
   // A draft-only PATCH mutates database rows and signs nothing: no custody
   // wallet, no wallet operation to judge. The same predicate the handler's
   // resolveMetadataUpdate uses decides whether an on-chain update will sign.
-  if (!token.mintAddress || token.status === "pending" || Object.keys(patch).length === 0) {
+  if (!isDeployedMetadataUpdate(token, patch)) {
     return { ...emptyExtraction, candidate: null };
   }
 
