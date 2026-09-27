@@ -773,6 +773,7 @@ export function createPostgresCounterpartyProviderAccountsRepository(
              AND provider = ?
              AND kind = 'payout_account'
              AND status = 'active'
+             AND external_account_reference IS NULL
            RETURNING *`
         )
         .bind(input.id, input.organizationId, input.projectId, input.counterpartyId, input.provider)

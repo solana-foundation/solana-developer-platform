@@ -297,6 +297,123 @@ describe("reconcileLightsparkProvisioning", () => {
     });
   });
 
+  it("resolves a payout intent whose row completed after its outcome write failed", async () => {
+    const counterparty = await seedCounterparty("ls_reconcile_completed");
+    const row = await seedPendingRow(counterparty.id, "Customer:reconcile_completed");
+    await accounts().completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+      externalAccountReference: "ExternalAccount:reconcile_completed",
+      providerStatus: "ACTIVE",
+    });
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:reconcile_completed",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    // The completed row is decided from local state alone: no provider call.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      throw new Error(`no provider call may run for a completed row: ${String(input)}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("success");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      externalAccountReference: "ExternalAccount:reconcile_completed",
+    });
+    await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
+  });
+
+  it("does not archive a reservation that completes while the provider lookup is in flight", async () => {
+    const counterparty = await seedCounterparty("ls_reconcile_race");
+    const row = await seedPendingRow(counterparty.id, "Customer:reconcile_race");
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:reconcile_race",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/customers/external-accounts")) {
+        // The racing request binds its provider account while the sweep waits
+        // on the lookup, so the sweep's later archive must refuse to run.
+        await accounts().completeExternalAccount({
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          provider: "lightspark",
+          id: row.id,
+          externalAccountReference: "ExternalAccount:reconcile_race",
+          providerStatus: "ACTIVE",
+        });
+        return new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const raced = await accounts().getExternalAccountById({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+    });
+    expect(raced?.status).toBe("active");
+    expect(raced?.external_account_reference).toBe("ExternalAccount:reconcile_race");
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("success");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      externalAccountReference: "ExternalAccount:reconcile_race",
+    });
+  });
+
   it("links an orphaned provider customer and resolves its unresolved intent", async () => {
     const counterparty = await seedCounterparty("ls_reconcile_customer");
     const intentId = await seedUnresolvedIntent({

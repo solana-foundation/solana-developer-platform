@@ -489,10 +489,13 @@ export interface CounterpartyProviderAccountsRepository {
   ): Promise<CounterpartyProviderAccountRow | null>;
 
   /**
-   * Archives an active corridor row.
+   * Archives an active corridor row that was never completed. A row that
+   * already carries a provider reference refuses the archive (returns null),
+   * so a completion racing the archive is never destroyed.
    *
    * @param input - Tenant scope and row id.
-   * @returns The archived row or null when it is outside the scope.
+   * @returns The archived row, or null when it is outside the scope, not
+   *   active, or already completed.
    */
   archiveExternalAccount(
     input: ArchiveExternalAccountInput

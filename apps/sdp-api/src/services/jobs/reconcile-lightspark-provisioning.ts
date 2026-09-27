@@ -62,6 +62,7 @@ export async function reconcileLightsparkProvisioning(
   const cutoff = new Date(Date.now() - graceMs).toISOString();
   let touched = 0;
   touched += await reconcileStalePendingAccounts(env, cutoff);
+  touched += await reconcileUnresolvedPayoutIntents(env, cutoff);
   touched += await reconcileUnresolvedCustomerIntents(env, cutoff);
   return touched;
 }
@@ -194,13 +195,159 @@ async function triagePendingAccount(
       { provider_account_id: row.id },
       "[lightspark provisioning] archived a stale pending reservation the provider never received"
     );
+    await resolvePendingAccountIntent(env, row, {
+      reconciled: true,
+      providerOutcome: "unverified",
+      providerAccountFound: false,
+    });
+    return true;
   }
-  await resolvePendingAccountIntent(env, row, {
-    reconciled: true,
-    providerOutcome: "unverified",
-    providerAccountFound: false,
+  // The archive refuses rows that already carry a provider reference: a
+  // concurrent request completed the reservation while the provider lookup
+  // was in flight. Re-read the row and resolve its intent from that state
+  // instead of recording a failure for a link that durably exists.
+  const settled = await accounts.getExternalAccountById({ ...scope, id: row.id });
+  if (settled !== null && settled.external_account_reference !== null) {
+    await resolvePendingAccountIntent(env, row, {
+      reconciled: true,
+      externalAccountReference: settled.external_account_reference,
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Sweeps unresolved Lightspark payout-account intents older than the grace
+ * window. The request path resolves an intent only with a best-effort outcome
+ * write, so a payout whose local row completed while that write failed — or
+ * after a crash before it — leaves the intent unresolved, and the pending
+ * sweep no longer sees the row because it carries its provider reference. The
+ * sweep reads the row the intent names: a durable completion resolves the
+ * intent as success, an archived or missing row resolves it as a failed
+ * attempt with providerOutcome "unverified", and a still-pending row is left
+ * for the pending sweep.
+ *
+ * @param env - Process environment used for database access.
+ * @param cutoff - ISO timestamp before which an intent is stale.
+ * @returns The number of intents resolved.
+ */
+async function reconcileUnresolvedPayoutIntents(env: Env, cutoff: string): Promise<number> {
+  const logger = getLogger();
+  const intents = await getDb(env)
+    .prepare(
+      `SELECT i.resource_id AS intent_id, i.organization_id,
+              CASE
+                WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+                THEN i.metadata::jsonb
+                ELSE NULL
+              END AS metadata
+       FROM audit_logs i
+       WHERE i.resource_type = 'audit_ledger'
+         AND CASE
+           WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+           THEN i.metadata::jsonb ->> 'auditPhase' = 'intent'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'provider' = 'lightspark'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = ?
+           ELSE false
+         END
+         AND i.created_at::timestamptz < ?::timestamptz
+         AND NOT EXISTS (
+           SELECT 1 FROM audit_logs o
+           WHERE CASE
+             WHEN o.metadata IS NOT NULL AND pg_input_is_valid(o.metadata, 'jsonb')
+             THEN o.metadata::jsonb ->> 'auditPhase' = 'outcome'
+                  AND o.metadata::jsonb ->> 'auditIntentId' = i.resource_id
+             ELSE false
+           END
+         )
+       ORDER BY i.created_at
+       LIMIT ${LIGHTSPARK_PROVISIONING_RECONCILE_BATCH}`
+    )
+    .bind(LIGHTSPARK_PAYOUT_ACTION, cutoff)
+    .all<UnresolvedLightsparkIntentRow>();
+  let touched = 0;
+  for (const intent of intents.results ?? []) {
+    if (await reconcilePayoutIntent(env, intent)) {
+      touched += 1;
+    }
+  }
+  if (touched > 0) {
+    logger.info({ count: touched }, "[lightspark provisioning] payout intents resolved");
+  }
+  return touched;
+}
+
+/**
+ * Reconciles one unresolved payout-account intent from the local row it names.
+ *
+ * @param env - Process environment used for database and ledger access.
+ * @param intent - The unresolved intent row.
+ * @returns Whether the intent was resolved.
+ */
+async function reconcilePayoutIntent(
+  env: Env,
+  intent: UnresolvedLightsparkIntentRow
+): Promise<boolean> {
+  const logger = getLogger();
+  const target = readIntentTarget(intent.metadata);
+  const metadata = target?.metadata ?? {};
+  const localRowId = typeof metadata.localRowId === "string" ? metadata.localRowId : undefined;
+  const counterpartyId =
+    typeof metadata.counterpartyId === "string" ? metadata.counterpartyId : undefined;
+  const organizationId =
+    typeof metadata.organizationId === "string"
+      ? metadata.organizationId
+      : (intent.organization_id ?? undefined);
+  const projectId = typeof metadata.projectId === "string" ? metadata.projectId : undefined;
+  if (
+    localRowId === undefined ||
+    counterpartyId === undefined ||
+    organizationId === undefined ||
+    projectId === undefined
+  ) {
+    logger.error(
+      { intent_id: intent.intent_id },
+      "[lightspark provisioning] payout intent lacks its tenant scope; leaving it for operators"
+    );
+    return false;
+  }
+  const row = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(env)
+  ).getExternalAccountById({
+    organizationId,
+    projectId,
+    counterpartyId,
+    provider: "lightspark",
+    id: localRowId,
   });
-  return archived !== null;
+  if (row !== null && row.status === "active" && row.external_account_reference === null) {
+    // Still an in-flight or untriaged reservation: the pending sweep owns it.
+    return false;
+  }
+  if (row !== null && row.external_account_reference !== null) {
+    await resolveIntent(env, intent, {
+      action: LIGHTSPARK_PAYOUT_ACTION,
+      status: "success",
+      metadata: {
+        reconciledBy: "lightspark_provisioning_reconciler",
+        reconciled: true,
+        externalAccountReference: row.external_account_reference,
+      },
+    });
+    return true;
+  }
+  // Archived or missing: the provisioning never durably completed locally.
+  await resolveIntent(env, intent, {
+    action: LIGHTSPARK_PAYOUT_ACTION,
+    status: "failure",
+    metadata: {
+      reconciledBy: "lightspark_provisioning_reconciler",
+      providerOutcome: "unverified",
+      providerAccountFound: false,
+    },
+  });
+  return true;
 }
 
 /**
@@ -242,21 +389,30 @@ async function reconcileUnresolvedCustomerIntents(env: Env, cutoff: string): Pro
   const logger = getLogger();
   const intents = await getDb(env)
     .prepare(
-      `SELECT i.resource_id AS intent_id, i.organization_id, i.metadata::jsonb AS metadata
+      `SELECT i.resource_id AS intent_id, i.organization_id,
+              CASE
+                WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+                THEN i.metadata::jsonb
+                ELSE NULL
+              END AS metadata
        FROM audit_logs i
        WHERE i.resource_type = 'audit_ledger'
-         AND i.metadata IS NOT NULL
-         AND pg_input_is_valid(i.metadata, 'jsonb')
-         AND i.metadata::jsonb ->> 'auditPhase' = 'intent'
-         AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'provider' = 'lightspark'
-         AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = ?
+         AND CASE
+           WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+           THEN i.metadata::jsonb ->> 'auditPhase' = 'intent'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'provider' = 'lightspark'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = ?
+           ELSE false
+         END
          AND i.created_at::timestamptz < ?::timestamptz
          AND NOT EXISTS (
            SELECT 1 FROM audit_logs o
-           WHERE o.metadata IS NOT NULL
-             AND pg_input_is_valid(o.metadata, 'jsonb')
-             AND o.metadata::jsonb ->> 'auditPhase' = 'outcome'
-             AND o.metadata::jsonb ->> 'auditIntentId' = i.resource_id
+           WHERE CASE
+             WHEN o.metadata IS NOT NULL AND pg_input_is_valid(o.metadata, 'jsonb')
+             THEN o.metadata::jsonb ->> 'auditPhase' = 'outcome'
+                  AND o.metadata::jsonb ->> 'auditIntentId' = i.resource_id
+             ELSE false
+           END
          )
        ORDER BY i.created_at
        LIMIT ?`
@@ -397,21 +553,30 @@ async function findUnresolvedIntent(
 ): Promise<UnresolvedLightsparkIntentRow | null> {
   return db
     .prepare(
-      `SELECT i.resource_id AS intent_id, i.organization_id, i.metadata::jsonb AS metadata
+      `SELECT i.resource_id AS intent_id, i.organization_id,
+              CASE
+                WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+                THEN i.metadata::jsonb
+                ELSE NULL
+              END AS metadata
        FROM audit_logs i
        WHERE i.resource_type = 'audit_ledger'
-         AND i.metadata IS NOT NULL
-         AND pg_input_is_valid(i.metadata, 'jsonb')
-         AND i.metadata::jsonb ->> 'auditPhase' = 'intent'
-         AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'provider' = 'lightspark'
-         AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = ?
-         AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'localRowId' = ?
+         AND CASE
+           WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+           THEN i.metadata::jsonb ->> 'auditPhase' = 'intent'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'provider' = 'lightspark'
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'action' = ?
+                AND i.metadata::jsonb -> 'target' -> 'metadata' ->> 'localRowId' = ?
+           ELSE false
+         END
          AND NOT EXISTS (
            SELECT 1 FROM audit_logs o
-           WHERE o.metadata IS NOT NULL
-             AND pg_input_is_valid(o.metadata, 'jsonb')
-             AND o.metadata::jsonb ->> 'auditPhase' = 'outcome'
-             AND o.metadata::jsonb ->> 'auditIntentId' = i.resource_id
+           WHERE CASE
+             WHEN o.metadata IS NOT NULL AND pg_input_is_valid(o.metadata, 'jsonb')
+             THEN o.metadata::jsonb ->> 'auditPhase' = 'outcome'
+                  AND o.metadata::jsonb ->> 'auditIntentId' = i.resource_id
+             ELSE false
+           END
          )
        ORDER BY i.created_at DESC
        LIMIT 1`

@@ -174,6 +174,49 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     expect(afterCompletion.id).not.toBe(replacementReservation.id);
   });
 
+  it("refuses to archive a payout account that already completed", async () => {
+    const counterparty = await seedCounterparty("cpacc_archive_completed");
+    const pending = await repository.insertPendingExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: "Customer:archive_completed",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+    });
+    const completed = await repository.completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: pending.id,
+      externalAccountReference: "ExternalAccount:archive_completed",
+      providerStatus: "ACTIVE",
+    });
+    expect(completed?.external_account_reference).toBe("ExternalAccount:archive_completed");
+
+    const archived = await repository.archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: pending.id,
+    });
+    expect(archived).toBeNull();
+
+    const row = await repository.getExternalAccountById({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: pending.id,
+    });
+    expect(row?.status).toBe("active");
+    expect(row?.external_account_reference).toBe("ExternalAccount:archive_completed");
+  });
+
   it("reads and updates provider resource accounts by kind", async () => {
     const counterparty = await seedCounterparty("cpacc_resource_accounts");
     const merchantWallet = await repository.insertProviderResourceAccount({
@@ -945,25 +988,48 @@ describe("CounterpartyProviderAccountsRepository (postgres)", () => {
     assert(active);
     expect(active.provider_status).toBe("ACTIVE");
     expect(await repository.archiveExternalAccount(wrongScope)).toBeNull();
+    // A completed row refuses the archive: its provider link is live, and
+    // destroying it would strand the corridor's completed account.
+    expect(
+      await repository.archiveExternalAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        id: pending.id,
+      })
+    ).toBeNull();
+
+    // A still-pending reservation archives, freeing the corridor for a retry.
+    const fresh = await repository.insertPendingExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      providerCustomerReference: customer.provider_customer_reference,
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+    });
     const archived = await repository.archiveExternalAccount({
       organizationId: TEST_ORG.id,
       projectId: TEST_PROJECT_ID,
       counterpartyId: counterparty.id,
       provider: "lightspark",
-      id: pending.id,
+      id: fresh.id,
     });
     assert(archived);
     expect(archived.status).toBe("archived");
-    expect(
-      await repository.listActiveExternalAccounts({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId: counterparty.id,
-        provider: "lightspark",
-        fiatCurrency: "USD",
-        destinationCountry: "US",
-      })
-    ).toEqual([]);
+    const remaining = await repository.listActiveExternalAccounts({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+    });
+    // The completed account remains active; no pending reservation does.
+    expect(remaining.every((row) => row.external_account_reference !== null)).toBe(true);
   });
 
   it("allows a replacement corridor row after archival", async () => {

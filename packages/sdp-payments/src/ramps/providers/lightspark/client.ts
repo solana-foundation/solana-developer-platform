@@ -723,12 +723,18 @@ export class LightsparkRampClient implements RampProvider {
     return parseLightsparkQuote(response);
   }
 
-  private async findCustomerExternalAccount(
+  /**
+   * Lists a customer's fiat external accounts page by page until the predicate
+   * matches, reporting whether the listing ran to a definitive end. A `false`
+   * `complete` means the listing stopped early — ten pages or a cursor the
+   * provider omitted — so "no match" is inconclusive, not absence.
+   */
+  private async listCustomerExternalAccountPages(
     config: LightsparkConfig,
     customerId: string,
     currency: string,
     predicate: (account: LightsparkExternalAccount) => boolean
-  ): Promise<LightsparkExternalAccount | null> {
+  ): Promise<{ found: LightsparkExternalAccount | null; complete: boolean }> {
     let cursor: string | undefined;
     for (let page = 0; page < 10; page += 1) {
       const query = new URLSearchParams();
@@ -746,7 +752,7 @@ export class LightsparkRampClient implements RampProvider {
       const accounts = Array.isArray(response.data) ? response.data : [];
       for (const accountPayload of accounts) {
         const account = parseLightsparkExternalAccount(accountPayload);
-        if (predicate(account)) return account;
+        if (predicate(account)) return { found: account, complete: true };
       }
 
       const hasMore = response.hasMore === true;
@@ -754,9 +760,25 @@ export class LightsparkRampClient implements RampProvider {
         typeof response.nextCursor === "string" && response.nextCursor.length > 0
           ? response.nextCursor
           : undefined;
-      if (!hasMore || !cursor) break;
+      if (!hasMore) return { found: null, complete: true };
+      if (!cursor) return { found: null, complete: false };
     }
-    return null;
+    return { found: null, complete: false };
+  }
+
+  private async findCustomerExternalAccount(
+    config: LightsparkConfig,
+    customerId: string,
+    currency: string,
+    predicate: (account: LightsparkExternalAccount) => boolean
+  ): Promise<LightsparkExternalAccount | null> {
+    const listing = await this.listCustomerExternalAccountPages(
+      config,
+      customerId,
+      currency,
+      predicate
+    );
+    return listing.found;
   }
 
   private async resolveOnrampDestinationAccountId(
@@ -1062,6 +1084,13 @@ export class LightsparkRampClient implements RampProvider {
    * provisioning reconciliation sweep uses it to bind a provider account
    * created before a crash back to the local reservation row that minted the
    * platform id.
+   *
+   * Absence is only reported when the listing ran to a definitive end: a
+   * truncated listing throws, so the sweep retries the lookup instead of
+   * treating the account as never created. An account the listing matched
+   * without its optional status is resolved through the single-account fetch,
+   * whose parser requires a status — an omission there also fails into a
+   * retry rather than a false absence.
    */
   async findExternalAccountByPlatformId(
     { env, mode }: RampRuntimeContext,
@@ -1072,13 +1101,25 @@ export class LightsparkRampClient implements RampProvider {
     }
   ): Promise<LightsparkExternalAccountResolution | null> {
     const config = readLightsparkConfig(env, mode);
-    const existing = await this.findCustomerExternalAccount(
+    const listing = await this.listCustomerExternalAccountPages(
       config,
       input.customerId,
       input.currency,
       (account) => account.platformAccountId === input.platformAccountId
     );
-    return existing?.id && existing.status ? { id: existing.id, status: existing.status } : null;
+    if (!listing.complete) {
+      throw providerUnavailable(
+        "Lightspark external-account listing ended before the platform id was resolved"
+      );
+    }
+    const existing = listing.found;
+    if (!existing?.id) {
+      return null;
+    }
+    if (!existing.status) {
+      return await this.getExternalAccount({ env, mode }, { accountId: existing.id });
+    }
+    return { id: existing.id, status: existing.status };
   }
 
   /**

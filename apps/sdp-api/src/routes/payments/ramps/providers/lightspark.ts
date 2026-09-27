@@ -413,27 +413,58 @@ export async function ensureLightsparkPayoutAccount(
     throw error;
   }
   const audit = requestLightsparkProvisioningAudit(c, input.counterparty);
-  const intent = await audit.begin({
-    action: "lightspark_payout_account_created",
-    metadata: {
-      organizationId: input.counterparty.organization_id,
-      projectId: input.projectId,
-      counterpartyId: input.counterparty.id,
-      localRowId: pending.id,
-      providerCustomerReference: input.customer.customerId,
-      // Redacted effect descriptor: the corridor and platform identity, never
-      // the submitted bank details.
-      corridor: {
-        fiatCurrency: input.fiatCurrency,
-        destinationCountry,
-        paymentRail,
+  // Compensation for every failure after the reservation exists: an abandoned
+  // active row keeps 409ing the corridor until the stale sweep runs.
+  const archiveReservation = async () => {
+    try {
+      await repository.archiveExternalAccount({
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        provider: "lightspark",
+        id: pending.id,
+      });
+    } catch (compensationError) {
+      logEvent("warn", {
+        event: "sdp_api_lightspark_reservation_compensation_failed",
+        organization_id: input.counterparty.organization_id,
+        project_id: input.projectId,
+        counterparty_id: input.counterparty.id,
+        provider_account_id: pending.id,
+        error: compensationError instanceof Error ? compensationError.message : "unknown",
+      });
+    }
+  };
+  let intent: AuditIntent;
+  try {
+    intent = await audit.begin({
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: input.counterparty.organization_id,
+        projectId: input.projectId,
+        counterpartyId: input.counterparty.id,
+        localRowId: pending.id,
+        providerCustomerReference: input.customer.customerId,
+        // Redacted effect descriptor: the corridor and platform identity, never
+        // the submitted bank details.
+        corridor: {
+          fiatCurrency: input.fiatCurrency,
+          destinationCountry,
+          paymentRail,
+        },
+        effect: {
+          kind: "payout_account",
+          platformAccountId: pending.id,
+        },
       },
-      effect: {
-        kind: "payout_account",
-        platformAccountId: pending.id,
-      },
-    },
-  });
+    });
+  } catch (error) {
+    // Admission failed before any provider call: the reservation would strand
+    // the corridor (409 on every resubmission until the stale sweep runs).
+    // Archive it so an immediate retry starts clean.
+    await archiveReservation();
+    throw error;
+  }
   try {
     const created = await RAMP_PROVIDER_CLIENTS.lightspark.getOrCreateFiatExternalAccount(
       rampRuntime(c),
@@ -478,24 +509,7 @@ export async function ensureLightsparkPayoutAccount(
     return completed;
   } catch (error) {
     await audit.fail(intent, error);
-    try {
-      await repository.archiveExternalAccount({
-        organizationId: input.counterparty.organization_id,
-        projectId: input.projectId,
-        counterpartyId: input.counterparty.id,
-        provider: "lightspark",
-        id: pending.id,
-      });
-    } catch (compensationError) {
-      logEvent("warn", {
-        event: "sdp_api_lightspark_reservation_compensation_failed",
-        organization_id: input.counterparty.organization_id,
-        project_id: input.projectId,
-        counterparty_id: input.counterparty.id,
-        provider_account_id: pending.id,
-        error: compensationError instanceof Error ? compensationError.message : "unknown",
-      });
-    }
+    await archiveReservation();
     throw error;
   }
 }

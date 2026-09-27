@@ -1274,6 +1274,84 @@ describe("Counterparties Routes", () => {
       }
     });
 
+    it("archives the reservation when the audit intent cannot be admitted", async () => {
+      const created = await createCounterparty({ externalId: "requirements_ls_audit_admission" });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:cus_audit_admission",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparties SET provider_data = ? WHERE id = ?")
+        .bind(
+          JSON.stringify({ lightspark: { purposeOfPayment: "GOODS_OR_SERVICES" } }),
+          counterparty.id
+        )
+        .run();
+
+      const db = getDb(env);
+      await db.execute(
+        `ALTER TABLE audit_logs ADD CONSTRAINT fail_ls_payout_intent
+         CHECK (metadata::jsonb->>'auditPhase' IS DISTINCT FROM 'intent') NOT VALID`
+      );
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ id: "ExternalAccount:audit_admission", status: "ACTIVE" }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+      try {
+        const res = await app.request(
+          `/v1/counterparties/${counterparty.id}/requirements`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: authHeader },
+            body: JSON.stringify({
+              provider: "lightspark",
+              direction: "offramp",
+              assetRail: "usdc.solana",
+              fiatCurrency: "USD",
+              collectedData: {
+                destinationCountry: "US",
+                paymentRails: "ACH",
+                purposeOfPayment: "SELF",
+                "bankAccount.accountNumber": "123456789",
+                "bankAccount.routingNumber": "021000021",
+              },
+            }),
+          },
+          env
+        );
+        expect(res.status).toBeGreaterThanOrEqual(500);
+        // Admission refused the write before any provider mutation ran.
+        expect(fetchSpy).not.toHaveBeenCalled();
+
+        // The abandoned reservation would 409 the corridor until the stale
+        // sweep runs; the admission compensation archives it immediately.
+        const archivedRow = await db
+          .prepare(
+            `SELECT id, external_account_reference FROM counterparty_provider_accounts
+             WHERE counterparty_id = ? AND provider = 'lightspark' AND kind = 'payout_account'`
+          )
+          .bind(counterparty.id)
+          .first<{ id: string; external_account_reference: string | null }>();
+        expect(archivedRow).not.toBeNull();
+        expect(archivedRow?.external_account_reference).toBeNull();
+        const archivedStatus = await db
+          .prepare(`SELECT status FROM counterparty_provider_accounts WHERE id = ?`)
+          .bind(archivedRow?.id)
+          .first<{ status: string }>();
+        expect(archivedStatus?.status).toBe("archived");
+      } finally {
+        fetchSpy.mockRestore();
+        await db.execute("ALTER TABLE audit_logs DROP CONSTRAINT fail_ls_payout_intent");
+      }
+    });
+
     it("returns the BVNK residence step for a fresh counterparty", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk" });
       expect(created.status).toBe(201);
