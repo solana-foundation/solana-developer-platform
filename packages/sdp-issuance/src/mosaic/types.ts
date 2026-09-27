@@ -250,6 +250,14 @@ export interface UpdateMetadataOptions {
    * can never spend more than the cost its policy gate approved (APE-831).
    */
   maxFeePayerSolLamports?: bigint;
+  /**
+   * Runs at the point of no return: after the cost-bound check passed and
+   * before the built transaction is signed and submitted. Callers fence
+   * durable effect state here, so a rejection above it (a cost that grew
+   * past the approved bound) never marks an effect as begun, and an
+   * interrupted submission always does.
+   */
+  onBeforeSubmit?: () => Promise<void>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -434,7 +434,6 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
       const { signer } = metadataUpdate.authority;
 
       const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-      await beginApprovedWalletOperationEffect(c);
       let result: Awaited<ReturnType<typeof mosaic.updateMetadata>>;
       try {
         result = await mosaic.updateMetadata({
@@ -449,6 +448,10 @@ export const updateToken = async (c: ValidatedBodyContext<typeof updateTokenSche
             env: c.env,
             judgedCandidate: getPolicyGateContext(c).candidate,
           }),
+          // The effect fence sits at the point of no return, after the cost
+          // check: a rejected cost marks no effect (nothing was submitted),
+          // while an interrupted submission is fenced for reconciliation.
+          onBeforeSubmit: () => beginApprovedWalletOperationEffect(c),
         });
       } catch (error) {
         if (error instanceof MetadataUpdateCostExceededError) {

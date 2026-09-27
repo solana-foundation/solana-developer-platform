@@ -138,6 +138,9 @@ function stubOnChainReads(params: {
     getFeeForMessage: () => ({
       send: async () => ({ value: params.feeLamports ?? NETWORK_FEE_LAMPORTS }),
     }),
+    sendTransaction: () => ({
+      send: async () => "fenced-signature",
+    }),
   };
   vi.spyOn(RpcModule, "createRpcForSdk").mockReturnValue(rpc as never);
   vi.spyOn(Kit, "fetchEncodedAccount").mockResolvedValue({
@@ -598,6 +601,49 @@ describe("metadata update execution is bounded by the approved SOL cost (APE-831
     });
     expect(result).toMatchObject({ signature: "bounded-signature" });
     expect(submitSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences the effect after the cost check and never marks a rejected update as begun", async () => {
+    const signer = await generateKeyPairSigner();
+    const mint = (await generateKeyPairSigner()).address;
+    stubOnChainReads({ mint, currentMintSizeBytes: 100, targetMintSize: 200 });
+    vi.spyOn(RpcModule, "confirmTransaction").mockResolvedValue({ err: null, slot: 1n } as never);
+    const service = new MosaicService(
+      signerPaidEnv as unknown as ConstructorParameters<typeof MosaicService>[0],
+      signer
+    );
+    const order: string[] = [];
+    const fence = () => {
+      order.push("fence");
+      return Promise.resolve();
+    };
+
+    // A cost above the approved bound rejects before signing: the effect fence
+    // never runs, so an interrupted attempt is not misread as submitted.
+    await expect(
+      service.updateMetadata({
+        mint,
+        name: SIZE_INCREASING_NAME,
+        updateAuthority: signer,
+        feePayer: signer,
+        maxFeePayerSolLamports: NETWORK_FEE_LAMPORTS + 899n,
+        onBeforeSubmit: fence,
+      })
+    ).rejects.toBeInstanceOf(MetadataUpdateCostExceededError);
+    expect(order).toEqual([]);
+
+    // Within the bound, the fence runs at the point of no return: after the
+    // cost check, before the transaction is submitted.
+    const result = await service.updateMetadata({
+      mint,
+      name: SIZE_INCREASING_NAME,
+      updateAuthority: signer,
+      feePayer: signer,
+      maxFeePayerSolLamports: NETWORK_FEE_LAMPORTS + 900n,
+      onBeforeSubmit: fence,
+    });
+    expect(result).toMatchObject({ signature: "fenced-signature" });
+    expect(order).toEqual(["fence"]);
   });
 
   it("derives the execution bound from the judged candidate and fails closed without one", () => {

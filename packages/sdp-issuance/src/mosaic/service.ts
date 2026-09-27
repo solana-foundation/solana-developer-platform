@@ -969,7 +969,7 @@ export class MosaicService {
       await this.assertUpdateMetadataCostWithinBound(plan, options.maxFeePayerSolLamports);
     }
 
-    return this.signAndSubmit(plan.message);
+    return this.signAndSubmit(plan.message, options.onBeforeSubmit);
   }
 
   /**
