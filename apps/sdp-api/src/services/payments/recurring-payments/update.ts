@@ -250,6 +250,51 @@ function legacyUpdateAttemptMatchesRequest(
   return attempt.mode === input.mode && updateAttemptMatchesRequest(attempt, translated);
 }
 
+/**
+ * A legacy attempt journals the replacement wallet by wallet_id only, and
+ * custody wallets under different configs can share a wallet_id within one
+ * tenant. Resuming the attempt pins the retried custody-wallet row id, so the
+ * retried wallet must be the exact identity the legacy snapshot selected: the
+ * one wallet row that wallet_id resolves to in the tenant scope (the 0073
+ * identity scope; wallet status is intentionally not part of identity).
+ * Ambiguous or missing resolutions cannot prove identity and keep recovery
+ * rejected instead of pinning a custody wallet the original attempt never
+ * chose.
+ */
+async function legacyAttemptCustodyIdentityMatches(
+  db: DatabaseExecutor,
+  attempt: PaymentRecurringPaymentUpdateAttemptRow,
+  input: {
+    organizationId: string;
+    projectId: string;
+    newSourceCustodyWalletId: string | null;
+  }
+): Promise<boolean> {
+  if (!attempt.changed_fields.includes(LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD)) {
+    return true;
+  }
+  const snapshotWalletId = attempt.after_values[LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD];
+  if (input.newSourceCustodyWalletId === null || typeof snapshotWalletId !== "string") {
+    return false;
+  }
+  const wallets = await db.queryMany<{ id: string }>(
+    `SELECT wallet.id
+       FROM custody_wallets wallet
+       LEFT JOIN custody_configs config ON config.id = wallet.custody_config_id
+       LEFT JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+      WHERE wallet.wallet_id = ?
+        AND (
+             (config.id IS NOT NULL AND config.organization_id = ?
+              AND (config.project_id = ? OR config.project_id IS NULL))
+             OR
+             (connection.id IS NOT NULL AND connection.organization_id = ?
+              AND connection.project_id = ?)
+        )`,
+    [snapshotWalletId, input.organizationId, input.projectId, input.organizationId, input.projectId]
+  );
+  return wallets.length === 1 && wallets[0].id === input.newSourceCustodyWalletId;
+}
+
 function requestedActiveUpdateMode(
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>
 ): PaymentRecurringPaymentUpdateAttemptMode {
@@ -512,6 +557,7 @@ async function updatePendingRecurringPayment(input: {
 }
 
 async function getOrCreateRecurringPaymentUpdateAttempt(input: {
+  db: DatabaseExecutor;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
@@ -534,23 +580,29 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
       statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
     if (existing) {
-      const matches =
-        existing.new_source_custody_wallet_id === null && usesLegacySourceWalletSnapshot(existing)
-          ? legacyUpdateAttemptMatchesRequest(existing, {
-              mode: input.mode,
-              changedFields: input.changedFields,
-              beforeValues: input.beforeValues,
-              afterValues: input.afterValues,
-              oldSourceWalletId: input.claimed.source_wallet_id,
-              newSourceWalletId: input.newSourceWalletId,
-            })
-          : existing.mode === input.mode &&
-            existing.new_source_custody_wallet_id === input.newSourceCustodyWalletId &&
-            updateAttemptMatchesRequest(existing, {
-              changedFields: input.changedFields,
-              beforeValues: input.beforeValues,
-              afterValues: input.afterValues,
-            });
+      const legacySnapshot =
+        existing.new_source_custody_wallet_id === null && usesLegacySourceWalletSnapshot(existing);
+      const matches = legacySnapshot
+        ? legacyUpdateAttemptMatchesRequest(existing, {
+            mode: input.mode,
+            changedFields: input.changedFields,
+            beforeValues: input.beforeValues,
+            afterValues: input.afterValues,
+            oldSourceWalletId: input.claimed.source_wallet_id,
+            newSourceWalletId: input.newSourceWalletId,
+          }) &&
+          (await legacyAttemptCustodyIdentityMatches(input.db, existing, {
+            organizationId: input.organizationId,
+            projectId: input.projectId,
+            newSourceCustodyWalletId: input.newSourceCustodyWalletId,
+          }))
+        : existing.mode === input.mode &&
+          existing.new_source_custody_wallet_id === input.newSourceCustodyWalletId &&
+          updateAttemptMatchesRequest(existing, {
+            changedFields: input.changedFields,
+            beforeValues: input.beforeValues,
+            afterValues: input.afterValues,
+          });
       if (!matches) {
         throw conflict("Recurring payment update recovery must retry the same update");
       }
@@ -1818,6 +1870,7 @@ export async function updateRecurringPayment(input: {
         });
     if (!claimed) return null;
     const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
+      db: tx,
       recurringRepo: transactionRepo,
       claimed,
       organizationId: input.organizationId,

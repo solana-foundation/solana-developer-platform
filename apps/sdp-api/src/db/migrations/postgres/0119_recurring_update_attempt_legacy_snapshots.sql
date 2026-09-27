@@ -4,8 +4,11 @@
 -- vocabulary (wallet_id values) and a NULL `new_source_custody_wallet_id`, so
 -- update recovery permanently rejects the exact replacement wallet. Backfill
 -- resolvable rows from the legacy snapshots using tenant-scoped wallet
--- resolution, normalize their snapshots to the current vocabulary, and
--- quarantine ambiguous or incomplete rows instead of guessing.
+-- resolution, normalize the legacy `sourceWalletId` snapshot vocabulary to
+-- `sourceCustodyWalletId` (custody ids, before value from the parent pin),
+-- and quarantine ambiguous or incomplete rows that have recorded no
+-- replacement side effects; side-effected rows stay in flight so the
+-- recovery path resumes them instead of restarting completed work.
 
 CREATE TEMP VIEW recurring_attempt_wallet_scope AS
 SELECT
@@ -81,15 +84,27 @@ WHERE attempt.recurring_payment_id = recurring.id
   AND NOT attempt.changed_fields @> ARRAY['sourceWalletId']::text[]
   AND (attempt.before_values ? 'sourceWalletId' OR attempt.after_values ? 'sourceWalletId');
 
--- Whatever the backfill could not resolve exactly is ambiguous or incomplete:
--- quarantine it out of the in-flight set into an explicit repairable state
--- instead of guessing an identity. A retry then creates a fresh attempt with
--- exact custody-wallet pinning.
+-- Whatever the backfill could not resolve exactly is ambiguous or incomplete.
+-- Attempts with no recorded side effects are quarantined out of the in-flight
+-- set into an explicit repairable state instead of guessing an identity: a
+-- retry then creates a fresh attempt with exact custody-wallet pinning.
+-- Attempts that already recorded replacement work (created plan, authorized
+-- subscription, canceled the old one) keep processing status so recovery
+-- resumes them where they stopped instead of repeating replacement
+-- operations — re-running an already-successful old-subscription cancellation
+-- would block finalizing the authorized replacement.
 UPDATE payment_recurring_payment_update_attempts attempt
 SET status = 'failed',
     error = 'legacy source-changing replacement attempt could not be resolved to an exact custody wallet; retry the update to create a fresh attempt'
 WHERE attempt.status = 'processing'
   AND attempt.new_source_custody_wallet_id IS NULL
-  AND attempt.changed_fields @> ARRAY['sourceWalletId']::text[];
+  AND attempt.changed_fields @> ARRAY['sourceWalletId']::text[]
+  AND attempt.new_plan_id IS NULL
+  AND attempt.new_subscription_id IS NULL
+  AND attempt.plan_update_signature IS NULL
+  AND attempt.plan_creation_signature IS NULL
+  AND attempt.authorization_setup_signature IS NULL
+  AND attempt.authorization_signature IS NULL
+  AND attempt.old_cancel_signature IS NULL;
 
 DROP VIEW recurring_attempt_wallet_scope;

@@ -1792,6 +1792,161 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects stale predecessor legacy recovery when the wallet_id is ambiguous", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_legacy_replacement";
+    const sharedWalletDuplicateCustodyWalletId = "cwlt_recurring_legacy_share";
+    const replacementWalletId = "wal_recurring_legacy_replacement";
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    // Custody wallets under different configs can share a wallet_id within
+    // one tenant, so the legacy wallet_id snapshot alone cannot prove which
+    // custody identity the original attempt selected. The duplicate lives in
+    // the organization-wide custody config, which the tenant scope also
+    // resolves for the payment's project.
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_legacy_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_legacy_replacement', ?, ?, 'active'),
+                  (?, 'cust_cfg_payments_test', ?, ?, 'active')`
+        )
+        .bind(
+          replacementCustodyWalletId,
+          replacementWalletId,
+          sourceSigner.address,
+          sharedWalletDuplicateCustodyWalletId,
+          replacementWalletId,
+          sourceSigner.address
+        ),
+    ]);
+
+    const parent = await getDb(env)
+      .prepare(
+        `SELECT source_wallet_id, counterparty_id, counterparty_account_id, token,
+                amount, period_hours, first_collection_at, next_collection_due_at,
+                metadata_uri
+           FROM payment_recurring_payments
+          WHERE id = ?`
+      )
+      .bind(activated.id)
+      .first<{
+        source_wallet_id: string;
+        counterparty_id: string;
+        counterparty_account_id: string;
+        token: string;
+        amount: string;
+        period_hours: number;
+        first_collection_at: string | null;
+        next_collection_due_at: string | null;
+        metadata_uri: string | null;
+      }>();
+    if (!parent) {
+      throw new Error("Recurring payment fixture row is missing");
+    }
+    const legacyBefore = {
+      sourceWalletId: parent.source_wallet_id,
+      counterpartyId: parent.counterparty_id,
+      counterpartyAccountId: parent.counterparty_account_id,
+      token: parent.token,
+      amount: parent.amount,
+      periodHours: parent.period_hours,
+      firstCollectionAt: parent.first_collection_at,
+      nextCollectionDueAt: parent.next_collection_due_at,
+      metadataUri: parent.metadata_uri,
+    };
+    const legacyAfter = { ...legacyBefore, sourceWalletId: replacementWalletId };
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, activated.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status,
+             stage, old_plan_id, old_subscription_id, changed_fields,
+             before_values, after_values, created_at, updated_at
+           ) VALUES (
+             'prpu_stale_legacy_source_change', ?, ?, ?, 'replacement', 'processing',
+             'create_plan', ?, ?, ARRAY['sourceWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?
+           )`
+        )
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          activated.planId,
+          activated.subscriptionId,
+          JSON.stringify(legacyBefore),
+          JSON.stringify(legacyAfter),
+          staleAt,
+          staleAt
+        ),
+    ]);
+
+    const hijackRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: sharedWalletDuplicateCustodyWalletId }),
+      },
+      env
+    );
+    expect(hijackRes.status).toBe(409);
+    const hijackBody = errorResponseSchema.parse(await hijackRes.json());
+    expect(hijackBody.error.message).toContain("retry the same update");
+
+    // Even the originally selected custody wallet stays rejected while its
+    // wallet_id is ambiguous: recovery needs an exact, unambiguous identity.
+    const ambiguousExactRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+    expect(ambiguousExactRes.status).toBe(409);
+    const ambiguousExactBody = errorResponseSchema.parse(await ambiguousExactRes.json());
+    expect(ambiguousExactBody.error.message).toContain("retry the same update");
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, new_source_custody_wallet_id
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{ status: string; new_source_custody_wallet_id: string | null }>();
+    expect(attempt).toMatchObject({ status: "processing", new_source_custody_wallet_id: null });
+    const parentPin = await getDb(env)
+      .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ source_custody_wallet_id: string | null }>();
+    expect(parentPin?.source_custody_wallet_id).not.toBe(replacementCustodyWalletId);
+    expect(parentPin?.source_custody_wallet_id).not.toBe(sharedWalletDuplicateCustodyWalletId);
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
