@@ -1,7 +1,12 @@
 import { type Address, address, type TransactionSigner } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildKaminoDepositPlan, buildKaminoWithdrawPlan, readKaminoPosition } from "./sdk";
+import {
+  buildKaminoDepositPlan,
+  buildKaminoWithdrawPlan,
+  quoteKaminoWithdraw,
+  readKaminoPosition,
+} from "./sdk";
 
 const VAULT = address("7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx");
 const OWNER = address("11111111111111111111111111111112");
@@ -19,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   createKaminoRpc: vi.fn(),
   fetchGlobalConfig: vi.fn(),
   fetchReserveStates: vi.fn(),
+  freelyAvailableLiquidity: 1_000_000,
   getState: vi.fn(),
   getUserShares: vi.fn(),
   getUserSharesState: vi.fn(),
@@ -67,7 +73,7 @@ vi.mock("@kamino-finance/klend-sdk", async (importOriginal) => {
     }
 
     getFreelyAvailableLiquidityAmount() {
-      return this.tokenOraclePrice.decimals.mul(1_000_000);
+      return this.tokenOraclePrice.decimals.mul(mocks.freelyAvailableLiquidity);
     }
   }
 
@@ -124,6 +130,7 @@ function integer(value: number) {
 const state = {
   baseVaultAuthority: VAULT,
   managementFeeBps: integer(0),
+  minWithdrawAmount: integer(0),
   pendingFeesSf: integer(0),
   performanceFeeBps: integer(0),
   sharesIssued: integer(1_000_000),
@@ -163,6 +170,7 @@ const runtime = { cluster: "devnet" as const, rpcUrl: "https://devnet.example.in
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.stateOnlyOracles.length = 0;
+  mocks.freelyAvailableLiquidity = 1_000_000;
   mocks.rpc = {
     getTokenAccountsByOwner: vi.fn(() => ({ send: mocks.sendTokenAccounts })),
   };
@@ -236,6 +244,120 @@ describe("oracle-free Kamino SDK execution", () => {
 
     expect(mocks.stateOnlyOracles).toHaveLength(1);
     expect(mocks.stateOnlyOracles[0]?.valid).toBe(false);
+  });
+
+  /**
+   * SOLA9-516 regression: the position read used to report the whole unstaked
+   * balance as `withdrawableShares` without consulting the same liquidity-aware
+   * exit plan the quote uses, so the dashboard could present a full exit as
+   * immediately available while the executable plan covered only part of it.
+   * The vault here holds 0.5 idle tokens plus a reserve allocation whose
+   * freely withdrawable liquidity is 0.6, against 1 share priced at 1.5
+   * tokens: the plan can execute 1.099999 of the 1.5 the full exit needs, so
+   * the ceiling must be the largest share quantity whose own plan is fully
+   * coverable — 733333 base units, exactly `floor(1099999 / 1.5)` — never the
+   * full balance.
+   */
+  it("caps withdrawableShares at the exit liquidity the vault can actually execute", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      tokenAvailable: integer(500_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 100_000;
+
+    await expect(
+      readKaminoPosition(runtime, { owner: OWNER, slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      shares: "1",
+      tokenValue: "1.5",
+      withdrawableShares: "0.733333",
+    });
+  });
+
+  /**
+   * With allocated reserves, the planner's one-lamport rounding buffer
+   * (`RESERVE_WITHDRAW_LIQUIDITY_ROUNDING_BUFFER_LAMPORTS`) leaves even a
+   * well-funded vault one base unit short of a full burn-all exit — the same
+   * shortfall `quoteKaminoWithdraw` reports for the full balance. The ceiling
+   * must agree with the quote at that scale too: the position read reports the
+   * largest coverable amount, and the pre-fix read ("1") was already an exit
+   * the builder refuses (encoded shares would differ from the request).
+   */
+  it("agrees with the quote down to the planner's one-lamport reserve buffer", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      tokenAvailable: integer(4_000_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 200_000;
+
+    await expect(
+      readKaminoPosition(runtime, { owner: OWNER, slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({ shares: "1", tokenValue: "5", withdrawableShares: "0.999999" });
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "1", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      issues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
+    });
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "0.999999", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({ issues: [] });
+  });
+
+  it("reports nothing immediately withdrawable when the exit plan cannot be observed", async () => {
+    mocks.fetchReserveStates.mockRejectedValue(new Error("reserve state unavailable"));
+
+    const position = await readKaminoPosition(runtime, {
+      owner: OWNER,
+      slot: 123n,
+      vault: VAULT,
+    });
+    expect(position.shares).toBe("1");
+    expect(position.tokenValue).toBeUndefined();
+    expect(position.withdrawableShares).toBe("0");
+  });
+
+  it("ceiling and quote agree: the capped amount quotes clean while the full balance reports short liquidity", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      tokenAvailable: integer(500_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 100_000;
+
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "1", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      issues: [expect.objectContaining({ code: "INSUFFICIENT_WITHDRAWAL_LIQUIDITY" })],
+    });
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "0.733333", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({ issues: [] });
+  });
+
+  /**
+   * The fail-closed half of the same invariant: a full exit the liquidity plan
+   * cannot fill makes the SDK encode fewer shares than requested, and the
+   * builder must refuse rather than sign a ledger record that would not match
+   * what moves on chain. The position ceiling above is what keeps the UI away
+   * from exactly this refusal.
+   */
+  it("refuses a full exit whose liquidity plan cannot burn every requested share", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      tokenAvailable: integer(500_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 100_000;
+
+    await expect(
+      buildKaminoWithdrawPlan(runtime, { owner, shares: "1", slot: 123n, vault: VAULT })
+    ).rejects.toMatchObject({
+      name: "SdpKaminoError",
+      code: "VAULT_UNREADABLE",
+      message: expect.stringContaining("encode 733332 share base units"),
+    });
   });
 
   it("keeps the state-only oracle fail-closed if an SDK path tries to price", async () => {

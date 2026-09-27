@@ -23,6 +23,7 @@ import {
   type KaminoDepositQuoteInput,
   type KaminoWithdrawQuote,
   type KaminoWithdrawQuoteInput,
+  liquidityCappedShareBaseUnits,
 } from "./quotes";
 import { createKaminoRpc } from "./rpc";
 import { parseShareTokenAccountBalances, sumRawTokenAccountBaseUnits } from "./share-balances";
@@ -784,6 +785,16 @@ async function readUnstakedShareBaseUnits(
  * independently of the share read: a position whose size is known but whose
  * value is not renders "—" for the value, which is the module rule everywhere
  * else in Earn and strictly better than a fabricated number.
+ *
+ * `withdrawableShares` is the LIQUIDITY-AWARE exit ceiling, not the unstaked
+ * balance: the largest share quantity whose `getShareExitLiquidityPlan` — the
+ * same planner `quoteKaminoWithdraw` prices with, under the same effective
+ * penalties — can fully cover from the vault's idle plus reserve liquidity
+ * right now. When that plan cannot be observed (rate, reserve or global-config
+ * read failed) the field reports "0" rather than an unverified balance, and
+ * total `shares` still reports the holding. A full exit the vault cannot fill
+ * is exactly the exit the builder refuses, so the ceiling and the quote can
+ * never disagree about what is immediately executable.
  */
 export async function readKaminoPosition(
   runtime: KaminoRuntime,
@@ -822,22 +833,77 @@ export async function readKaminoPosition(
 
   let tokenValue: string | undefined;
   let rawRate: unknown;
+  /**
+   * Fail-closed availability ceiling: until the SAME liquidity-aware exit plan
+   * `quoteKaminoWithdraw` prices with proves how much is executable right now,
+   * nothing is reported as immediately withdrawable. The unstaked balance
+   * alone is a holding figure, not an executable one — reporting it here made
+   * the dashboard present a full exit as available while the executable plan
+   * covered only part of it (SOLA9-516).
+   */
+  let withdrawableBase = 0n;
   try {
-    const reserves = await loadStateOnlyReserves(
-      runtime,
-      input.vault,
-      client,
-      state,
-      rpc,
-      config.klendProgramId,
-      config.slotDurationMs
-    );
+    const [reserves, globalConfig] = await Promise.all([
+      loadStateOnlyReserves(
+        runtime,
+        input.vault,
+        client,
+        state,
+        rpc,
+        config.klendProgramId,
+        config.slotDurationMs
+      ),
+      loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
+    ]);
     rawRate = await client.getTokensPerShareSingleVault(
       state,
       input.slot as Kit2,
       reserves,
       input.slot as Kit2
     );
+    const rate = requireNonNegativeFiniteDecimal("vault exchange rate", rawRate);
+    assertActive();
+    const unstakedShares = new Decimal(formatDecimalAmount(unstakedBase, shareDecimals));
+    // The effective penalties the quote and the builder both price with; planning
+    // the ceiling with anything smaller could clear it past what the quote allows.
+    const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
+    const fullPlan = await client.getShareExitLiquidityPlan(
+      state,
+      input.slot as Kit2,
+      reserves,
+      unstakedShares,
+      unstakedShares,
+      rate,
+      withdrawalPenalties as Kit2
+    );
+    const remaining = lamportsToBaseUnits(
+      "unfilled exit amount",
+      fullPlan.remainingNetTokenLamportsToWithdraw
+    );
+    withdrawableBase =
+      remaining <= 0n
+        ? unstakedBase
+        : await liquidityCappedShareBaseUnits({
+            ceilingBaseUnits: unstakedBase,
+            isFullyCoverable: async (candidate) => {
+              const candidateShares = new Decimal(formatDecimalAmount(candidate, shareDecimals));
+              const candidatePlan = await client.getShareExitLiquidityPlan(
+                state,
+                input.slot as Kit2,
+                reserves,
+                candidateShares,
+                unstakedShares,
+                rate,
+                withdrawalPenalties as Kit2
+              );
+              return (
+                lamportsToBaseUnits(
+                  "candidate exit plan",
+                  candidatePlan.remainingNetTokenLamportsToWithdraw
+                ) <= 0n
+              );
+            },
+          });
   } catch {
     rawRate = undefined;
   }
@@ -862,7 +928,7 @@ export async function readKaminoPosition(
     owner: input.owner,
     cluster: config.cluster,
     shares: shares.toFixed(),
-    withdrawableShares: formatDecimalAmount(unstakedBase, shareDecimals),
+    withdrawableShares: formatDecimalAmount(withdrawableBase, shareDecimals),
     ...(tokenValue === undefined ? {} : { tokenValue }),
     tokenMint: assetIdentity.depositTokenMint,
     sharesMint: assetIdentity.shareMint,

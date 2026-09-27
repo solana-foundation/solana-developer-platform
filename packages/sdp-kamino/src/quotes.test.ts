@@ -7,6 +7,7 @@ import {
   exitInstructionCount,
   type KaminoDepositEstimate,
   type KaminoExitPlanObservation,
+  liquidityCappedShareBaseUnits,
 } from "./quotes";
 
 /** A vault priced 1:1 (one share base unit per token base unit) with 1.5 units of cap. */
@@ -253,5 +254,72 @@ describe("deriveKaminoWithdrawQuote", () => {
         observation({ netBaseUnits: 5_001n, minimumWithdrawalBaseUnits: 5_000n })
       ).issues
     ).toEqual([]);
+  });
+});
+
+describe("liquidityCappedShareBaseUnits", () => {
+  /** A planner whose coverability boundary sits at `floor(candidate x 1.5) <= capacity`. */
+  function scaledPlanner(capacity: bigint) {
+    let evaluations = 0;
+    const oracle = async (candidate: bigint) => {
+      evaluations += 1;
+      return (candidate * 3n) / 2n <= capacity;
+    };
+    return { evaluations: () => evaluations, oracle };
+  }
+
+  it("finds the exact coverable boundary of a fractional exchange rate", async () => {
+    const { evaluations, oracle } = scaledPlanner(1_099_999n);
+    await expect(
+      liquidityCappedShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isFullyCoverable: oracle })
+    ).resolves.toBe(733_333n);
+    // Binary search over the boundary, not a linear scan.
+    expect(evaluations()).toBeLessThan(30);
+  });
+
+  it("returns the ceiling untouched when the full balance is coverable", async () => {
+    await expect(
+      liquidityCappedShareBaseUnits({
+        ceilingBaseUnits: 1_000_000n,
+        isFullyCoverable: async () => true,
+      })
+    ).resolves.toBe(1_000_000n);
+  });
+
+  it("returns zero when not even the empty exit is coverable", async () => {
+    await expect(
+      liquidityCappedShareBaseUnits({
+        ceilingBaseUnits: 1_000_000n,
+        isFullyCoverable: async () => false,
+      })
+    ).resolves.toBe(0n);
+  });
+
+  it("returns zero for a zero ceiling without evaluating the planner", async () => {
+    let evaluations = 0;
+    await expect(
+      liquidityCappedShareBaseUnits({
+        ceilingBaseUnits: 0n,
+        isFullyCoverable: async () => {
+          evaluations += 1;
+          return true;
+        },
+      })
+    ).resolves.toBe(0n);
+    expect(evaluations).toBe(0);
+  });
+
+  it("converges when only a one-base-unit sliver of the ceiling is coverable", async () => {
+    const { oracle } = scaledPlanner(1n);
+    await expect(
+      liquidityCappedShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isFullyCoverable: oracle })
+    ).resolves.toBe(1n);
+  });
+
+  it("converges when the boundary sits one base unit below the ceiling", async () => {
+    const { oracle } = scaledPlanner(1_499_998n);
+    await expect(
+      liquidityCappedShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isFullyCoverable: oracle })
+    ).resolves.toBe(999_999n);
   });
 });

@@ -246,3 +246,45 @@ export function deriveKaminoWithdrawQuote(
 
   return { assetsOut: format(net), assetDecimals, issues };
 }
+
+/**
+ * The largest share quantity, in integer share base units, whose exit plan the
+ * vault's current liquidity can fully cover.
+ *
+ * This is the position-read ceiling: `withdrawableShares` must never promise a
+ * full exit the liquidity-aware quote would refuse (SOLA9-516). The oracle is
+ * the caller's own liquidity planner evaluated at a candidate share amount —
+ * in `sdk.ts`, the same `getShareExitLiquidityPlan` call `quoteKaminoWithdraw`
+ * prices exits with — so the ceiling and the quote can never disagree about
+ * what is executable.
+ *
+ * Coverability is monotone in the share amount: the plan's net amount grows
+ * with the gross, and its uncovered remainder shrinks, so a binary search over
+ * integer base units finds the exact boundary in at most ~log2(ceiling)
+ * planner evaluations, all pure state math with no RPC. The result is
+ * planner-verified coverable by construction, and if an SDK upgrade ever made
+ * the predicate non-monotone the search still returns a verified-coverable
+ * amount — it can only understate, never overstate.
+ */
+export async function liquidityCappedShareBaseUnits(input: {
+  /** The holder's full unstaked balance, in share base units. */
+  ceilingBaseUnits: bigint;
+  /** Whether an exit of exactly this many share base units is fully coverable right now. */
+  isFullyCoverable: (candidateBaseUnits: bigint) => Promise<boolean>;
+}): Promise<bigint> {
+  const { ceilingBaseUnits: ceiling, isFullyCoverable } = input;
+  if (ceiling <= 0n) return 0n;
+  // Verify both ends rather than trusting the caller's precondition: the empty
+  // exit is coverable unless the planner has drifted, and a confirmed ceiling
+  // needs no search.
+  if (!(await isFullyCoverable(0n))) return 0n;
+  if (await isFullyCoverable(ceiling)) return ceiling;
+  let low = 0n;
+  let high = ceiling;
+  while (high - low > 1n) {
+    const mid = low + (high - low) / 2n;
+    if (await isFullyCoverable(mid)) low = mid;
+    else high = mid;
+  }
+  return low;
+}

@@ -242,6 +242,22 @@ to reuse. Every matching token account is summed; if any returned account lacks
 an exact raw amount, the entire position is unreadable rather than silently
 under-reported.
 
+`withdrawableShares` is NOT the unstaked balance — it is the LIQUIDITY-AWARE
+exit ceiling (SOLA9-516): the largest share quantity whose
+`getShareExitLiquidityPlan` — the same planner, rate, and effective penalties
+`quoteKaminoWithdraw` prices with — fully covers from idle plus reserve
+liquidity right now (`liquidityCappedShareBaseUnits` in `quotes.ts`, an exact
+binary search over share base units with the planner as oracle). A full
+unstaked balance the vault cannot fill is exactly the exit the builder refuses
+(encoded shares would differ from the request), so an overstated ceiling made
+the dashboard promise an exit the API would fail. When the plan cannot be
+observed at all (rate, reserve or global-config read failed) the field reports
+"0" — an unverified balance must never read as available — while total
+holdings stay on `shares`. Two planner truths show up in the numbers: a vault
+with ANY allocated reserve is one base unit short of a full burn-all exit
+(the SDK's `RESERVE_WITHDRAW_LIQUIDITY_ROUNDING_BUFFER_LAMPORTS`), and the
+quote reports the same shortfall, so ceiling and quote agree at every scale.
+
 An empty portfolio request first calls the SDK's on-chain
 `getUserSharesBalanceAllVaults` only to discover candidate vault ADDRESSES. That
 helper enumerates the configured kvault program plus the owner's farm and token

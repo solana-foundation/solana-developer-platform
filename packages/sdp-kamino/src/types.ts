@@ -176,7 +176,13 @@ export interface KaminoPosition {
   cluster: SolanaCluster;
   /** Shares held, as a decimal string. */
   shares: string;
-  /** Unstaked shares available to the vault withdrawal builder. */
+  /**
+   * Shares redeemable through the vault withdrawal builder RIGHT NOW, as a
+   * decimal string: the liquidity-aware exit ceiling observed by the same plan
+   * the withdrawal quote prices with, never the raw unstaked balance. "0" when
+   * that plan could not be observed — an unverified balance must not read as
+   * available. Total holdings stay on `shares`.
+   */
   withdrawableShares: string;
   /**
    * Current value of those shares in the vault's deposit token, as a decimal
