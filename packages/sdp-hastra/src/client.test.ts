@@ -826,6 +826,46 @@ describe("Hastra par redemption", () => {
     );
   });
 
+  it("reads a post-close System-owned occupant at the request address as closedOrUnknown", async () => {
+    const fixture = fixtureState();
+    const [request] = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER));
+    // A legitimately closed Hastra request PDA re-occupied by one plain System
+    // transfer of rent dust. A live RedemptionRequest is always owned by the
+    // pinned vault-mint program, so a foreign owner proves the request is no
+    // longer live and reconciliation must fall through to finalized history.
+    fixture.accounts.set(request.toBase58(), {
+      owner: "11111111111111111111111111111111",
+      data: Buffer.alloc(0),
+    });
+    stubRpc(fixture.accounts);
+
+    await expect(
+      makeClient().readParRedemptionRequest(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        requestAddress: request.toBase58(),
+      })
+    ).resolves.toMatchObject({ status: "closedOrUnknown", request: null });
+  });
+
+  it("still fails closed when a Hastra-owned request cannot be decoded", async () => {
+    const fixture = fixtureState();
+    const [request] = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER));
+    // Ownership matches the pinned program but the data does not decode: the
+    // account's meaning is ambiguous, so the read must not classify it closed.
+    fixture.accounts.set(request.toBase58(), {
+      owner: DEPLOYMENT.vaultMintProgramAddress,
+      data: Buffer.alloc(1),
+    });
+    stubRpc(fixture.accounts);
+
+    await expect(
+      makeClient().readParRedemptionRequest(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        requestAddress: request.toBase58(),
+      })
+    ).rejects.toMatchObject({ code: "PROGRAM_MISMATCH" });
+  });
+
   it("accepts only lifecycle events emitted in the pinned vault-mint invocation", async () => {
     const request = pda(
       DEPLOYMENT.vaultMintProgramAddress,

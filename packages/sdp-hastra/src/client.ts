@@ -2374,6 +2374,16 @@ export class HastraVaultDirectClient
         await loadHastraState(runtime, config);
         const account = await getAccount(runtime, requestAddress, "REQUEST_UNREADABLE");
         if (!account) return { requestAddress, status: "closedOrUnknown", request: null };
+        if (account.owner !== config.deployment.vaultMintProgramAddress) {
+          // A closed request PDA can be re-occupied by a plain System transfer
+          // of rent dust. A live RedemptionRequest is always owned by the
+          // pinned vault-mint program, so a foreign owner is deterministic
+          // proof the request is no longer live. Classify it closed so the
+          // reconciler can consult finalized history for the authenticated
+          // closing event instead of failing the read; a present account whose
+          // meaning stays ambiguous keeps failing closed below.
+          return { requestAddress, status: "closedOrUnknown", request: null };
+        }
         const decoded = decodeRedemptionRequest(account, config, requestAddress);
         return {
           requestAddress,
