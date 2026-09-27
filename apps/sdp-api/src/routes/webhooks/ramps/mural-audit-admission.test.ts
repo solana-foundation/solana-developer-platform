@@ -15,11 +15,13 @@ import { seedTestDatabase } from "@/test/mocks/db";
  * lookup returns the real row after archiving it ("archive"), after pointing
  * its denormalized Mural organization id elsewhere ("reassign"), or after
  * archiving it and handing the organization to a successor counterparty
- * ("handover"). Off by default, so every other test exercises the unmocked
- * flow.
+ * ("handover"). "fail-wallet-mirror" instead makes the normalized KYC-wallet
+ * write inside the business transaction fail, so the transaction aborts after
+ * the audit admission. Off by default, so every other test exercises the
+ * unmocked flow.
  */
 const concurrentWriter = vi.hoisted(() => ({
-  mode: "off" as "off" | "archive" | "reassign" | "handover",
+  mode: "off" as "off" | "archive" | "reassign" | "handover" | "fail-wallet-mirror",
   handover: { organizationId: "", successorId: "" },
 }));
 
@@ -31,7 +33,7 @@ vi.mock("@/db/repositories", async (importOriginal) => {
       ...args: Parameters<typeof actual.createSystemCounterpartiesRepository>
     ) => {
       const repo = actual.createSystemCounterpartiesRepository(...args);
-      if (concurrentWriter.mode === "off") {
+      if (!["archive", "reassign", "handover"].includes(concurrentWriter.mode)) {
         return repo;
       }
       const [mockEnv] = args;
@@ -65,6 +67,17 @@ vi.mock("@/db/repositories", async (importOriginal) => {
           .run();
         return found;
       };
+      return repo;
+    },
+    createPostgresKycWalletsRepository: (
+      ...args: Parameters<typeof actual.createPostgresKycWalletsRepository>
+    ) => {
+      const repo = actual.createPostgresKycWalletsRepository(...args);
+      if (concurrentWriter.mode === "fail-wallet-mirror") {
+        repo.setKycStatusByCounterparty = async () => {
+          throw new Error("kyc wallet mirror write failed (simulated)");
+        };
+      }
       return repo;
     },
   };
@@ -452,6 +465,79 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
       .first<{ count: number }>();
     expect(inbox?.count).toBe(1);
+  });
+
+  /**
+   * A business transaction that fails after audit admission must not strand
+   * its durable intent: the abort records a failure outcome against it, so a
+   * successful retry admits a fresh intent without leaving the earlier one
+   * unresolved for audit-ledger integrity verification.
+   */
+  it("resolves the admitted intent as a failure when the business transaction fails after admission", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    concurrentWriter.mode = "fail-wallet-mirror";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_tx_fails_after_admission",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    // The failed apply is not terminal: the inbox row keeps the verified
+    // payload for retry.
+    expect(applied).toBe(false);
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(1);
+
+    // The transaction rolled back: neither the counterparty nor the
+    // normalized KYC wallet moved.
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("pending");
+    expect(wallet?.kyc_status).toBe("pending");
+
+    // The admitted intent was not stranded: exactly one intent plus its
+    // failure outcome, linked so integrity verification sees it resolved.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(intents).toHaveLength(1);
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).status).toBe("failure");
+    const outcomeMetadata = parseMetadata(sole(outcomes)) as {
+      auditIntentId?: string;
+      result?: string;
+    };
+    expect(outcomeMetadata.auditIntentId).toBe(sole(intents).resource_id);
+    expect(outcomeMetadata.result).toBe("aborted");
   });
 
   it("ignores a stale replayed status without a new mutation or admission", async () => {
