@@ -37,8 +37,9 @@ export interface Env {
   K_SERVICE?: string;
   K_REVISION?: string;
   CLOUD_RUN_JOB?: string;
-  // Trust the first X-Forwarded-For address outside Cloud Run only when a
-  // deployment-owned proxy replaces caller-supplied forwarding headers.
+  // Trust X-Forwarded-For only when a deployment opts in: on Cloud Run once
+  // ingress is restricted to the external load balancer, and elsewhere only
+  // when a deployment-owned proxy replaces caller-supplied forwarding headers.
   TRUST_PROXY_HEADERS?: string;
 
   // Public-facing origin of this API (e.g. "https://api.example.com"). The

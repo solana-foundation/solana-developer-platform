@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { resolveClientIp } from "./client-ip";
 
 describe("resolveClientIp", () => {
-  it("uses the verified client appended by the Google load balancer on Cloud Run", () => {
+  it("uses the verified client appended by the Google load balancer on an opted-in Cloud Run deployment", () => {
     const headers = new Headers({
       "x-forwarded-for": "198.51.100.99, 203.0.113.10, 192.0.2.20",
     });
 
-    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBe("203.0.113.10");
+    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api", TRUST_PROXY_HEADERS: "true" })).toBe(
+      "203.0.113.10"
+    );
   });
 
   it("ignores malformed caller-supplied forwarded entries", () => {
@@ -15,11 +17,25 @@ describe("resolveClientIp", () => {
       "x-forwarded-for": "not-an-ip, 203.0.113.10, 192.0.2.20",
     });
 
-    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBe("203.0.113.10");
+    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api", TRUST_PROXY_HEADERS: "true" })).toBe(
+      "203.0.113.10"
+    );
   });
 
   it("rejects an unverified single-hop value on Cloud Run", () => {
     const headers = new Headers({ "x-forwarded-for": "198.51.100.99" });
+
+    expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBeNull();
+  });
+
+  it("does not infer proxy trust from K_SERVICE alone", () => {
+    // SOLA9-556: K_SERVICE marks the runtime, not a verified proxy hop. On a
+    // directly reachable Cloud Run service the whole chain is caller-supplied,
+    // so the next-to-last entry would let the caller pick the address an
+    // IP-restricted key is checked against.
+    const headers = new Headers({
+      "x-forwarded-for": "198.51.100.99, 203.0.113.10",
+    });
 
     expect(resolveClientIp(headers, { K_SERVICE: "sdp-api" })).toBeNull();
   });

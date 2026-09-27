@@ -175,6 +175,16 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
 
+      # SOLA9-556: the runtime trusts X-Forwarded-For only behind the external
+      # load balancer with an explicit TRUST_PROXY_HEADERS=true opt-in, so a
+      # directly reachable run.app URL can never select the address an
+      # IP-restricted API key is checked against. Fail the deploy before any
+      # image promotion when the live service drifts out of that topology.
+      - name: Verify Cloud Run ingress topology
+        run: |
+          node .github/scripts/verify-cloud-run-ingress.mjs \
+            "${SERVICE}" "${REGION}" "${PROJECT_ID}"
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 

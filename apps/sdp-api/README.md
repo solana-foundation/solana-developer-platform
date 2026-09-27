@@ -135,8 +135,13 @@ a separate paid-upstream budget configured with
 `EARN_ANONYMOUS_RPC_WINDOW_SECONDS`. API-key requests continue to use their
 project environment and authenticated quota. At startup, the API validates and
 logs the resolved anonymous Earn environment from `ENVIRONMENT`; verify that
-event before exposing a non-production deployment. Outside Cloud Run, forwarded
-client addresses are ignored unless `TRUST_PROXY_HEADERS=true`; enable it only
+event before exposing a non-production deployment. Forwarded client addresses
+are trusted only when `TRUST_PROXY_HEADERS=true`; `K_SERVICE` alone never
+grants that trust, because a directly reachable Cloud Run service receives an
+entirely caller-controlled `X-Forwarded-For` chain. A Cloud Run deployment
+sets it only after restricting ingress to
+`internal-and-cloud-load-balancing` (the deploy workflows fail when the live
+service drifts out of that topology), and a self-hosted deployment only
 behind an ingress that replaces caller-supplied `X-Forwarded-For` values.
 
 ### Optional: Custody Integrations

@@ -225,6 +225,53 @@ describe("Auth Middleware", () => {
       expect(res.status).toBe(403);
     });
 
+    it("does not let K_SERVICE alone trust a caller-selected allowlisted prefix", async () => {
+      // SOLA9-556: a directly reachable Cloud Run service lets the caller pick
+      // the address an IP-restricted key is checked against by sending two
+      // X-Forwarded-For entries — K_SERVICE marks the runtime, not a verified
+      // proxy hop, so without the explicit proxy-trust signal the allowlisted
+      // prefix must be rejected.
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["198.51.100.99/32"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.99, 203.0.113.10",
+          },
+        },
+        { ...env, K_SERVICE: "sdp-api", TRUST_PROXY_HEADERS: undefined }
+      );
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe("FORBIDDEN");
+    });
+
+    it("still honors the load-balancer-verified client after an explicit Cloud Run opt-in", async () => {
+      await seedCachedApiKey(env, validKeyHash, {
+        ...TEST_CACHED_API_KEY,
+        allowedIps: ["203.0.113.0/24"],
+      });
+
+      const res = await app.request(
+        `/v1/organizations/${TEST_CACHED_API_KEY.organizationId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "x-forwarded-for": "198.51.100.99, 203.0.113.10, 130.211.0.1",
+          },
+        },
+        { ...env, K_SERVICE: "sdp-api", TRUST_PROXY_HEADERS: "true" }
+      );
+
+      expect(res.status).toBe(200);
+    });
+
     it("rejects a restricted API key when no trusted client IP is available", async () => {
       await seedCachedApiKey(env, validKeyHash, {
         ...TEST_CACHED_API_KEY,

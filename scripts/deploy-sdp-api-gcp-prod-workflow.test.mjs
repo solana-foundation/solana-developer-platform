@@ -260,6 +260,27 @@ test("rollback verification accepts release-tag and merge-to-main identities", (
   assert.match(workflow, /refs\/tags\/v\.\+\|refs\/heads\/main/);
 });
 
+test("the Cloud Run ingress topology is verified before any image promotion", () => {
+  // SOLA9-556: the runtime trusts X-Forwarded-For only behind the external
+  // load balancer with an explicit TRUST_PROXY_HEADERS=true opt-in; a deploy
+  // must fail rather than serve restricted keys through a run.app URL.
+  assert.match(workflow, /- name: Verify Cloud Run ingress topology/);
+  assert.match(
+    workflow,
+    /node \.github\/scripts\/verify-cloud-run-ingress\.mjs \\\n+\s+"\$\{SERVICE\}" "\$\{REGION\}" "\$\{PROJECT_ID\}"/
+  );
+
+  const gcpAuth = workflow.indexOf("- name: Authenticate to GCP");
+  const ingressGate = workflow.indexOf("- name: Verify Cloud Run ingress topology");
+  const releasePromotion = workflow.indexOf("- name: Verify and promote release image");
+  const mergePromotion = workflow.indexOf("- name: Verify and promote merge image");
+  assert.ok(ingressGate > gcpAuth, "the gate needs gcloud credentials");
+  assert.ok(
+    ingressGate < releasePromotion && ingressGate < mergePromotion,
+    "the gate must run before any image is promoted into prod"
+  );
+});
+
 test("no static Doppler token remains in the deploy pipeline", () => {
   assert.doesNotMatch(workflow, /DOPPLER_TOKEN_CI/);
   assert.match(workflow, /- name: Doppler OIDC login/);

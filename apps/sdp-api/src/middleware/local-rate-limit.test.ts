@@ -3,9 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import { localRateLimit } from "./local-rate-limit";
 
-// SAFETY: the limiter reads only K_SERVICE, via getClientIp; the rest of Env is
-// irrelevant to it and constructing a whole one would say nothing extra.
-const CLOUD_RUN_ENV = { K_SERVICE: "sdp-api" } as unknown as Env;
+// SAFETY: the limiter reads only K_SERVICE and TRUST_PROXY_HEADERS, via
+// getClientIp; the rest of Env is irrelevant to it and constructing a whole one
+// would say nothing extra. The explicit TRUST_PROXY_HEADERS opt-in stands in
+// for the restricted-ingress deployment that is the only place Cloud Run may
+// trust forwarding headers.
+const CLOUD_RUN_ENV = {
+  K_SERVICE: "sdp-api",
+  TRUST_PROXY_HEADERS: "true",
+} as unknown as Env;
 
 function buildApp(limits: { maxRequests: number; maxTrackedKeys: number }) {
   const app = new Hono<{ Bindings: Env }>();
@@ -117,5 +123,16 @@ describe("localRateLimit", () => {
 
     expect((await app.request("/", spoofed, CLOUD_RUN_ENV)).status).toBe(200);
     expect((await app.request("/", { headers: {} }, CLOUD_RUN_ENV)).status).toBe(429);
+  });
+
+  it("ignores every forwarded address on Cloud Run without the explicit proxy-trust opt-in", async () => {
+    // SOLA9-556: K_SERVICE alone must not turn caller-supplied entries into
+    // verified addresses, or a directly reachable service would let each
+    // caller invent a fresh allowance bucket.
+    const app = buildApp({ maxRequests: 1, maxTrackedKeys: 8 });
+    const untrusted = { K_SERVICE: "sdp-api" } as unknown as Env;
+
+    expect((await app.request("/", fromAddress("203.0.113.7"), untrusted)).status).toBe(200);
+    expect((await app.request("/", fromAddress("203.0.113.8"), untrusted)).status).toBe(429);
   });
 });

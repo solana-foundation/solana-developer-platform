@@ -16,19 +16,24 @@ function parseForwardedFor(value: string | undefined): string[] {
 /**
  * Resolve the client IP supplied by the deployment's trusted reverse proxy.
  *
- * Google External Application Load Balancers append the verified client and
- * load-balancer addresses to any caller-supplied X-Forwarded-For prefix. Cloud
- * Run injects K_SERVICE itself, so in that environment the next-to-last IP is
- * the verified client and untrusted prefixes must be ignored. Other
- * deployments reject forwarding headers by default because a directly
- * reachable caller can forge them. A self-hosted operator may opt in only
- * after configuring its ingress to replace untrusted X-Forwarded-For values.
+ * Forwarding headers are trusted only after the deployment explicitly opts in
+ * with TRUST_PROXY_HEADERS=true, because K_SERVICE marks the Cloud Run runtime
+ * but says nothing about the network path a request took: a service reachable
+ * through its run.app URL receives an entirely caller-controlled
+ * X-Forwarded-For chain, and the value this function returns is what API-key
+ * and organization IP allowlists evaluate. A Cloud Run deployment sets the
+ * opt-in only after restricting ingress to the external load balancer, whose
+ * front end appends the verified client and load-balancer addresses to any
+ * caller-supplied prefix — so in that environment the next-to-last IP is the
+ * verified client and untrusted prefixes must be ignored. A self-hosted
+ * operator sets it only after configuring its ingress to replace untrusted
+ * X-Forwarded-For values.
  */
 export function resolveClientIp(
   headers: Pick<Headers, "get">,
   env: Pick<Env, "K_SERVICE" | "TRUST_PROXY_HEADERS">
 ): string | null {
-  if (!env.K_SERVICE && env.TRUST_PROXY_HEADERS !== "true") {
+  if (env.TRUST_PROXY_HEADERS !== "true") {
     return null;
   }
 

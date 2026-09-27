@@ -1463,10 +1463,14 @@ against the organization's shared pool. Pinned by the "metered quotas" describe 
 whose second test exhausts both counters and asserts the payout still lands,
 and by the one in `../earn.external-wallet.test.ts`, which also breaks the
 counter store and asserts the deposit build 503s while the exit still builds.
-Anonymous paid-upstream counters use a verified Cloud Run client address. A
-self-hosted deployment ignores forwarded addresses by default and shares the
-fail-closed unidentified bucket; `TRUST_PROXY_HEADERS=true` is safe only when
-its ingress replaces caller-supplied `X-Forwarded-For` values.
+Anonymous paid-upstream counters use a verified Cloud Run client address,
+resolved only after the deployment's explicit `TRUST_PROXY_HEADERS=true`
+opt-in (`K_SERVICE` alone never grants it, per SOLA9-556). A self-hosted
+deployment ignores forwarded addresses by default and shares the fail-closed
+unidentified bucket; `TRUST_PROXY_HEADERS=true` is safe only when its ingress
+restricts the request path to the trusted proxy — on Cloud Run,
+`internal-and-cloud-load-balancing` — that keeps caller-supplied
+`X-Forwarded-For` prefixes out of the verified chain.
 
 ## Audit-ledger parity (PRO-1866)
 
