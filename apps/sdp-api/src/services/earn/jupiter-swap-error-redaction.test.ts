@@ -37,9 +37,11 @@ const OPAQUE_MARKER = "CUSTOMER-PII-12345";
 const PROVIDER_BODY = `{"providerBody":{"identity":{"opaque":"${OPAQUE_MARKER}"}}}`;
 /**
  * A longer provider body (well past any diagnostic bound) that also carries a
- * credential-shaped field, so both the bound and the scrubber are exercised.
+ * credential-shaped field placed inside the retained window, so the bound and
+ * the scrubber are exercised independently: truncation alone cannot account
+ * for the credential's absence from the logged detail.
  */
-const TELEMETRY_BODY = `route rebuild failed after ${"A".repeat(600)} ${PROVIDER_BODY} {"x-api-key":"sk_live_supersecret"}`;
+const TELEMETRY_BODY = `route rebuild failed after {"x-api-key":"sk_live_supersecret"} ${"A".repeat(600)} ${PROVIDER_BODY}`;
 
 let server: Server;
 let baseUrl: string;
