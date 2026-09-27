@@ -263,6 +263,28 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
     ).toBe(1);
   });
 
+  it("countNonTerminalByProjectExcludingInstance skips only the named instance", async () => {
+    // Reconnecting a gateway must not count rows bound to its own instance —
+    // that reconnect is their recovery path — while rows on any other
+    // historical instance still block (SOLA9-468).
+    const db = getDb(env);
+    await repo.createWithdrawal(makeInput({ instanceId: TEST_INSTANCE_ID }));
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(TEST_INSTANCE_ID)
+      .run();
+    await seedInstance("inst_pcw_2");
+    await repo.createWithdrawal(makeInput({ instanceId: "inst_pcw_2" }));
+
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, TEST_INSTANCE_ID)).toBe(1);
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, "inst_pcw_2")).toBe(1);
+    // Excluding an instance with no rows leaves both in-flight withdrawals.
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, "inst_pcw_missing")).toBe(
+      2
+    );
+  });
+
   it("holds one withdrawal per idempotency key within a tenant", async () => {
     const first = await repo.createWithdrawal(
       makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })

@@ -544,6 +544,101 @@ describe("Private Channels routes", () => {
     expect(reactivatedBody.data.instance.isActive).toBe(true);
   });
 
+  it("POST /instance refuses to reactivate a gateway while a different historical instance has in-flight movements", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const first = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const firstBody = (await first.json()) as { data: { instance: { id: string } } };
+    const firstId = firstBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(firstId)
+      .run();
+
+    const otherGatewayUrl = "http://34.71.147.163:9902";
+    const originalAllowlist = env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST;
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = otherGatewayUrl;
+    try {
+      const second = await app.request(
+        "/v1/private-channels/instance",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ ...SANDBOX_DEFAULTS, gatewayUrl: otherGatewayUrl }),
+        },
+        env
+      );
+      expect(second.status).toBe(200);
+      const secondBody = (await second.json()) as { data: { instance: { id: string } } };
+      const secondId = secondBody.data.instance.id;
+
+      // A submitted transfer stranded on the second instance, which then retires.
+      await db
+        .prepare(
+          `INSERT INTO private_channel_transfers (
+               id, organization_id, project_id, instance_id, channel_id,
+               sender_private_channel_user_id, recipient_private_channel_user_id,
+               sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
+               mint, amount, status, signature
+             ) VALUES ('pct_other_instance', ?, ?, ?, 'pch_other', 'pcu_sender', 'pcu_recipient',
+                       'w_sender', 'w_recipient',
+                       '11111111111111111111111111111111', '22222222222222222222222222222222',
+                       'mint1', '1', 'submitted', 'sig_other')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id, secondId)
+        .run();
+      await db
+        .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+        .bind(secondId)
+        .run();
+
+      // Reconnecting the first gateway must not take the active slot while the
+      // transfer is bound to the second one — that reactivate is not the
+      // transfer's recovery path.
+      const refused = await app.request(
+        "/v1/private-channels/instance",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ ...SANDBOX_DEFAULTS, confirmReactivate: true }),
+        },
+        env
+      );
+      expect(refused.status).toBe(409);
+      const refusedBody = (await refused.json()) as { error: { message: string } };
+      expect(refusedBody.error.message).toMatch(/in flight/i);
+      expect(refusedBody.error.message).toMatch(/different/i);
+
+      // Reconnecting the second gateway stays available: that reconnect is the
+      // recovery path for its own transfer.
+      const recovered = await app.request(
+        "/v1/private-channels/instance",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            ...SANDBOX_DEFAULTS,
+            gatewayUrl: otherGatewayUrl,
+            confirmReactivate: true,
+          }),
+        },
+        env
+      );
+      expect(recovered.status).toBe(200);
+      const recoveredBody = (await recovered.json()) as {
+        data: { instance: { id: string; isActive: boolean } };
+      };
+      expect(recoveredBody.data.instance.id).toBe(secondId);
+      expect(recoveredBody.data.instance.isActive).toBe(true);
+    } finally {
+      env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = originalAllowlist;
+    }
+  });
+
   it("POST /instance/disconnect returns 404 when there is no active row", async () => {
     const res = await app.request(
       "/v1/private-channels/instance/disconnect",

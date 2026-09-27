@@ -132,6 +132,31 @@ export const connectPrivateChannelInstance = async (
 
   let row: PrivateChannelInstanceRow | null;
   if (existingByGateway) {
+    // Reactivating revives only this gateway's own instance, so it cannot
+    // settle movements bound to a different one. Refuse while another
+    // historical instance still has movements in flight (SOLA9-468): the
+    // recovery path for those rows is reconnecting *their* gateway, and
+    // handing this one the active slot again would strand them all the same.
+    const [deposits, withdrawals, transfers] = await Promise.all([
+      getPrivateChannelDepositRepository(c).countNonTerminalByProjectExcludingInstance(
+        scope,
+        existingByGateway.id
+      ),
+      getPrivateChannelWithdrawalRepository(c).countNonTerminalByProjectExcludingInstance(
+        scope,
+        existingByGateway.id
+      ),
+      getPrivateChannelTransferRepository(c).countNonTerminalByProjectExcludingInstance(
+        scope,
+        existingByGateway.id
+      ),
+    ]);
+    if (deposits > 0 || withdrawals > 0 || transfers > 0) {
+      throw new AppError(
+        "CONFLICT",
+        `This project has ${deposits} deposit(s), ${withdrawals} withdrawal(s), and ${transfers} transfer(s) still in flight on a different Private Channels instance. Reconnect that instance's gateway and let them settle or fail before reconnecting this one.`
+      );
+    }
     if (!confirmReactivate) {
       throw new AppError(
         "CONFLICT",
@@ -150,7 +175,9 @@ export const connectPrivateChannelInstance = async (
     // slot, an in-flight row bound to a retired instance can only be resolved
     // by reconnecting that gateway. Refuse the replacement while any historical
     // instance still has movements in flight (SOLA9-468). Reactivating a
-    // gateway's own row is untouched — that reconnect is the recovery path.
+    // gateway's own row skips this check — that reconnect is the recovery path
+    // for its own rows; the reactivate branch above still refuses while a
+    // different instance has rows in flight.
     const [deposits, withdrawals, transfers] = await Promise.all([
       getPrivateChannelDepositRepository(c).countNonTerminalByProject(scope),
       getPrivateChannelWithdrawalRepository(c).countNonTerminalByProject(scope),

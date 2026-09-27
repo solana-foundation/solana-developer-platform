@@ -110,6 +110,16 @@ export interface PrivateChannelDepositRepository {
   /** Replacement guard: in-flight deposits on any instance of the tenant. */
   countNonTerminalByProject(scope: DepositProjectScope): Promise<number>;
   /**
+   * Reactivation guard: in-flight deposits on any historical instance other
+   * than `excludeInstanceId`. Reconnecting a gateway settles only its own
+   * instance's rows, so deposits bound to a different retired instance must
+   * still block (SOLA9-468).
+   */
+  countNonTerminalByProjectExcludingInstance(
+    scope: DepositProjectScope,
+    excludeInstanceId: string
+  ): Promise<number>;
+  /**
    * Merge `patch` into `context` JSONB atomically. Used by the oracle to record
    * debounce markers (e.g. lastStuckWarningAt) without racing the poll update.
    */

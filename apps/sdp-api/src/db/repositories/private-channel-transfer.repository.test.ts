@@ -312,6 +312,41 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     ).toBe(0);
   });
 
+  it("countNonTerminalByProjectExcludingInstance skips only the named instance", async () => {
+    // Reconnecting a gateway must not count rows bound to its own instance —
+    // that reconnect is their recovery path — while rows on any other
+    // historical instance still block (SOLA9-468).
+    const db = getDb(env);
+    const seedInstanceRow = (id: string) =>
+      db
+        .prepare(
+          `INSERT INTO private_channel_instances (
+             id, organization_id, project_id, gateway_url,
+             escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+           ) VALUES (?, ?, ?, 'https://gateway.example/' || ?,
+              'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+        )
+        .bind(id, TEST_ORG.id, TEST_PROJECT_ID, id)
+        .run();
+
+    await seedTransfer();
+    await seedSubmitted();
+    // A project holds at most one active instance, so retire this one before
+    // seeding the next (the partial unique index would refuse otherwise).
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(TEST_INSTANCE_ID)
+      .run();
+    await seedInstanceRow("pci_pct_repo_other");
+    await seedTransfer({ instanceId: "pci_pct_repo_other" });
+
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, TEST_INSTANCE_ID)).toBe(1);
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, "pci_pct_repo_other")).toBe(
+      2
+    );
+  });
+
   it("maps a submitted transfer without exposing internal audit fields", async () => {
     const row = await seedSubmitted();
 

@@ -111,6 +111,16 @@ export interface PrivateChannelWithdrawalRepository {
   countNonTerminalByInstance(instanceId: string): Promise<number>;
   /** Replacement guard: in-flight withdrawals on any instance of the tenant. */
   countNonTerminalByProject(scope: WithdrawalProjectScope): Promise<number>;
+  /**
+   * Reactivation guard: in-flight withdrawals on any historical instance other
+   * than `excludeInstanceId`. Reconnecting a gateway settles only its own
+   * instance's rows, so withdrawals bound to a different retired instance must
+   * still block (SOLA9-468).
+   */
+  countNonTerminalByProjectExcludingInstance(
+    scope: WithdrawalProjectScope,
+    excludeInstanceId: string
+  ): Promise<number>;
   /** Merge `patch` into `context` JSONB atomically (see deposit repo). */
   patchContext(id: string, patch: PrivateChannelTransferContext): Promise<void>;
 }

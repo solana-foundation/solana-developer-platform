@@ -269,6 +269,37 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     ).toBe(otherProject === null ? 0 : 1);
   });
 
+  it("countNonTerminalByProjectExcludingInstance skips only the named instance", async () => {
+    // Reconnecting a gateway must not count rows bound to its own instance —
+    // that reconnect is their recovery path — while rows on any other
+    // historical instance still block (SOLA9-468).
+    const db = getDb(env);
+    await repo.createDeposit(makeInput());
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(TEST_INSTANCE_ID)
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO private_channel_instances (
+           id, organization_id, project_id, gateway_url,
+           escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+         ) VALUES ('inst_pcd_2', ?, ?, 'https://gateway.example/inst_pcd_2',
+           'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT_ID)
+      .run();
+    await repo.createDeposit(makeInput({ instanceId: "inst_pcd_2" }));
+
+    const scope = { organizationId: TEST_ORG.id, projectId: TEST_PROJECT_ID };
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, TEST_INSTANCE_ID)).toBe(1);
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, "inst_pcd_2")).toBe(1);
+    // Excluding an instance with no rows leaves both in-flight deposits.
+    expect(await repo.countNonTerminalByProjectExcludingInstance(scope, "inst_pcd_missing")).toBe(
+      2
+    );
+  });
+
   it("scopes idempotency reservations to the project", async () => {
     await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
     const read = (projectId: string) =>

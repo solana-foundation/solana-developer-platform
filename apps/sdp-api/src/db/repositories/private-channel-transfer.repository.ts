@@ -118,6 +118,16 @@ export interface PrivateChannelTransferRepository {
    */
   countNonTerminalByProject(scope: PrivateChannelTransferProjectScope): Promise<number>;
   /**
+   * Reactivation guard: in-flight transfers on any historical instance other
+   * than `excludeInstanceId`. Reconnecting a gateway settles only its own
+   * instance's rows, so transfers bound to a different retired instance must
+   * still block (SOLA9-468).
+   */
+  countNonTerminalByProjectExcludingInstance(
+    scope: PrivateChannelTransferProjectScope,
+    excludeInstanceId: string
+  ): Promise<number>;
+  /**
    * The row that already claimed `idempotencyKey` in this tenant, or null.
    * Scoped to (organization, project) to match the unique index, so one
    * tenant's key can neither collide with nor probe for another's.
