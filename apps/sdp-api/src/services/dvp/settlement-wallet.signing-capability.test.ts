@@ -13,8 +13,12 @@
  * 1. Provisioning refuses a lifecycle-only effective custody target BEFORE a
  *    provider wallet is minted or the `dvp_settlement_wallets` mapping is
  *    persisted.
- * 2. Runtime admission refuses a retained settlement wallet whose provider
- *    cannot sign, so a mapping that predates the guard still fails every
+ * 2. Provisioning re-verifies the wallet that was actually MINTED before the
+ *    mapping is persisted: the effective default can change between the first
+ *    guard and the provisioner's internal re-resolution, and the mapping must
+ *    never store an authority that cannot sign.
+ * 3. Runtime admission refuses a retained settlement wallet whose provider
+ *    cannot sign, so a mapping that predates the guards still fails every
  *    create closed instead of minting funded, uncloseable trades.
  *
  * Anchorage's supported non-signing workflows (wallet lifecycle, compliance)
@@ -52,6 +56,13 @@ const PRIVY_PROJECT_ID = "prj_dvp_signing_compatible";
 const PRIVY_USER_ID = "usr_dvp_signing_compatible";
 const PRIVY_CONFIG_ID = "cust_dvp_signing_compatible";
 const PRIVY_WALLET_ID = "cwlt_dvp_signing_compatible";
+
+const RACE_ORGANIZATION_ID = "org_dvp_signing_race";
+const RACE_PROJECT_ID = "prj_dvp_signing_race";
+const RACE_USER_ID = "usr_dvp_signing_race";
+const RACE_PRIVY_CONFIG_ID = "cust_dvp_signing_race_privy";
+const RACE_ANCHORAGE_CONFIG_ID = "cust_dvp_signing_race_anchorage";
+const RACE_WALLET_ID = "cwlt_dvp_signing_race_anchorage";
 
 const auditContext = new Context<{ Bindings: Env }>(new Request("http://localhost/dvp"), { env });
 const scope = { organizationId: ORGANIZATION_ID, projectId: PROJECT_ID };
@@ -165,6 +176,102 @@ describe("DvP settlement authority signing capability", () => {
 
     // Failed closed BEFORE minting a provider wallet or persisting the mapping.
     expect(provisionApiKeyWallet).not.toHaveBeenCalled();
+    expect(await getDb(env).queryMany("SELECT 1 FROM dvp_settlement_wallets")).toEqual([]);
+  });
+
+  it("refuses the settlement mapping when provisioning races a default switched to a lifecycle-only provider", async () => {
+    // The first guard verifies a signing-capable default, but an administrator
+    // can switch it to Anchorage before the provisioner re-resolves it
+    // internally. The wallet that comes back was minted under the
+    // lifecycle-only provider, so the mapping must refuse to store it.
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO organizations (id, name, slug, tier, status)
+           VALUES (?, 'DvP signing race', 'dvp-signing-race', 'individual', 'active')`
+        )
+        .bind(RACE_ORGANIZATION_ID),
+      db
+        .prepare(
+          `INSERT INTO users (id, email, email_verified, status)
+           VALUES (?, 'dvp-signing-race@example.com', 1, 'active')`
+        )
+        .bind(RACE_USER_ID),
+    ]);
+    await seedDefaultProjects(db, {
+      organizationId: RACE_ORGANIZATION_ID,
+      createdBy: RACE_USER_ID,
+      members: [],
+      ids: { sandbox: RACE_PROJECT_ID, production: `${RACE_PROJECT_ID}_production` },
+    });
+    await db.batch([
+      // The default the guard verifies: signing-capable.
+      db
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, status
+           ) VALUES (?, ?, ?, 'privy', ?, 'test', 'active')`
+        )
+        .bind(
+          RACE_PRIVY_CONFIG_ID,
+          RACE_ORGANIZATION_ID,
+          RACE_PROJECT_ID,
+          JSON.stringify({ provider: "privy", walletId: "privy_race_wallet" })
+        ),
+      // The default provisioning re-resolved after the switch: lifecycle-only.
+      db
+        .prepare(
+          `INSERT INTO custody_configs (
+             id, organization_id, project_id, provider, config_encrypted,
+             encryption_version, status
+           ) VALUES (?, ?, ?, 'anchorage', ?, 'test', 'active')`
+        )
+        .bind(
+          RACE_ANCHORAGE_CONFIG_ID,
+          RACE_ORGANIZATION_ID,
+          RACE_PROJECT_ID,
+          JSON.stringify({ provider: "anchorage", walletId: "anchorage_race_wallet" })
+        ),
+      db
+        .prepare(
+          `INSERT INTO custody_scope_defaults (
+             id, organization_id, project_id, default_custody_config_id
+           ) VALUES (?, ?, ?, ?)`
+        )
+        .bind(
+          `csd_${RACE_PRIVY_CONFIG_ID}`,
+          RACE_ORGANIZATION_ID,
+          RACE_PROJECT_ID,
+          RACE_PRIVY_CONFIG_ID
+        ),
+      // The wallet the provisioner minted under the switched default.
+      db
+        .prepare(
+          `INSERT INTO custody_wallets (
+             id, custody_config_id, wallet_id, public_key, purpose, status
+           ) VALUES (?, ?, ?, ?, 'dvp_settlement_authority', 'active')`
+        )
+        .bind(RACE_WALLET_ID, RACE_ANCHORAGE_CONFIG_ID, "anchorage_race_wallet", WALLET_ADDRESS),
+    ]);
+    provisionApiKeyWallet.mockResolvedValue({
+      id: RACE_WALLET_ID,
+      walletId: "anchorage_race_wallet",
+    });
+
+    await expect(
+      getOrCreateDvpSettlementWallet(env, auditContext, {
+        organizationId: RACE_ORGANIZATION_ID,
+        projectId: RACE_PROJECT_ID,
+      })
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      details: { reason: "provider_cannot_sign" },
+    });
+
+    // Failed closed AFTER the mint but BEFORE the mapping: no unusable
+    // settlement authority is ever stored.
     expect(await getDb(env).queryMany("SELECT 1 FROM dvp_settlement_wallets")).toEqual([]);
   });
 

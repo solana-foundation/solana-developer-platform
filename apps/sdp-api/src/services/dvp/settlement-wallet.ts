@@ -13,11 +13,11 @@
  * SDP's leg, never a reuse of it.
  */
 
-import { canProviderSign } from "@sdp/custody";
+import { CUSTODY_PROVIDERS, type CustodyProvider, canProviderSign } from "@sdp/custody";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
-import { conflict } from "@/lib/errors";
+import { conflict, internalError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -117,6 +117,32 @@ export async function getOrCreateDvpSettlementWallet(
     purpose: "dvp_settlement_authority",
   });
 
+  // The effective default verified above can change before provisioning
+  // re-resolves it internally, so the wallet just minted may belong to a
+  // provider the guard never saw. Verify the MINTED wallet — its provider is
+  // what the mapping below would freeze in — before that mapping exists. The
+  // unusable wallet is left orphaned and logged, like the loser of the
+  // provisioning race: it holds no funds, and deleting a freshly provisioned
+  // key is a worse failure mode.
+  const provisionedProvider = await readCustodyWalletProvider(env, provisioned.id);
+  if (provisionedProvider && !canProviderSign(provisionedProvider)) {
+    getLogger().warn(
+      {
+        organizationId: scope.organizationId,
+        projectId: scope.projectId,
+        provider: provisionedProvider,
+        targetKind: "config",
+        custodyWalletId: provisioned.id,
+        reason: "provider_cannot_sign",
+      },
+      "custody_runtime_target_unavailable"
+    );
+    throw conflict(
+      `DvP settlement requires a custody provider that can sign transactions; provider does not support transaction signing: ${provisionedProvider}`,
+      { reason: "provider_cannot_sign" }
+    );
+  }
+
   const claimed = await getDb(env)
     .prepare(
       `INSERT INTO dvp_settlement_wallets (project_id, organization_id, custody_wallet_id)
@@ -172,6 +198,40 @@ async function readMappedWalletId(env: Env, scope: Scope): Promise<string | null
     .bind(scope.projectId, scope.organizationId)
     .first<{ custody_wallet_id: string }>();
   return row?.custody_wallet_id ?? null;
+}
+
+/**
+ * The provider that owns a custody wallet, read back from the row the
+ * provisioner just wrote. Returns null when the row cannot be found; the
+ * mapping insert below fails on its foreign key in that case either way.
+ */
+async function readCustodyWalletProvider(
+  env: Env,
+  custodyWalletId: string
+): Promise<CustodyProvider | null> {
+  const row = await getDb(env)
+    .prepare(
+      `SELECT cfg.provider AS config_provider, conn.provider AS connection_provider
+         FROM custody_wallets w
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_connections conn ON conn.id = w.custody_connection_id
+        WHERE w.id = ?
+        LIMIT 1`
+    )
+    .bind(custodyWalletId)
+    .first<{ config_provider: string | null; connection_provider: string | null }>();
+  const provider = row?.connection_provider ?? row?.config_provider;
+  if (!provider) {
+    return null;
+  }
+  if (!CUSTODY_PROVIDERS.includes(provider as CustodyProvider)) {
+    getLogger().error(
+      { custodyWalletId, provider, reason: "unknown_custody_provider" },
+      "custody_runtime_target_unexpected"
+    );
+    throw internalError("Unknown custody wallet provider");
+  }
+  return provider as CustodyProvider;
 }
 
 /**
