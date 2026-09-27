@@ -19,7 +19,7 @@ import {
 } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
-import { getDb } from "@/db";
+import { asTransactionalClient, getDb } from "@/db";
 import { createAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
@@ -42,7 +42,7 @@ import {
   beginApprovedWalletOperationEffect,
 } from "@/services/policy/approved-operation-replay";
 import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
-import type { TokenService } from "@/services/token.service";
+import { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -1119,28 +1119,26 @@ function parsePreparedDeploySnapshot(
 
 /**
  * Verify the landed mint's authorities against server-derived expectations and
- * resolve the freeze authority to record.
+ * classify which agreement the mint carries.
  *
  * The mint authority must match the claimed row's custody address. The freeze
  * authority may match the claimed row's — or the prepare-time agreement
  * recorded on the marker (APE-848): a save that landed after the profile-save
  * fence expired can have moved the row off the agreement the mint was built
- * from. In that case the claimed row is restored to the agreement first, so
- * the recorded token describes the immutable mint that actually exists, while
- * the reviewed profile keeps the operator's newer decision. The returned
- * freeze authority is always one the server derived — never a request value.
+ * from. The freeze authority returned is always one the server derived — never
+ * a request value.
  *
- * Returns the (possibly restored) token snapshot the mint carries, plus the
- * verified freeze authority.
+ * Returns the token snapshot the mint actually carries (the prepared agreement
+ * when the mint matches that instead of the moved row), the verified freeze
+ * authority, and whether the recovery governs this confirm (the mint matches
+ * the prepare-time agreement and not the moved row).
  */
-async function verifyAndRecoverMintAuthorities(params: {
-  tokenService: TokenService;
-  tokenId: string;
+function verifyMintAuthorities(params: {
   claimed: Token;
   custodyAddress: Address;
   mintInitialization: ParsedTransaction["instructions"][number];
   preparedSnapshot: PreparedDeploySnapshot | null;
-}): Promise<{ claimed: Token; freezeAuthority: Address | null }> {
+}): { mintSnapshot: Token; freezeAuthority: Address | null; recoveredFromPrepared: boolean } {
   const { claimed, custodyAddress, mintInitialization, preparedSnapshot } = params;
   const currentFreezeAuthority = claimed.isFreezable ? custodyAddress : null;
   // Only a server-recorded agreement (the marker's preparedSnapshot) counts —
@@ -1164,25 +1162,16 @@ async function verifyAndRecoverMintAuthorities(params: {
     throw badRequest("Deploy transaction did not use the expected mint authorities");
   }
 
-  if (
+  const recoveredFromPrepared = Boolean(
     preparedSnapshot &&
-    actualFreezeAuthority === preparedFreezeAuthority &&
-    !resolvedSnapshotEqualsTokenSnapshot(preparedSnapshot, claimed)
-  ) {
-    await params.tokenService.restoreDeployingTokenSnapshot({
-      tokenId: params.tokenId,
-      template: preparedSnapshot.template,
-      isFreezable: preparedSnapshot.isFreezable,
-      requiresAllowlist: preparedSnapshot.requiresAllowlist,
-      extensions: preparedSnapshot.extensions,
-    });
-    return {
-      claimed: { ...claimed, ...preparedSnapshot },
-      freezeAuthority: actualFreezeAuthority,
-    };
-  }
-
-  return { claimed, freezeAuthority: actualFreezeAuthority };
+      actualFreezeAuthority === preparedFreezeAuthority &&
+      !resolvedSnapshotEqualsTokenSnapshot(preparedSnapshot, claimed)
+  );
+  return {
+    mintSnapshot: recoveredFromPrepared ? { ...claimed, ...preparedSnapshot } : claimed,
+    freezeAuthority: actualFreezeAuthority,
+    recoveredFromPrepared,
+  };
 }
 
 /**
@@ -1219,8 +1208,10 @@ async function verifyAndRecoverMintAuthorities(params: {
  * (the mint is immutable, the row is not). The marker records the snapshot its
  * transaction was built from, so when the landed mint matches that prepare-time
  * agreement instead of the moved row, confirm restores the row to the agreement
- * and records the mint rather than stranding it. The reviewed profile keeps the
- * operator's newer decision; the recorded token describes the mint that exists.
+ * and records the mint rather than stranding it — atomically with the deploy
+ * commit, and superseding the profile-consistency check for that case alone.
+ * The reviewed profile keeps the operator's newer decision; the recorded token
+ * describes the mint that exists.
  */
 export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploySchema>) => {
   const { tokenId } = c.req.param();
@@ -1286,25 +1277,13 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   let deploymentRecorded = false;
 
   try {
-    // The profile could have changed between prepare and confirm; the claim
-    // froze the snapshot the mint will carry, so hold it to the reviewed
-    // profile the same way the other deploy paths do. Throwing here releases
-    // the claim in the catch below, leaving the draft pending and
-    // re-deployable after a re-save.
-    await assertProfileSnapshotConsistent({
-      env: c.env,
-      tenantScope: getRequestTenantScope(c),
-      organizationId: orgId,
-      projectId,
-      tokenId,
-      token: claimed,
-    });
-
     // Verify the deploy actually landed before recording it: any tokens:write
     // caller could otherwise pin an arbitrary mint to this token and poison the
     // public metadata.json. See verifyTransactionLanded for why each of the
     // three checks exists; the caller-side check below (findMintInitialization)
-    // is the third leg — it links the signature to THIS mint.
+    // is the third leg — it links the signature to THIS mint. The profile
+    // consistency check runs after these (the recovery needs their verdict
+    // first) — see the gated call below.
     const rpc = createRpc(c.env);
     const verified = await verifyTransactionLanded(rpc, signature, { expectAccount: mint });
 
@@ -1352,14 +1331,29 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     });
     const custodyAddress = signer.address;
 
-    const { claimed: mintSnapshot, freezeAuthority } = await verifyAndRecoverMintAuthorities({
-      tokenService,
-      tokenId,
+    const { mintSnapshot, freezeAuthority, recoveredFromPrepared } = verifyMintAuthorities({
       claimed,
       custodyAddress,
       mintInitialization,
       preparedSnapshot,
     });
+
+    // The profile check is what keeps a pending token from deploying on a
+    // reviewed profile it disagrees with. The recovery case has already proven
+    // the mint exists on-chain and matches the prepare-time agreement recorded
+    // on its marker: recording it is what keeps the immutable mint from being
+    // stranded, so the — unavoidable — disagreement with the operator's newer
+    // profile review does not apply to it.
+    if (!recoveredFromPrepared) {
+      await assertProfileSnapshotConsistent({
+        env: c.env,
+        tenantScope: getRequestTenantScope(c),
+        organizationId: orgId,
+        projectId,
+        tokenId,
+        token: mintSnapshot,
+      });
+    }
 
     // Re-derive the ABL list address server-side instead of trusting the request
     // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
@@ -1389,14 +1383,39 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // setTokenDeployed flips the token to `active` and records the mint — this
     // is the irreversible commit point. The durable intent above must exist
     // before this write; later bookkeeping/outcome failures cannot make the
-    // already-confirmed deployment look retryable.
-    const deployedToken = await tokenService.setTokenDeployed(
-      tokenId,
-      mint,
-      custodyAddress,
-      freezeAuthority,
-      listAddress
-    );
+    // already-confirmed deployment look retryable. Everything that can fail
+    // (RPC, audit intent) happens above; the recovery's row restore and the
+    // commit run as one transaction, so a failure can never leave a pending
+    // token whose row already describes the prepared agreement its profile
+    // disagrees with (that state would conflict the retry's own checks).
+    const deployedToken = recoveredFromPrepared
+      ? await getDb(c.env).transaction(async (tx) => {
+          const txTokenService = new TokenService(
+            asTransactionalClient(tx),
+            getRequestTenantScope(c)
+          );
+          await txTokenService.restoreDeployingTokenSnapshot({
+            tokenId,
+            template: mintSnapshot.template,
+            isFreezable: mintSnapshot.isFreezable,
+            requiresAllowlist: mintSnapshot.requiresAllowlist,
+            extensions: mintSnapshot.extensions,
+          });
+          return txTokenService.setTokenDeployed(
+            tokenId,
+            mint,
+            custodyAddress,
+            freezeAuthority,
+            listAddress
+          );
+        })
+      : await tokenService.setTokenDeployed(
+          tokenId,
+          mint,
+          custodyAddress,
+          freezeAuthority,
+          listAddress
+        );
     deploymentRecorded = true;
 
     const updatedToken = await recordConfirmedDeploy({

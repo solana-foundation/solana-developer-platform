@@ -11150,6 +11150,116 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("rolls the recovery back atomically when the deploy commit fails, leaving the moved row untouched", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_fence_rollback",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          isFreezable: false,
+          requiresAllowlist: false,
+        });
+        const marker = await new TokenService(getDb(env)).createTransaction({
+          tokenId: token.id,
+          organizationId: TEST_ORG.id,
+          type: "deploy",
+          params: {
+            operation: "deploy",
+            mode: "prepare",
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            preparedSnapshot: {
+              template: "custom",
+              isFreezable: true,
+              requiresAllowlist: false,
+              extensions: null,
+            },
+          },
+        });
+        await new TokenService(getDb(env)).expireStalePreparedDeploys(token.id, 0);
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValue([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValue(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValue({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            },
+          ],
+        });
+        // Fail the deploy commit inside the recovery transaction: the row
+        // restore must roll back with it. A pending token left describing the
+        // prepared agreement its profile disagrees with would conflict the
+        // retry's own consistency check.
+        const consoleErrorSpy = vi.spyOn(rootLogger, "error").mockImplementation(() => {});
+        const setTokenDeployedSpy = vi
+          .spyOn(TokenService.prototype, "setTokenDeployed")
+          .mockRejectedValueOnce(new Error("D1_ERROR: commit timeout"));
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5fenceRollbackSig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+          expect(res.status).toBe(500);
+
+          // Nothing was restored and the claim was handed back: the row still
+          // carries the save's (moved) snapshot, and the marker keeps fencing.
+          const stored = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stored?.mintAddress).toBeNull();
+          expect(stored?.status).toBe("pending");
+          expect(stored?.isFreezable).toBe(false);
+          const markerRow = await getDb(env)
+            .prepare("SELECT status FROM issuance_transactions WHERE id = ?")
+            .bind(marker.transaction.id)
+            .first<{ status: string }>();
+          // The failed confirm doesn't touch the marker either way: it stays
+          // in its fence-expired state, still recoverable for the retry.
+          expect(markerRow?.status).toBe("failed");
+          expect(setTokenDeployedSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+          setTokenDeployedSpy.mockRestore();
+          consoleErrorSpy.mockRestore();
+        }
+      });
+
       it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
         ensureRpcUrl();
 
