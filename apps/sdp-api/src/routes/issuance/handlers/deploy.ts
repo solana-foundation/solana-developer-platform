@@ -865,143 +865,174 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     throw badRequest("Token already has a mint address");
   }
 
-  await assertProfileSnapshotConsistent({
-    env: c.env,
-    tenantScope: getRequestTenantScope(c),
-    organizationId: orgId,
-    projectId,
-    tokenId,
-    token,
-  });
-
-  const signingWalletId = resolveApiKeySigningWalletId(
-    auth,
-    body.signingWalletId ?? token.signingWalletId,
-    ["tokens:write"]
-  );
-
-  if (token.signingCustodyWalletId && signingWalletId !== token.signingWalletId) {
-    throw new AppError(
-      "CONFLICT",
-      "Legacy deploy prepare must use the provider wallet pinned on the token"
-    );
-  }
-
-  // This legacy client-signed flow intentionally remains Config-only. Validate
-  // the exact pin and load the Config signer before mutating the provider mirror.
-  const signer = await createLegacyResolvedAuthoritySigner({
-    env: c.env,
-    auth,
-    walletId: signingWalletId,
-    expectedCustodyWalletId: token.signingCustodyWalletId,
-  });
-
-  // Pin the resolved signing wallet on the token so confirmDeploy derives the
-  // SAME custody address — and thus the same mint/metadata authorities and ABL
-  // list PDA. Without this, a caller that passes a custom signingWalletId here
-  // but omits it in confirmDeploy would fall back to a different wallet and
-  // silently record wrong authorities. This is the one piece of state prepare
-  // must persist; everything else it hands the client to sign.
-  if (signingWalletId !== token.signingWalletId) {
-    await tokenService.updateToken(tokenId, { signingWalletId });
-  }
-
-  const custodyAddress = signer.address;
-
-  // Create Mosaic service and prepare transaction
-  const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
-
-  const enableAbl = shouldEnableOnChainAcl(token);
-  const aclMode = getMosaicAclMode(token);
-
-  // See deployToken above: SDP-hosted metadata fallback (HOO-466).
-  const resolvedUri =
-    token.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env), token.id);
-
-  const buildMetadata = (uri: string) => ({ name: token.name, symbol: token.symbol, uri });
-  const prepareOptions = {
-    template: token.template,
-    decimals: token.decimals,
-    mintAuthority: signer,
-    freezeAuthority: token.isFreezable ? custodyAddress : null,
-    feePayer: signer,
-    extensions: token.extensions ?? undefined,
-    enableAbl,
-    aclMode,
-  };
-
-  let prepared = await mosaic.prepareCreateToken({
-    ...prepareOptions,
-    metadata: buildMetadata(resolvedUri),
-  });
-
-  // The client signs and submits this tx itself, so the server can't set the
-  // uri afterward (the client owns the update authority). When the inline uri
-  // pushes the create tx over the packet limit (heavy template + long hosted
-  // URL), re-prepare the create tx with an empty uri and signal that the client
-  // must set the real uri in a follow-up tx (POST .../deploy/prepare-metadata)
-  // after the create tx confirms. Lighter templates / short URIs keep the
-  // single-tx fast path.
-  let metadataUriFollowUp: { required: true; uri: string } | undefined;
-  if (Buffer.from(prepared.serializedTx, "base64").length > PACKET_DATA_SIZE) {
-    prepared = await mosaic.prepareCreateToken({
-      ...prepareOptions,
-      metadata: buildMetadata(""),
-    });
-    metadataUriFollowUp = { required: true, uri: resolvedUri };
-  }
-
-  const rpc = createRpc(c.env);
-  const txBytes = Buffer.from(prepared.serializedTx, "base64");
-  const simulation = await simulateTransaction(rpc, txBytes);
-
-  // APE-848: pin the prepared deploy so a profile save cannot rewrite the
-  // snapshot this transaction will mint from while it can still land on-chain
-  // (a rewrite here would strand the submitted mint: confirm would compare the
-  // mint's authorities against the new snapshot and refuse it, with no way to
-  // record it). confirmDeploy closes this row; the profile-save path fences on
-  // it while it is fresh.
-  await tokenService.createTransaction({
+  // APE-848: record the prepare marker and take the deploy claim BEFORE any
+  // transaction bytes are built. The claim (pending → deploying) makes a
+  // concurrent profile save's guarded snapshot sync fail for the whole build,
+  // so no save can slip in between the marker write and the transaction that
+  // must match the snapshot it was built from; the marker then keeps fencing
+  // snapshot rewrites after the claim is handed back, for as long as the
+  // client-signed transaction can still land on-chain.
+  const preparedMarker = await tokenService.createTransaction({
     tokenId,
     organizationId: orgId,
     type: "deploy",
-    params: {
-      operation: "deploy",
-      mode: "prepare",
-      mint: prepared.mint,
-      template: token.template,
-      name: token.name,
-      symbol: token.symbol,
-    },
+    params: { operation: "deploy", mode: "prepare" },
     initiatedByKeyId: auth.id,
   });
+  const claimed = await tokenService.beginTokenDeploy(tokenId, null);
+  if (!claimed) {
+    await tokenService.updateTransaction(preparedMarker.transaction.id, {
+      status: "failed",
+      error: "Token deployment is already in progress",
+    });
+    throw new AppError("CONFLICT", "Token deployment is already in progress");
+  }
 
-  // Audit log
-  const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    action: "deploy",
-    resourceType: "token",
-    resourceId: tokenId,
-    metadata: {
-      mode: "prepare",
-      mint: prepared.mint,
-      template: token.template,
+  try {
+    await assertProfileSnapshotConsistent({
+      env: c.env,
+      tenantScope: getRequestTenantScope(c),
+      organizationId: orgId,
+      projectId,
+      tokenId,
+      token: claimed,
+    });
+
+    const signingWalletId = resolveApiKeySigningWalletId(
+      auth,
+      body.signingWalletId ?? claimed.signingWalletId,
+      ["tokens:write"]
+    );
+
+    if (claimed.signingCustodyWalletId && signingWalletId !== claimed.signingWalletId) {
+      throw new AppError(
+        "CONFLICT",
+        "Legacy deploy prepare must use the provider wallet pinned on the token"
+      );
+    }
+
+    // This legacy client-signed flow intentionally remains Config-only. Validate
+    // the exact pin and load the Config signer before mutating the provider mirror.
+    const signer = await createLegacyResolvedAuthoritySigner({
+      env: c.env,
+      auth,
+      walletId: signingWalletId,
+      expectedCustodyWalletId: claimed.signingCustodyWalletId,
+    });
+
+    // Pin the resolved signing wallet on the token so confirmDeploy derives the
+    // SAME custody address — and thus the same mint/metadata authorities and ABL
+    // list PDA. Without this, a caller that passes a custom signingWalletId here
+    // but omits it in confirmDeploy would fall back to a different wallet and
+    // silently record wrong authorities. This is the one piece of state prepare
+    // must persist; everything else it hands the client to sign.
+    if (signingWalletId !== claimed.signingWalletId) {
+      await tokenService.updateToken(tokenId, { signingWalletId });
+    }
+
+    const custodyAddress = signer.address;
+
+    // Create Mosaic service and prepare transaction
+    const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+    const enableAbl = shouldEnableOnChainAcl(claimed);
+    const aclMode = getMosaicAclMode(claimed);
+
+    // See deployToken above: SDP-hosted metadata fallback (HOO-466).
+    const resolvedUri =
+      claimed.uri?.trim() || canonicalMetadataUrl(resolveMetadataOrigin(c.env), claimed.id);
+
+    const buildMetadata = (uri: string) => ({ name: claimed.name, symbol: claimed.symbol, uri });
+    const prepareOptions = {
+      template: claimed.template,
+      decimals: claimed.decimals,
+      mintAuthority: signer,
+      freezeAuthority: claimed.isFreezable ? custodyAddress : null,
+      feePayer: signer,
+      extensions: claimed.extensions ?? undefined,
+      enableAbl,
       aclMode,
-      metadataUriFollowUp: metadataUriFollowUp?.required ?? false,
-    },
-  });
+    };
 
-  return success(c, {
-    transaction: {
-      serialized: prepared.serializedTx,
-      blockhash: prepared.blockhash,
-      lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
-    },
-    mint: prepared.mint,
-    listAddress: prepared.listAddress,
-    simulation,
-    ...(metadataUriFollowUp ? { metadataUriFollowUp } : {}),
-  });
+    let prepared = await mosaic.prepareCreateToken({
+      ...prepareOptions,
+      metadata: buildMetadata(resolvedUri),
+    });
+
+    // The client signs and submits this tx itself, so the server can't set the
+    // uri afterward (the client owns the update authority). When the inline uri
+    // pushes the create tx over the packet limit (heavy template + long hosted
+    // URL), re-prepare the create tx with an empty uri and signal that the client
+    // must set the real uri in a follow-up tx (POST .../deploy/prepare-metadata)
+    // after the create tx confirms. Lighter templates / short URIs keep the
+    // single-tx fast path.
+    let metadataUriFollowUp: { required: true; uri: string } | undefined;
+    if (Buffer.from(prepared.serializedTx, "base64").length > PACKET_DATA_SIZE) {
+      prepared = await mosaic.prepareCreateToken({
+        ...prepareOptions,
+        metadata: buildMetadata(""),
+      });
+      metadataUriFollowUp = { required: true, uri: resolvedUri };
+    }
+
+    const rpc = createRpc(c.env);
+    const txBytes = Buffer.from(prepared.serializedTx, "base64");
+    const simulation = await simulateTransaction(rpc, txBytes);
+
+    // The marker now names the mint the prepared transaction will create, so
+    // confirmDeploy can confirm it in place.
+    await tokenService.updateTransaction(preparedMarker.transaction.id, {
+      params: {
+        operation: "deploy",
+        mode: "prepare",
+        mint: prepared.mint,
+        template: claimed.template,
+        name: claimed.name,
+        symbol: claimed.symbol,
+      },
+    });
+
+    // Hand the claim back: the transaction bytes are built and the marker
+    // fences profile saves while they can still land. confirmDeploy re-claims.
+    await tokenService.releaseTokenDeploy(tokenId);
+
+    // Audit log
+    const auditService = new AuditService(getDb(c.env));
+    await auditService.log(c, {
+      action: "deploy",
+      resourceType: "token",
+      resourceId: tokenId,
+      metadata: {
+        mode: "prepare",
+        mint: prepared.mint,
+        template: claimed.template,
+        aclMode,
+        metadataUriFollowUp: metadataUriFollowUp?.required ?? false,
+      },
+    });
+
+    return success(c, {
+      transaction: {
+        serialized: prepared.serializedTx,
+        blockhash: prepared.blockhash,
+        lastValidBlockHeight: prepared.lastValidBlockHeight.toString(),
+      },
+      mint: prepared.mint,
+      listAddress: prepared.listAddress,
+      simulation,
+      ...(metadataUriFollowUp ? { metadataUriFollowUp } : {}),
+    });
+  } catch (error) {
+    // Nothing was handed to the client, so the marker can never correspond to a
+    // live transaction: close it (unfencing saves immediately) and hand the
+    // claim back for a clean retry.
+    await tokenService.updateTransaction(preparedMarker.transaction.id, {
+      status: "failed",
+      error: error instanceof Error ? error.message : "Deploy prepare failed",
+    });
+    await tokenService.releaseTokenDeploy(tokenId);
+    throw error;
+  }
 };
 
 // `initializeMint`/`initializeMint2` are the SPL Token / Token-2022 instructions
@@ -1121,6 +1152,11 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;
+  // Flip only once the submitted transaction is verified landed: before that
+  // (unconfirmed, RPC hiccups, not-yet-indexed) the mint may still land, so the
+  // prepare marker must stay pending and keep fencing profile saves. Failing it
+  // here would let a save rewrite the snapshot and strand the mint on retry.
+  let verifiedLanded = false;
 
   try {
     // The profile could have changed between prepare and confirm; the claim
@@ -1161,6 +1197,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
         "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
       );
     }
+    verifiedLanded = true;
 
     const confirmedTx = verified.transaction;
 
@@ -1259,7 +1296,12 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       // re-claim. Guarded on deploying/no-mint, so this can never demote a
       // token whose mint was committed by someone else in the meantime.
       await tokenService.releaseTokenDeploy(tokenId);
-      await failPreparedTransactionMarker(tokenService, preparedTransaction, error);
+      // The prepare marker stops fencing profile saves only once the
+      // transaction is verified landed (it can no longer "land later"); for
+      // retryable failures it stays pending and keeps holding the fence.
+      if (verifiedLanded) {
+        await failPreparedTransactionMarker(tokenService, preparedTransaction, error);
+      }
       if (auditIntent) {
         await auditService.completeCritical(c, auditIntent, {
           status: "failure",

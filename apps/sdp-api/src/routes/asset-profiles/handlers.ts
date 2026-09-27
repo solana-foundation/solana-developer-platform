@@ -579,7 +579,7 @@ export const updateAssetProfile = async (
         profileToken && resolvedSnapshotEqualsTokenSnapshot(snapshot, profileToken);
       if (
         snapshotUnchanged === false &&
-        (await tokenService.hasFreshPreparedDeploy(current.token_id, PREPARED_DEPLOY_FENCE_MS))
+        (await tokenService.expireStalePreparedDeploys(current.token_id, PREPARED_DEPLOY_FENCE_MS))
       ) {
         throw conflict(
           "A prepared client-signed deployment is in flight for this token; confirm it, let it expire, or discard it before changing its deployment settings"

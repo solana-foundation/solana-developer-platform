@@ -10135,6 +10135,33 @@ describe("Issuance Routes", () => {
               metadata: expect.objectContaining({ uri: expectedMetadataUrl(token.id) }),
             })
           );
+
+          // APE-848: prepare records a pending deploy marker naming the mint,
+          // and hands the deploy claim back once the transaction bytes are
+          // built — the token is pending again, ready for confirm to re-claim.
+          const marker = await getDb(env)
+            .prepare(
+              "SELECT status, operation_params FROM issuance_transactions WHERE token_id = ? AND type = 'deploy'"
+            )
+            .bind(token.id)
+            .first<{ status: string; operation_params: string }>();
+          expect(marker?.status).toBe("pending");
+          expect(JSON.parse(marker?.operation_params ?? "{}")).toMatchObject({
+            mode: "prepare",
+            mint: TEST_SOLANA_ADDRESSES.mint,
+          });
+          const tokenAfter = await app.request(
+            `/v1/issuance/tokens/${token.id}`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+            },
+            env
+          );
+          const tokenPayload = (await tokenAfter.json()) as {
+            data: { token: { status: string } };
+          };
+          expect(tokenPayload.data.token.status).toBe("pending");
         } finally {
           createOrgSignerSpy.mockRestore();
           prepareCreateTokenSpy.mockRestore();
@@ -10776,6 +10803,132 @@ describe("Issuance Routes", () => {
           };
           expect(tokenPayload.data.token.mintAddress).toBeNull();
           expect(tokenPayload.data.token.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("keeps the prepare marker pending when confirmation fails retryably", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_marker_retryable",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+        // What prepareDeploy recorded for the submitted mint (APE-848).
+        const marker = await new TokenService(getDb(env)).createTransaction({
+          tokenId: token.id,
+          organizationId: TEST_ORG.id,
+          type: "deploy",
+          params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
+        });
+
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce(null);
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5notYetIndexedMarkerSig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+          expect(res.status).toBe(502);
+
+          // The submitted transaction may still land, so the marker must keep
+          // fencing profile saves until the retry confirms it in place.
+          const row = await getDb(env)
+            .prepare("SELECT status FROM issuance_transactions WHERE id = ?")
+            .bind(marker.transaction.id)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("pending");
+        } finally {
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("closes the prepare marker when confirmation fails terminally", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_marker_terminal",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          requiresAllowlist: false,
+        });
+        const marker = await new TokenService(getDb(env)).createTransaction({
+          tokenId: token.id,
+          organizationId: TEST_ORG.id,
+          type: "deploy",
+          params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
+        });
+
+        // Confirmed and indexed, but the tx is unrelated to this mint — that
+        // transaction is dead, so nothing it prepared can still land.
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "11111111111111111111111111111111",
+              accounts: [],
+              parsedType: "transfer",
+              info: { destination: TEST_SOLANA_ADDRESSES.wallet2 },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5terminalMarkerSig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+          expect(res.status).toBe(400);
+
+          const row = await getDb(env)
+            .prepare("SELECT status FROM issuance_transactions WHERE id = ?")
+            .bind(marker.transaction.id)
+            .first<{ status: string }>();
+          expect(row?.status).toBe("failed");
         } finally {
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();

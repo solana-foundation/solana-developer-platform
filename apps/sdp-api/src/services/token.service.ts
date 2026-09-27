@@ -1362,32 +1362,47 @@ export class TokenService {
   }
 
   /**
-   * Is a client-signed deploy prepare still in flight for this token?
+   * Expire stale client-signed deploy prepare markers for this token and
+   * report whether a fresh one still fences profile saves (APE-848).
    *
    * `prepareDeploy` hands the caller a transaction built from the token's
-   * deployment snapshot and records a pending `deploy` transaction row for it
-   * (APE-848). Its blockhash stays valid for at most a couple of minutes, so a
-   * prepared transaction that could still land on-chain — and whose mint a
-   * snapshot rewrite would strand — is always younger than the caller's fence
-   * window. A pending row outside the window can never land and is ignored.
+   * deployment snapshot and records a pending `deploy` transaction row for it.
+   * Its blockhash stays valid for at most a couple of minutes, so a prepared
+   * transaction that could still land on-chain — and whose mint a snapshot
+   * rewrite would strand — is always younger than the caller's fence window.
+   * A pending row outside the window can never land; it is closed here so
+   * abandoned prepares do not linger as a deployment in progress.
    */
-  async hasFreshPreparedDeploy(tokenId: string, maxAgeMs: number): Promise<boolean> {
+  async expireStalePreparedDeploys(tokenId: string, maxAgeMs: number): Promise<boolean> {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
     const tenant = this.tenantTokenScope("token");
-    const row = await this.db
+    const rows = await this.db
       .prepare(
-        `SELECT 1 AS in_flight
+        `SELECT tx.id, tx.created_at
          FROM issuance_transactions tx
          JOIN issued_tokens token ON token.id = tx.token_id
          WHERE tx.token_id = ?
            AND tx.type = 'deploy'
-           AND tx.status = 'pending'
-           AND tx.created_at >= ?${tenant.clause}
-         LIMIT 1`
+           AND tx.status = 'pending'${tenant.clause}`
       )
-      .bind(tokenId, cutoff, ...tenant.values)
-      .first<{ in_flight: number }>();
-    return row !== undefined && row !== null;
+      .bind(tokenId, ...tenant.values)
+      .all<{ id: string; created_at: string }>();
+
+    let freshRemains = false;
+    const now = new Date().toISOString();
+    for (const row of rows.results) {
+      if (row.created_at >= cutoff) {
+        freshRemains = true;
+        continue;
+      }
+      await this.db
+        .prepare(
+          "UPDATE issuance_transactions SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
+        )
+        .bind("Prepared deploy expired without confirmation", now, row.id)
+        .run();
+    }
+    return freshRemains;
   }
 
   /**

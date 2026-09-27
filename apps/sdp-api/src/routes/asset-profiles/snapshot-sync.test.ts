@@ -663,5 +663,15 @@ describe("asset profile PATCH binds pending advanced settings to the deployment 
     });
     expect(afterExpiry.status).toBe(200);
     expect(await getToken(tokenId)).toMatchObject({ isFreezable: true });
+
+    // The save path closed the stale marker, so transaction history no longer
+    // shows a deployment in progress for a transaction that can never land.
+    const markerStatuses = await getDb(env)
+      .prepare(
+        "SELECT status FROM issuance_transactions WHERE token_id = ? AND type = 'deploy' ORDER BY created_at DESC"
+      )
+      .bind(tokenId)
+      .all<{ status: string }>();
+    expect(markerStatuses.results.map((row) => row.status)).toEqual(["failed"]);
   });
 });
