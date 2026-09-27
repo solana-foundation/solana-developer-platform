@@ -182,20 +182,24 @@ export class WalletPolicyEnforcementService {
     projectId?: string | null
   ) {
     const normalizedProjectId = projectId === undefined ? null : projectId;
-    await this.assertApprovalWithinVelocityLimits({
-      organizationId,
-      projectId: normalizedProjectId,
-      approvalRequestId,
-    });
+    const approvalRequest = await this.repository.runApprovalVelocityLocked(
+      async (txRepository) => {
+        await this.assertApprovalWithinVelocityLimits(txRepository, {
+          organizationId,
+          projectId: normalizedProjectId,
+          approvalRequestId,
+        });
 
-    const approvalRequest = await this.repository.updateApprovalRequestStatus({
-      organizationId,
-      projectId: normalizedProjectId,
-      approvalRequestId,
-      status: "approved",
-      operationStatus: "executing",
-      resolvedBy,
-    });
+        return txRepository.updateApprovalRequestStatus({
+          organizationId,
+          projectId: normalizedProjectId,
+          approvalRequestId,
+          status: "approved",
+          operationStatus: "executing",
+          resolvedBy,
+        });
+      }
+    );
 
     return requireApprovalRequestStatus(approvalRequest, "approved");
   }
@@ -206,33 +210,39 @@ export class WalletPolicyEnforcementService {
    * now, against the live policies: transfers parked one at a time are each
    * inside every cap while the others are still parked, and without this gate
    * approving them in sequence would execute past a deny-action velocity cap.
-   * A measured deny breach refuses the approval and leaves the request
-   * pending — the window can slide back under the cap, or the operator can
-   * cancel. Review- and approval-action breaches are not re-decided here:
-   * their breach response is the approval flow this call completes, and a
-   * rule that cannot produce a measurement decided the parking evaluation the
-   * same way. The measurement cannot be serialized with the status flip, so
-   * concurrent approvals can still overshoot together — the in-flight-bounded
-   * overshoot ADR 0004 prefers over false refusals.
+   * The caller runs this measurement and the status flip inside one
+   * approval-velocity-locked transaction, so a concurrent approval of another
+   * parked operation cannot measure the same pre-flip totals: it waits for the
+   * lock, then sees the earlier `executing` rows and is refused when executing
+   * would breach a deny cap. A measured deny breach refuses the approval and
+   * leaves the request pending — the window can slide back under the cap, or
+   * the operator can cancel. Review- and approval-action breaches are not
+   * re-decided here: their breach response is the approval flow this call
+   * completes, and a rule that cannot produce a measurement decided the
+   * parking evaluation the same way.
    *
+   * @param repository - The transaction-bound repository to measure through.
    * @param input - The tenant-scoped approval request being approved.
    */
-  private async assertApprovalWithinVelocityLimits(input: {
-    organizationId: string;
-    projectId: string | null;
-    approvalRequestId: string;
-  }): Promise<void> {
-    const request = await this.repository.getApprovalRequestDetail(input);
+  private async assertApprovalWithinVelocityLimits(
+    repository: PolicyRepository,
+    input: {
+      organizationId: string;
+      projectId: string | null;
+      approvalRequestId: string;
+    }
+  ): Promise<void> {
+    const request = await repository.getApprovalRequestDetail(input);
     if (request === null || request.approval_status !== "pending") {
       // The transition below reports a missing or already-resolved request.
       return;
     }
-    const operation = await this.repository.getWalletOperationById(request.wallet_operation_id);
+    const operation = await repository.getWalletOperationById(request.wallet_operation_id);
     if (operation === null) {
       return;
     }
 
-    const store = new PostgresPolicyEnforcementStore(this.repository, this.scope);
+    const store = new PostgresPolicyEnforcementStore(repository, this.scope);
     const candidate = mapWalletOperation(operation);
     const velocityRules = collectVelocityRules(await store.loadEffectivePolicies(candidate));
     if (velocityRules.length === 0) {

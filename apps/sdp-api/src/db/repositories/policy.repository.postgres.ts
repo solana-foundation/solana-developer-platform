@@ -1,4 +1,4 @@
-import type { AppDb, DatabaseExecutor } from "@/db";
+import { type AppDb, asTransactionalClient, type DatabaseExecutor } from "@/db";
 import {
   asPostgresJsonArray,
   asPostgresJsonObject,
@@ -2074,10 +2074,9 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         // (possibly never-executable) request spend velocity it never used
         // and deny later distinct operations (SOLA9-608). Only decided,
         // still-live rows count; a parked operation joins the totals when it
-        // is approved into `executing` — an approval re-checks deny-action
-        // caps first, so sequential approvals cannot spend past them, and the
-        // remaining overshoot is concurrent approvals bounded by the in-flight
-        // set, the failure direction ADR 0004 prefers over false refusals.
+        // is approved into `executing` — the approval re-checks deny-action
+        // caps inside a lock that serializes approvals, so neither sequential
+        // nor concurrent approvals can spend past them.
         "status NOT IN ('created', 'pending_approval', 'failed', 'canceled')",
         // `amount` is TEXT; only rows that cast cleanly may reach SUM. The
         // write path validates amounts, so this guards history, not input.
@@ -2620,6 +2619,25 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
       });
 
       return row ? mapApprovalRequestRow(row) : null;
+    },
+
+    async runApprovalVelocityLocked<T>(fn: (repository: PolicyRepository) => Promise<T>) {
+      return db.transaction(async (tx) => {
+        // The lock is what makes the approval-time velocity re-check sound
+        // against concurrent approvals: every approval measures the totals
+        // before flipping its own operation into them, so two approvals that
+        // measured together could both spend past a deny cap (the Greptile P1
+        // on PR #2113). Serializing approvals per organization makes each one
+        // measure after the earlier flips committed — org-scope totals reach
+        // the whole organization, so the lock does too. Approvals are
+        // human-gated and rare, so the serialization costs little.
+        await tx.execute(
+          // biome-ignore lint/security/noSecrets: parameterized PostgreSQL function call.
+          "SELECT pg_advisory_xact_lock(hashtext(?))",
+          [`wallet-operation-approvals:${scope.organizationId}`]
+        );
+        return fn(createPostgresPolicyRepository(asTransactionalClient(tx), scope));
+      });
     },
 
     async listApprovalRequestDetails(input: ListApprovalRequestDetailsInput) {

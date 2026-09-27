@@ -311,6 +311,14 @@ function createRepository(options: {
     }),
   } as unknown as PolicyRepository;
 
+  // The approve flow measures velocity and flips the status through the
+  // transaction-bound repository the lock hands it; the mock just invokes the
+  // callback with itself so the assertions below observe those calls directly.
+  repository.runApprovalVelocityLocked = vi.fn(
+    async (fn: (txRepository: PolicyRepository) => Promise<unknown>): Promise<unknown> =>
+      fn(repository)
+  ) as unknown as PolicyRepository["runApprovalVelocityLocked"];
+
   return repository;
 }
 
@@ -701,6 +709,7 @@ describe("WalletPolicyEnforcementService", () => {
         ruleId: "org-daily-cap",
       },
     });
+    expect(repository.runApprovalVelocityLocked).toHaveBeenCalledTimes(1);
     expect(repository.updateApprovalRequestStatus).not.toHaveBeenCalled();
   });
 
@@ -736,6 +745,10 @@ describe("WalletPolicyEnforcementService", () => {
     expect(repository.updateApprovalRequestStatus).toHaveBeenCalledWith(
       expect.objectContaining({ status: "approved", operationStatus: "executing" })
     );
+    // The flip ran inside the approval velocity lock: the measurement and the
+    // flip share the lock, so a concurrent approval cannot measure the same
+    // pre-flip totals and spend past the cap together with this one.
+    expect(repository.runApprovalVelocityLocked).toHaveBeenCalledTimes(1);
   });
 
   it("does not re-decide review-action velocity breaches at approval time", async () => {

@@ -881,6 +881,94 @@ describe("Payments routes — transfer policy", () => {
     expect(await countTransferRows()).toBe(1);
   });
 
+  // Concurrent approvals of parked transfers measure the same pre-flip totals
+  // unless the approvals serialize: 7 SOL and 4 SOL both pass while parked, and
+  // approving both together spends 11 SOL past the 10 SOL daily cap. The
+  // approval velocity lock makes the second approval measure the first one's
+  // committed `executing` row, so exactly one of them can execute.
+  it("refuses one of two concurrent approvals that would breach a deny velocity cap", async () => {
+    const sessionId = "ses_concurrent_velocity_approver";
+    const approverUserId = "usr_concurrent_velocity_approver";
+    await getDb(env).batch([
+      getDb(env)
+        .prepare("INSERT INTO users (id, email, email_verified, status) VALUES (?, ?, 1, 'active')")
+        .bind(approverUserId, "concurrent-velocity-approver@example.com"),
+      getDb(env)
+        .prepare(
+          `INSERT INTO organization_members (id, organization_id, user_id, role, status)
+           VALUES (?, ?, ?, 'admin', 'active')`
+        )
+        .bind("om_concurrent_velocity_approver", TEST_ORG.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO project_members (id, project_id, user_id, role)
+           VALUES (?, ?, ?, 'admin')`
+        )
+        .bind("pm_concurrent_velocity_approver", TEST_PROJECT.id, approverUserId),
+      getDb(env)
+        .prepare(
+          `INSERT INTO sessions (id, user_id, organization_id, auth_method, expires_at)
+           VALUES (?, ?, ?, 'session', ?)`
+        )
+        .bind(sessionId, approverUserId, TEST_ORG.id, "2099-01-01T00:00:00.000Z"),
+    ]);
+    await seedWalletControlProfile({
+      rules: [
+        {
+          id: "review-payment-execution",
+          kind: "operation_type",
+          operationTypes: ["payment_transfer_execute"],
+          action: "review",
+        },
+        {
+          id: "org-sol-daily-cap",
+          kind: "velocity",
+          scope: "organization",
+          window: "P1D",
+          max: "10",
+          asset: SOL_MINT,
+        },
+      ],
+    });
+
+    const approvalRequestIds: string[] = [];
+    for (const amount of ["7", "4"]) {
+      const pending = await postTransfer(
+        {
+          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+          destination: TEST_SOLANA_ADDRESSES.wallet2,
+          token: "SOL",
+          amount,
+        },
+        {}
+      );
+      expect(pending.status).toBe(202);
+      approvalRequestIds.push(
+        approvalErrorDetailsSchema.parse((await readErrorResponse(pending)).error.details)
+          .approvalRequestId
+      );
+    }
+
+    const adminHeaders = {
+      Cookie: `sdp_session=${sessionId}`,
+      "x-project-id": TEST_PROJECT.id,
+    };
+    const outcomes = await Promise.all(
+      approvalRequestIds.map((approvalRequestId) =>
+        app.request(
+          `/v1/wallets/approval-requests/${approvalRequestId}/approve`,
+          { method: "POST", headers: adminHeaders },
+          env
+        )
+      )
+    );
+
+    // Whichever approval measures second sees the other's committed `executing`
+    // row and is refused: 7 + 4 breaches the 10 SOL cap either way round.
+    expect(outcomes.map((response) => response.status).sort()).toEqual([200, 403]);
+    expect(await countTransferRows()).toBe(1);
+  });
+
   // The single-transfer dashboard retries with one stable key per payment. The
   // gate does not collapse a retry into the pending approval (each POST opens
   // its own request), so this pins what the key does guarantee: approving both

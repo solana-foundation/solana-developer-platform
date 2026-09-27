@@ -667,6 +667,16 @@ export interface PolicyRepository {
   updateApprovalRequestStatus(
     input: UpdateApprovalRequestStatusInput
   ): Promise<ApprovalRequestRow | null>;
+  /**
+   * Run `fn` inside one transaction while holding an advisory lock that
+   * serializes wallet-operation approvals across the organization. The
+   * callback receives a repository bound to that transaction: measuring
+   * velocity totals and flipping the approved operation into `executing`
+   * through it makes the measurement and the flip atomic against concurrent
+   * approvals, so an approval always measures what earlier approvals already
+   * joined into the totals instead of the pre-flip snapshot they all share.
+   */
+  runApprovalVelocityLocked<T>(fn: (repository: PolicyRepository) => Promise<T>): Promise<T>;
   listApprovalRequestDetails(
     input: ListApprovalRequestDetailsInput
   ): Promise<ApprovalRequestDetailRow[]>;
