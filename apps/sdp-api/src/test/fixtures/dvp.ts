@@ -83,6 +83,7 @@ export function buildDvpTradeRow(overrides: Partial<DvpTradeRow> = {}): DvpTrade
     escrowBPeakAmount: null,
     escrowAFrozen: null,
     escrowBFrozen: null,
+    bornFrozen: false,
     createdAt: "2026-09-03T00:00:00.000Z",
     updatedAt: "2026-09-03T00:00:00.000Z",
     ...overrides,

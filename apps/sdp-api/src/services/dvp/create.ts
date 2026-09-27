@@ -364,19 +364,22 @@ function frozenEscrowRefusal(tradeId: string, escrows: readonly Address[]): AppE
 
 /**
  * The escrows of a replayed trade its latest observation shows frozen, empty
- * when the trade is closed, failed, or not seen frozen.
+ * when the trade is closed, failed, not seen frozen, or was not REFUSED.
  *
- * Only an open trade (`creating`/`created`) can still be refused a funding
- * path, and those are exactly the statuses a born-frozen trade sits in: it
- * cannot be funded while frozen, so it cannot have moved on. A null flag —
- * never observed, or an unreadable chain — is not evidence of frozen and
- * passes, the same best-effort reading the create path itself uses.
+ * Only a born-frozen trade — one whose create response the refusal was thrown
+ * on, recorded durably by `markBornFrozen` — replays that refusal. The frozen
+ * flags are the escrow's current state, refreshed by every observation, so a
+ * trade created healthy and frozen by the mint authority later must NOT be
+ * read as born-frozen: its first response was a success, and its keyed retry
+ * answers with the same trade the first response gave. A null flag — never
+ * observed, or an unreadable chain — is not evidence of frozen and passes,
+ * the same best-effort reading the create path itself uses.
  *
  * @param row - The trade row as last observed.
  * @returns The frozen escrows' addresses.
  */
 function observedFrozenEscrows(row: DvpTradeRow): Address[] {
-  if (row.status !== "creating" && row.status !== "created") {
+  if (!row.bornFrozen || (row.status !== "creating" && row.status !== "created")) {
     return [];
   }
   const frozen: Address[] = [];
@@ -387,6 +390,49 @@ function observedFrozenEscrows(row: DvpTradeRow): Address[] {
     frozen.push(row.escrowB);
   }
   return frozen;
+}
+
+/** What a keyed replay of a live trade answers: the trade, or a retry to make. */
+type KeyedReplayVerdict =
+  | { action: "return"; trade: DvpTradeRow }
+  | { action: "recreate"; failedRowId: string };
+
+/**
+ * Answers a keyed retry whose stored row is still alive.
+ *
+ * A born-frozen refusal threw after the row was written, so a replay can be
+ * the SAME logical create that was refused — and it must answer with the
+ * refusal, not quietly turn it into a success. The row's own observation is
+ * the durable record of the frozen escrow; refreshed here when it is too old
+ * to answer with, so a thaw lets the retry through the moment the flags say
+ * funding works again.
+ *
+ * The refresh can also be the read that proves the create transaction expired
+ * without ever landing: the row then says `create_failed`, and answering with
+ * it would be a 201 for a trade that does not exist. That is the
+ * failed-create path, not a replay — the caller frees the key and makes the
+ * trade the request always claimed to be.
+ *
+ * @param env - API process environment.
+ * @param replayed - The stored row the key answered with.
+ * @param fingerprint - Hash of this request's resolved terms.
+ * @returns The trade to answer with, or the failed row whose key to inherit.
+ */
+async function resolveKeyedReplay(
+  env: Env,
+  replayed: DvpTradeRow,
+  fingerprint: string | null
+): Promise<KeyedReplayVerdict> {
+  const replay = assertOwnReplay(replayed, fingerprint);
+  const current = await observeDvpTradeIfStale(env, replay);
+  if (current.status === "create_failed") {
+    return { action: "recreate", failedRowId: current.id };
+  }
+  const frozen = observedFrozenEscrows(current);
+  if (frozen.length > 0) {
+    throw frozenEscrowRefusal(current.id, frozen);
+  }
+  return { action: "return", trade: current };
 }
 
 /**
@@ -427,19 +473,12 @@ export async function createDvpTrade(
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
       } else {
-        const replay = assertOwnReplay(replayed, fingerprint);
-        // A born-frozen refusal threw after the row was written, so this
-        // replay is the SAME logical create that was refused — and it must
-        // answer with the refusal, not quietly turn it into a success. The
-        // row's own observation is the durable record of the frozen escrow;
-        // refreshed here when it is too old to answer with, so a thaw lets
-        // the retry through the moment the flags say funding works again.
-        const current = await observeDvpTradeIfStale(env, replay);
-        const frozen = observedFrozenEscrows(current);
-        if (frozen.length > 0) {
-          throw frozenEscrowRefusal(current.id, frozen);
+        const verdict = await resolveKeyedReplay(env, replayed, fingerprint);
+        if (verdict.action === "recreate") {
+          failedRowId = verdict.failedRowId;
+        } else {
+          return verdict.trade;
         }
-        return current;
       }
     }
   }
@@ -711,7 +750,10 @@ export async function createDvpTrade(
     // balances and the frozen flags — and keeps its reconciler and its
     // recovery path. What is refused is this create's RESPONSE: the creator
     // learns the trade cannot be funded, not a success to build on. The
-    // refusal is what a keyed retry of this create must replay too.
+    // refusal is what a keyed retry of this create must replay too, which is
+    // what `markBornFrozen` makes replayable: the flags alone cannot tell
+    // "refused at birth" from "frozen by the authority later".
+    await repository.markBornFrozen(id);
     await observeDvpTradeNow(env, claimed);
     throw frozenEscrowRefusal(id, bornFrozen);
   }

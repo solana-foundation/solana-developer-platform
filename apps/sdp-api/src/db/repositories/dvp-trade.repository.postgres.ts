@@ -63,6 +63,7 @@ const dvpTradeRowSchema = z.object({
   escrow_b_peak_amount: z.string().nullable(),
   escrow_a_frozen: z.boolean().nullable(),
   escrow_b_frozen: z.boolean().nullable(),
+  born_frozen: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -149,6 +150,7 @@ function mapDvpTradeRow(row: Record<string, unknown>): DvpTradeRow {
     escrowBPeakAmount: parsed.escrow_b_peak_amount,
     escrowAFrozen: parsed.escrow_a_frozen,
     escrowBFrozen: parsed.escrow_b_frozen,
+    bornFrozen: parsed.born_frozen,
     createdAt: parsed.created_at,
     updatedAt: parsed.updated_at,
   };
@@ -167,7 +169,7 @@ const SELECT_COLUMNS = `id, organization_id, project_id, swap_dvp,
          close_claim_signature, close_claim_action, close_claim_expiry_height,
          close_resolution_attempts, close_resolution_after,
          escrow_a_amount, escrow_b_amount, escrow_a_peak_amount, escrow_b_peak_amount,
-         escrow_a_frozen, escrow_b_frozen,
+         escrow_a_frozen, escrow_b_frozen, born_frozen,
          created_at, updated_at`;
 
 /**
@@ -336,6 +338,19 @@ export function createPostgresDvpTradeRepository(db: AppDb): DvpTradeRepository 
         .bind(status, observed, observed, observed, observed, id)
         .first<Record<string, unknown>>();
       return row ? mapDvpTradeRow(row) : null;
+    },
+
+    async markBornFrozen(id) {
+      const row = await db
+        .prepare(
+          `UPDATE dvp_trades
+              SET born_frozen = TRUE, updated_at = sdp_iso_now()
+            WHERE id = ?
+            RETURNING id`
+        )
+        .bind(id)
+        .first<{ id: string }>();
+      return row !== null && row !== undefined;
     },
 
     async listOpenForReconciliation(limit: number) {

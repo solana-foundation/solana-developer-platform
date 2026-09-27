@@ -279,6 +279,41 @@ describe("DvpTradeRepository (postgres)", () => {
     expect(resolved?.swapDvp).toBe(created.swapDvp);
   });
 
+  // `born_frozen` is the durable "the create response was refused" fact the
+  // frozen flags cannot carry: observations refresh the flags to the escrow's
+  // current state, so only this marker lets a keyed retry tell a trade refused
+  // at birth from one frozen by the mint authority after a successful create.
+  it("marks born-frozen monotonically and never lets an observation clear it", async () => {
+    const created = await repo.create(tradeInsert());
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ bornFrozen: false });
+
+    await expect(repo.markBornFrozen(created.id)).resolves.toBe(true);
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({ bornFrozen: true });
+
+    // Marking is idempotent.
+    await expect(repo.markBornFrozen(created.id)).resolves.toBe(true);
+    // And an observation — which rewrites the frozen flags — keeps it.
+    await repo.resolveCreate(created.id, "created");
+    await repo.recordObservation({
+      id: created.id,
+      expectedStatus: "created",
+      status: "created",
+      escrowAAmount: "0",
+      escrowBAmount: "0",
+      escrowAFrozen: false,
+      escrowBFrozen: false,
+      closeSignature: null,
+      observedAt: "2026-09-10T00:00:00.000Z",
+      observedClusterTimestamp: "1800000000",
+    });
+    await expect(repo.getById(scope, created.id)).resolves.toMatchObject({
+      bornFrozen: true,
+      escrowAFrozen: false,
+    });
+
+    await expect(repo.markBornFrozen("dvp_missing")).resolves.toBe(false);
+  });
+
   it("remembers the peak open balance when a later observation is lower", async () => {
     const created = await repo.create(tradeInsert());
     await repo.resolveCreate(created.id, "created");

@@ -107,6 +107,16 @@ export interface DvpTradeRow {
   escrowBPeakAmount: string | null;
   escrowAFrozen: boolean | null;
   escrowBFrozen: boolean | null;
+  /**
+   * This create's RESPONSE was refused because the escrow was created frozen.
+   *
+   * The `escrow*Frozen` flags are the escrow's CURRENT state, refreshed by
+   * every observation: they cannot tell "frozen at birth" from "frozen later".
+   * Only a refused create replays its refusal to a keyed retry — a trade that
+   * was successfully created and frozen afterwards keeps answering to its key
+   * with the trade itself, exactly as it did the first time.
+   */
+  bornFrozen: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +154,9 @@ export type DvpTradeInsert = Omit<
   | "escrowBPeakAmount"
   | "escrowAFrozen"
   | "escrowBFrozen"
+  // Written by `markBornFrozen` when the create response is refused, never at
+  // insert: a claim is not refused before it is even signed.
+  | "bornFrozen"
 >;
 
 export interface DvpTradeScope {
@@ -234,6 +247,15 @@ export interface DvpTradeRepository {
    * chain to settle, because the transaction may still land.
    */
   resolveCreate(id: string, status: "created" | "create_failed"): Promise<DvpTradeRow | null>;
+  /**
+   * Records that this trade's create response was refused as born-frozen.
+   *
+   * Idempotent and monotone: once set, never cleared by any writer. It is the
+   * durable fact the frozen flags cannot carry — THAT the create was refused —
+   * while the flags keep carrying the live WHETHER funding is still blocked.
+   * @returns Whether the row was marked. False when the trade does not exist.
+   */
+  markBornFrozen(id: string): Promise<boolean>;
   /** Null when the trade does not exist or belongs to another project. */
   getById(scope: DvpTradeScope, id: string): Promise<DvpTradeRow | null>;
   /** Null when unknown. Lookup by the address a counterparty actually sees. */

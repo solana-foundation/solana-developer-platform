@@ -667,6 +667,56 @@ describe("createDvpTrade", () => {
     await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
+  // The frozen flags are the escrow's CURRENT state, refreshed by every
+  // observation, so a trade created healthy and frozen by the mint authority
+  // later looks identical on the row to one born frozen. Only a trade whose
+  // create response was actually refused may replay that refusal; this one
+  // was already handed back as a success, so its keyed retry answers with the
+  // same trade rather than a conflict claiming it "was created frozen".
+  it("returns the trade on a keyed retry when the escrow is only frozen later", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-later-freeze" };
+
+    const first = await createDvpTrade(env, auditContext, input);
+    // The reconciler's next sweep records a freeze that happened after the
+    // create was already returned as a success.
+    await getDb(env).execute(
+      "UPDATE dvp_trades SET escrow_a_frozen = TRUE, escrow_b_frozen = TRUE"
+    );
+
+    const retried = await createDvpTrade(env, auditContext, input);
+
+    expect(retried.id).toBe(first.id);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  // A keyed retry refreshes the trade before answering, and the refresh can be
+  // the read that proves the create transaction expired without landing. The
+  // row then says `create_failed` — nothing exists on chain — so returning it
+  // would answer 201 with a trade that does not exist. The retry must follow
+  // the failed-create path: free the key and make the trade it claimed to.
+  it("makes a fresh trade on a keyed retry whose refresh found the create dead", async () => {
+    acceptSend();
+    const input = { ...tradeInput(), idempotencyKey: "key-refresh-failed" };
+    const first = await createDvpTrade(env, auditContext, input);
+    observeDvpTradeIfStale.mockImplementationOnce(async (_env: unknown, trade: DvpTradeRow) => {
+      await getDb(env).execute("UPDATE dvp_trades SET status = 'create_failed' WHERE id = ?", [
+        trade.id,
+      ]);
+      return { ...trade, status: "create_failed" as const };
+    });
+
+    const retried = await createDvpTrade(env, auditContext, input);
+
+    expect(retried.id).not.toBe(first.id);
+    expect(retried.status).toBe("creating");
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+    const rows = await rowsInDb();
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.status).sort()).toEqual(["create_failed", "creating"]);
+  });
+
   // Best effort by design: a failed verdict read must not break the create.
   // The trade stays exactly where the pre-flight world left it, and the
   // reconciler logs a frozen escrow on every sweep if one is there.
