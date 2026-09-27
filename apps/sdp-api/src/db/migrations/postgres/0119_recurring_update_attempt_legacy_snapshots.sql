@@ -149,9 +149,10 @@ WHERE attempt.recurring_payment_id = recurring.id
 -- would block finalizing the authorized replacement. When a later retry
 -- cannot prove the recorded identity against any custody wallet, the
 -- recovery path journals the attempt failed with its recorded work intact
--- and releases the parent, unless the old subscription was already canceled
--- on-chain — that case stays in flight for manual reconciliation because a
--- fresh start would repeat the cancellation.
+-- and releases the parent, unless the replacement subscription was already
+-- authorized or the old subscription already canceled on-chain — those cases
+-- stay in flight for manual reconciliation, because a fresh start would
+-- abandon the authorized replacement or repeat the cancellation.
 UPDATE payment_recurring_payment_update_attempts attempt
 SET status = 'failed',
     error = 'legacy source-changing replacement attempt could not be resolved to an exact custody wallet; retry the update to create a fresh attempt'

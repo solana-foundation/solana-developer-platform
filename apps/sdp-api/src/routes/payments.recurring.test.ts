@@ -1803,6 +1803,7 @@ describe("Payments routes — recurring", () => {
     signableSharedWallet?: boolean;
     rekeyReplacementWalletId?: string;
     withOldCancelSignature?: boolean;
+    withAuthorizationSignature?: boolean;
   }): Promise<{
     activated: Awaited<ReturnType<typeof activateRecurringPaymentFixture>>;
     replacementCustodyWalletId: string;
@@ -1921,11 +1922,12 @@ describe("Payments routes — recurring", () => {
              id, organization_id, project_id, recurring_payment_id, mode, status,
              stage, old_plan_id, old_subscription_id, changed_fields,
              before_values, after_values, created_at, updated_at,
-             new_plan_id, plan_creation_signature, old_cancel_signature
+             new_plan_id, plan_creation_signature, authorization_signature,
+             old_cancel_signature
            ) VALUES (
              ?, ?, ?, ?, 'replacement', 'processing',
              'create_plan', ?, ?, ARRAY['sourceWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?,
-             ?, ?, ?
+             ?, ?, ?, ?
            )`
         )
         .bind(
@@ -1941,6 +1943,11 @@ describe("Payments routes — recurring", () => {
           staleAt,
           options.plan?.id ?? null,
           options.plan?.withSignature
+            ? signature(
+                "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+              )
+            : null,
+          options.withAuthorizationSignature === true
             ? signature(
                 "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
               )
@@ -2433,6 +2440,65 @@ describe("Payments routes — recurring", () => {
       .first<{ status: string; old_cancel_signature: string | null }>();
     expect(attempt?.status).toBe("processing");
     expect(attempt?.old_cancel_signature).not.toBeNull();
+    const parent = await getDb(env)
+      .prepare(
+        "SELECT status, source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?"
+      )
+      .bind(activated.id)
+      .first<{ status: string; source_custody_wallet_id: string | null }>();
+    expect(parent?.status).toBe("updating");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an authorized legacy replacement in flight for manual reconciliation instead of releasing it to a second replacement", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const { activated, replacementCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
+      attemptId: "prpu_stale_legacy_source_change",
+      // The recorded replacement subscription is already authorized on-chain
+      // but the old subscription is not canceled yet. No retry that cannot
+      // prove the recorded custody identity can finalize that replacement,
+      // and only the recorded replacement wallet itself can cancel it, so
+      // the attempt stays in flight for manual reconciliation instead of
+      // releasing the payment to a fresh update that would create a second
+      // replacement and orphan the authorized one.
+      plan: {
+        id: "psp_stale_legacy_authorized",
+        ownerAddress: "addr_no_custody_wallet_owner",
+        withSignature: true,
+      },
+      withAuthorizationSignature: true,
+    });
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(409);
+    const updateBody = errorResponseSchema.parse(await updateRes.json());
+    expect(updateBody.error.message).toContain(
+      "cannot prove the recorded replacement custody wallet identity"
+    );
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, authorization_signature, old_cancel_signature
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{
+        status: string;
+        authorization_signature: string | null;
+        old_cancel_signature: string | null;
+      }>();
+    expect(attempt?.status).toBe("processing");
+    expect(attempt?.authorization_signature).not.toBeNull();
+    expect(attempt?.old_cancel_signature).toBeNull();
     const parent = await getDb(env)
       .prepare(
         "SELECT status, source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?"

@@ -763,21 +763,26 @@ async function resolveStaleLegacyUpdateAttempt(input: {
       ),
     };
   }
-  if (input.existing.old_cancel_signature !== null) {
-    // The recorded replacement already canceled the old subscription
-    // on-chain. Failing the attempt and restarting would repeat that
-    // cancellation against the already-authorized replacement, so the
-    // attempt stays in flight for manual reconciliation instead of being
-    // released to a fresh start that cannot finalize it.
+  if (
+    input.existing.authorization_signature !== null ||
+    input.existing.old_cancel_signature !== null
+  ) {
+    // The recorded replacement subscription was already authorized on-chain
+    // (or the old subscription was already canceled). No retry that cannot
+    // prove the recorded custody identity can finalize that replacement, and
+    // only the recorded replacement wallet itself can cancel it — releasing
+    // the payment to a fresh update would abandon the authorized replacement
+    // and create a second one. Keep the attempt in flight for manual
+    // reconciliation instead.
     throw conflict(
-      "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the recorded replacement already canceled the old subscription on-chain, so reconcile the recorded replacement manually before updating"
+      "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the recorded replacement is already authorized on-chain or the old subscription is already canceled, so reconcile the recorded replacement manually before updating"
     );
   }
   if (legacyAttemptHasRecordedReplacementWork(input.existing)) {
     // The retried custody identity cannot be proven, but nothing was
-    // canceled on-chain yet. Return the attempt unrecovered so the caller
-    // journals it failed — keeping the recorded plan, subscription, and
-    // signature work for audit — and releases the parent after the claim
+    // authorized or canceled on-chain yet. Return the attempt unrecovered so
+    // the caller journals it failed — keeping the recorded plan, subscription,
+    // and signature work for audit — and releases the parent after the claim
     // commits: a fresh update can then repair the payment instead of every
     // retry deadlocking in updating.
     return { kind: "unrecoverable", attempt: input.existing };
