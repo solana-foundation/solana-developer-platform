@@ -10868,7 +10868,7 @@ describe("Issuance Routes", () => {
         }
       });
 
-      it("closes the prepare marker when confirmation fails terminally", async () => {
+      it("keeps the prepare marker pending when confirmation fails, even terminally", async () => {
         ensureRpcUrl();
 
         const token = await seedIssuedToken({
@@ -10885,8 +10885,11 @@ describe("Issuance Routes", () => {
           params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
         });
 
-        // Confirmed and indexed, but the tx is unrelated to this mint — that
-        // transaction is dead, so nothing it prepared can still land.
+        // Confirmed and indexed, but the tx is unrelated to this mint: the
+        // 400 is terminal for THIS signature, yet it proves nothing about the
+        // prepared transaction (a caller can submit any landed signature with
+        // the prepared mint), so the marker must keep holding the fence until
+        // a real confirmation or the fence expiry resolves it.
         const getSignatureStatusesSpy = vi
           .spyOn(SolanaRpc, "getSignatureStatuses")
           .mockResolvedValueOnce([
@@ -10928,7 +10931,7 @@ describe("Issuance Routes", () => {
             .prepare("SELECT status FROM issuance_transactions WHERE id = ?")
             .bind(marker.transaction.id)
             .first<{ status: string }>();
-          expect(row?.status).toBe("failed");
+          expect(row?.status).toBe("pending");
         } finally {
           getSignatureStatusesSpy.mockRestore();
           accountExistsSpy.mockRestore();

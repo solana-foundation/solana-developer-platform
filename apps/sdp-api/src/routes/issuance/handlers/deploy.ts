@@ -1075,24 +1075,14 @@ const findMintInitialization = (
  * control.
  */
 /**
- * Close a failed confirm's prepare marker (APE-848) so it stops fencing
- * profile saves and never lingers as a pending deploy: the failure path's
- * remediation is "re-save the profile and retry".
+ * A failed confirm never closes the prepare marker on purpose: the submitted
+ * signature proves nothing about the prepared transaction's fate (a caller can
+ * submit any landed signature with the prepared mint, and a failed tx cannot
+ * be told apart from the prepared one). Only a successful deploy confirms the
+ * marker in place; a marker whose prepared transaction can no longer land is
+ * closed by the profile-save fence's expiry instead. Until then it keeps
+ * fencing snapshot rewrites that could strand the prepared mint.
  */
-async function failPreparedTransactionMarker(
-  tokenService: TokenService,
-  preparedTransaction: TokenTransaction | null,
-  error: unknown
-): Promise<void> {
-  if (!preparedTransaction) {
-    return;
-  }
-  await tokenService.updateTransaction(preparedTransaction.id, {
-    status: "failed",
-    error: error instanceof Error ? error.message : "Deploy confirmation failed",
-  });
-}
-
 export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploySchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -1152,11 +1142,6 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   const auditService = new AuditService(getDb(c.env));
   let auditIntent: Awaited<ReturnType<AuditService["beginCritical"]>> | undefined;
   let deploymentRecorded = false;
-  // Flip only once the submitted transaction is verified landed: before that
-  // (unconfirmed, RPC hiccups, not-yet-indexed) the mint may still land, so the
-  // prepare marker must stay pending and keep fencing profile saves. Failing it
-  // here would let a save rewrite the snapshot and strand the mint on retry.
-  let verifiedLanded = false;
 
   try {
     // The profile could have changed between prepare and confirm; the claim
@@ -1197,7 +1182,6 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
         "Deploy transaction is confirmed but not yet indexed by the RPC; retry shortly"
       );
     }
-    verifiedLanded = true;
 
     const confirmedTx = verified.transaction;
 
@@ -1296,12 +1280,10 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       // re-claim. Guarded on deploying/no-mint, so this can never demote a
       // token whose mint was committed by someone else in the meantime.
       await tokenService.releaseTokenDeploy(tokenId);
-      // The prepare marker stops fencing profile saves only once the
-      // transaction is verified landed (it can no longer "land later"); for
-      // retryable failures it stays pending and keeps holding the fence.
-      if (verifiedLanded) {
-        await failPreparedTransactionMarker(tokenService, preparedTransaction, error);
-      }
+      // The prepare marker stays pending on every failure: the submitted
+      // signature does not prove the prepared transaction can no longer land
+      // (see the comment above this handler). The profile-save fence's expiry
+      // closes it once its blockhash can no longer be valid.
       if (auditIntent) {
         await auditService.completeCritical(c, auditIntent, {
           status: "failure",
