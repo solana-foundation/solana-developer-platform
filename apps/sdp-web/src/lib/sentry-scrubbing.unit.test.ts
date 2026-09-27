@@ -156,27 +156,28 @@ describe("sentryScrubbingHooks in the browser bundle", () => {
       });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("local sink did not bind");
-
-    const sensitiveMessage = "provider error: counterparty jane.doe@example.com";
-
-    Sentry.init({
-      dsn: `http://public@127.0.0.1:${address.port}/1`,
-      sendDefaultPii: false,
-      sampleRate: 1,
-      ...sentryScrubbingHooks,
-    });
-    const client = Sentry.getClient();
-    if (!client) throw new Error("Sentry client did not initialize");
-    // Registered conditionally only so a regression that removes the hook
-    // fails on the wire assertions below (the raw delivery) instead of on a
-    // TypeError at registration time.
-    if (typeof sentryScrubbingHooks.beforeSendFeedback === "function") {
-      client.on("beforeSendFeedback", sentryScrubbingHooks.beforeSendFeedback);
-    }
 
     try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("local sink did not bind");
+
+      const sensitiveMessage = "provider error: counterparty jane.doe@example.com";
+
+      Sentry.init({
+        dsn: `http://public@127.0.0.1:${address.port}/1`,
+        sendDefaultPii: false,
+        sampleRate: 1,
+        ...sentryScrubbingHooks,
+      });
+      const client = Sentry.getClient();
+      if (!client) throw new Error("Sentry client did not initialize");
+      // Registered conditionally only so a regression that removes the hook
+      // fails on the wire assertions below (the raw delivery) instead of on a
+      // TypeError at registration time.
+      if (typeof sentryScrubbingHooks.beforeSendFeedback === "function") {
+        client.on("beforeSendFeedback", sentryScrubbingHooks.beforeSendFeedback);
+      }
+
       Sentry.captureFeedback({
         message: sensitiveMessage,
         name: "Jane Doe",
