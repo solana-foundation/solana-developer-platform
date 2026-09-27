@@ -271,6 +271,30 @@ describe("DvpLegFundingClaimRepository", () => {
       });
     });
 
+    // The funding's broadcast marker describes the funding's own transaction.
+    // A reclaim lock that inherited it would never be swept past its expiry and
+    // would ride the reconciler's receipt resolution, which could record the
+    // reclaim's own signature as a funding receipt.
+    it("clears the broadcast marker when a receipt becomes the reclaim's lock", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_wallet"), expiryHeight: "100" });
+        expect(await repo.markBroadcast(TRADE_ID, "a", "sig_wallet", "sig_sponsored")).toBe(true);
+        await repo.recordFundingTx(TRADE_ID, "a", "sig_sponsored");
+
+        expect(
+          await repo.claimForReclaim(
+            { ...claimInput(PARTY_A_ORG, "a", "sig_reclaim"), expiryHeight: "120" },
+            "sig_sponsored"
+          )
+        ).toBe(true);
+      });
+
+      // Past the reclaim's own height the lock is an ordinary one: invisible to
+      // the reconciler's chain lookup, and swept like any unmarked claim.
+      expect(await repo.listExpiredBroadcast(121n)).toEqual([]);
+      expect(await repo.releaseExpired(121n)).toBe(1);
+    });
+
     // A funding still in flight may yet land; reclaiming over it is the race.
     it("refuses while a funding of the leg is still in flight", async () => {
       await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
@@ -394,6 +418,26 @@ describe("DvpLegFundingClaimRepository", () => {
         .bind(TRADE_ID)
         .run();
       expect(await repo.listExpiredBroadcast(900n)).toEqual([]);
+    });
+
+    // A broadcast-marked row whose receipt write is still owed has no status
+    // bound: a trade can close while the write is still owed — past the expiry
+    // height `hasLiveClaim` no longer blocks the close, and the sweep never
+    // touches a marked row. Closure must not strand the row, or a funding
+    // transfer that landed loses its durable receipt.
+    it("lists an unresolved broadcast-marked claim on a closed trade", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_wallet"), expiryHeight: "500" });
+        expect(await repo.markBroadcast(TRADE_ID, "a", "sig_wallet", "sig_marked")).toBe(true);
+      });
+
+      await getDb(env)
+        .prepare("UPDATE dvp_trades SET status = 'settled' WHERE id = ?")
+        .bind(TRADE_ID)
+        .run();
+
+      const listed = await repo.listExpiredBroadcast(900n);
+      expect(listed.map((claim) => claim.signature)).toEqual(["sig_marked"]);
     });
 
     it("deletes the matching broadcast claim and never an unbroadcast lock", async () => {

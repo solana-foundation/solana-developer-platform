@@ -132,6 +132,13 @@ export interface DvpLegFundingClaimRepository {
    * `releaseExpired` deliberately never touches either: on the wire means
    * possibly landed. Past the last-valid height only the chain can say which,
    * so resolution belongs to the reconciler's RPC read, never to the sweep.
+   *
+   * Receipts are bounded to trades whose escrows still exist — a closed
+   * trade's settled receipt is history the chain need never be asked about
+   * again. An unresolved broadcast-marked row carries no such bound: a trade
+   * can close while its receipt write is still owed (`hasLiveClaim` stops
+   * blocking past the expiry height), and closure must not strand the row —
+   * resolving it writes the receipt or deletes it, so it cannot loop.
    */
   listExpiredBroadcast(blockHeight: bigint): Promise<DvpLegFundingClaim[]>;
   /**
@@ -152,7 +159,11 @@ export interface DvpLegFundingClaimRepository {
    * chain about that exact funding transaction and found it landed (or moved
    * nothing); the row is turned into the reclaim's lock in one UPDATE guarded
    * on that signature, so a receipt that changed since the chain read, or a
-   * funding still in flight (`funding_tx IS NULL`), is never taken over.
+   * funding still in flight (`funding_tx IS NULL`), is never taken over. The
+   * takeover clears `broadcast_signature` along with the receipt: a reclaim
+   * lock that inherited the funding's marker would never be swept past its
+   * expiry and would ride the reconciler's receipt resolution, which could
+   * record the reclaim's own signature as a funding receipt.
    *
    * The lock is released by signature like any claim, so a reclaim can only
    * ever remove its own row, never a newer funding's receipt. One left behind by
@@ -343,21 +354,34 @@ export function createPostgresDvpLegFundingClaimRepository(
     },
 
     async listExpiredBroadcast(blockHeight) {
-      // Trades whose escrows still exist only: a closed trade's leg can never be
-      // funded again, so its claims are history, and without this bound every
-      // landed receipt would be re-checked on chain every tick forever. Expired
-      // counts as open here: its escrows are still on chain, a reclaim can still
-      // run on them, and a never-landed receipt left on one would otherwise link
-      // a dropped transaction from the trade page for good.
+      // Receipts are bounded to trades whose escrows still exist: a closed
+      // trade's leg can never be funded again, so its settled receipts are
+      // history, and without that bound every one of them would be re-checked
+      // on chain every tick forever. Expired counts as open: its escrows are
+      // still on chain, a reclaim can still run on them, and a never-landed
+      // receipt left on one would otherwise link a dropped transaction from
+      // the trade page for good.
+      //
+      // An unresolved broadcast-marked row (marked, `funding_tx` still null)
+      // gets no status bound: a trade can close while its receipt write is
+      // still owed — past the expiry height `hasLiveClaim` no longer blocks
+      // the close, and the sweep never touches a marked row — and stranding
+      // the row would lose a landed transfer its durable receipt. Resolving
+      // it either writes the receipt or deletes the row, so listing it on a
+      // closed trade cannot loop.
       const result = await db
         .prepare(
           `SELECT c.trade_id, c.side, c.organization_id, c.project_id, c.custody_wallet_id,
                   c.signature, c.expiry_height, c.funding_tx
              FROM dvp_leg_funding_claims c
              JOIN dvp_trades t ON t.id = c.trade_id
-            WHERE (c.funding_tx IS NOT NULL OR c.broadcast_signature IS NOT NULL)
-              AND CAST(c.expiry_height AS NUMERIC) < ?
-              AND t.status IN ('created', 'partially_funded', 'funded', 'expired')`
+             WHERE (
+                     (c.funding_tx IS NOT NULL
+                      AND t.status IN ('created', 'partially_funded', 'funded', 'expired'))
+                     OR (c.funding_tx IS NULL AND c.broadcast_signature IS NOT NULL)
+                   )
+               AND CAST(c.expiry_height AS NUMERIC) < ?
+          `
         )
         .bind(blockHeight.toString())
         .all<Record<string, unknown>>();
@@ -368,11 +392,18 @@ export function createPostgresDvpLegFundingClaimRepository(
       if (receipt === null) {
         return insertClaim(input);
       }
+      // `broadcast_signature` is cleared with the receipt: the marker described
+      // the funding's own broadcast, and a lock that inherited it would never
+      // be swept past its expiry and would ride the reconciler's receipt
+      // resolution, which could record the reclaim's own signature as a
+      // funding receipt. A reclaim has no receipt to lose, so its lock is an
+      // ordinary one.
       const takenOver = await db
         .prepare(
           `UPDATE dvp_leg_funding_claims
               SET organization_id = ?, project_id = ?, custody_wallet_id = ?,
-                  signature = ?, expiry_height = ?, funding_tx = NULL, updated_at = sdp_iso_now()
+                  signature = ?, expiry_height = ?, funding_tx = NULL,
+                  broadcast_signature = NULL, updated_at = sdp_iso_now()
             WHERE trade_id = ? AND side = ? AND funding_tx = ?
             RETURNING trade_id`
         )

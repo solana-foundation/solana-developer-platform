@@ -805,6 +805,37 @@ describe("reconcileDvpTrades", () => {
     expect(restored).toMatchObject({ signature: SIG, fundingTx: SIG });
   });
 
+  // A trade can close while a broadcast-marked claim still owes its receipt
+  // write: past the expiry height `hasLiveClaim` no longer blocks the close,
+  // and the sweep leaves a marked row alone. The resolving pass must see the
+  // row on a closed trade too — closure must not cost a landed transfer its
+  // durable receipt.
+  it("restores the receipt of a broadcast-marked claim on a closed trade", async () => {
+    await seedTrade("dvp_closed_marked", "settled");
+    const db = getDb(env);
+    await db
+      .prepare("UPDATE dvp_trades SET closed_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind("dvp_closed_marked")
+      .run();
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_closed_marked",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_wallet",
+      expiryHeight: "900",
+    });
+    expect(await claims.markBroadcast("dvp_closed_marked", "a", "sig_wallet", SIG)).toBe(true);
+    getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
+
+    await reconcileDvpTrades(env);
+
+    const [restored] = await claims.listForTrade("dvp_closed_marked");
+    expect(restored).toMatchObject({ signature: SIG, fundingTx: SIG });
+  });
+
   it("releases a broadcast-marked claim whose transfer never landed", async () => {
     await seedTrade("dvp_marked_dead", "created");
     const db = getDb(env);
