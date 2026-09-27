@@ -21,7 +21,6 @@ import { PrivateChannelError } from "@sdp/private-channels";
 import { createAuthClient, type SpcAuthClient } from "@sdp/private-channels/auth";
 import { getBase58Codec } from "@solana/codecs";
 import { createSignableMessage, isMessagePartialSigner } from "@solana/signers";
-import { getDb } from "@/db";
 import {
   createPrivateChannelInstanceRepository,
   createPrivateChannelUserRepository,
@@ -37,11 +36,11 @@ import {
   assertApiKeyWalletAccess,
   getAllowedApiKeyWalletIdsForPermissions,
 } from "@/services/api-key-scope.service";
-import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { Env } from "@/types/env";
 import { openSpcAuthContext, type SpcAuthContext, withSpcAuth } from "./auth/gateway-auth";
 import {
   createPrivateChannelSigner,
+  listPrivateChannelCustodyWallets,
   loadFreshWalletScopedAuth,
   resolvePrivateChannelCustodyWallet,
 } from "./wallet-access";
@@ -302,7 +301,10 @@ export async function verifyPrivateChannelWallet(
  * API keys are authorized BEFORE the mirror lookup — a selected key must not
  * distinguish "pubkey is verified" (403) from "pubkey is not verified"
  * (200 `deleted: false`), so mirror existence is never revealed to a key
- * without a fresh `payments:write` binding for that wallet. All-wallet keys
+ * without a fresh `payments:write` binding for that wallet. The pubkey→wallet
+ * mapping spans both ownership paths (config-owned AND connection-owned
+ * custody wallets) — the same universe the verify path resolves — so a key
+ * bound to a verified connection wallet can still revoke it. All-wallet keys
  * and dashboard actors keep the project-scoped behavior.
  */
 export async function deletePrivateChannelWallet(
@@ -321,12 +323,12 @@ export async function deletePrivateChannelWallet(
     // Selected scope: authorize against the custody-wallet pubkey mapping
     // instead of verification state, so the denial is uniform in mirror
     // existence and no verified pubkey is probeable.
-    const wallet = await new CustodyConfigStore(getDb(env), env).findActiveWalletByPublicKey(
-      auth.organizationId,
-      projectId,
-      pubkey
+    const candidateWalletIds = new Set(
+      (await listPrivateChannelCustodyWallets(env, auth.organizationId, projectId))
+        .filter((wallet) => wallet.publicKey === pubkey)
+        .map((wallet) => wallet.walletId)
     );
-    if (!wallet || !writeBindingWalletIds.includes(wallet.walletId)) {
+    if (!writeBindingWalletIds.some((walletId) => candidateWalletIds.has(walletId))) {
       throw forbidden("API key is not authorized for the requested wallet");
     }
   }

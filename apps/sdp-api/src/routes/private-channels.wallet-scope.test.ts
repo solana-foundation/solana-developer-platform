@@ -16,8 +16,10 @@
  * database is honored immediately, not after the KV cache window). The FRESH
  * top-level permission is enforced at both seams the same way, and the delete
  * path authorizes before the mirror lookup so mirror existence (verified vs
- * unverified pubkey) is never revealed to an unauthorized key. All-wallet keys
- * and dashboard actors keep the project-scoped behavior.
+ * unverified pubkey) is never revealed to an unauthorized key. The delete
+ * pubkey→wallet mapping spans both custody ownership paths, so a verified
+ * connection-owned wallet stays revocable for a key bound to it. All-wallet
+ * keys and dashboard actors keep the project-scoped behavior.
  *
  * The SPC auth boundary (`createAuthClient` + the SPC session mint) is the only
  * mock: the routes, API-key middleware, wallet-authorization refresh and the
@@ -44,12 +46,16 @@ const PRINCIPAL_ID = "pcu_pc_wallet_scope_default";
 const WALLET_A_ID = "wallet_scope_a";
 const WALLET_B_ID = "wallet_scope_b";
 const WALLET_C_ID = "wallet_scope_c";
+/** A project custody wallet owned by an ACTIVE CUSTODY CONNECTION (not a config). */
+const WALLET_CONN_ID = "wallet_scope_conn";
 const WALLET_A_PUBKEY = "7C1Pu8mbHaDDTFnGH8YTqemNDofqXP3XEotzSo6TbwHz";
 const WALLET_B_PUBKEY = "J231K9UEpS4y4KAPwGc4gsMNCjKFRMYcQBcjVW7vBhVi";
 /** A project custody wallet with NO verified mirror (never SPC-verified). */
 const WALLET_C_PUBKEY = "8XyBKraqNVWLqS1YnLjQXaWFikCMtLNjNLR7UVpPVsoP";
 /** A pubkey mapping to no custody wallet at all. */
 const UNKNOWN_PUBKEY = "7Kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk";
+/** The verified pubkey of the connection-owned custody wallet. */
+const WALLET_CONN_PUBKEY = "CcnW4L1CL8TqNf1V1yUh2pt1Y4M1QmeSfM1au2YcDuTP";
 
 /** Selected-scope key bound to wallet A with read-only wallet permissions. */
 const READ_KEY = {
@@ -80,6 +86,12 @@ const C_WRITE_KEY = {
   id: "key_pc_ws_cwrite",
   raw: "sk_test_pc_wallet_scope_cwrite",
   prefix: "sk_test_pwsc",
+};
+/** Selected-scope key bound to the verified connection-owned wallet with write permissions. */
+const CONN_WRITE_KEY = {
+  id: "key_pc_ws_connwrite",
+  raw: "sk_test_pc_wallet_scope_connwrite",
+  prefix: "sk_test_pwsk",
 };
 
 interface VerifiedWalletDto {
@@ -153,6 +165,12 @@ async function seedKeys(): Promise<void> {
       bindings: [{ walletId: WALLET_C_ID, permissions: ["payments:write"] }],
       dbBindings: [{ walletId: WALLET_C_ID, permissions: ["payments:write"] }],
     },
+    {
+      key: CONN_WRITE_KEY,
+      permissions: ["payments:read", "payments:write"],
+      bindings: [{ walletId: WALLET_CONN_ID, permissions: ["payments:write"] }],
+      dbBindings: [{ walletId: WALLET_CONN_ID, permissions: ["payments:write"] }],
+    },
   ];
 
   for (const entry of keys) {
@@ -224,7 +242,7 @@ async function seedProjectState(): Promise<void> {
       .prepare(
         `INSERT INTO custody_configs
            (id, organization_id, project_id, provider, config_encrypted, default_wallet_id, status)
-         VALUES ('cfg_pc_wallet_scope', ?, ?, 'synthetic', '{}', ?, 'active')`
+         VALUES ('cfg_pc_wallet_scope', ?, ?, 'privy', '{}', ?, 'active')`
       )
       .bind(ORGANIZATION_ID, PROJECT_ID, WALLET_A_ID),
     db
@@ -243,6 +261,41 @@ async function seedProjectState(): Promise<void> {
         WALLET_C_ID,
         WALLET_C_PUBKEY
       ),
+    // A project-scoped custody CONNECTION owning its own wallet — the second
+    // ownership path the delete pubkey→wallet mapping must cover.
+    db
+      .prepare(
+        `INSERT INTO provider_credentials
+           (id, organization_id, project_id, provider, label, scope, source,
+            storage_backend, status)
+         VALUES ('cred_pc_wallet_scope', ?, ?, 'privy', 'Scope connection credential',
+                 'project', 'runtime', 'runtime_env', 'active')`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID),
+    db
+      .prepare(
+        `INSERT INTO custody_connections
+           (id, organization_id, project_id, provider, scope, provider_credential_id,
+            provider_credential_scope_key)
+         VALUES ('conn_pc_wallet_scope', ?, ?, 'privy', 'project', 'cred_pc_wallet_scope', ?)`
+      )
+      .bind(ORGANIZATION_ID, PROJECT_ID, PROJECT_ID),
+    db
+      .prepare(
+        `INSERT INTO custody_wallets
+           (id, custody_connection_id, wallet_id, public_key, label, purpose, status)
+         VALUES ('cwlt_scope_conn', 'conn_pc_wallet_scope', ?, ?, 'Scope connection wallet',
+                 'transfer', 'active')`
+      )
+      .bind(WALLET_CONN_ID, WALLET_CONN_PUBKEY),
+    // Activate the connection once its default wallet exists (the active
+    // lifecycle check + the default-wallet FK are circular on insert).
+    db.prepare(
+      `UPDATE custody_connections SET status = 'active', activated_at = '2026-01-01T00:00:00.000Z',
+                last_check_status = 'success', last_check_at = '2026-01-01T00:00:00.000Z',
+                default_custody_wallet_id = 'cwlt_scope_conn'
+         WHERE id = 'conn_pc_wallet_scope'`
+    ),
     db
       .prepare(
         `INSERT INTO private_channel_instances
@@ -266,12 +319,13 @@ async function seedProjectState(): Promise<void> {
                  'spc_wallet_scope_default', 'wallet-scope-default', 'synthetic-ciphertext')`
       )
       .bind(PRINCIPAL_ID, ORGANIZATION_ID, PROJECT_ID, INSTANCE_ID),
-    // Both custody wallets are verified under the same default principal.
+    // All three custody wallets are verified under the same default principal.
     db
       .prepare(
         `INSERT INTO private_channel_verified_wallets
            (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey)
-         VALUES ('pcvw_scope_a', ?, ?, ?, ?, ?, ?), ('pcvw_scope_b', ?, ?, ?, ?, ?, ?)`
+         VALUES ('pcvw_scope_a', ?, ?, ?, ?, ?, ?), ('pcvw_scope_b', ?, ?, ?, ?, ?, ?),
+                 ('pcvw_scope_conn', ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         ORGANIZATION_ID,
@@ -285,7 +339,13 @@ async function seedProjectState(): Promise<void> {
         PRINCIPAL_ID,
         INSTANCE_ID,
         WALLET_B_ID,
-        WALLET_B_PUBKEY
+        WALLET_B_PUBKEY,
+        ORGANIZATION_ID,
+        PROJECT_ID,
+        PRINCIPAL_ID,
+        INSTANCE_ID,
+        WALLET_CONN_ID,
+        WALLET_CONN_PUBKEY
       ),
   ]);
 }
@@ -501,6 +561,40 @@ describe("Private Channels wallet-scope validation (SOLA9-576)", () => {
     const rows = await listVerifiedWalletRows();
     expect(rows.map((row) => row.wallet_id)).not.toContain(WALLET_A_ID);
     expect(deleteWalletMock).toHaveBeenCalledWith("jwt-wallet-scope", WALLET_A_PUBKEY);
+  });
+
+  it("DELETE still revokes a verified connection-owned wallet for a selected key bound to it", async () => {
+    // The connection wallet is verified and the key holds a fresh
+    // payments:write binding for its walletId; the pre-mirror pubkey→wallet
+    // mapping must span the connection ownership path, not just config-owned
+    // wallets, or a valid binding would 403 before the mirror is consulted.
+    const response = await app.request(
+      `/v1/private-channels/wallets/${WALLET_CONN_PUBKEY}`,
+      { method: "DELETE", headers: headers(CONN_WRITE_KEY) },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ data: { deleted: true } });
+    const rows = await listVerifiedWalletRows();
+    expect(rows.map((row) => row.wallet_id)).not.toContain(WALLET_CONN_ID);
+    expect(deleteWalletMock).toHaveBeenCalledWith("jwt-wallet-scope", WALLET_CONN_PUBKEY);
+  });
+
+  it("DELETE keeps mirror existence hidden for an unbound connection-wallet pubkey", async () => {
+    // WRITE_KEY is bound to wallet A only. The connection wallet's pubkey is
+    // verified, so a lookup that leaks mirror existence would answer
+    // deleted:false (200) instead of the uniform 403.
+    const response = await app.request(
+      `/v1/private-channels/wallets/${WALLET_CONN_PUBKEY}`,
+      { method: "DELETE", headers: headers(WRITE_KEY) },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    const rows = await listVerifiedWalletRows();
+    expect(rows.map((row) => row.wallet_id)).toContain(WALLET_CONN_ID);
+    expect(deleteWalletMock).not.toHaveBeenCalled();
   });
 
   it("DELETE keeps the project-scoped revocation for an all-wallet key", async () => {
