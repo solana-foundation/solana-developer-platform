@@ -1,5 +1,7 @@
+import { hashString } from "@sdp/payments/hash";
 import type {
   CounterpartyAccount,
+  CounterpartyAccountDetails,
   CounterpartyAccountResponse,
   ListCounterpartyAccountsResponse,
 } from "@sdp/types";
@@ -45,6 +47,24 @@ function mapToCounterpartyAccount(row: CounterpartyAccountRow): CounterpartyAcco
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+/**
+ * Redacted destination fingerprint for audit evidence: a SHA-256 over the
+ * network/address pair. The raw address stays in the account row; the
+ * immutable ledger records only the fingerprint, so a destination change is
+ * attributable and comparable across versions without copying the destination
+ * itself into the hash chain.
+ */
+async function destinationFingerprint(
+  details: CounterpartyAccountDetails | undefined
+): Promise<string | null> {
+  const network = typeof details?.network === "string" ? details.network : null;
+  const address = typeof details?.address === "string" ? details.address : null;
+  if (!network || !address) {
+    return null;
+  }
+  return hashString(`counterparty-account-destination:${network}:${address}`);
 }
 
 async function assertCounterpartyExists(
@@ -141,32 +161,54 @@ export const createCounterpartyAccount = async (
 
   await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
 
-  const account = await getCounterpartyAccountsRepository(c).createCounterpartyAccount({
-    organizationId: auth.organizationId,
-    projectId,
-    counterpartyId: params.data.counterpartyId,
-    accountKind: body.accountKind,
-    label: body.label ?? null,
-    details: body.details ?? {},
-    providerAccountData: body.providerAccountData ?? {},
-  });
-
-  if (!account) {
-    throw internalError("Failed to create counterparty account");
-  }
-
+  // Active accounts resolve as payout destinations, so a create that commits
+  // without its audit admission would leave an unattributed destination. The
+  // hash-chained ledger cannot run inside the mutation transaction, so the
+  // mutation is bracketed intent/outcome instead: a refused intent aborts
+  // before anything commits, and a crash between commit and outcome leaves
+  // the durable intent for reconciliation — a new destination can never exist
+  // without ledger attribution.
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+  const auditIntent = await auditService.beginCritical(c, {
     action: "create",
     resourceType: "counterparty_account",
-    resourceId: account.id,
     metadata: {
       counterpartyId: params.data.counterpartyId,
       accountKind: body.accountKind,
+      destinationFingerprint: await destinationFingerprint(body.details),
     },
+  });
+
+  let account: CounterpartyAccountRow | null;
+  try {
+    account = await getCounterpartyAccountsRepository(c).createCounterpartyAccount({
+      organizationId: auth.organizationId,
+      projectId,
+      counterpartyId: params.data.counterpartyId,
+      accountKind: body.accountKind,
+      label: body.label ?? null,
+      details: body.details ?? {},
+      providerAccountData: body.providerAccountData ?? {},
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  if (!account) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "Create returned no counterparty account row" },
+    });
+    throw internalError("Failed to create counterparty account");
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
+    resourceId: account.id,
+    metadata: { accountVersion: account.created_at },
   });
 
   const response: CounterpartyAccountResponse = { account: mapToCounterpartyAccount(account) };
@@ -188,48 +230,77 @@ export const updateCounterpartyAccount = async (
 
   const repo = getCounterpartyAccountsRepository(c);
 
-  if (body.details !== undefined) {
-    const existing = await repo.getCounterpartyAccountById({
-      counterpartyAccountId: params.data.counterpartyAccountId,
-      counterpartyId: params.data.counterpartyId,
-      organizationId: auth.organizationId,
-      projectId,
-    });
-    if (!existing) {
-      throw notFound("Counterparty account");
-    }
-    if (existing.account_kind === "crypto_wallet") {
-      const result = cryptoWalletDetailsSchema.safeParse(body.details);
-      if (!result.success) {
-        throw badRequest("Invalid crypto_wallet details", {
-          errors: z.treeifyError(result.error),
-        });
-      }
-    }
-  }
-
-  const updated = await repo.updateCounterpartyAccount({
+  // The current row is both the validation source and the pre-mutation
+  // evidence for the audit intent below.
+  const existing = await repo.getCounterpartyAccountById({
     counterpartyAccountId: params.data.counterpartyAccountId,
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
     projectId,
-    ...body,
   });
-
-  if (!updated) {
+  if (!existing) {
     await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
     throw notFound("Counterparty account");
   }
+  if (existing.account_kind === "crypto_wallet" && body.details !== undefined) {
+    const result = cryptoWalletDetailsSchema.safeParse(body.details);
+    if (!result.success) {
+      throw badRequest("Invalid crypto_wallet details", {
+        errors: z.treeifyError(result.error),
+      });
+    }
+  }
 
+  // Active accounts resolve as payout destinations, so an update that commits
+  // without its audit admission would leave a durable destination change
+  // without attribution. The hash-chained ledger cannot run inside the
+  // mutation transaction, so the mutation is bracketed intent/outcome instead:
+  // a refused intent aborts before anything commits, and a crash between
+  // commit and outcome leaves the durable intent — pinning the pre-mutation
+  // account version and redacted destination fingerprints — for
+  // reconciliation.
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+  const auditIntent = await auditService.beginCritical(c, {
     action: "update",
     resourceType: "counterparty_account",
-    resourceId: updated.id,
-    metadata: { changedFields: Object.keys(body) },
+    resourceId: existing.id,
+    metadata: {
+      counterpartyId: params.data.counterpartyId,
+      accountKind: existing.account_kind,
+      changedFields: Object.keys(body),
+      accountVersion: existing.updated_at,
+      previousDestinationFingerprint: await destinationFingerprint(existing.details),
+      destinationFingerprint: await destinationFingerprint(body.details ?? existing.details),
+    },
+  });
+
+  let updated: CounterpartyAccountRow | null;
+  try {
+    updated = await repo.updateCounterpartyAccount({
+      counterpartyAccountId: params.data.counterpartyAccountId,
+      counterpartyId: params.data.counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+      ...body,
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  if (!updated) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "Update returned no counterparty account row" },
+    });
+    throw notFound("Counterparty account");
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
+    metadata: { accountVersion: updated.updated_at },
   });
 
   const response: CounterpartyAccountResponse = { account: mapToCounterpartyAccount(updated) };
@@ -245,26 +316,63 @@ export const archiveCounterpartyAccount = async (c: AppContext) => {
     throw badRequestParams();
   }
 
-  const archived = await getCounterpartyAccountsRepository(c).archiveCounterpartyAccount({
+  const repo = getCounterpartyAccountsRepository(c);
+  const existing = await repo.getCounterpartyAccountById({
     counterpartyAccountId: params.data.counterpartyAccountId,
     counterpartyId: params.data.counterpartyId,
     organizationId: auth.organizationId,
     projectId,
   });
-
-  if (!archived) {
+  if (!existing) {
     await assertCounterpartyExists(c, params.data.counterpartyId, auth.organizationId, projectId);
     throw notFound("Counterparty account");
   }
 
+  // Active accounts resolve as payout destinations, so an archive that
+  // commits without its audit admission would leave an unattributed
+  // destination removal. The hash-chained ledger cannot run inside the
+  // mutation transaction, so the mutation is bracketed intent/outcome instead:
+  // a refused intent aborts before anything commits, and a crash between
+  // commit and outcome leaves the durable intent for reconciliation.
   const auditService = new AuditService(getDb(c.env));
-  await auditService.log(c, {
-    organizationId: auth.organizationId,
-    userId: auth.userId ?? undefined,
-    apiKeyId: auth.apiKeyId ?? undefined,
+  const auditIntent = await auditService.beginCritical(c, {
     action: "delete",
     resourceType: "counterparty_account",
-    resourceId: archived.id,
+    resourceId: existing.id,
+    metadata: {
+      counterpartyId: params.data.counterpartyId,
+      accountKind: existing.account_kind,
+      accountVersion: existing.updated_at,
+      destinationFingerprint: await destinationFingerprint(existing.details),
+    },
+  });
+
+  let archived: CounterpartyAccountRow | null;
+  try {
+    archived = await repo.archiveCounterpartyAccount({
+      counterpartyAccountId: params.data.counterpartyAccountId,
+      counterpartyId: params.data.counterpartyId,
+      organizationId: auth.organizationId,
+      projectId,
+    });
+  } catch (error) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: error instanceof Error ? error.message : "Unknown error" },
+    });
+    throw error;
+  }
+
+  if (!archived) {
+    await auditService.completeCritical(c, auditIntent, {
+      status: "failure",
+      metadata: { error: "Archive returned no counterparty account row" },
+    });
+    throw notFound("Counterparty account");
+  }
+
+  await auditService.completeCritical(c, auditIntent, {
+    metadata: { accountVersion: archived.updated_at },
   });
 
   return noContent(c);
