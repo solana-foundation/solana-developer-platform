@@ -1,6 +1,7 @@
 "use client";
 
 import type { AssetAuditEvent } from "@sdp/types";
+import { PROJECT_CONTEXT_HEADER_NAME } from "@/lib/project-cookie";
 
 export interface AssetAuditHistory {
   events: AssetAuditEvent[];
@@ -24,6 +25,7 @@ export async function fetchAssetAuditHistory(
     page?: number;
     pageSize?: number;
     signal?: AbortSignal;
+    projectContextId?: string | null;
   } = {}
 ): Promise<AssetAuditHistory> {
   const query = new URLSearchParams();
@@ -46,12 +48,25 @@ export async function fetchAssetAuditHistory(
   const suffix = query.toString();
   const response = await fetch(
     `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/audit${suffix ? `?${suffix}` : ""}`,
-    { method: "GET", cache: "no-store", signal: options.signal }
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: options.signal,
+      // Bind the read to the project the mounted surface was rendered with
+      // (SOLA9-564) instead of the shared selection cookie a sibling tab can
+      // flip.
+      headers: options.projectContextId
+        ? { [PROJECT_CONTEXT_HEADER_NAME]: options.projectContextId }
+        : undefined,
+    }
   );
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as AssetAuditEnvelope;
+    throw new Error(errorBody.error || `Audit request failed (${response.status})`);
+  }
   const body = (await response.json().catch(() => ({}))) as AssetAuditEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Audit request failed (${response.status})`);
+  if (body.error) {
+    throw new Error(body.error);
   }
 
   return {

@@ -3,6 +3,7 @@
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { z } from "zod";
 import { paymentsWalletsResponseSchema } from "@/app/dashboard/payments/payments-page.data";
+import { PROJECT_CONTEXT_HEADER_NAME } from "@/lib/project-cookie";
 
 const tokenAuthoritiesResponseSchema = z.object({
   data: z.object({
@@ -22,8 +23,20 @@ export type TokenAuthorityWalletsData = z.infer<typeof tokenAuthoritiesResponseS
   authorityWallets: PaymentsDashboardWallet[];
 };
 
-async function fetchParsed<Output>(path: string, schema: z.ZodType<Output>): Promise<Output> {
-  const response = await fetch(path, { cache: "no-store" });
+async function fetchParsed<Output>(
+  path: string,
+  schema: z.ZodType<Output>,
+  projectContextId?: string | null
+): Promise<Output> {
+  const response = await fetch(path, {
+    cache: "no-store",
+    headers: projectContextId
+      ? // Bind the read to the project the mounted surface was rendered with
+        // (SOLA9-564) instead of the shared selection cookie a sibling tab can
+        // flip.
+        { [PROJECT_CONTEXT_HEADER_NAME]: projectContextId }
+      : undefined,
+  });
   if (!response.ok) {
     throw new Error(`Request failed (${response.status})`);
   }
@@ -35,15 +48,19 @@ async function fetchParsed<Output>(path: string, schema: z.ZodType<Output>): Pro
  * Both reads go through their canonical dashboard proxies and are fanned out here on the client.
  *
  * @param tokenId - Issuance token id.
+ * @param options.projectContextId - Rendered project context, bound into the
+ * token authorities read so it cannot be retargeted by the shared cookie.
  * @returns Live authorities plus the signer wallet inventory.
  */
 export async function fetchTokenAuthorityWallets(
-  tokenId: string
+  tokenId: string,
+  options: { projectContextId?: string | null } = {}
 ): Promise<TokenAuthorityWalletsData> {
   const [authorities, wallets] = await Promise.all([
     fetchParsed(
       `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}?${TOKEN_AUTHORITIES_QUERY}`,
-      tokenAuthoritiesResponseSchema
+      tokenAuthoritiesResponseSchema,
+      options.projectContextId
     ),
     fetchParsed(AUTHORITY_WALLETS_PATH, paymentsWalletsResponseSchema),
   ]);

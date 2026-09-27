@@ -382,6 +382,33 @@ describe("createRequestScopedSdpApiClients", () => {
       expect(callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint")).toHaveLength(0);
     });
 
+    it("answers 500, not 403, when the project list fails at the network level", async () => {
+      // A network failure to load the validating list is this server failing,
+      // not the caller's answer being wrong — it must not read as forbidden.
+      mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+      const fetchMock = apiFetchMock({
+        projects: () => {
+          throw new Error("getaddrinfo ENOTFOUND api.example.test");
+        },
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      mocks.auth.mockResolvedValue({
+        userId: "user_test",
+        orgId: "org_test",
+        getToken: vi.fn().mockResolvedValue("token_test"),
+      });
+
+      const response = await proxyToSdpApi({
+        request: boundRequest(),
+        traceSource: "test.proxy.bound",
+        path: "/v1/issuance/tokens/tok_1/mint",
+        boundProjectId: "project_test",
+      });
+
+      expect(response.status).toBe(500);
+      expect(callsTo(fetchMock, "/v1/issuance/tokens/tok_1/mint")).toHaveLength(0);
+    });
+
     it("does not require the selection cookie when a context is bound", async () => {
       mocks.cookies.mockResolvedValue(cookieJar());
       const fetchMock = apiFetchMock();

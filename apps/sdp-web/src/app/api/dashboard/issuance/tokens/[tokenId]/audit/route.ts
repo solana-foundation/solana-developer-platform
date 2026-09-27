@@ -2,7 +2,7 @@ import type { AssetAuditEvent } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient, projectContextErrorStatus } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap (the parsePositiveInteger max in
 // the issuance audit handler). The dashboard pages with a fixed size under this;
@@ -79,7 +79,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         total: 0,
         hasMore: false,
       },
-      { status: 500 }
+      // An unlisted rendered context is the caller's answer being wrong (403);
+      // anything else is this server failing.
+      { status: projectContextErrorStatus(error) }
     );
   }
 }

@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { formatDisplayLabel } from "@/lib/utils";
@@ -236,6 +237,9 @@ function TransactionsResults({
 export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const locale = useLocale();
+  // The project this mounted browser was rendered with, bound into the read
+  // (SOLA9-564) so a sibling tab flipping the shared cookie cannot retarget it.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const [type, setType] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -248,6 +252,7 @@ export function TokenTransactionsBrowser({ tokenId }: { tokenId: string }) {
         status: st === "all" ? null : st,
         page: Number(pageNumber),
         pageSize: PAGE_SIZE,
+        projectContextId: selectedProjectId,
       }),
     // keepPreviousData → paging/filtering keeps the current rows on screen
     // (dimmed) while the next page loads, instead of flashing the empty state.

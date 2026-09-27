@@ -11,7 +11,7 @@ import {
 } from "@/app/dashboard/issuance/issuance-tokens.data";
 import { assetProfiles } from "@/flags";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient, projectContextErrorStatus } from "@/lib/sdp-api";
 
 // Paged asset list for the issuance workspace. The workspace re-fetches through
 // here on every search/filter/sort/page change, so a keystroke costs one token
@@ -88,7 +88,12 @@ export async function GET(request: Request) {
     } satisfies IssuanceTokensRouteResponse);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Request failed";
-    const status = error instanceof InvalidIssuanceSearchEncodingError ? 400 : 500;
+    const status =
+      error instanceof InvalidIssuanceSearchEncodingError
+        ? 400
+        : // An unlisted rendered context is the caller's answer being wrong
+          // (403); anything else is this server failing.
+          projectContextErrorStatus(error);
     trace.log({ ok: false, error: message, status });
     return NextResponse.json(emptyResponse(query.page, query.pageSize, message), { status });
   }

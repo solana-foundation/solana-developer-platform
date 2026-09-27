@@ -144,6 +144,19 @@ export class SdpApiResponseError extends Error {
   }
 }
 
+/**
+ * Thrown when a rendered project context does not name a project this
+ * organization currently lists. Callers distinguish it from an upstream
+ * failure: an unusable context is the client's answer being wrong (403),
+ * while a failed project-list load is the server failing (500).
+ */
+export class ProjectContextUnavailableError extends Error {
+  constructor(message = "Requested project is not available for this organization") {
+    super(message);
+    this.name = "ProjectContextUnavailableError";
+  }
+}
+
 async function parseSdpApiResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
@@ -393,7 +406,7 @@ export async function createProjectBoundSdpApiClient(
   const token = await getRequestClerkToken();
   const projects = await fetchRequestProjects(token);
   if (!projects.some((project) => project.id === projectId)) {
-    throw new Error("Requested project is not available for this organization");
+    throw new ProjectContextUnavailableError();
   }
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }
@@ -415,6 +428,16 @@ export async function sdpApiRequest(path: string, options: RequestInit = {}): Pr
 export function readProjectContextId(request: Request): string | null {
   const value = request.headers.get(PROJECT_CONTEXT_HEADER_NAME)?.trim();
   return value ? value : null;
+}
+
+/**
+ * The status a bound read route reports when its project-bound client cannot
+ * be built: an unlisted rendered context is the caller's answer being wrong
+ * (403), while a failed project-list load or a network error is this server
+ * failing (500) — the same split `proxyToSdpApi` draws for the proxy routes.
+ */
+export function projectContextErrorStatus(error: unknown): number {
+  return error instanceof ProjectContextUnavailableError ? 403 : 500;
 }
 
 /**
@@ -512,14 +535,16 @@ export async function proxyToSdpApi({
       );
     } catch (error) {
       // Fail closed: a rendered context that no longer validates never falls
-      // back to the mutable shared cookie.
-      if (error instanceof SdpApiResponseError) {
-        return proxyFailure(trace, 500, error.message);
+      // back to the mutable shared cookie. An unlisted context is the caller's
+      // answer being wrong (403); anything else — a failed list read, a
+      // network error — is this server failing (500), never an access verdict.
+      if (error instanceof ProjectContextUnavailableError) {
+        return proxyFailure(trace, 403, error.message);
       }
       return proxyFailure(
         trace,
-        403,
-        error instanceof Error ? error.message : "Rendered project context is not available"
+        500,
+        error instanceof Error ? error.message : "Rendered project context could not be validated"
       );
     }
     try {

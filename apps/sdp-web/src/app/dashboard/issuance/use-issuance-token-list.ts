@@ -164,6 +164,7 @@ export interface UseIssuanceTokenListResult {
   errorMessage: string | null;
 }
 
+// react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing list state orchestration; this change only binds its page fetches to the rendered project context
 export function useIssuanceTokenList({
   initialQuery,
   initialTokens,

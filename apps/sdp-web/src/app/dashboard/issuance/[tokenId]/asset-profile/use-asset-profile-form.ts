@@ -23,6 +23,56 @@ import {
 } from "./asset-profile-mapping";
 
 /**
+ * Field errors for the current draft: the shared details/compliance validation
+ * plus the rules only this edit-in-place form knows about. A deployed token's
+ * historical deployment wallet is read-only here, and — unlike the creation
+ * wizard — the form knows how much is already minted, so a cap under that
+ * (which could never be satisfied) is caught before the round-trip.
+ */
+function deriveFormErrors({
+  draft,
+  token,
+  supplyLocked,
+  draftWallets,
+  t,
+}: {
+  draft: DraftState;
+  token: Token;
+  supplyLocked: boolean;
+  draftWallets: readonly DraftAuthorityWallet[];
+  t: ReturnType<typeof useTranslations>;
+}): ReturnType<typeof getAssetDetailsErrors> {
+  const errors = getAssetDetailsErrors(draft, t);
+  if (
+    !token.mintAddress &&
+    draft.authorityWalletIds &&
+    Object.values(draft.authorityWalletIds).some(
+      (id) => !draftWallets.some((wallet) => wallet.id === id)
+    )
+  ) {
+    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
+  }
+  if (token.mintAddress) {
+    delete errors.signingWalletId;
+  }
+  if (!draft.name.trim()) {
+    errors.name = t("DashboardIssuance.errors.assetNameRequired");
+  }
+  if (
+    !supplyLocked &&
+    !errors.maxSupply &&
+    draft.maxSupply.trim() &&
+    isMaxSupplyBelowMintedSupply(draft.maxSupply, token.totalSupply)
+  ) {
+    errors.maxSupply = t("DashboardIssuance.errors.maxSupplyBelowMinted", {
+      amount: token.totalSupply,
+      symbol: token.symbol,
+    });
+  }
+  return errors;
+}
+
+/**
  * Edit-in-place form state for the asset management workspace: one draft
  * spanning the Details and Compliance tabs, hydrated from the profile + token,
  * saved as a whole through the save bar. No localStorage — the wizard's
@@ -109,36 +159,7 @@ export function useAssetProfileForm({
   // editable, and this decides both the field's mode and whether save sends it.
   const supplyLocked = isSupplyLockedOnChain(token);
 
-  const errors = getAssetDetailsErrors(draft, t);
-  if (
-    !token.mintAddress &&
-    draft.authorityWalletIds &&
-    Object.values(draft.authorityWalletIds).some(
-      (id) => !draftWallets.some((wallet) => wallet.id === id)
-    )
-  ) {
-    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
-  }
-  if (token.mintAddress) {
-    // A deployed token's historical deployment wallet is read-only here.
-    delete errors.signingWalletId;
-  }
-  if (!draft.name.trim()) {
-    errors.name = t("DashboardIssuance.errors.assetNameRequired");
-  }
-  // Unlike the creation wizard, this form knows how much is already minted — a
-  // cap under that could never be satisfied, so catch it before the round-trip.
-  if (
-    !supplyLocked &&
-    !errors.maxSupply &&
-    draft.maxSupply.trim() &&
-    isMaxSupplyBelowMintedSupply(draft.maxSupply, token.totalSupply)
-  ) {
-    errors.maxSupply = t("DashboardIssuance.errors.maxSupplyBelowMinted", {
-      amount: token.totalSupply,
-      symbol: token.symbol,
-    });
-  }
+  const errors = deriveFormErrors({ draft, token, supplyLocked, draftWallets, t });
   const errorCount = Object.keys(errors).length + (metadataSignerUnavailableReason ? 1 : 0);
 
   const discard = () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import type { TokenAllowlistEntry } from "@sdp/types";
+import { PROJECT_CONTEXT_HEADER_NAME } from "@/lib/project-cookie";
 
 export interface TokenAllowlistPage {
   entries: TokenAllowlistEntry[];
@@ -27,6 +28,7 @@ export async function fetchTokenAllowlistPage(
     search?: string | null;
     label?: string | null;
     signal?: AbortSignal;
+    projectContextId?: string | null;
   } = {}
 ): Promise<TokenAllowlistPage> {
   const query = new URLSearchParams();
@@ -46,12 +48,25 @@ export async function fetchTokenAllowlistPage(
   const suffix = query.toString();
   const response = await fetch(
     `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist${suffix ? `?${suffix}` : ""}`,
-    { method: "GET", cache: "no-store", signal: options.signal }
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: options.signal,
+      // Bind the read to the project the mounted surface was rendered with
+      // (SOLA9-564) instead of the shared selection cookie a sibling tab can
+      // flip.
+      headers: options.projectContextId
+        ? { [PROJECT_CONTEXT_HEADER_NAME]: options.projectContextId }
+        : undefined,
+    }
   );
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as TokenAllowlistPageEnvelope;
+    throw new Error(errorBody.error || `Allowlist request failed (${response.status})`);
+  }
   const body = (await response.json().catch(() => ({}))) as TokenAllowlistPageEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Allowlist request failed (${response.status})`);
+  if (body.error) {
+    throw new Error(body.error);
   }
 
   return {
@@ -78,16 +93,29 @@ interface TokenAllowlistLabelsEnvelope {
 
 export async function fetchTokenAllowlistLabels(
   tokenId: string,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; projectContextId?: string | null } = {}
 ): Promise<TokenAllowlistLabels> {
   const response = await fetch(
     `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/allowlist/labels`,
-    { method: "GET", cache: "no-store", signal: options.signal }
+    {
+      method: "GET",
+      cache: "no-store",
+      signal: options.signal,
+      // Bind the read to the project the mounted surface was rendered with
+      // (SOLA9-564) instead of the shared selection cookie a sibling tab can
+      // flip.
+      headers: options.projectContextId
+        ? { [PROJECT_CONTEXT_HEADER_NAME]: options.projectContextId }
+        : undefined,
+    }
   );
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as TokenAllowlistLabelsEnvelope;
+    throw new Error(errorBody.error || `Allowlist labels request failed (${response.status})`);
+  }
   const body = (await response.json().catch(() => ({}))) as TokenAllowlistLabelsEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Allowlist labels request failed (${response.status})`);
+  if (body.error) {
+    throw new Error(body.error);
   }
 
   return {

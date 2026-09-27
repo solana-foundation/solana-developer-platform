@@ -2,7 +2,12 @@ import type { TokenAllowlistEntry } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createContextBoundSdpApiClient, proxyToSdpApi, readProjectContextId } from "@/lib/sdp-api";
+import {
+  createContextBoundSdpApiClient,
+  projectContextErrorStatus,
+  proxyToSdpApi,
+  readProjectContextId,
+} from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap for the allowlist list handler.
 const MAX_PAGE_SIZE = 500;
@@ -81,7 +86,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         page: 1,
         pageSize: DEFAULT_PAGE_SIZE,
       },
-      { status: 500 }
+      // An unlisted rendered context is the caller's answer being wrong (403);
+      // anything else is this server failing.
+      { status: projectContextErrorStatus(error) }
     );
   }
 }

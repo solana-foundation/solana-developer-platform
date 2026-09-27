@@ -15,10 +15,14 @@ vi.mock("@/lib/request-tracing", () => ({
     step: (_name: string, task: () => unknown) => task(),
   }),
 }));
-vi.mock("@/lib/sdp-api", () => ({
-  createSdpApiClient: mocks.createSdpApiClient,
-  createContextBoundSdpApiClient: mocks.createContextBoundSdpApiClient,
-}));
+vi.mock("@/lib/sdp-api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/sdp-api")>("@/lib/sdp-api");
+  return {
+    ...actual,
+    createSdpApiClient: mocks.createSdpApiClient,
+    createContextBoundSdpApiClient: mocks.createContextBoundSdpApiClient,
+  };
+});
 
 import { GET } from "./route";
 

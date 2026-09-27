@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { getPageCount, getPageSummary } from "../../../pagination.utils";
@@ -301,6 +302,9 @@ export function ActivityTab({ tokenId, isDraft = false }: { tokenId: string; isD
 function AuditActivity({ tokenId }: { tokenId: string }) {
   const t = useTranslations();
   const locale = useLocale();
+  // The project this mounted tab was rendered with, bound into the audit read
+  // (SOLA9-564) so a sibling tab flipping the shared cookie cannot retarget it.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const [action, setAction] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [actorType, setActorType] = useState<string | null>(null);
@@ -315,6 +319,7 @@ function AuditActivity({ tokenId }: { tokenId: string }) {
         actorType: ty === "all" ? null : ty,
         page: Number(pageNumber),
         pageSize: PAGE_SIZE,
+        projectContextId: selectedProjectId,
       }),
     // keepPreviousData → paging/filtering keeps the current rows on screen
     // (dimmed) while the next page loads, instead of flashing the empty state.

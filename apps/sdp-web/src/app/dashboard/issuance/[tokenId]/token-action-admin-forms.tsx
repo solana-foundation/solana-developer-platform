@@ -28,6 +28,7 @@ import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectItem } from "@/components/ui/select";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { useDebounce } from "@/lib/use-debounce";
@@ -856,6 +857,7 @@ function ControlListResults({
 // Server-driven search + label-filter + paged list for a control list. Search
 // (address/label contains) and the label filter run against the whole list on
 // the API, so results aren't capped by what's loaded in the browser.
+// react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing list orchestration; this change only binds its reads to the rendered project context
 function ControlListEntries({
   tokenId,
   label,
@@ -874,6 +876,10 @@ function ControlListEntries({
   onRemove: (entryId: string) => void;
 }) {
   const t = useTranslations();
+  // The project this mounted form was rendered with, bound into the control-list
+  // reads (SOLA9-564) so a sibling tab flipping the shared cookie cannot
+  // retarget them.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const [query, setQuery] = useState("");
   const [labelFilter, setLabelFilter] = useState(ALL_LABELS);
   const [page, setPage] = useState(1);
@@ -884,7 +890,8 @@ function ControlListEntries({
   // also provides the unfiltered count rendered above the list.
   const { data: labelsData, error: labelsError } = usePersistedDashboardSWR(
     [TOKEN_ALLOWLIST_LABELS_KEY, tokenId] as const,
-    ([, id]: readonly [string, string]) => fetchTokenAllowlistLabels(id),
+    ([, id]: readonly [string, string]) =>
+      fetchTokenAllowlistLabels(id, { projectContextId: selectedProjectId }),
     { revalidateOnFocus: true, revalidateIfStale: true },
     { key: `token.${tokenId}.allowlist-labels`, ttlMs: 30_000 }
   );
@@ -916,6 +923,7 @@ function ControlListEntries({
         pageSize: CONTROL_LIST_PAGE_SIZE,
         search: searchParam,
         label: labelParam,
+        projectContextId: selectedProjectId,
       }),
     { revalidateOnFocus: true, revalidateIfStale: true, keepPreviousData: true },
     {

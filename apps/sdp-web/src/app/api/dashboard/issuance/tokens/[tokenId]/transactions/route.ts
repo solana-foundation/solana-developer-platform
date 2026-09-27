@@ -2,7 +2,7 @@ import type { TokenTransaction } from "@sdp/types";
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient, projectContextErrorStatus } from "@/lib/sdp-api";
 
 // Matches the API's server-side pageSize cap for the per-token transactions
 // handler. The dashboard pages with a fixed size well under this; the clamp is
@@ -83,7 +83,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
         page: 1,
         pageSize: DEFAULT_PAGE_SIZE,
       },
-      { status: 500 }
+      // An unlisted rendered context is the caller's answer being wrong (403);
+      // anything else is this server failing.
+      { status: projectContextErrorStatus(error) }
     );
   }
 }

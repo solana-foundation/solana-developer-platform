@@ -48,10 +48,13 @@ export async function fetchIssuanceTokensClientPage(
       ? { [PROJECT_CONTEXT_HEADER_NAME]: options.projectContextId }
       : undefined,
   });
+  if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as IssuanceTokensEnvelope;
+    throw new Error(errorBody.error || `Asset list request failed (${response.status})`);
+  }
   const body = (await response.json().catch(() => ({}))) as IssuanceTokensEnvelope;
-
-  if (!response.ok || body.error) {
-    throw new Error(body.error || `Asset list request failed (${response.status})`);
+  if (body.error) {
+    throw new Error(body.error);
   }
 
   return {

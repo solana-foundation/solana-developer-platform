@@ -1,6 +1,7 @@
 "use client";
 import type { Token, TokenAllowlistEntry } from "@sdp/types";
 import { useSWRConfig } from "swr";
+import { useOptionalDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { usePersistedDashboardSWR } from "@/lib/dashboard-swr";
 import { issuanceQueryKeys } from "../../issuance-query-key";
@@ -31,13 +32,18 @@ export function useTokenOperationData({
 }) {
   const t = useTranslations();
   const { mutate: globalMutate } = useSWRConfig();
+  // The project this mounted workspace was rendered with. Sent with the reads
+  // below so the BFF binds them to it (SOLA9-564) instead of the shared
+  // selection cookie a sibling tab can flip.
+  const selectedProjectId = useOptionalDashboardWorkspace()?.selectedProjectId ?? null;
   const {
     data: authorityWalletsData,
     error: authorityWalletsRequestError,
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
     shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
+    ([, tokenId]: readonly [string, string]) =>
+      fetchTokenAuthorityWallets(tokenId, { projectContextId: selectedProjectId }),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -61,7 +67,8 @@ export function useTokenOperationData({
     isLoading: frozenAccountsLoading,
   } = usePersistedDashboardSWR(
     token.mintAddress ? ([TOKEN_FROZEN_ACCOUNTS_KEY, token.id] as const) : null,
-    ([, tokenId]: readonly [string, string]) => fetchFrozenAccountsTotal(tokenId),
+    ([, tokenId]: readonly [string, string]) =>
+      fetchFrozenAccountsTotal(tokenId, { projectContextId: selectedProjectId }),
     { revalidateOnFocus: true, revalidateIfStale: true },
     { key: `token.${token.id}.frozen-accounts`, ttlMs: 30_000 }
   );

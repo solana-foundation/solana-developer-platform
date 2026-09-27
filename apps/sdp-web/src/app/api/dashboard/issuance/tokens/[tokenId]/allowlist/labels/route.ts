@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { parseErrorMessage } from "@/lib/api-error";
 import { createTimedTrace } from "@/lib/request-tracing";
-import { createContextBoundSdpApiClient } from "@/lib/sdp-api";
+import { createContextBoundSdpApiClient, projectContextErrorStatus } from "@/lib/sdp-api";
 
 export async function GET(request: Request, { params }: { params: Promise<{ tokenId: string }> }) {
   const trace = createTimedTrace("route.dashboard.issuance.token.allowlist_labels", request);
@@ -41,7 +41,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
   } catch (error) {
     return NextResponse.json(
       { labels: [], total: 0, error: error instanceof Error ? error.message : "Request failed" },
-      { status: 500 }
+      // An unlisted rendered context is the caller's answer being wrong (403);
+      // anything else is this server failing.
+      { status: projectContextErrorStatus(error) }
     );
   }
 }
