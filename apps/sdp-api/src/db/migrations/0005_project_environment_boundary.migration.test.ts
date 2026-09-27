@@ -16,15 +16,20 @@ import { applyPostgresMigration } from "../../../scripts/lib/run-postgres-migrat
 // (project_id NULL, invisible under every project scope) instead of surfacing
 // under sandbox scope.
 //
-// The migration runner records applied migrations by filename, so databases
-// that already ran the pre-fix 0005 never replay the corrected file. 0119
-// re-applies the corrected semantics for the rows that carry key provenance:
+// The migration runner records applied migrations by filename (with an
+// applied_at stamp), so databases that already ran the pre-fix 0005 never
+// replay the corrected file. 0119 re-applies the corrected semantics on them:
 // api_keys.environment is gone, but 0005 backfilled api_keys.project_id from
 // it before dropping the column, so the initiating key's project_id is the
-// durable provenance. Default-sandbox rows without an initiating key are left
-// in place — indistinguishable from legitimate sandbox transfers created
-// without an API key — so 0119 must be a no-op on databases that applied the
-// corrected 0005.
+// durable provenance for key-carrying rows. Default-sandbox rows without an
+// initiating key are split by age: ones created before the database's recorded
+// 0005 application time are exactly the set the pre-fix blanket backfill moved
+// out of the NULL-project state, so 0119 quarantines them (project_id NULL),
+// while ones created after 0005 ran were scoped by the application itself
+// (for example a sandbox on-ramp created without an API key) and are left in
+// place. On databases that applied the corrected 0005, 0119 is a no-op: no
+// no-key row at default-sandbox predates 0005 there, because the corrected
+// 0005 quarantined those rows instead of assigning them.
 //
 // The worker database is already fully migrated, so these tests build scratch
 // databases on the same cluster, apply the real 0001-0005 schema, seed
@@ -79,7 +84,14 @@ async function createScratchDatabase(name: string): Promise<Client> {
   const client = new Client({ connectionString: scratchUrl.toString() });
   await client.connect();
 
-  await client.query("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)");
+  // Mirror the real runner's schema_migrations (including the applied_at
+  // stamp 0119's time comparison reads).
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL DEFAULT timezone('UTC', now())::text
+    )
+  `);
   for (const migrationFile of LEGACY_MIGRATIONS) {
     await applyMigrationFile(client, migrationFile);
   }
@@ -135,12 +147,7 @@ async function createScratchDatabase(name: string): Promise<Client> {
        'Source666666666666666666666666666666666666',
        'Destination666666666666666666666666666666666', 'SOL', '6',
        'transfer', 'outbound', 'confirmed', 'key_other_org',
-       '2026-01-01T00:00:05.000Z', '2026-01-01T00:00:05.000Z'),
-      ('xfr_legit_sandbox_no_key', '${ORG}', '${SANDBOX_PROJECT}', 'wallet_0005',
-       'Source777777777777777777777777777777777777',
-       'Destination777777777777777777777777777777777', 'SOL', '7',
-       'transfer', 'outbound', 'confirmed', NULL,
-       '2026-01-01T00:00:06.000Z', '2026-01-01T00:00:06.000Z');
+       '2026-01-01T00:00:05.000Z', '2026-01-01T00:00:05.000Z');
 
     INSERT INTO organizations (id, name, slug) VALUES ('org_0005_other', 'Other Org', 'other-org');
     -- A member so 0005's default-project creation (steps 2-3) applies to this
@@ -157,6 +164,31 @@ async function createScratchDatabase(name: string): Promise<Client> {
   `);
 
   return client;
+}
+
+// A legitimate sandbox transfer created without an API key after the boundary
+// migration ran (for example a sandbox on-ramp): the application scoped it to
+// the org's default-sandbox project itself. Its created_at is read from the
+// clock at insert time, so it strictly postdates the recorded 0005 application
+// stamp the 0119 time comparison reads.
+async function seedPostBoundarySandboxTransfer(client: Client): Promise<void> {
+  await client.query(`
+    INSERT INTO payment_transfers (
+      id, organization_id, project_id, wallet_id, source_address,
+      destination_address, token, amount, type, direction, status,
+      initiated_by_key_id, created_at, updated_at
+    )
+    SELECT
+      'xfr_legit_sandbox_no_key', '${ORG}', p.id, 'wallet_0005',
+      'Source777777777777777777777777777777777777',
+      'Destination777777777777777777777777777777777', 'SOL', '7',
+      'transfer', 'outbound', 'confirmed', NULL,
+      to_char(timezone('UTC', clock_timestamp()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      to_char(timezone('UTC', clock_timestamp()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    FROM   projects p
+    WHERE  p.organization_id = '${ORG}'
+      AND  p.slug            = 'default-sandbox';
+  `);
 }
 
 beforeAll(async () => {
@@ -236,13 +268,18 @@ describe("0005 project environment boundary", () => {
   });
 
   it("0119 is a no-op on databases that applied the corrected 0005", async () => {
+    // Seeded after 0005 was applied in the test above: on a corrected database
+    // a no-key default-sandbox row can only be a post-boundary creation.
+    await seedPostBoundarySandboxTransfer(freshClient);
+
     await applyMigrationFile(freshClient, REPAIR_MIGRATION);
 
     // The repair only rewrites rows sitting at their org's default-sandbox
-    // project that carry an initiating-key reference. On a corrected database
-    // every such row already matches that provenance, quarantined rows are
-    // project_id NULL (never matched), and legitimate no-key sandbox transfers
-    // are never matched either.
+    // project that carry an initiating-key reference or predate the recorded
+    // 0005 application. On a corrected database every key-carrying row already
+    // matches its key's provenance, quarantined rows are project_id NULL
+    // (never matched), and the post-boundary no-key sandbox transfer is left
+    // exactly where the application scoped it.
     expect(await transferPlacements(freshClient)).toEqual(
       new Map([
         ["xfr_cross_org_key", null],
@@ -282,6 +319,10 @@ describe("0119 payment transfer provenance repair", () => {
     const damaged = await transferPlacements(legacyClient);
     expect(damaged.get("xfr_legacy_prod")).toBe(SANDBOX_PROJECT);
 
+    // A sandbox on-ramp created without an API key after 0005 ran: scoped by
+    // the application itself, never NULL-project, never blanket-assigned.
+    await seedPostBoundarySandboxTransfer(legacyClient);
+
     await applyMigrationFile(legacyClient, REPAIR_MIGRATION);
 
     const byId = await transferPlacements(legacyClient);
@@ -297,18 +338,16 @@ describe("0119 payment transfer provenance repair", () => {
     expect(byId.get("xfr_scoped_prod")).toBe(PRODUCTION_PROJECT);
 
     // Legitimate sandbox transfers survive the repair: a default-sandbox
-    // transfer created without an API key (no initiating key) was never
-    // NULL-project, so the pre-fix 0005 never moved it — and being
-    // indistinguishable from a blanket-assigned no-provenance row, it must be
-    // left in place rather than quarantined out of project-scoped history.
+    // transfer created without an API key AFTER 0005 ran was scoped by the
+    // application itself, predates nothing, and must stay in project-scoped
+    // sandbox history.
     expect(byId.get("xfr_legit_sandbox_no_key")).toBe(SANDBOX_PROJECT);
 
-    // The flip side of that trade-off: a blanket-assigned row with no
-    // initiating key is indistinguishable from the legitimate case above, so
-    // it stays in the sandbox ledger too (the pre-fix state) instead of being
-    // quarantined — quarantining it would also delete legitimate no-key
-    // sandbox transfers from project-scoped history.
-    expect(byId.get("xfr_no_provenance")).toBe(SANDBOX_PROJECT);
+    // Quarantine: a blanket-assigned row with no initiating key predates the
+    // recorded 0005 application — it was NULL-project when the pre-fix
+    // blanket ran, so it is exactly the unattributed set that must leave the
+    // sandbox ledger, matching the corrected 0005 semantics (project_id NULL).
+    expect(byId.get("xfr_no_provenance")).toBeNull();
 
     // Quarantine: rows whose origin cannot be established leave the sandbox
     // ledger (NULL), matching the corrected 0005 semantics.

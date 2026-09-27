@@ -10,27 +10,34 @@
 -- api_keys.environment no longer exists here, but 0005 backfilled
 -- api_keys.project_id from it before dropping the column, so the initiating
 -- key's project_id is the durable record of the key's environment. Re-applies
--- the corrected 0005 semantics for rows that carry key provenance: resolve a
--- legacy transfer's project from the key that initiated it, and quarantine
--- rows whose origin cannot be established (a deleted key, or a key belonging
--- to another organization) as project_id NULL — invisible under every project
+-- the corrected 0005 semantics: resolve a legacy transfer's project from the
+-- key that initiated it, and quarantine rows whose origin cannot be
+-- established (no initiating key, a deleted key, or a key belonging to
+-- another organization) as project_id NULL — invisible under every project
 -- scope, org-visible for manual reconciliation — instead of leaving them in
 -- the sandbox ledger.
 --
--- Only rows currently assigned to their org's default-sandbox project AND
--- carrying an initiating-key reference are touched. The key reference is what
--- makes attribution possible: transfers the pre-fix blanket backfill pulled
--- out of the NULL-project state either resolve through their initiating key
--- or cannot be attributed at all. A default-sandbox transfer WITHOUT an
--- initiating key is left exactly where it is: it is indistinguishable from a
--- legitimate sandbox transfer created without an API key (for example a
--- sandbox on-ramp), so rewriting it would risk deleting legitimate sandbox
--- history from project-scoped payment ledgers. Rows already scoped to any
--- other project were never NULL-project, so the pre-fix 0005 never touched
--- them and neither does this repair. On databases that applied the corrected
--- 0005 this statement is a no-op: rows at default-sandbox initiated by
--- sandbox keys resolve back to default-sandbox, and quarantined rows are
--- project_id NULL, which this WHERE clause never matches.
+-- Only rows currently assigned to their org's default-sandbox project are
+-- touched, split by what provenance they carry:
+--   - A row carrying an initiating-key reference is re-resolved through that
+--     key (or quarantined when the key cannot establish its origin).
+--   - A row without a key reference is quarantined only when it predates this
+--     database's recorded 0005 application time (schema_migrations.applied_at):
+--     it was NULL-project when the pre-fix blanket backfill ran, so it is
+--     exactly the unattributed set the blanket moved into the sandbox ledger,
+--     and quarantining restores the corrected 0005 semantics for it. A no-key
+--     default-sandbox row created AFTER 0005 ran was scoped by the application
+--     itself (for example a sandbox on-ramp created without an API key) and is
+--     left in place — quarantining it would delete legitimate sandbox history
+--     from project-scoped payment ledgers.
+-- Rows already scoped to any other project were never NULL-project, so the
+-- pre-fix 0005 never touched them and neither does this repair. On databases
+-- that applied the corrected 0005 the statement is a no-op: key-carrying rows
+-- at default-sandbox resolve back to it, quarantined rows are project_id NULL
+-- (never matched), and no no-key row predates 0005 because a corrected
+-- database quarantined those rows instead of assigning them to default-sandbox.
+-- If the 0005 stamp is ever unreadable, the time comparison is NULL and only
+-- key-carrying rows are touched — the repair degrades, it never fails.
 
 UPDATE payment_transfers pt
 SET    project_id = (
@@ -47,4 +54,11 @@ WHERE  pt.project_id = (
     WHERE  p.organization_id = pt.organization_id
       AND  p.slug            = 'default-sandbox'
 )
-  AND  pt.initiated_by_key_id IS NOT NULL;
+  AND  (
+        pt.initiated_by_key_id IS NOT NULL
+        OR pt.created_at::timestamptz < (
+            SELECT sm.applied_at::timestamptz
+            FROM   schema_migrations sm
+            WHERE  sm.version = '0005_project_environment_boundary.sql'
+        )
+      );
