@@ -22,9 +22,10 @@
  * mirror upsert while a compensating delete is still owed — a verification it
  * refuses is told to retry and finishes the owed cleanup itself when the
  * claim is free or stale, so the compensating delete can never take a fresh
- * verification's binding — and when the cleanup claim itself cannot be
- * decided, the marker is still recorded (without advancing the epoch) so the
- * late binding stays recoverable.
+ * verification's binding — and whenever the request exits without completing
+ * the compensating delete itself (the claim undecided, or a stand-down whose
+ * bounded wait outlived the pending cleaner), the marker is still recorded
+ * (without advancing the epoch) so the late binding stays recoverable.
  *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
@@ -199,14 +200,18 @@ async function recordPendingRevocation(
 
 // How long a stand-down cleanup waits for the pending cleaner's marker to
 // clear before re-claiming. The pending compensating delete is timeout-bounded
-// (every SPC call times out at SPC_AUTH_TIMEOUT_MS), so a short wait covers
-// the usual overlap; past it, the request reports the retryable revocation
-// and the marker's lease bounds the pending cleaner instead.
+// (every SPC call times out at SPC_AUTH_TIMEOUT_MS) and its local marker clear
+// commits right after, so a short wait covers the usual overlap and lets the
+// re-claim finish the owed cleanup here instead of stranding this request's
+// own binding. Past the wait, the request reports the retryable revocation
+// and records the fallback marker; the marker's lease bounds the pending
+// cleaner (a stale marker is taken over), so no exit leaves the binding
+// undiscoverable. Tests tune the wait down.
 const CLEANUP_PENDING_WAIT_MS = 2_000;
 const CLEANUP_PENDING_POLL_MS = 150;
 
 /**
- * Whether the pending cleaner's marker for this pubkey cleared within a short
+ * Whether the pending cleaner's marker for this pubkey cleared within a
  * bounded wait. Unreadable state is treated as "did not clear": the caller
  * stands down and reports the retryable revocation.
  */
@@ -214,9 +219,10 @@ async function waitForPendingRevocationClear(
   env: Env,
   principalId: string,
   instanceId: string,
-  pubkey: string
+  pubkey: string,
+  waitMs: number
 ): Promise<boolean> {
-  const deadline = Date.now() + CLEANUP_PENDING_WAIT_MS;
+  const deadline = Date.now() + waitMs;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, CLEANUP_PENDING_POLL_MS));
     if (!(await hasPendingRevocation(env, principalId, instanceId, pubkey))) {
@@ -300,15 +306,24 @@ async function rejectedMirrorState(
  * verification's binding.
  *
  * Single best effort: failures are logged; the durable retry marker recorded
- * by the claim keeps the late upstream binding recoverable either way.
+ * by the claim keeps the late upstream binding recoverable either way, and
+ * every exit that did NOT complete the compensating delete itself — a
+ * stand-down whose bounded wait timed out, a re-claim that lost to a newer
+ * claimant, an undecided claim — records the fallback marker (best effort)
+ * before returning. The record is the repository's decision: it is skipped
+ * under the epoch row lock when a mirror that belongs to this identity
+ * already exists (a newer verification's binding must survive), so the
+ * fallback never latches a mirror that is already there, and it no-ops when
+ * the marker this request stood down on is still present — whose cleaner's
+ * single delete covers this request's binding too.
  */
 async function compensateRejectedVerification(
   env: Env,
   session: WalletSession,
-  input: { walletId: string; pubkey: string; pendingRevocation: boolean }
+  input: { walletId: string; pubkey: string; pendingRevocation: boolean; cleanupWaitMs: number }
 ): Promise<void> {
   const { scope, instance, pcUser, client, spcAuth } = session;
-  const { walletId, pubkey, pendingRevocation } = input;
+  const { walletId, pubkey, pendingRevocation, cleanupWaitMs } = input;
   const verifiedWalletRepo = createPrivateChannelVerifiedWalletRepository(env);
   const claimInput = {
     ...scope,
@@ -326,11 +341,11 @@ async function compensateRejectedVerification(
       // The pending cleaner's delete may already have returned while its
       // marker is still latched, so standing down here could strand a
       // binding this request's own handshake just created with no mirror
-      // and no marker. Wait briefly for the marker to clear — the pending
-      // delete is timeout-bounded — and re-claim once, finishing the owed
-      // cleanup here. A mirror that re-appeared meanwhile makes the
-      // re-claim stand down for the newer verification instead.
-      if (await waitForPendingRevocationClear(env, pcUser.id, instance.id, pubkey)) {
+      // and no marker. Wait for the marker to clear (or its lease to
+      // expire) and re-claim once, finishing the owed cleanup here. A
+      // mirror that re-appeared meanwhile makes the re-claim stand down
+      // for the newer verification instead.
+      if (await waitForPendingRevocationClear(env, pcUser.id, instance.id, pubkey, cleanupWaitMs)) {
         cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
           ? "claimed"
           : "superseded";
@@ -343,13 +358,11 @@ async function compensateRejectedVerification(
     );
     // The claim failed, so nothing is deleted. Retry the claim once first —
     // a transient persistence failure should not latch verifications for a
-    // whole marker lease — and when the cleanup still cannot be decided,
-    // record the retry marker without advancing the epoch (best effort). A
-    // stand-down for a pending marker whose re-claim then failed must fall
-    // back too: this request's own handshake may have created a binding that
-    // neither a mirror nor the pending cleaner's delete covers. The record is
-    // skipped for a mirror this identity already re-created (whose binding
-    // must survive) and for a marker whose cleaner may still be running.
+    // whole marker lease — and leave the fallback decision to the shared
+    // exit below. A stand-down for a pending marker whose re-claim then
+    // failed must fall back too: this request's own handshake may have
+    // created a binding that neither a mirror nor the pending cleaner's
+    // delete covers.
     try {
       cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
         ? "claimed"
@@ -359,9 +372,6 @@ async function compensateRejectedVerification(
         { principalId: pcUser.id, instanceId: instance.id, claimRetryError },
         "private-channel wallet: cleanup claim retry failed after a rejected mirror"
       );
-    }
-    if (cleanup !== "claimed") {
-      await recordPendingRevocation(env, claimInput);
     }
   }
   if (cleanup === "claimed") {
@@ -373,7 +383,17 @@ async function compensateRejectedVerification(
         "private-channel wallet: could not revoke a late binding after a rejected mirror"
       );
     }
+    return;
   }
+  // Every exit without a completed compensating delete records the fallback
+  // marker (best effort): a wait that timed out on a still-fresh marker, a
+  // re-claim that lost to a newer claimant, or an undecided claim must all
+  // leave the late upstream binding recoverable instead of stranding it with
+  // no mirror and no marker. The record skips itself when this identity's
+  // mirror already owns the binding and no-ops while the marker this request
+  // stood down on is still present (its cleaner's delete covers this
+  // request too), so it is safe on every path that reaches it.
+  await recordPendingRevocation(env, claimInput);
 }
 
 /**
@@ -414,7 +434,8 @@ export async function verifyPrivateChannelWallet(
   auth: ApiKeyContext,
   projectId: string,
   walletId: string,
-  principalId?: string
+  principalId?: string,
+  opts?: { cleanupPendingWaitMs?: number }
 ): Promise<{ row: PrivateChannelVerifiedWalletRow; instance: PrivateChannelInstanceRow }> {
   const wallet = await resolvePrivateChannelCustodyWallet(env, auth, projectId, walletId);
   const signer = await createPrivateChannelSigner(env, auth.organizationId, projectId, wallet);
@@ -500,6 +521,7 @@ export async function verifyPrivateChannelWallet(
         walletId,
         pubkey,
         pendingRevocation: state.pendingRevocation,
+        cleanupWaitMs: opts?.cleanupPendingWaitMs ?? CLEANUP_PENDING_WAIT_MS,
       });
     }
     if (state.revokedWhileVerifying || state.pendingRevocation) {
