@@ -296,7 +296,8 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     tags: ["Counterparties"],
     summary: "Update counterparty account",
     operationId: "updateCounterpartyAccount",
-    description: "Updates a counterparty payment account. At least one field must be provided.",
+    description:
+      "Updates a counterparty payment account. At least one field must be provided. Returns 409 when the account changes concurrently; re-read the account and retry with its latest version.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -311,7 +312,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
         description: "Counterparty account updated",
         content: jsonContent(counterpartyAccountResponse),
       },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500]),
     },
   });
 
@@ -322,7 +323,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
     summary: "Archive counterparty account",
     operationId: "archiveCounterpartyAccount",
     description:
-      "Archives a counterparty payment account. Archived accounts are hidden from default lists.",
+      "Archives a counterparty payment account. Archived accounts are hidden from default lists. Returns 409 when the account changes concurrently; re-read the account and retry with its latest version.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -332,7 +333,7 @@ export function registerCounterpartyPaths(registry: OpenAPIRegistry) {
       204: {
         description: "Counterparty account archived",
       },
-      ...errorResponses(errorResponseSchema, [401, 403, 404, 500]),
+      ...errorResponses(errorResponseSchema, [401, 403, 404, 409, 500]),
     },
   });
 }
