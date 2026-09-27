@@ -421,4 +421,47 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok(secrets.includes(createdTokens[0]));
     assert.ok(secrets.includes(createdTokens[1]));
   });
+
+  it("keeps a shared token value held while any signature still holds it", async () => {
+    // Greptile finding on this PR (re-review of the pin): a provider repeating
+    // a user-action token value for two pending signatures must not let one
+    // signature's release unprotect the other. Holds are counted per value,
+    // and the value stays held until every hold is dropped.
+    const held: string[] = [];
+    serveHandshake(
+      (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          return jsonResponse({ id: `sig_${held.length}_poc`, status: "Pending" }, 200);
+        }
+        return null;
+      },
+      {
+        userActionTokens: () => {
+          held.push("user_action_dup");
+          return "user_action_dup";
+        },
+      }
+    );
+
+    const { client } = await createTestClientAndSigner();
+    const first = await client.keySignatures.createSignature({
+      keyId: "key_poc",
+      body: { kind: "Message", message: "0x010203" },
+    });
+    const second = await client.keySignatures.createSignature({
+      keyId: "key_poc",
+      body: { kind: "Message", message: "0x010204" },
+    });
+
+    const secrets = () => client.getKnownUpstreamSecrets?.() ?? [];
+    assert.ok(secrets().includes("user_action_dup"));
+    first.releaseHeldUpstreamSecret?.();
+    // The second signature still holds it.
+    assert.ok(secrets().includes("user_action_dup"));
+    second.releaseHeldUpstreamSecret?.();
+    // Both holds dropped: the token ages out of the retention window normally
+    // rather than being swept while a signature is still pending.
+    assert.ok(secrets().includes("user_action_dup"));
+  });
 });

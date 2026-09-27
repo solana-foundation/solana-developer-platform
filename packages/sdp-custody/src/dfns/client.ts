@@ -180,12 +180,13 @@ interface DfnsClientContext {
   userAgent: string;
   /**
    * Every user action token this context has minted in the current retention
-   * window, mapped to its mint time and pinned state. Unpinned tokens age out
-   * of the window; a token pinned for a signature request stays held until
-   * that request's result is handled, however long its poll runs and however
-   * many newer requests are minted meanwhile.
+   * window, mapped to its mint time and hold count. Unpinned tokens age out
+   * of the window; a token held by a signature request stays in the map
+   * until that request's result is handled (or the hold cap expires it),
+   * however long the request takes and however many newer requests are
+   * minted meanwhile.
    */
-  readonly heldUserActionTokens: Map<string, { mintedAt: number; pinned: boolean }>;
+  readonly heldUserActionTokens: Map<string, { mintedAt: number; pinCount: number }>;
   /** Last time expired unpinned tokens were swept, to keep mints O(1) amortized. */
   lastUserActionTokenSweepAt: number;
 }
@@ -341,24 +342,35 @@ const USER_ACTION_TOKEN_RETENTION_MS = 3_600_000;
 // Sweeps are throttled so a mint's cost is O(1) amortized instead of a scan
 // over everything held.
 const USER_ACTION_TOKEN_SWEEP_INTERVAL_MS = 60_000;
+// A pin is meant to last exactly as long as the signature result takes to be
+// handled. This cap bounds the hold for callers that never release (the
+// signer always does): far beyond any realistic poll, it keeps a long-lived
+// client from accumulating pins without end.
+const MAX_USER_ACTION_TOKEN_HOLD_MS = 24 * 3_600_000;
 
 function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
   const now = Date.now();
   if (now - ctx.lastUserActionTokenSweepAt >= USER_ACTION_TOKEN_SWEEP_INTERVAL_MS) {
     ctx.lastUserActionTokenSweepAt = now;
     for (const [token, entry] of ctx.heldUserActionTokens) {
-      if (!entry.pinned && now - entry.mintedAt >= USER_ACTION_TOKEN_RETENTION_MS) {
+      const expired = now - entry.mintedAt >= USER_ACTION_TOKEN_RETENTION_MS;
+      const holdCapped = now - entry.mintedAt >= MAX_USER_ACTION_TOKEN_HOLD_MS;
+      if (expired && (entry.pinCount === 0 || holdCapped)) {
         ctx.heldUserActionTokens.delete(token);
       }
     }
   }
-  ctx.heldUserActionTokens.set(userActionToken, { mintedAt: now, pinned: false });
+  // A provider repeating a token value must not reset or duplicate an entry
+  // that other signature flows may already hold pins on.
+  if (!ctx.heldUserActionTokens.has(userActionToken)) {
+    ctx.heldUserActionTokens.set(userActionToken, { mintedAt: now, pinCount: 0 });
+  }
 }
 
 function pinUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
   const entry = ctx.heldUserActionTokens.get(userActionToken);
   if (entry) {
-    entry.pinned = true;
+    entry.pinCount += 1;
   }
 }
 
@@ -368,7 +380,7 @@ function unpinUserActionToken(ctx: DfnsClientContext, userActionToken: string | 
   }
   const entry = ctx.heldUserActionTokens.get(userActionToken);
   if (entry) {
-    entry.pinned = false;
+    entry.pinCount = Math.max(0, entry.pinCount - 1);
   }
 }
 
@@ -712,15 +724,21 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
           "POST",
           `/keys/${encodeURIComponent(request.keyId)}/signatures`,
           request.body,
-          { onUserActionToken: (token) => (userActionToken = token) }
+          {
+            onUserActionToken: (token) => {
+              userActionToken = token;
+              // Pinned the moment it exists: the create response may take
+              // arbitrarily long (the fetch has no timeout), and a sweep
+              // triggered by another request's mint must not evict the token
+              // before its own response arrives.
+              pinUserActionToken(ctx, token);
+            },
+          }
         );
         if (userActionToken && signatureRequest && typeof signatureRequest === "object") {
-          // Pin this request's token for as long as its result is unhandled:
-          // a poll may run arbitrarily long, and no newer mint may evict the
-          // token its own failed result could echo back. The signer releases
-          // the pin through the attached handle once it has handled the
-          // result; after that the token simply ages out of the window.
-          pinUserActionToken(ctx, userActionToken);
+          // The signer drops the pin through this handle once it has handled
+          // the request's result; after that the token simply ages out of the
+          // retention window.
           Object.defineProperty(signatureRequest, "releaseHeldUpstreamSecret", {
             value: () => unpinUserActionToken(ctx, userActionToken),
             enumerable: false,
