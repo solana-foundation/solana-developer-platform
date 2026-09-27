@@ -454,6 +454,95 @@ async function legacyAttemptSignatureFailedOnChain(
 }
 
 /**
+ * Outcomes of the in-flight attempt's recorded authorization/cancellation
+ * signatures, resolved before the claim so Solana RPC polling never runs
+ * inside the transaction holding the claimed payment's row lock. The
+ * outcomes are only consulted when a retry cannot resume the attempt, so
+ * this evaluates the same recovery proof the claim applies and probes only
+ * for attempts an unprovable custody identity can release or strand.
+ * Confirmation failures are logged and left unresolved: a resumable retry
+ * must not fail on an unavailable RPC, and the claim-time decision re-checks
+ * an outcome only when it actually needs it.
+ */
+async function prepareRecordedSignatureOutcomes(input: {
+  env: Env;
+  db: DatabaseExecutor;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  organizationId: string;
+  projectId: string;
+  recurringPaymentId: string;
+  mode: PaymentRecurringPaymentUpdateAttemptMode;
+  changedFields: string[];
+  beforeValues: Record<string, unknown>;
+  afterValues: Record<string, unknown>;
+  oldSourceWalletId: string | null;
+  newSourceCustodyWalletId: string | null;
+  newSourceWalletId: string | null;
+  newSourcePublicKey: string | null;
+}): Promise<Map<string, boolean>> {
+  const outcomes = new Map<string, boolean>();
+  const pendingAttempt = await input.recurringRepo.getLatestUpdateAttempt({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    recurringPaymentId: input.recurringPaymentId,
+    statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+  });
+  if (
+    !pendingAttempt ||
+    pendingAttempt.new_source_custody_wallet_id !== null ||
+    !usesLegacySourceWalletSnapshot(pendingAttempt) ||
+    (pendingAttempt.authorization_signature === null &&
+      pendingAttempt.old_cancel_signature === null)
+  ) {
+    return outcomes;
+  }
+  const planOwner = await resolveLegacyAttemptPlanOwner(input.db, pendingAttempt, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  const requestMatched = legacyUpdateAttemptMatchesRequest(pendingAttempt, {
+    mode: input.mode,
+    changedFields: input.changedFields,
+    beforeValues: input.beforeValues,
+    afterValues: input.afterValues,
+    oldSourceWalletId: input.oldSourceWalletId,
+    newSourceWalletId: input.newSourceWalletId,
+    newSourcePublicKey: input.newSourcePublicKey,
+    planOwner,
+  });
+  if (!requestMatched) {
+    return outcomes;
+  }
+  const identity = await resolveLegacyAttemptCustodyIdentity(input.db, pendingAttempt, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    newSourceCustodyWalletId: input.newSourceCustodyWalletId,
+    planOwner,
+  });
+  if (identity === "matched") {
+    return outcomes;
+  }
+  await Promise.all(
+    [pendingAttempt.authorization_signature, pendingAttempt.old_cancel_signature]
+      .filter((recorded): recorded is string => recorded !== null)
+      .map(async (recorded) => {
+        try {
+          outcomes.set(
+            recorded,
+            await legacyAttemptSignatureFailedOnChain(input.env, recorded, outcomes)
+          );
+        } catch (error) {
+          getLogger().warn(
+            { err: error, signature: recorded },
+            "Failed to resolve a recorded recurring payment update signature outcome; recovery re-checks it only when the outcome is needed"
+          );
+        }
+      })
+  );
+  return outcomes;
+}
+
+/**
  * Replacement work recorded on the attempt that a restart would repeat:
  * created plan, created subscription, submitted signatures.
  */
@@ -2127,6 +2216,7 @@ export async function updateRecurringPayment(input: {
     recurringPayment: settled.recurringPayment,
   });
   const sourceChanged = resolved.changedFields.includes("sourceCustodyWalletId");
+  const recoveredSourceCustodyWalletId = sourceChanged ? resolved.sourceWallet.id : null;
   if (sourceChanged) {
     await assertNoPendingRecurringCollectionApproval({
       db: getDb(input.env),
@@ -2175,31 +2265,24 @@ export async function updateRecurringPayment(input: {
   // holding the claimed payment's row lock; the recovery reads the pre-warmed
   // outcomes and only falls back to an in-transaction check if the attempt
   // was replaced in between.
-  const recordedSignatureOutcomes = new Map<string, boolean>();
-  if (recoveringStaleUpdate) {
-    const pendingAttempt = await recurringRepo.getLatestUpdateAttempt({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      recurringPaymentId: settled.recurringPayment.id,
-      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
-    });
-    if (
-      pendingAttempt &&
-      pendingAttempt.new_source_custody_wallet_id === null &&
-      usesLegacySourceWalletSnapshot(pendingAttempt)
-    ) {
-      await Promise.all(
-        [pendingAttempt.authorization_signature, pendingAttempt.old_cancel_signature]
-          .filter((recorded): recorded is string => recorded !== null)
-          .map(async (recorded) => {
-            recordedSignatureOutcomes.set(
-              recorded,
-              await legacyAttemptSignatureFailedOnChain(input.env, recorded, new Map())
-            );
-          })
-      );
-    }
-  }
+  const recordedSignatureOutcomes = recoveringStaleUpdate
+    ? await prepareRecordedSignatureOutcomes({
+        env: input.env,
+        db: getDb(input.env),
+        recurringRepo,
+        organizationId: input.organizationId,
+        projectId: input.projectId,
+        recurringPaymentId: settled.recurringPayment.id,
+        mode,
+        changedFields: resolved.changedFields.map(String),
+        beforeValues: resolved.beforeValues,
+        afterValues: resolved.afterValues,
+        oldSourceWalletId: settled.recurringPayment.source_wallet_id,
+        newSourceCustodyWalletId: recoveredSourceCustodyWalletId,
+        newSourceWalletId: resolved.sourceWallet.walletId,
+        newSourcePublicKey: resolved.sourceWallet.publicKey,
+      })
+    : new Map<string, boolean>();
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = sourceChanged
@@ -2232,7 +2315,7 @@ export async function updateRecurringPayment(input: {
       changedFields: resolved.changedFields.map(String),
       beforeValues: resolved.beforeValues,
       afterValues: resolved.afterValues,
-      newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
+      newSourceCustodyWalletId: recoveredSourceCustodyWalletId,
       newSourceWalletId: resolved.sourceWallet.walletId,
       newSourcePublicKey: resolved.sourceWallet.publicKey,
       createdBy: input.createdBy,
