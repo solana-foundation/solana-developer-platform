@@ -3129,6 +3129,25 @@ describe("Issuance Routes", () => {
         params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
         createdAt: new Date().toISOString(),
       });
+      // The sweep only touches pending client-signed prepare markers: a
+      // custodial deploy row is a potentially live operation, and a row a
+      // confirmation already resolved keeps its recorded outcome.
+      await seedIssuanceTransaction({
+        id: "ptx_stale_custodial_deploy",
+        tokenId: token.id,
+        type: "deploy",
+        status: "pending",
+        params: { operation: "deploy", template: "custom" },
+        createdAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      });
+      await seedIssuanceTransaction({
+        id: "ptx_confirmed_prepare",
+        tokenId: token.id,
+        type: "deploy",
+        status: "confirmed",
+        params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
+        createdAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      });
 
       const res = await app.request(
         `/v1/issuance/tokens/${token.id}/transactions`,
@@ -3141,16 +3160,20 @@ describe("Issuance Routes", () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.meta.total).toBe(2);
+      expect(body.meta.total).toBe(4);
       const byId = (
         txs: Array<{ id: string; status: string; error?: string | null }>,
         id: string
       ) => txs.find((tx) => tx.id === id);
       const stale = byId(body.data, "ptx_stale_prepare");
       const fresh = byId(body.data, "ptx_fresh_prepare");
+      const custodial = byId(body.data, "ptx_stale_custodial_deploy");
+      const confirmed = byId(body.data, "ptx_confirmed_prepare");
       expect(stale?.status).toBe("failed");
       expect(stale?.error).toBe("Prepared deploy expired without confirmation");
       expect(fresh?.status).toBe("pending");
+      expect(custodial?.status).toBe("pending");
+      expect(confirmed?.status).toBe("confirmed");
     });
   });
 

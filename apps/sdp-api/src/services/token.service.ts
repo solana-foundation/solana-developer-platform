@@ -1438,13 +1438,19 @@ export class TokenService {
    * is recoverable: {@link findRecoverablePreparedDeploy} still hands such a
    * marker's prepare-time agreement to confirm, because a transaction built
    * from it may already have landed before its blockhash expired.
+   *
+   * Only client-signed prepare markers are matched (mode `prepare`): a
+   * custodial deploy's pending row is a potentially live operation the fence
+   * knows nothing about and must never be expired here. The close itself is
+   * guarded on the row still being pending, so a confirmation that lands
+   * between the read and the write is never demoted to failed.
    */
   async expireStalePreparedDeploys(tokenId: string, maxAgeMs: number): Promise<boolean> {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
     const tenant = this.tenantTokenScope("token");
     const rows = await this.db
       .prepare(
-        `SELECT tx.id, tx.created_at
+        `SELECT tx.id, tx.created_at, tx.operation_params
          FROM issuance_transactions tx
          JOIN issued_tokens token ON token.id = tx.token_id
          WHERE tx.token_id = ?
@@ -1452,18 +1458,22 @@ export class TokenService {
            AND tx.status = 'pending'${tenant.clause}`
       )
       .bind(tokenId, ...tenant.values)
-      .all<{ id: string; created_at: string }>();
+      .all<{ id: string; created_at: string; operation_params: string | null }>();
 
     let freshRemains = false;
     const now = new Date().toISOString();
     for (const row of rows.results) {
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      if (params.operation !== "deploy" || params.mode !== "prepare") {
+        continue;
+      }
       if (row.created_at >= cutoff) {
         freshRemains = true;
         continue;
       }
       await this.db
         .prepare(
-          "UPDATE issuance_transactions SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
+          "UPDATE issuance_transactions SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'pending'"
         )
         .bind(PREPARED_DEPLOY_EXPIRED_ERROR, now, row.id)
         .run();
