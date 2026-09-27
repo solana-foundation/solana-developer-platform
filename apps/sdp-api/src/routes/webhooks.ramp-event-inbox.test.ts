@@ -215,6 +215,29 @@ describe("Ramp webhook event inbox", () => {
     expect(await readTransferStatus()).toBe("awaiting_payment");
   });
 
+  it("claims nothing once the pass deadline has passed", async () => {
+    // The managed job bounds replay by its run's remaining time: a deadline
+    // already in the past must leave even an aged row untouched, because
+    // claiming it would spend an attempt the abandoned apply cannot use.
+    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    await getDb(env)
+      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+      .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
+      .run();
+
+    const applied = await replayRampWebhookEvents(env, { deadlineMs: performance.now() - 1 });
+
+    expect(applied).toBe(0);
+    const rows = await readInboxRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "pending", attempts: 0 });
+    expect(await readTransferStatus()).toBe("awaiting_payment");
+  });
+
   it("replays a pending event the background apply never ran for", async () => {
     // Simulate the crash-after-ack window: the row exists, the apply did not
     // happen. Backdate it past the replay minimum age so the job claims it.

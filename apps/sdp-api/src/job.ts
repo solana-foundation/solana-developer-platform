@@ -44,7 +44,7 @@ import { recoverApprovedWalletOperations } from "@/services/policy/approved-oper
 import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
-const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
+const SHUTDOWN_RESERVE_MS = 20_000;
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
@@ -74,7 +74,9 @@ const CLEANUP_SHUTDOWN_RESERVE_MS = 20_000;
  *
  * 1. **Pending transfers** + approved-wallet-operation replay + durable ramp
  *    webhook event replay + sponsorship budget reconciliation. The transfer
- *    legs settle before their tick reports failure. Fatal.
+ *    legs settle before their tick reports failure. Webhook replay claims
+ *    rows only while the run's deadline leaves time — the rest stay pending
+ *    for the next execution. Fatal.
  * 2. **Recurring-payment collection** — ungated, like the recurring routes: an
  *    always-on product surface. A money path, so it fails the job loudly. The
  *    deployment-provided Managed Reconciliation Cadence is its effective
@@ -123,8 +125,8 @@ export async function runCronJob(): Promise<void> {
   const timeoutSeconds = getManagedReconciliationTimeoutSeconds(env);
   // Account for module startup and keep this same cutoff through warmup. The
   // reserve covers settlement/shutdown; other reconcilers keep their own policy.
-  const cleanupDeadlineMs =
-    performance.now() + (timeoutSeconds - process.uptime()) * 1_000 - CLEANUP_SHUTDOWN_RESERVE_MS;
+  const runDeadlineMs =
+    performance.now() + (timeoutSeconds - process.uptime()) * 1_000 - SHUTDOWN_RESERVE_MS;
   assertSigningProviderAllowed(env);
 
   let probeRpc: ReturnType<typeof solanaRpc.createRpc> | null = null;
@@ -197,7 +199,9 @@ export async function runCronJob(): Promise<void> {
               // webhook whose background apply never ran would otherwise
               // strand its transfer here forever. Applying is idempotent and
               // the age cutoff keeps fresh rows with the request's own pass.
-              replayRampWebhookEvents(env),
+              // Bounded by this run's remaining time: rows the deadline leaves
+              // stay pending for the next execution.
+              replayRampWebhookEvents(env, { deadlineMs: runDeadlineMs }),
             ]);
             throwCollected(
               rejectionReasons(outcomes),
@@ -242,7 +246,7 @@ export async function runCronJob(): Promise<void> {
         }
       })(),
       monitored(PROVIDER_CREDENTIAL_SECRET_CLEANUP_MONITOR, () =>
-        cleanupRetiredProviderCredentialSecrets(env, { deadlineMs: cleanupDeadlineMs })
+        cleanupRetiredProviderCredentialSecrets(env, { deadlineMs: runDeadlineMs })
       ),
     ]);
     failures.push(...rejectionReasons(jobOutcomes));

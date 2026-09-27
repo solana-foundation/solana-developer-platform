@@ -127,8 +127,18 @@ export async function applyStoredRampWebhookEvent(
  * Replays pending events the background pass failed to apply (or never got to
  * run for — a deploy or crash between the ack and the apply). Returns the
  * number of events applied.
+ *
+ * When `deadlineMs` (a `performance.now()` timestamp) is supplied, rows are
+ * claimed only while time remains — whatever the deadline leaves stays pending
+ * for the next pass. The managed reconciliation job passes its run's remaining
+ * budget so a busy inbox cannot push later ticks into the platform's kill
+ * window; the in-process passes run unbounded, as before.
  */
-export async function replayRampWebhookEvents(env: Env): Promise<number> {
+export async function replayRampWebhookEvents(
+  env: Env,
+  options: { deadlineMs?: number } = {}
+): Promise<number> {
+  const { deadlineMs } = options;
   const events = createPostgresRampWebhookEventsRepository(getDb(env));
   const cutoff = new Date(Date.now() - RAMP_WEBHOOK_EVENT_REPLAY_MIN_AGE_MS).toISOString();
   const appRevision = currentAppRevision(env);
@@ -171,7 +181,16 @@ export async function replayRampWebhookEvents(env: Env): Promise<number> {
   // start every lease at once and let a slow early row expire the later ones.
   let applied = 0;
   let claimed = 0;
+  let deadlineReached = false;
   while (claimed < RAMP_WEBHOOK_EVENT_REPLAY_BATCH) {
+    // Bounded like the other sweeps (only admission is; an apply that already
+    // started runs to completion). Checked before each claim, never between a
+    // claim and its apply: a claim has already spent the row's attempt, so
+    // abandoning a claimed row would waste it.
+    if (deadlineMs !== undefined && performance.now() >= deadlineMs) {
+      deadlineReached = true;
+      break;
+    }
     const [row] = await events.claimReplayable({
       createdBefore: cutoff,
       maxAttempts: RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
@@ -189,6 +208,14 @@ export async function replayRampWebhookEvents(env: Env): Promise<number> {
   if (claimed > 0) {
     logEvent("info", {
       event: "sdp_api_ramp_webhook_events_replayed",
+      flow: "ramp-settlement",
+      claimed,
+      applied,
+    });
+  }
+  if (deadlineReached) {
+    logEvent("info", {
+      event: "sdp_api_ramp_webhook_events_deadline_reached",
       flow: "ramp-settlement",
       claimed,
       applied,

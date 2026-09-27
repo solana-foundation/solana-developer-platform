@@ -232,18 +232,21 @@ describe("managed reconciliation job replays the ramp webhook inbox", () => {
   beforeEach(async () => {
     await seedTestDatabase(env);
     vi.mocked(getProcessEnv).mockReset().mockReturnValue(managedJobEnv());
-    vi.mocked(solanaRpc.createRpc).mockClear();
-    vi.mocked(trackPendingTransfers).mockClear();
-    vi.mocked(reconcileRevokedApiKeyCache).mockClear();
-    vi.mocked(recoverApprovedWalletOperations).mockClear();
-    vi.mocked(reconcileSponsorshipBudgets).mockClear();
-    vi.mocked(collectDueRecurringPayments).mockClear();
-    vi.mocked(pollRingsIndexing).mockClear();
-    vi.mocked(reconcileEarnVaultMovements).mockClear();
-    vi.mocked(reconcileDvpTrades).mockClear();
-    vi.mocked(detectOrphanedEarnSplitSwaps).mockClear();
-    vi.mocked(retireOrphanedSecrets).mockClear();
-    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockClear();
+    // mockReset, not mockClear: a test that stubs an implementation onto a
+    // peripheral tick (a rejection, say) must not leak it into the next test
+    // — resetting restores each mock's own module-level default.
+    vi.mocked(solanaRpc.createRpc).mockReset();
+    vi.mocked(trackPendingTransfers).mockReset();
+    vi.mocked(reconcileRevokedApiKeyCache).mockReset();
+    vi.mocked(recoverApprovedWalletOperations).mockReset();
+    vi.mocked(reconcileSponsorshipBudgets).mockReset();
+    vi.mocked(collectDueRecurringPayments).mockReset();
+    vi.mocked(pollRingsIndexing).mockReset();
+    vi.mocked(reconcileEarnVaultMovements).mockReset();
+    vi.mocked(reconcileDvpTrades).mockReset();
+    vi.mocked(detectOrphanedEarnSplitSwaps).mockReset();
+    vi.mocked(retireOrphanedSecrets).mockReset();
+    vi.mocked(cleanupRetiredProviderCredentialSecrets).mockReset();
   });
 
   afterEach(() => {

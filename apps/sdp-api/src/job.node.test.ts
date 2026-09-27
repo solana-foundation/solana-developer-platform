@@ -260,6 +260,11 @@ describe("runCronJob", () => {
       expect.any(Object),
       { deadlineMs: 90_000 }
     );
+    // Replay shares the cleanup deadline: both must finish inside the run's
+    // budget instead of being killed mid-flight with the Cloud Run execution.
+    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(expect.any(Object), {
+      deadlineMs: 90_000,
+    });
     expect(performance.now()).toBe(40_000);
     expect(waitForEgress).toHaveBeenCalledWith(
       expect.objectContaining({ deadlineMs: 120_000, intervalMs: 5_000 })
@@ -793,7 +798,9 @@ describe("runCronJob", () => {
 
     await runCronJob();
 
-    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(env);
+    expect(replayRampWebhookEvents).toHaveBeenCalledExactlyOnceWith(env, {
+      deadlineMs: expect.any(Number),
+    });
   });
 
   it("aggregates a replay failure with the tick's other legs", async () => {
