@@ -3,7 +3,11 @@ import {
   createPostgresRampWebhookEventsRepository,
   type RampWebhookEventRow,
 } from "@/db/repositories/ramp-webhook-event.repository";
-import { TerminalRampWebhookError, type WebhookProcessor } from "@/routes/webhooks/ramps/processor";
+import {
+  DeferrableRampWebhookError,
+  TerminalRampWebhookError,
+  type WebhookProcessor,
+} from "@/routes/webhooks/ramps/processor";
 import {
   isWebhookRampProvider,
   RAMP_PROVIDER_WEBHOOK_PROCESSOR,
@@ -53,7 +57,10 @@ function currentAppRevision(env: Env): string {
  * Applies one persisted event and discharges its row. On failure the row
  * keeps its payload and error for the next replay pass, or parks as `failed`
  * once attempts are exhausted — the alertable state, because it means a
- * provider told SDP about a settlement and SDP could not act on it.
+ * provider told SDP about a settlement and SDP could not act on it. A policy
+ * deferral (a `DeferrableRampWebhookError`) is neither: the row stays pending
+ * with its attempt budget restored, because only an external state change can
+ * apply it and no deploy would un-park it.
  *
  * @param attempts - Attempts spent including the one this call is making.
  */
@@ -85,6 +92,15 @@ export async function applyStoredRampWebhookEvent(
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof DeferrableRampWebhookError) {
+      // A policy deferral is not a failed attempt: the event can only apply
+      // once an external state changes, so it stays pending with its attempt
+      // budget restored and the replay retries it every pass — parking it
+      // would strand the provider's only signed signal on a state no deploy
+      // can fix.
+      await events.recordDeferral({ id: row.id, error: message });
+      return false;
+    }
     const terminal = error instanceof TerminalRampWebhookError;
     if (terminal && row.environment === "sandbox") {
       await events.deleteEvent(row.id);

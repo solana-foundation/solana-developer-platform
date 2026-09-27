@@ -3,7 +3,12 @@ import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import type { PaymentTransferRow } from "@/db/repositories";
+import type { RampWebhookEventRow } from "@/db/repositories/ramp-webhook-event.repository";
 import app from "@/index";
+import {
+  applyStoredRampWebhookEvent,
+  RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS,
+} from "@/services/jobs/replay-ramp-webhook-events";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
@@ -129,6 +134,16 @@ describe("Mural compliance-review webhooks update cached KYC and gate settlement
       .prepare("SELECT COUNT(*)::int AS count FROM ramp_webhook_events")
       .first<{ count: number }>();
     return row?.count ?? -1;
+  }
+
+  async function inboxRow(): Promise<RampWebhookEventRow> {
+    const row = await getDb(env)
+      .prepare("SELECT * FROM ramp_webhook_events")
+      .first<Record<string, unknown>>();
+    if (!row) {
+      throw new Error("expected a ramp_webhook_events row");
+    }
+    return row as unknown as RampWebhookEventRow;
   }
 
   async function transferStatus(id: string): Promise<string | undefined> {
@@ -555,5 +570,100 @@ describe("Mural compliance-review webhooks update cached KYC and gate settlement
       })
     ).toBe("blocked");
     expect(await transferStatus("xfr_mural_claim_rejected")).toBe("awaiting_payment");
+
+    // The blocked classification keys off the transfer's own status — the
+    // other guard in the failed statement — never off a compliance re-read
+    // that may already have cleared and would discharge the credit event.
+    await setCachedKycStatus("errored");
+    await seedAwaitingTransfer("xfr_mural_claim_errored");
+    const erroredTransfer = await transferRow("xfr_mural_claim_errored");
+    expect(
+      await claimMuralAccountCredit(env, {
+        transfer: erroredTransfer,
+        counterpartyId,
+        deliveryId: "delivery_claim_errored",
+        tokenAmount: 100,
+      })
+    ).toBe("blocked");
+  });
+
+  it("does not let a delayed in-review status clear a review error", async () => {
+    await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_8",
+        currentStatus: { type: "error", errorDescription: "review pipeline failed" },
+      },
+    });
+    expect(await cachedKycStatus()).toBe("errored");
+
+    // A delayed or replayed pre-decision status must not clear the blocking
+    // error, or a credit refused during the error would settle on replay
+    // without any signed approval.
+    await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_9",
+        previousStatus: { type: "inReview" },
+        currentStatus: { type: "inReview" },
+      },
+    });
+    expect(await cachedKycStatus()).toBe("errored");
+  });
+
+  it("keeps a compliance-deferred credit pending until compliance clears, then settles it", async () => {
+    await seedAwaitingTransfer("xfr_mural_compliance_deferred");
+    await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_10",
+        currentStatus: { type: "error", errorDescription: "review pipeline failed" },
+      },
+    });
+    const creditResponse = await sendMuralWebhook({
+      payload: {
+        type: "account_credited",
+        organizationId: muralOrganizationId,
+        accountId,
+        tokenAmount: { tokenAmount: 100, tokenSymbol: "USDC" },
+      },
+    });
+    expect(creditResponse.status).toBe(200);
+    expect(await inboxCount()).toBe(1);
+    const row = await inboxRow();
+    expect(row.status).toBe("pending");
+
+    // Every replay pass defers the credit instead of spending an attempt: the
+    // row must never park as failed, however long compliance stays blocking —
+    // a parked row would strand the customer's credit until an unrelated
+    // deploy re-armed it.
+    for (let attempt = 1; attempt <= RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS + 1; attempt++) {
+      await expect(applyStoredRampWebhookEvent(env, row, attempt)).resolves.toBe(false);
+    }
+    const parked = await getDb(env)
+      .prepare("SELECT status, attempts, last_error FROM ramp_webhook_events WHERE id = ?")
+      .bind(row.id)
+      .first<{ status: string; attempts: number; last_error: string | null }>();
+    expect(parked?.status).toBe("pending");
+    expect(Number(parked?.attempts)).toBe(0);
+    expect(parked?.last_error).toContain("deferred");
+
+    // Once the error clears (a signed approval supersedes it), the next
+    // replay settles the credit and discharges the row.
+    await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_11",
+        currentStatus: { type: "approved" },
+      },
+    });
+    expect(await cachedKycStatus()).toBe("approved");
+    await expect(applyStoredRampWebhookEvent(env, row, 1)).resolves.toBe(true);
+    expect(await transferStatus("xfr_mural_compliance_deferred")).toBe("completed");
+    expect(await inboxCount()).toBe(0);
   });
 });

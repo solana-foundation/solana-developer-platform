@@ -19,6 +19,7 @@ import { getLogger } from "@/runtime/logger";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
+import { DeferrableRampWebhookError } from "./processor";
 
 const MURAL_DELIVERY_ID_FIELD = "__sdpDeliveryId";
 
@@ -186,20 +187,25 @@ export async function claimMuralAccountCredit(
   if (row) {
     return "completed";
   }
-  // No row matched: either the compliance gate just blocked the claim, or
-  // another apply (replay or concurrent delivery) already moved the transfer
-  // out of `awaiting_payment`. Distinguish by re-reading the cached status.
-  const counterparty = await getDb(env)
+  // No row matched: the statement's WHERE clause guards exactly two things
+  // beyond identity — `status = 'awaiting_payment'` and the compliance gate —
+  // so classify by re-reading the TRANSFER, not the compliance state. The
+  // transfer's status is what the failed statement actually raced on: still
+  // `awaiting_payment` means the gate blocked the claim (a compliance state
+  // re-read here could already have cleared and would misreport the block as
+  // "claimed elsewhere", discharging the only record of the credit); anything
+  // else means another apply moved it out of `awaiting_payment`.
+  const transferNow = await getDb(env)
     .prepare(
-      `SELECT provider_data->'mural'->'organization'->>'kycStatus' AS kyc_status
-         FROM counterparties WHERE id = ?`
+      `SELECT status
+         FROM payment_transfers
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id IS NOT DISTINCT FROM ?`
     )
-    .bind(input.counterpartyId)
-    .first<{ kyc_status: string | null }>();
-  const complianceStatus = counterparty?.kyc_status ?? undefined;
-  return complianceStatus === "rejected" || complianceStatus === "errored"
-    ? "blocked"
-    : "already_claimed";
+    .bind(input.transfer.id, input.transfer.organization_id, input.transfer.project_id)
+    .first<{ status: string }>();
+  return transferNow?.status === "awaiting_payment" ? "blocked" : "already_claimed";
 }
 
 async function handleAccountCredited(
@@ -230,14 +236,15 @@ async function handleAccountCredited(
     getLogger().warn(
       `[mural webhook] refusing account credit for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
     );
-    // Throw rather than return: a refusal that returned would discharge the
-    // inbox row and destroy the only signed record of the credit, leaving the
-    // transfer `awaiting_payment` with nothing to replay once the compliance
-    // error clears and the organization is approved again. A non-terminal
-    // failure keeps the event pending for the replay job (or parked, paging,
-    // once attempts are spent) — recoverable either way.
-    throw new Error(
-      `[mural webhook] account credit refused for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
+    // Throw a DEFERRABLE error rather than return: a refusal that returned
+    // would discharge the inbox row and destroy the only signed record of the
+    // credit, leaving the transfer `awaiting_payment` with nothing to replay
+    // once the compliance error clears and the organization is approved again.
+    // Deferring keeps the event pending with its attempt budget restored, so
+    // the replay job retries it every pass — parking it as a failed attempt
+    // would strand the credit until an unrelated deploy re-armed the row.
+    throw new DeferrableRampWebhookError(
+      `[mural webhook] account credit deferred for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
     );
   }
   const payments = createSystemPaymentsRepository(env);
@@ -277,8 +284,11 @@ async function handleAccountCredited(
     getLogger().warn(
       `[mural webhook] refusing account credit for counterparty ${counterparty.id}: compliance blocked at claim time`
     );
-    throw new Error(
-      `[mural webhook] account credit refused for counterparty ${counterparty.id}: compliance blocked at claim time`
+    // Same deferral discipline as the pre-check refusal above: the claim's
+    // compliance gate blocked the settlement, so the event must stay pending
+    // (never parked) until the cached state allows it to apply.
+    throw new DeferrableRampWebhookError(
+      `[mural webhook] account credit deferred for counterparty ${counterparty.id}: compliance blocked at claim time`
     );
   }
   getLogger().info(
@@ -303,6 +313,11 @@ const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "r
  * settlement stays blocked until the next signed approval arrives — while an
  * ignored error would leave money moving on a review the provider no longer
  * has.
+ *
+ * `errored` is itself a blocking cached state: a delayed or replayed
+ * pre-decision status (`pending`) must not clear it, or a credit refused
+ * during the review error would settle on replay without any signed approval.
+ * Only a terminal decision (`approved`, or a fresh `rejected`) supersedes it.
  */
 function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
   const cached = readCachedMuralOrganizationKycStatus(counterparty);
@@ -312,7 +327,7 @@ function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKyc
   if (incoming === "errored" || MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
     return false;
   }
-  return MURAL_TERMINAL_KYC_STATUSES.has(cached ?? "");
+  return MURAL_TERMINAL_KYC_STATUSES.has(cached ?? "") || cached === "errored";
 }
 
 function readCachedMuralOrganizationKycStatus(counterparty: CounterpartyRow): string | undefined {

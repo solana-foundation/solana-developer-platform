@@ -70,6 +70,16 @@ export interface RampWebhookEventsRepository {
    * the replay job; at the limit it parks as `failed`. */
   recordFailure(input: RecordRampWebhookEventFailureInput): Promise<void>;
   /**
+   * Records a policy deferral (a `DeferrableRampWebhookError`): the event
+   * stays `pending` with its attempt budget restored, so a deferral never
+   * parks the row — the replay retries it on every pass until the external
+   * state it waits on allows the apply to succeed. Restoring (not winding
+   * back) the budget is safe here: the claim's lease guarantees no other pass
+   * advanced `attempts` while this apply was running, and an understated count
+   * only means one extra replay before parking for a genuinely failing row.
+   */
+  recordDeferral(input: { id: string; error: string }): Promise<void>;
+  /**
    * Claims a batch of pending rows for replay, incrementing `attempts` in the
    * same statement. `SKIP LOCKED` keeps two concurrently running replay passes
    * from applying the same event; the settlement CAS makes a double apply
@@ -161,6 +171,20 @@ export function createPostgresRampWebhookEventsRepository(db: AppDb): RampWebhoo
           input.terminal === true,
           input.id
         )
+        .run();
+    },
+
+    async recordDeferral(input) {
+      await db
+        .prepare(
+          `UPDATE ramp_webhook_events
+              SET attempts = 0,
+                  last_error = ?,
+                  status = 'pending',
+                  updated_at = sdp_iso_now()
+            WHERE id = ?`
+        )
+        .bind(input.error, input.id)
         .run();
     },
 
