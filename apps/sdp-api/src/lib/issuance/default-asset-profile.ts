@@ -13,7 +13,7 @@ type ProfileSourceToken = Pick<
   "name" | "description" | "decimals" | "template" | "extensions" | "isFreezable"
 >;
 
-function categoryForTemplate(template: Token["template"]): AssetCategory {
+export function categoryForTemplate(template: Token["template"]): AssetCategory {
   if (template === "stablecoin") {
     return "stablecoin";
   }

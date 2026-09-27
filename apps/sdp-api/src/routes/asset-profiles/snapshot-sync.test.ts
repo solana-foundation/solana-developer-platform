@@ -482,9 +482,47 @@ describe("asset profile PATCH binds pending advanced settings to the deployment 
       { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
       env
     );
-    const json = (await response.json()) as SuccessJson;
+    const deployJson = (await response.json()) as SuccessJson;
     expect(response.status).toBe(400);
-    expect(json.error?.message).toContain("signingCustodyWalletId");
+    expect(deployJson.error?.message).toContain("signingCustodyWalletId");
+  });
+
+  it("persists the resolver's freeze flag when a locked template drives creation", async () => {
+    // The plain token-create path runs no settings resolution, but the default
+    // profile it derives still resolves through the capability registry: a
+    // stablecoin locks freezeAccounts on, so persisting the caller's raw
+    // isFreezable: false would fail this fresh token as drifted at deploy time.
+    const response = await app.request(
+      "/v1/issuance/tokens",
+      {
+        method: "POST",
+        headers: headers(ADMIN_KEY.raw),
+        body: JSON.stringify({
+          name: "Locked Freeze Token",
+          symbol: "LOCKED",
+          template: "stablecoin",
+          isFreezable: false,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(201);
+    const json = (await response.json()) as SuccessJson;
+    expect(json.data.token.isFreezable).toBe(true);
+    expect(json.data.token.template).toBe("stablecoin");
+    expect(await tokenRow(json.data.token.id)).toMatchObject({ freeze_authority_enabled: 1 });
+
+    // The fresh token passes the deploy-time snapshot check: the deploy
+    // advances past it and refuses later for the missing signing wallet
+    // instead of the drift 409.
+    const deployResponse = await app.request(
+      `/v1/issuance/tokens/${json.data.token.id}/deploy`,
+      { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
+      env
+    );
+    const deployJson = (await deployResponse.json()) as SuccessJson;
+    expect(deployResponse.status).toBe(400);
+    expect(deployJson.error?.message).toContain("signingCustodyWalletId");
   });
 
   it("keeps freshly created authority-stamped extensions deployable without an extra save", async () => {

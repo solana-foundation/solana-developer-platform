@@ -1,3 +1,4 @@
+import { resolveAssetCapability } from "@sdp/issuance/capabilities";
 import { normalizeTemplateId, resolveTemplateConfig } from "@sdp/issuance/templates";
 import { assertValidAddress } from "@sdp/solana/address";
 import type { Token } from "@sdp/types";
@@ -7,7 +8,10 @@ import { asTransactionalClient, getDb } from "@/db";
 import { createPostgresAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { badRequest, badRequestQuery, conflict, internalError, notFound } from "@/lib/errors";
-import { buildDefaultAssetProfile } from "@/lib/issuance/default-asset-profile";
+import {
+  buildDefaultAssetProfile,
+  categoryForTemplate,
+} from "@/lib/issuance/default-asset-profile";
 import { created, paginated, success } from "@/lib/response";
 import type { PolicyGateExtraction } from "@/middleware/policy-gate";
 import type { ValidatedBodyContext } from "@/middleware/validate";
@@ -147,6 +151,20 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
     });
   }
 
+  // APE-848 review: the capability registry locks freeze on for the regulated
+  // families (stablecoin / tokenized security) — the settings resolver forces
+  // `isFreezable` true there no matter what the selection says, and the
+  // deploy-time snapshot check holds the row to that same resolution.
+  // Persisting the caller's raw flag would fail such a freshly created token
+  // as drifted against its own default profile, so creation persists the
+  // resolved flag — exactly what the settings-driven create-with-profile path
+  // already does.
+  const defaultProfileCategory = categoryForTemplate(resolved.template);
+  const isFreezable =
+    resolveAssetCapability(defaultProfileCategory, "generic")?.settings.freezeAccounts === "locked"
+      ? true
+      : body.isFreezable;
+
   const signingWallet = body.signingCustodyWalletId
     ? await resolveIssuanceWallet({
         env: c.env,
@@ -178,7 +196,7 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
       extensions: resolved.extensions ?? undefined,
       maxSupply: body.maxSupply,
       isMintable: body.isMintable,
-      isFreezable: body.isFreezable,
+      isFreezable,
       requiresAllowlist: resolved.requiresAllowlist,
     });
     const profile = buildDefaultAssetProfile(token);
