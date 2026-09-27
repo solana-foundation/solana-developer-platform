@@ -5146,6 +5146,189 @@ describe("Issuance Routes", () => {
       }
     });
 
+    // The same gate runs inside the policy extractor, so a non-admin must be
+    // refused before the Dry-Run exit can evaluate (or queue) anything.
+    it("refuses a dry-run deployed-metadata PATCH from a tokens:write key before policy evaluation", async () => {
+      const db = getDb(env);
+      const writeKey = {
+        id: "key_issuance_dryrun_write_only",
+        raw: "sk_test_issuance_dryrun_write_only",
+        prefix: "sk_test_drw",
+      } as const;
+      const writeHash = await seedProjectApiKey(db, env, {
+        key: writeKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+      });
+      await seedCachedApiKey(env, writeHash, {
+        id: writeKey.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        role: "api_developer",
+        permissions: ["tokens:read", "tokens:write"],
+        environment: "sandbox",
+        rateLimitTier: "standard",
+        allowedIps: null,
+        signingWalletId: null,
+        status: "active",
+        expiresAt: null,
+        rotationDeadline: null,
+        organizationStatus: "active",
+      });
+
+      const token = await seedIssuedToken({
+        id: "tok_metadata_admin_gate_dryrun",
+        name: "Canonical name",
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet3,
+      });
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata");
+
+      try {
+        const res = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${writeKey.raw}`,
+              "Dry-Run": "true",
+            },
+            body: JSON.stringify({ name: "Dry-run metadata rewrite" }),
+          },
+          env
+        );
+
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({
+          error: {
+            code: "INSUFFICIENT_PERMISSIONS",
+            message: "Updating deployed token metadata requires the tokens:admin permission",
+          },
+        });
+        expect(signer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+        // The dry-run verdict is never reached, so nothing is judged or queued.
+        const operationCount = await db
+          .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 0 });
+        const row = await db
+          .prepare("SELECT name FROM issued_tokens WHERE id = ?")
+          .bind(token.id)
+          .first<{ name: string }>();
+        expect(row).toEqual({ name: "Canonical name" });
+      } finally {
+        updateMetadata.mockRestore();
+      }
+    });
+
+    it("queues a deployed-metadata PATCH from an explicit tokens:admin key for approval", async () => {
+      const db = getDb(env);
+      const adminKey = {
+        id: "key_issuance_metadata_admin",
+        raw: "sk_test_issuance_metadata_admin",
+        prefix: "sk_test_adm",
+      } as const;
+      const adminHash = await seedProjectApiKey(db, env, {
+        key: adminKey,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        createdBy: TEST_USER.id,
+        role: "api_admin",
+        permissions: ["tokens:read", "tokens:write", "tokens:admin"],
+      });
+      await seedCachedApiKey(env, adminHash, {
+        id: adminKey.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        role: "api_admin",
+        permissions: ["tokens:read", "tokens:write", "tokens:admin"],
+        environment: "sandbox",
+        rateLimitTier: "standard",
+        allowedIps: null,
+        signingWalletId: null,
+        status: "active",
+        expiresAt: null,
+        rotationDeadline: null,
+        organizationStatus: "active",
+      });
+
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_metadata_admin_approval",
+        TEST_SOLANA_ADDRESSES.wallet1
+      );
+      const token = await seedIssuedToken({
+        id: "tok_metadata_admin_approval",
+        name: "Canonical name",
+        signingWalletId: wallet.walletId,
+        mintAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+        metadataAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+      });
+      const policyResponse = await app.request(
+        `/v1/payments/wallets/${wallet.walletId}/policies`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "approve-issuance-metadata-admin",
+                kind: "approval",
+                operationTypes: ["issuance_metadata_update_execute"],
+              },
+            ],
+          }),
+        },
+        env
+      );
+      expect(policyResponse.status).toBe(200);
+      const updateMetadata = vi.spyOn(MosaicService.prototype, "updateMetadata");
+      const signer = vi.mocked(SolanaServices.createOrgSignerForCustodyWallet);
+      signer.mockClear();
+
+      try {
+        const pending = await app.request(
+          `/v1/issuance/tokens/${token.id}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${adminKey.raw}`,
+            },
+            body: JSON.stringify({ name: "Approved canonical name" }),
+          },
+          env
+        );
+
+        expect(pending.status).toBe(202);
+        const pendingBody = (await pending.json()) as {
+          error: { details: { approvalRequestId: string; walletOperationId: string } };
+        };
+        expect(pendingBody.error.details.approvalRequestId).toBeTruthy();
+        expect(pendingBody.error.details.walletOperationId).toBeTruthy();
+        // Pending approval: the permission gate passed, but nothing has signed.
+        expect(signer).not.toHaveBeenCalled();
+        expect(updateMetadata).not.toHaveBeenCalled();
+        const operationCount = await db
+          .prepare(
+            "SELECT COUNT(*)::int AS count FROM wallet_operations WHERE operation_type = 'issuance_metadata_update_execute'"
+          )
+          .first<{ count: number }>();
+        expect(operationCount).toEqual({ count: 1 });
+      } finally {
+        updateMetadata.mockRestore();
+      }
+    });
+
     it("keeps draft-only metadata edits available to a tokens:write key without tokens:admin", async () => {
       const db = getDb(env);
       const writeKey = {
