@@ -2509,6 +2509,64 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("releases a legacy attempt whose recorded authorization transaction failed on-chain", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const { activated, replacementCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
+      attemptId: "prpu_stale_legacy_source_change",
+      plan: {
+        id: "psp_stale_legacy_failed_authorization",
+        ownerAddress: "addr_no_custody_wallet_owner",
+        withSignature: true,
+      },
+      withAuthorizationSignature: true,
+    });
+    // The recorded authorization transaction confirmed with an error, so the
+    // journaled signature is not proof the replacement was authorized: the
+    // recorded work did not happen, and recovery releases the payment for a
+    // fresh update instead of blocking it for manual reconciliation forever.
+    const recordedSignature = signature(
+      "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+    );
+    confirmTransactionMock.mockImplementation(async (_rpc, confirmed) => ({
+      signature: confirmed,
+      slot: 101n,
+      confirmationStatus: "confirmed",
+      err: confirmed === recordedSignature ? { InstructionError: [0, "Custom"] } : null,
+    }));
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(409);
+    const updateBody = errorResponseSchema.parse(await updateRes.json());
+    expect(updateBody.error.message).toContain(
+      "cannot prove the recorded replacement custody wallet identity"
+    );
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, authorization_signature
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{ status: string; authorization_signature: string | null }>();
+    expect(attempt?.status).toBe("failed");
+    expect(attempt?.authorization_signature).not.toBeNull();
+    const parent = await getDb(env)
+      .prepare("SELECT status FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ status: string }>();
+    expect(parent?.status).toBe("active");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"

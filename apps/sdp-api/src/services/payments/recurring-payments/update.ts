@@ -412,6 +412,38 @@ async function resolveLegacyAttemptCustodyIdentity(
 }
 
 /**
+ * A recorded signature only proves recorded on-chain work when its
+ * transaction confirmed successfully — an authorization or cancellation
+ * transaction can confirm with an error, leaving the signature journaled but
+ * nothing executed. Probe the recorded signature's outcome: true when the
+ * transaction failed on-chain, false when it succeeded. Unknown outcomes
+ * (RPC errors, confirmation timeouts) propagate — recovery must not silently
+ * treat recorded work as absent.
+ */
+async function legacyAttemptSignatureFailedOnChain(
+  env: Env,
+  signature: string | null
+): Promise<boolean> {
+  const parsed = parseNullableStoredSignature(signature);
+  if (parsed === null) {
+    return false;
+  }
+  try {
+    await confirmSubscriptionSignature(
+      env,
+      parsed,
+      "Recurring payment update recorded signature failed on-chain"
+    );
+  } catch (error) {
+    if (error instanceof AppError && error.code === "TRANSACTION_FAILED") {
+      return true;
+    }
+    throw error;
+  }
+  return false;
+}
+
+/**
  * Replacement work recorded on the attempt that a restart would repeat:
  * created plan, created subscription, submitted signatures.
  */
@@ -711,6 +743,7 @@ type RecurringPaymentUpdateAttemptResolution =
  */
 async function resolveStaleLegacyUpdateAttempt(input: {
   db: DatabaseExecutor;
+  env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
@@ -767,16 +800,31 @@ async function resolveStaleLegacyUpdateAttempt(input: {
     input.existing.authorization_signature !== null ||
     input.existing.old_cancel_signature !== null
   ) {
-    // The recorded replacement subscription was already authorized on-chain
-    // (or the old subscription was already canceled). No retry that cannot
-    // prove the recorded custody identity can finalize that replacement, and
-    // only the recorded replacement wallet itself can cancel it — releasing
-    // the payment to a fresh update would abandon the authorized replacement
-    // and create a second one. Keep the attempt in flight for manual
-    // reconciliation instead.
-    throw conflict(
-      "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the recorded replacement is already authorized on-chain or the old subscription is already canceled, so reconcile the recorded replacement manually before updating"
-    );
+    // A recorded signature is not proof the transaction succeeded: check the
+    // confirmed on-chain outcome before treating the replacement as
+    // authorized or the old subscription as canceled.
+    const [authorizationFailed, oldCancelFailed] = await Promise.all([
+      legacyAttemptSignatureFailedOnChain(input.env, input.existing.authorization_signature),
+      legacyAttemptSignatureFailedOnChain(input.env, input.existing.old_cancel_signature),
+    ]);
+    const replacementFinalizedOnChain =
+      (input.existing.authorization_signature !== null && !authorizationFailed) ||
+      (input.existing.old_cancel_signature !== null && !oldCancelFailed);
+    if (replacementFinalizedOnChain) {
+      // The replacement subscription was authorized on-chain (or the old
+      // subscription was canceled). No retry that cannot prove the recorded
+      // custody identity can finalize that replacement, and only the
+      // recorded replacement wallet itself can cancel it — releasing the
+      // payment to a fresh update would abandon the authorized replacement
+      // and create a second one. Keep the attempt in flight for manual
+      // reconciliation instead.
+      throw conflict(
+        "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the recorded replacement is already authorized on-chain or the old subscription is already canceled, so reconcile the recorded replacement manually before updating"
+      );
+    }
+    // The recorded authorization and cancellation transactions both failed
+    // on-chain: none of that work happened, so the recorded signatures do
+    // not protect work a fresh start would abandon or repeat.
   }
   if (legacyAttemptHasRecordedReplacementWork(input.existing)) {
     // The retried custody identity cannot be proven, but nothing was
@@ -809,6 +857,7 @@ async function resolveStaleLegacyUpdateAttempt(input: {
 
 async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   db: DatabaseExecutor;
+  env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
@@ -2120,6 +2169,7 @@ export async function updateRecurringPayment(input: {
     if (!claimed) return null;
     const resolution = await getOrCreateRecurringPaymentUpdateAttempt({
       db: tx,
+      env: input.env,
       recurringRepo: transactionRepo,
       claimed,
       organizationId: input.organizationId,
