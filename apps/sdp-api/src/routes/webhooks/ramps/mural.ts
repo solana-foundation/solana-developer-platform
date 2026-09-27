@@ -375,9 +375,14 @@ async function applyMuralLifecycleToCurrentOwner(
       });
 
       // The counterparty patch and the normalized KYC-wallet mirror derive from one
-      // provider event, so they land or roll back together.
+      // provider event, so they land or roll back together. The SDP-internal
+      // delivery stamp rides in the same patch: it is the only proof the
+      // post-failure verification below can use that THIS transaction — not
+      // some earlier delivery that already stored the same status — committed.
       const organization: Record<string, unknown> =
-        event.kind === "kyc_status" ? { kycStatus: event.kycStatus } : { tosStatus: "ACCEPTED" };
+        event.kind === "kyc_status"
+          ? { kycStatus: event.kycStatus, __sdpLifecycleDeliveryId: event.deliveryId }
+          : { tosStatus: "ACCEPTED", __sdpLifecycleDeliveryId: event.deliveryId };
       await createPostgresCounterpartiesRepository(client).patchMuralOrganizationById({
         organizationId: event.organizationId,
         organization,
@@ -453,10 +458,12 @@ async function applyMuralLifecycleToCurrentOwner(
  * Evidence-based durable outcome for an intent whose business transaction
  * threw. A thrown transaction cannot distinguish an aborted mutation from a
  * committed one whose COMMIT acknowledgment was lost, so the counterparty's
- * current state decides: state matching the admitted transition is recorded
- * as applied, anything else as aborted. Returns false — leaving the intent
- * unresolved for the reconciliation runbook — when the post-failure state is
- * unreadable and no outcome write would be evidence-based.
+ * current state decides: the admitted transition counts as applied only when
+ * the status matches AND the delivery stamp the transaction wrote alongside
+ * it names this delivery — a status that merely predates the delivery is not
+ * proof. Anything else is recorded as aborted. Returns false — leaving the
+ * intent unresolved for the reconciliation runbook — when the post-failure
+ * state is unreadable and no outcome write would be evidence-based.
  */
 async function recordLifecycleIntentOutcomeAfterFailure(
   env: Env,
@@ -479,7 +486,14 @@ async function recordLifecycleIntentOutcomeAfterFailure(
       : undefined;
     const effectiveStatus =
       event.kind === "kyc_status" ? currentOrganization?.kycStatus : currentOrganization?.tosStatus;
-    committed = survivor !== undefined && effectiveStatus === newStatus;
+    const stampedDeliveryId =
+      typeof currentOrganization?.__sdpLifecycleDeliveryId === "string"
+        ? currentOrganization.__sdpLifecycleDeliveryId
+        : undefined;
+    committed =
+      survivor !== undefined &&
+      effectiveStatus === newStatus &&
+      stampedDeliveryId === event.deliveryId;
   } catch (verifyError) {
     getLogger().error(
       {

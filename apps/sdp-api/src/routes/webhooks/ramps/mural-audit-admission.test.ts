@@ -649,6 +649,79 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
     expect(outcomeMetadata.commitVerifiedAfterFailure).toBe(true);
   });
 
+  /**
+   * A delivery repeating a status the counterparty already stores is not
+   * proven committed by the matching status alone: when its transaction
+   * rolls back, the post-failure verification must fall back to aborted
+   * because the delivery stamp the transaction would have written alongside
+   * the status is absent. A matching status from an earlier delivery must
+   * never be misrecorded as this delivery's applied outcome.
+   */
+  it("records an aborted outcome when a repeated status predates the failed delivery", async () => {
+    await seedCounterparty({
+      mural: {
+        organization: {
+          id: muralOrganizationId,
+          kycStatus: "approved",
+          __sdpLifecycleDeliveryId: "mural_event_regression_earlier_delivery",
+        },
+      },
+    });
+    concurrentWriter.mode = "fail-wallet-mirror";
+    let applied: boolean;
+    try {
+      applied = (
+        await signAndApply({
+          id: "mural_event_regression_repeated_status_fails",
+          payload: {
+            type: "verification_status_changed",
+            organizationId: muralOrganizationId,
+            currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+          },
+        })
+      ).applied;
+    } finally {
+      concurrentWriter.mode = "off";
+    }
+    expect(applied).toBe(false);
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(1);
+
+    // The wallet mirror rolled back with the transaction.
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(wallet?.kyc_status).toBe("pending");
+
+    // The matching status predates this delivery (its stamp names an earlier
+    // delivery), so the abort is recorded instead of a false applied outcome.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(intents).toHaveLength(1);
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).status).toBe("failure");
+    const outcomeMetadata = parseMetadata(sole(outcomes)) as {
+      auditIntentId?: string;
+      result?: string;
+    };
+    expect(outcomeMetadata.auditIntentId).toBe(sole(intents).resource_id);
+    expect(outcomeMetadata.result).toBe("aborted");
+  });
+
   it("ignores a stale replayed status without a new mutation or admission", async () => {
     await seedCounterparty({
       mural: { organization: { id: muralOrganizationId, kycStatus: "approved" } },
