@@ -166,6 +166,8 @@ export interface TokenExtensionsConfig {
   };
   /** Permanent delegate for the token */
   permanentDelegate?: string;
+  /** ConfidentialTransferMint authority for the token (mirror of live on-chain state) */
+  confidentialTransfer?: string;
   /** Pausable extension configuration */
   pausable?: {
     /** Authority that can pause/resume transfers */

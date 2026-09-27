@@ -841,4 +841,89 @@ describe("authority-resolution", () => {
       )
     ).toBe("AENLi9e2XHK7fnMmEqHbPCADPjRPV4n3DxuWbMcBbxK9");
   });
+
+  describe("confidential transfer authority", () => {
+    // SOLA9-486: the stablecoin/tokenized-security templates bind the
+    // ConfidentialTransferMint authority to the deployment signer, and a
+    // MintTokens rotation never touches it. The platform must resolve the
+    // confidential authority live from the mint so a retired signer's control
+    // can be rotated or revoked through the same governed update-authority
+    // flow.
+    const confidentialExtension = (authority: string | null) => ({
+      __kind: "ConfidentialTransferMint",
+      authority: authority == null ? { __option: "None" } : { __option: "Some", value: authority },
+      autoApproveNewAccounts: false,
+      auditorElgamalPubkey: { __option: "None" },
+    });
+
+    const env = {
+      SOLANA_RPC_URL: "https://rpc.example.test",
+      SOLANA_NETWORK: "devnet",
+    } as never;
+    const tokenService = { updateTokenAuthorities: vi.fn() } as never;
+
+    it("resolves the live confidential-transfer authority from the mint extension", async () => {
+      fetchMaybeMintMock.mockResolvedValue(
+        createDecodedMint({
+          mintAuthority: OTHER_AUTHORITY,
+          extensions: [confidentialExtension(AUTHORITY)],
+        })
+      );
+
+      // The retired signer (AUTHORITY) still holds the on-chain confidential
+      // authority after the mint authority moved to OTHER_AUTHORITY.
+      await expect(
+        resolveCurrentAuthorityForRole(env, tokenService, createToken(), "confidentialTransfer")
+      ).resolves.toBe(AUTHORITY);
+      expect(fetchMaybeMintMock).toHaveBeenCalledOnce();
+      expect(
+        (tokenService as { updateTokenAuthorities: ReturnType<typeof vi.fn> })
+          .updateTokenAuthorities
+      ).not.toHaveBeenCalled();
+    });
+
+    it("treats a supplied confidential-transfer authority as an assertion", async () => {
+      fetchMaybeMintMock.mockResolvedValue(
+        createDecodedMint({
+          extensions: [confidentialExtension(OTHER_AUTHORITY)],
+        })
+      );
+
+      await expect(
+        resolveCurrentAuthorityForRole(
+          env,
+          tokenService,
+          createToken(),
+          "confidentialTransfer",
+          AUTHORITY
+        )
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    });
+
+    it("reports a revoked on-chain confidential-transfer authority as null", async () => {
+      fetchMaybeMintMock.mockResolvedValue(
+        createDecodedMint({ extensions: [confidentialExtension(null)] })
+      );
+
+      await expect(
+        resolveCurrentAuthorityForRole(env, tokenService, createToken(), "confidentialTransfer")
+      ).resolves.toBeNull();
+    });
+
+    it("returns null when the mint has no ConfidentialTransferMint extension", async () => {
+      fetchMaybeMintMock.mockResolvedValue(createDecodedMint({ mintAuthority: AUTHORITY }));
+
+      await expect(
+        resolveCurrentAuthorityForRole(env, tokenService, createToken(), "confidentialTransfer")
+      ).resolves.toBeNull();
+    });
+
+    it("fails closed when the confidential-transfer extension cannot be read", async () => {
+      fetchMaybeMintMock.mockRejectedValue(new Error("RPC returned invalid mint data"));
+
+      await expect(
+        resolveCurrentAuthorityForRole(env, tokenService, createToken(), "confidentialTransfer")
+      ).rejects.toMatchObject({ code: "SOLANA_RPC_ERROR", statusCode: 502 });
+    });
+  });
 });

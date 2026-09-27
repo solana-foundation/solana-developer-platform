@@ -8088,7 +8088,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8451,7 +8452,7 @@
         "operationId": "getToken",
         "title": "Get token",
         "method": "GET",
-        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}",
+        "path": "/v1/issuance/tokens/{tokenId}?includeAllowlistAuthority={includeAllowlistAuthority}&includeFreezeAuthority={includeFreezeAuthority}&includeMetadataAuthority={includeMetadataAuthority}&includePauseAuthority={includePauseAuthority}&includeConfidentialTransferAuthority={includeConfidentialTransferAuthority}",
         "pathFields": [
           {
             "key": "tokenId",
@@ -8531,6 +8532,24 @@
                 "value": "false"
               }
             ]
+          },
+          {
+            "key": "includeConfidentialTransferAuthority",
+            "label": "includeConfidentialTransferAuthority",
+            "description": "Opt in to a read-only lookup of the live Token-2022 ConfidentialTransferMint authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored confidential-transfer mirror without RPC. Ordinary token reads do not perform this lookup.",
+            "defaultValue": "true",
+            "required": false,
+            "kind": "select",
+            "options": [
+              {
+                "label": "true",
+                "value": "true"
+              },
+              {
+                "label": "false",
+                "value": "false"
+              }
+            ]
           }
         ],
         "bodyFields": [],
@@ -8595,7 +8614,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8690,7 +8710,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -8796,7 +8817,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9095,7 +9117,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",
@@ -9232,7 +9255,8 @@
             "allowlistAuthority": "So11111111111111111111111111111111111111112",
             "freezeAuthority": "So11111111111111111111111111111111111111112",
             "metadataAuthority": "So11111111111111111111111111111111111111112",
-            "pauseAuthority": "So11111111111111111111111111111111111111112"
+            "pauseAuthority": "So11111111111111111111111111111111111111112",
+            "confidentialTransferAuthority": "So11111111111111111111111111111111111111112"
           },
           "meta": {
             "requestId": "req_example",

@@ -16,7 +16,12 @@ import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 
-export type AuthorityRole = "mint" | "freeze" | "permanentDelegate" | "metadata";
+export type AuthorityRole =
+  | "mint"
+  | "freeze"
+  | "permanentDelegate"
+  | "metadata"
+  | "confidentialTransfer";
 type TokenRecord = Awaited<ReturnType<TokenService["getToken"]>>;
 
 export interface ResolvedIssuanceWallet {
@@ -135,6 +140,7 @@ async function fetchMintAuthorities(
   freezeAuthority: string | null;
   permanentDelegate: string | null;
   metadataAuthority: string | null;
+  confidentialTransferAuthority: string | null;
 }> {
   const mint = await fetchMaybeMint(
     createRpc(env),
@@ -153,6 +159,12 @@ async function fetchMintAuthorities(
   const metadataUpdateAuthority = tokenMetadata
     ? unwrapOption(tokenMetadata.updateAuthority)
     : null;
+  const confidentialTransferMint = extensions.find(
+    (extension) => extension.__kind === "ConfidentialTransferMint"
+  );
+  const confidentialTransferAuthority = confidentialTransferMint
+    ? unwrapOption(confidentialTransferMint.authority)
+    : null;
 
   return {
     mintAuthority: unwrapOption(mint.data.mintAuthority),
@@ -160,6 +172,7 @@ async function fetchMintAuthorities(
     permanentDelegate: permanentDelegate?.delegate ?? null,
     // MetadataPointer authority can redirect metadata, not edit its contents.
     metadataAuthority: metadataUpdateAuthority,
+    confidentialTransferAuthority,
   };
 }
 
@@ -211,6 +224,34 @@ export async function resolveMetadataAuthority(
     throw new AppError(
       "SOLANA_RPC_ERROR",
       error instanceof Error ? error.message : "Failed to resolve metadata authority"
+    );
+  }
+}
+
+/** Resolve the live Token-2022 ConfidentialTransferMint authority used for its rotation. */
+export async function resolveConfidentialTransferAuthority(
+  env: Env,
+  _tokenService: TokenService,
+  token: TokenRecord
+): Promise<string | null> {
+  if (!token) {
+    return null;
+  }
+
+  if (!token.mintAddress) {
+    return token.extensions?.confidentialTransfer ?? null;
+  }
+
+  try {
+    const { confidentialTransferAuthority } = await fetchMintAuthorities(env, token.mintAddress);
+
+    // The typed mint decoder distinguishes a revoked/absent authority from a
+    // failed read. Do not restore a stale stored authority after revocation.
+    return confidentialTransferAuthority;
+  } catch (error) {
+    throw new AppError(
+      "SOLANA_RPC_ERROR",
+      error instanceof Error ? error.message : "Failed to resolve confidential transfer authority"
     );
   }
 }
@@ -287,6 +328,27 @@ export async function resolveCurrentAuthorityForRole(
     case "metadata":
       currentAuthority = await resolveMetadataAuthority(env, tokenService, token);
       break;
+    case "confidentialTransfer": {
+      if (!token.mintAddress) {
+        currentAuthority = token.extensions?.confidentialTransfer ?? null;
+        break;
+      }
+      try {
+        const { confidentialTransferAuthority } = await fetchMintAuthorities(
+          env,
+          token.mintAddress
+        );
+        currentAuthority = confidentialTransferAuthority;
+      } catch (error) {
+        throw new AppError(
+          "SOLANA_RPC_ERROR",
+          error instanceof Error
+            ? error.message
+            : "Failed to resolve confidential transfer authority"
+        );
+      }
+      break;
+    }
   }
 
   if (override !== undefined && override !== currentAuthority) {

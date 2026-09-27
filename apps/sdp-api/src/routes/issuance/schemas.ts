@@ -136,6 +136,7 @@ export const getTokenQuerySchema = z.object({
   includeFreezeAuthority: z.enum(["true", "false"]).optional(),
   includeMetadataAuthority: z.enum(["true", "false"]).optional(),
   includePauseAuthority: z.enum(["true", "false"]).optional(),
+  includeConfidentialTransferAuthority: z.enum(["true", "false"]).optional(),
 });
 
 export const updateTokenSchema = z.object({
@@ -253,7 +254,7 @@ export const updateAuthoritySchema = z
   .object({
     signingCustodyWalletId: z.string().min(1).optional(),
     authority: z.object({
-      role: z.enum(["mint", "freeze", "permanentDelegate", "metadata"]),
+      role: z.enum(["mint", "freeze", "permanentDelegate", "metadata", "confidentialTransfer"]),
       currentAuthority: z.string().min(32).max(44).optional(),
       newAuthority: z.string().min(32).max(44).nullable(),
     }),

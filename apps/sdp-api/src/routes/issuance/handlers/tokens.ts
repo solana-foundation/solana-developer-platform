@@ -35,6 +35,7 @@ import {
   type ResolvedIssuanceWallet,
   resolveAllowlistAuthority,
   resolveAuthorityWallet,
+  resolveConfidentialTransferAuthority,
   resolveCurrentAuthorityForRole,
   resolveFreezeOperationAuthority,
   resolveIssuanceWallet,
@@ -289,6 +290,7 @@ export const getToken = async (c: AppContext) => {
     freezeAuthority?: string | null;
     metadataAuthority?: string | null;
     pauseAuthority?: string | null;
+    confidentialTransferAuthority?: string | null;
   } = {};
   if (parsed.data.includeAllowlistAuthority === "true") {
     authorities.allowlistAuthority = token.ablListAddress
@@ -305,6 +307,13 @@ export const getToken = async (c: AppContext) => {
     authorities.pauseAuthority = token.mintAddress
       ? await resolvePauseAuthority(c.env, token.mintAddress)
       : (token.extensions?.pausable?.authority ?? token.mintAuthority);
+  }
+  if (parsed.data.includeConfidentialTransferAuthority === "true") {
+    authorities.confidentialTransferAuthority = await resolveConfidentialTransferAuthority(
+      c.env,
+      tokenService,
+      token
+    );
   }
   return success(c, { token: toPublicToken(token), ...authorities });
 };

@@ -1092,6 +1092,87 @@ describe("TokenService", () => {
       ).resolves.toMatchObject({ metadataAuthority: newAuthority });
     });
 
+    it("mirrors a settled confidential-transfer authority and removes it on revocation", async () => {
+      // SOLA9-486: rotating the ConfidentialTransferMint authority must leave
+      // durable bookkeeping like the other governed roles, including revocation.
+      const tokenId = "tok_confidential_authority_settled";
+      const transactionId = "ttx_confidential_authority_settled";
+      const newAuthority = "confidential_authority_new";
+      await insertCappedToken(tokenId, "0", null);
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id
+           ) VALUES (?, ?, ?, 'update_authority', 'confirmed', ?, 100, ?)`
+        )
+        .bind(
+          transactionId,
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "confidentialTransfer", newAuthority }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(
+        transactionId,
+        tokenId,
+        "confidentialTransfer",
+        newAuthority
+      );
+
+      expect(
+        await db
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'confidentialTransfer'"
+          )
+          .bind(tokenId)
+          .first<{ config: string | null }>()
+      ).toEqual({ config: JSON.stringify(newAuthority) });
+
+      await db
+        .prepare(
+          `INSERT INTO issuance_transactions (
+             id, token_id, organization_id, type, status, operation_params, slot,
+             initiated_by_key_id
+           ) VALUES (?, ?, ?, 'update_authority', 'confirmed', ?, 101, ?)`
+        )
+        .bind(
+          "ttx_confidential_authority_revoked",
+          tokenId,
+          TEST_ORG.id,
+          JSON.stringify({ role: "confidentialTransfer", newAuthority: null }),
+          TEST_PROJECT_API_KEY.id
+        )
+        .run();
+
+      await tokenService.applySettledTokenAuthority(
+        "ttx_confidential_authority_revoked",
+        tokenId,
+        "confidentialTransfer",
+        null
+      );
+
+      expect(
+        await db
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'confidentialTransfer'"
+          )
+          .bind(tokenId)
+          .first<{ config: string | null }>()
+      ).toBeNull();
+      await expect(
+        tokenService.getToken({
+          tokenId,
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT.id,
+        })
+      ).resolves.toMatchObject({
+        extensions: expect.not.objectContaining({ confidentialTransfer: expect.anything() }),
+      });
+    });
+
     it("refuses a cap that a mint outran between the check and the write", async () => {
       await insertCappedToken("tok_cap_lost_race", "500000000", "1000000000");
       const originalPrepare = db.prepare.bind(db);

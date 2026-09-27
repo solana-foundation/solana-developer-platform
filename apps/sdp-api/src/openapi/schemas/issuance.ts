@@ -589,6 +589,10 @@ export const tokenResponseSchema = z
       description:
         "Live on-chain pausable authority. Returned only by GET token with includePauseAuthority=true; null when the mint has no pausable authority.",
     }),
+    confidentialTransferAuthority: solanaAddressSchema.nullable().optional().openapi({
+      description:
+        "Live on-chain ConfidentialTransferMint authority. Returned only by GET token with includeConfidentialTransferAuthority=true; null when the mint has no confidential-transfer authority. Rotation and revocation of this authority go through the update-authority operation with role confidentialTransfer.",
+    }),
   })
   .openapi({ description: "Token response payload." });
 
@@ -899,6 +903,14 @@ export const getTokenQueryOpenApiSchema = getTokenQuerySchemaBase.extend({
       "Opt in to a read-only lookup of the live Token-2022 pausable authority for wallet selection.",
     example: "true",
   }),
+  includeConfidentialTransferAuthority: withOpenApi(
+    getTokenQuerySchemaBase.shape.includeConfidentialTransferAuthority,
+    {
+      description:
+        "Opt in to a read-only lookup of the live Token-2022 ConfidentialTransferMint authority for wallet selection. Tokens with a mint use live chain state; tokens without a mint use the stored confidential-transfer mirror without RPC. Ordinary token reads do not perform this lookup.",
+      example: "true",
+    }
+  ),
 });
 
 export const updateTokenRequestSchema = updateTokenSchemaBase

@@ -109,7 +109,7 @@ function isSettledAuthorityTransaction(transaction: TokenTransaction): boolean {
   );
 }
 
-const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
+export const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
   switch (role) {
     case "mint":
       return AuthorityType.MintTokens as MosaicAuthorityRole;
@@ -119,6 +119,8 @@ const mapAuthorityRole = (role: AuthorityRole): MosaicAuthorityRole => {
       return AuthorityType.PermanentDelegate as MosaicAuthorityRole;
     case "metadata":
       return "Metadata" as MosaicAuthorityRole;
+    case "confidentialTransfer":
+      return AuthorityType.ConfidentialTransferMint as MosaicAuthorityRole;
   }
 };
 

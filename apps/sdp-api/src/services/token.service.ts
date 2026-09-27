@@ -1894,7 +1894,7 @@ export class TokenService {
   async applySettledTokenAuthority(
     transactionId: string,
     tokenId: string,
-    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata" | "confidentialTransfer",
     newAuthority: string | null
   ): Promise<void> {
     const tokenScope = this.tenantTokenScope("t");
@@ -1975,7 +1975,7 @@ export class TokenService {
   private async applyTokenAuthorityMirror(
     tx: DatabaseExecutor,
     tokenId: string,
-    role: "mint" | "freeze" | "permanentDelegate" | "metadata",
+    role: "mint" | "freeze" | "permanentDelegate" | "metadata" | "confidentialTransfer",
     newAuthority: string | null,
     now: string
   ): Promise<void> {
@@ -2014,6 +2014,36 @@ export class TokenService {
           "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'metadataAuthority'"
         )
         .bind(tokenId)
+        .run();
+      return;
+    }
+
+    if (role === "confidentialTransfer") {
+      const updated = await tx
+        .prepare(`UPDATE issued_tokens SET updated_at = ? WHERE id = ?${tokenMutation.clause}`)
+        .bind(now, tokenId, ...tokenMutation.values)
+        .run();
+      if (updated !== 1) throw new Error("TOKEN_NOT_FOUND");
+
+      // The confidential-transfer authority has no dedicated column; the
+      // extension row is the mirror (read back through token.extensions).
+      if (newAuthority === null) {
+        await tx
+          .prepare(
+            "DELETE FROM issued_token_extensions WHERE token_id = ? AND extension = 'confidentialTransfer'"
+          )
+          .bind(tokenId)
+          .run();
+        return;
+      }
+
+      await tx
+        .prepare(
+          `INSERT INTO issued_token_extensions (id, token_id, extension, config, created_at)
+           VALUES (?, ?, 'confidentialTransfer', ?, ?)
+           ON CONFLICT(token_id, extension) DO UPDATE SET config = excluded.config`
+        )
+        .bind(`tex_${crypto.randomUUID()}`, tokenId, JSON.stringify(newAuthority), now)
         .run();
       return;
     }
