@@ -341,13 +341,15 @@ async function compensateRejectedVerification(
       { principalId: pcUser.id, instanceId: instance.id, claimError },
       "private-channel wallet: could not claim the late-binding cleanup after a rejected mirror"
     );
-    // The claim failed, so cleanup stays undecided and nothing is deleted.
-    // Retry the claim once first — a transient persistence failure should
-    // not latch verifications for a whole marker lease — and only then
-    // record the retry marker without advancing the epoch (best effort).
-    // The marker is skipped for a mirror this identity already re-created,
-    // whose binding must survive, and for a marker whose cleaner may still
-    // be running.
+    // The claim failed, so nothing is deleted. Retry the claim once first —
+    // a transient persistence failure should not latch verifications for a
+    // whole marker lease — and when the cleanup still cannot be decided,
+    // record the retry marker without advancing the epoch (best effort). A
+    // stand-down for a pending marker whose re-claim then failed must fall
+    // back too: this request's own handshake may have created a binding that
+    // neither a mirror nor the pending cleaner's delete covers. The record is
+    // skipped for a mirror this identity already re-created (whose binding
+    // must survive) and for a marker whose cleaner may still be running.
     try {
       cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup(claimInput))
         ? "claimed"
@@ -358,7 +360,7 @@ async function compensateRejectedVerification(
         "private-channel wallet: cleanup claim retry failed after a rejected mirror"
       );
     }
-    if (cleanup === "undecided") {
+    if (cleanup !== "claimed") {
       await recordPendingRevocation(env, claimInput);
     }
   }
