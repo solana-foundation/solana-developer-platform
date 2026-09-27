@@ -2567,6 +2567,62 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("resumes a provable legacy replacement without probing its recorded signature outcomes", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const { activated, replacementCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
+      attemptId: "prpu_stale_legacy_source_change",
+      // The retried custody wallet proves the recorded identity through the
+      // replacement plan owner, so the recovery decision never needs the
+      // on-chain outcome of the recorded authorization signature: resuming
+      // the attempt must not spend a confirmation round trip on it before
+      // (or inside) the claim — an unavailable RPC must never fail a retry
+      // that can otherwise resume.
+      plan: {
+        id: "psp_stale_legacy_resumable_authorization",
+        ownerAddress: sourceSigner.address,
+        withSignature: true,
+      },
+      withAuthorizationSignature: true,
+    });
+    const confirmsBeforeRecovery = confirmTransactionMock.mock.calls.length;
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    const updateBody = await parseRecurringResponse(updateRes);
+    expect(updateBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      sourceCustodyWalletId: replacementCustodyWalletId,
+    });
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, authorization_signature
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{ status: string; authorization_signature: string | null }>();
+    expect(attempt?.status).toBe("confirmed");
+    expect(attempt?.authorization_signature).not.toBeNull();
+
+    // The recovery itself confirms nothing: the three confirmations are the
+    // execution re-confirming its own recorded plan creation and
+    // authorization signatures plus the fresh old-subscription cancellation.
+    expect(confirmTransactionMock.mock.calls.length - confirmsBeforeRecovery).toBe(3);
+    // Only the old-subscription cancellation is submitted; the recorded plan
+    // creation and authorization steps are resumed, not repeated.
+    expect(signAndSendMock).toHaveBeenCalledTimes(3);
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
