@@ -485,6 +485,12 @@ jobs:
           echo "::notice title=Fork-safe unit tests::Doppler OIDC authentication is unavailable to forked pull requests, so unit tests are running with local defaults instead of Doppler dev_ci secrets."
           node scripts/run-workspace-tests.mjs unit
 
+      # ephemeral-env.sh converts Cloud Run's YAML exports with PyYAML and the
+      # ephemeral-env script tests exercise that deploy path, so install the
+      # dependency explicitly instead of relying on the runner image shipping it.
+      - name: Install PyYAML for script tests
+        run: python3 -m pip install --user --break-system-packages "pyyaml==6.0.3"
+
       - name: Scripts tests
         run: pnpm test:scripts
 
