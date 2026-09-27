@@ -1201,6 +1201,106 @@ describe("CustodyRuntimeTargets", () => {
       default_custody_connection_id: null,
     });
   });
+
+  /**
+   * The Rings owner resolver's connection fallback reads through here, so the
+   * ordering contract is load-bearing: a connection that can sign now must
+   * beat one that cannot, and the lookup must be scoped to the one address —
+   * not a sweep of every wallet in the tenant.
+   */
+  it("findConnectionWalletsByAddress orders can-sign rows before blocked ones", async () => {
+    const healthy = await seedConnection({ id: "cconn_healthy", credentialId: "pcred_healthy" });
+    // A second connection whose last check did not succeed: same key, but its
+    // runtime admission would refuse to sign right now.
+    await seedConnection({
+      id: "cconn_stale",
+      credentialId: "pcred_stale",
+      lastCheckStatus: "retry_unknown",
+    });
+    await seedConnectionWallet("cconn_stale", "cwlt_cconn_stale_second");
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    const wallets = await targets.findConnectionWalletsByAddress({
+      organizationId: ORGANIZATION_ID,
+      projectId: PROJECT_ID,
+      publicKey: CONNECTION_PUBLIC_KEY,
+    });
+
+    expect(wallets).toEqual([
+      { id: `cwlt_${healthy.id}`, provider: "privy" },
+      { id: "cwlt_cconn_stale", provider: "privy" },
+      { id: "cwlt_cconn_stale_second", provider: "privy" },
+    ]);
+  });
+
+  it("findConnectionWalletsByAddress is scoped to the tenant and the queried address", async () => {
+    await seedConnection();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    // Another organization's row holding the same key must not leak in.
+    await getDb(env)
+      .prepare(
+        `INSERT INTO organizations (id, name, slug, tier, status)
+         VALUES ('org_other', 'Other Org', 'other-org', 'individual', 'active')`
+      )
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO provider_credentials (
+           id, organization_id, project_id, provider, label, scope, source,
+           storage_backend, encrypted_secret_payload, status, credential_version, created_by
+         ) VALUES ('pcred_other_org', 'org_other', ?, 'privy', 'Other', 'project',
+                   'stored', 'encrypted_db', 'ciphertext', 'active', 1, ?)`
+      )
+      .bind(PROJECT_ID, USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_connections (
+           id, organization_id, project_id, provider, scope,
+           provider_credential_id, provider_credential_scope_key,
+           status, created_by
+         ) VALUES ('cconn_other_org', 'org_other', ?, 'privy', 'project',
+                   'pcred_other_org', ?, 'pending', ?)`
+      )
+      .bind(PROJECT_ID, PROJECT_ID, USER_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO custody_wallets (
+           id, custody_connection_id, wallet_id, public_key, status
+         ) VALUES ('cwlt_other_org', 'cconn_other_org', 'wallet_other_org', ?, 'active')`
+      )
+      .bind(CONNECTION_PUBLIC_KEY)
+      .run();
+    await getDb(env)
+      .prepare(
+        `UPDATE custody_connections
+         SET status = 'active', last_check_status = 'success',
+             last_check_at = sdp_iso_now(), activated_at = sdp_iso_now(),
+             provider_account_fingerprint = 'sha256:other-org',
+             default_custody_wallet_id = 'cwlt_other_org'
+         WHERE id = 'cconn_other_org'`
+      )
+      .run();
+
+    await expect(
+      targets.findConnectionWalletsByAddress({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        publicKey: CONNECTION_PUBLIC_KEY,
+      })
+    ).resolves.toEqual([{ id: "cwlt_cconn_runtime_targets", provider: "privy" }]);
+
+    // A different address (or a non-active wallet) is not listed.
+    await expect(
+      targets.findConnectionWalletsByAddress({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        publicKey: SECOND_CONNECTION_PUBLIC_KEY,
+      })
+    ).resolves.toEqual([]);
+  });
 });
 
 async function seedScope(): Promise<void> {
@@ -1327,6 +1427,18 @@ async function seedConnection(
       ),
   ]);
   return { id, credentialId, walletId };
+}
+
+/** One more active wallet on an existing connection, holding the same key. */
+async function seedConnectionWallet(connectionId: string, id: string): Promise<void> {
+  await getDb(env)
+    .prepare(
+      `INSERT INTO custody_wallets (
+         id, custody_connection_id, wallet_id, public_key, status
+       ) VALUES (?, ?, ?, ?, 'active')`
+    )
+    .bind(id, connectionId, `privy_${id}`, CONNECTION_PUBLIC_KEY)
+    .run();
 }
 
 async function setProjectDefault(

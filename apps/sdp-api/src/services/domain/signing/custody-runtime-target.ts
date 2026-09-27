@@ -435,6 +435,60 @@ export class CustodyRuntimeTargets {
     return wallets.get(params.publicKey) ?? [];
   }
 
+  /**
+   * Active connection-owned custody wallets holding one address, ordered the
+   * way a signer resolution wants them: rows whose connection can sign now
+   * first, then the rest oldest first with ID as a tie-break (the SQL orders
+   * oldest-first and the split below preserves it). An indexed read
+   * (`idx_custody_wallets_public_key`) scoped to the tenant, so resolving one
+   * owner neither sweeps every wallet in scope nor fetches organization-wide
+   * provider availability. A row that cannot sign now stays listed: when
+   * nothing else holds the key it is the candidate whose runtime admission
+   * names the paused or unavailable custody state.
+   */
+  async findConnectionWalletsByAddress(params: {
+    organizationId: string;
+    projectId: string;
+    publicKey: string;
+  }): Promise<Array<{ id: string; provider: CustodyProvider }>> {
+    const rows = await this.db.queryMany<
+      CustodyConnectionRuntimeAvailabilityFacts & { id: string; provider: string }
+    >(
+      `SELECT w.id, c.provider,
+              c.status AS connection_status, c.last_check_status,
+              pc.status AS credential_status, c.provider_account_fingerprint,
+              c.default_custody_wallet_id,
+              default_wallet.wallet_id AS default_wallet_id,
+              default_wallet.public_key AS default_wallet_public_key,
+              default_wallet.status AS default_wallet_status
+         FROM custody_wallets w
+         JOIN custody_connections c ON c.id = w.custody_connection_id
+         JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+         LEFT JOIN custody_wallets default_wallet
+           ON default_wallet.id = c.default_custody_wallet_id
+          AND default_wallet.custody_connection_id = c.id
+        WHERE w.public_key = ?
+          AND w.status = 'active'
+          AND c.organization_id = ?
+          AND c.project_id = ?
+        ORDER BY w.created_at ASC, w.id ASC`,
+      [params.publicKey, params.organizationId, params.projectId]
+    );
+
+    const signable: Array<{ id: string; provider: CustodyProvider }> = [];
+    const blocked: Array<{ id: string; provider: CustodyProvider }> = [];
+    for (const row of rows) {
+      const provider = this.parseProvider(row.provider);
+      (isCustodyConnectionOwnerRuntimeAvailable(this.env, provider, row) ? signable : blocked).push(
+        {
+          id: row.id,
+          provider,
+        }
+      );
+    }
+    return [...signable, ...blocked];
+  }
+
   /** Batch equivalent of {@link findOperationalWalletIdsByAddress}, oldest first per address. */
   async findOperationalWalletIdsByAddresses(params: {
     organizationId: string;

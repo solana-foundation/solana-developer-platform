@@ -20,6 +20,7 @@ import {
   type TransactionSigner,
 } from "@solana/signers";
 import { getDb } from "@/db";
+import { AppError } from "@/lib/errors";
 import type { SigningProviderType } from "@/services/adapters/signing";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { createOrgSignerForCustodyWallet } from "@/services/solana/signer";
@@ -311,25 +312,29 @@ async function resolveOwnerSigner(
 /**
  * Fallback for owners held by connection-owned custody wallets, resolved
  * through the same tenant-scoped, connection-aware path every runtime flow
- * uses. Candidates already carry the owner's key, so the only choice is which
- * row to build the signer from; the projection's deterministic order (default
- * wallet first, then oldest) picks it, and the resolved signer's key is
- * verified below either way.
+ * uses. The lookup is address-scoped — the config path above already settled
+ * config-owned rows — and orders candidates so a connection that can sign now
+ * beats one that cannot: when several rows hold the owner's key, the signer is
+ * built from the row whose connection can actually serve the signature, and a
+ * paused or unavailable connection is chosen only when nothing else holds the
+ * key, in which case its runtime admission names the custody state. Either way
+ * the signer is built from one exact custody-wallet row and must still hold
+ * the owner's key.
  */
 async function resolveConnectionOwnerSigner(
   input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
 ): Promise<TransactionSigner> {
-  const connectionWallets = (
-    await new CustodyRuntimeTargets(getDb(input.env), input.env, new Map()).listWallets({
-      organizationId: input.organizationId,
-      projectId: input.projectId,
-      includeAllProviders: true,
-    })
-  ).filter(
-    (wallet) => wallet.publicKey === input.owner && wallet.custodyConnectionId !== undefined
-  );
+  const candidates = await new CustodyRuntimeTargets(
+    getDb(input.env),
+    input.env,
+    new Map()
+  ).findConnectionWalletsByAddress({
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    publicKey: input.owner,
+  });
 
-  const candidate = connectionWallets[0];
+  const candidate = candidates[0];
   if (!candidate) {
     throw new SigningError(`custody does not control ${input.owner}`, "WALLET_NOT_FOUND");
   }
@@ -378,11 +383,36 @@ async function ownerSignerForWalletRecord(
   return signer;
 }
 
+/**
+ * Runtime admission refusals, raised while building the signer for one exact
+ * custody-wallet row: the connection is paused or otherwise unavailable, or
+ * the provider is not entitled on this tier. Nothing signed and nothing broke,
+ * and no retry fixes them — custody (or the tier) has to change first. Mapping
+ * them like any other unknown error would file a paused connection as a
+ * retryable signing failure, which Rings reports as a service outage instead
+ * of the custody state that names the fix.
+ */
+const RUNTIME_ADMISSION_FAILURE_REASONS = new Set([
+  "runtime_execution_paused",
+  "runtime_execution_unavailable",
+  "provider_not_entitled",
+]);
+
 function toSignerFailure(error: unknown): RingsAdapterError {
   if (error instanceof RingsAdapterError) return error;
   if (error instanceof SigningError) {
     return new RingsAdapterError("signer_failed", error.message, {
       retryable: !NON_RETRYABLE_SIGNING_CODES.has(error.code),
+      cause: error,
+    });
+  }
+  if (
+    error instanceof AppError &&
+    typeof error.details?.reason === "string" &&
+    RUNTIME_ADMISSION_FAILURE_REASONS.has(error.details.reason)
+  ) {
+    return new RingsAdapterError("signer_failed", error.message, {
+      retryable: false,
       cause: error,
     });
   }

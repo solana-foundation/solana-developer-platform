@@ -20,6 +20,7 @@ import {
   type TransactionPartialSigner,
 } from "@solana/signers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/errors";
 import type { Env } from "@/types/env";
 import { RingsAdapterError } from "./adapter-error";
 import { submitRingsOuterTransaction } from "./rpc-adapter";
@@ -35,7 +36,7 @@ const env = {} as Env;
 // Only the resolution path uses these; a test that passes `signer` does not.
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
-const listOperationalWallets = vi.hoisted(() => vi.fn());
+const findConnectionWalletsByAddress = vi.hoisted(() => vi.fn());
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/stores/custody-config.store", () => ({
@@ -45,7 +46,7 @@ vi.mock("@/services/stores/custody-config.store", () => ({
 }));
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
-    listWallets = listOperationalWallets;
+    findConnectionWalletsByAddress = findConnectionWalletsByAddress;
   },
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
@@ -97,36 +98,16 @@ function signInput(overrides: Partial<Parameters<typeof signRingsOuterTransactio
   };
 }
 
-/** What CustodyRuntimeTargets.listWallets projects for a connection-owned row. */
-function connectionWalletProjection(
-  overrides: {
-    id?: string;
-    custodyConnectionId?: string;
-    provider?: string;
-    isDefaultProvider?: boolean;
-    isRuntimeExecutionAllowed?: boolean;
-    walletId?: string;
-    publicKey?: string;
-    label?: string | null;
-    purpose?: string | null;
-    status?: "active";
-    createdAt?: string;
-  } = {}
-) {
-  return {
-    id: "cwlt_connection_owner",
-    custodyConnectionId: "cconn_1",
-    provider: "privy",
-    isDefaultProvider: false,
-    isRuntimeExecutionAllowed: true,
-    walletId: "privy_connection_wallet",
-    publicKey: FEE_PAYER,
-    label: null,
-    purpose: null,
-    status: "active",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    ...overrides,
-  };
+/**
+ * What CustodyRuntimeTargets.findConnectionWalletsByAddress returns for one
+ * row: the custody-wallet record id to build the signer from, can-sign rows
+ * ordered before blocked ones.
+ */
+function connectionCandidate(overrides: { id?: string; provider?: string } = {}): {
+  id: string;
+  provider: string;
+} {
+  return { id: "cwlt_connection_owner", provider: "privy", ...overrides };
 }
 
 function rejection(promise: Promise<unknown>) {
@@ -214,7 +195,7 @@ describe("signRingsOuterTransaction", () => {
     // key moves the wrong money.
     it("refuses an owner custody does not control", async () => {
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([]);
+      findConnectionWalletsByAddress.mockResolvedValue([]);
 
       const error = await rejection(signRingsOuterTransaction(signInput({ owner: OTHER_KEY })));
 
@@ -315,15 +296,21 @@ describe("signRingsOuterTransaction", () => {
     it("signs through a connection-owned custody row when the config lookup misses", async () => {
       const signature = new Uint8Array(64).fill(9) as SignatureBytes;
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([connectionWalletProjection()]);
+      findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
       createOrgSignerForCustodyWallet.mockResolvedValue(
         partialSigner(async () => [{ [FEE_PAYER]: signature }])
       );
 
       const signed = await signRingsOuterTransaction(signInput());
 
-      expect(listOperationalWallets).toHaveBeenCalledWith(
-        expect.objectContaining({ organizationId: "org_1", projectId: "prj_1" })
+      // Address-scoped: the lookup is keyed by the owner's key, not a sweep of
+      // every wallet in scope.
+      expect(findConnectionWalletsByAddress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org_1",
+          projectId: "prj_1",
+          publicKey: FEE_PAYER,
+        })
       );
       expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
         env,
@@ -339,7 +326,7 @@ describe("signRingsOuterTransaction", () => {
     it("signs the derivation message through a connection-owned custody row", async () => {
       const signature = new Uint8Array(64).fill(11);
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([connectionWalletProjection()]);
+      findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
       createOrgSignerForCustodyWallet.mockResolvedValue(messageSigner(signature));
 
       const result = await signRingsMessage(resolveMessageInput());
@@ -353,13 +340,37 @@ describe("signRingsOuterTransaction", () => {
       );
     });
 
+    // The lookup orders can-sign rows first; the resolver must honor that
+    // order, so when several rows hold the owner's key the one whose
+    // connection can actually serve the signature is used.
+    it("signs through the first connection row the lookup orders first", async () => {
+      const signature = new Uint8Array(64).fill(13) as SignatureBytes;
+      findActiveWalletByPublicKey.mockResolvedValue(null);
+      findConnectionWalletsByAddress.mockResolvedValue([
+        connectionCandidate({ id: "cwlt_connection_can_sign" }),
+        connectionCandidate({ id: "cwlt_connection_blocked" }),
+      ]);
+      createOrgSignerForCustodyWallet.mockResolvedValue(
+        partialSigner(async () => [{ [FEE_PAYER]: signature }])
+      );
+
+      await signRingsOuterTransaction(signInput());
+
+      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+        env,
+        "org_1",
+        "prj_1",
+        "cwlt_connection_can_sign"
+      );
+    });
+
     // The provider gate does not stop at the config path: a connection wallet
     // whose provider cannot reproducibly sign raw messages must be refused
     // before anything is signed, for the same reason a config wallet is.
     it("refuses a connection wallet whose provider cannot reproducibly sign raw messages", async () => {
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([
-        connectionWalletProjection({ provider: "fireblocks" }),
+      findConnectionWalletsByAddress.mockResolvedValue([
+        connectionCandidate({ provider: "fireblocks" }),
       ]);
 
       const error = await rejection(signRingsMessage(resolveMessageInput()));
@@ -369,13 +380,11 @@ describe("signRingsOuterTransaction", () => {
       expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
     });
 
-    // Scope: only rows holding the owner's key are eligible, whichever path
-    // lists them.
-    it("refuses when only connection rows holding a different key are listed", async () => {
+    // Scope: the connection lookup is keyed by the owner's address, so no rows
+    // back means custody holds no active connection wallet for this key.
+    it("refuses when the connection lookup holds no row for the owner's key", async () => {
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([
-        connectionWalletProjection({ publicKey: OTHER_KEY, id: "cwlt_connection_other" }),
-      ]);
+      findConnectionWalletsByAddress.mockResolvedValue([]);
 
       const error = await rejection(signRingsMessage(resolveMessageInput()));
 
@@ -387,7 +396,7 @@ describe("signRingsOuterTransaction", () => {
     // The custody row and its provider have diverged on the connection path too.
     it("refuses a connection signer that resolves a different key", async () => {
       findActiveWalletByPublicKey.mockResolvedValue(null);
-      listOperationalWallets.mockResolvedValue([connectionWalletProjection()]);
+      findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
       createOrgSignerForCustodyWallet.mockResolvedValue(
         partialSigner(
           async () => [{ [OTHER_KEY]: new Uint8Array(64) as SignatureBytes }],
@@ -399,6 +408,42 @@ describe("signRingsOuterTransaction", () => {
 
       expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
       expect((error as Error).message).toContain("cwlt_connection_owner");
+    });
+
+    /**
+     * Runtime admission refused the exact custody-wallet row: the connection is
+     * paused or unavailable, or the provider is not entitled. Nothing signed
+     * and nothing broke, and no retry fixes it — so it must not read as the
+     * retryable outage a generic failure would become.
+     */
+    it.each([
+      ["paused", "FORBIDDEN", "runtime_execution_paused"] as const,
+      ["unavailable", "CONFLICT", "runtime_execution_unavailable"] as const,
+      ["not entitled", "FORBIDDEN", "provider_not_entitled"] as const,
+    ])(
+      "reports a %s connection as a non-retryable custody state, not a retryable outage",
+      async (_state, code, reason) => {
+        findActiveWalletByPublicKey.mockResolvedValue(null);
+        findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
+        createOrgSignerForCustodyWallet.mockRejectedValue(
+          new AppError(code, `connection is ${_state}`, { reason })
+        );
+
+        const error = await rejection(signRingsOuterTransaction(signInput()));
+
+        expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+        expect((error as Error).message).toContain(_state);
+      }
+    );
+
+    it("maps a non-admission custody failure to a retryable signer_failed", async () => {
+      findActiveWalletByPublicKey.mockResolvedValue(null);
+      findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
+      createOrgSignerForCustodyWallet.mockRejectedValue(new Error("provider socket dropped"));
+
+      const error = await rejection(signRingsOuterTransaction(signInput()));
+
+      expect(error).toMatchObject({ failureCode: "signer_failed", retryable: true });
     });
 
     it("maps a custody resolution failure through the signer's retry classification", async () => {
