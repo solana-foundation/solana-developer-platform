@@ -371,6 +371,48 @@ describe("verifyPrivateChannelWallet", () => {
     );
   });
 
+  it("revokes a late SPC binding when a revocation won the epoch race against an active identity", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    // The verification observed epoch 0 before the handshake; a revocation
+    // committed by the time the rejected upsert re-reads the epoch.
+    verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
+    });
+
+    // The winning revocation's SPC delete may have run before this request's
+    // verify-wallet created the binding, so the compensation must still run —
+    // but an active identity records no cleanup marker.
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+    expect(verifiedRepo.recordPendingRevocation).not.toHaveBeenCalled();
+  });
+
+  it("records a cleanup marker for a disabled identity even when a revocation won the race", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
+    principalRepo.getById.mockResolvedValue({
+      ...pcUser,
+      disabled_at: "2026-08-31T00:00:00.000Z",
+    });
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
+  });
+
   it("keeps a cleanup marker when late-binding revocation fails", async () => {
     verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
     principalRepo.getById.mockResolvedValue({

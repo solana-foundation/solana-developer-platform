@@ -12,7 +12,10 @@
  * (instance, pubkey): a revocation advances it in the same transaction that
  * removes the mirror, so an in-flight verification whose upstream binding was
  * concurrently revoked cannot recreate `private_channel_verified_wallets`
- * after `deleteWallet` succeeded (SOLA9-664).
+ * after `deleteWallet` succeeded (SOLA9-664). When the epoch race is lost, the
+ * upstream binding this request created is revoked again (idempotent) and a
+ * disabled identity first records a durable retry marker, so no late binding
+ * survives a completed cleanup.
  *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
@@ -248,11 +251,9 @@ export async function verifyPrivateChannelWallet(
       expectedRevocationEpoch: observedRevocationEpoch,
     });
   } catch (error) {
-    // A revocation can win while the remote verification is in flight: its
-    // epoch advance rejects this upsert. Re-read the epoch to tell that race
-    // apart from a persistence failure — the SPC binding this request created
-    // was already removed by the winning revocation, so no compensating call
-    // is needed and the mirror stays deleted.
+    // A revocation or a principal disable can win while the remote
+    // verification is in flight; its epoch advance rejects this upsert.
+    // Re-read the epoch to tell that race apart from a persistence failure.
     let revokedWhileVerifying = false;
     try {
       revokedWhileVerifying =
@@ -262,11 +263,6 @@ export async function verifyPrivateChannelWallet(
       getLogger().warn(
         { principalId: pcUser.id, instanceId: instance.id, statusError },
         "private-channel wallet: could not check the revocation epoch after a rejected mirror"
-      );
-    }
-    if (revokedWhileVerifying) {
-      throw conflict(
-        "This wallet verification was revoked while it was being verified. Start the verification again."
       );
     }
     // A disable can win while the remote verification is in flight. Only undo
@@ -282,25 +278,37 @@ export async function verifyPrivateChannelWallet(
         "private-channel wallet: could not check identity state after a rejected mirror"
       );
     }
-    if (disabled) {
+    if (revokedWhileVerifying || disabled) {
+      // The winning revocation's SPC delete may have run BEFORE this request's
+      // verify-wallet created the upstream binding, so the completed cleanup
+      // did not necessarily cover the binding this request just created. The
+      // compensating delete is idempotent (SPC answers 400 for an already
+      // unlinked wallet and that converges), so always run it after a lost
+      // race. For a disabled identity, persist the durable retry marker first:
+      // if SPC is unavailable, the next disable retry enumerates this row and
+      // tries the revocation again.
       try {
-        // Persist a durable cleanup marker before the compensating network
-        // call. If SPC is unavailable, the next disable retry can enumerate
-        // this row and try the revocation again.
-        await verifiedWalletRepo.recordPendingRevocation({
-          ...scope,
-          userId: pcUser.id,
-          instanceId: instance.id,
-          walletId,
-          pubkey,
-        });
+        if (disabled) {
+          await verifiedWalletRepo.recordPendingRevocation({
+            ...scope,
+            userId: pcUser.id,
+            instanceId: instance.id,
+            walletId,
+            pubkey,
+          });
+        }
         await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
       } catch (cleanupError) {
         getLogger().warn(
           { principalId: pcUser.id, instanceId: instance.id, cleanupError },
-          "private-channel wallet: could not revoke a late binding for a disabled identity"
+          "private-channel wallet: could not revoke a late binding after a rejected mirror"
         );
       }
+    }
+    if (revokedWhileVerifying) {
+      throw conflict(
+        "This wallet verification was revoked while it was being verified. Start the verification again."
+      );
     }
     throw error;
   }

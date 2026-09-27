@@ -359,4 +359,71 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_1" });
   });
+
+  it("an upsert overlapping an uncommitted revocation cannot resurrect the mirror", async () => {
+    // The mirror from an earlier verification; no revocation has happened yet,
+    // so the epoch row does not exist and this upsert creates it at 0.
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+
+    const db = getDb(env);
+    let releaseRevocation!: () => void;
+    const revocationGate = new Promise<void>((resolve) => {
+      releaseRevocation = resolve;
+    });
+    let signalRevocationApplied!: () => void;
+    const revocationApplied = new Promise<void>((resolve) => {
+      signalRevocationApplied = resolve;
+    });
+
+    // The local half of a first-ever revocation, applied but left uncommitted
+    // while the overlapping upsert runs: the epoch advance (which creates the
+    // row) plus the mirror removal, in the revocation's statement order.
+    const revocation = db.transaction(async (tx) => {
+      await tx
+        .prepare(
+          `INSERT INTO private_channel_wallet_revocation_epochs (
+               organization_id, project_id, instance_id, pubkey, epoch
+             )
+             VALUES (?, ?, ?, ?, 1)
+           ON CONFLICT (instance_id, pubkey) DO UPDATE
+             SET epoch = private_channel_wallet_revocation_epochs.epoch + 1`
+        )
+        .bind(scope.organizationId, scope.projectId, instanceA, PUBKEY_A)
+        .run();
+      await tx
+        .prepare(
+          "DELETE FROM private_channel_verified_wallets WHERE user_id = ? AND instance_id = ? AND pubkey = ?"
+        )
+        .bind(PCU_ID, instanceA, PUBKEY_A)
+        .run();
+      signalRevocationApplied();
+      await revocationGate;
+    });
+    await revocationApplied;
+
+    // The overlapping verification observed epoch 0 before its SPC handshake.
+    // It must lose once the revocation commits, however long it waits.
+    const overlappingUpsert = repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_overlap",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+    const upsertLoses = expect(overlappingUpsert).rejects.toMatchObject({ code: "CONFLICT" });
+    releaseRevocation();
+    await revocation;
+
+    await upsertLoses;
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+  });
 });

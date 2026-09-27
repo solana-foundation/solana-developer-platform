@@ -15,58 +15,84 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
 ): PrivateChannelVerifiedWalletRepository {
   return {
     async upsert(input: ConditionalUpsertVerifiedWalletInput) {
-      const row = await db
-        .prepare(
-          `WITH active_principal AS (
-             SELECT id
-                FROM private_channel_users
-               WHERE id = ?
-                 AND organization_id = ?
-                 AND project_id = ?
-                 AND instance_id = ?
-                 AND disabled_at IS NULL
-                 AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
-               FOR UPDATE
-           ),
-           revocation_epoch AS (
-             SELECT COALESCE(
-                      (SELECT epoch
-                         FROM private_channel_wallet_revocation_epochs
-                        WHERE instance_id = ?
-                          AND pubkey = ?),
-                      0
-                    ) AS epoch
-           )
-           INSERT INTO private_channel_verified_wallets (
-               id, organization_id, project_id, user_id, instance_id,
-               wallet_id, pubkey
+      const row = await db.transaction(async (tx) => {
+        // Barrier half 1 (SOLA9-664): make sure the epoch row exists. A
+        // first-ever revocation inserts this row in its own transaction, so a
+        // plain `SELECT ... FOR UPDATE` of an absent row would lock nothing
+        // and that revocation could still interleave with the mirror write.
+        await tx
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocation_epochs (
+                 organization_id, project_id, instance_id, pubkey, epoch
+               )
+               VALUES (?, ?, ?, ?, 0)
+             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+          )
+          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .run();
+
+        // Barrier half 2: lock the epoch row for the rest of the transaction.
+        // Every revocation advances this row before it removes a mirror, so
+        // either it committed first (this read observes the advanced epoch and
+        // the write below is refused) or it blocks until this transaction
+        // commits and then removes the mirror it writes. Reading the epoch
+        // without this lock would let an uncommitted revocation's mirror
+        // delete absorb the insert's conflict wait and resurrect the mirror
+        // with a stale epoch check.
+        const epochRow = await tx
+          .prepare(
+            `SELECT epoch
+                FROM private_channel_wallet_revocation_epochs
+               WHERE instance_id = ?
+                 AND pubkey = ?
+               FOR UPDATE`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .first<{ epoch: number }>();
+        if ((epochRow?.epoch ?? 0) !== input.expectedRevocationEpoch) {
+          return null;
+        }
+
+        return tx
+          .prepare(
+            `WITH active_principal AS (
+               SELECT id
+                  FROM private_channel_users
+                 WHERE id = ?
+                   AND organization_id = ?
+                   AND project_id = ?
+                   AND instance_id = ?
+                   AND disabled_at IS NULL
+                   AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+                 FOR UPDATE
              )
-             SELECT ?, ?, ?, id, ?, ?, ?
-               FROM active_principal
-              WHERE (SELECT epoch FROM revocation_epoch) = ?
+             INSERT INTO private_channel_verified_wallets (
+                 id, organization_id, project_id, user_id, instance_id,
+                 wallet_id, pubkey
+               )
+               SELECT ?, ?, ?, id, ?, ?, ?
+                 FROM active_principal
              ON CONFLICT (instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
                    verified_at = sdp_iso_now(),
                    updated_at = sdp_iso_now()
              WHERE private_channel_verified_wallets.user_id = excluded.user_id
-           RETURNING *`
-        )
-        .bind(
-          input.userId,
-          input.organizationId,
-          input.projectId,
-          input.instanceId,
-          input.instanceId,
-          input.pubkey,
-          generatePrivateChannelVerifiedWalletId(),
-          input.organizationId,
-          input.projectId,
-          input.instanceId,
-          input.walletId,
-          input.pubkey,
-          input.expectedRevocationEpoch
-        )
-        .first<Record<string, unknown>>();
+             RETURNING *`
+          )
+          .bind(
+            input.userId,
+            input.organizationId,
+            input.projectId,
+            input.instanceId,
+            generatePrivateChannelVerifiedWalletId(),
+            input.organizationId,
+            input.projectId,
+            input.instanceId,
+            input.walletId,
+            input.pubkey
+          )
+          .first<Record<string, unknown>>();
+      });
       if (!row) {
         throw conflict(
           "This wallet is already linked to another identity. Select a different wallet."

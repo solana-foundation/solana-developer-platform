@@ -72,7 +72,12 @@ export interface PrivateChannelVerifiedWalletRepository {
    * `getRevocationEpoch`): when a revocation committed after the caller
    * observed `expectedRevocationEpoch`, the mirror is not written and this
    * rejects, so a stale verification continuation can never resurrect a mirror
-   * that a completed revocation removed.
+   * that a completed revocation removed. The check is not a plain read: the
+   * upsert creates the epoch row if absent and takes its row lock for the rest
+   * of the transaction, so a revocation that overlaps this write either
+   * commits before the locked epoch read (the write is refused) or blocks
+   * until the write commits and removes the mirror afterwards — the mirror can
+   * never outlive a revocation it overlaps.
    */
   upsert(input: ConditionalUpsertVerifiedWalletInput): Promise<PrivateChannelVerifiedWalletRow>;
   /**

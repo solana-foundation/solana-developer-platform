@@ -68,8 +68,13 @@ async function requestBody(req: IncomingMessage): Promise<Record<string, string>
  * Stands in for the connected SPC auth service. `gateVerify` holds the first
  * verify-wallet response until the test releases it, so the verify request's
  * local mirror write can be raced against a completed revocation.
+ * `bindOnRelease` makes the upstream binding land only when that response is
+ * released — a binding created after a revocation's own deleteWallet ran.
  */
-async function createAuthHarness(gateVerify: boolean): Promise<AuthHarness> {
+async function createAuthHarness(
+  gateVerify: boolean,
+  { bindOnRelease = false }: { bindOnRelease?: boolean } = {}
+): Promise<AuthHarness> {
   const upstreamWallets = new Set<string>();
   let verifyReceivedResolve!: () => void;
   let releaseVerify!: () => void;
@@ -96,10 +101,15 @@ async function createAuthHarness(gateVerify: boolean): Promise<AuthHarness> {
     }
     if (req.method === "POST" && path === "/auth/verify-wallet") {
       const body = await requestBody(req);
-      upstreamWallets.add(body.pubkey);
+      if (!bindOnRelease) {
+        upstreamWallets.add(body.pubkey);
+      }
       verifyReceivedResolve();
       if (gateVerify) {
         await verifyRelease;
+      }
+      if (bindOnRelease) {
+        upstreamWallets.add(body.pubkey);
       }
       return json(res, 200, { pubkey: body.pubkey, created_at: "2099-01-01T00:00:00.000Z" });
     }
@@ -336,6 +346,61 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
 
     // Release A: the stale verification continuation must not recreate the
     // mirror while SPC has no binding.
+    harness.releaseVerify();
+    const verifyResponse = await verifyPromise;
+    expect(verifyResponse.status).toBe(409);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
+  });
+
+  it("revokes a late upstream binding that lands after a completed revocation", async () => {
+    harness = await createAuthHarness(true, { bindOnRelease: true });
+    await getDb(env)
+      .prepare("UPDATE private_channel_instances SET auth_url = ? WHERE id = ?")
+      .bind(harness.url, INSTANCE_ID)
+      .run();
+    // The mirror row from the wallet's previous verification: it is what makes
+    // the concurrent DELETE a real revocation of a bound wallet.
+    await getDb(env)
+      .prepare(
+        "INSERT INTO private_channel_verified_wallets (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        "pcvw_wallet_race_late",
+        ORG_ID,
+        PROJECT_ID,
+        PRINCIPAL_ID,
+        INSTANCE_ID,
+        WALLET_ID,
+        signerAddress
+      )
+      .run();
+    harness.upstreamWallets.add(signerAddress);
+
+    // Request A: verify. Its SPC verify-wallet response is withheld, so the
+    // upstream binding it creates does not land yet.
+    const verifyPromise = app.request(
+      `/v1/private-channels/wallets/${WALLET_ID}/verify`,
+      { method: "POST", headers: apiHeaders(), body: "{}" },
+      env
+    );
+    await waitFor(harness.verifyReceived, "SPC verify-wallet");
+
+    // Request B: revoke to completion while A's response is withheld. Its SPC
+    // deleteWallet runs BEFORE A's binding lands, so the completed cleanup
+    // cannot have covered the binding A is about to create.
+    const deleteResponse = await app.request(
+      `/v1/private-channels/wallets/${encodeURIComponent(signerAddress)}`,
+      { method: "DELETE", headers: apiHeaders() },
+      env
+    );
+    expect(deleteResponse.status).toBe(200);
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+
+    // Release A: the binding lands after the completed revocation. The stale
+    // continuation must still lose (409, mirror stays deleted), and the late
+    // upstream binding must not survive the completed cleanup.
     harness.releaseVerify();
     const verifyResponse = await verifyPromise;
     expect(verifyResponse.status).toBe(409);
