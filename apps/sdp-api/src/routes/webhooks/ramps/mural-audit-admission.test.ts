@@ -1,4 +1,4 @@
-import { createSign, generateKeyPairSync } from "node:crypto";
+import { createHash, createSign, generateKeyPairSync, randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -265,11 +265,47 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
     ]);
   }
 
+  /**
+   * Seeds the durable intent a prior failed attempt of `deliveryId` would have
+   * left unresolved: its business transaction failed and its post-failure
+   * outcome write failed too, so the intent row has no matching outcome.
+   */
+  async function insertStrandedIntent(intentId: string, deliveryId: string): Promise<void> {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO audit_logs (
+           id, organization_id, action, resource_type, resource_id, metadata, request_id, status
+         ) VALUES (?, ?, 'maintenance', 'audit_ledger', ?, ?, ?, 'success')`
+      )
+      .bind(
+        `aud_${randomUUID()}`,
+        organizationId,
+        intentId,
+        JSON.stringify({
+          auditPhase: "intent",
+          target: {
+            action: "update",
+            resourceType: "counterparty",
+            resourceId: counterpartyId,
+            metadata: { provider: "mural", trigger: "mural_webhook", providerEventId: deliveryId },
+          },
+        }),
+        deliveryId
+      )
+      .run();
+  }
+
   async function signAndApply(
-    eventBody: Record<string, unknown>
+    eventBody: Record<string, unknown>,
+    options: {
+      /** Fixed timestamp, so the test can compute the delivery digest up front. */
+      timestamp?: string;
+      /** Runs after verification, before the stored delivery is applied. */
+      beforeApply?: (deliveryId: string) => Promise<void>;
+    } = {}
   ): Promise<{ applied: boolean; deliveryId: string }> {
     const body = JSON.stringify(eventBody);
-    const timestamp = new Date().toISOString();
+    const timestamp = options.timestamp ?? new Date().toISOString();
     const signature = createSign("SHA256")
       .update(`${timestamp}.${body}`)
       .sign(privateKey)
@@ -298,6 +334,9 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       requestUrl: "http://localhost/webhooks/payments/ramps/sandbox/mural",
     });
     const deliveryId = verifiedMuralWebhook.parse(verified).__sdpDeliveryId;
+    if (options.beforeApply) {
+      await options.beforeApply(deliveryId);
+    }
     const events = createPostgresRampWebhookEventsRepository(getDb(env));
     const stored = await events.insertEvent({
       provider: "mural",
@@ -961,5 +1000,183 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       oldStatus: null,
       newStatus: "approved",
     });
+  });
+
+  /**
+   * A retry whose earlier attempt stranded an unresolved intent (transaction
+   * failed, then the post-failure outcome write failed too) must resolve that
+   * intent: the locked row is not stamped by this delivery, so the earlier
+   * attempt provably did not commit and the stranded intent closes as aborted
+   * while the retry admits and applies its own.
+   */
+  it("resolves a stranded intent as aborted when a retry of the delivery applies", async () => {
+    await seedCounterparty({
+      mural: { organization: { id: muralOrganizationId, kycStatus: "pending" } },
+    });
+    const strandedIntentId = `aint_${randomUUID()}`;
+    const { applied, deliveryId } = await signAndApply(
+      {
+        id: "mural_event_regression_retry_resolves_aborted",
+        payload: {
+          type: "verification_status_changed",
+          organizationId: muralOrganizationId,
+          currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+        },
+      },
+      { beforeApply: (id) => insertStrandedIntent(strandedIntentId, id) }
+    );
+    expect(applied).toBe(true);
+
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{ provider_data: { mural?: { organization?: { kycStatus?: string } } } }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("approved");
+    expect(wallet?.kyc_status).toBe("verified");
+
+    // Two intents share the delivery id — the stranded one and the retry's
+    // own — and each has a linked outcome, so integrity verification sees
+    // neither as unresolved.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    expect(intents).toHaveLength(2);
+    expect(intents.map((row) => row.resource_id)).toContain(strandedIntentId);
+    expect(intents.every((row) => row.request_id === deliveryId)).toBe(true);
+
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(outcomes).toHaveLength(2);
+    const strandedOutcome = sole(
+      outcomes.filter((row) => parseMetadata(row).auditIntentId === strandedIntentId)
+    );
+    expect(strandedOutcome.status).toBe("failure");
+    expect((parseMetadata(strandedOutcome) as { result?: string }).result).toBe("aborted");
+    const retryIntentId = sole(
+      intents.filter((row) => row.resource_id !== strandedIntentId)
+    ).resource_id;
+    const retryOutcome = sole(
+      outcomes.filter((row) => parseMetadata(row).auditIntentId === retryIntentId)
+    );
+    expect(retryOutcome.status).toBe("success");
+    expect((parseMetadata(retryOutcome) as { result?: string }).result).toBe("applied");
+
+    // Every sealed ledger entry carries its append-only anchor.
+    const anchors = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM audit_ledger_anchors")
+      .first<{ count: number }>();
+    expect(anchors?.count).toBe(auditRows.length);
+  });
+
+  /**
+   * When a retry finds the durable state already stamped by its own delivery,
+   * the delivery is complete: its stranded intents close as applied and no
+   * duplicate intent is admitted for the same signed event.
+   */
+  it("resolves a stranded intent as applied and admits nothing new when the delivery already committed", async () => {
+    const timestamp = new Date().toISOString();
+    const eventBody = {
+      id: "mural_event_regression_retry_already_committed",
+      payload: {
+        type: "verification_status_changed",
+        organizationId: muralOrganizationId,
+        currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+      },
+    };
+    // Same digest the processor stamps on the verified body.
+    const body = JSON.stringify(eventBody);
+    const deliveryId = createHash("sha256").update(`${timestamp}.${body}`).digest("hex");
+    await seedCounterparty({
+      mural: {
+        organization: {
+          id: muralOrganizationId,
+          kycStatus: "approved",
+          __sdpLifecycleDeliveryId: deliveryId,
+        },
+      },
+    });
+    // The prior attempt's transaction committed both of its writes, so the
+    // normalized KYC wallet mirror landed with the counterparty patch.
+    await getDb(env)
+      .prepare("UPDATE kyc_wallets SET kyc_status = 'verified' WHERE id = ?")
+      .bind(kycWalletId)
+      .run();
+    const strandedIntentId = `aint_${randomUUID()}`;
+    const { applied } = await signAndApply(eventBody, {
+      timestamp,
+      beforeApply: (id) => insertStrandedIntent(strandedIntentId, id),
+    });
+    expect(applied).toBe(true);
+
+    // The committed mutation is untouched and the inbox row is acknowledged.
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{
+        provider_data: {
+          mural?: { organization?: { kycStatus?: string; __sdpLifecycleDeliveryId?: string } };
+        };
+      }>();
+    const wallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind(kycWalletId)
+      .first<{ kyc_status: string }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("approved");
+    expect(counterparty?.provider_data.mural?.organization?.__sdpLifecycleDeliveryId).toBe(
+      deliveryId
+    );
+    expect(wallet?.kyc_status).toBe("verified");
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(0);
+
+    // Only the stranded intent exists — no duplicate admission — and it is
+    // resolved as applied, naming the delivery that committed it.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    expect(intents).toHaveLength(1);
+    expect(sole(intents).resource_id).toBe(strandedIntentId);
+    expect(sole(intents).request_id).toBe(deliveryId);
+
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).status).toBe("success");
+    const outcomeMetadata = parseMetadata(sole(outcomes)) as {
+      auditIntentId?: string;
+      result?: string;
+      resolvedByRetry?: boolean;
+    };
+    expect(outcomeMetadata.auditIntentId).toBe(strandedIntentId);
+    expect(outcomeMetadata.result).toBe("applied");
+    expect(outcomeMetadata.resolvedByRetry).toBe(true);
+
+    // Every sealed ledger entry carries its append-only anchor.
+    const anchors = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM audit_ledger_anchors")
+      .first<{ count: number }>();
+    expect(anchors?.count).toBe(auditRows.length);
   });
 });

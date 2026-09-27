@@ -4,7 +4,7 @@ import type { MuralKycStatus } from "@sdp/payments/ramps/providers/mural/provide
 import type { RampWebhookValidationContext } from "@sdp/payments/ramps/types";
 import type { KycStatus, SdpEnvironment } from "@sdp/types";
 import { asTransactionalClient, getDb } from "@/db";
-import { asPostgresJsonObject } from "@/db/postgres-utils";
+import { asPostgresJsonObject, parseOptionalPostgresJson } from "@/db/postgres-utils";
 import {
   createPostgresCounterpartiesRepository,
   createPostgresKycWalletsRepository,
@@ -19,7 +19,13 @@ import { badRequest, providerNotConfigured, unauthorized } from "@/lib/errors";
 import { verifyWebhookSignature } from "@/lib/webhook-signature";
 import { createKVStoreSet } from "@/runtime/kv-redis";
 import { getLogger } from "@/runtime/logger";
-import { type AuditIntent, AuditService } from "@/services/audit.service";
+import {
+  type AuditIntent,
+  AuditService,
+  isAuditAction,
+  type ResourceType,
+  type SystemAuditLogEntry,
+} from "@/services/audit.service";
 import { applyRampSettlementEvent } from "@/services/payments/ramp-settlements";
 import type { Env } from "@/types/env";
 import type { WebhookProcessor } from "./processor";
@@ -245,6 +251,86 @@ function isStaleMuralKycStatus(
 }
 
 /**
+ * Outcome rows for any earlier attempt of this delivery whose durable intent
+ * is still unresolved — an attempt whose business transaction failed and whose
+ * post-failure outcome write failed too. The locked row's current state is the
+ * evidence that decides them all: state stamped by this delivery proves the
+ * earlier attempt committed, anything else proves it did not. Resolving them
+ * here means a successful retry closes the earlier intent instead of failing
+ * audit-ledger integrity verification forever despite the delivery succeeding.
+ */
+async function resolveStrandedLifecycleIntents(
+  client: DatabaseClient,
+  audit: AuditService,
+  deliveryId: string,
+  organizationId: string,
+  committed: boolean
+): Promise<void> {
+  const stranded = await client
+    .prepare(
+      `SELECT intent.resource_id, intent.request_id, intent.metadata
+         FROM audit_logs AS intent
+        WHERE intent.organization_id = ?
+          AND intent.request_id = ?
+          AND intent.action = 'maintenance'
+          AND intent.resource_type = 'audit_ledger'
+          AND pg_input_is_valid(intent.metadata, 'jsonb')
+          AND intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM audit_logs AS outcome
+             WHERE pg_input_is_valid(outcome.metadata, 'jsonb')
+               AND outcome.metadata::jsonb ->> 'auditPhase' = 'outcome'
+               AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+          )`
+    )
+    .bind(organizationId, deliveryId)
+    .all<{ resource_id: string | null; request_id: string | null; metadata: string | null }>();
+  for (const row of stranded.results) {
+    const intentId = row.resource_id;
+    if (!intentId) {
+      continue;
+    }
+    // The outcome mirrors the admitted operation the intent wrapped — not the
+    // maintenance wrapper — exactly what a same-attempt outcome write appends.
+    const intentMetadata = parseOptionalPostgresJson<Record<string, unknown>>(row.metadata);
+    const target =
+      intentMetadata && typeof intentMetadata.target === "object" && intentMetadata.target !== null
+        ? (intentMetadata.target as {
+            action?: string;
+            resourceType?: string;
+            resourceId?: string | null;
+            metadata?: Record<string, unknown>;
+          })
+        : undefined;
+    const targetAction = target?.action;
+    const entry: SystemAuditLogEntry = {
+      organizationId,
+      requestId: row.request_id ?? deliveryId,
+      action:
+        targetAction !== undefined && isAuditAction(targetAction)
+          ? targetAction
+          : ("maintenance" as const),
+      resourceType: (target?.resourceType ?? "audit_ledger") as ResourceType,
+      resourceId: target?.resourceId ?? intentId,
+      metadata: target?.metadata ?? undefined,
+    };
+    const resolved = await audit.completeCriticalSystem(
+      { id: intentId, entry },
+      committed
+        ? { metadata: { result: "applied", resolvedByRetry: true } }
+        : { status: "failure", metadata: { result: "aborted", resolvedByRetry: true } }
+    );
+    if (!resolved) {
+      getLogger().error(
+        { audit_intent_id: intentId, provider_event_id: deliveryId },
+        "[mural webhook] stranded lifecycle intent outcome was not persisted; left unresolved for reconciliation"
+      );
+    }
+  }
+}
+
+/**
  * One lookup-lock-apply pass against the current active owner of the event's
  * Mural organization. `"owner-changed"` means the row locked was removed,
  * archived, or no longer owns the organization: nothing was mutated or
@@ -346,6 +432,35 @@ async function applyMuralLifecycleToCurrentOwner(
         // stale for the current owner, and re-resolving cannot freshen it.
         getLogger().info(
           `[mural webhook] ignoring stale kyc status "${event.kycStatus}" for ${counterparty.id}`
+        );
+        return;
+      }
+      // Evidence about this delivery's earlier attempts, read under the lock:
+      // state stamped by THIS delivery with the target status proves one of
+      // them committed. Anything else proves none of them did — a status that
+      // merely matches is not proof (its stamp names an earlier delivery).
+      const stampedDeliveryId =
+        typeof currentOrganization?.__sdpLifecycleDeliveryId === "string"
+          ? currentOrganization.__sdpLifecycleDeliveryId
+          : undefined;
+      const effectiveStatus =
+        event.kind === "kyc_status"
+          ? currentOrganization?.kycStatus
+          : currentOrganization?.tosStatus;
+      const committed = effectiveStatus === newStatus && stampedDeliveryId === event.deliveryId;
+      await resolveStrandedLifecycleIntents(
+        client,
+        audit,
+        event.deliveryId,
+        counterparty.organization_id,
+        committed
+      );
+      if (committed) {
+        // The delivery itself is complete: its mutation is in effect and its
+        // stranded intents (if any) are resolved. Re-admitting would append a
+        // duplicate intent/outcome pair for one signed event.
+        getLogger().info(
+          `[mural webhook] lifecycle event ${event.kind} ${event.deliveryId} already committed for counterparty ${counterparty.id}; resolved its stranded intents without a duplicate admission`
         );
         return;
       }
