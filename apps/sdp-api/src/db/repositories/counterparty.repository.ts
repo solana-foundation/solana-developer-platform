@@ -19,6 +19,12 @@ export interface CreateCounterpartyInput {
   displayName: string;
   providerData: CounterpartyProviderData;
   createdBy: string | null;
+  /**
+   * Pre-generated row id. Callers that bracket the insert with a durable
+   * audit intent pass the id here so the intent can name the exact row the
+   * insert will create; the repository generates one when omitted.
+   */
+  id?: string;
 }
 
 export interface UpdateCounterpartyInput {

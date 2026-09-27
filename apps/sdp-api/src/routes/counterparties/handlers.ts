@@ -28,7 +28,10 @@ import { isCollectFieldsRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
-import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
+import {
+  type CounterpartyRow,
+  generateCounterpartyId,
+} from "@/db/repositories/counterparty.repository";
 import { bvnkCustomerProviderAccountMetadataSchema } from "@/db/repositories/counterparty-provider-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import { resolveCreatorUserId } from "@/lib/creator";
@@ -564,11 +567,16 @@ export const createCounterparty = async (
   // intent aborts before anything commits, and a crash between commit and
   // outcome leaves an unresolved intent the verification gate pages on —
   // the row can never change while the ledger holds no admission for it.
+  // The row id is generated up front so the durable intent can name the
+  // exact row the insert will create; otherwise an unresolved intent after
+  // a committed create would leave nothing to reconcile the row with.
+  const counterpartyId = generateCounterpartyId();
   const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "create",
     resourceType: "counterparty",
     metadata: {
+      counterpartyId,
       entityType: body.entityType,
     },
   });
@@ -576,6 +584,7 @@ export const createCounterparty = async (
   let counterparty: CounterpartyRow | null;
   try {
     counterparty = await repo.createCounterparty({
+      id: counterpartyId,
       organizationId: auth.organizationId,
       projectId,
       externalId: body.externalId ?? null,
@@ -603,6 +612,7 @@ export const createCounterparty = async (
   await auditService.completeCritical(c, auditIntent, {
     resourceId: counterparty.id,
     metadata: {
+      counterpartyId: counterparty.id,
       entityType: body.entityType,
     },
   });

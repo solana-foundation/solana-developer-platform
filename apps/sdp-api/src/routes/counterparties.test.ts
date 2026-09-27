@@ -3477,6 +3477,38 @@ describe("Counterparties Routes", () => {
       expect(row).toEqual({ status: "active" });
     });
 
+    it("records the created row id in the durable create intent", async () => {
+      // The intent is written before the repository generates the row, so it
+      // must carry the pre-generated id: an unresolved intent after a
+      // committed create has to name the exact row to reconcile.
+      const res = await createCounterparty({ externalId: "audit_intent_row_link" });
+      expect(res.status).toBe(201);
+      const cp = (await res.json()).data.counterparty;
+
+      const intent = await getDb(env)
+        .prepare(
+          `SELECT metadata::jsonb -> 'target' -> 'metadata' ->> 'counterpartyId' AS row_id
+           FROM audit_logs
+           WHERE metadata::jsonb ->> 'auditPhase' = 'intent'
+             AND metadata::jsonb -> 'target' ->> 'action' = 'create'
+             AND metadata::jsonb -> 'target' ->> 'resourceType' = 'counterparty'
+             AND metadata::jsonb -> 'target' -> 'metadata' ->> 'counterpartyId' = ?`
+        )
+        .bind(cp.id)
+        .first<{ row_id: string }>();
+      expect(intent).toEqual({ row_id: cp.id });
+
+      const outcome = await getDb(env)
+        .prepare(
+          `SELECT resource_id FROM audit_logs
+           WHERE resource_type = 'counterparty' AND resource_id = ?
+             AND metadata::jsonb ->> 'auditPhase' = 'outcome'`
+        )
+        .bind(cp.id)
+        .first<{ resource_id: string }>();
+      expect(outcome).toEqual({ resource_id: cp.id });
+    });
+
     it("keeps mutations available once the audit checkpoint agrees again", async () => {
       const baseline = await createCounterparty({ externalId: "audit_recovery_baseline" });
       expect(baseline.status).toBe(201);

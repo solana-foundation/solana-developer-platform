@@ -139,7 +139,7 @@ async function mutateProviderDataLocked(
 export function createPostgresCounterpartiesRepository(db: AppDb): CounterpartiesRepository {
   return {
     async createCounterparty(input: CreateCounterpartyInput) {
-      const id = generateCounterpartyId();
+      const id = input.id ?? generateCounterpartyId();
       const refs = providerLookupReferences(input.providerData);
 
       const row = await db
