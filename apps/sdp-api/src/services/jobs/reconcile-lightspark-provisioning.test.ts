@@ -10,6 +10,7 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import {
+  LIGHTSPARK_PROVISIONING_RECONCILE_BATCH,
   LIGHTSPARK_PROVISIONING_RECONCILE_GRACE_MS,
   reconcileLightsparkProvisioning,
 } from "./reconcile-lightspark-provisioning";
@@ -343,6 +344,205 @@ describe("reconcileLightsparkProvisioning", () => {
     expect(outcome?.metadata).toMatchObject({
       reconciledBy: "lightspark_provisioning_reconciler",
       externalAccountReference: "ExternalAccount:reconcile_completed",
+    });
+    await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
+  });
+
+  it("detects an orphaned provider account behind an archived reservation", async () => {
+    const counterparty = await seedCounterparty("ls_reconcile_orphan");
+    const row = await seedPendingRow(counterparty.id, "Customer:reconcile_orphan");
+    await accounts().archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+    });
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:reconcile_orphan",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    // The provider did receive the account before the local completion failed
+    // and the request archived its reservation: the sweep must detect the
+    // orphan instead of recording a false absence.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/customers/external-accounts")) {
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "ExternalAccount:orphaned",
+                platformAccountId: row.id,
+                status: "ACTIVE",
+                accountInfo: { accountType: "USD_ACCOUNT", paymentRails: ["ACH"] },
+              },
+            ],
+            hasMore: false,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("failure");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      providerAccountFound: true,
+      orphanedProviderAccount: true,
+      externalAccountReference: "ExternalAccount:orphaned",
+      providerStatus: "ACTIVE",
+    });
+    await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
+  });
+
+  it("verifies the absence behind an archived reservation before failing its intent", async () => {
+    const counterparty = await seedCounterparty("ls_reconcile_archived_absent");
+    const row = await seedPendingRow(counterparty.id, "Customer:reconcile_archived_absent");
+    await accounts().archiveExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+    });
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:reconcile_archived_absent",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/customers/external-accounts")) {
+        return new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("failure");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      providerOutcome: "verified",
+      providerAccountFound: false,
+    });
+    await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
+  });
+
+  it("resolves newer completed-payout intents while an outage pins the pending ones", async () => {
+    // A full oldest-first batch of stale reservations a provider outage leaves
+    // untriageable must not starve newer intents whose rows completed locally.
+    for (let index = 0; index < LIGHTSPARK_PROVISIONING_RECONCILE_BATCH; index += 1) {
+      const staleCounterparty = await seedCounterparty(`ls_reconcile_starve_${index}`);
+      const staleRow = await seedPendingRow(staleCounterparty.id, `Customer:starve_${index}`);
+      await seedUnresolvedIntent({
+        counterpartyId: staleCounterparty.id,
+        action: "lightspark_payout_account_created",
+        metadata: {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: staleCounterparty.id,
+          localRowId: staleRow.id,
+          providerCustomerReference: `Customer:starve_${index}`,
+          corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+          effect: { kind: "payout_account", platformAccountId: staleRow.id },
+        },
+      });
+    }
+    // The stale intents above were admitted first, so they fill the batch's
+    // oldest-first window; the completed intent below lands one position past
+    // the batch limit.
+
+    const counterparty = await seedCounterparty("ls_reconcile_starved_completed");
+    const row = await seedPendingRow(counterparty.id, "Customer:starved_completed");
+    await accounts().completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+      externalAccountReference: "ExternalAccount:starved_completed",
+      providerStatus: "ACTIVE",
+    });
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:starved_completed",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    // The outage fails every provider lookup, so the stale reservations cannot
+    // be triaged; the completed row resolves from local state alone.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      throw new Error(`provider outage: ${String(input)}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("success");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      externalAccountReference: "ExternalAccount:starved_completed",
     });
     await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
   });

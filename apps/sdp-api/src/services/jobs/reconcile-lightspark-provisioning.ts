@@ -224,9 +224,13 @@ async function triagePendingAccount(
  * after a crash before it — leaves the intent unresolved, and the pending
  * sweep no longer sees the row because it carries its provider reference. The
  * sweep reads the row the intent names: a durable completion resolves the
- * intent as success, an archived or missing row resolves it as a failed
- * attempt with providerOutcome "unverified", and a still-pending row is left
- * for the pending sweep.
+ * intent as success from local state, an archived row is checked against the
+ * provider before it resolves as a failed attempt, and a missing row resolves
+ * as the provable absence it is. Intents naming a still-pending reservation
+ * are excluded from the batch itself — the pending sweep owns those rows — so
+ * reservations a provider outage leaves untriageable can never fill this
+ * oldest-first batch and starve newer intents that local state can already
+ * resolve.
  *
  * @param env - Process environment used for database access.
  * @param cutoff - ISO timestamp before which an intent is stale.
@@ -261,8 +265,24 @@ async function reconcileUnresolvedPayoutIntents(env: Env, cutoff: string): Promi
              ELSE false
            END
          )
-       ORDER BY i.created_at
-       LIMIT ${LIGHTSPARK_PROVISIONING_RECONCILE_BATCH}`
+         -- A still-pending reservation belongs to the pending sweep. Excluding
+         -- its intent here keeps reservations the pending sweep cannot triage
+         -- yet (provider outage) from occupying this oldest-first batch every
+         -- tick and starving newer intents local state can resolve.
+         AND NOT EXISTS (
+           SELECT 1 FROM counterparty_provider_accounts cpa
+           WHERE cpa.id = CASE
+                   WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+                   THEN i.metadata::jsonb -> 'target' -> 'metadata' ->> 'localRowId'
+                   ELSE NULL
+                 END
+             AND cpa.provider = 'lightspark'
+             AND cpa.kind = 'payout_account'
+             AND cpa.status = 'active'
+             AND cpa.external_account_reference IS NULL
+         )
+        ORDER BY i.created_at
+        LIMIT ${LIGHTSPARK_PROVISIONING_RECONCILE_BATCH}`
     )
     .bind(LIGHTSPARK_PAYOUT_ACTION, cutoff)
     .all<UnresolvedLightsparkIntentRow>();
@@ -322,7 +342,8 @@ async function reconcilePayoutIntent(
     id: localRowId,
   });
   if (row !== null && row.status === "active" && row.external_account_reference === null) {
-    // Still an in-flight or untriaged reservation: the pending sweep owns it.
+    // A still-pending reservation belongs to the pending sweep: the batch
+    // query already excludes such intents, so this is a defensive re-check.
     return false;
   }
   if (row !== null && row.external_account_reference !== null) {
@@ -337,13 +358,89 @@ async function reconcilePayoutIntent(
     });
     return true;
   }
-  // Archived or missing: the provisioning never durably completed locally.
+  // The reservation is gone or archived: the provisioning never durably
+  // completed locally. A missing row was never inserted, so the provider was
+  // never called with the row's platform id — the absence is provable. An
+  // archived row is different: the request may have created the account at
+  // the provider and then failed its local completion and archived the
+  // reservation. Ask the provider before recording an absence, so an orphaned
+  // account is detected instead of written off as never created.
+  if (row === null) {
+    await resolveIntent(env, intent, {
+      action: LIGHTSPARK_PAYOUT_ACTION,
+      status: "failure",
+      metadata: {
+        reconciledBy: "lightspark_provisioning_reconciler",
+        providerOutcome: "unverified",
+        providerAccountFound: false,
+      },
+    });
+    return true;
+  }
+  const corridor =
+    typeof metadata.corridor === "object" && metadata.corridor !== null
+      ? (metadata.corridor as Record<string, unknown>)
+      : undefined;
+  const fiatCurrency =
+    typeof corridor?.fiatCurrency === "string" ? corridor.fiatCurrency : undefined;
+  const customerReference =
+    typeof metadata.providerCustomerReference === "string"
+      ? metadata.providerCustomerReference
+      : undefined;
+  const mode = await projectEnvironment(env, projectId);
+  if (mode === null || customerReference === undefined || fiatCurrency === undefined) {
+    logger.error(
+      { intent_id: intent.intent_id, provider_account_id: localRowId },
+      "[lightspark provisioning] archived reservation lacks the scope to verify the provider; leaving it for operators"
+    );
+    return false;
+  }
+  const ctx: RampRuntimeContext = {
+    env: env as unknown as Record<string, string | undefined>,
+    mode,
+  };
+  let found: { id: string; status: string } | null = null;
+  try {
+    found = await RAMP_PROVIDER_CLIENTS.lightspark.findExternalAccountByPlatformId(ctx, {
+      customerId: customerReference,
+      currency: fiatCurrency,
+      platformAccountId: localRowId,
+    });
+  } catch (error) {
+    logger.error(
+      { intent_id: intent.intent_id, provider_account_id: localRowId, error: describeError(error) },
+      "[lightspark provisioning] archived-reservation provider lookup failed; retrying next tick"
+    );
+    return false;
+  }
+  if (found !== null) {
+    logger.error(
+      {
+        intent_id: intent.intent_id,
+        provider_account_id: localRowId,
+        external_account_reference: found.id,
+      },
+      "[lightspark provisioning] detected an orphaned provider payout account; operators must clean it up"
+    );
+    await resolveIntent(env, intent, {
+      action: LIGHTSPARK_PAYOUT_ACTION,
+      status: "failure",
+      metadata: {
+        reconciledBy: "lightspark_provisioning_reconciler",
+        providerAccountFound: true,
+        orphanedProviderAccount: true,
+        externalAccountReference: found.id,
+        providerStatus: found.status,
+      },
+    });
+    return true;
+  }
   await resolveIntent(env, intent, {
     action: LIGHTSPARK_PAYOUT_ACTION,
     status: "failure",
     metadata: {
       reconciledBy: "lightspark_provisioning_reconciler",
-      providerOutcome: "unverified",
+      providerOutcome: "verified",
       providerAccountFound: false,
     },
   });
