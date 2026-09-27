@@ -10,14 +10,23 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS, type Token, type TokenTransaction } from "@sdp/types";
+import {
+  SPL_TOKEN_PROGRAMS,
+  type Token,
+  type TokenExtensionsConfig,
+  type TokenTemplate,
+  type TokenTransaction,
+} from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
 import { createAssetProfilesRepository } from "@/db/repositories";
 import type { ApiKeyContext } from "@/lib/auth";
 import { AppError, badRequest, conflict, forbidden, notFound } from "@/lib/errors";
-import { profileSnapshotMatchesToken } from "@/lib/issuance/profile-deployment-snapshot";
+import {
+  profileSnapshotMatchesToken,
+  resolvedSnapshotEqualsTokenSnapshot,
+} from "@/lib/issuance/profile-deployment-snapshot";
 import { success } from "@/lib/response";
 import { getRequestTenantScope, type TenantScope } from "@/lib/tenant-scope";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -980,7 +989,10 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
     const simulation = await simulateTransaction(rpc, txBytes);
 
     // The marker now names the mint the prepared transaction will create, so
-    // confirmDeploy can confirm it in place.
+    // confirmDeploy can confirm it in place. It also records the deployment
+    // snapshot the transaction bytes were built from (APE-848): if the profile
+    // save fence later expires and a save rewrites the row, confirm recovers
+    // the landed mint from this agreement instead of stranding it.
     await tokenService.updateTransaction(preparedMarker.transaction.id, {
       params: {
         operation: "deploy",
@@ -989,6 +1001,12 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
         template: claimed.template,
         name: claimed.name,
         symbol: claimed.symbol,
+        preparedSnapshot: {
+          template: claimed.template,
+          isFreezable: claimed.isFreezable,
+          requiresAllowlist: claimed.requiresAllowlist,
+          extensions: claimed.extensions ?? null,
+        },
       },
     });
 
@@ -1055,6 +1073,119 @@ const findMintInitialization = (
   );
 
 /**
+ * The prepare-time deployment snapshot a client-signed prepare stamped on its
+ * marker (APE-848), when present and well-formed. Legacy markers predate the
+ * stamp and simply have no recovery agreement; anything malformed is treated
+ * the same way rather than trusted.
+ */
+interface PreparedDeploySnapshot {
+  template: TokenTemplate;
+  isFreezable: boolean;
+  requiresAllowlist: boolean;
+  extensions: TokenExtensionsConfig | null;
+}
+
+function parsePreparedDeploySnapshot(
+  marker: TokenTransaction | null
+): PreparedDeploySnapshot | null {
+  if (!marker) {
+    return null;
+  }
+  const snapshot = (marker.params as { preparedSnapshot?: unknown } | undefined)?.preparedSnapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+  const { template, isFreezable, requiresAllowlist, extensions } = snapshot as Record<
+    string,
+    unknown
+  >;
+  if (
+    typeof template !== "string" ||
+    typeof isFreezable !== "boolean" ||
+    typeof requiresAllowlist !== "boolean"
+  ) {
+    return null;
+  }
+  if (extensions !== null && (typeof extensions !== "object" || Array.isArray(extensions))) {
+    return null;
+  }
+  return {
+    template: template as TokenTemplate,
+    isFreezable,
+    requiresAllowlist,
+    extensions: extensions as TokenExtensionsConfig | null,
+  };
+}
+
+/**
+ * Verify the landed mint's authorities against server-derived expectations and
+ * resolve the freeze authority to record.
+ *
+ * The mint authority must match the claimed row's custody address. The freeze
+ * authority may match the claimed row's — or the prepare-time agreement
+ * recorded on the marker (APE-848): a save that landed after the profile-save
+ * fence expired can have moved the row off the agreement the mint was built
+ * from. In that case the claimed row is restored to the agreement first, so
+ * the recorded token describes the immutable mint that actually exists, while
+ * the reviewed profile keeps the operator's newer decision. The returned
+ * freeze authority is always one the server derived — never a request value.
+ *
+ * Returns the (possibly restored) token snapshot the mint carries, plus the
+ * verified freeze authority.
+ */
+async function verifyAndRecoverMintAuthorities(params: {
+  tokenService: TokenService;
+  tokenId: string;
+  claimed: Token;
+  custodyAddress: Address;
+  mintInitialization: ParsedTransaction["instructions"][number];
+  preparedSnapshot: PreparedDeploySnapshot | null;
+}): Promise<{ claimed: Token; freezeAuthority: Address | null }> {
+  const { claimed, custodyAddress, mintInitialization, preparedSnapshot } = params;
+  const currentFreezeAuthority = claimed.isFreezable ? custodyAddress : null;
+  // Only a server-recorded agreement (the marker's preparedSnapshot) counts —
+  // the request never names authorities.
+  const preparedFreezeAuthority = preparedSnapshot
+    ? preparedSnapshot.isFreezable
+      ? custodyAddress
+      : null
+    : null;
+  // The RPC's parsed instruction info is loosely typed; the equality check
+  // below has already narrowed the value to one of the Address-typed
+  // expectations this server derived.
+  const actualFreezeAuthority = (mintInitialization.info?.freezeAuthority ??
+    null) as Address | null;
+
+  if (
+    mintInitialization.info?.mintAuthority !== custodyAddress ||
+    (actualFreezeAuthority !== currentFreezeAuthority &&
+      actualFreezeAuthority !== preparedFreezeAuthority)
+  ) {
+    throw badRequest("Deploy transaction did not use the expected mint authorities");
+  }
+
+  if (
+    preparedSnapshot &&
+    actualFreezeAuthority === preparedFreezeAuthority &&
+    !resolvedSnapshotEqualsTokenSnapshot(preparedSnapshot, claimed)
+  ) {
+    await params.tokenService.restoreDeployingTokenSnapshot({
+      tokenId: params.tokenId,
+      template: preparedSnapshot.template,
+      isFreezable: preparedSnapshot.isFreezable,
+      requiresAllowlist: preparedSnapshot.requiresAllowlist,
+      extensions: preparedSnapshot.extensions,
+    });
+    return {
+      claimed: { ...claimed, ...preparedSnapshot },
+      freezeAuthority: actualFreezeAuthority,
+    };
+  }
+
+  return { claimed, freezeAuthority: actualFreezeAuthority };
+}
+
+/**
  * Record a confirmed non-custodial deploy.
  *
  * `prepareDeploy` hands the client an unsigned create tx and persists only the
@@ -1082,6 +1213,14 @@ const findMintInitialization = (
  * marker in place; a marker whose prepared transaction can no longer land is
  * closed by the profile-save fence's expiry instead. Until then it keeps
  * fencing snapshot rewrites that could strand the prepared mint.
+ *
+ * The expiry itself is recoverable: a save that lifts the fence may have
+ * rewritten the token's snapshot AFTER the prepared transaction already landed
+ * (the mint is immutable, the row is not). The marker records the snapshot its
+ * transaction was built from, so when the landed mint matches that prepare-time
+ * agreement instead of the moved row, confirm restores the row to the agreement
+ * and records the mint rather than stranding it. The reviewed profile keeps the
+ * operator's newer decision; the recorded token describes the mint that exists.
  */
 export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploySchema>) => {
   const { tokenId } = c.req.param();
@@ -1134,9 +1273,12 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   }
 
   // The prepare marker this confirm corresponds to, when prepare recorded one
-  // (APE-848). Confirmed in place on success, failed in the catch on error, so
-  // it never lingers as a pending deploy.
-  const preparedTransaction = await tokenService.findPendingPreparedDeploy(tokenId, body.mint);
+  // (APE-848) — pending, or already auto-expired by the save fence (a landed
+  // mint built from it is still recoverable). Confirmed in place on success,
+  // never closed on error, so it never lingers as a live fence after a real
+  // deploy and its agreement survives for the recovery path.
+  const preparedTransaction = await tokenService.findRecoverablePreparedDeploy(tokenId, body.mint);
+  const preparedSnapshot = parsePreparedDeploySnapshot(preparedTransaction);
 
   const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
@@ -1209,14 +1351,15 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       expectedCustodyWalletId: claimed.signingCustodyWalletId,
     });
     const custodyAddress = signer.address;
-    const freezeAuthority = claimed.isFreezable ? custodyAddress : null;
 
-    if (
-      mintInitialization.info?.mintAuthority !== custodyAddress ||
-      (mintInitialization.info?.freezeAuthority ?? null) !== freezeAuthority
-    ) {
-      throw badRequest("Deploy transaction did not use the expected mint authorities");
-    }
+    const { claimed: mintSnapshot, freezeAuthority } = await verifyAndRecoverMintAuthorities({
+      tokenService,
+      tokenId,
+      claimed,
+      custodyAddress,
+      mintInitialization,
+      preparedSnapshot,
+    });
 
     // Re-derive the ABL list address server-side instead of trusting the request
     // body's `listAddress`: for allowlist/blocklist tokens a wrong value would
@@ -1225,7 +1368,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // is only seeded on-chain when ACL is enabled and the mint is freezable —
     // mirror the `enableSrfc37` condition the create path uses (mosaic/service.ts).
     const listAddress =
-      shouldEnableOnChainAcl(claimed) && freezeAuthority !== null
+      shouldEnableOnChainAcl(mintSnapshot) && freezeAuthority !== null
         ? await deriveAblListAddress(custodyAddress, mint)
         : undefined;
 
@@ -1238,7 +1381,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
         mintAddress: mint,
         signature,
         slot: verified.status.slot.toString(),
-        template: claimed.template,
+        template: mintSnapshot.template,
         ablListAddress: listAddress ?? null,
       },
     });
@@ -1260,7 +1403,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       tokenService,
       organizationId: auth.organizationId,
       initiatedByKeyId: auth.id,
-      token: claimed,
+      token: mintSnapshot,
       tokenId,
       mint,
       custodyAddress,

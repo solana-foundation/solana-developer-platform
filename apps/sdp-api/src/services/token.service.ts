@@ -35,6 +35,17 @@ type StoredTokenTransactionListItem = Omit<TokenTransactionListItem, "transactio
 // letting an abandoned mint hold the supply record hostage.
 const MINT_IN_FLIGHT_WINDOW_MS = 5 * 60 * 1000;
 
+/**
+ * Error stamped on client-signed deploy prepare markers the APE-848 profile-save
+ * fence expires ("Prepared deploy expired without confirmation"). The expiry is
+ * what stops an abandoned prepare from fencing saves forever, but a transaction
+ * built from such a marker may already have landed on-chain, so confirm still
+ * recognizes these rows as a recoverable prepare-time agreement — unlike any
+ * other failure, which always leaves the marker pending (never closed by a
+ * failed confirm).
+ */
+export const PREPARED_DEPLOY_EXPIRED_ERROR = "Prepared deploy expired without confirmation";
+
 // Escapes LIKE/ILIKE wildcards so operator-supplied search text matches
 // literally (mirrors the payments/policy repositories' `ESCAPE '\'` idiom).
 function escapeLikePattern(value: string): string {
@@ -1362,6 +1373,58 @@ export class TokenService {
   }
 
   /**
+   * Rewrite a claimed (deploying, un-minted) token's deployment snapshot to the
+   * prepare-time agreement its deploy marker recorded (APE-848 recovery).
+   *
+   * A client-signed mint that lands after the profile-save fence expired can
+   * face a row a concurrent save has already moved off the agreement it was
+   * built from. Confirm restores this snapshot before `setTokenDeployed` so
+   * the recorded token describes the immutable mint that actually exists — the
+   * reviewed profile keeps the operator's newer decision. Guarded on the claim
+   * confirm holds (`status = 'deploying' AND mint_address IS NULL`), so a lost
+   * claim or a recorded mint is a no-op rather than a stray write.
+   */
+  async restoreDeployingTokenSnapshot(input: {
+    tokenId: string;
+    template: TokenTemplate;
+    isFreezable: boolean;
+    requiresAllowlist: boolean;
+    extensions: TokenExtensionsConfig | null;
+  }): Promise<void> {
+    const now = new Date().toISOString();
+    const tenant = this.tenantMutationScope();
+    const rowsAffected = await this.db
+      .prepare(
+        `UPDATE issued_tokens
+         SET template = ?,
+             freeze_authority_enabled = ?,
+             allowlist_enabled = ?,
+             updated_at = ?
+         WHERE id = ?${tenant.clause} AND status = 'deploying' AND mint_address IS NULL`
+      )
+      .bind(
+        input.template,
+        input.isFreezable ? 1 : 0,
+        input.requiresAllowlist ? 1 : 0,
+        now,
+        input.tokenId,
+        ...tenant.values
+      )
+      .run();
+    if (rowsAffected === 0) {
+      return;
+    }
+
+    await this.db
+      .prepare("DELETE FROM issued_token_extensions WHERE token_id = ?")
+      .bind(input.tokenId)
+      .run();
+    if (input.extensions) {
+      await this.insertTokenExtensions(input.tokenId, input.extensions, now);
+    }
+  }
+
+  /**
    * Expire stale client-signed deploy prepare markers for this token and
    * report whether a fresh one still fences profile saves (APE-848).
    *
@@ -1371,7 +1434,10 @@ export class TokenService {
    * transaction that could still land on-chain — and whose mint a snapshot
    * rewrite would strand — is always younger than the caller's fence window.
    * A pending row outside the window can never land; it is closed here so
-   * abandoned prepares do not linger as a deployment in progress.
+   * abandoned prepares do not linger as a deployment in progress. The expiry
+   * is recoverable: {@link findRecoverablePreparedDeploy} still hands such a
+   * marker's prepare-time agreement to confirm, because a transaction built
+   * from it may already have landed before its blockhash expired.
    */
   async expireStalePreparedDeploys(tokenId: string, maxAgeMs: number): Promise<boolean> {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
@@ -1399,19 +1465,26 @@ export class TokenService {
         .prepare(
           "UPDATE issuance_transactions SET status = 'failed', error = ?, updated_at = ? WHERE id = ?"
         )
-        .bind("Prepared deploy expired without confirmation", now, row.id)
+        .bind(PREPARED_DEPLOY_EXPIRED_ERROR, now, row.id)
         .run();
     }
     return freshRemains;
   }
 
   /**
-   * The pending `deploy` marker row a client-signed prepare wrote for this
-   * token and mint (APE-848), or null. confirmDeploy confirms it in place on
-   * success and marks it failed on error, so a finished prepare neither fences
-   * profile saves nor lingers as a pending deploy in transaction history.
+   * The client-signed deploy prepare marker a prepare wrote for this token and
+   * mint (APE-848), or null — a pending marker, or one the profile-save fence
+   * already auto-expired. Confirm confirms it in place on success, so a
+   * finished prepare neither fences profile saves nor lingers as a pending
+   * deploy in transaction history. The fence-expired rows stay recoverable
+   * because their prepared transaction may already have landed on-chain before
+   * the expiry closed them; the marker's recorded prepare-time snapshot is
+   * what lets confirm record that mint instead of stranding it.
    */
-  async findPendingPreparedDeploy(tokenId: string, mint: string): Promise<TokenTransaction | null> {
+  async findRecoverablePreparedDeploy(
+    tokenId: string,
+    mint: string
+  ): Promise<TokenTransaction | null> {
     const tenant = this.tenantTokenScope("token");
     const rows = await this.db
       .prepare(
@@ -1423,10 +1496,10 @@ export class TokenService {
          JOIN issued_tokens token ON token.id = tx.token_id
          WHERE tx.token_id = ?
            AND tx.type = 'deploy'
-           AND tx.status = 'pending'${tenant.clause}
+           AND (tx.status = 'pending' OR (tx.status = 'failed' AND tx.error = ?))${tenant.clause}
          ORDER BY tx.created_at DESC`
       )
-      .bind(tokenId, ...tenant.values)
+      .bind(tokenId, PREPARED_DEPLOY_EXPIRED_ERROR, ...tenant.values)
       .all<TokenTransactionRow>();
     for (const row of rows.results) {
       const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});

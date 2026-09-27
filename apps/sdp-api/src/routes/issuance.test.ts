@@ -10939,6 +10939,217 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("records a landed prepare-time mint after the save fence expired and a save moved the row off the agreement", async () => {
+        ensureRpcUrl();
+
+        // The stranded-mint sequence (APE-848 review): prepare built the tx
+        // from a freezable snapshot, the mint landed on-chain, the save fence
+        // then expired and a profile save rewrote the row to non-freezable.
+        // The row is the drifted side; the mint is immutable, so confirm must
+        // recover the prepare-time agreement from the marker and record the
+        // mint instead of rejecting it forever.
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_fence_recovery",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          isFreezable: false,
+          requiresAllowlist: false,
+        });
+        const marker = await new TokenService(getDb(env)).createTransaction({
+          tokenId: token.id,
+          organizationId: TEST_ORG.id,
+          type: "deploy",
+          params: {
+            operation: "deploy",
+            mode: "prepare",
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            preparedSnapshot: {
+              template: "custom",
+              isFreezable: true,
+              requiresAllowlist: false,
+              extensions: null,
+            },
+          },
+        });
+        // Expire the marker exactly the way the profile-save fence does.
+        await new TokenService(getDb(env)).expireStalePreparedDeploys(token.id, 0);
+        const expiredRow = await getDb(env)
+          .prepare("SELECT status, error FROM issuance_transactions WHERE id = ?")
+          .bind(marker.transaction.id)
+          .first<{ status: string; error: string | null }>();
+        expect(expiredRow?.status).toBe("failed");
+        expect(expiredRow?.error).toBe("Prepared deploy expired without confirmation");
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        // The landed mint carries the prepare-time agreement: freezable, with
+        // the custody wallet as its freeze authority.
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5fenceRecoverySig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(200);
+          const payload = (await res.json()) as {
+            data: { token: { mintAddress: string | null; status: string; isFreezable: boolean } };
+          };
+          expect(payload.data.token.mintAddress).toBe(TEST_SOLANA_ADDRESSES.mint);
+          expect(payload.data.token.status).toBe("active");
+          // The row was restored to the agreement the mint actually carries.
+          expect(payload.data.token.isFreezable).toBe(true);
+
+          const stored = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stored?.freezeAuthority).toBe(TEST_SOLANA_ADDRESSES.wallet2);
+          expect(stored?.isFreezable).toBe(true);
+
+          // The recovered marker is confirmed in place, not left failed.
+          const markerRow = await getDb(env)
+            .prepare("SELECT status FROM issuance_transactions WHERE id = ?")
+            .bind(marker.transaction.id)
+            .first<{ status: string }>();
+          expect(markerRow?.status).toBe("confirmed");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
+      it("still rejects a landed mint matching neither the moved row nor the prepare-time agreement", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_fence_no_match",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          isFreezable: false,
+          requiresAllowlist: false,
+        });
+        await new TokenService(getDb(env)).createTransaction({
+          tokenId: token.id,
+          organizationId: TEST_ORG.id,
+          type: "deploy",
+          params: {
+            operation: "deploy",
+            mode: "prepare",
+            mint: TEST_SOLANA_ADDRESSES.mint,
+            preparedSnapshot: {
+              template: "custom",
+              isFreezable: true,
+              requiresAllowlist: false,
+              extensions: null,
+            },
+          },
+        });
+        await new TokenService(getDb(env)).expireStalePreparedDeploys(token.id, 0);
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        // wallet1 is neither the moved row's expectation (no freeze authority)
+        // nor the prepare-time agreement's (wallet2) — the recovery must not
+        // loosen the authority check.
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: TEST_SOLANA_ADDRESSES.wallet1,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5fenceNoMatchSig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const stillPending = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stillPending?.mintAddress).toBeNull();
+          expect(stillPending?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
       it("records the server-derived ABL list address, ignoring the client-supplied one", async () => {
         ensureRpcUrl();
 
