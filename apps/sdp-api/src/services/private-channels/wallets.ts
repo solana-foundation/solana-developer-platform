@@ -16,7 +16,12 @@
  * upstream binding this request created is revoked again (idempotent) unless a
  * newer verification has already re-created the mirror, and the cleanup claim
  * records a durable retry marker either way, so no late binding survives a
- * completed cleanup.
+ * completed cleanup. The retry marker also latches the mirror upsert while a
+ * compensating delete is still owed — a verification it refuses is told to
+ * retry and finishes the owed cleanup itself, so the compensating delete can
+ * never take a fresh verification's binding — and when the cleanup claim
+ * itself cannot be decided, the marker is still recorded (without advancing
+ * the epoch) so the late binding stays recoverable.
  *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
@@ -133,6 +138,60 @@ async function revokeWalletWithSession(
     instanceId: instance.id,
     pubkey,
   });
+}
+
+/**
+ * Best-effort status check after a rejected mirror write: whether a
+ * pending-revocation marker for this pubkey still owes a compensating SPC
+ * delete. Unreadable (transient persistence failure) means undetected.
+ */
+async function hasPendingRevocation(
+  env: Env,
+  principalId: string,
+  instanceId: string,
+  pubkey: string
+): Promise<boolean> {
+  try {
+    return await createPrivateChannelVerifiedWalletRepository(env).hasPendingRevocation(
+      principalId,
+      instanceId,
+      pubkey
+    );
+  } catch (statusError) {
+    getLogger().warn(
+      { principalId, instanceId, statusError },
+      "private-channel wallet: could not check for a pending revocation after a rejected mirror"
+    );
+    return false;
+  }
+}
+
+/**
+ * Best-effort durable record of a still-owed upstream delete after the
+ * cleanup claim itself failed, so the late binding stays recoverable by the
+ * next principal-disable cleanup. Returns false when the record was skipped
+ * because this identity's fresh mirror already owns the binding.
+ */
+async function recordPendingRevocation(
+  env: Env,
+  input: {
+    organizationId: string;
+    projectId: string;
+    userId: string;
+    instanceId: string;
+    walletId: string;
+    pubkey: string;
+  }
+): Promise<boolean> {
+  try {
+    return await createPrivateChannelVerifiedWalletRepository(env).recordPendingRevocation(input);
+  } catch (markerError) {
+    getLogger().warn(
+      { principalId: input.userId, instanceId: input.instanceId, markerError },
+      "private-channel wallet: could not record a pending-revocation marker after a failed cleanup claim"
+    );
+    return false;
+  }
 }
 
 /**
@@ -279,7 +338,14 @@ export async function verifyPrivateChannelWallet(
         "private-channel wallet: could not check identity state after a rejected mirror"
       );
     }
-    if (revokedWhileVerifying || disabled) {
+    // A pending-revocation marker for this pubkey means another rejected
+    // verification's compensating cleanup is still owed the upstream SPC
+    // delete. The marker latched this mirror write out (the upsert refuses
+    // while a marker exists), so this request must not surface the raw
+    // identity conflict: it owns a share of the owed cleanup and reports the
+    // revocation as retryable instead.
+    const pendingRevocation = await hasPendingRevocation(env, pcUser.id, instance.id, pubkey);
+    if (revokedWhileVerifying || disabled || pendingRevocation) {
       // The winning revocation's SPC delete may have run BEFORE this request's
       // verify-wallet created the upstream binding, so the completed cleanup
       // did not necessarily cover the binding this request just created. The
@@ -290,7 +356,11 @@ export async function verifyPrivateChannelWallet(
       // of this identity has already re-created the mirror, and otherwise
       // advances the epoch and records the durable retry marker in the same
       // transaction, so a failed or interrupted SPC delete leaves the late
-      // binding recoverable by the next principal-disable cleanup.
+      // binding recoverable by the next principal-disable cleanup. The marker
+      // also latches the mirror upsert until the compensating delete has run:
+      // a verification that lands afterwards is refused with a retryable
+      // conflict and finishes the owed cleanup itself, so the compensating
+      // delete can never take a fresh verification's binding.
       let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
       try {
         cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup({
@@ -307,6 +377,18 @@ export async function verifyPrivateChannelWallet(
           { principalId: pcUser.id, instanceId: instance.id, claimError },
           "private-channel wallet: could not claim the late-binding cleanup after a rejected mirror"
         );
+        // The claim failed, so cleanup stays undecided and nothing is deleted
+        // — but the late upstream binding must stay recoverable. Record the
+        // retry marker without advancing the epoch (best effort). It is
+        // skipped for a mirror this identity already re-created, whose
+        // binding must survive.
+        await recordPendingRevocation(env, {
+          ...scope,
+          userId: pcUser.id,
+          instanceId: instance.id,
+          walletId,
+          pubkey,
+        });
       }
       if (cleanup === "claimed") {
         try {
@@ -319,7 +401,7 @@ export async function verifyPrivateChannelWallet(
         }
       }
     }
-    if (revokedWhileVerifying) {
+    if (revokedWhileVerifying || pendingRevocation) {
       throw conflict(
         "This wallet verification was revoked while it was being verified. Start the verification again."
       );

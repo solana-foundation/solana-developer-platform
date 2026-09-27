@@ -111,6 +111,27 @@ export interface PrivateChannelVerifiedWalletRepository {
    * markers. Single-writer contract as for upsert.
    */
   claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<boolean>;
+  /**
+   * Whether a pending-revocation retry marker exists for this identity's
+   * (user_id, instance_id, pubkey). A pending marker means a stale
+   * verification's compensating SPC delete is still owed for this pubkey, so
+   * the mirror upsert refuses to land while one exists (the marker is the
+   * upsert's latch) and a refused verification finishes the owed cleanup in
+   * its own rejection path instead of handing a live binding to that delete.
+   */
+  hasPendingRevocation(userId: string, instanceId: string, pubkey: string): Promise<boolean>;
+  /**
+   * The undecided-cleanup fallback: durably record the pending-revocation
+   * retry marker WITHOUT advancing the epoch, so a late upstream binding stays
+   * discoverable by the principal-disable cleanup even when
+   * `claimStaleVerificationCleanup` itself failed and no compensating delete
+   * can be decided. Under the revocation-epoch row lock, the record is skipped
+   * (returning false) when a mirror that belongs to this identity already
+   * exists: that mirror is a newer verification's, its binding must survive,
+   * and a marker would latch the mirror upsert against a row that is already
+   * there. Single-writer contract as for upsert.
+   */
+  recordPendingRevocation(input: UpsertVerifiedWalletInput): Promise<boolean>;
   /** Pending upstream revocations for one identity and instance. */
   listPendingRevocations(
     userId: string,

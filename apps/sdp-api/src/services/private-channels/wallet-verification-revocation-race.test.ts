@@ -50,6 +50,8 @@ interface AuthHarness {
   upstreamWallets: Set<string>;
   verifyReceived: Promise<void>;
   releaseVerify: () => void;
+  lateDeleteReceived: Promise<void>;
+  releaseLateDelete: () => void;
 }
 
 function json(res: ServerResponse, status: number, value: unknown): void {
@@ -65,17 +67,27 @@ async function requestBody(req: IncomingMessage): Promise<Record<string, string>
 }
 
 /**
- * Stands in for the connected SPC auth service. `gateVerify` holds the first
+ * Stands in for the connected SPC auth service. `gateVerify` holds the FIRST
  * verify-wallet response until the test releases it, so the verify request's
- * local mirror write can be raced against a completed revocation.
- * `bindOnRelease` makes the upstream binding land only when that response is
+ * local mirror write can be raced against a completed revocation;
+ * `bindOnRelease` makes that first binding land only when the response is
  * released — a binding created after a revocation's own deleteWallet ran.
+ * Later verify-wallet calls (a fresh verification racing the stale cleanup)
+ * pass through ungated. `gateSubsequentDeletes` parks the SECOND delete-wallet
+ * call (a stale verification's compensating delete) until
+ * `releaseLateDelete`, so the test can run a fresh verification between the
+ * cleanup claim and the compensating delete.
  */
 async function createAuthHarness(
   gateVerify: boolean,
-  { bindOnRelease = false }: { bindOnRelease?: boolean } = {}
+  {
+    bindOnRelease = false,
+    gateSubsequentDeletes = false,
+  }: { bindOnRelease?: boolean; gateSubsequentDeletes?: boolean } = {}
 ): Promise<AuthHarness> {
   const upstreamWallets = new Set<string>();
+  let verifyCalls = 0;
+  let deleteCalls = 0;
   let verifyReceivedResolve!: () => void;
   let releaseVerify!: () => void;
   const verifyReceived = new Promise<void>((resolve) => {
@@ -83,6 +95,14 @@ async function createAuthHarness(
   });
   const verifyRelease = new Promise<void>((resolve) => {
     releaseVerify = resolve;
+  });
+  let lateDeleteReceivedResolve!: () => void;
+  let releaseLateDelete!: () => void;
+  const lateDeleteReceived = new Promise<void>((resolve) => {
+    lateDeleteReceivedResolve = resolve;
+  });
+  const lateDeleteRelease = new Promise<void>((resolve) => {
+    releaseLateDelete = resolve;
   });
 
   const server = createServer(async (req, res) => {
@@ -101,6 +121,11 @@ async function createAuthHarness(
     }
     if (req.method === "POST" && path === "/auth/verify-wallet") {
       const body = await requestBody(req);
+      verifyCalls += 1;
+      if (verifyCalls > 1) {
+        upstreamWallets.add(body.pubkey);
+        return json(res, 200, { pubkey: body.pubkey, created_at: "2099-01-01T00:00:00.000Z" });
+      }
       if (!bindOnRelease) {
         upstreamWallets.add(body.pubkey);
       }
@@ -115,6 +140,11 @@ async function createAuthHarness(
     }
     if (req.method === "DELETE" && path.startsWith("/auth/wallets/")) {
       const pubkey = decodeURIComponent(path.slice("/auth/wallets/".length));
+      deleteCalls += 1;
+      if (gateSubsequentDeletes && deleteCalls === 2) {
+        lateDeleteReceivedResolve();
+        await lateDeleteRelease;
+      }
       upstreamWallets.delete(pubkey);
       res.writeHead(204);
       return res.end();
@@ -132,6 +162,8 @@ async function createAuthHarness(
     upstreamWallets,
     verifyReceived,
     releaseVerify,
+    lateDeleteReceived,
+    releaseLateDelete,
   };
 }
 
@@ -158,6 +190,26 @@ async function readMirrorRow(instanceId: string, pubkey: string) {
     )
     .bind(instanceId, pubkey)
     .first<{ wallet_id: string; pubkey: string }>();
+}
+
+async function readPendingRevocationMarkers(instanceId: string, pubkey: string) {
+  const result = await getDb(env)
+    .prepare(
+      "SELECT user_id, pubkey FROM private_channel_wallet_revocations WHERE instance_id = ? AND pubkey = ?"
+    )
+    .bind(instanceId, pubkey)
+    .all<{ user_id: string; pubkey: string }>();
+  return result.results ?? [];
+}
+
+async function readRevocationEpoch(instanceId: string, pubkey: string) {
+  const row = await getDb(env)
+    .prepare(
+      "SELECT epoch FROM private_channel_wallet_revocation_epochs WHERE instance_id = ? AND pubkey = ?"
+    )
+    .bind(instanceId, pubkey)
+    .first<{ epoch: number }>();
+  return row?.epoch ?? 0;
 }
 
 describe("Private Channels wallet verification vs revocation race (SOLA9-664)", () => {
@@ -406,6 +458,109 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
     expect(verifyResponse.status).toBe(409);
     expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
     expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
+  });
+
+  it("loses a latched fresh verification retryably while a stale cleanup is pending", async () => {
+    // Regression for the cleanup-claim gap: the claim only re-checks the
+    // mirror when it commits, so a fresh verification that lands between the
+    // claim and the compensating delete would hand its brand-new binding and
+    // mirror to that delete — a returned-success verification silently
+    // undone. The pending-revocation marker latches the mirror upsert while
+    // the compensating delete is owed: the fresh verification must lose with
+    // a retryable conflict, finish the owed cleanup itself, and leave the
+    // wallet verifiable again — never return success into the stale delete.
+    harness = await createAuthHarness(true, {
+      bindOnRelease: true,
+      gateSubsequentDeletes: true,
+    });
+    await getDb(env)
+      .prepare("UPDATE private_channel_instances SET auth_url = ? WHERE id = ?")
+      .bind(harness.url, INSTANCE_ID)
+      .run();
+    await getDb(env)
+      .prepare(
+        "INSERT INTO private_channel_verified_wallets (id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      .bind(
+        "pcvw_wallet_race_latch",
+        ORG_ID,
+        PROJECT_ID,
+        PRINCIPAL_ID,
+        INSTANCE_ID,
+        WALLET_ID,
+        signerAddress
+      )
+      .run();
+    harness.upstreamWallets.add(signerAddress);
+
+    // Request A: verify. Parked between its SPC verify-wallet call and its
+    // local mirror write.
+    const verifyPromiseA = app.request(
+      `/v1/private-channels/wallets/${WALLET_ID}/verify`,
+      { method: "POST", headers: apiHeaders(), body: "{}" },
+      env
+    );
+    await waitFor(harness.verifyReceived, "SPC verify-wallet");
+
+    // Request B: revoke to completion while A is parked (the first delete
+    // passes the gate). The epoch advances and the mirror is removed.
+    const deleteResponse = await app.request(
+      `/v1/private-channels/wallets/${encodeURIComponent(signerAddress)}`,
+      { method: "DELETE", headers: apiHeaders() },
+      env
+    );
+    expect(deleteResponse.status).toBe(200);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+
+    // Release A: its upsert loses to the revocation, its cleanup claim
+    // commits (retry marker recorded), and its compensating SPC delete
+    // arrives at the harness — where the gate parks it.
+    harness.releaseVerify();
+    await waitFor(harness.lateDeleteReceived, "compensating SPC delete-wallet");
+    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toHaveLength(1);
+
+    // Request C: a fresh verification of the same wallet, started after the
+    // claim committed. The marker latches its mirror upsert out, so it must
+    // NOT return success into A's parked compensating delete: it loses with
+    // a retryable conflict and finishes the owed cleanup itself.
+    const verifyPromiseC = app.request(
+      `/v1/private-channels/wallets/${WALLET_ID}/verify`,
+      { method: "POST", headers: apiHeaders(), body: "{}" },
+      env
+    );
+    const verifyResponseC = await verifyPromiseC;
+    expect(verifyResponseC.status).toBe(409);
+    const bodyC = (await verifyResponseC.json()) as { error: { code: string; message: string } };
+    expect(bodyC.error.message).toContain("Start the verification again");
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+    // C's compensating delete removed the binding its own verify-wallet had
+    // just created: the owed cleanup is complete and no mirror lies about it.
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
+    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toEqual([]);
+
+    // Release A's parked compensating delete: the binding is already gone,
+    // so it converges (SPC 400 → treated as unlinked) and the epoch keeps
+    // advancing without resurrecting anything.
+    harness.releaseLateDelete();
+    const verifyResponseA = await verifyPromiseA;
+    expect(verifyResponseA.status).toBe(409);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
+    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toEqual([]);
+    expect(await readRevocationEpoch(INSTANCE_ID, signerAddress)).toBeGreaterThan(0);
+
+    // The system converged: a verification started now succeeds end to end.
+    const retryResponse = await app.request(
+      `/v1/private-channels/wallets/${WALLET_ID}/verify`,
+      { method: "POST", headers: apiHeaders(), body: "{}" },
+      env
+    );
+    expect(retryResponse.status).toBe(200);
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(true);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toEqual({
+      wallet_id: WALLET_ID,
+      pubkey: signerAddress,
+    });
   });
 
   it("still allows a fresh verification after a completed revocation", async () => {

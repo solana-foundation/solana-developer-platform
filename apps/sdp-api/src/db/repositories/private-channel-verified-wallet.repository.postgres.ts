@@ -53,6 +53,30 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           return null;
         }
 
+        // Barrier half 3: a pending-revocation retry marker for this identity
+        // means a stale verification's compensating cleanup is still owed an
+        // upstream SPC delete for this pubkey. That delete targets the binding
+        // at (SPC user, pubkey) — exactly the binding a fresh verification
+        // would create — so while the marker is pending the mirror must not
+        // land: a verification refused here loses with a retryable conflict
+        // and finishes the owed cleanup in its own rejection path instead of
+        // handing a live binding to the compensating delete. The marker is
+        // written only by transactions holding this same epoch row lock, so
+        // this serialized read cannot miss one.
+        const pendingRevocation = await tx
+          .prepare(
+            `SELECT 1
+                FROM private_channel_wallet_revocations
+               WHERE user_id = ?
+                 AND instance_id = ?
+                 AND pubkey = ?`
+          )
+          .bind(input.userId, input.instanceId, input.pubkey)
+          .first<{ "1": number }>();
+        if (pendingRevocation) {
+          return null;
+        }
+
         return tx
           .prepare(
             `WITH active_principal AS (
@@ -208,6 +232,94 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           )
           .bind(input.instanceId, input.pubkey)
           .run();
+        await tx
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocations (
+                 id, organization_id, project_id, user_id, instance_id,
+                 wallet_id, pubkey
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
+               SET wallet_id = excluded.wallet_id,
+                   updated_at = sdp_iso_now()`
+          )
+          .bind(
+            generatePrivateChannelVerifiedWalletId(),
+            input.organizationId,
+            input.projectId,
+            input.userId,
+            input.instanceId,
+            input.walletId,
+            input.pubkey
+          )
+          .run();
+        return true;
+      });
+    },
+
+    async hasPendingRevocation(userId: string, instanceId: string, pubkey: string) {
+      const row = await db
+        .prepare(
+          `SELECT 1 FROM private_channel_wallet_revocations
+            WHERE user_id = ?
+              AND instance_id = ?
+              AND pubkey = ?
+            LIMIT 1`
+        )
+        .bind(userId, instanceId, pubkey)
+        .first<{ "1": number }>();
+      return row !== null;
+    },
+
+    async recordPendingRevocation(input: UpsertVerifiedWalletInput) {
+      // The undecided-cleanup fallback: record the retry marker WITHOUT
+      // advancing the epoch, so the next principal-disable cleanup finds a late
+      // upstream binding even when the cleanup claim itself failed and nobody
+      // can say whether a compensating delete is still owed. Whether a fresh
+      // verification now owns the binding is decided under the epoch row lock
+      // (the same serialization the claim uses): a mirror that belongs to this
+      // identity is a newer verification's, its binding must survive, and no
+      // marker is recorded — recording one would latch the mirror upsert
+      // against a mirror that already exists. The lock closes the read-then-
+      // insert race against a verification that is landing right now: it
+      // cannot commit its mirror while this transaction holds the lock, so it
+      // sees the marker and is refused instead.
+      return db.transaction(async (tx) => {
+        await tx
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocation_epochs (
+                 organization_id, project_id, instance_id, pubkey, epoch
+               )
+               VALUES (?, ?, ?, ?, 0)
+             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+          )
+          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .run();
+
+        await tx
+          .prepare(
+            `SELECT epoch
+                FROM private_channel_wallet_revocation_epochs
+               WHERE instance_id = ?
+                 AND pubkey = ?
+               FOR UPDATE`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .first<{ epoch: number }>();
+
+        const mirror = await tx
+          .prepare(
+            `SELECT user_id
+                FROM private_channel_verified_wallets
+               WHERE instance_id = ?
+                 AND pubkey = ?`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .first<{ user_id: string }>();
+        if (mirror?.user_id === input.userId) {
+          return false;
+        }
+
         await tx
           .prepare(
             `INSERT INTO private_channel_wallet_revocations (

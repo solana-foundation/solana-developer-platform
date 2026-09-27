@@ -75,6 +75,8 @@ let verifiedRepo: {
   getRevocationEpoch: ReturnType<typeof vi.fn>;
   revokeVerifiedWallet: ReturnType<typeof vi.fn>;
   claimStaleVerificationCleanup: ReturnType<typeof vi.fn>;
+  hasPendingRevocation: ReturnType<typeof vi.fn>;
+  recordPendingRevocation: ReturnType<typeof vi.fn>;
   listPendingRevocations: ReturnType<typeof vi.fn>;
   findByInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
@@ -125,6 +127,8 @@ beforeEach(async () => {
     getRevocationEpoch: vi.fn().mockResolvedValue(0),
     revokeVerifiedWallet: vi.fn().mockResolvedValue(true),
     claimStaleVerificationCleanup: vi.fn().mockResolvedValue(true),
+    hasPendingRevocation: vi.fn().mockResolvedValue(false),
+    recordPendingRevocation: vi.fn().mockResolvedValue(true),
     listPendingRevocations: vi.fn().mockResolvedValue([]),
     findByInstanceAndPubkey: vi.fn().mockResolvedValue({
       id: "pcvw_1",
@@ -424,6 +428,50 @@ describe("verifyPrivateChannelWallet", () => {
     // fresh verification's, so it must not delete anything upstream.
     expect(client.deleteWallet).not.toHaveBeenCalled();
     expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
+    // The undecided claim must still leave the late upstream binding
+    // recoverable: the retry marker is recorded without advancing the epoch,
+    // so the next principal-disable cleanup finds the binding.
+    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "pcu_1",
+        instanceId: "pci_1",
+        walletId: WALLET_ID,
+        pubkey: PUBKEY,
+      })
+    );
+  });
+
+  it("does not record a marker when the claim stands down for a newer verification", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+
+    expect(verifiedRepo.recordPendingRevocation).not.toHaveBeenCalled();
+  });
+
+  it("finishes the owed cleanup when a pending marker latched the mirror upsert", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    // The epoch is unchanged since the handshake (no revocation won, the
+    // identity is active) — the upsert was refused by the pending-revocation
+    // marker another rejected verification's cleanup left behind.
+    verifiedRepo.hasPendingRevocation.mockResolvedValue(true);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
+    });
+
+    // This request completes the owed cleanup instead of surfacing the raw
+    // identity conflict, and reports a retryable revocation.
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(1);
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
+    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    );
   });
 
   it("keeps the claimed cleanup recoverable when the compensating SPC delete fails", async () => {

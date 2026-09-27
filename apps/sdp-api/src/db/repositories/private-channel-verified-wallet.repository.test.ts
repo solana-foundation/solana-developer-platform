@@ -298,6 +298,148 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
   });
 
+  it("the pending-revocation marker latches the conditional mirror upsert", async () => {
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+    await repo.revokeVerifiedWallet({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      pubkey: PUBKEY_A,
+    });
+    // A stale verification's cleanup claim: it advances the epoch and records
+    // the retry marker for the compensating SPC delete it still owes.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+
+    // A fresh verification that observed the advanced epoch must STILL lose:
+    // while the marker is pending, the compensating delete targets the
+    // binding a fresh verification would create, so the mirror must not land.
+    // (It observed epoch 2 — the claim's advance — so this refusal is the
+    // marker latch, not the epoch barrier.)
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_fresh",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 2,
+      })
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
+
+    // Completing the owed cleanup removes the marker with the mirror and the
+    // epoch barrier stays: the pubkey is verifiable again.
+    await repo.revokeVerifiedWallet({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      pubkey: PUBKEY_A,
+    });
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(
+      repo.upsert({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_fresh",
+        pubkey: PUBKEY_A,
+        expectedRevocationEpoch: 3,
+      })
+    ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_fresh" });
+  });
+
+  it("recordPendingRevocation records the fallback marker without advancing the epoch", async () => {
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+  });
+
+  it("recordPendingRevocation skips the marker when this identity's mirror owns the pubkey", async () => {
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+
+    // A newer verification of this identity has landed: its binding must
+    // survive, and a marker here would latch the mirror upsert against the
+    // row that already exists.
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+  });
+
+  it("recordPendingRevocation records independently when another identity owns the mirror", async () => {
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_users (
+           id, organization_id, project_id, instance_id, name, is_default
+         ) VALUES (?, ?, ?, ?, 'Second', FALSE)`
+      )
+      .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
+      .run();
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_active",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+
+    // The mirror belongs to the first identity, so the second identity's late
+    // upstream binding (its own SPC user) still needs its retry marker.
+    await expect(
+      repo.recordPendingRevocation({
+        ...scope,
+        userId: SECOND_PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_stale",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.listPendingRevocations(SECOND_PCU_ID, instanceA)).resolves.toHaveLength(1);
+    // The owning identity's mirror and epoch are untouched.
+    await expect(repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).resolves.toMatchObject({
+      user_id: PCU_ID,
+    });
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+  });
+
   it("lists wallets by user and instance", async () => {
     await repo.upsert({
       ...scope,
