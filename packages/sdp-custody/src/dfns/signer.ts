@@ -290,55 +290,63 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
     // client holds tokens for other pending signatures too, and a poll result
     // for a different request must never be honored as this one's.
     const signatureId = current.id;
+    // This flow's own user action token stays pinned in the client until the
+    // result has been handled here — however long the poll runs, a pin
+    // survives it, and only this flow's pin is ever dropped.
+    const releaseHeldUpstreamSecret = initial.releaseHeldUpstreamSecret;
 
-    for (let attempt = 0; attempt <= SIGNATURE_MAX_POLL_ATTEMPTS; attempt += 1) {
-      const status = current.status;
+    try {
+      for (let attempt = 0; attempt <= SIGNATURE_MAX_POLL_ATTEMPTS; attempt += 1) {
+        const status = current.status;
 
-      if (signatureId && current.id && current.id !== signatureId) {
-        // Fail closed on a poll response that does not correspond to the
-        // request being polled: honoring another pending signature's result
-        // here would let a provider smuggle its state into this error.
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-          message: `${this.providerLabel} signature request poll returned a different request ID`,
-        });
+        if (signatureId && current.id && current.id !== signatureId) {
+          // Fail closed on a poll response that does not correspond to the
+          // request being polled: honoring another pending signature's result
+          // here would let a provider smuggle its state into this error.
+          throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `${this.providerLabel} signature request poll returned a different request ID`,
+          });
+        }
+
+        if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
+          return current;
+        }
+
+        if (TERMINAL_FAILURE_STATUSES.has(status)) {
+          // `reason` is a provider-controlled response field on a 200 body, so
+          // it gets the same compact-value discipline as the client's body
+          // summarizer — only an identifier-shaped, non-secret-shaped code is
+          // embedded — plus exact matching against the credentials the client
+          // holds, read live so it includes this request's own (still pinned)
+          // user action token and every token minted within the retention
+          // window: nothing echoed back can dodge vetting by aging out.
+          const reason = summarizeUpstreamErrorValue(
+            current.reason,
+            undefined,
+            this.client.getKnownUpstreamSecrets?.() ?? []
+          );
+          throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `${this.providerLabel} signature request failed (${status})${
+              reason ? `: ${reason}` : ""
+            }`,
+          });
+        }
+
+        if (!signatureId) {
+          throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
+            message: `${this.providerLabel} signature request is '${status}' but missing request ID`,
+          });
+        }
+
+        if (attempt === SIGNATURE_MAX_POLL_ATTEMPTS) {
+          break;
+        }
+
+        await sleep(SIGNATURE_POLL_INTERVAL_MS);
+        current = await this.getSignatureRequest(keyId, signatureId);
       }
-
-      if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
-        return current;
-      }
-
-      if (TERMINAL_FAILURE_STATUSES.has(status)) {
-        // `reason` is a provider-controlled response field on a 200 body, so it
-        // gets the same compact-value discipline as the client's body
-        // summarizer — only an identifier-shaped, non-secret-shaped code is
-        // embedded — plus exact matching against the credentials the client
-        // holds, read live so it includes the user action token minted for
-        // this very request and for any request minted within the retention
-        // window: nothing echoed back can dodge vetting by aging out.
-        const reason = summarizeUpstreamErrorValue(
-          current.reason,
-          undefined,
-          this.client.getKnownUpstreamSecrets?.() ?? []
-        );
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-          message: `${this.providerLabel} signature request failed (${status})${
-            reason ? `: ${reason}` : ""
-          }`,
-        });
-      }
-
-      if (!signatureId) {
-        throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
-          message: `${this.providerLabel} signature request is '${status}' but missing request ID`,
-        });
-      }
-
-      if (attempt === SIGNATURE_MAX_POLL_ATTEMPTS) {
-        break;
-      }
-
-      await sleep(SIGNATURE_POLL_INTERVAL_MS);
-      current = await this.getSignatureRequest(keyId, signatureId);
+    } finally {
+      releaseHeldUpstreamSecret?.();
     }
 
     throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {

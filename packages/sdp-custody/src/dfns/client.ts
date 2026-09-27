@@ -116,6 +116,14 @@ export interface DfnsSignatureRequest {
   datePolicyResolved?: string;
   dateSigned?: string;
   dateConfirmed?: string;
+  /**
+   * Attached (non-enumerable, never serialized) by the client that issued
+   * this request: drops the hold on this request's user action token once the
+   * signer has handled the request's result. The hold exists so a provider
+   * echoing the token back cannot dodge vetting by outliving the retention
+   * window while its signature is still pending.
+   */
+  releaseHeldUpstreamSecret?: () => void;
 }
 
 interface DfnsUserActionChallenge {
@@ -172,17 +180,21 @@ interface DfnsClientContext {
   userAgent: string;
   /**
    * Every user action token this context has minted in the current retention
-   * window, mapped to its mint time. Held far beyond the maximum signature
-   * poll window, so no in-flight signature's token can be evicted before its
-   * result is vetted — however many newer requests are minted meanwhile, and
-   * whatever IDs a provider returns for them.
+   * window, mapped to its mint time and pinned state. Unpinned tokens age out
+   * of the window; a token pinned for a signature request stays held until
+   * that request's result is handled, however long its poll runs and however
+   * many newer requests are minted meanwhile.
    */
-  readonly heldUserActionTokens: Map<string, number>;
+  readonly heldUserActionTokens: Map<string, { mintedAt: number; pinned: boolean }>;
+  /** Last time expired unpinned tokens were swept, to keep mints O(1) amortized. */
+  lastUserActionTokenSweepAt: number;
 }
 
 interface DfnsRequestOptions {
   requireUserAction?: boolean;
   query?: Record<string, string | number | undefined>;
+  /** Invoked as soon as this request's user action token has been minted. */
+  onUserActionToken?: (userActionToken: string) => void;
 }
 
 interface DfnsRawResponse {
@@ -322,19 +334,42 @@ function heldUpstreamSecrets(ctx: DfnsClientContext, userActionToken?: string): 
   ].filter((secret): secret is string => typeof secret === "string" && secret.length > 0);
 }
 
-// Every token minted in the last hour is held, so a token can never age out
-// before the result of the request it authorized is vetted: the maximum
-// signature poll window is 30 seconds, 120x shorter than this retention.
+// Every token minted in the last hour is held, so unpinned tokens outlive
+// any plausible echo of a finished request; tokens pinned by an in-flight
+// signature request are held until its result is handled regardless of age.
 const USER_ACTION_TOKEN_RETENTION_MS = 3_600_000;
+// Sweeps are throttled so a mint's cost is O(1) amortized instead of a scan
+// over everything held.
+const USER_ACTION_TOKEN_SWEEP_INTERVAL_MS = 60_000;
 
 function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
   const now = Date.now();
-  for (const [token, mintedAt] of ctx.heldUserActionTokens) {
-    if (now - mintedAt >= USER_ACTION_TOKEN_RETENTION_MS) {
-      ctx.heldUserActionTokens.delete(token);
+  if (now - ctx.lastUserActionTokenSweepAt >= USER_ACTION_TOKEN_SWEEP_INTERVAL_MS) {
+    ctx.lastUserActionTokenSweepAt = now;
+    for (const [token, entry] of ctx.heldUserActionTokens) {
+      if (!entry.pinned && now - entry.mintedAt >= USER_ACTION_TOKEN_RETENTION_MS) {
+        ctx.heldUserActionTokens.delete(token);
+      }
     }
   }
-  ctx.heldUserActionTokens.set(userActionToken, now);
+  ctx.heldUserActionTokens.set(userActionToken, { mintedAt: now, pinned: false });
+}
+
+function pinUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
+  const entry = ctx.heldUserActionTokens.get(userActionToken);
+  if (entry) {
+    entry.pinned = true;
+  }
+}
+
+function unpinUserActionToken(ctx: DfnsClientContext, userActionToken: string | undefined): void {
+  if (!userActionToken) {
+    return;
+  }
+  const entry = ctx.heldUserActionTokens.get(userActionToken);
+  if (entry) {
+    entry.pinned = false;
+  }
 }
 
 function applyDfnsQueryParams(url: URL, query?: Record<string, string | number | undefined>): void {
@@ -396,6 +431,7 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
     heldUserActionTokens: new Map(),
+    lastUserActionTokenSweepAt: 0,
   };
 }
 
@@ -446,6 +482,7 @@ async function dfnsRequestRaw(
     // error body, redirect follow-up, or a later signature status — may echo
     // the token back, and every summarizer site vets against the held tokens.
     recordUserActionToken(ctx, userActionToken);
+    options?.onUserActionToken?.(userActionToken);
   }
   const headers = createDfnsRequestHeaders(ctx, userActionToken);
   const response = await fetch(url, {
@@ -668,13 +705,29 @@ function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
         dfnsRequestJson<DfnsWallet>(ctx, "POST", "/wallets", request.body),
     },
     keySignatures: {
-      createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) =>
-        dfnsRequestJson<DfnsSignatureRequest>(
+      createSignature: async (request: { keyId: string; body: DfnsCreateSignatureBody }) => {
+        let userActionToken: string | undefined;
+        const signatureRequest = await dfnsRequestJson<DfnsSignatureRequest>(
           ctx,
           "POST",
           `/keys/${encodeURIComponent(request.keyId)}/signatures`,
-          request.body
-        ),
+          request.body,
+          { onUserActionToken: (token) => (userActionToken = token) }
+        );
+        if (userActionToken && signatureRequest && typeof signatureRequest === "object") {
+          // Pin this request's token for as long as its result is unhandled:
+          // a poll may run arbitrarily long, and no newer mint may evict the
+          // token its own failed result could echo back. The signer releases
+          // the pin through the attached handle once it has handled the
+          // result; after that the token simply ages out of the window.
+          pinUserActionToken(ctx, userActionToken);
+          Object.defineProperty(signatureRequest, "releaseHeldUpstreamSecret", {
+            value: () => unpinUserActionToken(ctx, userActionToken),
+            enumerable: false,
+          });
+        }
+        return signatureRequest;
+      },
       getSignature: async (request: { keyId: string; signatureId: string }) =>
         dfnsRequestJson<DfnsSignatureRequest>(
           ctx,
@@ -724,6 +777,7 @@ function resolveIbmHavenContext(
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
     heldUserActionTokens: new Map(),
+    lastUserActionTokenSweepAt: 0,
   };
 }
 
