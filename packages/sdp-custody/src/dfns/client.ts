@@ -150,12 +150,16 @@ export interface DfnsApiClient {
   };
   /**
    * Credentials this client authenticates with (bearer token, credential id,
-   * private key material). A compromised provider can echo back exactly what
-   * it was sent, and a short bare token carries no shape a filter could
-   * recognize, so provider-controlled fragments are also vetted against these
-   * values by exact match before they may surface in an error message.
+   * private key material, and every user action token it has minted). A
+   * compromised provider can echo back exactly what it was sent, and a short
+   * bare token carries no shape a filter could recognize, so
+   * provider-controlled fragments are also vetted against these values by
+   * exact match before they may surface in an error message. A function, not
+   * a snapshot: per-request user action tokens are minted after construction,
+   * and the failed-signature `reason` vetting must see the token of the very
+   * request that produced the signature.
    */
-  readonly knownUpstreamSecrets?: readonly string[];
+  readonly getKnownUpstreamSecrets?: () => readonly string[];
 }
 
 interface DfnsClientContext {
@@ -166,6 +170,13 @@ interface DfnsClientContext {
   /** Provider display label for error messages ("DFNS" or the white-label name). */
   providerLabel: string;
   userAgent: string;
+  /**
+   * User action tokens this context has minted, oldest first, bounded to the
+   * most recent few. A provider echoing one back in a later response — an
+   * error `code`, or a 200-body `reason` on the signature request it was sent
+   * with — must fail closed even though the value is short and prefix-less.
+   */
+  readonly userActionTokens: string[];
 }
 
 interface DfnsRequestOptions {
@@ -293,15 +304,38 @@ function normalizeDfnsPath(path: string): string {
 }
 
 /**
- * Every credential this client context holds, including the per-request user
- * action token. Fed to the upstream error summarizer so a controlled provider
- * echoing one of them back in an error `code` (or a failed-signature `reason`)
- * collapses to `unavailable` even when the value is short and unprefix-shaped.
+ * Every credential this client context holds, plus the user action tokens it
+ * has minted so far (and the per-request one, if it is still in flight). Fed
+ * to the upstream error summarizer so a controlled provider echoing one of
+ * them back in an error `code` (or a failed-signature `reason`) collapses to
+ * `unavailable` even when the value is short and unprefix-shaped.
  */
 function heldUpstreamSecrets(ctx: DfnsClientContext, userActionToken?: string): readonly string[] {
-  return [ctx.authToken, ctx.credentialId, ctx.privateKey, userActionToken].filter(
-    (secret): secret is string => typeof secret === "string" && secret.length > 0
-  );
+  return [
+    ctx.authToken,
+    ctx.credentialId,
+    ctx.privateKey,
+    ...ctx.userActionTokens,
+    userActionToken,
+  ].filter((secret): secret is string => typeof secret === "string" && secret.length > 0);
+}
+
+// A long-lived client mints one token per write request, so the register is
+// bounded to the most recent few; older tokens stop being echoable long
+// before they need to stop being held.
+const MAX_HELD_USER_ACTION_TOKENS = 8;
+
+function recordUserActionToken(ctx: DfnsClientContext, userActionToken: string): void {
+  const tokens = ctx.userActionTokens;
+  const existing = tokens.indexOf(userActionToken);
+  if (existing >= 0) {
+    tokens.splice(existing, 1);
+  }
+  tokens.push(userActionToken);
+  const overflow = tokens.length - MAX_HELD_USER_ACTION_TOKENS;
+  if (overflow > 0) {
+    tokens.splice(0, overflow);
+  }
 }
 
 function applyDfnsQueryParams(url: URL, query?: Record<string, string | number | undefined>): void {
@@ -362,6 +396,7 @@ function resolveDfnsContext(env: DfnsEnv, options?: { apiBaseUrl?: string }): Df
     ),
     providerLabel: DFNS_PROVIDER_LABEL,
     userAgent: DFNS_USER_AGENT,
+    userActionTokens: [],
   };
 }
 
@@ -407,6 +442,12 @@ async function dfnsRequestRaw(
     requireUserAction && method !== "GET"
       ? await createDfnsUserActionToken(ctx, method, normalizedPath, payload ?? "")
       : undefined;
+  if (userActionToken) {
+    // Recorded before the request goes out: any response to this request —
+    // error body, redirect follow-up, or a later signature status — may echo
+    // the token back, and every summarizer site vets against the register.
+    recordUserActionToken(ctx, userActionToken);
+  }
   const headers = createDfnsRequestHeaders(ctx, userActionToken);
   const response = await fetch(url, {
     method,
@@ -607,7 +648,7 @@ export function resolveDfnsNetwork(
 
 function buildDfnsApiClient(ctx: DfnsClientContext): DfnsApiClient {
   return {
-    knownUpstreamSecrets: heldUpstreamSecrets(ctx),
+    getKnownUpstreamSecrets: () => heldUpstreamSecrets(ctx),
     wallets: {
       getWallet: async (request: { walletId: string }) =>
         dfnsRequestJson<DfnsWallet>(ctx, "GET", `/wallets/${encodeURIComponent(request.walletId)}`),
@@ -683,6 +724,7 @@ function resolveIbmHavenContext(
     ),
     providerLabel: IBM_HAVEN_PROVIDER_LABEL,
     userAgent: IBM_HAVEN_USER_AGENT,
+    userActionTokens: [],
   };
 }
 

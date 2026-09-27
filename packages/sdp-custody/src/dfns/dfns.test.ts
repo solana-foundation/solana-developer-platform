@@ -247,4 +247,25 @@ describe("dfns signer upstream error redaction", () => {
     );
     assert.ok(!error.message.includes("user_action_poc"));
   });
+
+  it("omits a provider echo of the user action token from a failed signature request", async () => {
+    // Greptile finding on this PR (re-review of the redirect fix): the token
+    // is minted inside the client at request time, after the signer's known
+    // secret snapshot was taken — so a 200 signature status echoing it back in
+    // `reason` still surfaced it. Reason vetting must see tokens minted after
+    // client construction.
+    serveHandshake((url, init) => {
+      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
+        return jsonResponse({ id: "sig_poc", status: "Failed", reason: "user_action_poc" }, 200);
+      }
+      return null;
+    });
+
+    const signer = await createSigner();
+    const error = await captureSignerError(signer);
+
+    assert.ok(error instanceof SignerError);
+    assert.match(error.message, /signature request failed \(Failed\)(?!:)/);
+    assert.ok(!error.message.includes("user_action_poc"));
+  });
 });
