@@ -14,14 +14,17 @@
  * concurrently revoked cannot recreate `private_channel_verified_wallets`
  * after `deleteWallet` succeeded (SOLA9-664). When the epoch race is lost, the
  * upstream binding this request created is revoked again (idempotent) unless a
- * newer verification has already re-created the mirror, and the cleanup claim
- * records a durable retry marker either way, so no late binding survives a
- * completed cleanup. The retry marker also latches the mirror upsert while a
- * compensating delete is still owed — a verification it refuses is told to
- * retry and finishes the owed cleanup itself, so the compensating delete can
- * never take a fresh verification's binding — and when the cleanup claim
- * itself cannot be decided, the marker is still recorded (without advancing
- * the epoch) so the late binding stays recoverable.
+ * newer verification has already re-created the mirror or another rejected
+ * verification's cleanup for the same binding is still pending (one binding
+ * per SPC user and pubkey — its single compensating delete covers them all),
+ * and the cleanup claim records a durable retry marker either way, so no late
+ * binding survives a completed cleanup. The retry marker also latches the
+ * mirror upsert while a compensating delete is still owed — a verification it
+ * refuses is told to retry and finishes the owed cleanup itself when the
+ * claim is free or stale, so the compensating delete can never take a fresh
+ * verification's binding — and when the cleanup claim itself cannot be
+ * decided, the marker is still recorded (without advancing the epoch) so the
+ * late binding stays recoverable.
  *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
@@ -356,11 +359,18 @@ export async function verifyPrivateChannelWallet(
       // of this identity has already re-created the mirror, and otherwise
       // advances the epoch and records the durable retry marker in the same
       // transaction, so a failed or interrupted SPC delete leaves the late
-      // binding recoverable by the next principal-disable cleanup. The marker
-      // also latches the mirror upsert until the compensating delete has run:
-      // a verification that lands afterwards is refused with a retryable
-      // conflict and finishes the owed cleanup itself, so the compensating
-      // delete can never take a fresh verification's binding.
+      // binding recoverable by the next principal-disable cleanup. The claim
+      // also stands down while another rejected verification's cleanup for
+      // the same binding is still pending (a fresh marker): SPC keeps one
+      // binding per (SPC user, pubkey), so that cleaner's single delete
+      // covers this request too, and a second concurrent delete would let
+      // the first finisher clear the shared marker while the second delete
+      // is still in flight — a fresh verification landing in that window
+      // would lose its binding and mirror to the outstanding delete. The
+      // marker latches the mirror upsert the whole time: a verification that
+      // lands afterwards is refused with a retryable conflict and finishes
+      // the owed cleanup itself once the claim is free or stale, so the
+      // compensating delete can never take a fresh verification's binding.
       let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
       try {
         cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup({

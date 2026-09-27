@@ -100,14 +100,24 @@ export interface PrivateChannelVerifiedWalletRepository {
   revokeVerifiedWallet(input: RevokeVerifiedWalletInput): Promise<boolean>;
   /**
    * Decide — under the revocation-epoch row lock — whether a stale
-   * verification's compensating SPC delete may still run. Returns false when a
-   * newer verification of the same identity has already re-created the mirror:
-   * its upstream binding is the one the compensating delete would remove, so
-   * the caller must stand down. Otherwise advances the epoch — the same
-   * barrier a revocation uses, so any verification that has not landed yet is
-   * refused — and records the pending-revocation retry marker for the binding
-   * in the same transaction, so a failed or interrupted compensation stays
-   * recoverable by the principal-disable cleanup that enumerates these
+   * verification's compensating SPC delete may still run. Returns false when
+   * a newer verification of the same identity has already re-created the
+   * mirror: its upstream binding is the one the compensating delete would
+   * remove, so the caller must stand down. Returns false as well when another
+   * stale verification's cleanup for this binding is still pending (a fresh
+   * retry marker): SPC keeps one binding per (SPC user, pubkey), so the
+   * pending cleaner's single delete covers them all, and a second concurrent
+   * delete would let the first finisher clear the shared latch while the
+   * second delete is still in flight — a fresh verification landing in that
+   * window would lose its binding and mirror to the outstanding delete. A
+   * marker older than the cleanup lease (longer than any timeout-bounded
+   * compensating delete) cannot have a delete in flight, so the claim takes
+   * it over: that converges an owner that died mid-cleanup and the
+   * undecided-cleanup fallback marker. Otherwise advances the epoch — the
+   * same barrier a revocation uses, so any verification that has not landed
+   * yet is refused — and records the pending-revocation retry marker for the
+   * binding in the same transaction, so a failed or interrupted compensation
+   * stays recoverable by the principal-disable cleanup that enumerates these
    * markers. Single-writer contract as for upsert.
    */
   claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<boolean>;
@@ -116,8 +126,8 @@ export interface PrivateChannelVerifiedWalletRepository {
    * (user_id, instance_id, pubkey). A pending marker means a stale
    * verification's compensating SPC delete is still owed for this pubkey, so
    * the mirror upsert refuses to land while one exists (the marker is the
-   * upsert's latch) and a refused verification finishes the owed cleanup in
-   * its own rejection path instead of handing a live binding to that delete.
+   * upsert's latch) — a refused verification can never hand a live binding to
+   * that delete.
    */
   hasPendingRevocation(userId: string, instanceId: string, pubkey: string): Promise<boolean>;
   /**

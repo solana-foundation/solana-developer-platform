@@ -10,6 +10,17 @@ import {
   type UpsertVerifiedWalletInput,
 } from "./private-channel-verified-wallet.repository";
 
+/**
+ * How long a pending-revocation marker counts as actively owned by another
+ * stale verification's compensating delete. Must exceed the worst-case
+ * compensating delete — every SPC call times out at 8s
+ * (SPC_AUTH_TIMEOUT_MS in services/private-channels/wallets.ts) and the delete
+ * chain is at most a token refresh plus the delete (~24s) — so a marker older
+ * than the lease cannot have a compensating delete still in flight, and
+ * taking it over is safe.
+ */
+const CLEANUP_CLAIM_LEASE = "60 seconds";
+
 export function createPostgresPrivateChannelVerifiedWalletRepository(
   db: AppDb
 ): PrivateChannelVerifiedWalletRepository {
@@ -59,10 +70,9 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         // at (SPC user, pubkey) — exactly the binding a fresh verification
         // would create — so while the marker is pending the mirror must not
         // land: a verification refused here loses with a retryable conflict
-        // and finishes the owed cleanup in its own rejection path instead of
-        // handing a live binding to the compensating delete. The marker is
-        // written only by transactions holding this same epoch row lock, so
-        // this serialized read cannot miss one.
+        // instead of handing a live binding to the compensating delete. The
+        // marker is written only by transactions holding this same epoch row
+        // lock, so this serialized read cannot miss one.
         const pendingRevocation = await tx
           .prepare(
             `SELECT 1
@@ -185,7 +195,10 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       // wins, the epoch advance refuses any verification that has not landed
       // yet, and the retry marker is recorded in the same transaction: if the
       // compensating delete then fails or the process dies, the next
-      // principal-disable cleanup still finds the late upstream binding.
+      // principal-disable cleanup still finds the late upstream binding. The
+      // claim also stands down while another stale verification's cleanup for
+      // the same binding is still pending (a fresh marker), so the latch can
+      // only ever be cleared by the single delete it covers.
       return db.transaction(async (tx) => {
         await tx
           .prepare(
@@ -212,9 +225,9 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
         const mirror = await tx
           .prepare(
             `SELECT user_id
-                FROM private_channel_verified_wallets
-               WHERE instance_id = ?
-                 AND pubkey = ?`
+                 FROM private_channel_verified_wallets
+                WHERE instance_id = ?
+                  AND pubkey = ?`
           )
           .bind(input.instanceId, input.pubkey)
           .first<{ user_id: string }>();
@@ -222,6 +235,40 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
           return false;
         }
 
+        // SPC keeps ONE binding per (SPC user, pubkey), so every stale
+        // verification of this wallet owes a delete for the same binding and
+        // one compensating delete covers them all. A pending marker for this
+        // identity therefore means another rejected verification's cleanup is
+        // the single owner of that delete: a second claimant must not start
+        // its own delete, because the first finisher would clear this shared
+        // latch while the second delete is still in flight and a fresh
+        // verification landing in that window would lose its new binding and
+        // mirror to the outstanding delete. Stand down while the marker is
+        // fresh; the pending cleaner converges the binding. A marker older
+        // than the lease cannot have a delete in flight (its owner's calls
+        // are timeout-bounded), so taking it over is safe: that covers an
+        // owner that died mid-cleanup and the undecided-cleanup fallback
+        // marker, either of which would otherwise latch verifications here
+        // forever.
+        const pendingMarker = await tx
+          .prepare(
+            `SELECT (sdp_iso_now()::timestamptz - updated_at::timestamptz)
+                  < interval '${CLEANUP_CLAIM_LEASE}' AS lease_active
+               FROM private_channel_wallet_revocations
+              WHERE user_id = ?
+                AND instance_id = ?
+                AND pubkey = ?`
+          )
+          .bind(input.userId, input.instanceId, input.pubkey)
+          .first<{ lease_active: boolean }>();
+        if (pendingMarker?.lease_active) {
+          return false;
+        }
+
+        // The claim wins: advance the epoch — the same barrier a revocation
+        // uses, so any verification that has not landed yet is refused — and
+        // (re)record the retry marker in the same transaction, freshening its
+        // lease.
         await tx
           .prepare(
             `UPDATE private_channel_wallet_revocation_epochs

@@ -522,7 +522,12 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
     // Request C: a fresh verification of the same wallet, started after the
     // claim committed. The marker latches its mirror upsert out, so it must
     // NOT return success into A's parked compensating delete: it loses with
-    // a retryable conflict and finishes the owed cleanup itself.
+    // a retryable conflict. And because A's cleanup for the same binding is
+    // still pending (its marker is fresh), C's rejection path stands down
+    // instead of starting a second delete: with one SPC binding per (SPC
+    // user, pubkey), two concurrent deletes would let the first finisher
+    // clear the shared marker while the second delete is still in flight,
+    // and a verification landing in that window would be undone.
     const verifyPromiseC = app.request(
       `/v1/private-channels/wallets/${WALLET_ID}/verify`,
       { method: "POST", headers: apiHeaders(), body: "{}" },
@@ -533,14 +538,29 @@ describe("Private Channels wallet verification vs revocation race (SOLA9-664)", 
     const bodyC = (await verifyResponseC.json()) as { error: { code: string; message: string } };
     expect(bodyC.error.message).toContain("Start the verification again");
     expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
-    // C's compensating delete removed the binding its own verify-wallet had
-    // just created: the owed cleanup is complete and no mirror lies about it.
-    expect(harness.upstreamWallets.has(signerAddress)).toBe(false);
-    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toEqual([]);
+    // C's own verify-wallet binding is still parked upstream — deleting it is
+    // A's single compensating delete, still in flight — and the marker still
+    // latches the mirror.
+    expect(harness.upstreamWallets.has(signerAddress)).toBe(true);
+    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toHaveLength(1);
 
-    // Release A's parked compensating delete: the binding is already gone,
-    // so it converges (SPC 400 → treated as unlinked) and the epoch keeps
-    // advancing without resurrecting anything.
+    // Request D: a further fresh verification while A's delete is still
+    // parked. The marker latches it out too: no verification can return
+    // success into an outstanding compensating delete, which is the undo
+    // race this test guards.
+    const verifyResponseD = await app.request(
+      `/v1/private-channels/wallets/${WALLET_ID}/verify`,
+      { method: "POST", headers: apiHeaders(), body: "{}" },
+      env
+    );
+    expect(verifyResponseD.status).toBe(409);
+    expect(await readMirrorRow(INSTANCE_ID, signerAddress)).toBeNull();
+    expect(await readPendingRevocationMarkers(INSTANCE_ID, signerAddress)).toHaveLength(1);
+
+    // Release A's parked compensating delete: it removes the binding that
+    // C's and D's handshakes had (re)created, and its completion clears the
+    // shared marker only after that delete returned — the latch and an
+    // outstanding delete are never open at the same time.
     harness.releaseLateDelete();
     const verifyResponseA = await verifyPromiseA;
     expect(verifyResponseA.status).toBe(409);

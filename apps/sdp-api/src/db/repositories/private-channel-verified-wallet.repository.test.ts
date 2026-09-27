@@ -259,6 +259,101 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
   });
 
+  it("a second cleanup claim stands down while the first claim's marker is fresh", async () => {
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+
+    // A second stale verification of the same wallet claims cleanup: SPC
+    // keeps one binding per (SPC user, pubkey), so the first claim's single
+    // compensating delete covers it too. The second claim must stand down —
+    // two deletes would let the first finisher clear the shared marker while
+    // the second delete is still in flight, and a fresh verification landing
+    // in that window would lose its binding and mirror.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
+
+    // Once the pending cleanup completes (its compensating revoke clears the
+    // marker), a new claim is free again.
+    await expect(
+      repo.revokeVerifiedWallet({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_2",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(3);
+  });
+
+  it("a cleanup claim takes over a marker whose lease has expired", async () => {
+    // Seed a marker whose owner died before its compensating delete (or that
+    // the undecided-cleanup fallback recorded): older than the claim lease,
+    // so no timeout-bounded compensating delete can still be in flight.
+    const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await getDb(env)
+      .prepare(
+        `INSERT INTO private_channel_wallet_revocations (
+             id, organization_id, project_id, user_id, instance_id,
+             wallet_id, pubkey, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        "pcr_lease_expired",
+        TEST_ORG.id,
+        TEST_PROJECT_ID,
+        PCU_ID,
+        instanceA,
+        "wal_1",
+        PUBKEY_A,
+        stale,
+        stale
+      )
+      .run();
+
+    // Taking the marker over is safe and converges the latch: the claim
+    // advances the epoch and refreshes the marker's lease instead of
+    // latching verifications here forever.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    const markers = await repo.listPendingRevocations(PCU_ID, instanceA);
+    expect(markers).toHaveLength(1);
+    expect(Date.now() - new Date(markers[0].updated_at).getTime()).toBeLessThan(60_000);
+  });
+
   it("the cleanup claim records cleanup independently when another identity owns the same pubkey", async () => {
     const db = getDb(env);
     await db
