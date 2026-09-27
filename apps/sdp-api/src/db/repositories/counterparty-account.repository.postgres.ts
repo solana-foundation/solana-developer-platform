@@ -60,7 +60,7 @@ export function createPostgresCounterpartyAccountsRepository(
 ): CounterpartyAccountsRepository {
   return {
     async createCounterpartyAccount(input: CreateCounterpartyAccountInput) {
-      const id = generateCounterpartyAccountId();
+      const id = input.id ?? generateCounterpartyAccountId();
       const label = input.label ?? null;
       const details = input.details ?? {};
       const providerAccountData = input.providerAccountData ?? {};
@@ -114,6 +114,16 @@ export function createPostgresCounterpartyAccountsRepository(
           return null;
         }
         const current = mapCounterpartyAccountRow(row);
+        // The row is locked, so this comparison is authoritative: a mismatch
+        // means a concurrent mutation committed after the caller's pre-read,
+        // and its audit intent describes a row it never saw. Refuse instead
+        // of committing stale evidence.
+        if (
+          input.expectedUpdatedAt !== undefined &&
+          current.updated_at !== input.expectedUpdatedAt
+        ) {
+          return null;
+        }
         const label = input.label !== undefined ? input.label : current.label;
         const details = input.details ?? current.details;
         const providerAccountData = input.providerAccountData ?? current.provider_account_data;
@@ -149,13 +159,16 @@ export function createPostgresCounterpartyAccountsRepository(
               AND organization_id = ?
               AND project_id = ?
               AND status = 'active'
+              AND (?::boolean = false OR updated_at = ?)
           RETURNING *`
         )
         .bind(
           input.counterpartyId,
           input.counterpartyAccountId,
           input.organizationId,
-          input.projectId
+          input.projectId,
+          input.expectedUpdatedAt !== undefined,
+          input.expectedUpdatedAt ?? null
         )
         .first<Record<string, unknown>>();
       return row ? mapCounterpartyAccountRow(row) : null;

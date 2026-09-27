@@ -32,6 +32,12 @@ export interface CreateCounterpartyAccountInput {
   label?: string | null;
   details?: CounterpartyAccountDetails;
   providerAccountData?: CounterpartyAccountProviderData;
+  /**
+   * Pre-generated account id. Critical-audit callers admit the mutation with
+   * an intent that names the account before the insert runs, so a crash after
+   * commit but before the outcome write still leaves the account identified.
+   */
+  id?: string;
 }
 
 export interface UpdateCounterpartyAccountInput {
@@ -42,6 +48,14 @@ export interface UpdateCounterpartyAccountInput {
   label?: string | null;
   details?: CounterpartyAccountDetails;
   providerAccountData?: CounterpartyAccountProviderData;
+  /**
+   * Optimistic-concurrency guard: the mutation only commits when the row is
+   * still at the version the caller read (and recorded in its audit intent).
+   * A mismatch means a concurrent mutation won the race; the caller must
+   * re-read and re-admit instead of committing evidence about a row it never
+   * saw.
+   */
+  expectedUpdatedAt?: string;
 }
 
 export interface ArchiveCounterpartyAccountInput {
@@ -49,6 +63,8 @@ export interface ArchiveCounterpartyAccountInput {
   counterpartyId: string;
   organizationId: string;
   projectId: string;
+  /** Same optimistic-concurrency guard as {@link UpdateCounterpartyAccountInput}. */
+  expectedUpdatedAt?: string;
 }
 
 export interface ListCounterpartyAccountsByCounterpartyInput {

@@ -200,8 +200,9 @@ describe("Counterparty account audit admission ordering (APE-738)", () => {
     // No update event was admitted, so none may exist for the account.
     expect(await accountAuditRows(accountId, "update")).toHaveLength(0);
 
-    // Negative control: with the checkpoint restored, the same mutation
-    // commits together with its append-only update event.
+    // Negative control: with the checkpoint restored, the same rotation the
+    // admission failure refused now commits together with its append-only
+    // update event — and the attempted destination actually persists.
     const kv = createKVStoreSet(env);
     await kv.cache.put(AUDIT_LEDGER_CHECKPOINT_KEY, validCheckpoint);
     const successfulMutation = await app.request(
@@ -210,7 +211,7 @@ describe("Counterparty account audit admission ordering (APE-738)", () => {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: authHeader },
         body: JSON.stringify({
-          details: { network: "solana", address: ORIGINAL_ADDRESS },
+          details: { network: "solana", address: ATTACKER_ADDRESS },
         }),
       },
       env
@@ -218,8 +219,15 @@ describe("Counterparty account audit admission ordering (APE-738)", () => {
     expect(successfulMutation.status).toBe(200);
     expect((await successfulMutation.json()).data.account.details).toEqual({
       network: "solana",
-      address: ORIGINAL_ADDRESS,
+      address: ATTACKER_ADDRESS,
     });
+    const rotatedRows = await accountRows(counterpartyId);
+    expect(rotatedRows.results).toHaveLength(1);
+    expect(rotatedRows.results[0].details).toEqual({
+      network: "solana",
+      address: ATTACKER_ADDRESS,
+    });
+    expect(rotatedRows.results[0].address).toBe(ATTACKER_ADDRESS);
     expect(await accountAuditRows(accountId, "update")).toHaveLength(1);
   });
 
@@ -265,6 +273,23 @@ describe("Counterparty account audit admission ordering (APE-738)", () => {
     expect(successfulCreate.status).toBe(201);
     const accountId = (await successfulCreate.json()).data.account.id;
     expect(await accountAuditRows(accountId, "create")).toHaveLength(1);
+
+    // The durable intent pins the account's identity, not just its
+    // destination fingerprint: two accounts under the same counterparty can
+    // share a destination, so the intent must name the account it admitted.
+    const createIntents = await ledgerIntentRows();
+    const createIntent = createIntents
+      .map((row) => ({ row, metadata: row.metadata ? JSON.parse(row.metadata) : null }))
+      .find(
+        (candidate) =>
+          candidate.metadata?.auditPhase === "intent" &&
+          candidate.metadata?.target?.action === "create" &&
+          candidate.metadata?.target?.resourceId === accountId
+      );
+    expect(createIntent).toBeDefined();
+    expect(createIntent?.metadata?.target?.metadata?.destinationFingerprint).toMatch(
+      /^[0-9a-f]{64}$/
+    );
   });
 
   it("DELETE keeps the account active when audit admission fails", async () => {
@@ -328,6 +353,7 @@ describe("Counterparty account audit admission ordering (APE-738)", () => {
       .find(
         (candidate) =>
           candidate.metadata?.auditPhase === "intent" &&
+          candidate.metadata?.target?.action === "update" &&
           candidate.metadata?.target?.resourceId === accountId
       );
     expect(intent).toBeDefined();

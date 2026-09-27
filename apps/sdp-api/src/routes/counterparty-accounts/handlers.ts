@@ -8,11 +8,13 @@ import type {
 import { z } from "zod";
 import { getDb } from "@/db";
 import type { CounterpartyAccountRow } from "@/db/repositories/counterparty-account.repository";
+import { generateCounterpartyAccountId } from "@/db/repositories/counterparty-account.repository";
 import { getAuth, requireProjectId } from "@/lib/auth";
 import {
   badRequest,
   badRequestParams,
   badRequestQuery,
+  conflict,
   internalError,
   notFound,
 } from "@/lib/errors";
@@ -168,10 +170,17 @@ export const createCounterpartyAccount = async (
   // before anything commits, and a crash between commit and outcome leaves
   // the durable intent for reconciliation — a new destination can never exist
   // without ledger attribution.
+  //
+  // The account id is generated up front and pinned in the intent before the
+  // insert: two accounts under the same counterparty can share a destination,
+  // so the destination fingerprint alone cannot tell an operator which
+  // unresolved intent admitted which account.
+  const accountId = generateCounterpartyAccountId();
   const auditService = new AuditService(getDb(c.env));
   const auditIntent = await auditService.beginCritical(c, {
     action: "create",
     resourceType: "counterparty_account",
+    resourceId: accountId,
     metadata: {
       counterpartyId: params.data.counterpartyId,
       accountKind: body.accountKind,
@@ -182,6 +191,7 @@ export const createCounterpartyAccount = async (
   let account: CounterpartyAccountRow | null;
   try {
     account = await getCounterpartyAccountsRepository(c).createCounterpartyAccount({
+      id: accountId,
       organizationId: auth.organizationId,
       projectId,
       counterpartyId: params.data.counterpartyId,
@@ -231,7 +241,10 @@ export const updateCounterpartyAccount = async (
   const repo = getCounterpartyAccountsRepository(c);
 
   // The current row is both the validation source and the pre-mutation
-  // evidence for the audit intent below.
+  // evidence for the audit intent below. The mutation is guarded by the row's
+  // version, so a concurrent PATCH/DELETE that commits after this read makes
+  // the later mutation refuse instead of committing evidence about a row it
+  // never saw.
   const existing = await repo.getCounterpartyAccountById({
     counterpartyAccountId: params.data.counterpartyAccountId,
     counterpartyId: params.data.counterpartyId,
@@ -281,6 +294,7 @@ export const updateCounterpartyAccount = async (
       counterpartyId: params.data.counterpartyId,
       organizationId: auth.organizationId,
       projectId,
+      expectedUpdatedAt: existing.updated_at,
       ...body,
     });
   } catch (error) {
@@ -292,11 +306,15 @@ export const updateCounterpartyAccount = async (
   }
 
   if (!updated) {
+    // The pre-read already proved the account exists and is active, so a null
+    // here can only mean a concurrent mutation won the race. Refusing keeps
+    // the intent's recorded destination and version truthful; the caller
+    // re-reads and re-admits.
     await auditService.completeCritical(c, auditIntent, {
       status: "failure",
-      metadata: { error: "Update returned no counterparty account row" },
+      metadata: { error: "Counterparty account changed concurrently" },
     });
-    throw notFound("Counterparty account");
+    throw conflict("Counterparty account changed while updating; retry with the latest account");
   }
 
   await auditService.completeCritical(c, auditIntent, {
@@ -354,6 +372,7 @@ export const archiveCounterpartyAccount = async (c: AppContext) => {
       counterpartyId: params.data.counterpartyId,
       organizationId: auth.organizationId,
       projectId,
+      expectedUpdatedAt: existing.updated_at,
     });
   } catch (error) {
     await auditService.completeCritical(c, auditIntent, {
@@ -364,11 +383,15 @@ export const archiveCounterpartyAccount = async (c: AppContext) => {
   }
 
   if (!archived) {
+    // The pre-read already proved the account exists and is active, so a null
+    // here can only mean a concurrent mutation won the race (a PATCH changing
+    // the destination the intent describes, or an archive). Refusing keeps
+    // the intent's recorded destination and version truthful.
     await auditService.completeCritical(c, auditIntent, {
       status: "failure",
-      metadata: { error: "Archive returned no counterparty account row" },
+      metadata: { error: "Counterparty account changed concurrently" },
     });
-    throw notFound("Counterparty account");
+    throw conflict("Counterparty account changed while archiving; retry with the latest account");
   }
 
   await auditService.completeCritical(c, auditIntent, {

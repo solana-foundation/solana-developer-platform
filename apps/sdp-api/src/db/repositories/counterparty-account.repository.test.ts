@@ -130,6 +130,23 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       expect(row.details).toEqual(TEST_ACCOUNT_DETAILS);
       expect(row.provider_account_data).toEqual({});
     });
+
+    it("uses the caller-provided id when given (audit-intent identity)", async () => {
+      const counterparty = await seedCounterparty();
+      const id = `counterparty_account_${crypto.randomUUID()}`;
+
+      const row = await repo.createCounterpartyAccount({
+        id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
+      });
+
+      assert(row);
+      expect(row.id).toBe(id);
+    });
   });
 
   describe("getCounterpartyAccountById", () => {
@@ -465,6 +482,56 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
       });
       expect(untouched?.label).toBe("owned by A");
     });
+
+    it("returns null when expectedUpdatedAt is stale (lost audit-intent race)", async () => {
+      const counterparty = await seedCounterparty();
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
+        label: "read before the race",
+      });
+      assert(account);
+
+      // A concurrent mutation commits after the caller read the row: the
+      // version the caller recorded (account.updated_at) is now stale.
+      // Timestamps have millisecond resolution, so the winning version is
+      // pinned explicitly instead of relying on wall-clock drift.
+      await getDb(env)
+        .prepare("UPDATE counterparty_accounts SET updated_at = ? WHERE id = ?")
+        .bind("2030-01-01T00:00:00.000Z", account.id)
+        .run();
+
+      const stale = await repo.updateCounterpartyAccount({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        label: "stale writer",
+        expectedUpdatedAt: account.updated_at,
+      });
+      expect(stale).toBeNull();
+
+      const untouched = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(untouched?.label).toBe("read before the race");
+
+      const current = await repo.updateCounterpartyAccount({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        label: "current writer",
+        expectedUpdatedAt: "2030-01-01T00:00:00.000Z",
+      });
+      expect(current?.label).toBe("current writer");
+    });
   });
 
   describe("archiveCounterpartyAccount", () => {
@@ -537,6 +604,51 @@ describe("CounterpartyAccountsRepository (postgres)", () => {
         projectId: TEST_PROJECT_ID,
       });
       expect(stillActive?.status).toBe("active");
+    });
+
+    it("returns null when expectedUpdatedAt is stale (lost audit-intent race)", async () => {
+      const counterparty = await seedCounterparty();
+      const account = await repo.createCounterpartyAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        accountKind: "crypto_wallet",
+        details: TEST_ACCOUNT_DETAILS,
+      });
+      assert(account);
+
+      // A concurrent mutation commits after the caller read the row (see the
+      // updateCounterpartyAccount sibling test for the millisecond note).
+      await getDb(env)
+        .prepare("UPDATE counterparty_accounts SET updated_at = ? WHERE id = ?")
+        .bind("2030-01-01T00:00:00.000Z", account.id)
+        .run();
+
+      const stale = await repo.archiveCounterpartyAccount({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        expectedUpdatedAt: account.updated_at,
+      });
+      expect(stale).toBeNull();
+
+      const stillActive = await repo.getCounterpartyAccountById({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      });
+      expect(stillActive?.status).toBe("active");
+
+      const archived = await repo.archiveCounterpartyAccount({
+        counterpartyAccountId: account.id,
+        counterpartyId: counterparty.id,
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        expectedUpdatedAt: "2030-01-01T00:00:00.000Z",
+      });
+      expect(archived?.status).toBe("archived");
     });
   });
 
