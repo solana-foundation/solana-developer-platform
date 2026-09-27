@@ -10,7 +10,7 @@ import {
   simulateTransaction,
 } from "@sdp/rpc/solana";
 import { verifyTransactionLanded } from "@sdp/rpc/verified-confirmation";
-import { SPL_TOKEN_PROGRAMS, type Token } from "@sdp/types";
+import { SPL_TOKEN_PROGRAMS, type Token, type TokenTransaction } from "@sdp/types";
 import type { Address, TransactionSigner } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
@@ -201,6 +201,9 @@ async function recordConfirmedDeploy(params: {
   signature: string;
   slot: number | bigint;
   deployedToken: Awaited<ReturnType<TokenService["setTokenDeployed"]>>;
+  // The pending deploy-prepare marker (APE-848) when prepare recorded one:
+  // confirmed in place instead of writing a second deploy row.
+  preparedTransaction?: TokenTransaction | null;
 }): Promise<Awaited<ReturnType<TokenService["setTokenDeployed"]>>> {
   const {
     tokenService,
@@ -215,6 +218,7 @@ async function recordConfirmedDeploy(params: {
     signature,
     slot,
     deployedToken,
+    preparedTransaction,
   } = params;
   try {
     const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
@@ -225,21 +229,24 @@ async function recordConfirmedDeploy(params: {
           })
         : deployedToken;
 
-    // prepareDeploy persists no transaction row, so record one here for history /
-    // audit parity with the custodial deploy path.
-    const { transaction: tx } = await tokenService.createTransaction({
-      tokenId,
-      organizationId,
-      type: "deploy",
-      params: {
-        operation: "deploy",
-        tokenId,
-        template: token.template,
-        name: token.name,
-        symbol: token.symbol,
-      },
-      initiatedByKeyId,
-    });
+    // prepareDeploy persists no transaction row of its own beyond the prepare
+    // marker, so record one here for history / audit parity with the custodial
+    // deploy path (or confirm the marker in place when it exists).
+    const { transaction: tx } = preparedTransaction
+      ? { transaction: preparedTransaction }
+      : await tokenService.createTransaction({
+          tokenId,
+          organizationId,
+          type: "deploy",
+          params: {
+            operation: "deploy",
+            tokenId,
+            template: token.template,
+            name: token.name,
+            symbol: token.symbol,
+          },
+          initiatedByKeyId,
+        });
 
     await tokenService.updateTransaction(tx.id, {
       status: "confirmed",
@@ -948,6 +955,27 @@ export const prepareDeploy = async (c: ValidatedBodyContext<typeof legacyDeployT
   const txBytes = Buffer.from(prepared.serializedTx, "base64");
   const simulation = await simulateTransaction(rpc, txBytes);
 
+  // APE-848: pin the prepared deploy so a profile save cannot rewrite the
+  // snapshot this transaction will mint from while it can still land on-chain
+  // (a rewrite here would strand the submitted mint: confirm would compare the
+  // mint's authorities against the new snapshot and refuse it, with no way to
+  // record it). confirmDeploy closes this row; the profile-save path fences on
+  // it while it is fresh.
+  await tokenService.createTransaction({
+    tokenId,
+    organizationId: orgId,
+    type: "deploy",
+    params: {
+      operation: "deploy",
+      mode: "prepare",
+      mint: prepared.mint,
+      template: token.template,
+      name: token.name,
+      symbol: token.symbol,
+    },
+    initiatedByKeyId: auth.id,
+  });
+
   // Audit log
   const auditService = new AuditService(getDb(c.env));
   await auditService.log(c, {
@@ -1015,6 +1043,25 @@ const findMintInitialization = (
  * the request) so a caller can't record a mint under authorities it doesn't
  * control.
  */
+/**
+ * Close a failed confirm's prepare marker (APE-848) so it stops fencing
+ * profile saves and never lingers as a pending deploy: the failure path's
+ * remediation is "re-save the profile and retry".
+ */
+async function failPreparedTransactionMarker(
+  tokenService: TokenService,
+  preparedTransaction: TokenTransaction | null,
+  error: unknown
+): Promise<void> {
+  if (!preparedTransaction) {
+    return;
+  }
+  await tokenService.updateTransaction(preparedTransaction.id, {
+    status: "failed",
+    error: error instanceof Error ? error.message : "Deploy confirmation failed",
+  });
+}
+
 export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploySchema>) => {
   const { tokenId } = c.req.param();
   const { auth, projectId, orgId } = requireProjectScope(c);
@@ -1064,6 +1111,11 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
   if (!claimed) {
     throw new AppError("CONFLICT", "Token deployment is already in progress");
   }
+
+  // The prepare marker this confirm corresponds to, when prepare recorded one
+  // (APE-848). Confirmed in place on success, failed in the catch on error, so
+  // it never lingers as a pending deploy.
+  const preparedTransaction = await tokenService.findPendingPreparedDeploy(tokenId, body.mint);
 
   const { mint, signature } = body;
   const auditService = new AuditService(getDb(c.env));
@@ -1196,6 +1248,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       signature: body.signature,
       slot: verified.status.slot,
       deployedToken,
+      preparedTransaction,
     });
 
     await auditService.completeCritical(c, auditIntent);
@@ -1206,6 +1259,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       // re-claim. Guarded on deploying/no-mint, so this can never demote a
       // token whose mint was committed by someone else in the meantime.
       await tokenService.releaseTokenDeploy(tokenId);
+      await failPreparedTransactionMarker(tokenService, preparedTransaction, error);
       if (auditIntent) {
         await auditService.completeCritical(c, auditIntent, {
           status: "failure",

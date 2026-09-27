@@ -1362,6 +1362,67 @@ export class TokenService {
   }
 
   /**
+   * Is a client-signed deploy prepare still in flight for this token?
+   *
+   * `prepareDeploy` hands the caller a transaction built from the token's
+   * deployment snapshot and records a pending `deploy` transaction row for it
+   * (APE-848). Its blockhash stays valid for at most a couple of minutes, so a
+   * prepared transaction that could still land on-chain — and whose mint a
+   * snapshot rewrite would strand — is always younger than the caller's fence
+   * window. A pending row outside the window can never land and is ignored.
+   */
+  async hasFreshPreparedDeploy(tokenId: string, maxAgeMs: number): Promise<boolean> {
+    const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+    const tenant = this.tenantTokenScope("token");
+    const row = await this.db
+      .prepare(
+        `SELECT 1 AS in_flight
+         FROM issuance_transactions tx
+         JOIN issued_tokens token ON token.id = tx.token_id
+         WHERE tx.token_id = ?
+           AND tx.type = 'deploy'
+           AND tx.status = 'pending'
+           AND tx.created_at >= ?${tenant.clause}
+         LIMIT 1`
+      )
+      .bind(tokenId, cutoff, ...tenant.values)
+      .first<{ in_flight: number }>();
+    return row !== undefined && row !== null;
+  }
+
+  /**
+   * The pending `deploy` marker row a client-signed prepare wrote for this
+   * token and mint (APE-848), or null. confirmDeploy confirms it in place on
+   * success and marks it failed on error, so a finished prepare neither fences
+   * profile saves nor lingers as a pending deploy in transaction history.
+   */
+  async findPendingPreparedDeploy(tokenId: string, mint: string): Promise<TokenTransaction | null> {
+    const tenant = this.tenantTokenScope("token");
+    const rows = await this.db
+      .prepare(
+        `SELECT tx.id, tx.token_id, tx.organization_id, tx.custody_wallet_id, tx.type, tx.status,
+                tx.idempotency_key, tx.idempotency_fingerprint, tx.signature, tx.serialized_tx,
+                tx.operation_params, tx.slot, tx.block_time, tx.fee, tx.error,
+                tx.initiated_by_key_id, tx.created_at, tx.updated_at
+         FROM issuance_transactions tx
+         JOIN issued_tokens token ON token.id = tx.token_id
+         WHERE tx.token_id = ?
+           AND tx.type = 'deploy'
+           AND tx.status = 'pending'${tenant.clause}
+         ORDER BY tx.created_at DESC`
+      )
+      .bind(tokenId, ...tenant.values)
+      .all<TokenTransactionRow>();
+    for (const row of rows.results) {
+      const params = parsePostgresJsonOr<Record<string, unknown>>(row.operation_params, {});
+      if (params.mint === mint) {
+        return this.mapRowToTransaction(row);
+      }
+    }
+    return null;
+  }
+
+  /**
    * Commit a deploy: record the mint and flip the claimed token to `active`.
    *
    * Guarded on `deploying`/no-mint so it only completes a claim taken via

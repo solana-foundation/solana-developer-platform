@@ -35,6 +35,15 @@ export interface ResolvedProfileSnapshot {
   errors: TemplateOverrideError[];
 }
 
+/**
+ * How long a client-signed deploy prepare can still land on-chain, for the
+ * profile-save fence. The prepared transaction's blockhash stays valid for at
+ * most a couple of minutes; the window is generous past that for clock skew
+ * and slow confirmations, because a rewrite inside it can strand the submitted
+ * mint while a rewrite after it cannot.
+ */
+export const PREPARED_DEPLOY_FENCE_MS = 15 * 60 * 1000;
+
 /** True when the profile asserts the capability-derived settings path at all. */
 export function profileUsesAdvancedSettings(
   metadata: IssuanceMetadata | null | undefined
@@ -75,9 +84,11 @@ export function resolveProfileDeploymentSnapshot(params: {
 }
 
 // Authority values are per-deployment wallet state, not policy: both sides of
-// the deploy check normalize the stored delegate to this marker so the
-// comparison judges whether the extension is selected, not which wallet
-// controls it.
+// the deploy check strip them (the stored delegate becomes a shared marker) so
+// the comparison judges which extensions are selected with which reviewed
+// params, never which wallet controls them. Creation/deploy inject these
+// fields from the signing wallet, so the resolver's selection output never
+// carries them and comparing them raw would reject every consistent token.
 const DELEGATE_COMPARISON_MARKER = "__profile-snapshot-check__";
 
 function canonicalJson(value: unknown): string {
@@ -102,6 +113,21 @@ function normalizedTokenExtensions(
   const clone: Record<string, unknown> = { ...extensions };
   if (typeof clone.permanentDelegate === "string") {
     clone.permanentDelegate = DELEGATE_COMPARISON_MARKER;
+  }
+  if (clone.transferFee && typeof clone.transferFee === "object") {
+    const {
+      transferFeeConfigAuthority: _a,
+      withdrawWithheldAuthority: _b,
+      ...transferFee
+    } = clone.transferFee as Record<string, unknown>;
+    clone.transferFee = transferFee;
+  }
+  for (const key of ["interestBearing", "pausable", "scaledUiAmount", "transferHook"] as const) {
+    const value = clone[key];
+    if (value && typeof value === "object" && "authority" in (value as Record<string, unknown>)) {
+      const { authority: _a, ...rest } = value as Record<string, unknown>;
+      clone[key] = rest;
+    }
   }
   return clone as TokenExtensionsConfig;
 }
@@ -154,7 +180,29 @@ export function profileSnapshotMatchesToken(
     snapshot.template === token.template &&
     snapshot.isFreezable === token.isFreezable &&
     snapshot.requiresAllowlist === token.requiresAllowlist &&
-    canonicalJson(snapshot.extensions) ===
+    canonicalJson(normalizedTokenExtensions(snapshot.extensions)) ===
+      canonicalJson(normalizedTokenExtensions(token.extensions))
+  );
+}
+
+/**
+ * Does a save's resolved snapshot differ from what the pending token currently
+ * carries? Same normalization as the deploy check: a save that would rewrite
+ * any snapshot field is the one that can strand an in-flight prepared deploy,
+ * while a value-identical re-save (e.g. metadata-only) is harmless.
+ */
+export function resolvedSnapshotEqualsTokenSnapshot(
+  resolved: Pick<
+    ResolvedProfileSnapshot,
+    "template" | "isFreezable" | "requiresAllowlist" | "extensions"
+  >,
+  token: Pick<Token, "template" | "isFreezable" | "requiresAllowlist" | "extensions">
+): boolean {
+  return (
+    resolved.template === token.template &&
+    resolved.isFreezable === token.isFreezable &&
+    resolved.requiresAllowlist === token.requiresAllowlist &&
+    canonicalJson(normalizedTokenExtensions(resolved.extensions)) ===
       canonicalJson(normalizedTokenExtensions(token.extensions))
   );
 }

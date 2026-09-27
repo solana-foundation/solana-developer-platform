@@ -34,7 +34,9 @@ import {
   validateAdvancedSettings,
 } from "@/lib/issuance/advanced-settings";
 import {
+  PREPARED_DEPLOY_FENCE_MS,
   profileUsesAdvancedSettings,
+  resolvedSnapshotEqualsTokenSnapshot,
   resolveProfileDeploymentSnapshot,
 } from "@/lib/issuance/profile-deployment-snapshot";
 import { projectPublicMetadata } from "@/lib/issuance/public-metadata";
@@ -45,6 +47,7 @@ import { AuditService } from "@/services/audit.service";
 import { TokenService } from "@/services/token.service";
 import { resolveIssuanceWallet } from "../issuance/handlers/authority-resolution";
 import { toPublicToken } from "../issuance/handlers/public-response";
+import { getTenantTokenService } from "../issuance/helpers";
 import { type AppContext, getAssetProfilesRepository } from "./context";
 import {
   assetProfileIdParamsSchema,
@@ -107,14 +110,31 @@ function normalizeCapacities(value: unknown): MetadataRecord | null {
 // advanced settings selection, the off-chain capacities, and the access-control
 // mode. Everything else on the profile (asset details, public-info visibility)
 // stays at tokens:write.
-function compliancePolicyView(metadata: unknown): unknown {
+function compliancePolicyView(
+  metadata: unknown,
+  options: {
+    assetCategory?: AssetCategory;
+    assetType?: string;
+    // Effective access control when the metadata does not carry one: the
+    // dashboard derives the mode from the token's columns (requiresAllowlist /
+    // template) and writes it back on save, so a stored profile without
+    // compliance.accessControl must not treat that round-trip as a change.
+    accessControlFallback?: string | null;
+    // Category/type feed the settings resolver (template + freeze derivation),
+    // so a category/type-only PATCH is policy when settings are asserted.
+    governCategoryType?: boolean;
+  } = {}
+): unknown {
   const source = asRecord(metadata) ?? {};
   const settings = asRecord(source.settings);
   const compliance = asRecord(source.compliance);
   return {
+    ...(options.governCategoryType
+      ? { assetCategory: options.assetCategory ?? null, assetType: options.assetType ?? null }
+      : {}),
     // `settings.version` is server-stamped, not policy — compare the selection.
     settings: settings?.selected ?? null,
-    accessControl: compliance?.accessControl ?? null,
+    accessControl: compliance?.accessControl ?? options.accessControlFallback ?? null,
     capacities: normalizeCapacities(compliance?.capacities),
   };
 }
@@ -134,14 +154,60 @@ function sortRecursively(value: unknown): unknown {
   );
 }
 
+// One side of a policy comparison: the metadata plus the category/type whose
+// registry entry shapes what its settings resolve to.
+export interface CompliancePolicySide {
+  metadata: unknown;
+  assetCategory?: AssetCategory;
+  assetType?: string;
+  accessControlFallback?: string | null;
+}
+
+function compliancePolicyChangedSides(before: CompliancePolicySide, after: CompliancePolicySide) {
+  const governCategoryType =
+    profileUsesAdvancedSettings((before.metadata ?? {}) as IssuanceMetadata) ||
+    profileUsesAdvancedSettings((after.metadata ?? {}) as IssuanceMetadata);
+  return (
+    JSON.stringify(
+      sortRecursively(
+        compliancePolicyView(before.metadata, {
+          assetCategory: before.assetCategory,
+          assetType: before.assetType,
+          accessControlFallback: before.accessControlFallback,
+          governCategoryType,
+        })
+      )
+    ) !==
+    JSON.stringify(
+      sortRecursively(
+        compliancePolicyView(after.metadata, {
+          assetCategory: after.assetCategory,
+          assetType: after.assetType,
+          accessControlFallback: after.accessControlFallback,
+          governCategoryType,
+        })
+      )
+    )
+  );
+}
+
 // True when a PATCH would alter the compliance policy vs. the persisted profile.
 // Editing the policy requires tokens:admin even though the route gate is
 // tokens:write; this is the server backstop for the admin-only compliance tab.
 export function compliancePolicyChanged(before: unknown, after: unknown): boolean {
-  return (
-    JSON.stringify(sortRecursively(compliancePolicyView(before))) !==
-    JSON.stringify(sortRecursively(compliancePolicyView(after)))
-  );
+  return compliancePolicyChangedSides({ metadata: before }, { metadata: after });
+}
+
+// The access-control mode a token's own columns imply — the same derivation the
+// dashboard's access-control utils perform when hydrating a profile that never
+// stored compliance.accessControl.
+function tokenAccessControlFallback(token: Token): string {
+  if (token.requiresAllowlist) {
+    return "allowlist";
+  }
+  return token.template === "stablecoin" || token.template === "tokenized-security"
+    ? "blocklist"
+    : "disabled";
 }
 
 export const getAssetProfileFieldOptions = async (c: AppContext) => {
@@ -349,21 +415,6 @@ export const updateAssetProfile = async (
     throw notFound("Asset profile");
   }
 
-  // Compliance policy is admin-governed. The route gate (tokens:write) covers
-  // the rest of the profile, but changing the advanced settings, capacities, or
-  // access-control mode requires tokens:admin — mirroring the admin-only
-  // compliance tab in the dashboard.
-  if (
-    body.issuanceMetadata !== undefined &&
-    compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata) &&
-    !hasPermission(auth.permissions, "tokens:admin")
-  ) {
-    throw new AppError(
-      "INSUFFICIENT_PERMISSIONS",
-      "Editing compliance policy requires the tokens:admin permission"
-    );
-  }
-
   // Resolve the effective category/type by merging the patch over the existing
   // row, then validate the pair (the schema can only check it when both are sent).
   const nextCategory = body.assetCategory ?? current.asset_category;
@@ -379,6 +430,49 @@ export const updateAssetProfile = async (
 
   const typeChanged = nextCategory !== current.asset_category || nextType !== current.asset_type;
   const metadataChanged = body.issuanceMetadata !== undefined;
+
+  // The token's own access-control columns normalize the policy view: the
+  // dashboard writes back a mode it derived from them when the stored profile
+  // never carried one, and that round-trip is not a policy change.
+  const preGateToken = current.token_id
+    ? await getTenantTokenService(c).getToken({
+        tokenId: current.token_id,
+        organizationId: auth.organizationId,
+        projectId,
+      })
+    : null;
+  const accessControlFallback = preGateToken ? tokenAccessControlFallback(preGateToken) : null;
+
+  // Compliance policy is admin-governed. The route gate (tokens:write) covers
+  // the rest of the profile, but changing the advanced settings, capacities, or
+  // access-control mode requires tokens:admin — mirroring the admin-only
+  // compliance tab in the dashboard. A category/type change is policy too when
+  // the profile asserts advanced settings: the resolver derives the template
+  // and freeze behavior from them (so a tokens:write caller could otherwise
+  // rewrite the effective policy through the category selector alone).
+  if (
+    (body.issuanceMetadata !== undefined || typeChanged) &&
+    compliancePolicyChangedSides(
+      {
+        metadata: current.issuance_metadata,
+        assetCategory: current.asset_category,
+        assetType: current.asset_type,
+        accessControlFallback,
+      },
+      {
+        metadata: body.issuanceMetadata ?? current.issuance_metadata,
+        assetCategory: nextCategory,
+        assetType: nextType,
+        accessControlFallback,
+      }
+    ) &&
+    !hasPermission(auth.permissions, "tokens:admin")
+  ) {
+    throw new AppError(
+      "INSUFFICIENT_PERMISSIONS",
+      "Editing compliance policy requires the tokens:admin permission"
+    );
+  }
 
   // Validate settings when metadata or type changed; catches unsupported by type change too.
   if (metadataChanged || typeChanged) {
@@ -417,9 +511,16 @@ export const updateAssetProfile = async (
   // diverging from the mint it cannot reach.
   const db = getDb(c.env);
   const tenantScope = getRequestTenantScope(c);
-  const policyChanged =
-    body.issuanceMetadata !== undefined &&
-    compliancePolicyChanged(current.issuance_metadata, body.issuanceMetadata);
+  const policySide = (metadata: unknown, assetCategory: AssetCategory, assetType: string) => ({
+    metadata,
+    assetCategory,
+    assetType,
+    accessControlFallback,
+  });
+  const policyChanged = compliancePolicyChangedSides(
+    policySide(current.issuance_metadata, current.asset_category, current.asset_type),
+    policySide(nextMetadata, nextCategory, nextType)
+  );
   const usesAdvancedSettings =
     profileUsesAdvancedSettings(nextMetadata) ||
     profileUsesAdvancedSettings(current.issuance_metadata);
@@ -467,6 +568,23 @@ export const updateAssetProfile = async (
 
     let syncedTokenRow: Token | null = null;
     if (snapshot) {
+      // A client-signed deploy prepare hands the caller a transaction minted
+      // from the snapshot as it stood at prepare time. If this save would
+      // rewrite any snapshot field while that transaction can still land, its
+      // mint would carry the old policy while confirm verifies the new one —
+      // the recorded-mint mismatch that strands the mint. Refuse the rewrite
+      // until the prepare's marker row is closed (or its blockhash expires);
+      // a value-identical re-save rewrites nothing and is harmless.
+      const snapshotUnchanged =
+        profileToken && resolvedSnapshotEqualsTokenSnapshot(snapshot, profileToken);
+      if (
+        snapshotUnchanged === false &&
+        (await tokenService.hasFreshPreparedDeploy(current.token_id, PREPARED_DEPLOY_FENCE_MS))
+      ) {
+        throw conflict(
+          "A prepared client-signed deployment is in flight for this token; confirm it, let it expire, or discard it before changing its deployment settings"
+        );
+      }
       // Guarded on pending + no mint inside the same transaction: losing the
       // guard means a deploy claimed the token mid-save, so neither side of the
       // reviewed agreement may land.

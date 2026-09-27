@@ -4,6 +4,7 @@ import type { AssetProfile, Token } from "@sdp/types";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { buildIssuanceMetadata, getAssetDetailsErrors } from "../../create/draft-mapping";
 import type { DraftState } from "../../create/issuance-draft-wizard.types";
@@ -80,15 +81,7 @@ export function useAssetProfileForm({
     selectedMetadataSignerWalletId || metadataSignerSelection.defaultWalletId;
   const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
   const metadataSignerUnavailableReason = requiresMetadataSigner
-    ? (metadataSignerSelection.unavailableReason ??
-      getSignerWalletUnavailableReason(
-        metadataSignerSelection.wallets,
-        metadataSignerWalletId,
-        t
-      ) ??
-      (metadataSignerSelection.wallets.some((wallet) => wallet.id === metadataSignerWalletId)
-        ? null
-        : t("DashboardIssuance.signer.select")))
+    ? resolveMetadataSignerUnavailableReason(token, metadataSignerSelection, metadataSignerWalletId, t)
     : null;
 
   const updateDraft = (patch: Partial<DraftState>) => {
@@ -106,36 +99,7 @@ export function useAssetProfileForm({
   // editable, and this decides both the field's mode and whether save sends it.
   const supplyLocked = isSupplyLockedOnChain(token);
 
-  const errors = getAssetDetailsErrors(draft, t);
-  if (
-    !token.mintAddress &&
-    draft.authorityWalletIds &&
-    Object.values(draft.authorityWalletIds).some(
-      (id) => !draftWallets.some((wallet) => wallet.id === id)
-    )
-  ) {
-    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
-  }
-  if (token.mintAddress) {
-    // A deployed token's historical deployment wallet is read-only here.
-    delete errors.signingWalletId;
-  }
-  if (!draft.name.trim()) {
-    errors.name = t("DashboardIssuance.errors.assetNameRequired");
-  }
-  // Unlike the creation wizard, this form knows how much is already minted — a
-  // cap under that could never be satisfied, so catch it before the round-trip.
-  if (
-    !supplyLocked &&
-    !errors.maxSupply &&
-    draft.maxSupply.trim() &&
-    isMaxSupplyBelowMintedSupply(draft.maxSupply, token.totalSupply)
-  ) {
-    errors.maxSupply = t("DashboardIssuance.errors.maxSupplyBelowMinted", {
-      amount: token.totalSupply,
-      symbol: token.symbol,
-    });
-  }
+  const errors = deriveFormErrors({ token, draft, draftWallets, supplyLocked, t });
   const errorCount = Object.keys(errors).length + (metadataSignerUnavailableReason ? 1 : 0);
 
   const discard = () => {
@@ -255,6 +219,71 @@ function draftTokenPatch(draft: DraftState): Partial<Token> {
     imageUrl: draft.imageUrl.trim() || null,
     maxSupply: draft.maxSupply.trim() || null,
   };
+}
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+// Why the metadata signer selection cannot be used, if it cannot: the picker is
+// only meaningful for a deployed token, and must resolve to a wallet that
+// exists, is available, and is selected.
+function resolveMetadataSignerUnavailableReason(
+  token: Token,
+  selection: SignerSelectionState,
+  selectedWalletId: string,
+  t: Translate
+): string | null {
+  if (!token.mintAddress || token.status === "pending") {
+    return null;
+  }
+  return (
+    selection.unavailableReason ??
+    getSignerWalletUnavailableReason(selection.wallets, selectedWalletId, t) ??
+    (selection.wallets.some((wallet) => wallet.id === selectedWalletId)
+      ? null
+      : t("DashboardIssuance.signer.select"))
+  );
+}
+
+// Field-level save blockers for the current draft. Unlike the creation wizard,
+// this form knows how much is already minted — a cap under that could never be
+// satisfied, so it is caught here before the round-trip.
+function deriveFormErrors(params: {
+  token: Token;
+  draft: DraftState;
+  draftWallets: readonly DraftAuthorityWallet[];
+  supplyLocked: boolean;
+  t: Translate;
+}): ReturnType<typeof getAssetDetailsErrors> {
+  const { token, draft, draftWallets, supplyLocked, t } = params;
+  const errors = getAssetDetailsErrors(draft, t);
+  if (
+    !token.mintAddress &&
+    draft.authorityWalletIds &&
+    Object.values(draft.authorityWalletIds).some(
+      (id) => !draftWallets.some((wallet) => wallet.id === id)
+    )
+  ) {
+    errors.authorityWalletIds = t("DashboardIssuance.signer.select");
+  }
+  if (token.mintAddress) {
+    // A deployed token's historical deployment wallet is read-only here.
+    delete errors.signingWalletId;
+  }
+  if (!draft.name.trim()) {
+    errors.name = t("DashboardIssuance.errors.assetNameRequired");
+  }
+  if (
+    !supplyLocked &&
+    !errors.maxSupply &&
+    draft.maxSupply.trim() &&
+    isMaxSupplyBelowMintedSupply(draft.maxSupply, token.totalSupply)
+  ) {
+    errors.maxSupply = t("DashboardIssuance.errors.maxSupplyBelowMinted", {
+      amount: token.totalSupply,
+      symbol: token.symbol,
+    });
+  }
+  return errors;
 }
 
 export type AssetProfileForm = ReturnType<typeof useAssetProfileForm>;

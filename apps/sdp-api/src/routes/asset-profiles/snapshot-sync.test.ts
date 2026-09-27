@@ -17,6 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { getDb } from "@/db";
 import app from "@/index";
 import { createKVStoreSet } from "@/runtime/kv-redis";
+import { TokenService } from "@/services/token.service";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { TEST_PRODUCTION_PROJECT, TEST_PROJECT } from "@/test/fixtures/tokens";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
@@ -458,5 +459,209 @@ describe("asset profile PATCH binds pending advanced settings to the deployment 
     } finally {
       createTokenSpy.mockRestore();
     }
+  });
+
+  it("persists the resolver's freeze flag when settings drive creation", async () => {
+    // CREATE_BODY already sends isFreezable: false; the freezeAccounts
+    // selection is the reviewed policy and the resolver derives the flag from
+    // it — persisting the caller's raw flag would fail this fresh token as
+    // drifted at deploy time.
+    const { tokenId } = await createPendingTokenWithProfile({
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        settings: { selected: { freezeAccounts: {} } },
+      },
+    });
+    expect(await getToken(tokenId)).toMatchObject({ isFreezable: true });
+
+    // The fresh token passes the deploy-time snapshot check: the deploy
+    // advances past it and refuses later for the missing signing wallet
+    // instead of the drift 409.
+    const response = await app.request(
+      `/v1/issuance/tokens/${tokenId}/deploy`,
+      { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
+      env
+    );
+    const json = (await response.json()) as SuccessJson;
+    expect(response.status).toBe(400);
+    expect(json.error?.message).toContain("signingCustodyWalletId");
+  });
+
+  it("keeps freshly created authority-stamped extensions deployable without an extra save", async () => {
+    // Mirrors the integration suite's transfer-fee deploy: creation stores the
+    // caller's per-deployment authority fields, which the settings resolver
+    // never reproduces — the deploy check must compare policy, not wallet
+    // state, on both sides.
+    const mint = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+    const { tokenId } = await createPendingTokenWithProfile({
+      overrides: {
+        extensions: {
+          transferFee: {
+            basisPoints: 100,
+            maxFee: "1000000000",
+            transferFeeConfigAuthority: mint,
+            withdrawWithheldAuthority: mint,
+          },
+        },
+      },
+    });
+
+    const response = await app.request(
+      `/v1/issuance/tokens/${tokenId}/deploy`,
+      { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
+      env
+    );
+    const json = (await response.json()) as SuccessJson;
+    expect(response.status).toBe(400);
+    expect(json.error?.message).toContain("signingCustodyWalletId");
+
+    const delegateToken = await createPendingTokenWithProfile({
+      overrides: { extensions: { permanentDelegate: mint } },
+    });
+    const delegateResponse = await app.request(
+      `/v1/issuance/tokens/${delegateToken.tokenId}/deploy`,
+      { method: "POST", headers: headers(ADMIN_KEY.raw), body: JSON.stringify({}) },
+      env
+    );
+    const delegateJson = (await delegateResponse.json()) as SuccessJson;
+    expect(delegateResponse.status).toBe(400);
+    expect(delegateJson.error?.message).toContain("signingCustodyWalletId");
+  });
+
+  it("governs category/type-only edits as compliance policy", async () => {
+    const { tokenId, profileId } = await createPendingTokenWithProfile({
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        settings: { selected: { pauseTransfers: {} } },
+      },
+    });
+
+    // The resolver derives the template (and freeze behavior) from the
+    // category/type, so a tokens:write caller must not re-derive the policy
+    // through the category selector alone.
+    const denied = await patchProfile(profileId, DEPLOYER_KEY.raw, { assetCategory: "stablecoin" });
+    expect(denied.status).toBe(403);
+    expect(denied.json.error?.code).toBe("INSUFFICIENT_PERMISSIONS");
+
+    // Admin-governed: the pending snapshot re-resolves for the new category.
+    const saved = await patchProfile(profileId, ADMIN_KEY.raw, { assetCategory: "stablecoin" });
+    expect(saved.status).toBe(200);
+    expect(saved.json.data.token?.template).toBe("stablecoin");
+    expect(await tokenRow(tokenId)).toMatchObject({ template: "stablecoin" });
+  });
+
+  it("refuses a deployed profile's category change (the mint's derived policy is immutable)", async () => {
+    const { tokenId, profileId } = await createPendingTokenWithProfile({
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        settings: { selected: { pauseTransfers: {} } },
+      },
+    });
+    const mint = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+    await getDb(env)
+      .prepare(
+        "UPDATE issued_tokens SET status = 'active', mint_address = ?, mint_authority = ?, deployed_at = '2026-01-01T00:00:00.000Z' WHERE id = ?"
+      )
+      .bind(mint, mint, tokenId)
+      .run();
+
+    const rejected = await patchProfile(profileId, ADMIN_KEY.raw, { assetCategory: "stablecoin" });
+    expect(rejected.status).toBe(409);
+  });
+
+  it("does not treat the dashboard's access-control round-trip as a deployed policy change", async () => {
+    const { tokenId, profileId } = await createPendingTokenWithProfile();
+    const mint = "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv";
+    await getDb(env)
+      .prepare(
+        "UPDATE issued_tokens SET status = 'active', mint_address = ?, mint_authority = ?, deployed_at = '2026-01-01T00:00:00.000Z' WHERE id = ?"
+      )
+      .bind(mint, mint, tokenId)
+      .run();
+
+    // The dashboard re-derives the mode from the token's own columns (custom
+    // template, no allowlist) and writes it back; the stored profile never
+    // carried compliance.accessControl, so this save changes no effective
+    // policy and must not trip the deployed-mint guard.
+    const saved = await patchProfile(profileId, ADMIN_KEY.raw, {
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        compliance: { accessControl: "disabled" },
+        settings: { selected: {} },
+      },
+    });
+    expect(saved.status).toBe(200);
+
+    // A genuine mode change is still a policy change on an immutable mint.
+    const rejected = await patchProfile(profileId, ADMIN_KEY.raw, {
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        compliance: { accessControl: "allowlist" },
+        settings: { selected: {} },
+      },
+    });
+    expect(rejected.status).toBe(409);
+  });
+
+  it("refuses a snapshot-rewriting save while a prepared client-signed deploy is in flight", async () => {
+    const { tokenId, profileId } = await createPendingTokenWithProfile({
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        settings: { selected: { pauseTransfers: {} } },
+      },
+    });
+
+    // What prepareDeploy records when it hands the client a transaction built
+    // from the current snapshot: a pending deploy marker for the mint it will
+    // create.
+    const tokenService = new TokenService(getDb(env));
+    await tokenService.createTransaction({
+      tokenId,
+      organizationId: TEST_ORG.id,
+      type: "deploy",
+      params: {
+        operation: "deploy",
+        mode: "prepare",
+        mint: "7iQJKBEwzBccKMvyZgnPmXfSPJB5XjN7hE2vgGYX5Kkv",
+      },
+    });
+
+    // Rewriting the snapshot now could strand the submitted mint: confirm
+    // would hold the mint's on-chain authorities against the new snapshot and
+    // refuse it with no way to record it.
+    const fenced = await patchProfile(profileId, ADMIN_KEY.raw, {
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token" },
+        settings: { selected: { freezeAccounts: {} } },
+      },
+    });
+    expect(fenced.status).toBe(409);
+    expect(fenced.json.error?.message).toContain("prepared client-signed deployment");
+
+    // A value-identical save rewrites nothing and is harmless.
+    const harmless = await patchProfile(profileId, ADMIN_KEY.raw, {
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token renamed" },
+        settings: { selected: { pauseTransfers: {} } },
+      },
+    });
+    expect(harmless.status).toBe(200);
+
+    // Once the prepared transaction can no longer land (its blockhash expired
+    // long before this fence window lapses), the fence lifts.
+    await getDb(env)
+      .prepare(
+        "UPDATE issuance_transactions SET created_at = '2026-01-01T00:00:00.000Z' WHERE token_id = ? AND type = 'deploy'"
+      )
+      .bind(tokenId)
+      .run();
+    const afterExpiry = await patchProfile(profileId, ADMIN_KEY.raw, {
+      issuanceMetadata: {
+        asset: { name: "Snapshot Drift Token renamed" },
+        settings: { selected: { freezeAccounts: {} } },
+      },
+    });
+    expect(afterExpiry.status).toBe(200);
+    expect(await getToken(tokenId)).toMatchObject({ isFreezable: true });
   });
 });

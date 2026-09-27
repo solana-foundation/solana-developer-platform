@@ -84,22 +84,35 @@ export const createTokenWithAssetProfile = async (
     });
   }
 
-  const resolved = usingSettings
+  const settingsResolution = usingSettings
     ? resolveSettingsToExtensions(assetCategory, assetType, selectedSettings, {
         authorities: signingWallet ? { permanentDelegate: signingWallet.publicKey } : undefined,
         decimals: tokenInput.decimals,
         requiresAllowlist: tokenInput.requiresAllowlist,
       })
-    : resolveTemplateConfig(
-        normalizeTemplateId(tokenInput.template),
-        tokenInput.overrides,
-        tokenInput.requiresAllowlist,
-        tokenInput.decimals
-      );
+    : null;
+  const resolved =
+    settingsResolution ??
+    resolveTemplateConfig(
+      normalizeTemplateId(tokenInput.template),
+      tokenInput.overrides,
+      tokenInput.requiresAllowlist,
+      tokenInput.decimals
+    );
 
   if (resolved.errors.length > 0) {
     throw badRequest("Invalid token extension configuration", { errors: resolved.errors });
   }
+
+  // The resolver owns the freeze flag when settings drive the token: it derives
+  // `isFreezable` from the freezeAccounts selection, and the deploy-time
+  // snapshot check holds the row to that same resolution — persisting the
+  // caller's raw flag here would fail a freshly created token as drifted. The
+  // legacy template + overrides path keeps the caller's flag (no settings
+  // resolution runs for it).
+  const isFreezable: boolean | undefined = settingsResolution
+    ? settingsResolution.isFreezable
+    : tokenInput.isFreezable;
 
   const metadata = stampAdvancedSettingsVersion(issuanceMetadata ?? {});
   const publicMetadata = projectPublicMetadata(assetCategory, assetType, metadata);
@@ -129,7 +142,7 @@ export const createTokenWithAssetProfile = async (
       extensions: resolved.extensions ?? undefined,
       maxSupply: tokenInput.maxSupply,
       isMintable: tokenInput.isMintable,
-      isFreezable: tokenInput.isFreezable,
+      isFreezable,
       requiresAllowlist: resolved.requiresAllowlist,
     });
 
