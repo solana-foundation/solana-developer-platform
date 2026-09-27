@@ -290,6 +290,7 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       const status = current.status;
 
       if (!status || TERMINAL_SUCCESS_STATUSES.has(status)) {
+        this.releaseSignatureUserActionToken(current);
         return current;
       }
 
@@ -298,14 +299,16 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
         // gets the same compact-value discipline as the client's body
         // summarizer — only an identifier-shaped, non-secret-shaped code is
         // embedded — plus exact matching against the credentials the client
-        // holds, read live so it includes the user action token minted for the
-        // request that produced this signature: a provider echoing that short,
-        // unprefix-shaped token back is omitted entirely.
+        // holds, read live so it includes the user action token minted for
+        // this very request. That token is held for the signature's whole
+        // lifetime (however many newer requests are minted meanwhile), and is
+        // released only after the reason has been vetted against it.
         const reason = summarizeUpstreamErrorValue(
           current.reason,
           undefined,
           this.client.getKnownUpstreamSecrets?.() ?? []
         );
+        this.releaseSignatureUserActionToken(current);
         throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
           message: `${this.providerLabel} signature request failed (${status})${
             reason ? `: ${reason}` : ""
@@ -328,9 +331,16 @@ export class DfnsSigner<TAddress extends string = string> implements SolanaSigne
       current = await this.getSignatureRequest(keyId, signatureId);
     }
 
+    this.releaseSignatureUserActionToken(current);
     throwSignerError(SignerErrorCode.REMOTE_API_ERROR, {
       message: `Timed out while waiting for ${this.providerLabel} signature request to complete`,
     });
+  }
+
+  private releaseSignatureUserActionToken(request: DfnsSignatureRequest): void {
+    if (request.id) {
+      this.client.releaseSignatureUserActionToken?.(request.id);
+    }
   }
 }
 

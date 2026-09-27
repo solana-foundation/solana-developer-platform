@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import { SignerError } from "@solana/keychain-core";
+import type { DfnsApiClient } from "./client";
 import { createDfnsApiClient, DfnsSigner } from "./index";
 
 /**
@@ -40,7 +41,10 @@ function stubFetch(handler: FetchHandler): void {
   });
 }
 
-function serveHandshake(handler: (url: URL, init?: RequestInit) => Response | null): void {
+function serveHandshake(
+  handler: (url: URL, init?: RequestInit) => Response | null,
+  options?: { userActionTokens?: () => string }
+): void {
   stubFetch((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "GET" && url.pathname === "/wallets/wa_poc") {
@@ -65,13 +69,16 @@ function serveHandshake(handler: (url: URL, init?: RequestInit) => Response | nu
       );
     }
     if (method === "POST" && url.pathname === "/auth/action") {
-      return jsonResponse({ userAction: "user_action_poc" }, 200);
+      return jsonResponse(
+        { userAction: options?.userActionTokens ? options.userActionTokens() : "user_action_poc" },
+        200
+      );
     }
     return handler(url, init);
   });
 }
 
-async function createSigner(): Promise<DfnsSigner> {
+async function createTestClientAndSigner(): Promise<{ client: DfnsApiClient; signer: DfnsSigner }> {
   const { privateKey } = generateKeyPairSync("ed25519");
   const client = await createDfnsApiClient(
     {
@@ -81,7 +88,12 @@ async function createSigner(): Promise<DfnsSigner> {
     },
     { apiBaseUrl: API_BASE_URL }
   );
-  return DfnsSigner.create({ client, walletId: "wa_poc" });
+  return { client, signer: await DfnsSigner.create({ client, walletId: "wa_poc" }) };
+}
+
+async function createSigner(): Promise<DfnsSigner> {
+  const { signer } = await createTestClientAndSigner();
+  return signer;
 }
 
 async function captureSignerError(signer: DfnsSigner): Promise<Error> {
@@ -267,5 +279,63 @@ describe("dfns signer upstream error redaction", () => {
     assert.ok(error instanceof SignerError);
     assert.match(error.message, /signature request failed \(Failed\)(?!:)/);
     assert.ok(!error.message.includes("user_action_poc"));
+  });
+
+  it("holds a pending signature's token even as newer requests evict the register", async () => {
+    // Greptile finding on this PR (re-review of the token-vetting fix): a
+    // bounded register evicts a pending signature's token once enough newer
+    // requests are minted, so the failed result's `reason` echo of that token
+    // would survive vetting. Each request's token must instead be held until
+    // its signature result is handled.
+    let mint = 0;
+    let lastMintedToken = "";
+    let signatureToken = "";
+    let polls = 0;
+    serveHandshake(
+      (url, init) => {
+        const method = init?.method ?? "GET";
+        if (method === "POST" && url.pathname === "/keys/key_poc/signatures") {
+          signatureToken = lastMintedToken;
+          return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+        }
+        if (method === "GET" && url.pathname === "/keys/key_poc/signatures/sig_poc") {
+          polls += 1;
+          if (polls < 2) {
+            return jsonResponse({ id: "sig_poc", status: "Pending" }, 200);
+          }
+          return jsonResponse({ id: "sig_poc", status: "Failed", reason: signatureToken }, 200);
+        }
+        if (method === "POST" && url.pathname === "/wallets") {
+          return jsonResponse({ id: `wa_${mint}`, network: "SolanaDevnet" }, 200);
+        }
+        return null;
+      },
+      {
+        userActionTokens: () => (lastMintedToken = `user_action_${++mint}`),
+      }
+    );
+
+    const { client, signer } = await createTestClientAndSigner();
+    let caught: unknown;
+    // The signature request's own token is minted first; the createWallet
+    // mints below run while it is pending and push it out of the short-term
+    // register (more than its 8 slots, whatever the interleaving).
+    const signing = signer
+      .signMessages([{ content: new Uint8Array([1, 2, 3]), signatures: {} }])
+      .catch((error) => {
+        caught = error;
+      });
+    for (let index = 0; index < 16; index += 1) {
+      await client.wallets.createWallet({ body: { network: "SolanaDevnet" } });
+    }
+    await signing;
+
+    assert.ok(caught instanceof SignerError);
+    assert.ok(signatureToken.length > 0);
+    assert.match(caught.message, /signature request failed \(Failed\)(?!:)/);
+    assert.ok(!caught.message.includes(signatureToken));
+    // The result has been handled, so the token is released and drops out of
+    // the held secrets entirely.
+    assert.ok(!(client.getKnownUpstreamSecrets?.() ?? []).includes(signatureToken));
   });
 });
