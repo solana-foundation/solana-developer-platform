@@ -36,6 +36,11 @@ export function createGuardedSolanaRpcTransport(
   }): Promise<RpcResponse> => {
     const response = await fetchImpl(url, {
       method: "POST",
+      // The redirect is refused here rather than trusted to the fetch: a
+      // `redirect: "manual"` response surfaces as a non-2xx, so a 3xx can
+      // never walk the RPC leg onto a second endpoint even through a fetch
+      // that would follow one by default.
+      redirect: "manual",
       headers: {
         accept: "application/json",
         "content-type": "application/json; charset=utf-8",

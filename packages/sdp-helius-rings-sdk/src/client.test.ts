@@ -69,13 +69,29 @@ describe("createRingsClient Solana RPC transport", () => {
   });
 
   it("refuses to follow a redirect instead of riding it to a second endpoint", async () => {
-    const { fetch, calls } = stubFetch(
-      () =>
-        new Response(null, {
-          status: 307,
-          headers: { location: "https://elsewhere.example.test/rpc" },
-        })
-    );
+    const redirectTarget = "https://elsewhere.example.test/rpc";
+    // A fetch with the platform's default redirect semantics: unless the
+    // caller passes `redirect: "manual"`, a 3xx re-issues the request at
+    // `location` and serves the second endpoint's answer — exactly like the
+    // real fetch this stubs. The test only stays green while the transport
+    // keeps refusing redirects itself.
+    const requestedUrls: string[] = [];
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const url = input.toString();
+      requestedUrls.push(url);
+      if (url === RPC_URL) {
+        if (init?.redirect === "manual") {
+          return new Response(null, {
+            status: 307,
+            headers: { location: redirectTarget },
+          });
+        }
+        // Redirects are on: re-issue at the location like the real fetch
+        // would, and serve the second endpoint's answer.
+        return fetch(redirectTarget, init);
+      }
+      return jsonRpcResponse("1", { context: { slot: 2 }, value: null });
+    };
 
     const client = await createRingsClient({
       solanaRpcUrl: RPC_URL,
@@ -87,8 +103,7 @@ describe("createRingsClient Solana RPC transport", () => {
     await expect(client.getAccount(address(TEST_OWNER))).rejects.toMatchObject({
       code: "CLIENT_RPC",
     });
-    expect(calls.length).toBe(1);
-    expect(calls[0]?.url).toBe(RPC_URL);
+    expect(requestedUrls).toEqual([RPC_URL]);
   });
 
   it("propagates a guard refusal instead of falling back to another transport", async () => {
@@ -110,9 +125,7 @@ describe("createRingsClient Solana RPC transport", () => {
   });
 
   it("serializes bigint request params through the same wire codec", async () => {
-    const { fetch, calls } = stubFetch(() =>
-      jsonRpcResponse("1", { context: { slot: 1 }, value: null })
-    );
+    const { fetch, calls } = stubFetch(() => jsonRpcResponse("1", null));
 
     const client = await createRingsClient({
       solanaRpcUrl: RPC_URL,
@@ -121,8 +134,12 @@ describe("createRingsClient Solana RPC transport", () => {
       fetch,
     });
 
-    await expect(client.getAccount(address(TEST_OWNER))).resolves.toBeUndefined();
+    // A bigint param: plain JSON.stringify cannot serialize a bigint at all,
+    // so the exact digits on the wire prove the request rode the same
+    // bigint-aware codec the responses are parsed with.
+    await expect(client.solanaRpc.getBlock(4294967296n).send()).resolves.toBeNull();
     const payload = JSON.parse(calls[0]?.body ?? "{}") as { method: string };
-    expect(payload.method).toBe("getAccountInfo");
+    expect(payload.method).toBe("getBlock");
+    expect(calls[0]?.body).toMatch(/"params":\[4294967296(,|\])/);
   });
 });
