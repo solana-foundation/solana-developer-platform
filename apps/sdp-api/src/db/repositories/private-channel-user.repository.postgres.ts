@@ -111,16 +111,25 @@ export function createPostgresPrivateChannelUserRepository(
     },
 
     async findDefaultPrincipal(scope, instanceId) {
+      // Derived read, same as listPrincipals: callers of the default principal
+      // (the restricted principals listing included) must see the same
+      // verified-wallet count the full-directory path reports.
       const row = await db
         .prepare(
-          `SELECT *
-             FROM private_channel_users
-            WHERE organization_id = ?
-              AND project_id = ?
-              AND instance_id = ?
-              AND is_default = TRUE
-              AND disabled_at IS NULL
-              AND (spc_user_id IS NOT NULL OR provisioned_at IS NOT NULL)
+          `SELECT pcu.*,
+                  (
+                    SELECT COUNT(*)
+                      FROM private_channel_verified_wallets vw
+                     WHERE vw.user_id = pcu.id
+                       AND vw.instance_id = pcu.instance_id
+                  ) AS verified_wallet_count
+             FROM private_channel_users pcu
+            WHERE pcu.organization_id = ?
+              AND pcu.project_id = ?
+              AND pcu.instance_id = ?
+              AND pcu.is_default = TRUE
+              AND pcu.disabled_at IS NULL
+              AND (pcu.spc_user_id IS NOT NULL OR pcu.provisioned_at IS NOT NULL)
             LIMIT 1`
         )
         .bind(scope.organizationId, scope.projectId, instanceId)

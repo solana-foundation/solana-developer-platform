@@ -194,6 +194,31 @@ describe("PrivateChannelUserRepository (postgres) — verified_wallet_count", ()
     expect(fetched?.project_role).toBeNull();
   });
 
+  it("computes verified_wallet_count on findDefaultPrincipal like listPrincipals", async () => {
+    const instanceId = await connectInstance();
+    await markPrincipalProvisioned();
+    await walletRepo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+    });
+    await walletRepo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId,
+      walletId: "wal_2",
+      pubkey: PUBKEY_B,
+    });
+
+    const found = await repo.findDefaultPrincipal(scope, instanceId);
+    expect(found?.verified_wallet_count).toBe(2);
+
+    const [listed] = await repo.listPrincipals(scope, instanceId);
+    expect(listed.verified_wallet_count).toBe(found?.verified_wallet_count);
+  });
+
   it("does not expose an incomplete default principal as active", async () => {
     const instanceId = await connectInstance();
 

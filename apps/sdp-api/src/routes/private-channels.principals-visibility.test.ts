@@ -125,6 +125,20 @@ async function seedProjectDirectory(): Promise<void> {
     )
     .bind(USER_ID, USER_ID)
     .run();
+  // The default principal's wallets were verified under the active instance;
+  // the dashboard overview reads this derived count.
+  await db
+    .prepare(
+      `INSERT INTO private_channel_verified_wallets (
+         id, organization_id, project_id, user_id, instance_id, wallet_id, pubkey
+       ) VALUES
+         ('pcvw_poc_default_1', ?, ?, 'pcu_poc_default', ?, 'wal_poc_default_1',
+          'So1111111111111111111111111111111111111111'),
+         ('pcvw_poc_default_2', ?, ?, 'pcu_poc_default', ?, 'wal_poc_default_2',
+          'So1111111111111111111111111111111111111112')`
+    )
+    .bind(ORG_ID, PROJECT_ID, INSTANCE_ID, ORG_ID, PROJECT_ID, INSTANCE_ID)
+    .run();
 }
 
 interface PrincipalDto {
@@ -183,6 +197,9 @@ describe("GET /v1/private-channels/principals directory visibility", () => {
         name: "Default",
         isDefault: true,
         status: "active",
+        // The restricted path must report the same derived verified-wallet
+        // count the full-directory path reports for this principal.
+        verifiedWalletCount: 2,
       }),
     ]);
     expect(principals.map((principal) => principal.id)).not.toContain("pcu_poc_treasury");
@@ -211,12 +228,14 @@ describe("GET /v1/private-channels/principals directory visibility", () => {
           id: "pcu_poc_default",
           name: "Default",
           isDefault: true,
+          verifiedWalletCount: 2,
           channels: [{ id: "pch_poc_general", name: "General", isDefault: true }],
         }),
         expect.objectContaining({
           id: "pcu_poc_treasury",
           name: "Treasury Operator",
           isDefault: false,
+          verifiedWalletCount: 0,
           channels: [
             { id: "pch_poc_confidential", name: "Confidential Treasury", isDefault: false },
           ],
