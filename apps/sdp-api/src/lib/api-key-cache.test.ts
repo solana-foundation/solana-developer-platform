@@ -640,10 +640,12 @@ describe("fillApiKeyCache install fencing (SOLA9-624)", () => {
   type Row = Record<string, unknown>;
 
   /**
-   * In-memory slot store. `armCasGate` suspends the next winning
-   * compareAndSet before it applies, modeling repair contention, and
-   * returns that CAS's release handle. Only applied writes are recorded in
-   * `writes` — a losing CAS must not read as a cache write.
+   * In-memory slot store. `armCasGate` suspends the next compareAndSet
+   * before it applies, modeling repair contention, and returns that CAS's
+   * release handle. The expected-state check runs only after the gate
+   * opens, so a write landing while the gate is closed makes the suspended
+   * CAS lose, like the real Redis CAS would. Only applied writes are
+   * recorded in `writes` — a losing CAS must not read as a cache write.
    */
   function gatedKV() {
     const slot = new Map<string, string>();
@@ -659,12 +661,12 @@ describe("fillApiKeyCache install fencing (SOLA9-624)", () => {
         slot.delete(key);
       },
       compareAndSet: async (key: string, expected: string | null, value: string) => {
-        if ((slot.get(key) ?? null) !== expected) {
-          return false;
-        }
         const gate = casGates.shift();
         if (gate) {
           await gate.promise;
+        }
+        if ((slot.get(key) ?? null) !== expected) {
+          return false;
         }
         slot.set(key, value);
         writes.push({ expected, value });
