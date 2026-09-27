@@ -83,6 +83,11 @@ export const tokenExtensionsConfigSchema = z
       description: "Permanent delegate address.",
       example: "So11111111111111111111111111111111111111112",
     }),
+    confidentialTransfer: solanaAddressSchema.optional().openapi({
+      description:
+        "Confidential-transfer (ConfidentialTransferMint) authority address, mirrored from the last settled authority rotation; absent after revocation.",
+      example: "So11111111111111111111111111111111111111112",
+    }),
     pausable: z
       .object({
         authority: solanaAddressSchema.optional().openapi({

@@ -2096,6 +2096,116 @@ describe("Issuance Routes", () => {
       configSpy.mockRestore();
     });
 
+    it("rotates and revokes the confidential-transfer authority through the authority route", async () => {
+      // SOLA9-486: the ConfidentialTransferMint authority must flow through the
+      // same governed update-authority route as the other roles, including
+      // revocation, with the settled mirror readable on ordinary token reads.
+      const currentAuthority = TEST_SOLANA_ADDRESSES.wallet1;
+      let callCount = 0;
+      const wallet = await seedIssuanceActivityWallet(
+        "wal_issuance_confidential_authority",
+        currentAuthority
+      );
+      const token = await seedIssuedToken({
+        id: "tok_issuance_confidential_authority",
+        signingWalletId: wallet.walletId,
+        mintAuthority: currentAuthority,
+      });
+      const updateAuthoritySpy = vi
+        .spyOn(MosaicService.prototype, "updateAuthority")
+        .mockImplementation(async () => {
+          callCount += 1;
+          return { signature: `sig_confidential_rotation_${callCount}`, slot: 888n };
+        });
+
+      const rotate = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            signingCustodyWalletId: wallet.custodyWalletId,
+            authority: {
+              role: "confidentialTransfer",
+              newAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+            },
+          }),
+        },
+        env
+      );
+
+      expect(rotate.status, JSON.stringify(await rotate.clone().json())).toBe(200);
+      expect(updateAuthoritySpy).toHaveBeenCalledWith({
+        mint: address(token.mintAddress ?? ""),
+        role: Token2022.AuthorityType.ConfidentialTransferMint,
+        currentAuthority: expect.objectContaining({ address: currentAuthority }),
+        newAuthority: address(TEST_SOLANA_ADDRESSES.wallet2),
+        feePayer: expect.objectContaining({ address: currentAuthority }),
+      });
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'confidentialTransfer'"
+          )
+          .bind(token.id)
+          .first<{ config: string | null }>()
+      ).toEqual({ config: JSON.stringify(TEST_SOLANA_ADDRESSES.wallet2) });
+      const storedAfterRotation = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await storedAfterRotation.json()).data.token.extensions.confidentialTransfer).toBe(
+        TEST_SOLANA_ADDRESSES.wallet2
+      );
+
+      const revoke = await app.request(
+        `/v1/issuance/tokens/${token.id}/authority`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            signingCustodyWalletId: wallet.custodyWalletId,
+            authority: { role: "confidentialTransfer", newAuthority: null },
+          }),
+        },
+        env
+      );
+
+      expect(revoke.status, JSON.stringify(await revoke.clone().json())).toBe(200);
+      expect(updateAuthoritySpy).toHaveBeenLastCalledWith({
+        mint: address(token.mintAddress ?? ""),
+        role: Token2022.AuthorityType.ConfidentialTransferMint,
+        currentAuthority: expect.objectContaining({ address: currentAuthority }),
+        newAuthority: null,
+        feePayer: expect.objectContaining({ address: currentAuthority }),
+      });
+      expect(
+        await getDb(env)
+          .prepare(
+            "SELECT config FROM issued_token_extensions WHERE token_id = ? AND extension = 'confidentialTransfer'"
+          )
+          .bind(token.id)
+          .first<{ config: string | null }>()
+      ).toBeNull();
+      const storedAfterRevocation = await app.request(
+        `/v1/issuance/tokens/${token.id}`,
+        { headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` } },
+        env
+      );
+      expect((await storedAfterRevocation.json()).data.token.extensions ?? {}).not.toHaveProperty(
+        "confidentialTransfer"
+      );
+
+      updateAuthoritySpy.mockRestore();
+    });
+
     it("loads the approved authority signer before starting the external-effect fence", async () => {
       const wallet = await seedIssuanceActivityWallet(
         "wal_issuance_authority_signer_failure",
