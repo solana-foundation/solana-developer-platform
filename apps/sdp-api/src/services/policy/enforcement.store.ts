@@ -157,7 +157,10 @@ export class PostgresPolicyEnforcementStore implements PolicyEnforcementStore {
    * rule unchanged; failed, canceled and still-undecided (`created`) rows
    * never count, so concurrent contenders do not veto each other, and the
    * operation under evaluation (already inserted by enforcement) is excluded
-   * by id as well.
+   * by id as well. A SOL window is rent-inclusive: it also sums the
+   * fee-payer-funded ATA rent a mint recorded on its own token-asset row
+   * (SOLA9-464), so successive fresh-destination mints cannot each dodge the
+   * cap the prior mints' rent already committed.
    * A rule whose window does not parse gets no observation and reviews.
    * The per-key sums run in parallel under a small concurrency cap: the
    * schema permits enough unique keys that measuring them one await at a

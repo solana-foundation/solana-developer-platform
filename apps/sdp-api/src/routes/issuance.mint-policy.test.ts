@@ -9,6 +9,7 @@
  * constrain fresh-destination mints.
  */
 
+import { MosaicService } from "@sdp/issuance/mosaic/service";
 import { hashString } from "@sdp/payments/hash";
 import * as SolanaRpc from "@sdp/rpc/solana";
 import type { Address } from "@solana/kit";
@@ -18,6 +19,7 @@ import { getDb } from "@/db";
 import app from "@/index";
 import { AppError } from "@/lib/errors";
 import * as AuthorityResolution from "@/routes/issuance/handlers/authority-resolution";
+import * as SolanaServices from "@/services/solana";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import {
   TEST_ACTIVE_TOKEN,
@@ -433,5 +435,84 @@ describe("issuance mint policy gate — ATA rent leg", () => {
       (criterion) => criterion.leg === null && criterion.action === "deny"
     );
     expect(aggregateDeny).toMatchObject({ ruleId: "deny-token-outflow", kind: "amount" });
+  });
+
+  it("caps combined fresh-destination rent across successive mints with a SOL velocity rule", async () => {
+    const wallet = await seedMintPolicyWallet("velocity");
+    const token = await seedMintPolicyToken({
+      id: "tok_mint_policy_velocity",
+      signingWalletId: wallet.walletId,
+    });
+    await putWalletPolicy(wallet.walletId, [
+      {
+        id: "approve-ata-rent",
+        kind: "amount",
+        asset: "SOL",
+        max: "0.00203928",
+        action: "approval_required",
+      },
+      {
+        id: "cap-combined-rent",
+        kind: "velocity",
+        asset: "SOL",
+        window: "P1D",
+        max: "0.00203928",
+        action: "deny",
+      },
+    ]);
+    vi.spyOn(SolanaRpc, "accountExists").mockResolvedValue(false);
+
+    // The approval rule parks the first mint at the gate, so its wallet
+    // operation — and the ATA rent it records — persists without execution.
+    const first = await postMint(token.id, FRESH_DESTINATION);
+    expect(first.status).toBe(202);
+
+    // SECURITY: the second mint's SOL velocity window must observe the first
+    // mint's persisted rent, so the combined outflow breaches the cap. On the
+    // vulnerable baseline only token-asset rows were summed and this mint was
+    // approved too.
+    const second = await postMint(token.id, FRESH_DESTINATION);
+    const body = (await second.json()) as {
+      error: { code: string; details: { decision: string } };
+    };
+
+    expect(second.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.details.decision).toBe("deny");
+  });
+
+  it("fails closed when the destination ATA is closed between policy evaluation and submission", async () => {
+    const wallet = await seedMintPolicyWallet("toctou");
+    const token = await seedMintPolicyToken({
+      id: "tok_mint_policy_toctou",
+      signingWalletId: wallet.walletId,
+    });
+    await putWalletPolicy(wallet.walletId, [
+      {
+        id: "allow-small-token-mint",
+        kind: "amount",
+        asset: token.symbol,
+        max: "1",
+        action: "allow",
+      },
+    ]);
+    // The gate's preflight sees an existing ATA (no rent leg to evaluate); by
+    // the submission boundary the ATA is gone, so the mint's create-ATA would
+    // charge rent the evaluated decision never saw.
+    vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true).mockResolvedValue(false);
+    vi.spyOn(SolanaServices, "createOrgSignerForCustodyWallet").mockResolvedValue({
+      address: MINT_AUTHORITY,
+    } as never);
+    const mintToSpy = vi
+      .spyOn(MosaicService.prototype, "mintTo")
+      .mockResolvedValue({ signature: "sig_toctou", slot: 1n, tokenAccount: "ata" } as never);
+
+    const response = await postMint(token.id, TEST_SOLANA_ADDRESSES.wallet2);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+
+    expect(response.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toContain("changed after policy evaluation");
+    expect(mintToSpy).not.toHaveBeenCalled();
   });
 });

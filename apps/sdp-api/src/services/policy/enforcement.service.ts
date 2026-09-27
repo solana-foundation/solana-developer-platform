@@ -117,7 +117,10 @@ export class WalletPolicyEnforcementService {
       operation.asset === (input.asset ?? null) &&
       operation.amount === (input.amount ?? null) &&
       operation.destination === (input.destination ?? null) &&
-      jsonValuesEqual(operation.raw_payload, walletOperationRawPayload(input));
+      jsonValuesEqual(
+        replayComparableRawPayload(operation.raw_payload),
+        replayComparableRawPayload(walletOperationRawPayload(input))
+      );
     if (!matches) {
       throw new AppError("FORBIDDEN", "Approved wallet operation does not match replayed action");
     }
@@ -234,6 +237,22 @@ function walletOperationRawPayload(input: CreateWalletOperationInput): Record<st
     ...(input.context != null ? { context: input.context } : {}),
     ...(input.providerExtensions != null ? { providerExtensions: input.providerExtensions } : {}),
   };
+}
+
+/**
+ * Raw-payload keys the approved-replay comparison ignores. They record
+ * environment facts captured when the operation was evaluated — the issuance
+ * mint's preflighted fee-payer ATA rent (SOLA9-464) — not the approved action.
+ * The replay re-preflights them and the submission boundary re-governs them
+ * against the evaluated facts, so their drift between approval and replay
+ * must not reject the replay with a payload mismatch.
+ */
+const REPLAY_VOLATILE_RAW_PAYLOAD_KEYS: readonly string[] = ["ataRent"];
+
+function replayComparableRawPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !REPLAY_VOLATILE_RAW_PAYLOAD_KEYS.includes(key))
+  );
 }
 
 function storedOperationContext(rawPayload: Record<string, unknown>): WalletOperationContext {

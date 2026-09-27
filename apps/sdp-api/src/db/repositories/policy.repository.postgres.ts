@@ -2062,9 +2062,20 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
 
     async sumWalletOperationAmounts(input: SumWalletOperationAmountsInput) {
       assertTenantClaim(scope, input, "PolicyRepository.sumWalletOperationAmounts");
+      // A SOL window must also sum the fee-payer-funded ATA rent a mint
+      // recorded on its own (token-asset) operation row (SOLA9-464): the rent
+      // is a native-SOL outflow that left the governed wallet, so successive
+      // fresh-destination mints would otherwise each dodge the cap the prior
+      // mints' rent already committed. Token rows contribute only their rent,
+      // never their token amount, and non-SOL windows are untouched.
+      const rentVisible = input.asset === "SOL";
+      const rentFactsExpression = `
+                 raw_payload->'ataRent'->>'solAmount' IS NOT NULL
+                 AND raw_payload->'ataRent'->>'solAmount' ~ '^[0-9]*\\.?[0-9]*$'
+                 AND raw_payload->'ataRent'->>'solAmount' ~ '[0-9]'`;
       const conditions: string[] = [
         "organization_id = ?",
-        "asset = ?",
+        rentVisible ? `(asset = ? OR (${rentFactsExpression}))` : "asset = ?",
         "created_at >= ?",
         // `created` is an undecided contender: enforcement inserts the row
         // before it evaluates, so counting that status lets two concurrent
@@ -2079,7 +2090,11 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         "amount ~ '^[0-9]*\\.?[0-9]*$'",
         "amount ~ '[0-9]'",
       ];
-      const params: unknown[] = [scope.organizationId, input.asset, input.since];
+      // The rent-inclusive SUM names its asset discriminator before the WHERE
+      // conditions, so the discriminator's binding comes first in text order.
+      const params: unknown[] = rentVisible
+        ? [input.asset, scope.organizationId, input.asset, input.since]
+        : [scope.organizationId, input.asset, input.since];
 
       switch (input.scope) {
         case "organization":
@@ -2121,9 +2136,21 @@ export function createPostgresPolicyRepository(db: AppDb, scope: TenantScope): P
         params.push(...input.operationTypes);
       }
 
+      // Rows in a rent-visible sum are either native-SOL rows (their amount)
+      // or token rows the rent arm let in (only their recorded rent). The
+      // guards in the WHERE arm keep the rent cast clean.
+      const totalExpression = rentVisible
+        ? `COALESCE(SUM(
+               CASE
+                 WHEN asset = ? THEN amount::numeric
+                 ELSE (raw_payload->'ataRent'->>'solAmount')::numeric
+               END
+             ), 0)::text`
+        : `COALESCE(SUM(amount::numeric), 0)::text`;
+
       const row = await db
         .prepare(
-          `SELECT COALESCE(SUM(amount::numeric), 0)::text AS total
+          `SELECT ${totalExpression} AS total
            FROM wallet_operations
            WHERE ${conditions.join("\n             AND ")}`
         )

@@ -823,6 +823,72 @@ describe("PolicyRepository (postgres)", () => {
     expect(badWindow).toEqual([]);
   });
 
+  it("sums a token operation's recorded ATA rent into SOL velocity windows without counting its token amount", async () => {
+    const service = policyStores(repo);
+    const enforcement = new PostgresPolicyEnforcementStore(repo, TEST_SCOPE);
+    const mintRentPayload = {
+      ataRent: {
+        tokenAccount: "ata_rent_destination",
+        rentLamports: "2039280",
+        solAmount: "0.00203928",
+        payer: "custody_wallet",
+      },
+    };
+    // A governed fresh-destination mint: token-asset aggregate row carrying the
+    // fee-payer-funded ATA rent the execution would charge (SOLA9-464).
+    await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "issuance",
+      operationType: "issuance_mint_execute",
+      asset: "USDC",
+      amount: "1000",
+      legs: [],
+      status: "evaluated",
+      rawPayload: mintRentPayload,
+    });
+    // A mint whose recorded rent cannot be parsed must not poison the sum.
+    await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "issuance",
+      operationType: "issuance_mint_execute",
+      asset: "USDC",
+      amount: "1000",
+      legs: [],
+      status: "evaluated",
+      rawPayload: { ataRent: { ...mintRentPayload.ataRent, solAmount: "not-a-number" } },
+    });
+    const current = await service.recordWalletOperation({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT.id,
+      custodyWalletId: TEST_CUSTODY_WALLET.id,
+      walletId: TEST_CUSTODY_WALLET.walletId,
+      apiKeyId: TEST_API_KEY.id,
+      operationFamily: "issuance",
+      operationType: "issuance_mint_execute",
+      asset: "SOL",
+      amount: "0.00203928",
+      legs: [],
+    });
+
+    const [sol, token] = await enforcement.loadVelocityObservations(current, [
+      { kind: "velocity", window: "P1D", max: "1", asset: "SOL" },
+      { kind: "velocity", window: "P1D", max: "1", asset: "USDC" },
+    ]);
+
+    // SECURITY: the SOL window counts the prior mint's rent (once — the
+    // unparsable row contributes nothing) but never its token amount.
+    expect(sol).toMatchObject({ asset: "SOL", total: "0.00203928" });
+    expect(token).toMatchObject({ asset: "USDC", total: "2000" });
+  });
+
   it("preserves an explicit null wallet operation actor through service mapping", async () => {
     const service = policyStores(repo);
 

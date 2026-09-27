@@ -32,7 +32,11 @@ import {
   assertDestinationAllowedByControlList,
   getOnChainAllowlistMutationForMint,
 } from "./access-control";
-import { type MintAtaRent, preflightMintAtaRent } from "./ata-rent";
+import {
+  assertMintAtaRentCoveredByEvaluation,
+  type MintAtaRent,
+  preflightMintAtaRent,
+} from "./ata-rent";
 import {
   admitIssuanceRuntimeExecution,
   createResolvedAuthoritySigner,
@@ -928,6 +932,18 @@ export const executeMint = async (c: AppContext) => {
           addedBy: auth.id,
         })
       : false;
+
+    // The gate preflighted the destination ATA before enforcement; submission
+    // happens only here. A destination owner can close an empty ATA in
+    // between, so re-verify at the submission boundary and refuse a mint whose
+    // create-ATA would charge rent the evaluated decision never covered
+    // (SOLA9-464).
+    await assertMintAtaRentCoveredByEvaluation({
+      env: c.env,
+      mint: mintAddress,
+      destination,
+      evaluatedAtaRent: gate.enforcement.operation.rawPayload.ataRent,
+    });
 
     const result = await mosaic.mintTo(
       {
