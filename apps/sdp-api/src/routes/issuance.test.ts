@@ -5001,6 +5001,10 @@ describe("Issuance Routes", () => {
           imageUrl: "https://example.com/token.png",
           updateAuthority: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet3 }),
           feePayer: expect.objectContaining({ address: TEST_SOLANA_ADDRESSES.wallet3 }),
+          // The test env's Kora sponsor pays the fees, so no custody-SOL cost
+          // bound applies; the effect fence rides the point-of-no-return hook.
+          maxFeePayerSolLamports: undefined,
+          onBeforeSubmit: expect.any(Function),
         });
       } finally {
         resolveCurrentAuthoritySpy.mockRestore();
