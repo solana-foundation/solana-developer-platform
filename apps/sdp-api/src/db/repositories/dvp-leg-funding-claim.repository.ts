@@ -54,6 +54,18 @@ export interface DvpLegFundingClaimRepository {
   claim(input: DvpLegFundingClaimInsert): Promise<boolean>;
   /** Replaces an unbroadcast claim's signature after sponsorship. */
   rebindSignature(tradeId: string, side: "a" | "b", from: string, to: string): Promise<boolean>;
+  /**
+   * Attaches the sponsored signature to an unbroadcast claim AND records that
+   * this signed transaction was handed to the broadcaster — in one statement,
+   * before the broadcast.
+   *
+   * That record is the recovery row for APE-770: from here until
+   * `recordFundingTx` (or a definitive preflight rejection) lands, the claim is
+   * neither a plain lock nor a receipt, and the expiry sweep must leave it for
+   * the reconciler's chain lookup. False when the row was released or rebound
+   * under the caller.
+   */
+  markBroadcast(tradeId: string, side: "a" | "b", from: string, to: string): Promise<boolean>;
   /** Checks whether an exact claim is still held. */
   hasClaim(tradeId: string, side: "a" | "b", signature: string): Promise<boolean>;
   /**
@@ -64,8 +76,15 @@ export interface DvpLegFundingClaimRepository {
    * release a newer claim taken after its own had already been swept.
    */
   release(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
-  /** Records the transfer once it is on the wire, so it outlives the claim. */
-  recordFundingTx(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
+  /**
+   * Records the transfer once it is on the wire, so it outlives the claim.
+   *
+   * Verifies its own write: false when no claim row took the receipt, which
+   * after APE-770 means the row was lost between the broadcast and this update
+   * (a sweep race, a crash). The caller reports that rather than letting the
+   * receipt vanish silently — the transfer is already on the wire either way.
+   */
+  recordFundingTx(tradeId: string, side: "a" | "b", signature: string): Promise<boolean>;
   /**
    * Whether any leg of the trade is being moved right now: a lock (a funding not
    * yet on the wire, or a reclaim not yet confirmed) whose transaction can still
@@ -97,24 +116,31 @@ export interface DvpLegFundingClaimRepository {
    * and what this table needs for exactly the same reason.
    *
    * Never touches a claim that was broadcast: `funding_tx` set means the row is
-   * a receipt rather than a lock.
+   * a receipt rather than a lock. Never touches a broadcast-marked row either
+   * (`broadcast_signature` set by `markBroadcast`): the signed transaction was
+   * handed to the broadcaster and may be on the wire, so deleting it on a
+   * height alone would lose the receipt of a transfer that still landed
+   * (APE-770). Both belong to the reconciler's chain lookup, never the sweep.
    */
   releaseExpired(blockHeight: bigint): Promise<number>;
   /**
-   * Lists broadcast claims whose signed transaction can no longer be accepted.
+   * Lists claims whose signed transaction can no longer be accepted, and whose
+   * fate only the chain can decide: receipts (`funding_tx` set) and
+   * broadcast-marked rows whose receipt write was lost or is still owed
+   * (`broadcast_signature` set, `funding_tx` null).
    *
-   * `releaseExpired` deliberately never touches a row with `funding_tx` set:
-   * on the wire means possibly landed. Past the last-valid height only the
-   * chain can say which, so resolution belongs to the reconciler's RPC read,
-   * never to the sweep.
+   * `releaseExpired` deliberately never touches either: on the wire means
+   * possibly landed. Past the last-valid height only the chain can say which,
+   * so resolution belongs to the reconciler's RPC read, never to the sweep.
    */
   listExpiredBroadcast(blockHeight: bigint): Promise<DvpLegFundingClaim[]>;
   /**
    * Deletes one broadcast claim whose transfer the chain confirmed never landed.
    *
-   * Guarded on the signature AND `funding_tx IS NOT NULL`, so the reconciler
-   * can only ever remove the exact row it checked on chain — never an
-   * unbroadcast lock, which only `releaseExpired` may release.
+   * Guarded on the signature AND on the row being broadcast — a receipt
+   * (`funding_tx` set) or a broadcast-marked row (`broadcast_signature` set) —
+   * so the reconciler can only ever remove the exact row it checked on chain,
+   * never an unbroadcast lock, which only `releaseExpired` may release.
    */
   deleteBroadcastClaim(tradeId: string, side: "a" | "b", signature: string): Promise<void>;
   /**
@@ -210,6 +236,22 @@ export function createPostgresDvpLegFundingClaimRepository(
       return result !== null;
     },
 
+    async markBroadcast(tradeId, side, from, to) {
+      // One statement, before the broadcast: the sponsored signature and the
+      // marker ride together, so a crash between them cannot leave a broadcast
+      // row looking like a plain lock (which the sweep would delete).
+      const result = await db
+        .prepare(
+          `UPDATE dvp_leg_funding_claims
+              SET signature = ?, broadcast_signature = ?, updated_at = sdp_iso_now()
+            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NULL
+            RETURNING trade_id`
+        )
+        .bind(to, to, tradeId, side, from)
+        .first<{ trade_id: string }>();
+      return result !== null;
+    },
+
     async hasClaim(tradeId, side, signature) {
       const result = await db
         .prepare(
@@ -223,21 +265,27 @@ export function createPostgresDvpLegFundingClaimRepository(
     },
 
     async recordFundingTx(tradeId, side, signature) {
-      await db
+      const result = await db
         .prepare(
           `UPDATE dvp_leg_funding_claims
               SET funding_tx = ?, updated_at = sdp_iso_now()
-            WHERE trade_id = ? AND side = ? AND signature = ?`
+            WHERE trade_id = ? AND side = ? AND signature = ?
+            RETURNING trade_id`
         )
         .bind(signature, tradeId, side, signature)
-        .run();
+        .first<{ trade_id: string }>();
+      return result !== null;
     },
 
     async releaseExpired(blockHeight) {
+      // `broadcast_signature IS NULL` is the APE-770 guard: a row whose signed
+      // transaction was handed to the broadcaster stays until the chain says
+      // what it did, even though its receipt write has not landed yet.
       const result = await db
         .prepare(
           `DELETE FROM dvp_leg_funding_claims
             WHERE funding_tx IS NULL
+              AND broadcast_signature IS NULL
               AND CAST(expiry_height AS NUMERIC) < ?
             RETURNING trade_id`
         )
@@ -307,7 +355,7 @@ export function createPostgresDvpLegFundingClaimRepository(
                   c.signature, c.expiry_height, c.funding_tx
              FROM dvp_leg_funding_claims c
              JOIN dvp_trades t ON t.id = c.trade_id
-            WHERE c.funding_tx IS NOT NULL
+            WHERE (c.funding_tx IS NOT NULL OR c.broadcast_signature IS NOT NULL)
               AND CAST(c.expiry_height AS NUMERIC) < ?
               AND t.status IN ('created', 'partially_funded', 'funded', 'expired')`
         )
@@ -343,13 +391,16 @@ export function createPostgresDvpLegFundingClaimRepository(
     },
 
     async deleteBroadcastClaim(tradeId, side, signature) {
-      // `funding_tx IS NOT NULL` keeps this from ever releasing an unbroadcast
-      // lock: the caller decided on chain that THIS signature never landed,
-      // and an unbroadcast claim was never checked against the chain at all.
+      // The broadcast disjunct keeps this from ever releasing an unbroadcast
+      // lock: the caller decided on chain that THIS signature never landed, and
+      // an unbroadcast claim was never checked against the chain at all. A
+      // broadcast-marked row whose receipt write was lost qualifies — the chain
+      // answered for exactly its signature.
       await db
         .prepare(
           `DELETE FROM dvp_leg_funding_claims
-            WHERE trade_id = ? AND side = ? AND signature = ? AND funding_tx IS NOT NULL`
+            WHERE trade_id = ? AND side = ? AND signature = ?
+              AND (funding_tx IS NOT NULL OR broadcast_signature IS NOT NULL)`
         )
         .bind(tradeId, side, signature)
         .run();

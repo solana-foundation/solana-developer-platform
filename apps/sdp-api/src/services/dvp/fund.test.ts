@@ -43,7 +43,7 @@ const readMintDecimals = vi.hoisted(() => vi.fn());
 const claimFunding = vi.hoisted(() => vi.fn());
 const releaseFunding = vi.hoisted(() => vi.fn());
 const recordFundingTx = vi.hoisted(() => vi.fn());
-const rebindSignature = vi.hoisted(() => vi.fn());
+const markBroadcast = vi.hoisted(() => vi.fn());
 const hasClaim = vi.hoisted(() => vi.fn());
 const createProjectSponsorshipFeePayment = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
@@ -69,7 +69,7 @@ vi.mock("@/db/repositories/dvp-leg-funding-claim.repository", () => ({
   createPostgresDvpLegFundingClaimRepository: () => ({
     claim: claimFunding,
     release: releaseFunding,
-    rebindSignature,
+    markBroadcast,
     hasClaim,
     recordFundingTx,
   }),
@@ -151,9 +151,9 @@ describe("fundDvpTradeLeg", () => {
     claimFunding.mockResolvedValue(true);
     assertTradeNotClosing.mockResolvedValue(undefined);
     releaseFunding.mockResolvedValue(undefined);
-    rebindSignature.mockResolvedValue(true);
+    markBroadcast.mockResolvedValue(true);
     hasClaim.mockResolvedValue(true);
-    recordFundingTx.mockResolvedValue(undefined);
+    recordFundingTx.mockResolvedValue(true);
   });
 
   it("moves the named side's leg into its escrow", async () => {
@@ -384,7 +384,7 @@ describe("fundDvpTradeLeg", () => {
     });
     sendTransaction.mockImplementation(async () => {
       order.push("send");
-      const signature = rebindSignature.mock.calls[0][3];
+      const signature = markBroadcast.mock.calls[0][3];
       return signature;
     });
 
@@ -393,9 +393,9 @@ describe("fundDvpTradeLeg", () => {
     expect(order).toEqual(["claim", "sponsor", "send"]);
   });
 
-  it("rebinds the claim to the sponsored signature before broadcast", async () => {
+  it("marks the claim broadcast with the sponsored signature before broadcast", async () => {
     const order: string[] = [];
-    rebindSignature.mockImplementation(async () => {
+    markBroadcast.mockImplementation(async () => {
       order.push("rebind");
       return true;
     });
@@ -407,7 +407,7 @@ describe("fundDvpTradeLeg", () => {
     const result = await fundDvpTradeLeg(context, trade(), FUNDER_A);
     const claimSignature = claimFunding.mock.calls[0][0].signature;
 
-    expect(rebindSignature).toHaveBeenCalledWith(trade().id, "a", claimSignature, result.signature);
+    expect(markBroadcast).toHaveBeenCalledWith(trade().id, "a", claimSignature, result.signature);
     expect(order).toEqual(["rebind", "send"]);
   });
 
@@ -418,7 +418,7 @@ describe("fundDvpTradeLeg", () => {
 
     const claimSignature = claimFunding.mock.calls[0][0].signature;
     expect(releaseFunding).toHaveBeenCalledWith(trade().id, "a", claimSignature);
-    expect(rebindSignature).not.toHaveBeenCalled();
+    expect(markBroadcast).not.toHaveBeenCalled();
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
@@ -429,7 +429,7 @@ describe("fundDvpTradeLeg", () => {
 
     await expect(fundDvpTradeLeg(context, trade(), FUNDER_A)).rejects.toThrow("socket hang up");
     expect(releaseFunding).not.toHaveBeenCalled();
-    expect(rebindSignature).toHaveBeenCalledTimes(1);
+    expect(markBroadcast).toHaveBeenCalledTimes(1);
   });
 
   it("refuses when the mint cannot be read", async () => {

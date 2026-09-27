@@ -91,14 +91,20 @@ export interface DvpFundingPlan {
   signer: { organizationId: string; projectId: string; custodyWalletId: string };
   /** Takes the lock on this leg. False when somebody else already holds it. */
   claim(signature: Signature, expiryHeight: string): Promise<boolean>;
-  /** Replaces the wallet-signature lock key with the sponsored transaction signature. */
+  /**
+   * Replaces the wallet-signature lock key with the sponsored transaction
+   * signature and marks the claim broadcast, before the broadcast itself.
+   */
   rebindClaim(from: Signature, to: Signature): Promise<void>;
   /** Checks whether this plan still owns the named claim. */
   hasClaim(signature: Signature): Promise<boolean>;
   /** Gives it back, when and only when nothing was broadcast. */
   release(signature: Signature): Promise<void>;
-  /** Records the transfer once it is on the wire. */
-  recordFundingTx(signature: Signature): Promise<void>;
+  /**
+   * Records the transfer once it is on the wire. False when no claim row took
+   * the receipt — reported by the caller, never swallowed.
+   */
+  recordFundingTx(signature: Signature): Promise<boolean>;
 }
 
 /**
@@ -128,7 +134,7 @@ export function fundingPlan(
       }),
     release: (signature) => claims.release(trade.id, side, signature),
     rebindClaim: async (from, to) => {
-      const rebound = await claims.rebindSignature(trade.id, side, from, to);
+      const rebound = await claims.markBroadcast(trade.id, side, from, to);
       if (!rebound) {
         throw new Error(
           "funding claim was released before the sponsored signature could be attached"
@@ -449,7 +455,20 @@ export async function executeDvpFunding(
   // The row stays as the receipt and keeps the leg taken: a later funding of the
   // same leg conflicts until a reclaim takes the row over (`claimForReclaim`)
   // or the reconciler deletes a receipt whose transfer never landed.
-  await plan.recordFundingTx(heldSignature);
+  // The row itself is protected from the sweep from the broadcast mark onwards,
+  // so a false here means the row was lost some other way: report it loudly —
+  // the reconciler restores or releases the row from the chain either way.
+  if (!(await plan.recordFundingTx(heldSignature))) {
+    getLogger().error(
+      {
+        event: "sdp_dvp_funding_receipt_unattached",
+        tradeId: trade.id,
+        side,
+        signature: heldSignature,
+      },
+      "dvp funding: broadcast transfer could not be attached to its claim row"
+    );
+  }
 
   return { signature: heldSignature, leg: side, amount: outstanding.toString() };
 }

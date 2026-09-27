@@ -232,6 +232,12 @@ async function syncTradeTransfers(
  *
  * A failed or short answer deletes nothing in the chunk: only a definitive
  * answer for a signature releases its claim, and the next tick asks again.
+ *
+ * A chunk can also carry a broadcast-marked claim whose receipt write never
+ * landed (APE-770): the row says a signed transaction was handed to the
+ * broadcaster, but `funding_tx` is still null. A successful chain lookup for
+ * one of those RESTORES the claim-backed receipt rather than letting cleanup
+ * take it; only a definitive moved-nothing releases the row.
  */
 async function resolveExpiredReceipts(
   claims: ReturnType<typeof createPostgresDvpLegFundingClaimRepository>,
@@ -275,34 +281,81 @@ async function resolveExpiredReceipts(
     // FAILED (`err` set, fees consumed, zero tokens moved). Both leave the claim
     // neither lock nor receipt. The same classification decides whether reclaim
     // may take a receipt over.
-    if (classifyDvpFundingReceipt(status, true) !== "moved_nothing") {
+    const classification = classifyDvpFundingReceipt(status, true);
+    if (classification === "moved_nothing") {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each delete is guarded on its own signature; order does not matter and the count is bounded by the chunk.
+        await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
+        getLogger().info(
+          {
+            event: "sdp_dvp_funding_claim_released",
+            reason: status === null ? "never_landed" : "landed_failed",
+            tradeId: claim.tradeId,
+            side: claim.side,
+            signature: claim.signature,
+            err: status === null ? null : status.err,
+          },
+          "dvp reconcile: released broadcast funding claim whose transfer moved nothing"
+        );
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "sdp_dvp_funding_claim_resolution_failed",
+            tradeId: claim.tradeId,
+            side: claim.side,
+            signature: claim.signature,
+            error,
+          },
+          "dvp reconcile: expired broadcast funding claim could not be released"
+        );
+      }
       continue;
     }
-    try {
-      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each delete is guarded on its own signature; order does not matter and the count is bounded by the chunk.
-      await claims.deleteBroadcastClaim(claim.tradeId, claim.side, claim.signature);
-      getLogger().info(
-        {
-          event: "sdp_dvp_funding_claim_released",
-          reason: status === null ? "never_landed" : "landed_failed",
-          tradeId: claim.tradeId,
-          side: claim.side,
-          signature: claim.signature,
-          err: status === null ? null : status.err,
-        },
-        "dvp reconcile: released broadcast funding claim whose transfer moved nothing"
-      );
-    } catch (error) {
-      getLogger().error(
-        {
-          event: "sdp_dvp_funding_claim_resolution_failed",
-          tradeId: claim.tradeId,
-          side: claim.side,
-          signature: claim.signature,
-          error,
-        },
-        "dvp reconcile: expired broadcast funding claim could not be released"
-      );
+
+    // Landed, and the row carries no receipt: this is a broadcast-marked claim
+    // whose post-broadcast `recordFundingTx` write was lost to a crash or a
+    // sweep race (APE-770). The chain has now confirmed the transfer, so the
+    // durable receipt goes back rather than being lost to cleanup. A merely
+    // pending answer leaves the row for a later sweep to ask about again.
+    if (classification === "landed" && claim.fundingTx === null) {
+      try {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each restore is guarded on its own signature; order does not matter and the count is bounded by the chunk.
+        const restored = await claims.recordFundingTx(claim.tradeId, claim.side, claim.signature);
+        if (restored) {
+          getLogger().info(
+            {
+              event: "sdp_dvp_funding_claim_receipt_restored",
+              tradeId: claim.tradeId,
+              side: claim.side,
+              signature: claim.signature,
+            },
+            "dvp reconcile: restored the funding receipt the chain confirmed"
+          );
+        } else {
+          // No row to return to: a delete or a takeover won the race, and both
+          // are decided from the same chain answer this read produced.
+          getLogger().warn(
+            {
+              event: "sdp_dvp_funding_claim_resolution_failed",
+              tradeId: claim.tradeId,
+              side: claim.side,
+              signature: claim.signature,
+            },
+            "dvp reconcile: confirmed funding receipt had no claim row to return to"
+          );
+        }
+      } catch (error) {
+        getLogger().error(
+          {
+            event: "sdp_dvp_funding_claim_resolution_failed",
+            tradeId: claim.tradeId,
+            side: claim.side,
+            signature: claim.signature,
+            error,
+          },
+          "dvp reconcile: confirmed funding receipt could not be restored"
+        );
+      }
     }
   }
 }

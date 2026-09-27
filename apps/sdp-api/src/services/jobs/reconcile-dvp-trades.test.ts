@@ -778,6 +778,91 @@ describe("reconcileDvpTrades", () => {
     expect(after).toHaveLength(0);
   });
 
+  // APE-770. A claim whose signed transaction was handed to the broadcaster but
+  // whose receipt write was lost (a crash, a sweep race) is listed here too —
+  // the chain, not the height, decides whether it landed.
+  it("restores the receipt of a broadcast-marked claim the chain confirmed landed", async () => {
+    await seedTrade("dvp_lost_receipt", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_lost_receipt",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_wallet",
+      expiryHeight: "900",
+    });
+    // persistSigned, immediately before the broadcast: the sponsored signature
+    // is attached and the row is marked broadcast. The receipt write never ran.
+    expect(await claims.markBroadcast("dvp_lost_receipt", "a", "sig_wallet", SIG)).toBe(true);
+    getSignatureStatusesMock.mockResolvedValue(LANDED_STATUS);
+
+    await reconcileDvpTrades(env);
+
+    const [restored] = await claims.listForTrade("dvp_lost_receipt");
+    expect(restored).toMatchObject({ signature: SIG, fundingTx: SIG });
+  });
+
+  it("releases a broadcast-marked claim whose transfer never landed", async () => {
+    await seedTrade("dvp_marked_dead", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_marked_dead",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_wallet",
+      expiryHeight: "900",
+    });
+    expect(await claims.markBroadcast("dvp_marked_dead", "a", "sig_wallet", SIG)).toBe(true);
+    getSignatureStatusesMock.mockResolvedValue([null]);
+
+    await reconcileDvpTrades(env);
+
+    expect(await claims.listForTrade("dvp_marked_dead")).toHaveLength(0);
+    // The leg is claimable again — the whole point of the resolution.
+    const retried = await claims.claim({
+      tradeId: "dvp_marked_dead",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: SIG,
+      expiryHeight: "800",
+    });
+    expect(retried).toBe(true);
+  });
+
+  // An answer that cannot call the landing either way must not write the
+  // receipt, and must not release the row either; the next sweep asks again.
+  it("keeps a broadcast-marked claim whose transfer is only processed", async () => {
+    await seedTrade("dvp_marked_pending", "created");
+    const db = getDb(env);
+    const claims = createPostgresDvpLegFundingClaimRepository(db);
+    await claims.claim({
+      tradeId: "dvp_marked_pending",
+      side: "a",
+      organizationId: TEST_ORG.id,
+      projectId: PROJECT_ID,
+      custodyWalletId: CUSTODY_WALLET_ID,
+      signature: "sig_wallet",
+      expiryHeight: "900",
+    });
+    expect(await claims.markBroadcast("dvp_marked_pending", "a", "sig_wallet", SIG)).toBe(true);
+    getSignatureStatusesMock.mockResolvedValue([
+      { slot: 5n, confirmations: 0n, confirmationStatus: "processed", err: null },
+    ]);
+
+    await reconcileDvpTrades(env);
+
+    const [kept] = await claims.listForTrade("dvp_marked_pending");
+    expect(kept).toMatchObject({ signature: SIG, fundingTx: null });
+  });
+
   // A processed failure can be re-executed on the surviving fork, so it is not
   // yet an answer; only a confirmed one is.
   it("keeps an expired broadcast claim whose failure is only processed", async () => {

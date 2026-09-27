@@ -438,6 +438,98 @@ describe("DvpLegFundingClaimRepository", () => {
   });
 
   /**
+   * APE-770 (SOLA9-484). A funding whose signed transaction has crossed the
+   * broadcast boundary must not lose its durable receipt to the expiry sweep.
+   * `markBroadcast` is the transition `persistSigned` makes immediately before
+   * the submit: past it the transfer may be on the wire, so the sweep has no
+   * business deleting the row without the chain's answer — and the
+   * post-broadcast receipt write must still land on the surviving row.
+   */
+  describe("a claim whose transaction crossed the broadcast boundary", () => {
+    it("survives the expiry sweep and still takes its receipt", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_wallet"), expiryHeight: "100" });
+        // persistSigned: the sponsored signature is attached AND the row is
+        // marked broadcast, before the broadcast itself.
+        expect(await repo.markBroadcast(TRADE_ID, "a", "sig_wallet", "sig_sponsored")).toBe(true);
+      });
+
+      // The sweep races the post-broadcast receipt write: it must leave the row
+      // for the chain to resolve.
+      expect(await repo.releaseExpired(101n)).toBe(0);
+
+      await expect(repo.recordFundingTx(TRADE_ID, "a", "sig_sponsored")).resolves.toBe(true);
+      const [row] = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(row).toMatchObject({
+        side: "a",
+        signature: "sig_sponsored",
+        fundingTx: "sig_sponsored",
+      });
+
+      // The receipt is visible where the product reads funding history.
+      const unified = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        getDb(env)
+          .prepare(`SELECT id FROM unified_transactions WHERE module = 'dvp' AND id = ?`)
+          .bind(`${TRADE_ID}:fund:a`)
+          .first<{ id: string }>()
+      );
+      expect(unified).not.toBeNull();
+    });
+
+    // The receipt write is the last thing a funding request does; a claim that
+    // vanished underneath it (a sweep race, a crash) must be reported, never
+    // silently swallowed.
+    it("reports when no claim row took the receipt", async () => {
+      await expect(repo.recordFundingTx(TRADE_ID, "a", "sig_ghost")).resolves.toBe(false);
+    });
+
+    // Rebinding for a reclaim attaches no broadcast mark: a reclaim lock left
+    // behind by an ambiguous send stays an ordinary lock, swept past its last
+    // valid height exactly as before (a reclaim has no receipt to lose).
+    it("sweeps an ambiguous reclaim lock whose signature was rebound without a mark", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_wallet"), expiryHeight: "100" });
+        expect(await repo.rebindSignature(TRADE_ID, "a", "sig_wallet", "sig_rebound")).toBe(true);
+      });
+
+      expect(await repo.releaseExpired(101n)).toBe(1);
+      const remaining = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(remaining).toHaveLength(0);
+    });
+
+    // The reconciler may delete the broadcast-marked row it asked the chain
+    // about, but never an unbroadcast lock.
+    it("deletes a broadcast-marked row the chain answered for, and never an unmarked lock", async () => {
+      await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, async () => {
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "a", "sig_wallet"), expiryHeight: "100" });
+        await repo.markBroadcast(TRADE_ID, "a", "sig_wallet", "sig_marked");
+        await repo.claim({ ...claimInput(PARTY_A_ORG, "b", "sig_plain"), expiryHeight: "100" });
+      });
+
+      // Wrong signature: misses both rows.
+      await repo.deleteBroadcastClaim(TRADE_ID, "a", "sig_other");
+      // An unmarked, never-broadcast lock is only ever `releaseExpired`'s to
+      // delete — the chain was never asked about it.
+      await repo.deleteBroadcastClaim(TRADE_ID, "b", "sig_plain");
+
+      const untouched = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(untouched.map((claim) => claim.signature).sort()).toEqual(["sig_marked", "sig_plain"]);
+
+      await repo.deleteBroadcastClaim(TRADE_ID, "a", "sig_marked");
+      const afterMarked = await runWithTenantDatabaseIdentity({ organizationId: PARTY_A_ORG }, () =>
+        repo.listForTrade(TRADE_ID)
+      );
+      expect(afterMarked.map((claim) => claim.signature)).toEqual(["sig_plain"]);
+    });
+  });
+
+  /**
    * PRO-1973. A settle or cancel runs as the trade's owner and has to see a
    * party's leg lock in flight, or it closes the escrow under a transfer. 0110
    * lets the owner read the rows on its own trades; nothing else crosses.
