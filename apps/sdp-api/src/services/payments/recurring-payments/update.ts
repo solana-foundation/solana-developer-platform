@@ -313,18 +313,21 @@ async function resolveLegacyAttemptPlanOwner(
  * A legacy attempt journals the replacement wallet by wallet_id only, and
  * custody wallets under different configs can share a wallet_id within one
  * tenant. Resuming the attempt pins the retried custody-wallet row id, so the
- * retried wallet must be the exact identity the legacy snapshot selected: the
- * one wallet row that wallet_id resolves to in the tenant scope (the 0073
- * identity scope; wallet status is intentionally not part of identity).
- * Attempts that already created their replacement plan resolve through the
- * plan owner instead — the wallet_id plus public key pair the original
- * attempt executed against — so recorded work stays recoverable even when the
- * wallet_id alone is ambiguous. When that pair is duplicated across
- * custody-wallet rows, or the snapshot's wallet_id no longer matches any row
- * carrying the recorded key, the recorded plan owner still proves the
- * on-chain identity: the retry resumes when the retried wallet carries the
- * recorded public key instead of rejecting every retry of an
- * already-authorized replacement forever.
+ * retried wallet must be the exact custody identity the legacy snapshot
+ * selected. The snapshot proves a row identity only when its wallet_id
+ * resolves to exactly one custody row in the tenant scope (the 0073 identity
+ * scope; wallet status is intentionally not part of identity) — a retry with
+ * any other row never resumes. Attempts that already created their replacement
+ * plan resolve through the plan owner instead — the wallet_id plus public key
+ * pair the original attempt executed against — so recorded work stays
+ * recoverable even when the wallet_id alone is ambiguous or has drifted: the
+ * plan PDA is derived from the owner's public key, so a retried wallet
+ * carrying that key executes against the exact on-chain identity the recorded
+ * work was created with, however the wallet_id vocabulary has drifted since.
+ * Every unprovable outcome ("different", "ambiguous", "missing") keeps the
+ * attempt from resuming: the caller either rejects the retry or journals the
+ * attempt failed and releases the parent, never pinning a custody row that
+ * the snapshot and the recorded plan owner cannot both vouch for.
  */
 type LegacyCustodyIdentityResolution = "matched" | "different" | "ambiguous" | "missing";
 
@@ -687,6 +690,118 @@ async function updatePendingRecurringPayment(input: {
   return updated;
 }
 
+/**
+ * Outcome of resolving the in-flight attempt for a stale recovery: either an
+ * attempt the request can continue executing ("ready"), or an unrecoverable
+ * legacy attempt whose recorded replacement work could not be proven against
+ * the retried custody wallet ("unrecoverable"). The unrecoverable case must
+ * not throw from inside the claim transaction — the caller journals the
+ * failure and releases the parent after the claim commits, so the payment
+ * does not deadlock in updating.
+ */
+type RecurringPaymentUpdateAttemptResolution =
+  | { kind: "ready"; attempt: PaymentRecurringPaymentUpdateAttemptRow }
+  | { kind: "unrecoverable"; attempt: PaymentRecurringPaymentUpdateAttemptRow };
+
+/**
+ * Recovery resolution for a stale attempt carrying the legacy snapshot
+ * vocabulary: a resumed attempt ("ready"), an unrecoverable one the caller
+ * must journal and release the parent from ("unrecoverable"), or null when
+ * the retry should create a fresh attempt.
+ */
+async function resolveStaleLegacyUpdateAttempt(input: {
+  db: DatabaseExecutor;
+  recurringRepo: PaymentRecurringPaymentsRepository;
+  claimed: PaymentRecurringPaymentRow;
+  organizationId: string;
+  projectId: string;
+  mode: PaymentRecurringPaymentUpdateAttemptMode;
+  changedFields: string[];
+  beforeValues: Record<string, unknown>;
+  afterValues: Record<string, unknown>;
+  newSourceCustodyWalletId: string | null;
+  newSourceWalletId: string | null;
+  newSourcePublicKey: string | null;
+  nowIso: string;
+  existing: PaymentRecurringPaymentUpdateAttemptRow;
+}): Promise<RecurringPaymentUpdateAttemptResolution | null> {
+  const planOwner = await resolveLegacyAttemptPlanOwner(input.db, input.existing, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+  });
+  if (
+    !legacyUpdateAttemptMatchesRequest(input.existing, {
+      mode: input.mode,
+      changedFields: input.changedFields,
+      beforeValues: input.beforeValues,
+      afterValues: input.afterValues,
+      oldSourceWalletId: input.claimed.source_wallet_id,
+      newSourceWalletId: input.newSourceWalletId,
+      newSourcePublicKey: input.newSourcePublicKey,
+      planOwner,
+    })
+  ) {
+    throw conflict("Recurring payment update recovery must retry the same update");
+  }
+  const identity = await resolveLegacyAttemptCustodyIdentity(input.db, input.existing, {
+    organizationId: input.organizationId,
+    projectId: input.projectId,
+    newSourceCustodyWalletId: input.newSourceCustodyWalletId,
+    planOwner,
+  });
+  if (identity === "matched") {
+    return {
+      kind: "ready",
+      attempt: await requireUpdatedAttempt(
+        await input.recurringRepo.updateUpdateAttempt({
+          attemptId: input.existing.id,
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+          error: null,
+          updatedAt: input.nowIso,
+        })
+      ),
+    };
+  }
+  if (input.existing.old_cancel_signature !== null) {
+    // The recorded replacement already canceled the old subscription
+    // on-chain. Failing the attempt and restarting would repeat that
+    // cancellation against the already-authorized replacement, so the
+    // attempt stays in flight for manual reconciliation instead of being
+    // released to a fresh start that cannot finalize it.
+    throw conflict(
+      "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the recorded replacement already canceled the old subscription on-chain, so reconcile the recorded replacement manually before updating"
+    );
+  }
+  if (legacyAttemptHasRecordedReplacementWork(input.existing)) {
+    // The retried custody identity cannot be proven, but nothing was
+    // canceled on-chain yet. Return the attempt unrecovered so the caller
+    // journals it failed — keeping the recorded plan, subscription, and
+    // signature work for audit — and releases the parent after the claim
+    // commits: a fresh update can then repair the payment instead of every
+    // retry deadlocking in updating.
+    return { kind: "unrecoverable", attempt: input.existing };
+  }
+  // Nothing has been recorded that a restart would repeat: quarantine
+  // the unprovable attempt so this retry creates a fresh, exactly
+  // pinned attempt instead of failing recovery forever. The fresh
+  // attempt is the new update the retry explicitly requested — it is
+  // pinned to the retried custody wallet's own row id, never to an
+  // identity inferred from the ambiguous legacy snapshot.
+  requireUpdatedAttempt(
+    await input.recurringRepo.updateUpdateAttempt({
+      attemptId: input.existing.id,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      status: "failed",
+      error:
+        "legacy source-changing replacement attempt could not be resolved to an exact custody wallet; retry the update to create a fresh attempt",
+      updatedAt: input.nowIso,
+    })
+  );
+  return null;
+}
+
 async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   db: DatabaseExecutor;
   recurringRepo: PaymentRecurringPaymentsRepository;
@@ -703,7 +818,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
-}): Promise<PaymentRecurringPaymentUpdateAttemptRow> {
+}): Promise<RecurringPaymentUpdateAttemptResolution> {
   if (input.recoveringStaleUpdate) {
     const existing = await input.recurringRepo.getLatestUpdateAttempt({
       organizationId: input.organizationId,
@@ -714,56 +829,13 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     if (existing) {
       const legacySnapshot =
         existing.new_source_custody_wallet_id === null && usesLegacySourceWalletSnapshot(existing);
-      let resume = false;
       if (legacySnapshot) {
-        const planOwner = await resolveLegacyAttemptPlanOwner(input.db, existing, {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-        });
-        if (
-          !legacyUpdateAttemptMatchesRequest(existing, {
-            mode: input.mode,
-            changedFields: input.changedFields,
-            beforeValues: input.beforeValues,
-            afterValues: input.afterValues,
-            oldSourceWalletId: input.claimed.source_wallet_id,
-            newSourceWalletId: input.newSourceWalletId,
-            newSourcePublicKey: input.newSourcePublicKey,
-            planOwner,
-          })
-        ) {
-          throw conflict("Recurring payment update recovery must retry the same update");
-        }
-        const identity = await resolveLegacyAttemptCustodyIdentity(input.db, existing, {
-          organizationId: input.organizationId,
-          projectId: input.projectId,
-          newSourceCustodyWalletId: input.newSourceCustodyWalletId,
-          planOwner,
-        });
-        if (identity === "matched") {
-          resume = true;
-        } else if (legacyAttemptHasRecordedReplacementWork(existing)) {
-          throw conflict(
-            "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; resolve duplicate or missing custody wallets for the recorded wallet and retry the update"
-          );
-        } else {
-          // Nothing has been recorded that a restart would repeat: quarantine
-          // the unprovable attempt so this retry creates a fresh, exactly
-          // pinned attempt instead of failing recovery forever.
-          requireUpdatedAttempt(
-            await input.recurringRepo.updateUpdateAttempt({
-              attemptId: existing.id,
-              organizationId: input.organizationId,
-              projectId: input.projectId,
-              status: "failed",
-              error:
-                "legacy source-changing replacement attempt could not be resolved to an exact custody wallet; retry the update to create a fresh attempt",
-              updatedAt: input.nowIso,
-            })
-          );
+        const resolution = await resolveStaleLegacyUpdateAttempt({ ...input, existing });
+        if (resolution) {
+          return resolution;
         }
       } else {
-        resume =
+        const resume =
           existing.mode === input.mode &&
           existing.new_source_custody_wallet_id === input.newSourceCustodyWalletId &&
           updateAttemptMatchesRequest(existing, {
@@ -774,17 +846,18 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
         if (!resume) {
           throw conflict("Recurring payment update recovery must retry the same update");
         }
-      }
-      if (resume) {
-        return requireUpdatedAttempt(
-          await input.recurringRepo.updateUpdateAttempt({
-            attemptId: existing.id,
-            organizationId: input.organizationId,
-            projectId: input.projectId,
-            error: null,
-            updatedAt: input.nowIso,
-          })
-        );
+        return {
+          kind: "ready",
+          attempt: await requireUpdatedAttempt(
+            await input.recurringRepo.updateUpdateAttempt({
+              attemptId: existing.id,
+              organizationId: input.organizationId,
+              projectId: input.projectId,
+              error: null,
+              updatedAt: input.nowIso,
+            })
+          ),
+        };
       }
     }
   }
@@ -828,7 +901,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
     throw internalError("Failed to journal recurring payment update");
   }
 
-  return attempt;
+  return { kind: "ready", attempt };
 }
 
 function activeNextCollectionDueAt(input: {
@@ -2040,7 +2113,7 @@ export async function updateRecurringPayment(input: {
           staleBefore,
         });
     if (!claimed) return null;
-    const attempt = await getOrCreateRecurringPaymentUpdateAttempt({
+    const resolution = await getOrCreateRecurringPaymentUpdateAttempt({
       db: tx,
       recurringRepo: transactionRepo,
       claimed,
@@ -2057,12 +2130,33 @@ export async function updateRecurringPayment(input: {
       nowIso,
       recoveringStaleUpdate,
     });
-    return { claimed, attempt };
+    return { claimed, resolution };
   });
   if (!claimResult) {
     throw conflict("Recurring payment update is already processing");
   }
-  const { attempt, claimed } = claimResult;
+  const { claimed, resolution } = claimResult;
+  if (resolution.kind === "unrecoverable") {
+    // The claim has committed, so journaling here persists: the unprovable
+    // legacy attempt is marked failed with its recorded replacement work
+    // intact and the parent is released back to active, giving the caller a
+    // repair path (a fresh update) instead of deadlocking the payment in
+    // updating behind a conflict that every retry would repeat.
+    const unrecoverable = conflict(
+      "Recurring payment update recovery cannot prove the recorded replacement custody wallet identity; the failed attempt kept its recorded replacement work and the payment was released — resolve the recorded custody identity or submit a fresh update"
+    );
+    await recordRecurringPaymentUpdateFailure({
+      env: input.env,
+      attempt: resolution.attempt,
+      claimed,
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      error: unrecoverable,
+      resetToActive: true,
+    });
+    throw unrecoverable;
+  }
+  const { attempt } = resolution;
 
   try {
     if (mode === "metadata_schedule") {

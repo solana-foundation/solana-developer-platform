@@ -1802,6 +1802,7 @@ describe("Payments routes — recurring", () => {
     } | null;
     signableSharedWallet?: boolean;
     rekeyReplacementWalletId?: string;
+    withOldCancelSignature?: boolean;
   }): Promise<{
     activated: Awaited<ReturnType<typeof activateRecurringPaymentFixture>>;
     replacementCustodyWalletId: string;
@@ -1920,11 +1921,11 @@ describe("Payments routes — recurring", () => {
              id, organization_id, project_id, recurring_payment_id, mode, status,
              stage, old_plan_id, old_subscription_id, changed_fields,
              before_values, after_values, created_at, updated_at,
-             new_plan_id, plan_creation_signature
+             new_plan_id, plan_creation_signature, old_cancel_signature
            ) VALUES (
              ?, ?, ?, ?, 'replacement', 'processing',
              'create_plan', ?, ?, ARRAY['sourceWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?,
-             ?, ?
+             ?, ?, ?
            )`
         )
         .bind(
@@ -1940,6 +1941,11 @@ describe("Payments routes — recurring", () => {
           staleAt,
           options.plan?.id ?? null,
           options.plan?.withSignature
+            ? signature(
+                "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+              )
+            : null,
+          options.withOldCancelSignature === true
             ? signature(
                 "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
               )
@@ -2178,20 +2184,24 @@ describe("Payments routes — recurring", () => {
     expect(parentPin?.source_custody_wallet_id).toBe(replacementCustodyWalletId);
   });
 
-  it("rejects a re-keyed legacy retry whose custody wallet does not carry the recorded plan owner identity", async () => {
+  it("releases a side-effected legacy attempt whose custody identity cannot be proven and repairs with a fresh update", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
     const { activated, sharedCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
       attemptId: "prpu_stale_legacy_source_change",
       // The recorded plan owner's wallet_id matches no custody wallet row
       // carrying its public key, and the retried wallet shares only the
       // wallet_id — not the recorded public key — so it cannot prove the
-      // identity the original attempt executed against.
+      // identity the original attempt executed against. Nothing was canceled
+      // on-chain yet, so recovery journals the attempt failed with its
+      // recorded work intact and releases the parent instead of deadlocking
+      // the payment in updating behind a conflict every retry repeats.
       plan: {
         id: "psp_stale_legacy_rekeyed_mismatch",
         ownerAddress: "addr_no_custody_wallet_owner",
         withSignature: true,
       },
       rekeyReplacementWalletId: "wal_recurring_legacy_rekeyed_mismatch",
+      signableSharedWallet: true,
     });
 
     const updateRes = await app.request(
@@ -2212,20 +2222,60 @@ describe("Payments routes — recurring", () => {
 
     const attempt = await getDb(env)
       .prepare(
-        `SELECT status, new_source_custody_wallet_id
+        `SELECT status, new_source_custody_wallet_id, plan_creation_signature
            FROM payment_recurring_payment_update_attempts
           WHERE id = 'prpu_stale_legacy_source_change'`
       )
-      .first<{ status: string; new_source_custody_wallet_id: string | null }>();
-    expect(attempt).toMatchObject({ status: "processing", new_source_custody_wallet_id: null });
+      .first<{
+        status: string;
+        new_source_custody_wallet_id: string | null;
+        plan_creation_signature: string | null;
+      }>();
+    expect(attempt?.status).toBe("failed");
+    expect(attempt?.plan_creation_signature).not.toBeNull();
+    expect(attempt?.new_source_custody_wallet_id).toBeNull();
     const parent = await getDb(env)
       .prepare(
         "SELECT status, source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?"
       )
       .bind(activated.id)
       .first<{ status: string; source_custody_wallet_id: string | null }>();
-    expect(parent?.status).toBe("updating");
+    expect(parent?.status).toBe("active");
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
+
+    // The released payment accepts a fresh update: the retry executes as a
+    // new, exactly pinned attempt instead of being rejected forever.
+    const repairRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: sharedCustodyWalletId }),
+      },
+      env
+    );
+    expect(repairRes.status).toBe(200);
+    const repairBody = await parseRecurringResponse(repairRes);
+    expect(repairBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      sourceCustodyWalletId: sharedCustodyWalletId,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(5);
+    const freshAttempt = await getDb(env)
+      .prepare(
+        `SELECT id, status, new_source_custody_wallet_id
+           FROM payment_recurring_payment_update_attempts
+          WHERE id <> 'prpu_stale_legacy_source_change'
+          ORDER BY created_at DESC`
+      )
+      .first<{ id: string; status: string; new_source_custody_wallet_id: string | null }>();
+    expect(freshAttempt?.status).toBe("confirmed");
+    expect(freshAttempt?.new_source_custody_wallet_id).toBe(sharedCustodyWalletId);
+    const repairedParent = await getDb(env)
+      .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ source_custody_wallet_id: string | null }>();
+    expect(repairedParent?.source_custody_wallet_id).toBe(sharedCustodyWalletId);
   });
 
   it("quarantines an unprovable side-effect-free legacy attempt and restarts recovery with an exact pin", async () => {
@@ -2291,12 +2341,14 @@ describe("Payments routes — recurring", () => {
     expect(parentPin?.source_custody_wallet_id).not.toBe(replacementCustodyWalletId);
   });
 
-  it("rejects recovery of a side-effected legacy attempt whose recorded plan cannot prove the custody identity", async () => {
+  it("journals a side-effected legacy attempt failed and releases the parent when no retry can prove the custody identity", async () => {
     const signAndSendMock = recurringExecution.signAndSendMock();
     const { activated, replacementCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
       attemptId: "prpu_stale_legacy_source_change",
       // The recorded plan owner does not match any custody wallet, so no
       // retry can prove which custody identity the original attempt selected.
+      // Nothing was canceled on-chain yet, so the recovery releases the
+      // payment instead of deadlocking it in updating forever.
       plan: {
         id: "psp_stale_legacy_unprovable",
         ownerAddress: "addr_no_custody_wallet_owner",
@@ -2327,7 +2379,60 @@ describe("Payments routes — recurring", () => {
           WHERE id = 'prpu_stale_legacy_source_change'`
       )
       .first<{ status: string; new_source_custody_wallet_id: string | null }>();
-    expect(attempt).toMatchObject({ status: "processing", new_source_custody_wallet_id: null });
+    expect(attempt?.status).toBe("failed");
+    expect(attempt?.new_source_custody_wallet_id).toBeNull();
+    const parent = await getDb(env)
+      .prepare(
+        "SELECT status, source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?"
+      )
+      .bind(activated.id)
+      .first<{ status: string; source_custody_wallet_id: string | null }>();
+    expect(parent?.status).toBe("active");
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a fully executed legacy replacement in flight for manual reconciliation when no retry can prove the custody identity", async () => {
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const { activated, replacementCustodyWalletId } = await seedStaleLegacyRecoveryScenario({
+      attemptId: "prpu_stale_legacy_source_change",
+      // The recorded replacement already canceled the old subscription
+      // on-chain. Repeating that cancellation from a fresh attempt could
+      // prevent the authorized replacement from being finalized, so the
+      // attempt stays in flight for manual reconciliation instead of being
+      // released to a fresh start.
+      plan: {
+        id: "psp_stale_legacy_canceled_old",
+        ownerAddress: "addr_no_custody_wallet_owner",
+        withSignature: true,
+      },
+      withOldCancelSignature: true,
+    });
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(409);
+    const updateBody = errorResponseSchema.parse(await updateRes.json());
+    expect(updateBody.error.message).toContain(
+      "cannot prove the recorded replacement custody wallet identity"
+    );
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, old_cancel_signature
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{ status: string; old_cancel_signature: string | null }>();
+    expect(attempt?.status).toBe("processing");
+    expect(attempt?.old_cancel_signature).not.toBeNull();
     const parent = await getDb(env)
       .prepare(
         "SELECT status, source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?"
