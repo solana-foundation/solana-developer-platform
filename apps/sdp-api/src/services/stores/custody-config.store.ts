@@ -80,6 +80,13 @@ export const DVP_SETTLEMENT_AUTHORITY_LOCKED_REASON =
   "It is part of each trade's on-chain address, so deactivating it would leave them permanently unsettleable — settle or cancel them first.";
 
 /**
+ * Trade statuses that keep a settlement authority load-bearing, as a SQL list.
+ * Migration 0119's partial index covers exactly this set; keep them in step.
+ */
+export const LOAD_BEARING_DVP_TRADE_STATUSES_SQL =
+  "('creating', 'created', 'partially_funded', 'funded', 'expired')";
+
+/**
  * Thrown when a deactivation path refuses to mark a settlement authority
  * inactive while open DvP trades still depend on it.
  */
@@ -755,7 +762,7 @@ export class CustodyConfigStore implements SigningConfigStore {
            SELECT COUNT(*)
              FROM dvp_trades t
             WHERE t.settlement_authority = custody_wallets.public_key
-              AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+              AND t.status IN ${LOAD_BEARING_DVP_TRADE_STATUSES_SQL}
          ) = 0`
       )
       .bind(configId, walletId)
@@ -818,7 +825,7 @@ export class CustodyConfigStore implements SigningConfigStore {
            SELECT COUNT(*)
              FROM dvp_trades t
             WHERE t.settlement_authority = custody_wallets.public_key
-              AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')
+              AND t.status IN ${LOAD_BEARING_DVP_TRADE_STATUSES_SQL}
          ) = 0`
       )
       .bind(configId, walletId, configId)
@@ -866,7 +873,7 @@ export class CustodyConfigStore implements SigningConfigStore {
           WHERE t.settlement_authority = (
                   SELECT public_key FROM custody_wallets WHERE id = ?
                 )
-            AND t.status IN ('creating', 'created', 'partially_funded', 'funded', 'expired')`
+            AND t.status IN ${LOAD_BEARING_DVP_TRADE_STATUSES_SQL}`
       )
       .bind(custodyWalletId)
       .first<{ open_trades: number | string }>();
