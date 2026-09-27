@@ -423,14 +423,22 @@ function endsTheWalk(reason: EntryStop, mayAdvance: boolean): boolean {
  * top ran past the scan cap: the signatures newer than the cursor, and the
  * region below it as well, because that is where the node's omission sits —
  * an omitted movement is served there once the node's index catches up, and a
- * walk bounded at the cursor alone would never list it. Null when even the
- * newer region exceeds the cap. The two regions are listings of their own:
- * `bounded` counts the entries the bounded read saw, so the sweep can tell
- * them apart, and the probe's depth proves nothing about the bounded read
- * above the cursor. `whole` says whether the probe reached its end; a probe
- * the cap cut off has not seen everything the node holds, so the sweep must
- * not settle on it — but what the probe saw is kept, because recording an
- * omission it reached is the very thing it is read for.
+ * walk bounded at the cursor alone would never list it. The two regions are
+ * listings of their own: `bounded` counts the entries the bounded read saw,
+ * so the sweep can tell them apart, and the probe's depth proves nothing
+ * about the bounded read above the cursor. `whole` says whether the probe
+ * reached its end; a probe the cap cut off has not seen everything the node
+ * holds, so the sweep must not settle on it — but what the probe saw is kept,
+ * because recording an omission it reached is the very thing it is read for.
+ *
+ * A newer region that exceeds the cap on its own — a leg that stopped being
+ * read while its escrow kept moving — cannot be read on from in one sweep,
+ * and giving up would stall the leg for good: an unproven cursor un-bounds
+ * every later sweep, so each would ask for the same region and drop it whole.
+ * The newest page of the region is read instead, and `chunked` says so: the
+ * advance it offers the walk jumped the region the read never listed, so the
+ * sweep must save the position unproven — the skipped region sits behind the
+ * new cursor, where only the next sweep's probe sees it.
  *
  * @param reader - The chain.
  * @param leg - The escrow to read.
@@ -444,11 +452,13 @@ async function readOnPastCap(
   read: { entries: DvpEscrowHistoryEntry[]; floorReached: boolean };
   bounded: number;
   whole: boolean;
+  chunked: boolean;
 } | null> {
   const newer = await readHistorySince(reader, leg, cursor.signature);
-  if (!newer.complete) {
-    return null;
-  }
+  // A read the cap cut off filled every page, so its newest page is a full
+  // one; a complete read is kept whole.
+  const chunked = !newer.complete;
+  const boundedNewestFirst = chunked ? newer.entries.slice(0, HISTORY_PAGE_LIMIT) : newer.entries;
   const older = await readHistorySince(reader, leg, null, cursor.signature);
   return {
     read: {
@@ -456,11 +466,12 @@ async function readOnPastCap(
       // it. The floor is the bounded read's own: the probe may have run past
       // the trade's creation, but that is depth below the cursor, not proof
       // of what the bounded read listed above it.
-      entries: [...newer.entries, ...older.entries],
+      entries: [...boundedNewestFirst, ...older.entries],
       floorReached: newer.floorReached,
     },
-    bounded: newer.entries.length,
+    bounded: boundedNewestFirst.length,
     whole: older.complete,
+    chunked,
   };
 }
 
@@ -717,6 +728,10 @@ export async function syncDvpLegTransfers(
   // How many of the read's entries the position may advance over; null unless
   // the fallback stitched two listings together.
   let bounded: number | null = null;
+  // Whether that fallback's bounded read was the newest page of a region that
+  // exceeds the cap on its own: the advance it offers the walk jumped the
+  // region the read never listed, so the position is saved unproven.
+  let chunked = false;
   // A walk that ran past the scan cap is dropped whole: resolving the oldest
   // of a truncated read would leave a gap behind it no later read fills.
   let read = listed(await readHistorySince(reader, leg, since));
@@ -741,6 +756,7 @@ export async function syncDvpLegTransfers(
       read = fallback.read;
       bounded = fallback.bounded;
       wholeHistory = fallback.whole;
+      chunked = fallback.chunked;
     }
   }
   if (read === null) {
@@ -825,8 +841,10 @@ export async function syncDvpLegTransfers(
     // A probe that did not run to its end leaves the next sweep asking for the
     // whole history: the position may stand, but the region behind it is not
     // yet accounted for, and the probe is the one read that reaches what a
-    // walk bounded at the position never lists again.
-    cursorSlotComplete: cursor === null ? false : cursorSlotComplete && probeEnded,
+    // walk bounded at the position never lists again. A chunked read never
+    // proves the position it jumped into either: the region it skipped sits
+    // behind the new cursor, where only the next sweep's probe sees it.
+    cursorSlotComplete: cursor === null ? false : cursorSlotComplete && probeEnded && !chunked,
     scannedAt: settled ? new Date(now).toISOString() : null,
   });
   return recorded;

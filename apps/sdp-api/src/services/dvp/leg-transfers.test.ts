@@ -593,6 +593,88 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
+  // A cursor the region above it outgrew — a leg that stopped being read
+  // while its escrow kept moving — cannot be read on from in one sweep, and
+  // giving up would stall the leg for good: an unproven cursor un-bounds
+  // every later sweep, so each would ask for the same region and drop it
+  // whole. The sweep reads the newest page of the region instead and advances
+  // onto it, unproven: the region it skipped sits behind the new cursor,
+  // where the next sweep's probe covers it.
+  it("advances through a newer region that alone exceeds the scan cap, unproven", async () => {
+    const fullPage = history(
+      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
+      { failed: true }
+    );
+    listSignatures
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce(fullPage)
+      .mockResolvedValueOnce([])
+      .mockImplementation(async (_escrow, page) => {
+        if (page.until === sig(3_000)) {
+          // The second sweep's bounded read: nothing newer than the position
+          // the first sweep advanced into.
+          return [];
+        }
+        if (page.before === sig(3_000)) {
+          // The second sweep's probe: the region the first sweep skipped,
+          // now listing the movement that sat in it.
+          return history([6]);
+        }
+        return fullPage;
+      });
+    served.set(sig(6), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    expect(listSignatures.mock.calls.map(([, page]) => page)).toEqual([
+      { before: null, until: null },
+      { before: sig(2_001), until: null },
+      { before: sig(2_001), until: null },
+      // The fallback: the newest page of the region above the cursor, then
+      // the probe of the region below it.
+      { before: null, until: sig(7) },
+      { before: sig(2_001), until: sig(7) },
+      { before: sig(2_001), until: sig(7) },
+      { before: sig(7), until: null },
+    ]);
+    // The position advanced onto the newest page of the region above the
+    // cursor — a jump across the region the read never listed — so the
+    // watermark does not travel with it, and the next sweep asks for the
+    // whole history.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(3_000), slot: "3000" },
+      cursorSlotComplete: false,
+      scannedAt: expect.any(String),
+    });
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+    // The second sweep's probe recorded the movement the first one skipped.
+    expect(rows.has(sig(6))).toBe(true);
+    expect(saved[1]).toEqual({
+      side: "a",
+      cursor: { signature: sig(3_000), slot: "3000" },
+      cursorSlotComplete: false,
+      scannedAt: expect.any(String),
+    });
+  });
+
   // The probe of the region below the cursor is a listing of its own. What
   // it saw says nothing about the bounded read above the cursor, so its
   // entries record their transfers but neither move the position nor prove
