@@ -48,8 +48,8 @@ async function fetchParsed<Output>(
  * Both reads go through their canonical dashboard proxies and are fanned out here on the client.
  *
  * @param tokenId - Issuance token id.
- * @param options.projectContextId - Rendered project context, bound into the
- * token authorities read so it cannot be retargeted by the shared cookie.
+ * @param options.projectContextId - Rendered project context, bound into both
+ * reads so authorities and signer wallets answer the same project.
  * @returns Live authorities plus the signer wallet inventory.
  */
 export async function fetchTokenAuthorityWallets(
@@ -62,7 +62,10 @@ export async function fetchTokenAuthorityWallets(
       tokenAuthoritiesResponseSchema,
       options.projectContextId
     ),
-    fetchParsed(AUTHORITY_WALLETS_PATH, paymentsWalletsResponseSchema),
+    // Same project context on both legs: the authorities and the signer wallet
+    // inventory must come from one project, or a sibling tab flipping the
+    // shared cookie makes valid signers look unavailable (SOLA9-564).
+    fetchParsed(AUTHORITY_WALLETS_PATH, paymentsWalletsResponseSchema, options.projectContextId),
   ]);
   return { ...authorities.data, authorityWallets: wallets.data.wallets };
 }
