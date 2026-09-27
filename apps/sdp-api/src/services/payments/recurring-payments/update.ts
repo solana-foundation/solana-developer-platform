@@ -260,7 +260,11 @@ function legacyUpdateAttemptMatchesRequest(
  * Attempts that already created their replacement plan resolve through the
  * plan owner instead — the wallet_id plus public key pair the original
  * attempt executed against — so recorded work stays recoverable even when the
- * wallet_id alone is ambiguous.
+ * wallet_id alone is ambiguous. When even that pair is duplicated across
+ * custody-wallet rows, the recorded plan owner still proves the on-chain
+ * identity: the retry resumes when the retried wallet carries the recorded
+ * public key instead of rejecting every retry of an already-authorized
+ * replacement forever.
  */
 type LegacyCustodyIdentityResolution = "matched" | "different" | "ambiguous" | "missing";
 
@@ -318,6 +322,37 @@ async function resolveLegacyAttemptCustodyIdentity(
     ]
   );
   if (wallets.length !== 1) {
+    if (wallets.length >= 2 && ownerPublicKey !== null) {
+      // Duplicate custody-wallet rows share the recorded wallet_id plus
+      // public-key pair, so no single row proves which row the original
+      // attempt selected. The recorded plan owner still proves the on-chain
+      // identity the recorded work executed against: resume when the retried
+      // wallet carries exactly that identity instead of rejecting every
+      // retry — an already-authorized replacement could otherwise never
+      // finalize.
+      const retriedWallet = await db.queryOne<{ public_key: string }>(
+        `SELECT wallet.public_key
+           FROM custody_wallets wallet
+           LEFT JOIN custody_configs config ON config.id = wallet.custody_config_id
+           LEFT JOIN custody_connections connection ON connection.id = wallet.custody_connection_id
+          WHERE wallet.id = ?
+            AND (
+                 (config.id IS NOT NULL AND config.organization_id = ?
+                  AND (config.project_id = ? OR config.project_id IS NULL))
+                 OR
+                 (connection.id IS NOT NULL AND connection.organization_id = ?
+                  AND connection.project_id = ?)
+            )`,
+        [
+          input.newSourceCustodyWalletId,
+          input.organizationId,
+          input.projectId,
+          input.organizationId,
+          input.projectId,
+        ]
+      );
+      return retriedWallet?.public_key === ownerPublicKey ? "matched" : "different";
+    }
     return wallets.length === 0 ? "missing" : "ambiguous";
   }
   return wallets[0].id === input.newSourceCustodyWalletId ? "matched" : "different";
