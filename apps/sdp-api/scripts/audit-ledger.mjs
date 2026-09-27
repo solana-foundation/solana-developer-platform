@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { pathToFileURL } from "node:url";
+import { realpathSync, statSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import Redis from "ioredis";
 import pg from "pg";
 import { databaseIdentitySessionConfigStatement } from "./lib/database-identity.mjs";
@@ -525,7 +526,33 @@ async function main() {
 
 // Run only when executed directly (`pnpm --filter @sdp/api audit:ledger ...`),
 // so tests can import the exported inspection functions without side effects.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// The comparison must survive an aliased entry path: when the CLI is invoked
+// through a symlink (or a hard link, or `--preserve-symlinks`), Node loads the
+// resolved module while `process.argv[1]` keeps the alias path, so a raw URL
+// compare would skip `main()` — a `verify` that runs nothing, prints nothing,
+// and still exits 0. Any invocation that actually executes this file must run
+// the CLI, so fall back to comparing the underlying directory entry.
+function isEntryInvocation() {
+  const entry = process.argv[1];
+  if (!entry) {
+    return false;
+  }
+  try {
+    if (import.meta.url === pathToFileURL(realpathSync(entry)).href) {
+      return true;
+    }
+    const invokedEntry = statSync(entry);
+    const moduleEntry = statSync(fileURLToPath(import.meta.url));
+    return invokedEntry.dev === moduleEntry.dev && invokedEntry.ino === moduleEntry.ino;
+  } catch {
+    // `process.argv[1]` does not name a readable file, so this module was
+    // imported (e.g. by tests), not executed.
+    return false;
+  }
+}
+
+if (isEntryInvocation()) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

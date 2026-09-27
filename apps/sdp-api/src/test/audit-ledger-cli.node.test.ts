@@ -13,6 +13,8 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Redis from "ioredis";
@@ -46,8 +48,8 @@ function requiredStoreUrl(value: string | undefined, label: string): string {
 const runtimeDatabaseUrl = requiredStoreUrl(env.DATABASE_URL, "DATABASE_URL");
 const runtimeRedisUrl = requiredStoreUrl(env.REDIS_URL, "REDIS_URL");
 
-function runAuditLedgerCli(args: string[]) {
-  return spawnSync(process.execPath, [cliEntry, ...args], {
+function runAuditLedgerCli(args: string[], entryPath: string = cliEntry) {
+  return spawnSync(process.execPath, [entryPath, ...args], {
     cwd: apiRoot,
     env: { ...process.env, DATABASE_URL: runtimeDatabaseUrl, REDIS_URL: runtimeRedisUrl },
     encoding: "utf8",
@@ -122,6 +124,31 @@ describe("audit:ledger CLI identity stamping", () => {
     expect(report.checkedEntries).toBe(0);
     expect(report.runtimeRoleProtected).toBe(true);
     expect(report.systemIdentity).toBe("script:audit-ledger");
+  });
+
+  it("runs the real CLI when invoked through a symlinked entry path", async () => {
+    await seedTestDatabase(env);
+    await withRawRedis((redis) => redis.del(RAW_CHECKPOINT_KEY));
+
+    // An aliased entry path must never silently skip the CLI: a symlink
+    // invocation loads the resolved module while process.argv[1] keeps the
+    // alias path, and a skipped main() would "verify" nothing and exit 0.
+    const linkDir = mkdtempSync(path.join(tmpdir(), "audit-ledger-entry-"));
+    try {
+      const linkedEntry = path.join(linkDir, "audit-ledger");
+      symlinkSync(cliEntry, linkedEntry);
+      const result = runAuditLedgerCli(["verify"], linkedEntry);
+      const report = JSON.parse(result.stdout || "{}") as AuditLedgerInspection;
+
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      // Evidence that the CLI actually ran and stamped its session.
+      expect(report.systemIdentity).toBe("script:audit-ledger");
+      expect(report.valid).toBe(true);
+      expect(report.checkedEntries).toBe(0);
+    } finally {
+      rmSync(linkDir, { recursive: true, force: true });
+    }
   });
 
   it("appends a checkpoint through the stamped session and verifies it", async () => {
