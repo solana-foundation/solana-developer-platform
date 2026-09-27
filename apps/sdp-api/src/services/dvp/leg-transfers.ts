@@ -76,13 +76,18 @@ export const HISTORY_AUDIT_MS = 60 * 60_000;
 const SIGNATURE_STATUS_LIMIT = 256;
 /**
  * Signatures whose read outcome the process remembers. An escrow anyone may
- * send transactions to can collect thousands that moved none of its tokens or
- * cannot be read with confidence, and a region of the history full of them is
- * re-listed by every probe until it is walked through. Reading each one again
- * every sweep would spend the budget shared by every leg on answers already
- * known, and stop the walk at the same page each time; remembering the answer
- * lets the walk pass a page it has already read for the cost of the listing.
- * The cap keeps a spammy escrow's whole history from being held in memory; an
+ * send transactions to can collect thousands that moved none of its tokens,
+ * and a region of the history full of them is re-listed by every probe until
+ * it is walked through. Reading each one again every sweep would spend the
+ * budget shared by every leg on answers already known, and stop the walk at
+ * the same page each time; remembering the answer lets the walk pass a page
+ * it has already read for the cost of the listing. Only the "moved nothing"
+ * answer is remembered: it is read off the transaction the cluster served,
+ * which never changes. A transaction whose balances could not be read with
+ * confidence is forgotten on purpose — a caught-up node may serve it in a
+ * shape the ledger can read, and a transfer sitting in it must stay
+ * reachable, so it is read again and costs the budget once more. The cap
+ * keeps a spammy escrow's whole history from being held in memory; an
  * evicted signature is read again, which costs a read and nothing else.
  */
 const READ_MEMO_CAP = 20_000;
@@ -357,41 +362,58 @@ export interface DvpLegTransferBudget {
 
 /**
  * What reading a transaction came to, for the signatures whose answer never
- * changes: it moved none of the escrow's tokens, or its balances cannot be
- * read with confidence. A transaction's own data is fixed once the cluster
- * serves it, so the outcome is the same every time it is listed, and a
- * re-listed page is resolved from the memo without spending the sweep's
- * budget on the read again.
+ * changes: it moved none of the escrow's tokens. The answer is read off the
+ * transaction the cluster served, which is fixed once served, so it is the
+ * same every time the signature is listed, and a re-listed page is resolved
+ * from the memo without spending the sweep's budget on the read again. An
+ * unreadable read is deliberately not one of these: it says the balances
+ * could not be read with confidence, not what the transaction did, and stays
+ * retryable.
  */
-export type DvpLegTransferReadOutcome = { kind: "none" } | { kind: "unreadable" };
+export type DvpLegTransferReadOutcome = { kind: "none" };
 
-/** Signatures whose read outcome this process already knows. */
+/** The leg a read outcome belongs to: the balances that were evaluated. */
+export type DvpLegTransferReadScope = Pick<DvpLegEscrow, "escrow" | "mint">;
+
+/** Signatures whose read outcome this process already knows, per leg. */
 export interface DvpLegTransferReadMemo {
-  /** The outcome the signature was read to, or null for one never read. */
-  recall(signature: Signature): DvpLegTransferReadOutcome | null;
-  remember(signature: Signature, outcome: DvpLegTransferReadOutcome): void;
+  /** The outcome the signature was read to for this leg, or null for one never read. */
+  recall(leg: DvpLegTransferReadScope, signature: Signature): DvpLegTransferReadOutcome | null;
+  remember(
+    leg: DvpLegTransferReadScope,
+    signature: Signature,
+    outcome: DvpLegTransferReadOutcome
+  ): void;
 }
 
 /**
- * A bounded memo of read outcomes, shared by every leg in the process. The
- * oldest entry falls out of the memo past the cap, and a recalled one is
- * moved to the newest end so a region the sweep walks repeatedly stays in it.
+ * A bounded memo of read outcomes, shared by every leg in the process and
+ * scoped to the leg whose balances each outcome was read from: one
+ * transaction can sit in two escrows' histories and move one while moving
+ * none of the other, so an answer recorded for one leg must never be served
+ * to another. The oldest entry falls out of the memo past the cap, and a
+ * recalled one is moved to the newest end so a region the sweep walks
+ * repeatedly stays in it.
  */
 export function createDvpLegTransferReadMemo(cap: number = READ_MEMO_CAP): DvpLegTransferReadMemo {
-  const outcomes = new Map<Signature, DvpLegTransferReadOutcome>();
+  const outcomes = new Map<string, DvpLegTransferReadOutcome>();
+  const key = (leg: DvpLegTransferReadScope, signature: Signature) =>
+    `${leg.escrow}:${leg.mint}:${signature}`;
   return {
-    recall(signature) {
-      const outcome = outcomes.get(signature);
+    recall(leg, signature) {
+      const memoKey = key(leg, signature);
+      const outcome = outcomes.get(memoKey);
       if (outcome === undefined) {
         return null;
       }
-      outcomes.delete(signature);
-      outcomes.set(signature, outcome);
+      outcomes.delete(memoKey);
+      outcomes.set(memoKey, outcome);
       return outcome;
     },
-    remember(signature, outcome) {
-      outcomes.delete(signature);
-      outcomes.set(signature, outcome);
+    remember(leg, signature, outcome) {
+      const memoKey = key(leg, signature);
+      outcomes.delete(memoKey);
+      outcomes.set(memoKey, outcome);
       const oldest = outcomes.keys().next().value;
       if (outcomes.size > cap && oldest !== undefined) {
         outcomes.delete(oldest);
@@ -507,6 +529,15 @@ function endsTheWalk(reason: EntryStop, mayAdvance: boolean): boolean {
  * again. `probeComplete` says whether this probe ran to its end, and
  * `probeDeepest` is the signature below which it stopped.
  *
+ * When the bounded read was itself cut off by the cap, it listed only the
+ * newest of the region above the cursor, and the part it never listed sits
+ * between the cursor and the deepest signature it listed. That region is read
+ * here as well, its own listing bounded by the same cap: a resume point saved
+ * below the cursor would start the next probe past it, so the point may only
+ * travel below the cursor once this read has listed the region through.
+ * `gapComplete` says whether it did, and `gapDeepest` is the signature below
+ * which it stopped otherwise.
+ *
  * @param reader - The chain.
  * @param leg - The escrow to read.
  * @param cursor - The saved read position to read on from.
@@ -523,6 +554,8 @@ async function readOnPastCap(
   chunked: boolean;
   probeComplete: boolean;
   probeDeepest: { signature: Signature; slot: string } | null;
+  gapComplete: boolean;
+  gapDeepest: { signature: Signature; slot: string } | null;
 }> {
   const newer = await readHistorySince(reader, leg, cursor.signature);
   // A read the cap cut off is kept whole: every signature it listed is
@@ -531,6 +564,23 @@ async function readOnPastCap(
   // further behind the position than the next sweep's probe reaches.
   const chunked = !newer.complete;
   const boundedNewestFirst = newer.entries;
+  // The part of the region above the cursor the bounded read never listed:
+  // empty and complete when the read was not cut off, since a read that ran
+  // to its end listed everything above the cursor there is.
+  let gapNewestFirst: DvpEscrowHistoryEntry[] = [];
+  let gapComplete = true;
+  const boundedOldest = boundedNewestFirst.at(-1);
+  if (chunked && boundedOldest !== undefined) {
+    const gap = await readHistorySince(
+      reader,
+      leg,
+      cursor.signature,
+      boundedOldest.signature,
+      HISTORY_PAGE_CAP
+    );
+    gapNewestFirst = gap.entries;
+    gapComplete = gap.complete;
+  }
   // The probe starts below where the last one stopped, or immediately behind
   // the cursor, and reads at most the scan cap's pages: the region behind the
   // position the sweep is about to save is the one read only the probe
@@ -543,13 +593,14 @@ async function readOnPastCap(
     HISTORY_PAGE_CAP
   );
   const deepest = older.entries.at(-1);
+  const gapOldest = gapNewestFirst.at(-1);
   return {
     read: {
       // Newest first, so the region below the cursor follows the region above
       // it. The floor is the bounded read's own: the probe may have run past
       // the trade's creation, but that is depth below the cursor, not proof
       // of what the bounded read listed above it.
-      entries: [...boundedNewestFirst, ...older.entries],
+      entries: [...boundedNewestFirst, ...gapNewestFirst, ...older.entries],
       floorReached: newer.floorReached,
     },
     bounded: boundedNewestFirst.length,
@@ -562,6 +613,11 @@ async function readOnPastCap(
       deepest === undefined
         ? null
         : { signature: deepest.signature, slot: deepest.slot.toString() },
+    gapComplete,
+    gapDeepest:
+      gapOldest === undefined
+        ? null
+        : { signature: gapOldest.signature, slot: gapOldest.slot.toString() },
   };
 }
 
@@ -639,11 +695,11 @@ async function resolveEntry(
     }
     return { step: "resolved", recorded: false };
   }
-  // A transaction read before this process was asked about it again: its
-  // outcome never changes, so it is resolved for the cost of the listing and
-  // the sweep's budget is spent only on reads that could still record
-  // something.
-  const remembered = memo.recall(entry.signature);
+  // A transaction read before this process was asked about it again, for
+  // this leg: it moved none of this escrow's tokens, and that answer never
+  // changes, so it is resolved for the cost of the listing and the sweep's
+  // budget is spent only on reads that could still record something.
+  const remembered = memo.recall(leg, entry.signature);
   if (remembered !== null) {
     return { step: "resolved", recorded: false };
   }
@@ -679,11 +735,15 @@ async function resolveEntry(
       },
       "dvp transfers: skipped a transaction whose escrow balances could not be read"
     );
-    memo.remember(entry.signature, { kind: "unreadable" });
+    // Deliberately not remembered: an unreadable answer says the balances
+    // could not be read with confidence, not what the transaction did, and a
+    // caught-up node may yet serve it in a shape the ledger can read. It
+    // costs the budget again next sweep, and a transfer sitting in it stays
+    // reachable.
     return { step: "resolved", recorded: false };
   }
   if (reading.kind === "none") {
-    memo.remember(entry.signature, { kind: "none" });
+    memo.remember(leg, entry.signature, { kind: "none" });
     return { step: "resolved", recorded: false };
   }
   await transfers.record(reading.transfer);
@@ -807,8 +867,9 @@ function historyBound(scan: DvpLegTransferScan | null, now: number): Signature |
 /**
  * What the sweep reads: the walk from the top when it fits under the scan
  * cap, or — when the walk ran past the cap and the leg has a saved cursor to
- * read on from — the fallback's stitch of the region above the cursor and the
- * probe of the region below it, resuming behind where the last probe stopped.
+ * read on from — the fallback's stitch of the region above the cursor, the
+ * part of that region the bounded read never listed, and the probe of the
+ * region below it, resuming behind where the last probe stopped.
  *
  * A walk that ran past the scan cap is dropped whole on its own: resolving
  * the oldest of a truncated read would leave a gap behind it no later read
@@ -832,10 +893,20 @@ async function readTheSweep(
   chunked: boolean;
   probeComplete: boolean;
   probeDeepest: { signature: Signature; slot: string } | null;
+  gapComplete: boolean;
+  gapDeepest: { signature: Signature; slot: string } | null;
 }> {
   const read = listed(await readHistorySince(reader, leg, since));
   if (read !== null || stored === null || since !== null) {
-    return { read, bounded: null, chunked: false, probeComplete: true, probeDeepest: null };
+    return {
+      read,
+      bounded: null,
+      chunked: false,
+      probeComplete: true,
+      probeDeepest: null,
+      gapComplete: true,
+      gapDeepest: null,
+    };
   }
   getLogger().warn(
     { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
@@ -848,6 +919,8 @@ async function readTheSweep(
     chunked: fallback.chunked,
     probeComplete: fallback.probeComplete,
     probeDeepest: fallback.probeDeepest,
+    gapComplete: fallback.gapComplete,
+    gapDeepest: fallback.gapDeepest,
   };
 }
 
@@ -885,9 +958,10 @@ function settledRead(
 
 /**
  * Whether the position was stood at the deepest signature a chunked read
- * listed: the region immediately behind it was never listed by anything, and
- * the next probe must start there rather than below a point an earlier probe
- * saved further down.
+ * listed: the region immediately behind it — the part of the region above the
+ * cursor that read never listed — is only accounted for once the sweep's own
+ * read of it ran through, and until then no point below the cursor may
+ * travel with the position.
  */
 function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean): boolean {
   return chunked && deepestReached;
@@ -900,23 +974,36 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
  * a probe that ran to its end covered the whole region, so the next one
  * starts over from the position. An interrupted walk through the probe's
  * finds saves nothing: the finds above the deepest page were never resolved,
- * and a resume point below them would leave them skipped. Nor does a sweep
- * whose read the cap cut off save one when it stood the position at the
- * deepest signature the read listed: the region behind that position — down
- * to the cursor the probe probed below — was never listed, and a point below
- * the cursor would have the next probe start past it, so the next probe
- * starts behind the position instead, where the region is.
+ * and a resume point below them would leave them skipped.
+ *
+ * When the sweep stood the position at the deepest signature a chunked read
+ * listed, the region behind that position — down to the cursor the probe
+ * probed below — is the part of the region above the cursor the bounded read
+ * never listed. A point below the cursor would start the next probe past it,
+ * so the point may only travel below the cursor once this sweep's read of
+ * that region ran through: the probe's own point then stands, and the next
+ * probe resumes below it rather than behind the position, keeping the depth
+ * past sweeps reached however much newer history the escrow keeps
+ * accumulating. A gap read the cap stopped saves where it stopped instead —
+ * everything between there and the position is listed, and the next probe
+ * continues below it toward the older end.
  */
 function resumePoint(
   fallbackRan: boolean,
   probeComplete: boolean,
   probeEnded: boolean,
   probeDeepest: { signature: Signature; slot: string } | null,
+  gapComplete: boolean,
+  gapDeepest: { signature: Signature; slot: string } | null,
   unlistedBehindPosition: boolean
 ): { signature: Signature; slot: string } | null {
-  return fallbackRan && !probeComplete && probeEnded && !unlistedBehindPosition
-    ? probeDeepest
-    : null;
+  if (!fallbackRan || !probeEnded) {
+    return null;
+  }
+  if (unlistedBehindPosition && !gapComplete) {
+    return gapDeepest;
+  }
+  return probeComplete ? null : probeDeepest;
 }
 
 /**
@@ -958,13 +1045,8 @@ export async function syncDvpLegTransfers(
   const since = historyBound(scan, now);
   // Whether the sweep saw the leg's whole history. A read the cap cut off in
   // the middle leaves this false, so the leg stays due and asks again.
-  const { read, bounded, chunked, probeComplete, probeDeepest } = await readTheSweep(
-    reader,
-    leg,
-    since,
-    stored,
-    probe
-  );
+  const { read, bounded, chunked, probeComplete, probeDeepest, gapComplete, gapDeepest } =
+    await readTheSweep(reader, leg, since, stored, probe);
   if (read === null) {
     getLogger().warn(
       { tradeId: leg.tradeId, side: leg.side, escrow: leg.escrow },
@@ -1090,6 +1172,8 @@ export async function syncDvpLegTransfers(
       probeComplete,
       probeEnded,
       probeDeepest,
+      gapComplete,
+      gapDeepest,
       standsBeforeAnUnlistedRegion(chunked, deepestReached)
     ),
     scannedAt: settled ? new Date(now).toISOString() : null,

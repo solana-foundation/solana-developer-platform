@@ -42,6 +42,9 @@ import {
 
 const ESCROW = address("FwQyjVB3o9UkWEEWZVLbvc3EizH3jhHp4g9HmpmuzGWU");
 const MINT = address("ns7Y4h26io6zGKiuvSx1jRBWANjDytnYyxEmVPfPAk1");
+const ESCROW_B = address("ViYEm8RXTAbiYvhpdBvAQPnXGYkVEU6RzUpeUCoToVi");
+const MINT_B = address("ViYSPBc3a6QYBQS1opzG34CfdUsawgv4bePEmEmgwE8");
+const OTHER_MINT = address("ViYe1EnZh2DMotACzU4MficozQzgeujhCowq4Gjv4xY");
 const FEE_PAYER = address("9BvXsTHgFvS31NLpVN4hpAoHCTfwvVX1XkgFq7fJEZxY");
 const DEPOSITOR = address("AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC");
 const TOKEN_2022 = address("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
@@ -60,6 +63,14 @@ const LEG: DvpLegEscrow = {
   escrow: ESCROW,
   mint: MINT,
   createdAt: new Date(CREATED_AT_SECONDS * 1000).toISOString(),
+};
+/** The trade's other leg: a different escrow and mint, the same trade row. */
+const LEG_B: DvpLegEscrow = {
+  tradeId: "dvp_ledger",
+  side: "b",
+  escrow: ESCROW_B,
+  mint: MINT_B,
+  createdAt: LEG.createdAt,
 };
 
 /** A distinct, structurally valid signature per number. */
@@ -666,6 +677,12 @@ describe("syncDvpLegTransfers", () => {
       if (before === sig(7)) {
         return [];
       }
+      // The read of the region the bounded read never listed, between the
+      // cursor and the deepest signature it listed: a short page, so it ran
+      // through and the probe's resume point may travel with the position.
+      if (before === sig(2_001) && until === sig(7)) {
+        return page(2_000, 1_002);
+      }
       if (before === sig(2_001)) {
         return page(2_000, 1_001);
       }
@@ -704,11 +721,13 @@ describe("syncDvpLegTransfers", () => {
       { before: null, until: null },
       { before: sig(4_001), until: null },
       { before: sig(3_001), until: null },
-      // The fallback: the region above the cursor, then the probe of the
-      // region below it.
+      // The fallback: the region above the cursor, then the read of the part
+      // of it the bounded read never listed, then the probe of the region
+      // below the cursor.
       { before: null, until: sig(7) },
       { before: sig(4_001), until: sig(7) },
       { before: sig(3_001), until: sig(7) },
+      { before: sig(2_001), until: sig(7) },
       { before: sig(7), until: null },
     ]);
     // The position stands at the deepest signature the region's own listing
@@ -924,10 +943,11 @@ describe("syncDvpLegTransfers", () => {
   // When the region above the cursor outgrows the scan cap, the position is
   // stood at the deepest signature its own listing reached — and the region
   // behind that position, down to the cursor the probe probed below, was
-  // never listed by anything. A resume point from below the old cursor would
-  // start the next probe past that region, so it is dropped and the next
-  // probe starts behind the position, where the unlisted region is.
-  it("drops the resume point when the position stands before an unlisted region", async () => {
+  // never listed by the bounded read. The sweep lists that region too, and
+  // once its listing runs through, the probe's own resume point travels with
+  // the position: the next probe resumes below it, continuing toward older
+  // history however much newer history the escrow keeps accumulating.
+  it("keeps the probe's resume point once the sweep has listed the region behind the position", async () => {
     const page = (high: number, low: number) =>
       history(
         Array.from({ length: high - low + 1 }, (_, index) => high - index),
@@ -949,17 +969,136 @@ describe("syncDvpLegTransfers", () => {
       // The region above the cursor alone exceeds the scan cap: the read is
       // cut off three pages down, and the position is stood at the deepest
       // signature it listed.
-      if (until === sig(4_000)) {
-        if (before === null) {
-          return page(10_000, 9_001);
-        }
-        if (before === sig(9_001)) {
-          return page(9_000, 8_001);
-        }
+      if (until === sig(4_000) && before === null) {
+        return page(10_000, 9_001);
+      }
+      if (until === sig(4_000) && before === sig(9_001)) {
+        return page(9_000, 8_001);
+      }
+      if (until === sig(4_000) && before === sig(8_001)) {
         return page(8_000, 7_001);
+      }
+      // The read of the region the bounded read never listed, between the
+      // cursor and the deepest signature it listed: two full pages and a
+      // short one, so it ran through.
+      if (until === sig(4_000) && before === sig(7_001)) {
+        return page(7_000, 6_001);
+      }
+      if (until === sig(4_000) && before === sig(6_001)) {
+        return page(6_000, 5_001);
+      }
+      if (until === sig(4_000) && before === sig(5_001)) {
+        return page(5_000, 4_501);
       }
       // The probe of the region behind the position: three full pages, so it
       // stops at the cap with the region's oldest end unlisted.
+      if (before === sig(4_000)) {
+        return page(3_999, 3_000);
+      }
+      if (before === sig(3_000)) {
+        return page(2_999, 2_000);
+      }
+      // The second sweep lists nothing new above the position, and its probe
+      // resumes below where the first one stopped, reaching the region's
+      // oldest end.
+      if (until === sig(7_001)) {
+        return [];
+      }
+      if (before === sig(1_000)) {
+        return [...page(999, 2), ...history([1])];
+      }
+      return page(1_999, 1_000);
+    });
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(4_000), slot: "4000" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The position stands at the deepest signature the region's own listing
+    // reached, and the probe's resume point travels with it: the region
+    // behind the position was listed through, so the next probe continues
+    // below where this one stopped instead of starting over behind the
+    // position.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_001), slot: "7001" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(1_000), slot: "1000" },
+      scannedAt: null,
+    });
+    // The probe read its three pages below the old cursor and no deeper.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(2_000), until: null });
+    expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, { before: sig(1_000), until: null });
+
+    served.set(sig(1), transaction({ post: "100" }));
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+    // The next sweep's probe resumed below the saved point, never behind the
+    // position, and reached the movement at the region's oldest end that no
+    // sweep's probe had ever listed.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(1_000), until: null });
+    expect(rows.has(sig(1))).toBe(true);
+  });
+
+  // When the region behind the position runs deeper than the scan cap itself,
+  // the sweep's read of it stops at the cap with its oldest end unlisted. The
+  // point saved is then where that read stopped, not where the probe below
+  // the cursor did: everything between the two is listed, and the next probe
+  // continues below the gap read's point toward the older end.
+  it("saves where the read of the region behind the position stopped when it exceeds the scan cap", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(13_000, 12_001);
+      }
+      if (before === sig(12_001)) {
+        return page(12_000, 11_001);
+      }
+      if (before === sig(11_001)) {
+        return page(11_000, 10_001);
+      }
+      // The region above the cursor alone exceeds the scan cap: the read is
+      // cut off three pages down, and the position is stood at the deepest
+      // signature it listed.
+      if (until === sig(4_000) && before === null) {
+        return page(10_000, 9_001);
+      }
+      if (until === sig(4_000) && before === sig(9_001)) {
+        return page(9_000, 8_001);
+      }
+      if (until === sig(4_000) && before === sig(8_001)) {
+        return page(8_000, 7_001);
+      }
+      // The read of the region the bounded read never listed: three full
+      // pages, so it stops at the cap with the region's oldest end unlisted.
+      if (before === sig(7_001) && until === sig(4_000)) {
+        return page(7_000, 6_001);
+      }
+      if (before === sig(6_001) && until === sig(4_000)) {
+        return page(6_000, 5_001);
+      }
+      if (before === sig(5_001) && until === sig(4_000)) {
+        return page(5_000, 4_001);
+      }
+      // The probe of the region behind the position: three full pages, so it
+      // stops at the cap as well.
       if (before === sig(4_000)) {
         return page(3_999, 3_000);
       }
@@ -984,18 +1123,23 @@ describe("syncDvpLegTransfers", () => {
     );
 
     // The position stands at the deepest signature the region's own listing
-    // reached, and no resume point travels with it: the next probe must start
-    // behind the position, where the region nothing listed sits.
-    expect(saved).toEqual([
-      {
-        side: "a",
-        cursor: { signature: sig(7_001), slot: "7001" },
-        cursorSlotComplete: false,
-        probe: null,
-        scannedAt: null,
-      },
-    ]);
-    // The probe read its three pages below the old cursor and no deeper.
+    // reached, and the point that travels with it is where the read of the
+    // region behind it stopped: the next probe starts below that, listing the
+    // region's oldest end rather than skipping past it.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_001), slot: "7001" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(4_001), slot: "4001" },
+      scannedAt: null,
+    });
+    // The read of the region behind the position stopped at the cap, and the
+    // probe of the region below the cursor read its three pages and no more.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(5_001), until: sig(4_000) });
+    expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, {
+      before: sig(4_001),
+      until: sig(4_000),
+    });
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(2_000), until: null });
     expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, { before: sig(1_000), until: null });
   });
@@ -1121,6 +1265,85 @@ describe("syncDvpLegTransfers", () => {
       probe: null,
       scannedAt: expect.any(String),
     });
+  });
+
+  // One transaction can sit in two legs' escrow histories and move one while
+  // moving none of the other. The memo is what lets a probe walk the same
+  // pages again without paying for the reads, but an answer read for one
+  // leg's balances is not an answer for another's: keyed by the signature
+  // alone it would serve the first leg's "moved nothing" to the second and
+  // skip the read that would have recorded its transfer.
+  it("reads a shared transaction for each leg instead of serving one leg's answer to the other", async () => {
+    const memo = createDvpLegTransferReadMemo();
+    // The shared transaction loads both escrows, moves none of leg A's
+    // tokens, and funds leg B's.
+    served.set(sig(50), {
+      slot: 420n,
+      blockTime: unixTimestamp(BigInt(CREATED_AT_SECONDS)),
+      meta: {
+        err: null,
+        preTokenBalances: [balance(2, "400")],
+        postTokenBalances: [balance(2, "400"), balance(3, "100", MINT_B)],
+      },
+      transaction: {
+        message: {
+          accountKeys: [
+            { pubkey: FEE_PAYER },
+            { pubkey: DEPOSITOR },
+            { pubkey: ESCROW },
+            { pubkey: ESCROW_B },
+          ],
+        },
+      },
+    });
+    listSignatures.mockImplementation(async (escrow) =>
+      escrow === ESCROW ? history([50]) : history([50])
+    );
+
+    await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW, memo);
+    await syncDvpLegTransfers(reader, transfers, LEG_B, null, { remaining: 10 }, NOW, memo);
+
+    // Each leg read the transaction for itself: leg A's "moved nothing" was
+    // never served to leg B, whose transfer the second read recorded.
+    expect(readTransaction.mock.calls.filter(([requested]) => requested === sig(50))).toHaveLength(
+      2
+    );
+    expect(rows.get(sig(50))?.side).toBe("b");
+
+    // Within a leg the answer is still remembered: leg A's next sweep walks
+    // the same page without paying for the read again.
+    await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW, memo);
+    expect(readTransaction.mock.calls.filter(([requested]) => requested === sig(50))).toHaveLength(
+      2
+    );
+  });
+
+  // A transaction whose balances cannot be read with confidence is skipped,
+  // never recorded as zero — and deliberately not remembered either: the
+  // answer says the read failed, not what the transaction did, and a
+  // caught-up node may yet serve it in a shape the ledger can read. Unlike a
+  // transaction that moved nothing, it stays retryable, so a transfer sitting
+  // in it is never out of reach for good.
+  it("reads an unreadable transaction again on a later sweep instead of remembering it", async () => {
+    const memo = createDvpLegTransferReadMemo();
+    served.set(sig(30), {
+      ...transaction({ pre: "400", post: "400" }),
+      meta: {
+        err: null,
+        preTokenBalances: [balance(2, "400", OTHER_MINT)],
+        postTokenBalances: [balance(2, "400", OTHER_MINT)],
+      },
+    });
+    listSignatures.mockResolvedValue(history([30]));
+
+    await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW, memo);
+    expect(rows.has(sig(30))).toBe(false);
+
+    await syncDvpLegTransfers(reader, transfers, LEG, null, { remaining: 10 }, NOW, memo);
+
+    // The second sweep asked again: the unreadable answer was not remembered.
+    expect(readTransaction.mock.calls).toHaveLength(2);
+    expect(rows.has(sig(30))).toBe(false);
   });
 
   // The probe of the region below the cursor is a listing of its own. What
