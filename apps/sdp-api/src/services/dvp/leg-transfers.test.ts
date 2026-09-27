@@ -552,21 +552,50 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
-  // A probe that cannot reach the floor has not seen the whole of what the
-  // node holds, so the scan does not settle: the leg stays due and the next
-  // sweep asks again.
-  it("leaves the leg due when the region below the cursor also exceeds the scan cap", async () => {
-    const fullPage = history(
-      Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
-      { failed: true }
-    );
+  // The probe of the region behind the cursor reads until the trade's
+  // creation rather than the scan cap — that region is the one read only it
+  // reaches — and the sweep's budget, not the cap, is what ends the walk
+  // through it: the leg stays due, and the next sweep asks again.
+  it("reads the region below the cursor past the scan cap and stays due on the budget", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    const fullPage = page(3_000, 2_001);
     listSignatures
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
-      .mockResolvedValueOnce(history([8]))
-      .mockResolvedValue(fullPage);
-    served.set(sig(8), transaction({ post: "100" }));
+      .mockImplementation(async (_escrow, { before, until }) => {
+        // The region above the cursor lists nothing new.
+        if (until === sig(7)) {
+          return [];
+        }
+        // The probe of the region below the cursor: paged past the scan
+        // cap, down to the short page at its end.
+        if (before === sig(7)) {
+          return page(3_000, 2_001);
+        }
+        if (before === sig(2_001)) {
+          return page(2_000, 1_001);
+        }
+        if (before === sig(1_001)) {
+          return page(1_000, 1);
+        }
+        if (before === sig(1)) {
+          return [
+            ...history([500, 499, 498, 497, 496, 495, 494, 493, 492, 491, 490]),
+            ...page(489, 8),
+          ];
+        }
+        return [];
+      });
+    for (const n of [500, 499, 498, 497, 496, 495, 494, 493, 492, 491, 490]) {
+      served.set(sig(n), transaction({ post: "100" }));
+    }
 
     await syncDvpLegTransfers(
       reader,
@@ -581,12 +610,15 @@ describe("syncDvpLegTransfers", () => {
       { remaining: 10 }
     );
 
-    // The newer region is still recorded, but the read was not complete.
-    expect(rows.has(sig(8))).toBe(true);
+    // The probe read four pages for a cap of three, and the budget ran out
+    // part way through its finds: the walk stopped there and the leg stays
+    // due, with the position where it was.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(1), until: null });
+    expect(rows.size).toBe(10);
     expect(saved).toEqual([
       {
         side: "a",
-        cursor: { signature: sig(8), slot: "8" },
+        cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         scannedAt: null,
       },
@@ -757,6 +789,91 @@ describe("syncDvpLegTransfers", () => {
     });
   });
 
+  // The region a chunked read skipped can run deeper than the scan cap the
+  // probe used to stop at: the position the sweep saves stands at the deepest
+  // listed signature, and the probe of the region behind it reads until the
+  // trade's creation, so the skipped region's oldest end — however deep —
+  // stays reachable on the next sweep.
+  it("reads a skipped region deeper than the scan cap on the next sweep's probe", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The probe of the region behind the position: empty below the saved
+      // cursor of the first sweep, and the whole history below the position
+      // it stood at afterwards — paged past the scan cap, down to the short
+      // page at its end.
+      if (before === sig(7)) {
+        return [];
+      }
+      if (before === sig(4_001)) {
+        return page(4_000, 3_001);
+      }
+      if (before === sig(3_001)) {
+        return page(3_000, 2_001);
+      }
+      if (before === sig(2_001)) {
+        return page(2_000, 1_001);
+      }
+      if (before === sig(1_001)) {
+        return [...page(1_000, 10), ...history([9]), ...history([8], { failed: true })];
+      }
+      // The region above the cursor, newest first, paged.
+      if (before === null) {
+        return page(7_000, 6_001);
+      }
+      if (before === sig(6_001)) {
+        return page(6_000, 5_001);
+      }
+      if (until === sig(4_001)) {
+        return page(5_000, 4_002);
+      }
+      return page(5_000, 4_001);
+    });
+    served.set(sig(9), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The region above the cursor outgrew the cap; the position stands at the
+    // deepest signature its listing reached, unproven, and the scan does not
+    // settle on a read that skipped the middle of the region.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(4_001), slot: "4001" },
+      cursorSlotComplete: false,
+      scannedAt: null,
+    });
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+    // The next sweep's probe read the whole region behind the position —
+    // four pages for a cap of three — and recorded the movement at its
+    // oldest end, which no three-page probe had ever reached.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(1_001), until: null });
+    expect(rows.has(sig(9))).toBe(true);
+    expect(saved[1]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_000), slot: "7000" },
+      cursorSlotComplete: true,
+      scannedAt: expect.any(String),
+    });
+  });
+
   // The probe of the region below the cursor is a listing of its own. What
   // it saw says nothing about the bounded read above the cursor, so its
   // entries record their transfers but neither move the position nor prove
@@ -818,19 +935,22 @@ describe("syncDvpLegTransfers", () => {
     ]);
   });
 
-  // A probe the cap cut off has still seen the newest of what lies below the
-  // cursor, and what it saw is recorded: discarding its entries would leave
-  // a movement the node omitted — the one thing the probe is read for —
-  // unrecorded for as long as the history stays over the cap.
-  it("records what the probe saw when the cap cut it off", async () => {
+  // A probe the walk through which was interrupted has still seen the newest
+  // of what lies below the cursor, and what it saw is recorded: discarding
+  // its entries would leave a movement the node omitted — the one thing the
+  // probe is read for — unrecorded until the next sweep probes again.
+  it("records what the probe saw when the node would not serve part of its region", async () => {
     const fullPage = history(
       Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
       { failed: true }
     );
     const probePage = [
       ...history([6]),
+      // Not failed and served nothing: reading it stops the walk, not the
+      // probe's own listing, and not the recording of what it saw around it.
+      ...history([5]),
       ...history(
-        Array.from({ length: HISTORY_PAGE_LIMIT - 1 }, (_, index) => 5 - index),
+        Array.from({ length: HISTORY_PAGE_LIMIT - 2 }, (_, index) => 4 - index),
         {
           failed: true,
           // Failed transactions need no read, which keeps this test to the
@@ -844,7 +964,7 @@ describe("syncDvpLegTransfers", () => {
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
       .mockImplementation(async (_escrow, page) =>
-        page.until === sig(7) ? [] : page.before === sig(7) ? probePage : fullPage
+        page.until === sig(7) ? [] : page.before === sig(7) ? probePage : []
       );
     served.set(sig(6), transaction({ post: "100" }));
 
@@ -862,7 +982,8 @@ describe("syncDvpLegTransfers", () => {
     );
 
     // The omitted movement was in the probe's first page and was recorded;
-    // the scan does not settle, because the probe did not reach its end.
+    // the scan does not settle, because the walk through the probe's region
+    // was interrupted.
     expect(rows.has(sig(6))).toBe(true);
     expect(saved).toEqual([
       {
@@ -948,7 +1069,7 @@ describe("syncDvpLegTransfers", () => {
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
       .mockImplementation(async (_escrow, page) =>
-        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : []
       );
     // sig(6) is served nothing: reading it fails, and the walk stops there.
     served.set(sig(8), transaction({ post: "100" }));
@@ -1007,7 +1128,7 @@ describe("syncDvpLegTransfers", () => {
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
       .mockImplementation(async (_escrow, page) =>
-        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : fullPage
+        page.until === sig(7) ? history([8]) : page.before === sig(7) ? probePage : []
       );
     served.set(sig(6), transaction({ post: "100" }));
     served.set(sig(8), transaction({ post: "200" }));
@@ -1029,10 +1150,11 @@ describe("syncDvpLegTransfers", () => {
     expect([...rows.keys()]).toEqual([sig(6), sig(8)]);
   });
 
-  // A probe the cap cut off leaves the region behind the cursor unaccounted
-  // for, and the position's proof does not travel: the next sweep asks for
-  // the whole history and probes again, instead of bounding itself at a
-  // cursor whose behind it has not seen.
+  // A walk through the probe's region that a transaction the node will not
+  // serve stops leaves the region behind the cursor unaccounted for, and the
+  // position's proof does not travel: the next sweep asks for the whole
+  // history and probes again, instead of bounding itself at a cursor whose
+  // behind it has not seen.
   it("does not let the position's proof travel when the probe did not run to its end", async () => {
     const fullPage = history(
       Array.from({ length: HISTORY_PAGE_LIMIT }, (_, index) => 3_000 - index),
@@ -1043,7 +1165,11 @@ describe("syncDvpLegTransfers", () => {
       .mockResolvedValueOnce(fullPage)
       .mockResolvedValueOnce(fullPage)
       .mockImplementation(async (_escrow, page) =>
-        page.until === sig(7) ? history([9, 8], { failed: true }) : fullPage
+        page.until === sig(7)
+          ? history([9, 8], { failed: true })
+          : page.before === sig(7)
+            ? fullPage
+            : history([0])
       );
 
     await syncDvpLegTransfers(
@@ -1059,8 +1185,9 @@ describe("syncDvpLegTransfers", () => {
       { remaining: 10 }
     );
 
-    // The bounded read continued below slot 9 into slot 8, but the probe of
-    // the region behind the cursor was cut off: the position moved, unproven.
+    // The bounded read continued below slot 9 into slot 8, but the walk
+    // through the probe's region was interrupted: the position moved,
+    // unproven.
     expect(saved).toEqual([
       {
         side: "a",
