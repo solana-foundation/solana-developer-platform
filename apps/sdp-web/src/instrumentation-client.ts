@@ -61,6 +61,12 @@ if (sentryDsn) {
     // never leaves the tab.
     ...sentryScrubbingHooks,
   });
+
+  // Feedback is the one payload the SDK never feeds to an init option:
+  // captureFeedback emits this hook on the client and captures the same
+  // object, ignoring hook return values. Without this registration the
+  // feedback widget's free-form message and contact fields ship unscrubbed.
+  Sentry.getClient()?.on("beforeSendFeedback", sentryScrubbingHooks.beforeSendFeedback);
 }
 
 export const onRouterTransitionStart = sentryDsn ? Sentry.captureRouterTransitionStart : undefined;

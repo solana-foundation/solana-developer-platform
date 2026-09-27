@@ -129,6 +129,77 @@ describe("sentryScrubbingHooks", () => {
     ]);
   });
 
+  it("scrubs a feedback event in place, including contexts.feedback", () => {
+    // The feedback widget and the public captureFeedback API both ship the
+    // message, the page URL, and the optional contact fields as one
+    // type=feedback event. The SDK does not feed that event to any init
+    // option — it emits the `beforeSendFeedback` client hook and then
+    // captures the same object, ignoring hook return values — so the
+    // scrubbing has to be observable in the event itself.
+    const event = {
+      type: "feedback",
+      level: "info",
+      contexts: {
+        feedback: {
+          contact_email: "jane.doe@example.com",
+          name: "Jane Doe",
+          message: "provider error: counterparty jane.doe@example.com",
+          url: "https://dashboard.example.test/payments?owner=jane.doe@example.com",
+        },
+      },
+    };
+
+    const scrubbed = sentryScrubbingHooks.beforeSendFeedback(event);
+    const serialized = JSON.stringify(scrubbed);
+
+    assert.ok(!serialized.includes("jane.doe@example.com"), serialized);
+    assert.equal(scrubbed, event);
+    assert.equal(scrubbed?.type, "feedback");
+    assert.equal(scrubbed?.level, "info");
+    assert.equal(scrubbed?.contexts.feedback.contact_email, "[REDACTED]");
+    assert.equal(
+      scrubbed?.contexts.feedback.message,
+      "provider error: counterparty [REDACTED_EMAIL]"
+    );
+    assert.equal(
+      scrubbed?.contexts.feedback.url,
+      "https://dashboard.example.test/payments?owner=[REDACTED_EMAIL]"
+    );
+    // Bare `name` stays readable — the same policy as every other sink (see
+    // NEVER_REDACTED_KEYS); the scrubber must not overreach just because the
+    // payload is user-typed.
+    assert.equal(scrubbed?.contexts.feedback.name, "Jane Doe");
+  });
+
+  it("reduces a feedback event to its skeleton when scrubbing throws, since the hook cannot drop it", () => {
+    const reported: unknown[][] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      reported.push(args);
+    };
+    try {
+      const hostile = {
+        type: "feedback",
+        level: "info",
+        get contexts(): unknown {
+          throw new TypeError("invalid address: jane.doe@example.com");
+        },
+      };
+
+      const scrubbed = sentryScrubbingHooks.beforeSendFeedback(hostile);
+
+      assert.deepEqual(scrubbed, { type: "feedback", level: "info" });
+    } finally {
+      console.error = original;
+    }
+    const serialized = JSON.stringify(reported);
+    assert.ok(!serialized.includes("jane.doe@example.com"), serialized);
+    assert.ok(!serialized.includes("invalid address"), serialized);
+    assert.deepEqual(reported, [
+      ["sdp_telemetry_scrub_failed", { kind: "feedback", errorType: "TypeError" }],
+    ]);
+  });
+
   it("reduces a span to its skeleton when scrubbing throws, since a span must be returned", () => {
     const hostile = {
       span_id: "span_1",

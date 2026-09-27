@@ -31,4 +31,9 @@ if (sentryDsn) {
     // breadcrumbs. Shared with the API so there is one denylist.
     ...sentryScrubbingHooks,
   });
+
+  // Feedback is the one payload the SDK never feeds to an init option:
+  // captureFeedback emits this hook on the client and captures the same
+  // object, ignoring hook return values. See instrumentation-client.ts.
+  Sentry.getClient()?.on("beforeSendFeedback", sentryScrubbingHooks.beforeSendFeedback);
 }

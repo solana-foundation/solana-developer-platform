@@ -119,7 +119,7 @@ is not done until it appears here with a test.
 | API logs (pino) | `hooks.logMethod` in `apps/sdp-api/src/runtime/logger.ts` — every argument, including the message |
 | API unexpected-error capture | `scrubError` in `captureUnexpectedError` (`apps/sdp-api/src/app.ts`) — the API has no Sentry since #1602 (error tracking is web-only); the capture lands in the pino stream, which the log hook scrubs again |
 | Audit ledger metadata | `scrubAuditMetadata` in `AuditService.persist` — before the row is hashed |
-| Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites |
+| Dashboard Sentry (browser, server, edge) | `sentryScrubbingHooks` spread into all three `Sentry.init` sites, with `beforeSendFeedback` additionally registered on the client (`Sentry.getClient()?.on(...)`) — feedback is the one payload the SDK never feeds to an init option |
 | Dashboard Sentry user | `apps/sdp-web/src/components/sentry-user-context.tsx` — Clerk user id only |
 | Ramp provider error messages | `extractProviderErrorMessage` (`packages/sdp-payments/src/ramps/fetch.ts`) |
 | Earn provider error messages and bodies | `extractProviderErrorMessage` and `providerFetchJson` (`packages/sdp-earn/src/fetch.ts`) scrub the message and the named fields they keep; `logVendorCallFailure` (`apps/sdp-api/src/runtime/vendor-calls.ts`) logs name and code only |
@@ -127,7 +127,10 @@ is not done until it appears here with a test.
 
 Scrubbing failure is a drop, not a pass-through: if the walker throws inside a Sentry hook
 the payload is discarded and `sdp_telemetry_scrub_failed` is written to stderr. An
-unscrubbed event is an incident; a missing event is a gap in a dashboard.
+unscrubbed event is an incident; a missing event is a gap in a dashboard. The two hooks
+that must return an event (`beforeSendSpan`, because a span cannot be dropped, and
+`beforeSendFeedback`, because the SDK ignores hook return values and sends the same object
+either way) instead reduce the payload to a skeleton carrying no user data.
 
 Two details of the walker exist because it is now on an attacker-reachable path — a provider
 webhook body passes through it before anything else reads the payload:

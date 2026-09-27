@@ -1,6 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import path from "node:path";
 import { sentryScrubbingHooks } from "@sdp/redaction";
+import * as Sentry from "@sentry/nextjs";
 import { describe, expect, it } from "vitest";
 
 const APP_ROOT = path.resolve(__dirname, "../..");
@@ -34,6 +36,19 @@ describe("Sentry initialization", () => {
     expect(source).toContain("...sentryScrubbingHooks");
     expect(source).toContain("sendDefaultPii: false");
   });
+
+  it.each(SENTRY_INIT_FILES)(
+    "%s registers the shared feedback hook on the client",
+    (relativePath) => {
+      // `beforeSendFeedback` is not an init option: the SDK only emits it as a
+      // client hook and ignores its return value, so spreading the hooks object
+      // alone leaves feedback events unscrubbed. Each init site must register it.
+      const source = readAppFile(relativePath);
+
+      expect(source).toContain('Sentry.getClient()?.on("beforeSendFeedback"');
+      expect(source).toContain("sentryScrubbingHooks.beforeSendFeedback");
+    }
+  );
 
   it("has no other Sentry.init call site that could ship unscrubbed events", () => {
     // A new runtime (a future worker or instrumentation entry) is the realistic
@@ -94,5 +109,109 @@ describe("sentryScrubbingHooks in the browser bundle", () => {
     expect(serialized).not.toContain("000123456789");
     expect(event?.user.id).toBe("user_1");
     expect(serialized).toContain("cp_1");
+  });
+
+  it("scrubs a feedback event, which the SDK never feeds to beforeSend", () => {
+    // Sentry.captureFeedback emits the `beforeSendFeedback` client hook before
+    // capturing and ignores hook return values, so the hook must exist on the
+    // shared object and scrub the event in place.
+    expect(typeof sentryScrubbingHooks.beforeSendFeedback).toBe("function");
+
+    const event = {
+      type: "feedback",
+      level: "info",
+      contexts: {
+        feedback: {
+          contact_email: "jane.doe@example.com",
+          message: "provider error: counterparty jane.doe@example.com",
+          url: "https://dashboard.example.test/payments?owner=jane.doe@example.com",
+        },
+      },
+    };
+
+    const scrubbed = sentryScrubbingHooks.beforeSendFeedback(event);
+    const serialized = JSON.stringify(scrubbed);
+
+    expect(serialized).not.toContain("jane.doe@example.com");
+    expect(scrubbed).toBe(event);
+    expect(scrubbed?.contexts.feedback.contact_email).toBe("[REDACTED]");
+    expect(scrubbed?.contexts.feedback.message).toBe(
+      "provider error: counterparty [REDACTED_EMAIL]"
+    );
+  });
+
+  it("scrubs a captured feedback event before the transport receives it", async () => {
+    // End to end through the pinned SDK: init the way the app does, register
+    // the hook the way every init site does, and read the feedback event off
+    // the wire. This is the exploit path from the security finding — the
+    // feedback widget's free-form message and contact fields reaching the
+    // transport unredacted.
+    const received: string[] = [];
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received.push(Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(200).end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("local sink did not bind");
+
+    const sensitiveMessage = "provider error: counterparty jane.doe@example.com";
+
+    Sentry.init({
+      dsn: `http://public@127.0.0.1:${address.port}/1`,
+      sendDefaultPii: false,
+      sampleRate: 1,
+      ...sentryScrubbingHooks,
+    });
+    const client = Sentry.getClient();
+    if (!client) throw new Error("Sentry client did not initialize");
+    // Registered conditionally only so a regression that removes the hook
+    // fails on the wire assertions below (the raw delivery) instead of on a
+    // TypeError at registration time.
+    if (typeof sentryScrubbingHooks.beforeSendFeedback === "function") {
+      client.on("beforeSendFeedback", sentryScrubbingHooks.beforeSendFeedback);
+    }
+
+    try {
+      Sentry.captureFeedback({
+        message: sensitiveMessage,
+        name: "Jane Doe",
+        email: "jane.doe@example.com",
+        url: "https://dashboard.example.test/payments?owner=jane.doe@example.com",
+      });
+      if (!(await Sentry.flush(5000))) throw new Error("Sentry did not flush");
+    } finally {
+      server.close();
+    }
+
+    const feedbackEvent = received
+      .flatMap((body) => body.split("\n"))
+      .map((line): Record<string, unknown> | null => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .find(
+        (value) =>
+          value !== null &&
+          value.type === "feedback" &&
+          typeof value.contexts === "object" &&
+          value.contexts !== null
+      );
+    if (!feedbackEvent)
+      throw new Error(`no feedback event reached the sink: ${received.length} envelopes`);
+
+    const serialized = JSON.stringify(feedbackEvent);
+    expect(serialized).not.toContain("jane.doe@example.com");
+    const feedback = (feedbackEvent.contexts as { feedback: Record<string, unknown> }).feedback;
+    expect(feedback.contact_email).toBe("[REDACTED]");
+    expect(feedback.message).toBe("provider error: counterparty [REDACTED_EMAIL]");
+    expect(feedback.url).toBe("https://dashboard.example.test/payments?owner=[REDACTED_EMAIL]");
   });
 });
