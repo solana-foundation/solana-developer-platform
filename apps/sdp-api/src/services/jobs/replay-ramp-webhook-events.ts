@@ -130,9 +130,12 @@ export async function applyStoredRampWebhookEvent(
  *
  * When `deadlineMs` (a `performance.now()` timestamp) is supplied, rows are
  * claimed only while time remains — whatever the deadline leaves stays pending
- * for the next pass. The managed reconciliation job passes its run's remaining
- * budget so a busy inbox cannot push later ticks into the platform's kill
- * window; the in-process passes run unbounded, as before.
+ * for the next pass. Every bounded pass still claims at least one row: the
+ * managed reconciliation job passes its run's remaining budget so a busy
+ * inbox cannot push later ticks into the platform's kill window, and a budget
+ * already spent on startup or egress warmup must not strand the backlog,
+ * because the managed job is the only replay a Cloud Run deployment gets.
+ * The in-process passes run unbounded, as before.
  */
 export async function replayRampWebhookEvents(
   env: Env,
@@ -186,8 +189,11 @@ export async function replayRampWebhookEvents(
     // Bounded like the other sweeps (only admission is; an apply that already
     // started runs to completion). Checked before each claim, never between a
     // claim and its apply: a claim has already spent the row's attempt, so
-    // abandoning a claimed row would waste it.
-    if (deadlineMs !== undefined && performance.now() >= deadlineMs) {
+    // abandoning a claimed row would waste it. The first claim is exempt: a
+    // budget spent before the loop (startup, egress warmup) must not starve
+    // the backlog, because the managed job is the only replay a Cloud Run
+    // deployment gets — every bounded pass settles at least one aged row.
+    if (claimed > 0 && deadlineMs !== undefined && performance.now() >= deadlineMs) {
       deadlineReached = true;
       break;
     }

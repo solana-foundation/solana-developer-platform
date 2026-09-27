@@ -215,27 +215,36 @@ describe("Ramp webhook event inbox", () => {
     expect(await readTransferStatus()).toBe("awaiting_payment");
   });
 
-  it("claims nothing once the pass deadline has passed", async () => {
-    // The managed job bounds replay by its run's remaining time: a deadline
-    // already in the past must leave even an aged row untouched, because
-    // claiming it would spend an attempt the abandoned apply cannot use.
-    const stored = await createPostgresRampWebhookEventsRepository(getDb(env)).insertEvent({
+  it("still claims one aged row once the pass deadline has passed", async () => {
+    // The managed job bounds replay by its run's remaining time, but a budget
+    // spent before the loop (startup, egress warmup) must not starve the
+    // backlog: Cloud Run has no in-process replay to pick rows up, so every
+    // bounded pass settles at least one aged row and leaves the rest pending.
+    const repository = createPostgresRampWebhookEventsRepository(getDb(env));
+    const first = await repository.insertEvent({
       provider: "moonpay",
       environment: "sandbox",
       payload: completedPayload,
     });
-    await getDb(env)
-      .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
-      .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
-      .run();
+    const second = await repository.insertEvent({
+      provider: "moonpay",
+      environment: "sandbox",
+      payload: completedPayload,
+    });
+    for (const stored of [first, second]) {
+      await getDb(env)
+        .prepare("UPDATE ramp_webhook_events SET created_at = ?, updated_at = ? WHERE id = ?")
+        .bind("2026-06-18T00:00:00.000Z", "2026-06-18T00:00:00.000Z", stored.id)
+        .run();
+    }
 
     const applied = await replayRampWebhookEvents(env, { deadlineMs: performance.now() - 1 });
 
-    expect(applied).toBe(0);
+    expect(applied).toBe(1);
+    expect(await readTransferStatus()).toBe("completed");
     const rows = await readInboxRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "pending", attempts: 0 });
-    expect(await readTransferStatus()).toBe("awaiting_payment");
   });
 
   it("replays a pending event the background apply never ran for", async () => {
