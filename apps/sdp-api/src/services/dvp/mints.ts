@@ -21,12 +21,18 @@
  * 3. The mint carries no extension SDP cannot move yet, even where the program
  *    accepts it. A trade SDP can create but never settle, cancel or reclaim is
  *    a trap for whoever funds it.
+ *
+ * 4. The mint does not default new accounts to frozen. The escrow ATA derives
+ *    frozen, the funding path refuses a frozen escrow, and no settle, cancel
+ *    or reclaim thaws one — a trade created on such a mint could be published
+ *    but funded by no one.
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";
 import { type Account, type Address, type EncodedAccount, fetchEncodedAccount } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
+  AccountState,
   decodeMint,
   fetchMaybeMint,
   type Mint,
@@ -46,7 +52,9 @@ import {
  *
  * Everything else passes the program, including `PermanentDelegate`,
  * `DefaultAccountState`, `TransferHook` and `Pausable`. See
- * `UNSUPPORTED_MINT_EXTENSIONS` for what SDP refuses on top.
+ * `UNSUPPORTED_MINT_EXTENSIONS` for what SDP refuses on top, and the
+ * frozen-default check in `readMintExtensionProblems` for the one state of
+ * `DefaultAccountState` SDP refuses.
  */
 export const BLOCKED_MINT_EXTENSIONS: ReadonlySet<string> = new Set([
   "TransferFeeConfig",
@@ -141,7 +149,7 @@ export async function validateDvpMints(
       );
       continue;
     }
-    const { refusedByProgram, unsupportedBySdp } = extensionProblems;
+    const { refusedByProgram, unsupportedBySdp, frozenByDefault } = extensionProblems;
     for (const extension of refusedByProgram) {
       problems.push(
         `${leg.label} ${leg.mint} carries the ${extension} extension, which DvP settlement refuses`
@@ -150,6 +158,11 @@ export async function validateDvpMints(
     for (const extension of unsupportedBySdp) {
       problems.push(
         `${leg.label} ${leg.mint} carries the ${extension} extension, which SDP cannot settle, cancel or reclaim yet`
+      );
+    }
+    if (frozenByDefault) {
+      problems.push(
+        `${leg.label} ${leg.mint} defaults new accounts to frozen (DefaultAccountState=Frozen), so its escrow would be created frozen and could never be funded`
       );
     }
   }
@@ -184,7 +197,8 @@ export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<n
 
 /**
  * Names the ruled-out extensions present on a mint's raw account data: those
- * the program refuses, and those SDP cannot move yet.
+ * the program refuses, those SDP cannot move yet, and whether the mint defaults
+ * new accounts to frozen.
  *
  * Returns null on data it cannot decode, and the caller refuses the mint. The
  * program enforces its own refusals on chain, but not SDP's: an unreadable
@@ -193,11 +207,12 @@ export async function readMintDecimals(rpc: SolanaRpc, mint: Address): Promise<n
  *
  * @param account - A fetched, existing account owned by Token-2022.
  * @returns The ruled-out extension names present, split by who rules them out,
- *   or null when the mint cannot be decoded.
+ *   plus the frozen-default flag, or null when the mint cannot be decoded.
  */
 function readMintExtensionProblems(account: EncodedAccount): {
   refusedByProgram: string[];
   unsupportedBySdp: string[];
+  frozenByDefault: boolean;
 } | null {
   let mint: Account<Mint>;
   try {
@@ -205,12 +220,14 @@ function readMintExtensionProblems(account: EncodedAccount): {
   } catch {
     return null;
   }
-  const kinds =
-    mint.data.extensions.__option === "Some"
-      ? mint.data.extensions.value.map((extension) => extension.__kind)
-      : [];
+  const extensions = mint.data.extensions.__option === "Some" ? mint.data.extensions.value : [];
+  const kinds = extensions.map((extension) => extension.__kind);
   return {
     refusedByProgram: kinds.filter((kind) => BLOCKED_MINT_EXTENSIONS.has(kind)),
     unsupportedBySdp: kinds.filter((kind) => UNSUPPORTED_MINT_EXTENSIONS.has(kind)),
+    frozenByDefault: extensions.some(
+      (extension) =>
+        extension.__kind === "DefaultAccountState" && extension.state === AccountState.Frozen
+    ),
   };
 }

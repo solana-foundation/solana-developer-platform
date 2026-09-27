@@ -18,7 +18,12 @@ import type { SolanaRpc } from "@sdp/rpc/solana";
 import type { Account, Address } from "@solana/kit";
 import { fetchEncodedAccount } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
-import { decodeMint, type Mint, TOKEN_2022_PROGRAM_ADDRESS } from "@solana-program/token-2022";
+import {
+  AccountState,
+  decodeMint,
+  type Mint,
+  TOKEN_2022_PROGRAM_ADDRESS,
+} from "@solana-program/token-2022";
 import { BLOCKED_MINT_EXTENSIONS, UNSUPPORTED_MINT_EXTENSIONS } from "./mints";
 
 export interface DvpMintInspection {
@@ -103,11 +108,20 @@ export async function inspectDvpMint(
       ? decoded.data.extensions.value
       : [];
 
+  // Create refuses a mint that defaults new accounts to frozen — its escrow
+  // would be created frozen and could never be funded — so the form hears the
+  // same answer here, and only for that state: a default of Initialized funds
+  // fine.
+  const frozenByDefault = extensions.some(
+    (extension) =>
+      extension.__kind === "DefaultAccountState" && extension.state === AccountState.Frozen
+  );
+
   const blockedBy =
     extensions
       .map((extension) => extension.__kind)
       .find((kind) => BLOCKED_MINT_EXTENSIONS.has(kind) || UNSUPPORTED_MINT_EXTENSIONS.has(kind)) ??
-    null;
+    (frozenByDefault ? "DefaultAccountState" : null);
 
   const metadata = extensions.find((extension) => extension.__kind === "TokenMetadata");
   const name =

@@ -16,6 +16,7 @@
 import { type Address, none, some } from "@solana/kit";
 import { TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import {
+  AccountState,
   type ExtensionArgs,
   extension,
   getMintEncoder,
@@ -75,14 +76,46 @@ describe("validateDvpMints", () => {
   });
 
   // The program's carve-outs. Refusing these would block regulated RWA issuance,
-  // which is exactly what PermanentDelegate exists for.
+  // which is exactly what PermanentDelegate exists for. DefaultAccountState stays
+  // admissible where it does not default accounts to frozen (see below).
   it("accepts the extensions the program explicitly allows", async () => {
     const rpc = rpcReturning({
       owner: TOKEN_2022_PROGRAM_ADDRESS,
       data: encodeMint([
         extension("PermanentDelegate", { delegate: AUTHORITY }),
-        extension("DefaultAccountState", { state: 2 }),
+        extension("DefaultAccountState", { state: AccountState.Initialized }),
       ]),
+    });
+
+    await expect(validateDvpMints(rpc, leg())).resolves.toEqual([]);
+  });
+
+  // SOLA9-536: a mint whose DefaultAccountState is Frozen derives every new
+  // token account frozen — including the escrow ATA at (swapDvp, mint,
+  // tokenProgram). The funding path refuses a frozen escrow before
+  // TransferChecked, and settle, cancel and reclaim never thaw one, so a trade
+  // created on such a mint can be published but funded by no one. Refused at
+  // admission, before persistence and before the custody wallet is provisioned.
+  it("refuses a mint that defaults new accounts to frozen", async () => {
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: encodeMint([extension("DefaultAccountState", { state: AccountState.Frozen })]),
+    });
+
+    const problems = await validateDvpMints(rpc, leg());
+
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("DefaultAccountState");
+    expect(problems[0]).toContain("frozen");
+  });
+
+  // The extension is not what is refused — only the frozen default. A mint
+  // whose new accounts start initialized derives an unfrozen, fundable escrow,
+  // so it keeps working.
+  it("accepts a mint whose default account state is not frozen", async () => {
+    const rpc = rpcReturning({
+      owner: TOKEN_2022_PROGRAM_ADDRESS,
+      data: encodeMint([extension("DefaultAccountState", { state: AccountState.Initialized })]),
     });
 
     await expect(validateDvpMints(rpc, leg())).resolves.toEqual([]);

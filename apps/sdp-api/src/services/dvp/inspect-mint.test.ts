@@ -9,7 +9,7 @@
  */
 
 import { type Address, none, some } from "@solana/kit";
-import { extension, getMintEncoder } from "@solana-program/token-2022";
+import { AccountState, extension, getMintEncoder } from "@solana-program/token-2022";
 import { describe, expect, it } from "vitest";
 
 /** An RPC whose `getAccountInfo` returns the given wire-format account. */
@@ -87,6 +87,55 @@ describe("inspectDvpMint", () => {
     await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
       eligible: false,
       blockedBy: "TransferHook",
+    });
+  });
+
+  // SOLA9-536: create refuses a mint that defaults new accounts to frozen — its
+  // escrow would be created frozen and could never be funded — so the form is
+  // told the mint is ineligible before anyone types an amount.
+  it("marks a default-frozen mint ineligible and names the extension", async () => {
+    const authority = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" as Address;
+    const data = getMintEncoder().encode({
+      mintAuthority: some(authority),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: some(authority),
+      extensions: some([extension("DefaultAccountState", { state: AccountState.Frozen })]),
+    });
+    const rpc = rpcReturning({
+      owner: TOKEN_2022,
+      data: Buffer.from(data).toString("base64"),
+    });
+
+    await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
+      decimals: 6,
+      eligible: false,
+      blockedBy: "DefaultAccountState",
+    });
+  });
+
+  // Only the frozen default is refused: a default of Initialized derives an
+  // unfrozen, fundable escrow, so it stays eligible.
+  it("keeps a mint whose default account state is Initialized eligible", async () => {
+    const authority = "AMX5b8Rwt5yZd3Zdyfa7QcL6BYvLPS1uUqZGVRbe6DoC" as Address;
+    const data = getMintEncoder().encode({
+      mintAuthority: some(authority),
+      supply: 0n,
+      decimals: 6,
+      isInitialized: true,
+      freezeAuthority: some(authority),
+      extensions: some([extension("DefaultAccountState", { state: AccountState.Initialized })]),
+    });
+    const rpc = rpcReturning({
+      owner: TOKEN_2022,
+      data: Buffer.from(data).toString("base64"),
+    });
+
+    await expect(inspectDvpMint(rpc, ATD_MINT as never)).resolves.toMatchObject({
+      decimals: 6,
+      eligible: true,
+      blockedBy: null,
     });
   });
 
