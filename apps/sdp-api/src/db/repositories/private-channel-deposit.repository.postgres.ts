@@ -163,9 +163,12 @@ export function createPostgresPrivateChannelDepositRepository(
     async listNonTerminalByProject(scope: DepositProjectScope) {
       const result = await db
         .prepare(
+          // `confirmed` is terminal for deposits (settled is unreachable — see
+          // 0040): the sweep only returns states a reconciler can advance, so
+          // terminal rows can never occupy or starve the queue (SOLA9-544).
           `SELECT * FROM private_channel_deposits
              WHERE organization_id = ? AND project_id = ?
-               AND status IN ('pending', 'submitted', 'confirmed')
+               AND status IN ('pending', 'submitted')
              ORDER BY updated_at ASC, id ASC`
         )
         .bind(scope.organizationId, scope.projectId)
@@ -179,8 +182,14 @@ export function createPostgresPrivateChannelDepositRepository(
           // Tie-broken because of the LIMIT: this is the cron's work queue, so
           // rows sharing an updated_at at the cutoff would otherwise be included
           // or dropped arbitrarily from tick to tick, and one could be starved.
+          //
+          // The queue holds only states the worker can advance. `confirmed` is
+          // terminal for deposits (`confirmed -> settled` is not driven; the
+          // credit is off-chain), so a confirmed row is finished work: including
+          // it let 100 settled rows permanently starve every newer pending or
+          // submitted deposit behind the LIMIT (SOLA9-544).
           `SELECT * FROM private_channel_deposits
-             WHERE status IN ('pending', 'submitted', 'confirmed')
+             WHERE status IN ('pending', 'submitted')
              ORDER BY updated_at ASC, id ASC
              LIMIT ?`
         )
@@ -192,8 +201,11 @@ export function createPostgresPrivateChannelDepositRepository(
     async countNonTerminalByInstance(instanceId: string) {
       const row = await db
         .prepare(
+          // `confirmed` is terminal for deposits, so it is not in-flight work
+          // and must not block instance deletion (SOLA9-544). Must agree with
+          // the partial indexes in migration 0119.
           `SELECT COUNT(*)::int AS count FROM private_channel_deposits
-             WHERE instance_id = ? AND status IN ('pending', 'submitted', 'confirmed')`
+             WHERE instance_id = ? AND status IN ('pending', 'submitted')`
         )
         .bind(instanceId)
         .first<{ count: number }>();

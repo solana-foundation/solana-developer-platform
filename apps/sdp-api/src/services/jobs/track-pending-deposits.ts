@@ -11,6 +11,11 @@
  *     targeting the same project RPC rides a single getSignatureStatuses call
  *     instead of one RPC round trip per row.
  *
+ * The queue (`listNonTerminal`) holds only `pending`/`submitted` rows — the
+ * states this worker can advance. `confirmed` is terminal, so it never
+ * occupies the bounded per-tick page: a page of finished work would starve
+ * every newer deposit behind it (SOLA9-544).
+ *
  * `confirmed → settled` is not driven: the operator's channel-side credit is
  * off-chain and gateway `getTransaction` is Operator-only, so we can't observe
  * it. The UI surfaces the credit via the channel-balance read.

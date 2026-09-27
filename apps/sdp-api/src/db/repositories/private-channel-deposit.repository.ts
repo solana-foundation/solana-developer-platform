@@ -98,14 +98,25 @@ export interface PrivateChannelDepositRepository {
     scope: DepositProjectScope & { id: string }
   ): Promise<PrivateChannelDepositRow | null>;
   listDepositsByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
-  /** Opportunistic sweep of non-terminal deposits for a project. */
+  /**
+   * Opportunistic sweep of a project's active deposits. `confirmed` is
+   * terminal for deposits (`settled` is unreachable), so only `pending` and
+   * `submitted` rows come back — terminal rows must never occupy or starve a
+   * reconciliation queue (SOLA9-544).
+   */
   listNonTerminalByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
   /**
-   * Global sweep of non-terminal deposits, oldest-updated first. Used by the
-   * cron reconciler; `limit` caps the per-tick work.
+   * Global sweep of active deposits, oldest-updated first. Used by the cron
+   * reconciler; `limit` caps the per-tick work. Same active-states-only
+   * predicate as `listNonTerminalByProject`: the bounded page must never fill
+   * with terminal `confirmed` rows the worker cannot advance (SOLA9-544).
    */
   listNonTerminal(limit: number): Promise<PrivateChannelDepositRow[]>;
-  /** Delete guard: an instance can't be deleted while deposits are in flight. */
+  /**
+   * Delete guard: an instance can't be deleted while deposits are in flight.
+   * Terminal states (`confirmed`, `settled`, `failed`) never count — the row
+   * survives deletion as financial history either way.
+   */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
   /**
    * Merge `patch` into `context` JSONB atomically. Used by the oracle to record
