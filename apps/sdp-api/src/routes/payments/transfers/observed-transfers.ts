@@ -271,8 +271,9 @@ function readTokenAmountInfo(
  *   state to reconstruct the conversion at the confirming block's clock: any
  *   multiplier replacement is a transaction touching the mint account, so
  *   every scaled mint's conversion is anchored to the mint's own transaction
- *   history, and a mint touched after the transfer confirmed (or with an
- *   unreadable history) drops its rows instead (see convertObservedTokenAmount).
+ *   history, and a mint touched after the transfer confirmed — or in the
+ *   transfer's own slot by anything but the transfer itself — or with an
+ *   unreadable history drops its rows instead (see convertObservedTokenAmount).
  * - `static`: no amount-mutating extension (including legacy SPL mints), so
  *   the RPC-reported amount or decimals-only formatting is the amount the
  *   holder sees.
@@ -295,6 +296,14 @@ type ObservedMintAmountState =
        * convertObservedTokenAmount).
        */
       lastModifiedSlot: number | null;
+      /**
+       * The signature of that newest touching transaction, or null when it
+       * could not be read. A touch in the transfer's own slot is ambiguous
+       * unless it is the transfer itself, so the signature — not just the
+       * slot — is what disambiguates same-slot writes (see
+       * convertObservedTokenAmount).
+       */
+      lastModifiedSignature: string | null;
     }
   | {
       kind: "interest-bearing";
@@ -321,6 +330,7 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
         // Filled in by fetchObservedMintAmountState for every scaled mint;
         // the account alone cannot anchor a historical multiplier.
         lastModifiedSlot: null,
+        lastModifiedSignature: null,
       };
     }
 
@@ -348,19 +358,23 @@ function resolveMintAmountState(mint: Mint): ObservedMintAmountState {
 export const MINT_LAST_MODIFIED_HISTORY_LIMIT = 1;
 
 /**
- * The slot of the newest transaction that touched the mint account, or null
- * when the account has no readable touching signature. Rejections propagate
- * so the per-batch resolver can retry the read within its budget.
+ * The slot and signature of the newest transaction that touched the mint
+ * account, or nulls when the account has no readable touching signature.
+ * Rejections propagate so the per-batch resolver can retry the read within
+ * its budget.
  */
-async function fetchMintLastModifiedSlot(
+async function fetchMintLastModifiedTouch(
   rpc: solanaRpc.SolanaRpc,
   mint: Address
-): Promise<number | null> {
+): Promise<{ slot: number | null; signature: string | null }> {
   const signatures = await solanaRpc.getSignaturesForAddress(rpc, mint, {
     limit: MINT_LAST_MODIFIED_HISTORY_LIMIT,
   });
   const newest = signatures[0];
-  return newest?.slot != null ? Number(newest.slot) : null;
+  return {
+    slot: newest?.slot != null ? Number(newest.slot) : null,
+    signature: newest?.signature != null ? String(newest.signature) : null,
+  };
 }
 
 /**
@@ -389,7 +403,12 @@ async function fetchObservedMintAmountState(
       // replaced since — so every scaled mint is anchored to its own
       // transaction history before any row relies on the multiplier (see
       // convertObservedTokenAmount).
-      return { ...state, lastModifiedSlot: await fetchMintLastModifiedSlot(rpc, mint) };
+      const lastModifiedTouch = await fetchMintLastModifiedTouch(rpc, mint);
+      return {
+        ...state,
+        lastModifiedSlot: lastModifiedTouch.slot,
+        lastModifiedSignature: lastModifiedTouch.signature,
+      };
     }
     return state;
   }
@@ -444,8 +463,10 @@ function convertObservedTokenAmount(input: {
   mintStates: Map<string, ObservedMintAmountState>;
   timestampSeconds: number | null;
   slot: number | null;
+  signature: string;
 }): string | null {
-  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds, slot } = input;
+  const { rawAmount, decimals, rpcUiAmount, mint, mintStates, timestampSeconds, slot, signature } =
+    input;
 
   const state = mint ? mintStates.get(mint) : undefined;
   if (!state || state.kind === "unresolved") {
@@ -470,12 +491,22 @@ function convertObservedTokenAmount(input: {
     // governed the transfer — a schedule may have been replaced since — so
     // the historical multiplier is anchored to the mint's own transaction
     // history: any multiplier replacement is a transaction touching the mint
-    // account, so a mint whose newest touching transaction is at or before
-    // the confirming slot still exposed the state the transfer converted
-    // with. A later touching transaction (or an unreadable history) leaves
-    // the historical multiplier unestablishable, and the row is dropped
-    // rather than confirmed with a possibly-wrong amount.
+    // account, so a mint whose newest touching transaction is strictly
+    // before the confirming slot still exposed the state the transfer
+    // converted with. A later touching transaction (or an unreadable
+    // history) leaves the historical multiplier unestablishable, and the row
+    // is dropped rather than confirmed with a possibly-wrong amount.
     if (slot === null || state.lastModifiedSlot === null || slot < state.lastModifiedSlot) {
+      return null;
+    }
+
+    // A touching transaction in the transfer's own slot is ambiguous — the
+    // write may have preceded or followed the transfer within the slot —
+    // unless it is the transfer itself (a mintTo or mintToChecked writes the
+    // mint's supply, so the observed transaction can be the newest touch):
+    // in that case the current account state is exactly the state the
+    // transfer converted with.
+    if (slot === state.lastModifiedSlot && state.lastModifiedSignature !== signature) {
       return null;
     }
 
@@ -1027,6 +1058,7 @@ function buildObservedTransferRows(
         mintStates,
         timestampSeconds,
         slot,
+        signature,
       });
       if (resolvedUiAmount === null) {
         continue;
@@ -1135,6 +1167,7 @@ function buildObservedTransferRows(
       mintStates,
       timestampSeconds,
       slot,
+      signature,
     });
     if (resolvedUiAmount === null) {
       continue;

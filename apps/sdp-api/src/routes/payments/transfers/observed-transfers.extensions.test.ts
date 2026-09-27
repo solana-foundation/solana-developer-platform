@@ -640,6 +640,55 @@ describe("observed Token-2022 transfer amount conversion", () => {
     }
   });
 
+  it("drops a scaled mint's row when a different transaction touched the mint in the same slot", async () => {
+    // A write in the transfer's own slot may have preceded or followed the
+    // transfer within the slot, so a newest touch that is not the transfer
+    // itself leaves the historical multiplier unestablishable — the row is
+    // dropped rather than confirmed with a possibly-replaced multiplier.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+      mintSignaturesByAddress: {
+        [MINT_SCALED]: [{ slot: SLOT }],
+      },
+    });
+
+    try {
+      const rows = await buildObservedRows(rpcServer, [
+        signatureEntry({ signature: "sig_same_slot_other" }),
+      ]);
+      expect(rows).toEqual([]);
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
+  it("keeps a scaled mint's row when the newest same-slot touch is the transfer itself", async () => {
+    // A mintTo (or mintToChecked) writes the mint's supply, so the observed
+    // transaction can be the mint's newest touch: the current account state
+    // is then exactly the state the transfer converted with, and the row is
+    // published.
+    const rpcServer = await startTokenRpcServer(plainTransfer(MINT_SCALED), {
+      mintAccountsByAddress: {
+        [MINT_SCALED]: { data: scaledMintAccount(2), owner: TOKEN_2022_PROGRAM_ADDRESS },
+      },
+      mintSignaturesByAddress: {
+        [MINT_SCALED]: [{ slot: SLOT }],
+      },
+    });
+
+    try {
+      const [observed] = await buildObservedRows(rpcServer, [signatureEntry()]);
+      expect(observed?.status).toBe("confirmed");
+      expect(observed?.amount).toBe(
+        amountToUiAmountForScaledUiAmountMintWithoutSimulation(RAW_AMOUNT, DECIMALS, 2)
+      );
+    } finally {
+      await rpcServer.close();
+    }
+  });
+
   it("converts a transferChecked on a scaled mint even when the RPC reported a decimals-only uiAmountString", async () => {
     const rpcServer = await startTokenRpcServer(
       {
