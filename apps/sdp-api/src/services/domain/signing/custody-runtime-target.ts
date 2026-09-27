@@ -489,6 +489,83 @@ export class CustodyRuntimeTargets {
     return [...signable, ...blocked];
   }
 
+  /**
+   * One exact custody-wallet row by record id, returned only while the tenant
+   * still owns it, the row is active, it still holds `publicKey`, and — for a
+   * connection-owned row — its connection can sign now. Provisioning records
+   * the row id on the flows it authorizes (a Rings wallet, for one), so
+   * signing can prefer that row over any other row holding the same key. A
+   * row that no longer qualifies returns null and the caller falls back to
+   * key-based resolution; admission still re-locks the row when its signer is
+   * built.
+   */
+  async findSignableWalletRecordById(params: {
+    organizationId: string;
+    projectId: string;
+    custodyWalletId: string;
+    publicKey: string;
+  }): Promise<{ id: string; provider: CustodyProvider } | null> {
+    const row = await this.db.queryOne<
+      CustodyConnectionRuntimeAvailabilityFacts & {
+        id: string;
+        public_key: string;
+        connection_provider: string | null;
+        config_provider: string | null;
+      }
+    >(
+      `SELECT w.id, w.public_key,
+              c.provider AS connection_provider,
+              cfg.provider AS config_provider,
+              c.status AS connection_status, c.last_check_status,
+              pc.status AS credential_status, c.provider_account_fingerprint,
+              c.default_custody_wallet_id,
+              default_wallet.wallet_id AS default_wallet_id,
+              default_wallet.public_key AS default_wallet_public_key,
+              default_wallet.status AS default_wallet_status
+         FROM custody_wallets w
+         LEFT JOIN custody_connections c ON c.id = w.custody_connection_id
+         LEFT JOIN provider_credentials pc ON pc.id = c.provider_credential_id
+         LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
+         LEFT JOIN custody_wallets default_wallet
+           ON default_wallet.id = c.default_custody_wallet_id
+          AND default_wallet.custody_connection_id = c.id
+        WHERE w.id = ?
+          AND w.status = 'active'
+          AND w.public_key = ?
+          AND (
+            (c.id IS NOT NULL AND c.organization_id = ? AND c.project_id = ?)
+            OR
+            (cfg.id IS NOT NULL AND cfg.organization_id = ? AND cfg.status = 'active'
+               AND (cfg.project_id = ? OR cfg.project_id IS NULL))
+          )
+        LIMIT 1`,
+      [
+        params.custodyWalletId,
+        params.publicKey,
+        params.organizationId,
+        params.projectId,
+        params.organizationId,
+        params.projectId,
+      ]
+    );
+    if (!row) {
+      return null;
+    }
+
+    if (row.connection_provider !== null) {
+      const provider = this.parseProvider(row.connection_provider);
+      // A paused or otherwise unavailable connection steps aside: the
+      // key-based fallback can still serve the signature through a row whose
+      // connection can sign now.
+      return isCustodyConnectionOwnerRuntimeAvailable(this.env, provider, row)
+        ? { id: row.id, provider }
+        : null;
+    }
+    return row.config_provider === null
+      ? null
+      : { id: row.id, provider: this.parseProvider(row.config_provider) };
+  }
+
   /** Batch equivalent of {@link findOperationalWalletIdsByAddress}, oldest first per address. */
   async findOperationalWalletIdsByAddresses(params: {
     organizationId: string;

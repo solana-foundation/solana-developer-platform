@@ -104,6 +104,12 @@ export interface SignRingsOuterTransactionInput {
    */
   owner: string;
   unsignedTxBase64: string;
+  /**
+   * The custody-wallet row this rings wallet was provisioned against, when the
+   * caller has one recorded. Preferred over key-based resolution while that
+   * row still qualifies; otherwise the resolver falls back to the key.
+   */
+  custodyWalletId?: string | null;
   /** Test seam; production resolves the owner's custody wallet. */
   signer?: TransactionSigner;
 }
@@ -190,7 +196,10 @@ function equalBytes(left: ArrayLike<number>, right: ArrayLike<number>): boolean 
 
 /** The test-seam signer, or the owner's custody signer with failures mapped once. */
 async function ownerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner"> & {
+  input: Pick<
+    SignRingsOuterTransactionInput,
+    "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId"
+  > & {
     signer?: TransactionSigner;
   }
 ): Promise<TransactionSigner> {
@@ -242,6 +251,11 @@ export interface SignRingsMessageInput {
   /** Base58 address of the key the message requires a signature from. */
   owner: string;
   messageBase64: string;
+  /**
+   * The custody-wallet row this rings wallet was provisioned against, when the
+   * caller has one recorded. Same preference as the transaction path.
+   */
+  custodyWalletId?: string | null;
   /** Test seam; production resolves the owner's custody signer. */
   signer?: TransactionSigner;
 }
@@ -288,16 +302,38 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * lookup is scoped to the organization and to active wallets, so an owner
  * custody no longer controls fails here rather than at the chain.
  *
- * The config store only sees `custody_configs` wallets, so when it misses, the
- * resolver re-queries through the connection-aware custody path before giving
- * up: an owner provisioned under an active custody connection (the BYOK path)
- * is otherwise unreachable and every provisioning attempt strands its Rings
- * row in `pending`. Either way the signer is built from one exact custody-wallet
- * row and must still hold the owner's key.
+ * The recorded row is still the first candidate when the caller has one and it
+ * still qualifies: with several rows holding the owner's key, signing through
+ * the row the caller provisioned against honors the authorization the key
+ * alone cannot express. The config store only sees `custody_configs` wallets,
+ * so when the key-based lookups miss there, the resolver re-queries through
+ * the connection-aware custody path before giving up: an owner provisioned
+ * under an active custody connection (the BYOK path) is otherwise unreachable
+ * and every provisioning attempt strands its Rings row in `pending`. Either
+ * way the signer is built from one exact custody-wallet row and must still
+ * hold the owner's key.
  */
 async function resolveOwnerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
+  input: Pick<
+    SignRingsOuterTransactionInput,
+    "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId"
+  >
 ): Promise<TransactionSigner> {
+  const runtimeTargets = new CustodyRuntimeTargets(getDb(input.env), input.env, new Map());
+
+  if (input.custodyWalletId) {
+    const recorded = await runtimeTargets.findSignableWalletRecordById({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      custodyWalletId: input.custodyWalletId,
+      publicKey: input.owner,
+    });
+    if (recorded) {
+      assertRawMessageSigningProvider(recorded.provider);
+      return ownerSignerForWalletRecord(input, recorded.id);
+    }
+  }
+
   const configWallet = await new CustodyConfigStore(
     getDb(input.env),
     input.env
@@ -306,7 +342,7 @@ async function resolveOwnerSigner(
     assertRawMessageSigningProvider(configWallet.provider);
     return ownerSignerForWalletRecord(input, configWallet.id);
   }
-  return resolveConnectionOwnerSigner(input);
+  return resolveConnectionOwnerSigner(input, runtimeTargets);
 }
 
 /**
@@ -322,13 +358,13 @@ async function resolveOwnerSigner(
  * the owner's key.
  */
 async function resolveConnectionOwnerSigner(
-  input: Pick<SignRingsOuterTransactionInput, "env" | "organizationId" | "projectId" | "owner">
+  input: Pick<
+    SignRingsOuterTransactionInput,
+    "env" | "organizationId" | "projectId" | "owner" | "custodyWalletId"
+  >,
+  runtimeTargets: CustodyRuntimeTargets
 ): Promise<TransactionSigner> {
-  const candidates = await new CustodyRuntimeTargets(
-    getDb(input.env),
-    input.env,
-    new Map()
-  ).findConnectionWalletsByAddress({
+  const candidates = await runtimeTargets.findConnectionWalletsByAddress({
     organizationId: input.organizationId,
     projectId: input.projectId,
     publicKey: input.owner,

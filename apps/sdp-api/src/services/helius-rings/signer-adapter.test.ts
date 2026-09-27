@@ -37,6 +37,7 @@ const env = {} as Env;
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const findConnectionWalletsByAddress = vi.hoisted(() => vi.fn());
+const findSignableWalletRecordById = vi.hoisted(() => vi.fn());
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/stores/custody-config.store", () => ({
@@ -47,6 +48,7 @@ vi.mock("@/services/stores/custody-config.store", () => ({
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
     findConnectionWalletsByAddress = findConnectionWalletsByAddress;
+    findSignableWalletRecordById = findSignableWalletRecordById;
   },
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
@@ -361,6 +363,79 @@ describe("signRingsOuterTransaction", () => {
         "org_1",
         "prj_1",
         "cwlt_connection_can_sign"
+      );
+    });
+
+    /**
+     * Regression (Greptile P1, "wrong custody row selected"): a rings wallet
+     * records the custody row it was provisioned against, and among several
+     * rows holding the owner's key that recorded row is the one the caller
+     * authorized. While it still qualifies it must beat the oldest row, not
+     * lose to it.
+     */
+    it("prefers the custody row recorded on the rings wallet while it still qualifies", async () => {
+      const signature = new Uint8Array(64).fill(15) as SignatureBytes;
+      findSignableWalletRecordById.mockResolvedValue({
+        id: "cwlt_recorded",
+        provider: "privy",
+      });
+      findConnectionWalletsByAddress.mockResolvedValue([
+        connectionCandidate({ id: "cwlt_connection_oldest" }),
+      ]);
+      createOrgSignerForCustodyWallet.mockResolvedValue(
+        partialSigner(async () => [{ [FEE_PAYER]: signature }])
+      );
+
+      const signed = await signRingsOuterTransaction(
+        signInput({ custodyWalletId: "cwlt_recorded" })
+      );
+
+      expect(findSignableWalletRecordById).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: "org_1",
+          projectId: "prj_1",
+          custodyWalletId: "cwlt_recorded",
+          publicKey: FEE_PAYER,
+        })
+      );
+      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+        env,
+        "org_1",
+        "prj_1",
+        "cwlt_recorded"
+      );
+      expect(findActiveWalletByPublicKey).not.toHaveBeenCalled();
+      expect(findConnectionWalletsByAddress).not.toHaveBeenCalled();
+      expect(getTransactionDecoder().decode(base64.encode(signed)).signatures[FEE_PAYER]).toEqual(
+        signature
+      );
+    });
+
+    // The recorded row is a preference, never a dependency: once it no longer
+    // qualifies (moved off the tenant, inactive, rekeyed, connection paused),
+    // resolution falls back to the key-based paths instead of failing.
+    it("falls back to the key-based paths when the recorded row no longer qualifies", async () => {
+      const signature = new Uint8Array(64).fill(17) as SignatureBytes;
+      findSignableWalletRecordById.mockResolvedValue(null);
+      findActiveWalletByPublicKey.mockResolvedValue({
+        id: "cw_owner",
+        publicKey: FEE_PAYER,
+        provider: "turnkey",
+      });
+      createOrgSignerForCustodyWallet.mockResolvedValue(
+        partialSigner(async () => [{ [FEE_PAYER]: signature }])
+      );
+
+      await signRingsOuterTransaction(signInput({ custodyWalletId: "cwlt_recorded" }));
+
+      expect(findSignableWalletRecordById).toHaveBeenCalledWith(
+        expect.objectContaining({ custodyWalletId: "cwlt_recorded" })
+      );
+      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+        env,
+        "org_1",
+        "prj_1",
+        "cw_owner"
       );
     });
 

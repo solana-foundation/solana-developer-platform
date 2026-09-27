@@ -1445,6 +1445,9 @@ export class HeliusRingsService {
         projectId: this.tenant.projectId,
         owner,
         unsignedTxBase64: built.outerUnsignedTxBase64,
+        // The row this wallet was provisioned against, so signing prefers it
+        // over any other custody row that happens to hold the owner's key.
+        custodyWalletId: wallet.custody_wallet_id,
       });
       const signature = await assertRingsSignedTransactionMatches({
         owner,

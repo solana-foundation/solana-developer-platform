@@ -1301,6 +1301,84 @@ describe("CustodyRuntimeTargets", () => {
       })
     ).resolves.toEqual([]);
   });
+
+  /**
+   * The Rings owner resolver prefers the custody row recorded on the rings
+   * wallet over any other row holding the owner's key, so the record-id
+   * lookup has to be exact about what still qualifies: the tenant must own
+   * the row, the row must be active and hold the queried key, and a
+   * connection-owned row must be able to sign now.
+   */
+  it("findSignableWalletRecordById returns an active connection row that can sign", async () => {
+    const connection = await seedConnection();
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.findSignableWalletRecordById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${connection.id}`,
+        publicKey: CONNECTION_PUBLIC_KEY,
+      })
+    ).resolves.toEqual({ id: `cwlt_${connection.id}`, provider: "privy" });
+  });
+
+  it("findSignableWalletRecordById returns an active config row it still holds", async () => {
+    const config = await seedConfig({ provider: "privy" });
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.findSignableWalletRecordById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${config.id}`,
+        publicKey: CONFIG_PUBLIC_KEY,
+      })
+    ).resolves.toEqual({ id: `cwlt_${config.id}`, provider: "privy" });
+  });
+
+  it("findSignableWalletRecordById hides a connection row that cannot sign now", async () => {
+    const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });
+    const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+    await expect(
+      targets.findSignableWalletRecordById({
+        organizationId: ORGANIZATION_ID,
+        projectId: PROJECT_ID,
+        custodyWalletId: `cwlt_${connection.id}`,
+        publicKey: CONNECTION_PUBLIC_KEY,
+      })
+    ).resolves.toBeNull();
+  });
+
+  it.each(["rekeyed", "inactive", "foreign"] as const)(
+    "findSignableWalletRecordById hides a %s recorded row",
+    async (scenario) => {
+      const connection = await seedConnection();
+      if (scenario === "rekeyed") {
+        // The recorded row no longer holds the owner's key.
+        await getDb(env)
+          .prepare("UPDATE custody_wallets SET public_key = ? WHERE id = ?")
+          .bind(SECOND_CONNECTION_PUBLIC_KEY, `cwlt_${connection.id}`)
+          .run();
+      } else if (scenario === "inactive") {
+        await getDb(env)
+          .prepare("UPDATE custody_wallets SET status = 'inactive' WHERE id = ?")
+          .bind(`cwlt_${connection.id}`)
+          .run();
+      }
+      const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
+
+      await expect(
+        targets.findSignableWalletRecordById({
+          organizationId: ORGANIZATION_ID,
+          projectId: scenario === "foreign" ? "prj_foreign" : PROJECT_ID,
+          custodyWalletId: `cwlt_${connection.id}`,
+          publicKey: CONNECTION_PUBLIC_KEY,
+        })
+      ).resolves.toBeNull();
+    }
+  );
 });
 
 async function seedScope(): Promise<void> {
