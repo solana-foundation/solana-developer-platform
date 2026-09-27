@@ -547,6 +547,91 @@ describe("reconcileLightsparkProvisioning", () => {
     await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
   });
 
+  it("resolves newer completed-payout intents while an outage pins archived-row verifications", async () => {
+    // A full oldest-first batch of archived reservations whose provider
+    // verification an outage blocks must not starve newer intents whose rows
+    // completed locally: locally decidable intents order first.
+    for (let index = 0; index < LIGHTSPARK_PROVISIONING_RECONCILE_BATCH; index += 1) {
+      const staleCounterparty = await seedCounterparty(`ls_reconcile_archived_starve_${index}`);
+      const staleRow = await seedPendingRow(
+        staleCounterparty.id,
+        `Customer:archived_starve_${index}`
+      );
+      await accounts().archiveExternalAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: staleCounterparty.id,
+        provider: "lightspark",
+        id: staleRow.id,
+      });
+      await seedUnresolvedIntent({
+        counterpartyId: staleCounterparty.id,
+        action: "lightspark_payout_account_created",
+        metadata: {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: staleCounterparty.id,
+          localRowId: staleRow.id,
+          providerCustomerReference: `Customer:archived_starve_${index}`,
+          corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+          effect: { kind: "payout_account", platformAccountId: staleRow.id },
+        },
+      });
+    }
+    // The archived intents above were admitted first, so they fill the batch's
+    // oldest-first window; the completed intent below lands one position past
+    // the batch limit.
+
+    const counterparty = await seedCounterparty("ls_reconcile_archived_starved_completed");
+    const row = await seedPendingRow(counterparty.id, "Customer:archived_starved_completed");
+    await accounts().completeExternalAccount({
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+      counterpartyId: counterparty.id,
+      provider: "lightspark",
+      id: row.id,
+      externalAccountReference: "ExternalAccount:archived_starved_completed",
+      providerStatus: "ACTIVE",
+    });
+    const intentId = await seedUnresolvedIntent({
+      counterpartyId: counterparty.id,
+      action: "lightspark_payout_account_created",
+      metadata: {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        localRowId: row.id,
+        providerCustomerReference: "Customer:archived_starved_completed",
+        corridor: { fiatCurrency: "USD", destinationCountry: "US", paymentRail: "ACH" },
+        effect: { kind: "payout_account", platformAccountId: row.id },
+      },
+    });
+
+    // The outage fails every provider lookup, so the archived rows cannot be
+    // verified; the completed row still resolves from local state alone.
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      throw new Error(`provider outage: ${String(input)}`);
+    });
+
+    const touched = await reconcileLightsparkProvisioning(env, { graceMs: 0 });
+    expect(touched).toBe(1);
+
+    const outcome = await getDb(env)
+      .prepare(
+        `SELECT status, metadata::jsonb AS metadata FROM audit_logs
+         WHERE metadata::jsonb ->> 'auditPhase' = 'outcome'
+           AND metadata::jsonb ->> 'auditIntentId' = ?`
+      )
+      .bind(intentId)
+      .first<{ status: string; metadata: Record<string, unknown> }>();
+    expect(outcome?.status).toBe("success");
+    expect(outcome?.metadata).toMatchObject({
+      reconciledBy: "lightspark_provisioning_reconciler",
+      externalAccountReference: "ExternalAccount:archived_starved_completed",
+    });
+    await expect(unresolvedIntentCount(intentId)).resolves.toBe(0);
+  });
+
   it("does not archive a reservation that completes while the provider lookup is in flight", async () => {
     const counterparty = await seedCounterparty("ls_reconcile_race");
     const row = await seedPendingRow(counterparty.id, "Customer:reconcile_race");

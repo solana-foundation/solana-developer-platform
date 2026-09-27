@@ -230,7 +230,10 @@ async function triagePendingAccount(
  * are excluded from the batch itself — the pending sweep owns those rows — so
  * reservations a provider outage leaves untriageable can never fill this
  * oldest-first batch and starve newer intents that local state can already
- * resolve.
+ * resolve. Archived rows can only be verified against the provider, so their
+ * intents order after every locally decidable one: an outage pinning those
+ * verifications delays them without ever hiding an intent local state could
+ * settle behind the same batch limit.
  *
  * @param env - Process environment used for database access.
  * @param cutoff - ISO timestamp before which an intent is stale.
@@ -281,8 +284,27 @@ async function reconcileUnresolvedPayoutIntents(env: Env, cutoff: string): Promi
              AND cpa.status = 'active'
              AND cpa.external_account_reference IS NULL
          )
-        ORDER BY i.created_at
-        LIMIT ${LIGHTSPARK_PROVISIONING_RECONCILE_BATCH}`
+         -- Archived rows can only be verified against the provider, so their
+         -- intents order after every locally decidable one: an outage pinning
+         -- those lookups delays them without ever hiding an intent local
+         -- state could settle behind the same batch limit.
+         ORDER BY CASE
+           WHEN EXISTS (
+             SELECT 1 FROM counterparty_provider_accounts cpa
+             WHERE cpa.id = CASE
+                     WHEN i.metadata IS NOT NULL AND pg_input_is_valid(i.metadata, 'jsonb')
+                     THEN i.metadata::jsonb -> 'target' -> 'metadata' ->> 'localRowId'
+                     ELSE NULL
+                   END
+               AND cpa.provider = 'lightspark'
+               AND cpa.kind = 'payout_account'
+               AND cpa.status = 'archived'
+           )
+           THEN 1
+           ELSE 0
+         END,
+         i.created_at
+         LIMIT ${LIGHTSPARK_PROVISIONING_RECONCILE_BATCH}`
     )
     .bind(LIGHTSPARK_PAYOUT_ACTION, cutoff)
     .all<UnresolvedLightsparkIntentRow>();
