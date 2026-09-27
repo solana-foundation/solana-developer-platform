@@ -411,32 +411,34 @@ describe("signRingsOuterTransaction", () => {
       );
     });
 
-    // The recorded row is a preference, never a dependency: once it no longer
-    // backs the key in this tenant (moved off the tenant, inactive, rekeyed),
-    // resolution falls back to the key-based paths instead of failing.
-    it("falls back to the key-based paths when the recorded row no longer qualifies", async () => {
-      const signature = new Uint8Array(64).fill(17) as SignatureBytes;
+    /**
+     * Regression (Greptile P1, "recorded wallet can be bypassed"): a recorded
+     * row that no longer backs the key in this tenant (moved off the tenant,
+     * inactive, rekeyed) must end resolution. Falling through to the
+     * key-based paths would sign through a different row holding the same key
+     * that was never authorized as the replacement.
+     */
+    it("refuses when the recorded row no longer qualifies instead of signing through another row", async () => {
       findAuthorizedWalletRecordById.mockResolvedValue(null);
+      // Both key-based paths hold a row with the owner's key; neither may
+      // serve the operation the recorded row was authorized against.
       findActiveWalletByPublicKey.mockResolvedValue({
         id: "cw_owner",
         publicKey: FEE_PAYER,
         provider: "turnkey",
       });
-      createOrgSignerForCustodyWallet.mockResolvedValue(
-        partialSigner(async () => [{ [FEE_PAYER]: signature }])
+      findConnectionWalletsByAddress.mockResolvedValue([connectionCandidate()]);
+
+      const error = await rejection(
+        signRingsOuterTransaction(signInput({ custodyWalletId: "cwlt_recorded" }))
       );
 
-      await signRingsOuterTransaction(signInput({ custodyWalletId: "cwlt_recorded" }));
-
-      expect(findAuthorizedWalletRecordById).toHaveBeenCalledWith(
-        expect.objectContaining({ custodyWalletId: "cwlt_recorded" })
-      );
-      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
-        env,
-        "org_1",
-        "prj_1",
-        "cw_owner"
-      );
+      expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+      // Names the stranded row, so an operator can find and relink it.
+      expect((error as Error).message).toContain("cwlt_recorded");
+      expect(findActiveWalletByPublicKey).not.toHaveBeenCalled();
+      expect(findConnectionWalletsByAddress).not.toHaveBeenCalled();
+      expect(createOrgSignerForCustodyWallet).not.toHaveBeenCalled();
     });
 
     /**

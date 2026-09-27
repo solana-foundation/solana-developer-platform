@@ -498,8 +498,10 @@ export class CustodyRuntimeTargets {
    * unavailable: the runtime admission raised while building the signer names
    * that denial instead of letting a different row's connection serve the
    * signature. Null means the recorded row no longer backs the key in this
-   * tenant, and the caller falls back to key-based resolution; admission
-   * still re-locks the row when its signer is built.
+   * tenant, and the caller refuses the operation rather than falling back to
+   * key-based resolution: another row holding the same key was never
+   * authorized as the replacement. Admission still re-locks the row when its
+   * signer is built.
    */
   async findAuthorizedWalletRecordById(params: {
     organizationId: string;

@@ -106,8 +106,9 @@ export interface SignRingsOuterTransactionInput {
   unsignedTxBase64: string;
   /**
    * The custody-wallet row this rings wallet was provisioned against, when the
-   * caller has one recorded. Preferred over key-based resolution while that
-   * row still qualifies; otherwise the resolver falls back to the key.
+   * caller has one recorded. That row is the authority the operation was
+   * authorized against: while it qualifies it is preferred, and when it no
+   * longer does, resolution refuses rather than signing through another row.
    */
   custodyWalletId?: string | null;
   /** Test seam; production resolves the owner's custody wallet. */
@@ -253,7 +254,7 @@ export interface SignRingsMessageInput {
   messageBase64: string;
   /**
    * The custody-wallet row this rings wallet was provisioned against, when the
-   * caller has one recorded. Same preference as the transaction path.
+   * caller has one recorded. Same authority as the transaction path.
    */
   custodyWalletId?: string | null;
   /** Test seam; production resolves the owner's custody signer. */
@@ -302,18 +303,19 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * lookup is scoped to the organization and to active wallets, so an owner
  * custody no longer controls fails here rather than at the chain.
  *
- * The recorded row is still the first candidate when the caller has one and
- * the tenant still owns it holding the key: with several rows holding the
- * owner's key, signing through the row the caller provisioned against honors
- * the authorization the key alone cannot express, and a runtime denial of
- * that row is raised by its admission rather than bypassed through another
- * row. The config store only sees `custody_configs` wallets, so when the
- * key-based lookups miss there, the resolver re-queries through the
- * connection-aware custody path before giving up: an owner provisioned under
- * an active custody connection (the BYOK path) is otherwise unreachable and
- * every provisioning attempt strands its Rings row in `pending`. Either way
- * the signer is built from one exact custody-wallet row and must still hold
- * the owner's key.
+ * When the caller has a recorded custody-wallet row, that row is the authority
+ * the operation was authorized against: it is preferred while it still
+ * qualifies, and a runtime denial of it is raised by its admission rather
+ * than bypassed through another row. When it no longer qualifies (inactive,
+ * moved off the tenant, rekeyed), resolution refuses: key-based resolution
+ * would sign through a different row that was never authorized as the
+ * replacement. The config store only sees `custody_configs` wallets, so when
+ * there is no recorded row and the key-based lookups miss there, the resolver
+ * re-queries through the connection-aware custody path before giving up: an
+ * owner provisioned under an active custody connection (the BYOK path) is
+ * otherwise unreachable and every provisioning attempt strands its Rings row
+ * in `pending`. Either way the signer is built from one exact custody-wallet
+ * row and must still hold the owner's key.
  */
 async function resolveOwnerSigner(
   input: Pick<
@@ -334,6 +336,16 @@ async function resolveOwnerSigner(
       assertRawMessageSigningProvider(recorded.provider);
       return ownerSignerForWalletRecord(input, recorded.id);
     }
+    // The recorded row no longer backs the owner's key in this tenant — the
+    // row is gone, inactive, or rekeyed. Falling through to the key-based
+    // paths would sign through a different row the caller never authorized as
+    // the replacement, so the miss is refused. Relinking the rings wallet (or
+    // re-provisioning) is the fix, and the row id is named so an operator can
+    // find which wallet is stranded.
+    throw new SigningError(
+      `recorded custody wallet ${input.custodyWalletId} no longer backs owner ${input.owner}`,
+      "WALLET_NOT_FOUND"
+    );
   }
 
   const configWallet = await new CustodyConfigStore(
