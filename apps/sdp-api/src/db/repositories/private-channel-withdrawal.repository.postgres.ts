@@ -1,5 +1,6 @@
 import type { PrivateChannelTransferContext } from "@sdp/types";
 import type { AppDb } from "@/db";
+import type { PrivateChannelHistoryWalletScope } from "./base";
 import {
   type CreateWithdrawalInput,
   generatePrivateChannelWithdrawalId,
@@ -136,25 +137,48 @@ export function createPostgresPrivateChannelWithdrawalRepository(
       return row ? mapRow(row) : null;
     },
 
-    async getWithdrawalById(scope: WithdrawalProjectScope & { id: string }) {
+    async getWithdrawalById(
+      scope: WithdrawalProjectScope & {
+        id: string;
+        walletScope?: PrivateChannelHistoryWalletScope;
+      }
+    ) {
+      // A selected scope with no wallet ids can match nothing (SOLA9-518);
+      // answer without a query rather than reading past the key's bindings.
+      if (scope.walletScope?.scope === "none") return null;
+      const walletClause =
+        scope.walletScope?.scope === "selected" ? "AND wallet_id = ANY(?::text[])" : "";
       const row = await db
         .prepare(
           `SELECT * FROM private_channel_withdrawals
-             WHERE organization_id = ? AND project_id = ? AND id = ?`
+             WHERE organization_id = ? AND project_id = ? AND id = ? ${walletClause}`
         )
-        .bind(scope.organizationId, scope.projectId, scope.id)
+        .bind(
+          ...(scope.walletScope?.scope === "selected"
+            ? [scope.organizationId, scope.projectId, scope.id, scope.walletScope.walletIds]
+            : [scope.organizationId, scope.projectId, scope.id])
+        )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
 
-    async listWithdrawalsByProject(scope: WithdrawalProjectScope) {
+    async listWithdrawalsByProject(
+      scope: WithdrawalProjectScope & { walletScope?: PrivateChannelHistoryWalletScope }
+    ) {
+      if (scope.walletScope?.scope === "none") return [];
+      const walletClause =
+        scope.walletScope?.scope === "selected" ? "AND wallet_id = ANY(?::text[])" : "";
       const result = await db
         .prepare(
           `SELECT * FROM private_channel_withdrawals
-             WHERE organization_id = ? AND project_id = ?
+             WHERE organization_id = ? AND project_id = ? ${walletClause}
              ORDER BY created_at DESC, id DESC`
         )
-        .bind(scope.organizationId, scope.projectId)
+        .bind(
+          ...(scope.walletScope?.scope === "selected"
+            ? [scope.organizationId, scope.projectId, scope.walletScope.walletIds]
+            : [scope.organizationId, scope.projectId])
+        )
         .all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },

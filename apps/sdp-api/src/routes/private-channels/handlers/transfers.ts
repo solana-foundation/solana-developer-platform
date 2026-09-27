@@ -13,7 +13,7 @@ import {
   getPrivateChannelTransferRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
-import { requireIdempotencyKey } from "../helpers";
+import { requireIdempotencyKey, resolveHistoryWalletScope } from "../helpers";
 import { authorizeMovementReplay, matchesTransferReplay, requireMovementWrite } from "../replay";
 import {
   type createTransferBodySchema,
@@ -147,6 +147,8 @@ export async function getPrivateChannelTransferById(c: AppContext) {
     organizationId: auth.organizationId,
     projectId,
     id: parsed.data.id,
+    // A selected-scope key reads only transfers sent from its bound wallets.
+    walletScope: resolveHistoryWalletScope(auth),
   });
   if (!row) {
     throw notFound("Transfer");
@@ -169,6 +171,8 @@ export async function listPrivateChannelTransfers(c: AppContext) {
     organizationId: auth.organizationId,
     projectId,
     channelId: parsed.data.channelId,
+    // A selected-scope key reads only transfers sent from its bound wallets.
+    walletScope: resolveHistoryWalletScope(auth),
   });
   return success(c, { transfers: rows.map(mapPrivateChannelTransferRow) });
 }

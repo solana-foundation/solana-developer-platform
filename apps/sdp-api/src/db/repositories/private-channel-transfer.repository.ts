@@ -3,7 +3,7 @@ import type {
   PrivateChannelTransfer,
   PrivateChannelTransferRecipientDto,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { PrivateChannelHistoryWalletScope, RepositoryDbClient } from "./base";
 
 export function generatePrivateChannelTransferId(): string {
   return `pct_${crypto.randomUUID()}`;
@@ -88,6 +88,12 @@ export interface ListPrivateChannelTransfersInput extends PrivateChannelTransfer
   channelId?: string;
   /** Caps the history page; defaults to `DEFAULT_TRANSFER_LIST_LIMIT`. */
   limit?: number;
+  /**
+   * Wallet-level visibility for API-key history reads (SOLA9-518): selected
+   * keys see only transfers sent from their bound wallets. Absent only for
+   * internal callers, which keep project-wide scope.
+   */
+  walletScope?: PrivateChannelHistoryWalletScope;
 }
 
 export interface ListEligiblePrivateChannelTransferRecipientsInput
@@ -120,7 +126,14 @@ export interface PrivateChannelTransferRepository {
     scope: PrivateChannelTransferProjectScope & { idempotencyKey: string }
   ): Promise<PrivateChannelTransferRow | null>;
   getTransferById(
-    scope: PrivateChannelTransferProjectScope & { id: string }
+    scope: PrivateChannelTransferProjectScope & {
+      id: string;
+      /**
+       * Wallet-level visibility for API-key history reads (SOLA9-518).
+       * Absent only for internal callers, which keep project-wide scope.
+       */
+      walletScope?: PrivateChannelHistoryWalletScope;
+    }
   ): Promise<PrivateChannelTransferRow | null>;
   listTransfersByProject(
     input: ListPrivateChannelTransfersInput

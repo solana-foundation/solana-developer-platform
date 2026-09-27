@@ -3,10 +3,14 @@ import {
   PRIVATE_CHANNEL_EVENT_STATUSES,
   type PrivateChannelEventType,
 } from "@sdp/types";
-import type { PrivateChannelInstanceRow } from "@/db/repositories";
-import { getAuth, requireProjectId } from "@/lib/auth";
+import type {
+  PrivateChannelHistoryWalletScope,
+  PrivateChannelInstanceRow,
+} from "@/db/repositories";
+import { type ApiKeyContext, getAuth, requireProjectId } from "@/lib/auth";
 import { AppError, badRequest } from "@/lib/errors";
 import { IDEMPOTENCY_KEY_HEADER } from "@/middleware/idempotency-key";
+import { getAllowedApiKeyWalletIdsForPermissions } from "@/services/api-key-scope.service";
 import {
   type AppContext,
   getPrivateChannelEventService,
@@ -28,6 +32,24 @@ export async function requireActiveInstance(c: AppContext): Promise<PrivateChann
     );
   }
   return instance;
+}
+
+/**
+ * The wallet-level visibility of movement history for this caller.
+ *
+ * The route permission (`payments:read`) says a caller may read project
+ * history at all; an API key's wallet bindings say WHICH wallets' history it
+ * may see. Without this filter a selected-scope key bound to one wallet could
+ * enumerate every wallet's deposits, withdrawals and transfers in the project
+ * (SOLA9-518). Sessions and all-wallet keys keep full project visibility, and
+ * a selected key whose bindings hold no `payments:read` sees nothing.
+ */
+export function resolveHistoryWalletScope(auth: ApiKeyContext): PrivateChannelHistoryWalletScope {
+  const walletIds = getAllowedApiKeyWalletIdsForPermissions(auth, ["payments:read"]);
+  if (walletIds === null) {
+    return { scope: "all" };
+  }
+  return walletIds.length > 0 ? { scope: "selected", walletIds } : { scope: "none" };
 }
 
 /**

@@ -48,6 +48,7 @@ import { isPostgresUniqueViolation } from "@/db/postgres-utils";
 import {
   createPrivateChannelWithdrawalRepository,
   mapPrivateChannelWithdrawalRow,
+  type PrivateChannelHistoryWalletScope,
   type PrivateChannelWithdrawalRepository,
   type PrivateChannelWithdrawalRow,
 } from "@/db/repositories";
@@ -527,7 +528,12 @@ export async function createChannelWithdrawal(
 /** Read a single withdrawal for the project. */
 export async function getChannelWithdrawal(
   env: Env,
-  scope: { organizationId: string; projectId: string; id: string }
+  scope: {
+    organizationId: string;
+    projectId: string;
+    id: string;
+    walletScope?: PrivateChannelHistoryWalletScope;
+  }
 ): Promise<PrivateChannelWithdrawal | null> {
   const row = await createPrivateChannelWithdrawalRepository(env).getWithdrawalById(scope);
   return row ? mapPrivateChannelWithdrawalRow(row) : null;
@@ -536,7 +542,11 @@ export async function getChannelWithdrawal(
 /** List a project's withdrawals, newest first. */
 export async function listChannelWithdrawals(
   env: Env,
-  scope: { organizationId: string; projectId: string }
+  scope: {
+    organizationId: string;
+    projectId: string;
+    walletScope?: PrivateChannelHistoryWalletScope;
+  }
 ): Promise<PrivateChannelWithdrawal[]> {
   const rows = await createPrivateChannelWithdrawalRepository(env).listWithdrawalsByProject(scope);
   return rows.map(mapPrivateChannelWithdrawalRow);

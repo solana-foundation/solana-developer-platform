@@ -48,6 +48,7 @@ import {
   mapPrivateChannelDepositRow,
   type PrivateChannelDepositRepository,
   type PrivateChannelDepositRow,
+  type PrivateChannelHistoryWalletScope,
 } from "@/db/repositories";
 import { AppError, badRequest } from "@/lib/errors";
 import { buildPrivateChannelDepositFingerprint } from "@/lib/idempotency";
@@ -386,7 +387,12 @@ export async function createChannelDeposit(
 /** Read a single deposit for the project. */
 export async function getChannelDeposit(
   env: Env,
-  scope: { organizationId: string; projectId: string; id: string }
+  scope: {
+    organizationId: string;
+    projectId: string;
+    id: string;
+    walletScope?: PrivateChannelHistoryWalletScope;
+  }
 ): Promise<PrivateChannelDeposit | null> {
   const row = await createPrivateChannelDepositRepository(env).getDepositById(scope);
   return row ? mapPrivateChannelDepositRow(row) : null;
@@ -395,7 +401,11 @@ export async function getChannelDeposit(
 /** List a project's deposits, newest first. */
 export async function listChannelDeposits(
   env: Env,
-  scope: { organizationId: string; projectId: string }
+  scope: {
+    organizationId: string;
+    projectId: string;
+    walletScope?: PrivateChannelHistoryWalletScope;
+  }
 ): Promise<PrivateChannelDeposit[]> {
   const rows = await createPrivateChannelDepositRepository(env).listDepositsByProject(scope);
   return rows.map(mapPrivateChannelDepositRow);

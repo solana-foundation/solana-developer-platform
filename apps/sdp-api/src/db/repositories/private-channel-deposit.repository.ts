@@ -3,7 +3,7 @@ import type {
   PrivateChannelTransferContext,
   PrivateChannelTransferStatus,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { PrivateChannelHistoryWalletScope, RepositoryDbClient } from "./base";
 
 export function generatePrivateChannelDepositId(): string {
   return `dep_${crypto.randomUUID()}`;
@@ -95,9 +95,19 @@ export interface PrivateChannelDepositRepository {
     scope: DepositProjectScope & { idempotencyKey: string }
   ): Promise<PrivateChannelDepositRow | null>;
   getDepositById(
-    scope: DepositProjectScope & { id: string }
+    scope: DepositProjectScope & {
+      id: string;
+      /**
+       * Wallet-level visibility for API-key history reads (SOLA9-518).
+       * Absent only for internal callers — the poller and replay paths —
+       * which keep project-wide scope.
+       */
+      walletScope?: PrivateChannelHistoryWalletScope;
+    }
   ): Promise<PrivateChannelDepositRow | null>;
-  listDepositsByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
+  listDepositsByProject(
+    scope: DepositProjectScope & { walletScope?: PrivateChannelHistoryWalletScope }
+  ): Promise<PrivateChannelDepositRow[]>;
   /** Opportunistic sweep of non-terminal deposits for a project. */
   listNonTerminalByProject(scope: DepositProjectScope): Promise<PrivateChannelDepositRow[]>;
   /**

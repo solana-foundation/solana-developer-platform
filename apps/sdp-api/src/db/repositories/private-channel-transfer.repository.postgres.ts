@@ -1,5 +1,6 @@
 import type { PrivateChannelTransferRecipientDto } from "@sdp/types";
 import type { AppDb } from "@/db";
+import type { PrivateChannelHistoryWalletScope } from "./base";
 import {
   type CreatePrivateChannelTransferInput,
   DEFAULT_TRANSFER_LIST_LIMIT,
@@ -155,34 +156,53 @@ export function createPostgresPrivateChannelTransferRepository(
       return row ? mapRow(row) : null;
     },
 
-    async getTransferById(scope: PrivateChannelTransferProjectScope & { id: string }) {
+    async getTransferById(
+      scope: PrivateChannelTransferProjectScope & {
+        id: string;
+        walletScope?: PrivateChannelHistoryWalletScope;
+      }
+    ) {
+      // A selected scope with no wallet ids can match nothing (SOLA9-518);
+      // answer without a query rather than reading past the key's bindings.
+      if (scope.walletScope?.scope === "none") return null;
+      const walletClause =
+        scope.walletScope?.scope === "selected" ? "AND sender_wallet_id = ANY(?::text[])" : "";
       const row = await db
         .prepare(
           `SELECT * FROM private_channel_transfers
             WHERE organization_id = ?
               AND project_id = ?
-              AND id = ?`
+              AND id = ?
+              ${walletClause}`
         )
-        .bind(scope.organizationId, scope.projectId, scope.id)
+        .bind(
+          ...(scope.walletScope?.scope === "selected"
+            ? [scope.organizationId, scope.projectId, scope.id, scope.walletScope.walletIds]
+            : [scope.organizationId, scope.projectId, scope.id])
+        )
         .first<Record<string, unknown>>();
       return row ? mapRow(row) : null;
     },
 
     async listTransfersByProject(input: ListPrivateChannelTransfersInput) {
+      if (input.walletScope?.scope === "none") return [];
       const channelFilter = input.channelId === undefined ? "" : " AND channel_id = ?";
+      const walletClause =
+        input.walletScope?.scope === "selected" ? " AND sender_wallet_id = ANY(?::text[])" : "";
       const limit = input.limit ?? DEFAULT_TRANSFER_LIST_LIMIT;
       const statement = db.prepare(
         `SELECT * FROM private_channel_transfers
           WHERE organization_id = ?
             AND project_id = ?
-            ${channelFilter}
+            ${channelFilter}${walletClause}
           ORDER BY created_at DESC, id DESC
           LIMIT ?`
       );
-      const result = await (input.channelId === undefined
-        ? statement.bind(input.organizationId, input.projectId, limit)
-        : statement.bind(input.organizationId, input.projectId, input.channelId, limit)
-      ).all<Record<string, unknown>>();
+      const binds: unknown[] = [input.organizationId, input.projectId];
+      if (input.channelId !== undefined) binds.push(input.channelId);
+      if (input.walletScope?.scope === "selected") binds.push(input.walletScope.walletIds);
+      binds.push(limit);
+      const result = await statement.bind(...binds).all<Record<string, unknown>>();
       return result.results.map(mapRow);
     },
 

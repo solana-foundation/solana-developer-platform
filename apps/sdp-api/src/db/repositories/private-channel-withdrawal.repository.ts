@@ -3,7 +3,7 @@ import type {
   PrivateChannelTransferStatus,
   PrivateChannelWithdrawal,
 } from "@sdp/types";
-import type { RepositoryDbClient } from "./base";
+import type { PrivateChannelHistoryWalletScope, RepositoryDbClient } from "./base";
 
 export function generatePrivateChannelWithdrawalId(): string {
   return `wd_${crypto.randomUUID()}`;
@@ -97,9 +97,19 @@ export interface PrivateChannelWithdrawalRepository {
     scope: WithdrawalProjectScope & { idempotencyKey: string }
   ): Promise<PrivateChannelWithdrawalRow | null>;
   getWithdrawalById(
-    scope: WithdrawalProjectScope & { id: string }
+    scope: WithdrawalProjectScope & {
+      id: string;
+      /**
+       * Wallet-level visibility for API-key history reads (SOLA9-518).
+       * Absent only for internal callers — the poller and replay paths —
+       * which keep project-wide scope.
+       */
+      walletScope?: PrivateChannelHistoryWalletScope;
+    }
   ): Promise<PrivateChannelWithdrawalRow | null>;
-  listWithdrawalsByProject(scope: WithdrawalProjectScope): Promise<PrivateChannelWithdrawalRow[]>;
+  listWithdrawalsByProject(
+    scope: WithdrawalProjectScope & { walletScope?: PrivateChannelHistoryWalletScope }
+  ): Promise<PrivateChannelWithdrawalRow[]>;
   /** Opportunistic sweep of non-terminal withdrawals for a project. */
   listNonTerminalByProject(scope: WithdrawalProjectScope): Promise<PrivateChannelWithdrawalRow[]>;
   /**

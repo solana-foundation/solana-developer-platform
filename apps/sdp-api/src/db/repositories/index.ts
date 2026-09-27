@@ -9,7 +9,7 @@ export type {
   UpdateAssetProfileInput,
 } from "./asset-profile.repository";
 export { createPostgresAssetProfilesRepository } from "./asset-profile.repository.postgres";
-export type { RepositoryDbClient } from "./base";
+export type { PrivateChannelHistoryWalletScope, RepositoryDbClient } from "./base";
 export { createPostgresBvnkOnrampTransfersRepository } from "./bvnk-onramp-transfers.repository.postgres";
 export type {
   ArchiveCounterpartyInput,

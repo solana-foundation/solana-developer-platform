@@ -13,7 +13,7 @@ import { resolveGatewayAuth } from "@/services/private-channels/auth/gateway-aut
 import { createPrivateChannelSigner } from "@/services/private-channels/wallet-access";
 import type { AppContext } from "../context";
 import { getPrivateChannelDepositRepository, loadPrivateChannelProjectRpcClient } from "../context";
-import { requireIdempotencyKey } from "../helpers";
+import { requireIdempotencyKey, resolveHistoryWalletScope } from "../helpers";
 import { authorizeMovementReplay, matchesDepositReplay, requireMovementWrite } from "../replay";
 import { type createDepositBodySchema, depositIdParamSchema } from "../schemas";
 import { resolveDepositCreateContext } from "../value-movement-access";
@@ -118,6 +118,8 @@ export async function getPrivateChannelDepositById(c: AppContext) {
       organizationId: auth.organizationId,
       projectId,
       id: parsed.data.id,
+      // A selected-scope key reads only its bound wallets' history (SOLA9-518).
+      walletScope: resolveHistoryWalletScope(auth),
     });
     if (!deposit) {
       throw notFound("Deposit");
@@ -136,6 +138,8 @@ export async function listPrivateChannelDeposits(c: AppContext) {
     const deposits = await listChannelDeposits(c.env, {
       organizationId: auth.organizationId,
       projectId,
+      // A selected-scope key reads only its bound wallets' history (SOLA9-518).
+      walletScope: resolveHistoryWalletScope(auth),
     });
     return success(c, { deposits });
   } catch (error) {

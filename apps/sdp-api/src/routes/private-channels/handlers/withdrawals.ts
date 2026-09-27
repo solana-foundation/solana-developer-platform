@@ -21,7 +21,7 @@ import {
   getPrivateChannelWithdrawalRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
-import { requireIdempotencyKey } from "../helpers";
+import { requireIdempotencyKey, resolveHistoryWalletScope } from "../helpers";
 import { authorizeMovementReplay, matchesWithdrawalReplay, requireMovementWrite } from "../replay";
 import { type createWithdrawalBodySchema, withdrawalIdParamSchema } from "../schemas";
 import { resolveWithdrawalCreateContext } from "../value-movement-access";
@@ -140,6 +140,8 @@ export async function getPrivateChannelWithdrawalById(c: AppContext) {
       organizationId: auth.organizationId,
       projectId,
       id: parsed.data.id,
+      // A selected-scope key reads only its bound wallets' history (SOLA9-518).
+      walletScope: resolveHistoryWalletScope(auth),
     });
     if (!withdrawal) {
       throw notFound("Withdrawal");
@@ -158,6 +160,8 @@ export async function listPrivateChannelWithdrawals(c: AppContext) {
     const withdrawals = await listChannelWithdrawals(c.env, {
       organizationId: auth.organizationId,
       projectId,
+      // A selected-scope key reads only its bound wallets' history (SOLA9-518).
+      walletScope: resolveHistoryWalletScope(auth),
     });
     return success(c, { withdrawals });
   } catch (error) {
