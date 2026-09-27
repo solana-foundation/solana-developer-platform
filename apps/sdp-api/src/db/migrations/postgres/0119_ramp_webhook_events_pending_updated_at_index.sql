@@ -1,3 +1,4 @@
+-- sdp:migration-mode: non-transactional
 -- Replay claims the least-recently-touched pending events first, so an event
 -- a pass deferred (or failed) rotates to the back of the queue instead of
 -- crowding fresh settlements out of the batch (the claim orders by
@@ -8,7 +9,10 @@
 -- predicate mirrors the claim's `status = 'pending'` guard; created_at and
 -- attempts stay residual filters over the small pending set (applied rows are
 -- deleted, so the pending backlog is bounded by the events awaiting apply).
+-- Built CONCURRENTLY (hence the non-transactional mode): the inbox takes
+-- signed webhook writes and replay updates continuously, and a plain
+-- index build would block them for the duration.
 
-CREATE INDEX IF NOT EXISTS idx_ramp_webhook_events_pending_updated_at
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ramp_webhook_events_pending_updated_at
     ON ramp_webhook_events (updated_at)
     WHERE status = 'pending';
