@@ -199,6 +199,7 @@ describe("DvpLegTransferRepository", () => {
         cursor: { signature: sig(1), slot: "420" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       });
 
@@ -212,6 +213,7 @@ describe("DvpLegTransferRepository", () => {
             cursor: null,
             cursorSlotComplete: false,
             probe: null,
+            unreadableRetries: [],
             scannedAt: null,
           })
         )
@@ -227,6 +229,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: null,
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -234,6 +237,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(7), slot: "700" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
 
@@ -243,6 +247,7 @@ describe("DvpLegTransferRepository", () => {
         cursor: { signature: sig(7), slot: "700" },
         cursorSlotComplete: true,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
     ]);
@@ -258,6 +263,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: false,
       probe: { signature: sig(4), slot: "400" },
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -267,6 +273,7 @@ describe("DvpLegTransferRepository", () => {
         cursor: { signature: sig(9), slot: "900" },
         cursorSlotComplete: false,
         probe: { signature: sig(4), slot: "400" },
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -276,10 +283,80 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
 
     expect((await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.probe).toBeNull();
+  });
+
+  // The transactions a sweep could not read with confidence are remembered
+  // behind the position, oldest first, and asked for again directly by the
+  // next sweep: the probe that reaches that region never lists it twice.
+  it("saves and clears the unreadable retries", async () => {
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(4), slot: "400" },
+      unreadableRetries: [
+        { signature: sig(2), slot: "200", finalized: true },
+        { signature: sig(1), slot: "100", finalized: false },
+      ],
+      scannedAt: null,
+    });
+
+    expect(
+      (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.unreadableRetries
+    ).toEqual([
+      { signature: sig(2), slot: "200", finalized: true },
+      { signature: sig(1), slot: "100", finalized: false },
+    ]);
+
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(4), slot: "400" },
+      unreadableRetries: [],
+      scannedAt: null,
+    });
+
+    expect(
+      (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.unreadableRetries
+    ).toEqual([]);
+  });
+
+  // Two sweeps can overlap. The slower one, working from an older read, saves
+  // the list of asks it settled and skipped for itself: whichever write lands,
+  // the next sweep reads that sweep's list and asks about each entry again.
+  it("overwrites the unreadable retries with the newer sweep's list", async () => {
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [{ signature: sig(1), slot: "100", finalized: true }],
+      scannedAt: null,
+    });
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [
+        { signature: sig(3), slot: "300", finalized: true },
+        { signature: sig(1), slot: "100", finalized: false },
+      ],
+      scannedAt: null,
+    });
+
+    expect(
+      (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.unreadableRetries
+    ).toEqual([
+      { signature: sig(3), slot: "300", finalized: true },
+      { signature: sig(1), slot: "100", finalized: false },
+    ]);
   });
 
   // Two sweeps can overlap. The slower one, working from an older read, must
@@ -290,6 +367,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -297,6 +375,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(8), slot: "899" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
     await repo.saveScan(TRADE_ID, {
@@ -304,6 +383,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: null,
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -311,6 +391,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(3), slot: "300" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -318,6 +399,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: null,
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -328,6 +410,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
     expect(scans.find((scan) => scan.side === "b")?.cursor).toEqual({
@@ -348,6 +431,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -355,6 +439,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(8), slot: "900" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
@@ -362,6 +447,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: null,
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -370,6 +456,7 @@ describe("DvpLegTransferRepository", () => {
       cursor: { signature: sig(8), slot: "900" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
   });

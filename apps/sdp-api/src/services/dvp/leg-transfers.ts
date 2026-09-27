@@ -92,6 +92,18 @@ const SIGNATURE_STATUS_LIMIT = 256;
  */
 const READ_MEMO_CAP = 20_000;
 
+/**
+ * How many unreadable reads one leg's scan remembers to ask for again. The
+ * fallback's probe carries its resume point, so it lists each part of the
+ * region behind the position once and never comes back: a transaction skipped
+ * there is owed a read of its own, which the scan remembers across sweeps.
+ * The cap keeps an escrow whose responses never read from owning an
+ * unbounded share of the budget every sweep; past it, the oldest skips are
+ * kept and the newest fall out, and an escrow that keeps sending such
+ * responses is logged on every read anyway.
+ */
+const UNREADABLE_RETRY_CAP = 64;
+
 /** One signature in an escrow's history, newest first as the cluster lists them. */
 export interface DvpEscrowHistoryEntry {
   signature: Signature;
@@ -673,7 +685,12 @@ function advancedPosition(
   };
 }
 
-/** Resolves one listed signature: recorded, moving nothing, or unreadable and logged. */
+/**
+ * Resolves one listed signature: recorded, moving nothing, or unreadable and
+ * logged. A read whose balances could not be read with confidence is appended
+ * to `unreadableSkips` when the caller collects them, since a walk never lists
+ * behind the position again and the transaction is owed a read of its own.
+ */
 async function resolveEntry(
   reader: DvpEscrowHistoryReader,
   transfers: DvpLegTransferRepository,
@@ -681,11 +698,9 @@ async function resolveEntry(
   entry: DvpEscrowHistoryEntry,
   known: ReadonlyMap<Signature, DvpLegTransfer>,
   budget: DvpLegTransferBudget,
-  memo: DvpLegTransferReadMemo
-): Promise<
-  | { step: "resolved"; recorded: boolean; unreadable?: DvpEscrowHistoryEntry }
-  | { step: "stop"; reason: EntryStop }
-> {
+  memo: DvpLegTransferReadMemo,
+  unreadableSkips?: DvpEscrowHistoryEntry[]
+): Promise<{ step: "resolved"; recorded: boolean } | { step: "stop"; reason: EntryStop }> {
   // A transaction that failed moved no token; no need to read it.
   if (entry.failed) {
     return { step: "resolved", recorded: false };
@@ -743,7 +758,8 @@ async function resolveEntry(
     // caught-up node may yet serve it in a shape the ledger can read. It
     // costs the budget again next sweep, and a transfer sitting in it stays
     // reachable.
-    return { step: "resolved", recorded: false, unreadable: entry };
+    unreadableSkips?.push(entry);
+    return { step: "resolved", recorded: false };
   }
   if (reading.kind === "none") {
     memo.remember(leg, entry.signature, { kind: "none" });
@@ -751,6 +767,97 @@ async function resolveEntry(
   }
   await transfers.record(reading.transfer);
   return { step: "resolved", recorded: true };
+}
+
+/**
+ * Asks the chain again for each transaction the last sweeps could not read
+ * with confidence, oldest first, out of the sweep's own budget. A read that
+ * comes back in a shape the ledger can read records the transfer (or settles
+ * that the transaction moved none of the escrow's tokens), and the entry
+ * leaves the list; anything else -- including a budget that ran out before
+ * the read -- keeps it there for the next sweep.
+ *
+ * @returns The retries still owed after this sweep's asks.
+ */
+async function retryUnreadableReads(
+  reader: DvpEscrowHistoryReader,
+  transfers: DvpLegTransferRepository,
+  leg: DvpLegEscrow,
+  retries: DvpLegTransferScan["unreadableRetries"] | undefined,
+  known: ReadonlyMap<Signature, DvpLegTransfer>,
+  budget: DvpLegTransferBudget,
+  memo: DvpLegTransferReadMemo
+): Promise<DvpLegTransferScan["unreadableRetries"]> {
+  const kept: DvpLegTransferScan["unreadableRetries"] = [];
+  for (const retry of retries ?? []) {
+    if (budget.remaining <= 0) {
+      kept.push(retry);
+      continue;
+    }
+    // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each ask is guarded on its own signature; the list is bounded by the retry cap.
+    const skipped: DvpEscrowHistoryEntry[] = [];
+    const outcome = await resolveEntry(
+      reader,
+      transfers,
+      leg,
+      {
+        signature: retry.signature,
+        slot: BigInt(retry.slot),
+        blockTime: null,
+        failed: false,
+        finalized: retry.finalized,
+      },
+      known,
+      budget,
+      memo,
+      skipped
+    );
+    if (outcome.step === "stop" || skipped.length > 0) {
+      // The cluster would not serve it, the read failed, the budget ran out,
+      // or the balances came back unreadable again: the ask stays owed.
+      kept.push(retry);
+    }
+  }
+  return kept;
+}
+
+/**
+ * The retry list the sweep hands over: the asks it did not settle, and the
+ * unreadable skips of this sweep's own walk that stand behind the position it
+ * saves -- the walk never lists behind the position again, so those are owed
+ * a read of their own. Skips above the position are left out, since the
+ * bounded read lists everything newer than the position again, and the list
+ * keeps the oldest entries past the cap.
+ */
+function nextUnreadableRetries(
+  kept: DvpLegTransferScan["unreadableRetries"],
+  skipped: readonly DvpEscrowHistoryEntry[],
+  cursor: { signature: Signature; slot: string } | null
+): DvpLegTransferScan["unreadableRetries"] {
+  if (cursor === null) {
+    // No position at all: the sweep reads the whole history from the top, so
+    // every one of these transactions is listed again regardless.
+    return [];
+  }
+  const entries = [...kept];
+  const seen = new Set(entries.map((retry) => retry.signature));
+  for (const entry of skipped) {
+    if (seen.has(entry.signature)) {
+      continue;
+    }
+    if (BigInt(entry.slot) > BigInt(cursor.slot)) {
+      // Above the position: the bounded read lists everything newer than the
+      // position again, so this one is asked about regardless.
+      continue;
+    }
+    seen.add(entry.signature);
+    entries.push({
+      signature: entry.signature,
+      slot: entry.slot.toString(),
+      finalized: entry.finalized,
+    });
+  }
+  return entries.slice(0, UNREADABLE_RETRY_CAP);
 }
 
 /**
@@ -973,25 +1080,6 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
 }
 
 /**
- * Whether the walk skipped an unreadable transaction the position now stands
- * past: the position only ever moves forward, so one at the position's slot
- * or older sits behind it, where a bounded read never lists it again and only
- * the probe reaches. The answer was never resolved with confidence, so the
- * next sweep has to list the transaction again and ask for its balances once
- * more.
- */
-function standsPastAnUnreadableSkip(
-  unreadableOldest: DvpEscrowHistoryEntry | undefined,
-  cursor: { signature: Signature; slot: string } | null
-): boolean {
-  return (
-    unreadableOldest !== undefined &&
-    cursor !== null &&
-    BigInt(unreadableOldest.slot) <= BigInt(cursor.slot)
-  );
-}
-
-/**
  * Where the next sweep's probe of the region behind the position resumes. A
  * probe the cap stopped saves the signature below which it stopped, so the
  * region's oldest end is reached a few pages further down with every sweep;
@@ -1012,10 +1100,10 @@ function standsPastAnUnreadableSkip(
  * everything between there and the position is listed, and the next probe
  * continues below it toward the older end.
  *
- * The point never travels past an unreadable transaction either: a sweep that
- * skipped one behind the position saves nothing, for a point below it would
- * leave it skipped for good — the next sweep probes from the position again,
- * where the transaction is listed and its balances asked for once more.
+ * The point never travels past an unreadable transaction either: the sweep
+ * asks for each one it skipped again directly, by signature, so the probe's
+ * progress deeper into the region never has to be traded for the reach of the
+ * transactions behind it.
  */
 function resumePoint(
   fallbackRan: boolean,
@@ -1024,13 +1112,9 @@ function resumePoint(
   probeDeepest: { signature: Signature; slot: string } | null,
   gapComplete: boolean,
   gapDeepest: { signature: Signature; slot: string } | null,
-  unlistedBehindPosition: boolean,
-  unreadableBehindPosition: boolean
+  unlistedBehindPosition: boolean
 ): { signature: Signature; slot: string } | null {
   if (!fallbackRan || !probeEnded) {
-    return null;
-  }
-  if (unreadableBehindPosition) {
     return null;
   }
   if (unlistedBehindPosition && !gapComplete) {
@@ -1106,6 +1190,18 @@ export async function syncDvpLegTransfers(
       transfer,
     ])
   );
+  // The transactions the last sweeps could not read with confidence are the
+  // oldest unsettled business this leg has: they are asked for again before
+  // the walk spends the budget on anything newer.
+  const keptRetries = await retryUnreadableReads(
+    reader,
+    transfers,
+    leg,
+    scan?.unreadableRetries,
+    known,
+    budget,
+    memo
+  );
   let cursor = stored;
   // The watermark qualifies the cursor it arrived with: a stored cursor was
   // only ever saved over a slot the listing continued below.
@@ -1119,10 +1215,10 @@ export async function syncDvpLegTransfers(
   // Whether the walk advanced onto the deepest listed signature: only then
   // may the position stand there.
   let deepestReached = false;
-  // The oldest transaction whose balances the walk could not read with
-  // confidence. The walk runs oldest first, so the first skip of its kind is
-  // the oldest one this sweep saw.
-  let unreadableOldest: DvpEscrowHistoryEntry | undefined;
+  // The transactions whose balances the walk could not read with confidence.
+  // The ones behind the position it saves are owed a read of their own, since
+  // the walk never lists behind the position again.
+  const unreadableSkips: DvpEscrowHistoryEntry[] = [];
   // The walk resolves the listings oldest first — the probe of the region
   // behind the cursor before the bounded read ahead of it, so the ledger's
   // sequence keeps the transfers in the order the chain lists them.
@@ -1132,7 +1228,16 @@ export async function syncDvpLegTransfers(
   }));
   for (const { entry, mayAdvance } of walk) {
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- oldest first, so the read position only advances over resolved signatures.
-    const outcome = await resolveEntry(reader, transfers, leg, entry, known, budget, memo);
+    const outcome = await resolveEntry(
+      reader,
+      transfers,
+      leg,
+      entry,
+      known,
+      budget,
+      memo,
+      unreadableSkips
+    );
     if (outcome.step === "stop") {
       complete = false;
       // A stop anywhere in the probe's region leaves what it listed behind it
@@ -1149,9 +1254,6 @@ export async function syncDvpLegTransfers(
       continue;
     }
     recorded += outcome.recorded ? 1 : 0;
-    // The walk runs oldest first, so the first skip of its kind this sweep saw
-    // is the oldest one.
-    unreadableOldest ??= outcome.unreadable;
     if (finalizedSoFar && entry.finalized) {
       const advanced = advancedPosition(
         cursor,
@@ -1217,9 +1319,9 @@ export async function syncDvpLegTransfers(
       probeDeepest,
       gapComplete,
       gapDeepest,
-      standsBeforeAnUnlistedRegion(chunked, deepestReached),
-      standsPastAnUnreadableSkip(unreadableOldest, cursor)
+      standsBeforeAnUnlistedRegion(chunked, deepestReached)
     ),
+    unreadableRetries: nextUnreadableRetries(keptRetries, unreadableSkips, cursor),
     scannedAt: settled ? new Date(now).toISOString() : null,
   });
   return recorded;

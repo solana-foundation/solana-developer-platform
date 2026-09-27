@@ -71,6 +71,19 @@ export interface DvpLegTransferScan {
    */
   probe: { signature: Signature; slot: string } | null;
   /**
+   * The transactions behind the read position whose balances a sweep could not
+   * read with confidence, oldest first. The probe that reaches that region
+   * carries its resume point, so it lists each part of it once and never comes
+   * back; these are asked for again directly, by signature, until the cluster
+   * serves one in a shape the ledger can read.
+   */
+  unreadableRetries: {
+    signature: Signature;
+    slot: string;
+    /** The finality the listing carried when the read was skipped. */
+    finalized: boolean;
+  }[];
+  /**
    * When a read last got through to the newest signature with nothing left
    * provisional; null when none has, which makes the leg due.
    */
@@ -103,6 +116,12 @@ const transferRowSchema = z.object({
   ]),
 });
 
+const unreadableRetrySchema = z.object({
+  signature: z.string(),
+  slot: z.string().regex(/^\d+$/),
+  finalized: z.boolean(),
+});
+
 const scanRowSchema = z.object({
   side: z.enum(["a", "b"]),
   cursor_signature: z.string().nullable(),
@@ -110,6 +129,7 @@ const scanRowSchema = z.object({
   cursor_slot_complete: z.boolean(),
   probe_signature: z.string().nullable(),
   probe_slot: z.string().regex(/^\d+$/).nullable(),
+  unreadable_retries: z.array(unreadableRetrySchema),
   scanned_at: z.string().nullable(),
 });
 
@@ -151,6 +171,11 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
       parsed.probe_signature === null || parsed.probe_slot === null
         ? null
         : { signature: signature(parsed.probe_signature), slot: parsed.probe_slot },
+    unreadableRetries: parsed.unreadable_retries.map((retry) => ({
+      signature: signature(retry.signature),
+      slot: retry.slot,
+      finalized: retry.finalized,
+    })),
     scannedAt: parsed.scanned_at,
   };
 }
@@ -287,7 +312,7 @@ export function createPostgresDvpLegTransferRepository(
       const result = await db
         .prepare(
           `SELECT side, cursor_signature, cursor_slot, cursor_slot_complete,
-                probe_signature, probe_slot, scanned_at
+                probe_signature, probe_slot, unreadable_retries, scanned_at
            FROM dvp_leg_transfer_scans
           WHERE trade_id = ?`
         )
@@ -311,10 +336,15 @@ export function createPostgresDvpLegTransferRepository(
       const cursorAdvances = `EXCLUDED.cursor_slot IS NOT NULL
              AND (dvp_leg_transfer_scans.cursor_slot IS NULL
                   OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)`;
+      // The retry list is the sweep's own word for what it still owes a read:
+      // it saves the stored list minus the asks it settled, plus its own new
+      // skips. A slower sweep overwriting the list costs the transactions it
+      // dropped their retry, the same way overwriting a deeper probe point
+      // costs the next probe a re-listing of pages it already resolved.
       await db
         .prepare(
-          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, probe_signature, probe_slot, scanned_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, probe_signature, probe_slot, unreadable_retries, scanned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
          ON CONFLICT (trade_id, side)
          DO UPDATE SET
            cursor_signature = CASE
@@ -331,6 +361,7 @@ export function createPostgresDvpLegTransferRepository(
              ELSE dvp_leg_transfer_scans.cursor_slot_complete END,
            probe_signature = EXCLUDED.probe_signature,
            probe_slot = EXCLUDED.probe_slot,
+           unreadable_retries = EXCLUDED.unreadable_retries,
            scanned_at = EXCLUDED.scanned_at`
         )
         .bind(
@@ -341,6 +372,15 @@ export function createPostgresDvpLegTransferRepository(
           cursorSlotComplete,
           probeSignature,
           probeSlot,
+          scan.unreadableRetries.length === 0
+            ? "[]"
+            : JSON.stringify(
+                scan.unreadableRetries.map((retry) => ({
+                  signature: retry.signature,
+                  slot: retry.slot,
+                  finalized: retry.finalized,
+                }))
+              ),
           scan.scannedAt
         )
         .run();

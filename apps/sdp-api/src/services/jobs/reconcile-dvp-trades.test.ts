@@ -251,6 +251,7 @@ describe("reconcileDvpTrades", () => {
           cursor: null,
           cursorSlotComplete: false,
           probe: null,
+          unreadableRetries: [],
           scannedAt,
         });
       }

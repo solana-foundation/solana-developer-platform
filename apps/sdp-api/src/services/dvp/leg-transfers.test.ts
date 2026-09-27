@@ -392,6 +392,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(3), slot: "3" },
         cursorSlotComplete: true,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       },
     ]);
@@ -414,6 +415,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(5), slot: "5" },
         cursorSlotComplete: true,
         probe: null,
+        unreadableRetries: [],
         // Scanned this sweep, at half past the audit hour: the proof is fresh
         // and the audit does not fall due, so the read bounds itself at the
         // cursor.
@@ -493,6 +495,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -516,6 +519,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(8), slot: "8" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       },
     ]);
@@ -549,6 +553,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -565,6 +570,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       },
     ]);
@@ -629,6 +635,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -648,6 +655,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -712,6 +720,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -739,6 +748,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(2_001), slot: "2001" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -751,6 +761,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(5_000), slot: "5000" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: expect.any(String),
     });
   });
@@ -800,6 +811,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -813,6 +825,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(1_001), slot: "1001" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -827,6 +840,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(4_000), slot: "4000" },
       cursorSlotComplete: true,
       probe: null,
+      unreadableRetries: [],
       scannedAt: expect.any(String),
     });
   });
@@ -895,6 +909,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7_000), slot: "7000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -908,6 +923,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: { signature: sig(4_000), slot: "4000" },
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -921,6 +937,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: { signature: sig(1_000), slot: "1000" },
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -936,6 +953,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: expect.any(String),
     });
   });
@@ -1019,6 +1037,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(4_000), slot: "4000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1034,6 +1053,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_001), slot: "7001" },
       cursorSlotComplete: false,
       probe: { signature: sig(1_000), slot: "1000" },
+      unreadableRetries: [],
       scannedAt: null,
     });
     // The probe read its three pages below the old cursor and no deeper.
@@ -1052,12 +1072,13 @@ describe("syncDvpLegTransfers", () => {
 
   // An unreadable transaction the position now stands past — one in the region
   // between the position and the cursor the probe probed below — is resolved
-  // no further than "could not read with confidence". A resume point below it
-  // would start the next probe past it, and a bounded read never lists behind
-  // the position, so its transfer would never be retried. The sweep therefore
-  // saves no point: the next probe starts behind the position, where the
-  // transaction is listed and its balances asked for once more.
-  it("drops the probe's resume point past an unreadable transaction behind the position", async () => {
+  // no further than "could not read with confidence". The probe that reached
+  // it carries its resume point, so it never lists that part of the region
+  // again, and a bounded read never lists behind the position: the sweep
+  // therefore remembers the transaction, and the next sweep asks the cluster
+  // for it directly, by signature, without spending a page of the probe's
+  // progress on reaching it.
+  it("asks again, by signature, for an unreadable transaction behind the position", async () => {
     const page = (high: number, low: number) =>
       history(
         Array.from({ length: high - low + 1 }, (_, index) => high - index),
@@ -1108,13 +1129,12 @@ describe("syncDvpLegTransfers", () => {
       if (before === sig(3_000)) {
         return page(2_999, 2_000);
       }
-      // The second sweep lists nothing new above the position, and its probe
-      // starts behind the position, where the unreadable transaction sits.
-      if (until === sig(7_001)) {
-        return [];
+      if (before === sig(2_000)) {
+        return page(1_999, 1_000);
       }
-      if (before === sig(7_001)) {
-        return history([6_500]);
+      // The second sweep's probe resumes below where the first one stopped.
+      if (before === sig(1_000)) {
+        return [];
       }
       return [];
     });
@@ -1129,36 +1149,44 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(4_000), slot: "4000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
     );
 
     // The position stands at the deepest signature the bounded read listed,
-    // but no resume point travels below it: the probe of the region behind the
-    // position ran past an unreadable transaction, and a point below it would
-    // leave that transaction skipped for good.
+    // and the probe's resume point travels with it — the region's oldest end
+    // is reached a few pages further down with every sweep. The unreadable
+    // transaction is remembered for the next sweep to ask about directly.
     expect(saved[0]).toEqual({
       side: "a",
       cursor: { signature: sig(7_001), slot: "7001" },
       cursorSlotComplete: false,
-      probe: null,
+      probe: { signature: sig(1_000), slot: "1000" },
+      unreadableRetries: [{ signature: sig(6_500), slot: "6500", finalized: true }],
       scannedAt: null,
     });
 
-    // The next sweep's probe starts behind the position, lists the unreadable
-    // transaction again, and this time the cluster serves it in a shape the
-    // ledger can read, so its transfer is recorded after all.
+    // The next sweep asks the cluster for the transaction directly, without a
+    // listing reaching it, and this time the cluster serves it in a shape the
+    // ledger can read, so its transfer is recorded and the ask is settled.
     served.set(sig(6_500), transaction({ post: "100" }));
     await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
 
+    expect(readTransaction).toHaveBeenCalledWith(sig(6_500));
+    expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, {
+      before: sig(6_500),
+      until: null,
+    });
     expect(rows.has(sig(6_500))).toBe(true);
+    expect(saved[1].unreadableRetries).toEqual([]);
   });
 
   // An unreadable transaction above the position is another matter: the
   // bounded read lists everything newer than the position again, so the
-  // transaction is asked for once more regardless of the probe, and the
-  // probe's resume point travels as it would have.
+  // transaction is asked for once more regardless of the probe, and the probe
+  // keeps both its resume point and an empty retry list.
   it("keeps the probe's resume point when the unreadable transaction stands above the position", async () => {
     const page = (high: number, low: number) =>
       history(
@@ -1224,6 +1252,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(4_000), slot: "4000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1237,6 +1266,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_001), slot: "7001" },
       cursorSlotComplete: false,
       probe: { signature: sig(1_000), slot: "1000" },
+      unreadableRetries: [],
       scannedAt: null,
     });
   });
@@ -1308,6 +1338,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(4_000), slot: "4000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1322,6 +1353,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_001), slot: "7001" },
       cursorSlotComplete: false,
       probe: { signature: sig(4_001), slot: "4001" },
+      unreadableRetries: [],
       scannedAt: null,
     });
     // The read of the region behind the position stopped at the cap, and the
@@ -1409,6 +1441,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7_000), slot: "7000" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 },
@@ -1425,6 +1458,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -1440,6 +1474,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: { signature: sig(4_000), slot: "4000" },
+      unreadableRetries: [],
       scannedAt: null,
     });
 
@@ -1454,6 +1489,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(7_000), slot: "7000" },
       cursorSlotComplete: false,
       probe: null,
+      unreadableRetries: [],
       scannedAt: expect.any(String),
     });
   });
@@ -1581,6 +1617,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(3_002), slot: "3002" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1595,6 +1632,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(3_003), slot: "3003" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       },
     ]);
@@ -1642,6 +1680,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1657,6 +1696,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -1694,6 +1734,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(2), slot: "420" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1706,6 +1747,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(2), slot: "420" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       },
     ]);
@@ -1752,6 +1794,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1768,6 +1811,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(8), slot: "8" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -1813,6 +1857,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1853,6 +1898,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(7), slot: "7" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1867,6 +1913,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(9), slot: "9" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -1904,6 +1951,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(1), slot: "1" },
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -1923,6 +1971,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: null,
         cursorSlotComplete: false,
         probe: null,
+        unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1930,7 +1979,14 @@ describe("syncDvpLegTransfers", () => {
 
     expect(rows.size).toBe(0);
     expect(saved).toEqual([
-      { side: "a", cursor: null, cursorSlotComplete: false, probe: null, scannedAt: null },
+      {
+        side: "a",
+        cursor: null,
+        cursorSlotComplete: false,
+        probe: null,
+        unreadableRetries: [],
+        scannedAt: null,
+      },
     ]);
   });
 
@@ -1965,6 +2021,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(2), slot: "2" },
         cursorSlotComplete: true,
         probe: null,
+        unreadableRetries: [],
         scannedAt: null,
       },
     ]);
@@ -1988,6 +2045,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(1), slot: "1" },
           cursorSlotComplete: false,
           probe: null,
+          unreadableRetries: [],
           scannedAt: null,
         },
       ]);
@@ -2024,6 +2082,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(1), slot: "1" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: null,
         },
         { remaining: 10 }
@@ -2040,6 +2099,7 @@ describe("syncDvpLegTransfers", () => {
           // travel: the next read takes the overlap and looks again.
           cursorSlotComplete: false,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2059,6 +2119,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(1), slot: "1" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: null,
         },
         { remaining: 10 }
@@ -2072,6 +2133,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(1), slot: "1" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2215,6 +2277,7 @@ describe("syncDvpLegTransfers", () => {
         cursor: { signature: sig(3), slot: "420" },
         cursorSlotComplete: true,
         probe: null,
+        unreadableRetries: [],
         scannedAt: expect.any(String),
       });
     });
@@ -2232,6 +2295,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: false,
           probe: null,
+          unreadableRetries: [],
           scannedAt: "2026-09-15T00:00:00.000Z",
         },
         { remaining: 10 }
@@ -2255,6 +2319,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: false,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2284,6 +2349,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2302,6 +2368,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(1), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           // Scanned this sweep, at half past the audit hour: the audit does
           // not fall due, so the read bounds itself at the cursor.
           scannedAt: new Date(NOW).toISOString(),
@@ -2316,6 +2383,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2340,6 +2408,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: new Date(NOW - 2 * HISTORY_AUDIT_MS).toISOString(),
         },
         { remaining: 10 },
@@ -2356,6 +2425,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
@@ -2379,6 +2449,7 @@ describe("syncDvpLegTransfers", () => {
           cursor: { signature: sig(2), slot: "420" },
           cursorSlotComplete: true,
           probe: null,
+          unreadableRetries: [],
           scannedAt: expect.any(String),
         },
       ]);
