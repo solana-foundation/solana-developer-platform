@@ -200,6 +200,56 @@ function updateAttemptMatchesRequest(
   );
 }
 
+const LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD = "sourceWalletId";
+
+function usesLegacySourceWalletSnapshot(attempt: PaymentRecurringPaymentUpdateAttemptRow): boolean {
+  return (
+    attempt.changed_fields.includes(LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD) ||
+    LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD in attempt.before_values ||
+    LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD in attempt.after_values
+  );
+}
+
+function toLegacySourceWalletSnapshot(
+  values: Record<string, unknown>,
+  legacySourceWalletId: string | null
+): Record<string, unknown> {
+  if (!("sourceCustodyWalletId" in values)) {
+    return values;
+  }
+  const { sourceCustodyWalletId: _sourceCustodyWalletId, ...rest } = values;
+  return { ...rest, [LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD]: legacySourceWalletId };
+}
+
+/**
+ * Rows written before migration 0073 snapshot the source wallet by wallet_id
+ * under the `sourceWalletId` key and carry no replacement custody-wallet
+ * identity. Translate the retried request into that vocabulary so recovery
+ * still compares the exact same update — a different replacement wallet,
+ * amount, or schedule keeps failing the comparison — instead of permanently
+ * rejecting predecessor-era updates.
+ */
+function legacyUpdateAttemptMatchesRequest(
+  attempt: PaymentRecurringPaymentUpdateAttemptRow,
+  input: {
+    mode: PaymentRecurringPaymentUpdateAttemptMode;
+    changedFields: string[];
+    beforeValues: Record<string, unknown>;
+    afterValues: Record<string, unknown>;
+    oldSourceWalletId: string | null;
+    newSourceWalletId: string | null;
+  }
+): boolean {
+  const translated = {
+    changedFields: input.changedFields.map((field) =>
+      field === "sourceCustodyWalletId" ? LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD : field
+    ),
+    beforeValues: toLegacySourceWalletSnapshot(input.beforeValues, input.oldSourceWalletId),
+    afterValues: toLegacySourceWalletSnapshot(input.afterValues, input.newSourceWalletId),
+  };
+  return attempt.mode === input.mode && updateAttemptMatchesRequest(attempt, translated);
+}
+
 function requestedActiveUpdateMode(
   changedFields: Array<keyof RecurringPaymentUpdateSnapshot>
 ): PaymentRecurringPaymentUpdateAttemptMode {
@@ -471,6 +521,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   beforeValues: Record<string, unknown>;
   afterValues: Record<string, unknown>;
   newSourceCustodyWalletId: string | null;
+  newSourceWalletId: string | null;
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
@@ -483,15 +534,24 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
       statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
     });
     if (existing) {
-      if (
-        existing.mode !== input.mode ||
-        existing.new_source_custody_wallet_id !== input.newSourceCustodyWalletId ||
-        !updateAttemptMatchesRequest(existing, {
-          changedFields: input.changedFields,
-          beforeValues: input.beforeValues,
-          afterValues: input.afterValues,
-        })
-      ) {
+      const matches =
+        existing.new_source_custody_wallet_id === null && usesLegacySourceWalletSnapshot(existing)
+          ? legacyUpdateAttemptMatchesRequest(existing, {
+              mode: input.mode,
+              changedFields: input.changedFields,
+              beforeValues: input.beforeValues,
+              afterValues: input.afterValues,
+              oldSourceWalletId: input.claimed.source_wallet_id,
+              newSourceWalletId: input.newSourceWalletId,
+            })
+          : existing.mode === input.mode &&
+            existing.new_source_custody_wallet_id === input.newSourceCustodyWalletId &&
+            updateAttemptMatchesRequest(existing, {
+              changedFields: input.changedFields,
+              beforeValues: input.beforeValues,
+              afterValues: input.afterValues,
+            });
+      if (!matches) {
         throw conflict("Recurring payment update recovery must retry the same update");
       }
       return requireUpdatedAttempt(
@@ -1767,6 +1827,7 @@ export async function updateRecurringPayment(input: {
       beforeValues: resolved.beforeValues,
       afterValues: resolved.afterValues,
       newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
+      newSourceWalletId: resolved.sourceWallet.walletId,
       createdBy: input.createdBy,
       nowIso,
       recoveringStaleUpdate,

@@ -1496,6 +1496,302 @@ describe("Payments routes — recurring", () => {
     expect(signAndSendMock).toHaveBeenCalledTimes(2);
   });
 
+  it("recovers a stale predecessor source-changing replacement update", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_legacy_replacement";
+    const replacementWalletId = "wal_recurring_legacy_replacement";
+    const replacementPlanSignature = signature(
+      "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
+    );
+    const replacementAuthSignature = signature(
+      "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy"
+    );
+    const oldCancelSignature = signature(
+      "5Tzxe7r8pab72bTDx9pQHM9YEWXoQ2MchfbzdnJAj3vScaUmAAJgEE3Jx1b68u33cfWdJTKXgpUtHBZPYJxVQ1pV"
+    );
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    signAndSendMock
+      .mockResolvedValueOnce(replacementPlanSignature)
+      .mockResolvedValueOnce(replacementAuthSignature)
+      .mockResolvedValueOnce(oldCancelSignature);
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_legacy_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_legacy_replacement', ?, ?, 'active')`
+        )
+        .bind(replacementCustodyWalletId, replacementWalletId, sourceSigner.address),
+    ]);
+
+    // Predecessor snapshot vocabulary: the source wallet is recorded by
+    // wallet_id under the sourceWalletId key, and the row carries no
+    // replacement custody-wallet identity.
+    const parent = await getDb(env)
+      .prepare(
+        `SELECT source_wallet_id, counterparty_id, counterparty_account_id, token,
+                amount, period_hours, first_collection_at, next_collection_due_at,
+                metadata_uri
+           FROM payment_recurring_payments
+          WHERE id = ?`
+      )
+      .bind(activated.id)
+      .first<{
+        source_wallet_id: string;
+        counterparty_id: string;
+        counterparty_account_id: string;
+        token: string;
+        amount: string;
+        period_hours: number;
+        first_collection_at: string | null;
+        next_collection_due_at: string | null;
+        metadata_uri: string | null;
+      }>();
+    if (!parent) {
+      throw new Error("Recurring payment fixture row is missing");
+    }
+    const legacyBefore = {
+      sourceWalletId: parent.source_wallet_id,
+      counterpartyId: parent.counterparty_id,
+      counterpartyAccountId: parent.counterparty_account_id,
+      token: parent.token,
+      amount: parent.amount,
+      periodHours: parent.period_hours,
+      firstCollectionAt: parent.first_collection_at,
+      nextCollectionDueAt: parent.next_collection_due_at,
+      metadataUri: parent.metadata_uri,
+    };
+    const legacyAfter = { ...legacyBefore, sourceWalletId: replacementWalletId };
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, activated.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status,
+             stage, old_plan_id, old_subscription_id, changed_fields,
+             before_values, after_values, created_at, updated_at
+           ) VALUES (
+             'prpu_stale_legacy_source_change', ?, ?, ?, 'replacement', 'processing',
+             'create_plan', ?, ?, ARRAY['sourceWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?
+           )`
+        )
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          activated.planId,
+          activated.subscriptionId,
+          JSON.stringify(legacyBefore),
+          JSON.stringify(legacyAfter),
+          staleAt,
+          staleAt
+        ),
+    ]);
+
+    const updateRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: replacementCustodyWalletId }),
+      },
+      env
+    );
+
+    expect(updateRes.status).toBe(200);
+    const updateBody = await parseRecurringResponse(updateRes);
+    expect(updateBody.data.recurringPayment).toMatchObject({
+      status: "active",
+      sourceCustodyWalletId: replacementCustodyWalletId,
+    });
+    expect(signAndSendMock).toHaveBeenCalledTimes(5);
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT mode, status, stage, new_source_custody_wallet_id
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{
+        mode: string;
+        status: string;
+        stage: string;
+        new_source_custody_wallet_id: string | null;
+      }>();
+    expect(attempt).toMatchObject({ mode: "replacement", status: "confirmed", stage: "finalize" });
+    expect(attempt?.new_source_custody_wallet_id).toBeNull();
+    const parentPin = await getDb(env)
+      .prepare("SELECT source_custody_wallet_id FROM payment_recurring_payments WHERE id = ?")
+      .bind(activated.id)
+      .first<{ source_custody_wallet_id: string | null }>();
+    expect(parentPin?.source_custody_wallet_id).toBe(replacementCustodyWalletId);
+  });
+
+  it("rejects stale predecessor source-changing recovery with a different update", async () => {
+    const sourceSigner = recurringExecution.sourceSigner();
+    const replacementCustodyWalletId = "cwlt_recurring_legacy_replacement";
+    const hijackedCustodyWalletId = "cwlt_recurring_legacy_hijack";
+    const replacementWalletId = "wal_recurring_legacy_replacement";
+    const signAndSendMock = recurringExecution.signAndSendMock();
+    const activated = await activateRecurringPaymentFixture({
+      ...DEFAULT_RECURRING_FIXTURE,
+      headers: RECURRING_HEADERS,
+    });
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_configs
+             (id, organization_id, project_id, provider, config_encrypted,
+              encryption_version, status)
+           VALUES ('cust_cfg_recurring_legacy_replacement', ?, ?, 'local', 'test-config',
+                   'sdp-custody-encryption-v1', 'active')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO custody_wallets
+             (id, custody_config_id, wallet_id, public_key, status)
+           VALUES (?, 'cust_cfg_recurring_legacy_replacement', ?, ?, 'active'),
+                  (?, 'cust_cfg_recurring_legacy_replacement', ?, ?, 'active')`
+        )
+        .bind(
+          replacementCustodyWalletId,
+          replacementWalletId,
+          sourceSigner.address,
+          hijackedCustodyWalletId,
+          "wal_recurring_legacy_hijack",
+          sourceSigner.address
+        ),
+    ]);
+
+    const parent = await getDb(env)
+      .prepare(
+        `SELECT source_wallet_id, counterparty_id, counterparty_account_id, token,
+                amount, period_hours, first_collection_at, next_collection_due_at,
+                metadata_uri
+           FROM payment_recurring_payments
+          WHERE id = ?`
+      )
+      .bind(activated.id)
+      .first<{
+        source_wallet_id: string;
+        counterparty_id: string;
+        counterparty_account_id: string;
+        token: string;
+        amount: string;
+        period_hours: number;
+        first_collection_at: string | null;
+        next_collection_due_at: string | null;
+        metadata_uri: string | null;
+      }>();
+    if (!parent) {
+      throw new Error("Recurring payment fixture row is missing");
+    }
+    const legacyBefore = {
+      sourceWalletId: parent.source_wallet_id,
+      counterpartyId: parent.counterparty_id,
+      counterpartyAccountId: parent.counterparty_account_id,
+      token: parent.token,
+      amount: parent.amount,
+      periodHours: parent.period_hours,
+      firstCollectionAt: parent.first_collection_at,
+      nextCollectionDueAt: parent.next_collection_due_at,
+      metadataUri: parent.metadata_uri,
+    };
+    const legacyAfter = { ...legacyBefore, sourceWalletId: replacementWalletId };
+    const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+
+    await getDb(env).batch([
+      getDb(env)
+        .prepare(
+          "UPDATE payment_recurring_payments SET status = 'updating', updated_at = ? WHERE id = ?"
+        )
+        .bind(staleAt, activated.id),
+      getDb(env)
+        .prepare(
+          `INSERT INTO payment_recurring_payment_update_attempts (
+             id, organization_id, project_id, recurring_payment_id, mode, status,
+             stage, old_plan_id, old_subscription_id, changed_fields,
+             before_values, after_values, created_at, updated_at
+           ) VALUES (
+             'prpu_stale_legacy_source_change', ?, ?, ?, 'replacement', 'processing',
+             'create_plan', ?, ?, ARRAY['sourceWalletId']::text[], ?::jsonb, ?::jsonb, ?, ?
+           )`
+        )
+        .bind(
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          activated.id,
+          activated.planId,
+          activated.subscriptionId,
+          JSON.stringify(legacyBefore),
+          JSON.stringify(legacyAfter),
+          staleAt,
+          staleAt
+        ),
+    ]);
+
+    const hijackRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({ sourceCustodyWalletId: hijackedCustodyWalletId }),
+      },
+      env
+    );
+    expect(hijackRes.status).toBe(409);
+    const hijackBody = errorResponseSchema.parse(await hijackRes.json());
+    expect(hijackBody.error.message).toContain("retry the same update");
+
+    const differentAmountRes = await app.request(
+      `/v1/payments/recurring-payments/${activated.id}`,
+      {
+        method: "PATCH",
+        headers: RECURRING_HEADERS,
+        body: JSON.stringify({
+          sourceCustodyWalletId: replacementCustodyWalletId,
+          amount: "36.00",
+        }),
+      },
+      env
+    );
+    expect(differentAmountRes.status).toBe(409);
+    const differentAmountBody = errorResponseSchema.parse(await differentAmountRes.json());
+    expect(differentAmountBody.error.message).toContain("retry the same update");
+
+    const attempt = await getDb(env)
+      .prepare(
+        `SELECT status, new_source_custody_wallet_id
+           FROM payment_recurring_payment_update_attempts
+          WHERE id = 'prpu_stale_legacy_source_change'`
+      )
+      .first<{ status: string; new_source_custody_wallet_id: string | null }>();
+    expect(attempt).toMatchObject({ status: "processing", new_source_custody_wallet_id: null });
+    expect(signAndSendMock).toHaveBeenCalledTimes(2);
+  });
+
   it("clamps stale metadata update retries after the subscription period advances", async () => {
     const updatePlanSignature = signature(
       "3agLAsjf2Qba9W59cqxbXFoPRJFDFKB3efqYRhT6wLxaM4KwV31NVrLDjKAw22hR1GFcQc4mePSjZ6XZEHUAjN4c"
