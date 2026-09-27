@@ -50,7 +50,7 @@ import {
   createDvpTradeRepository,
   type DvpTradeRow,
 } from "@/db/repositories";
-import { badRequest, conflict } from "@/lib/errors";
+import { type AppError, badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
@@ -66,7 +66,7 @@ import { describeDvpDestinationProblem, findDvpDestinationProblem } from "./insp
 import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
-import { observeDvpTradeNow } from "./observe-now";
+import { observeDvpTradeIfStale, observeDvpTradeNow } from "./observe-now";
 import { readEscrowState } from "./read-chain";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
@@ -345,6 +345,51 @@ async function findBornFrozenEscrows(
 }
 
 /**
+ * The refusal a born-frozen escrow earns, shared by the create that watches it
+ * happen and the keyed retries that would otherwise replay it as a success.
+ *
+ * A keyed retry of a refused create must answer with the same refusal, not a
+ * fresh success: the replay IS the same logical request, and handing it a 201
+ * would undo the admission rule the original response enforced.
+ *
+ * @param tradeId - The trade row id, for the message.
+ * @param escrows - The frozen escrow addresses.
+ * @returns The conflict error to throw.
+ */
+function frozenEscrowRefusal(tradeId: string, escrows: readonly Address[]): AppError {
+  return conflict(
+    `DvP trade ${tradeId}: ${escrows.join(", ")} was created frozen — the mint began defaulting new accounts to frozen between the pre-flight check and the create landing — so no transfer can fund this trade unless the mint's freeze authority thaws ${escrows.join(", ")} first. A new request once the mint no longer defaults accounts to frozen creates a fresh trade.`
+  );
+}
+
+/**
+ * The escrows of a replayed trade its latest observation shows frozen, empty
+ * when the trade is closed, failed, or not seen frozen.
+ *
+ * Only an open trade (`creating`/`created`) can still be refused a funding
+ * path, and those are exactly the statuses a born-frozen trade sits in: it
+ * cannot be funded while frozen, so it cannot have moved on. A null flag —
+ * never observed, or an unreadable chain — is not evidence of frozen and
+ * passes, the same best-effort reading the create path itself uses.
+ *
+ * @param row - The trade row as last observed.
+ * @returns The frozen escrows' addresses.
+ */
+function observedFrozenEscrows(row: DvpTradeRow): Address[] {
+  if (row.status !== "creating" && row.status !== "created") {
+    return [];
+  }
+  const frozen: Address[] = [];
+  if (row.escrowAFrozen === true) {
+    frozen.push(row.escrowA);
+  }
+  if (row.escrowBFrozen === true) {
+    frozen.push(row.escrowB);
+  }
+  return frozen;
+}
+
+/**
  * Creates a DvP trade on chain and records it.
  *
  * @param env - API process environment.
@@ -382,7 +427,19 @@ export async function createDvpTrade(
       if (replayed.status === "create_failed") {
         failedRowId = replayed.id;
       } else {
-        return assertOwnReplay(replayed, fingerprint);
+        const replay = assertOwnReplay(replayed, fingerprint);
+        // A born-frozen refusal threw after the row was written, so this
+        // replay is the SAME logical create that was refused — and it must
+        // answer with the refusal, not quietly turn it into a success. The
+        // row's own observation is the durable record of the frozen escrow;
+        // refreshed here when it is too old to answer with, so a thaw lets
+        // the retry through the moment the flags say funding works again.
+        const current = await observeDvpTradeIfStale(env, replay);
+        const frozen = observedFrozenEscrows(current);
+        if (frozen.length > 0) {
+          throw frozenEscrowRefusal(current.id, frozen);
+        }
+        return current;
       }
     }
   }
@@ -653,11 +710,10 @@ export async function createDvpTrade(
     // The trade is live on chain, so the row records it as such — status,
     // balances and the frozen flags — and keeps its reconciler and its
     // recovery path. What is refused is this create's RESPONSE: the creator
-    // learns the trade cannot be funded, not a success to build on.
+    // learns the trade cannot be funded, not a success to build on. The
+    // refusal is what a keyed retry of this create must replay too.
     await observeDvpTradeNow(env, claimed);
-    throw conflict(
-      `DvP trade ${id}: ${bornFrozen.join(", ")} was created frozen — the mint began defaulting new accounts to frozen between the pre-flight check and the create landing — so no transfer can fund this trade unless the mint's freeze authority thaws ${bornFrozen.join(", ")} first. A new request once the mint no longer defaults accounts to frozen creates a fresh trade.`
-    );
+    throw frozenEscrowRefusal(id, bornFrozen);
   }
 
   const observed = await observeDvpTradeNow(env, claimed);

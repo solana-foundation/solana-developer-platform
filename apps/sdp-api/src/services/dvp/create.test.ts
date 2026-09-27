@@ -75,9 +75,12 @@ vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
 vi.mock("./read-chain", () => ({ readEscrowState }));
 // The immediate chain read after a send is the reconciler's contract, tested in
 // observe-now.test.ts; here it is stubbed so these tests stay about the claim,
-// sign and send ordering. Null means "nothing observed yet".
+// sign and send ordering. Null means "nothing observed yet". The replay path's
+// staleness gate is stubbed alongside it: identity by default, so a replay
+// decides on the row's stored flags unless a case overrides it.
 const observeDvpTradeNow = vi.hoisted(() => vi.fn());
-vi.mock("./observe-now", () => ({ observeDvpTradeNow }));
+const observeDvpTradeIfStale = vi.hoisted(() => vi.fn());
+vi.mock("./observe-now", () => ({ observeDvpTradeNow, observeDvpTradeIfStale }));
 vi.mock("@sdp/rpc/solana", () => ({
   createRpc: () => ({}),
   getRecentBlockhash: async () => ({
@@ -207,6 +210,7 @@ describe("createDvpTrade", () => {
       }
     );
     observeDvpTradeNow.mockResolvedValue(null);
+    observeDvpTradeIfStale.mockImplementation(async (_env: unknown, trade: DvpTradeRow) => trade);
     confirmTransaction.mockResolvedValue({ slot: 1n, confirmationStatus: "confirmed", err: null });
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     createProjectSponsorshipFeePayment.mockResolvedValue({
@@ -608,22 +612,59 @@ describe("createDvpTrade", () => {
     expect(observeDvpTradeNow).toHaveBeenCalledOnce();
   });
 
-  // A keyed retry after the refusal must replay the SAME trade. The escrow is
-  // frozen but the trade is on chain; marking the row failed would free the
-  // key and sign a second trade with a fresh nonce on top of the first.
-  it("replays the refused trade on a keyed retry rather than creating a second one", async () => {
+  // A keyed retry after the refusal must replay the SAME trade — and the same
+  // refusal. The escrow is frozen but the trade is on chain; marking the row
+  // failed would free the key and sign a second trade with a fresh nonce on
+  // top of the first, while returning the row as a success would undo the
+  // admission rule the first response enforced. So the retry re-answers with
+  // the conflict, from the frozen flags the observation recorded on the row.
+  it("replays the refusal on a keyed retry rather than a success or a second trade", async () => {
     acceptSend();
     readEscrowState.mockResolvedValue({ amount: 0n, frozen: true });
+    // The real recorder writes what the immediate observation saw; the stub
+    // must do the same or the retry would find nothing on the row to refuse.
+    observeDvpTradeNow.mockImplementation(async (_env: unknown, trade: DvpTradeRow) => {
+      await getDb(env).execute(
+        "UPDATE dvp_trades SET status = 'created', escrow_a_frozen = TRUE, escrow_b_frozen = TRUE WHERE id = ?",
+        [trade.id]
+      );
+      return { ...trade, status: "created" as const, escrowAFrozen: true, escrowBFrozen: true };
+    });
     const input = { ...tradeInput(), idempotencyKey: "key-frozen" };
 
     await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
-    const retried = await createDvpTrade(env, auditContext, input);
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
 
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
+  });
+
+  // The refusal is only ever about funding, so once a thaw is observed the
+  // same keyed retry goes back to returning the trade — the recovery path the
+  // conflict message promises.
+  it("returns the trade on a keyed retry once the escrow is no longer frozen", async () => {
+    acceptSend();
+    readEscrowState.mockResolvedValue({ amount: 0n, frozen: true });
+    observeDvpTradeNow.mockImplementation(async (_env: unknown, trade: DvpTradeRow) => {
+      await getDb(env).execute(
+        "UPDATE dvp_trades SET status = 'created', escrow_a_frozen = TRUE, escrow_b_frozen = TRUE WHERE id = ?",
+        [trade.id]
+      );
+      return { ...trade, status: "created" as const, escrowAFrozen: true, escrowBFrozen: true };
+    });
+    const input = { ...tradeInput(), idempotencyKey: "key-frozen-thaw" };
+
+    await expect(createDvpTrade(env, auditContext, input)).rejects.toThrow(/created frozen/);
+    // The reconciler's next sweep records the thaw.
+    await getDb(env).execute(
+      "UPDATE dvp_trades SET escrow_a_frozen = FALSE, escrow_b_frozen = FALSE"
+    );
+
+    const retried = await createDvpTrade(env, auditContext, input);
+
     expect(retried.id).toBeTypeOf("string");
-    const rows = await rowsInDb();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe(retried.id);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    await expect(rowsInDb()).resolves.toHaveLength(1);
   });
 
   // Best effort by design: a failed verdict read must not break the create.
