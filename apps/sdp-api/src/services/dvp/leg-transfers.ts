@@ -127,6 +127,8 @@ export interface DvpEscrowHistoryReader {
   readTransaction(signature: Signature): Promise<DvpLegTransactionRead>;
   /** Whether the cluster still knows each signature, in the order asked. */
   knowsSignatures(signatures: readonly Signature[]): Promise<boolean[]>;
+  /** Whether the cluster has finalized each signature, in the order asked. */
+  finalityOf(signatures: readonly Signature[]): Promise<boolean[]>;
   /**
    * The oldest slot this node still holds. Below it the node knows nothing, so
    * "not found" there is the node's gap, not a transaction that went away.
@@ -205,6 +207,18 @@ export function createDvpEscrowHistoryReader(rpc: SolanaRpc): DvpEscrowHistoryRe
         );
       }
       return statuses.map((status) => status !== null);
+    },
+
+    async finalityOf(signatures) {
+      const statuses = await getSignatureStatuses(rpc, [...signatures], {
+        searchTransactionHistory: true,
+      });
+      if (statuses.length !== signatures.length) {
+        throw new Error(
+          `getSignatureStatuses returned ${statuses.length} statuses for ${signatures.length} signatures`
+        );
+      }
+      return statuses.map((status) => status?.confirmationStatus === "finalized");
     },
 
     async oldestKnownSlot() {
@@ -775,7 +789,14 @@ async function resolveEntry(
  * comes back in a shape the ledger can read records the transfer (or settles
  * that the transaction moved none of the escrow's tokens), and the entry
  * leaves the list; anything else -- including a budget that ran out before
- * the read -- keeps it there for the next sweep.
+ * the read -- keeps it there for the next sweep. The asks may spend at most
+ * half of what the sweep has left, so however long they go on, the newly
+ * listed movements of this sweep keep their share of the budget.
+ *
+ * Each ask is replayed with the finality the cluster reports now, not the one
+ * the listing carried when the read was skipped: a transaction confirmed then
+ * and finalized since is recorded finalized, and never waits for a listing of
+ * the older region to settle its row.
  *
  * @returns The retries still owed after this sweep's asks.
  */
@@ -788,14 +809,33 @@ async function retryUnreadableReads(
   budget: DvpLegTransferBudget,
   memo: DvpLegTransferReadMemo
 ): Promise<DvpLegTransferScan["unreadableRetries"]> {
+  const owed = retries ?? [];
+  if (owed.length === 0) {
+    return [];
+  }
   const kept: DvpLegTransferScan["unreadableRetries"] = [];
-  for (const retry of retries ?? []) {
-    if (budget.remaining <= 0) {
+  // Half of what the sweep has left, rounded up: the first ask may spend it
+  // all, and the walk that follows still holds the other half.
+  const share = Math.ceil(budget.remaining / 2);
+  let spent = 0;
+  let finalized: boolean[];
+  try {
+    finalized = await reader.finalityOf(owed.map((retry) => retry.signature));
+  } catch (error) {
+    getLogger().error(
+      { error, tradeId: leg.tradeId, side: leg.side, signatures: owed.map((r) => r.signature) },
+      "dvp transfers: could not ask how far the cluster has finalized the owed reads"
+    );
+    return owed;
+  }
+  for (const [index, retry] of owed.entries()) {
+    if (budget.remaining <= 0 || spent >= share) {
       kept.push(retry);
       continue;
     }
     // react-doctor-disable-next-line react-doctor/async-await-in-loop -- each ask is guarded on its own signature; the list is bounded by the retry cap.
     const skipped: DvpEscrowHistoryEntry[] = [];
+    const before = budget.remaining;
     const outcome = await resolveEntry(
       reader,
       transfers,
@@ -805,13 +845,14 @@ async function retryUnreadableReads(
         slot: BigInt(retry.slot),
         blockTime: null,
         failed: false,
-        finalized: retry.finalized,
+        finalized: finalized[index] ?? retry.finalized,
       },
       known,
       budget,
       memo,
       skipped
     );
+    spent += before - budget.remaining;
     if (outcome.step === "stop" || skipped.length > 0) {
       // The cluster would not serve it, the read failed, the budget ran out,
       // or the balances came back unreadable again: the ask stays owed.
@@ -833,11 +874,11 @@ function nextUnreadableRetries(
   kept: DvpLegTransferScan["unreadableRetries"],
   skipped: readonly DvpEscrowHistoryEntry[],
   cursor: { signature: Signature; slot: string } | null
-): DvpLegTransferScan["unreadableRetries"] {
+): { retries: DvpLegTransferScan["unreadableRetries"]; overflowed: boolean } {
   if (cursor === null) {
     // No position at all: the sweep reads the whole history from the top, so
     // every one of these transactions is listed again regardless.
-    return [];
+    return { retries: [], overflowed: false };
   }
   const entries = [...kept];
   const seen = new Set(entries.map((retry) => retry.signature));
@@ -857,7 +898,13 @@ function nextUnreadableRetries(
       finalized: entry.finalized,
     });
   }
-  return entries.slice(0, UNREADABLE_RETRY_CAP);
+  // Past the cap the newest asks fall out of the list, and the probe's resume
+  // point falls with them: the next sweep probes from the position again,
+  // where the transactions it dropped are listed and collected once more.
+  return {
+    retries: entries.slice(0, UNREADABLE_RETRY_CAP),
+    overflowed: entries.length > UNREADABLE_RETRY_CAP,
+  };
 }
 
 /**
@@ -960,7 +1007,7 @@ async function removeDroppedTransfers(
  * holds, and only an unbounded walk serves what a bounded one never lists
  * again.
  */
-function historyBound(scan: DvpLegTransferScan | null, now: number): Signature | null {
+function historyBound(scan: SeenScan | null, now: number): Signature | null {
   if (scan?.cursorSlotComplete !== true) {
     return null;
   }
@@ -1103,7 +1150,8 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
  * The point never travels past an unreadable transaction either: the sweep
  * asks for each one it skipped again directly, by signature, so the probe's
  * progress deeper into the region never has to be traded for the reach of the
- * transactions behind it.
+ * transactions behind it. A list outgrown by its own asks drops the point, so
+ * the transactions past the cap are listed and collected once more.
  */
 function resumePoint(
   fallbackRan: boolean,
@@ -1112,9 +1160,10 @@ function resumePoint(
   probeDeepest: { signature: Signature; slot: string } | null,
   gapComplete: boolean,
   gapDeepest: { signature: Signature; slot: string } | null,
-  unlistedBehindPosition: boolean
+  unlistedBehindPosition: boolean,
+  overflowedRetries: boolean
 ): { signature: Signature; slot: string } | null {
-  if (!fallbackRan || !probeEnded) {
+  if (!fallbackRan || !probeEnded || overflowedRetries) {
     return null;
   }
   if (unlistedBehindPosition && !gapComplete) {
@@ -1122,6 +1171,63 @@ function resumePoint(
   }
   return probeComplete ? null : probeDeepest;
 }
+
+/**
+ * The two retry lists joined, the fresh row's entries first, a signature
+ * counted once. Both sweeps' asks stay owed: whichever write lands, a
+ * transaction either sweep could not read is still asked about.
+ */
+function mergeUnreadableRetries(
+  fresh: DvpLegTransferScan["unreadableRetries"],
+  mine: DvpLegTransferScan["unreadableRetries"]
+): DvpLegTransferScan["unreadableRetries"] {
+  const entries = [...fresh];
+  const seen = new Set(entries.map((retry) => retry.signature));
+  for (const retry of mine) {
+    if (!seen.has(retry.signature)) {
+      seen.add(retry.signature);
+      entries.push(retry);
+    }
+  }
+  return entries.slice(0, UNREADABLE_RETRY_CAP);
+}
+
+/**
+ * Saves the sweep's scan against the stamp of the scan it read. A write the
+ * row has outgrown -- a concurrent sweep saved first -- is refused, and the
+ * sweep merges what that one left behind: the fresh row's position and probe
+ * stand, and the two retry lists join so neither sweep's unreadable
+ * transactions lose their ask. One merge is attempted; a second refusal
+ * leaves the row as the concurrent sweep wrote it, and the leg stays due, so
+ * the next sweep reads the row fresh and walks again.
+ */
+async function persistTheScan(
+  transfers: DvpLegTransferRepository,
+  leg: DvpLegEscrow,
+  scan: Omit<DvpLegTransferScan, "version">,
+  seen: SeenScan | null
+): Promise<void> {
+  if (await transfers.saveScan(leg.tradeId, scan, seen?.version)) {
+    return;
+  }
+  const fresh = (await transfers.listScans(leg.tradeId)).find((row) => row.side === leg.side);
+  if (fresh !== undefined) {
+    await transfers.saveScan(
+      leg.tradeId,
+      {
+        ...fresh,
+        unreadableRetries: mergeUnreadableRetries(fresh.unreadableRetries, scan.unreadableRetries),
+      },
+      fresh.version
+    );
+  }
+}
+
+/**
+ * A scan as the sweep read it: the row's own stamp when it came from the row,
+ * and no stamp at all when the leg was never read.
+ */
+type SeenScan = Omit<DvpLegTransferScan, "version"> & { version?: string };
 
 /**
  * Reads a leg's escrow history from where the last read stopped, records every
@@ -1152,7 +1258,7 @@ export async function syncDvpLegTransfers(
   reader: DvpEscrowHistoryReader,
   transfers: DvpLegTransferRepository,
   leg: DvpLegEscrow,
-  scan: DvpLegTransferScan | null,
+  scan: SeenScan | null,
   budget: DvpLegTransferBudget,
   now: number = Date.now(),
   memo: DvpLegTransferReadMemo = createDvpLegTransferReadMemo()
@@ -1295,34 +1401,45 @@ export async function syncDvpLegTransfers(
   // that region partly unlisted, which is not a scan either. Anything less
   // leaves the leg due next sweep.
   const settled = settledRead(complete, finalizedSoFar, unaccounted, chunked, probeComplete);
-  await transfers.saveScan(leg.tradeId, {
-    side: leg.side,
-    cursor,
-    // A probe that did not run to its end leaves the next sweep asking for the
-    // whole history: the position may stand, but the region behind it is not
-    // yet accounted for, and the probe is the one read that reaches what a
-    // walk bounded at the position never lists again. A chunked read never
-    // proves the position it read on to either: the region it skipped sits
-    // immediately behind the position, where only the next sweep's probe
-    // sees it.
-    cursorSlotComplete: provenPosition(
+  const { retries: unreadableRetries, overflowed } = nextUnreadableRetries(
+    keptRetries,
+    unreadableSkips,
+    cursor
+  );
+  await persistTheScan(
+    transfers,
+    leg,
+    {
+      side: leg.side,
       cursor,
-      cursorSlotComplete,
-      probeEnded,
-      chunked,
-      probeComplete
-    ),
-    probe: resumePoint(
-      bounded !== null,
-      probeComplete,
-      probeEnded,
-      probeDeepest,
-      gapComplete,
-      gapDeepest,
-      standsBeforeAnUnlistedRegion(chunked, deepestReached)
-    ),
-    unreadableRetries: nextUnreadableRetries(keptRetries, unreadableSkips, cursor),
-    scannedAt: settled ? new Date(now).toISOString() : null,
-  });
+      // A probe that did not run to its end leaves the next sweep asking for the
+      // whole history: the position may stand, but the region behind it is not
+      // yet accounted for, and the probe is the one read that reaches what a
+      // walk bounded at the position never lists again. A chunked read never
+      // proves the position it read on to either: the region it skipped sits
+      // immediately behind the position, where only the next sweep's probe
+      // sees it.
+      cursorSlotComplete: provenPosition(
+        cursor,
+        cursorSlotComplete,
+        probeEnded,
+        chunked,
+        probeComplete
+      ),
+      probe: resumePoint(
+        bounded !== null,
+        probeComplete,
+        probeEnded,
+        probeDeepest,
+        gapComplete,
+        gapDeepest,
+        standsBeforeAnUnlistedRegion(chunked, deepestReached),
+        overflowed
+      ),
+      unreadableRetries,
+      scannedAt: settled ? new Date(now).toISOString() : null,
+    },
+    scan
+  );
   return recorded;
 }

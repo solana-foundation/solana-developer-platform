@@ -84,6 +84,12 @@ export interface DvpLegTransferScan {
     finalized: boolean;
   }[];
   /**
+   * Rises with every write of this row. A sweep saves against the stamp it
+   * read, so a write that arrives after a concurrent sweep's own is refused
+   * and the sweep can merge what that one left behind.
+   */
+  version: string;
+  /**
    * When a read last got through to the newest signature with nothing left
    * provisional; null when none has, which makes the leg due.
    */
@@ -131,6 +137,14 @@ const scanRowSchema = z.object({
   probe_slot: z.string().regex(/^\d+$/).nullable(),
   unreadable_retries: z.array(unreadableRetrySchema),
   scanned_at: z.string().nullable(),
+  // BIGINT. The driver hands it back as a number, a bigint or text depending on
+  // the column's width and its own settings, so all three are read as the
+  // integer they are and carried as text like every other u64-shaped value.
+  version: z.union([
+    z.string().regex(/^\d+$/),
+    z.bigint().transform(String),
+    z.number().int().nonnegative().transform(String),
+  ]),
 });
 
 function toTransfer(row: Record<string, unknown>): DvpLegTransfer {
@@ -177,6 +191,7 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
       finalized: retry.finalized,
     })),
     scannedAt: parsed.scanned_at,
+    version: parsed.version,
   };
 }
 
@@ -211,9 +226,15 @@ export interface DvpLegTransferRepository {
    * Stores where a leg's history read stopped. The cursor never moves back to
    * an earlier slot than the one stored, so an overlapping slower sweep cannot
    * undo a faster one's progress, and the slot's watermark travels with the
-   * cursor it qualifies.
+   * cursor it qualifies. A sweep that read the row at `seenVersion` saves
+   * against that stamp: the write lands only while the row still carries it,
+   * and the boolean answers whether it did.
    */
-  saveScan(tradeId: string, scan: DvpLegTransferScan): Promise<void>;
+  saveScan(
+    tradeId: string,
+    scan: Omit<DvpLegTransferScan, "version">,
+    seenVersion?: string
+  ): Promise<boolean>;
 }
 
 export function createPostgresDvpLegTransferRepository(
@@ -312,7 +333,7 @@ export function createPostgresDvpLegTransferRepository(
       const result = await db
         .prepare(
           `SELECT side, cursor_signature, cursor_slot, cursor_slot_complete,
-                probe_signature, probe_slot, unreadable_retries, scanned_at
+                probe_signature, probe_slot, unreadable_retries, scanned_at, version
            FROM dvp_leg_transfer_scans
           WHERE trade_id = ?`
         )
@@ -321,14 +342,14 @@ export function createPostgresDvpLegTransferRepository(
       return result.results.map(toScan);
     },
 
-    async saveScan(tradeId, scan) {
+    async saveScan(tradeId, scan, seenVersion) {
       const cursorSignature = scan.cursor === null ? null : scan.cursor.signature;
       const cursorSlot = scan.cursor === null ? null : scan.cursor.slot;
       // The watermark qualifies the cursor, so a naked one is never stored.
       const cursorSlotComplete = scan.cursor === null ? false : scan.cursorSlotComplete;
       const probeSignature = scan.probe === null ? null : scan.probe.signature;
       const probeSlot = scan.probe === null ? null : scan.probe.slot;
-      // All three CASEs read the stored row as it was before this statement,
+      // All four CASEs read the stored row as it was before this statement,
       // so the signature, its slot and the slot's watermark move together. The
       // probe point is the sweep's own word for where its probe stopped: a
       // slower sweep overwriting a deeper one only costs the next probe a
@@ -336,15 +357,18 @@ export function createPostgresDvpLegTransferRepository(
       const cursorAdvances = `EXCLUDED.cursor_slot IS NOT NULL
              AND (dvp_leg_transfer_scans.cursor_slot IS NULL
                   OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)`;
-      // The retry list is the sweep's own word for what it still owes a read:
-      // it saves the stored list minus the asks it settled, plus its own new
-      // skips. A slower sweep overwriting the list costs the transactions it
-      // dropped their retry, the same way overwriting a deeper probe point
-      // costs the next probe a re-listing of pages it already resolved.
-      await db
+      // The sweep saves against the stamp it read the row at. A stamp it never
+      // saw (`seenVersion` undefined) writes unconditionally; one the row has
+      // outgrown is refused, and the caller merges what the concurrent sweep
+      // left behind and tries once more.
+      const stampUnmoved =
+        seenVersion === undefined
+          ? "TRUE"
+          : `dvp_leg_transfer_scans.version = ${Number(seenVersion)}::numeric`;
+      const rowsAffected = await db
         .prepare(
-          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, probe_signature, probe_slot, unreadable_retries, scanned_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)
+          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, probe_signature, probe_slot, unreadable_retries, scanned_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, 1)
          ON CONFLICT (trade_id, side)
          DO UPDATE SET
            cursor_signature = CASE
@@ -362,7 +386,9 @@ export function createPostgresDvpLegTransferRepository(
            probe_signature = EXCLUDED.probe_signature,
            probe_slot = EXCLUDED.probe_slot,
            unreadable_retries = EXCLUDED.unreadable_retries,
-           scanned_at = EXCLUDED.scanned_at`
+           scanned_at = EXCLUDED.scanned_at,
+           version = dvp_leg_transfer_scans.version + 1
+         WHERE ${stampUnmoved}`
         )
         .bind(
           tradeId,
@@ -384,6 +410,7 @@ export function createPostgresDvpLegTransferRepository(
           scan.scannedAt
         )
         .run();
+      return rowsAffected > 0;
     },
   };
 }

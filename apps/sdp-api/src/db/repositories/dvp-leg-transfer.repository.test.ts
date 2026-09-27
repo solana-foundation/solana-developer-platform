@@ -249,6 +249,7 @@ describe("DvpLegTransferRepository", () => {
         probe: null,
         unreadableRetries: [],
         scannedAt: "2026-09-15T00:00:00.000Z",
+        version: "2",
       },
     ]);
   });
@@ -275,6 +276,7 @@ describe("DvpLegTransferRepository", () => {
         probe: { signature: sig(4), slot: "400" },
         unreadableRetries: [],
         scannedAt: null,
+        version: "1",
       },
     ]);
 
@@ -325,6 +327,65 @@ describe("DvpLegTransferRepository", () => {
     expect(
       (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.unreadableRetries
     ).toEqual([]);
+  });
+
+  // Two sweeps can overlap. A sweep saves against the stamp of the row it
+  // read: a write that arrives after a concurrent sweep's own is refused, so
+  // the slower sweep merges what the faster one left behind and tries again,
+  // and an unconditional write lands as it always did.
+  it("refuses a save whose stamp the row has outgrown", async () => {
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: true,
+      probe: null,
+      unreadableRetries: [],
+      scannedAt: null,
+    });
+    const seen = (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a");
+
+    // The concurrent sweep's write lands first and moves the stamp.
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(10), slot: "1000" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [],
+      scannedAt: null,
+    });
+
+    // The slower sweep's save, against the stamp it read, is refused.
+    const landed = await repo.saveScan(
+      TRADE_ID,
+      {
+        side: "a",
+        cursor: { signature: sig(8), slot: "800" },
+        cursorSlotComplete: false,
+        probe: null,
+        unreadableRetries: [],
+        scannedAt: null,
+      },
+      seen?.version
+    );
+    expect(landed).toBe(false);
+    expect((await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.cursor).toEqual({
+      signature: sig(10),
+      slot: "1000",
+    });
+
+    // And a save that carries no stamp writes unconditionally, as before --
+    // though the cursor's own guard still never lets it move backwards.
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(8), slot: "800" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [],
+      scannedAt: null,
+    });
+    const after = (await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a");
+    expect(after?.cursor).toEqual({ signature: sig(10), slot: "1000" });
+    expect(after?.version).toBe("3");
   });
 
   // Two sweeps can overlap. The slower one, working from an older read, saves
@@ -412,6 +473,7 @@ describe("DvpLegTransferRepository", () => {
       probe: null,
       unreadableRetries: [],
       scannedAt: "2026-09-15T00:00:00.000Z",
+      version: "2",
     });
     expect(scans.find((scan) => scan.side === "b")?.cursor).toEqual({
       signature: sig(3),
@@ -458,6 +520,7 @@ describe("DvpLegTransferRepository", () => {
       probe: null,
       unreadableRetries: [],
       scannedAt: null,
+      version: "3",
     });
   });
 

@@ -275,8 +275,13 @@ describe("parseDvpLegTransaction", () => {
 describe("syncDvpLegTransfers", () => {
   /** The ledger, keyed by signature, as the fake repository holds it. */
   const rows = new Map<Signature, DvpLegTransfer>();
-  const saved: DvpLegTransferScan[] = [];
+  const saved: Omit<DvpLegTransferScan, "version">[] = [];
   const deleted: Signature[] = [];
+  const listScans = vi.fn<DvpLegTransferRepository["listScans"]>(async () => []);
+  const saveScan = vi.fn<DvpLegTransferRepository["saveScan"]>(async (_tradeId, scan) => {
+    saved.push(scan);
+    return true;
+  });
   const transfers: DvpLegTransferRepository = {
     record: async (transfer) => {
       const existing = rows.get(transfer.signature);
@@ -302,10 +307,8 @@ describe("syncDvpLegTransfers", () => {
     },
     listForLeg: async () => [...rows.values()],
     listForTrades: async () => new Map(),
-    listScans: async () => [],
-    saveScan: async (_tradeId, scan) => {
-      saved.push(scan);
-    },
+    listScans: listScans,
+    saveScan: saveScan,
   };
 
   const served = new Map<Signature, DvpLegTransaction | null | Error | "malformed">();
@@ -327,11 +330,14 @@ describe("syncDvpLegTransfers", () => {
   const knowsSignatures = vi.fn<DvpEscrowHistoryReader["knowsSignatures"]>();
   // The node holds the whole of this trade's history unless a test says otherwise.
   const oldestKnownSlot = vi.fn<DvpEscrowHistoryReader["oldestKnownSlot"]>(async () => 0n);
+  // The cluster has finalized everything it lists, unless a test says otherwise.
+  const finalityOf = vi.fn<DvpEscrowHistoryReader["finalityOf"]>(async () => []);
   const reader: DvpEscrowHistoryReader = {
     listSignatures,
     readTransaction,
     knowsSignatures,
     oldestKnownSlot,
+    finalityOf,
   };
 
   /** History entries, newest first, as the RPC lists them; finalized unless said otherwise. */
@@ -419,6 +425,7 @@ describe("syncDvpLegTransfers", () => {
         // Scanned this sweep, at half past the audit hour: the proof is fresh
         // and the audit does not fall due, so the read bounds itself at the
         // cursor.
+        version: "0",
         scannedAt: new Date(NOW).toISOString(),
       },
       { remaining: 10 },
@@ -496,6 +503,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -554,6 +562,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -636,6 +645,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -721,6 +731,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -812,6 +823,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -910,6 +922,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1038,6 +1051,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1150,6 +1164,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1181,6 +1196,65 @@ describe("syncDvpLegTransfers", () => {
     });
     expect(rows.has(sig(6_500))).toBe(true);
     expect(saved[1].unreadableRetries).toEqual([]);
+  });
+
+  // Two sweeps can overlap on the same leg, and the row they save to moves
+  // under the slower one: its write is refused, and it merges its still-owed
+  // asks into what the faster sweep left behind, so a transaction either sweep
+  // could not read keeps its retry.
+  it("merges its retry list into the row a concurrent sweep just wrote", async () => {
+    listSignatures.mockResolvedValue([]);
+    const mine = {
+      side: "a" as const,
+      cursor: { signature: sig(7), slot: "700" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [{ signature: sig(3), slot: "3", finalized: true }],
+      scannedAt: null,
+      version: "0",
+    };
+    // The concurrent sweep's row: its own retry, and a stamp the sweep's read
+    // predates by the time its write lands.
+    const concurrent = {
+      side: "a" as const,
+      cursor: { signature: sig(8), slot: "800" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [{ signature: sig(9), slot: "900", finalized: true }],
+      scannedAt: null,
+      version: "1",
+    };
+    saveScan.mockImplementationOnce(async () => false);
+    listScans.mockImplementationOnce(async () => [concurrent]);
+    served.set(sig(3), "malformed");
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      mine,
+      { remaining: 10 },
+      NOW,
+      createDvpLegTransferReadMemo()
+    );
+
+    // The refused write is followed by one merge-and-retry, and the saved list
+    // is the join of both sweeps': the concurrent sweep's retry and the sweep's
+    // own, under the concurrent sweep's position and probe.
+    expect(saveScan).toHaveBeenCalledTimes(2);
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(8), slot: "800" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [
+        { signature: sig(9), slot: "900", finalized: true },
+        { signature: sig(3), slot: "3", finalized: true },
+      ],
+      scannedAt: null,
+      // The merged save saves against the concurrent sweep's stamp.
+      version: "1",
+    });
   });
 
   // An unreadable transaction above the position is another matter: the
@@ -1253,6 +1327,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1339,6 +1414,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1442,6 +1518,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 },
@@ -1618,6 +1695,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1681,6 +1759,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1735,6 +1814,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1795,6 +1875,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1858,6 +1939,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1899,6 +1981,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -1972,6 +2055,7 @@ describe("syncDvpLegTransfers", () => {
         cursorSlotComplete: false,
         probe: null,
         unreadableRetries: [],
+        version: "0",
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
       { remaining: 10 }
@@ -2083,6 +2167,7 @@ describe("syncDvpLegTransfers", () => {
           cursorSlotComplete: true,
           probe: null,
           unreadableRetries: [],
+          version: "0",
           scannedAt: null,
         },
         { remaining: 10 }
@@ -2120,6 +2205,7 @@ describe("syncDvpLegTransfers", () => {
           cursorSlotComplete: true,
           probe: null,
           unreadableRetries: [],
+          version: "0",
           scannedAt: null,
         },
         { remaining: 10 }
@@ -2296,6 +2382,7 @@ describe("syncDvpLegTransfers", () => {
           cursorSlotComplete: false,
           probe: null,
           unreadableRetries: [],
+          version: "0",
           scannedAt: "2026-09-15T00:00:00.000Z",
         },
         { remaining: 10 }
@@ -2371,6 +2458,7 @@ describe("syncDvpLegTransfers", () => {
           unreadableRetries: [],
           // Scanned this sweep, at half past the audit hour: the audit does
           // not fall due, so the read bounds itself at the cursor.
+          version: "0",
           scannedAt: new Date(NOW).toISOString(),
         },
         { remaining: 10 },
@@ -2409,6 +2497,7 @@ describe("syncDvpLegTransfers", () => {
           cursorSlotComplete: true,
           probe: null,
           unreadableRetries: [],
+          version: "0",
           scannedAt: new Date(NOW - 2 * HISTORY_AUDIT_MS).toISOString(),
         },
         { remaining: 10 },
