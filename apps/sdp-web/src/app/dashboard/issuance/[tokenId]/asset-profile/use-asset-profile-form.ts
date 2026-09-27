@@ -81,7 +81,12 @@ export function useAssetProfileForm({
     selectedMetadataSignerWalletId || metadataSignerSelection.defaultWalletId;
   const requiresMetadataSigner = Boolean(token.mintAddress && token.status !== "pending");
   const metadataSignerUnavailableReason = requiresMetadataSigner
-    ? resolveMetadataSignerUnavailableReason(token, metadataSignerSelection, metadataSignerWalletId, t)
+    ? resolveMetadataSignerUnavailableReason(
+        token,
+        metadataSignerSelection,
+        metadataSignerWalletId,
+        t
+      )
     : null;
 
   const updateDraft = (patch: Partial<DraftState>) => {
