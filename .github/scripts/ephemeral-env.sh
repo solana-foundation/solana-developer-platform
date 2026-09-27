@@ -6,7 +6,9 @@
 #
 # deploy clones the dev migrate job and the dev API/worker services into
 # per-PR copies that share dev's secrets but land on their own database
-# (EPHEMERAL_DB_NAME) and redis keyspace (EPHEMERAL_REDIS_DB). teardown
+# (EPHEMERAL_DB_NAME) and redis keyspace (EPHEMERAL_REDIS_DB). The API clone
+# drops dev's TRUST_PROXY_HEADERS opt-in: it is publicly reachable while dev
+# sits behind the load balancer. teardown
 # drops the database, flushes the redis db, and deletes the clones.
 set -euo pipefail
 
@@ -113,8 +115,16 @@ deploy() {
   fi
   run jobs execute "${db_job}" --wait
 
+  # The clone inherits dev's environment, which carries TRUST_PROXY_HEADERS=true
+  # (the dev deploy gate requires it behind the load balancer). This clone is
+  # instead public: ingress "all" plus the allUsers invocation below, so its
+  # run.app URL hands callers an entirely attacker-controlled X-Forwarded-For
+  # chain. Drop the proxy-trust opt-in so client IPs fail closed instead of
+  # letting a caller choose the address an IP-restricted key's allowlist
+  # evaluates (APE-810).
   jq --arg name "${api_service}" --arg pr "${pr}" --arg image "${image}" \
     --arg redisdb "${redis_db}" \
+    --arg proxyTrustEnv "TRUST_PROXY_HEADERS" \
     --argjson extra "$(ephemeral_env_json)" \
     '.metadata.name = $name
      | .metadata.labels["sdp-ephemeral-pr"] = $pr
@@ -125,7 +135,8 @@ deploy() {
      | .spec.template.metadata.annotations["autoscaling.knative.dev/maxScale"] = "2"
      | .spec.template.spec.containers[0].image = $image
      | .spec.template.spec.containers[0].env =
-         ((.spec.template.spec.containers[0].env // []) + $extra)
+         (((.spec.template.spec.containers[0].env // [])
+            | map(select(.name != $proxyTrustEnv))) + $extra)
     ' "${tmp}/api.json" >"${tmp}/${api_service}.json"
   run services replace "${tmp}/${api_service}.json" >/dev/null
   run services add-iam-policy-binding "${api_service}" \
