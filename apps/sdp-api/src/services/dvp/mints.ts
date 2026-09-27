@@ -25,7 +25,9 @@
  * 4. The mint does not default new accounts to frozen. The escrow ATA derives
  *    frozen, the funding path refuses a frozen escrow, and no settle, cancel
  *    or reclaim thaws one — a trade created on such a mint could be published
- *    but funded by no one.
+ *    but funded by no one. A mint read is a snapshot, so the create path
+ *    re-checks the rule where it can no longer race: on the escrow accounts
+ *    themselves, once the create has landed (`findBornFrozenEscrows` there).
  */
 
 import type { SolanaRpc } from "@sdp/rpc/solana";

@@ -53,6 +53,8 @@ const getFeePayer = vi.hoisted(() => vi.fn());
 const prepareOwnedSubmission = vi.hoisted(() => vi.fn());
 const releaseDefinitelyUnbroadcast = vi.hoisted(() => vi.fn());
 const sendTransaction = vi.hoisted(() => vi.fn());
+const confirmTransaction = vi.hoisted(() => vi.fn());
+const readEscrowState = vi.hoisted(() => vi.fn());
 // The mint pre-flight is verified separately against real devnet mints in
 // mints.test.ts; here it is stubbed so these tests stay about broadcast
 // ordering. The last case below still proves create is wired to it.
@@ -67,6 +69,10 @@ vi.mock("@/services/sponsorship.service", async () => {
 });
 vi.mock("./mints", () => ({ validateDvpMints }));
 vi.mock("./inspect-mint", () => ({ inspectDvpMint }));
+// The born-frozen escrow check reads the escrows through read-chain's trust
+// discipline, which has its own tests; here it is stubbed so these tests stay
+// about what the create does with the verdict, healthy by default.
+vi.mock("./read-chain", () => ({ readEscrowState }));
 // The immediate chain read after a send is the reconciler's contract, tested in
 // observe-now.test.ts; here it is stubbed so these tests stay about the claim,
 // sign and send ordering. Null means "nothing observed yet".
@@ -79,6 +85,7 @@ vi.mock("@sdp/rpc/solana", () => ({
     lastValidBlockHeight: 100n,
   }),
   sendTransaction,
+  confirmTransaction,
 }));
 
 const { createDvpTrade } = await import("./create");
@@ -200,6 +207,8 @@ describe("createDvpTrade", () => {
       }
     );
     observeDvpTradeNow.mockResolvedValue(null);
+    confirmTransaction.mockResolvedValue({ slot: 1n, confirmationStatus: "confirmed", err: null });
+    readEscrowState.mockResolvedValue({ amount: 0n, frozen: false });
     createProjectSponsorshipFeePayment.mockResolvedValue({
       getFeePayer,
       prepareOwnedSubmission,
@@ -574,6 +583,42 @@ describe("createDvpTrade", () => {
     expect(rows[0].create_signature).not.toBeNull();
     expect(rows[0].create_last_valid_block_height).toBe("100");
     expect(releaseDefinitelyUnbroadcast).not.toHaveBeenCalled();
+  });
+
+  // The frozen-default pre-flight reads the MINT before signing, and
+  // `DefaultAccountState` only governs accounts created after it changes, so a
+  // mint authority flipping the default to frozen mid-flight leaves the escrow
+  // frozen at birth — fundable by no one, since funding refuses a frozen
+  // escrow and no settle, cancel or reclaim thaws one. The create re-checks
+  // the landed escrows and refuses the trade rather than publishing it.
+  it("refuses a trade whose escrow was created frozen after the pre-flight read", async () => {
+    acceptSend();
+    readEscrowState.mockResolvedValueOnce({ amount: 0n, frozen: true });
+
+    await expect(createDvpTrade(env, auditContext, tradeInput())).rejects.toThrow(/created frozen/);
+
+    const rows = await rowsInDb();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("create_failed");
+    // The create landed, so the signature is on the record; what was refused
+    // is the publication, and the observation that would show the trade as
+    // live never ran.
+    expect(rows[0].create_signature).not.toBeNull();
+    expect(observeDvpTradeNow).not.toHaveBeenCalled();
+  });
+
+  // Best effort by design: a failed verdict read must not break the create.
+  // The trade stays exactly where the pre-flight world left it, and the
+  // reconciler logs a frozen escrow on every sweep if one is there.
+  it("publishes the trade when the born-frozen verdict cannot be read", async () => {
+    acceptSend();
+    readEscrowState.mockRejectedValue(new Error("rpc rate limited"));
+
+    const trade = await createDvpTrade(env, auditContext, tradeInput());
+
+    expect(trade.status).toBe("creating");
+    expect(observeDvpTradeNow).toHaveBeenCalledOnce();
+    await expect(rowsInDb()).resolves.toMatchObject([{ status: "creating" }]);
   });
 
   // The pre-flight has to run BEFORE anything is signed or written. A mint the

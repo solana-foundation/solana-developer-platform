@@ -37,6 +37,7 @@ import {
   getTransactionEncoder,
   none,
   pipe,
+  type Signature,
   setTransactionMessageFeePayer,
   setTransactionMessageLifetimeUsingBlockhash,
   some,
@@ -51,6 +52,7 @@ import {
 } from "@/db/repositories";
 import { badRequest, conflict } from "@/lib/errors";
 import { createTenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import { readSolanaCryptoWalletAddress } from "@/services/payments/counterparty-account-resolution";
 import { createProjectSponsorshipFeePayment } from "@/services/sponsorship.service";
@@ -65,6 +67,7 @@ import { inspectDvpMint } from "./inspect-mint";
 import { validateDvpMints } from "./mints";
 import { randomDvpNonce } from "./nonce";
 import { observeDvpTradeNow } from "./observe-now";
+import { readEscrowState } from "./read-chain";
 import { getOrCreateDvpSettlementWallet } from "./settlement-wallet";
 import { validateDvpTerms } from "./validate";
 
@@ -277,6 +280,65 @@ async function assertNamedDestinationsUsable(
   }
 }
 
+/** One leg's on-chain identity, as `readEscrowState` expects it. */
+type EscrowLeg = {
+  escrow: Address;
+  tokenProgram: Address;
+  mint: Address;
+};
+
+/**
+ * The escrows the create transaction just created that sit frozen, empty set
+ * when none do or the verdict could not be read.
+ *
+ * The frozen-default pre-flight (`validateDvpMints`) reads the MINT before the
+ * trade is signed, and `DefaultAccountState` only governs accounts created
+ * after it changes. So a mint authority flipping the default to frozen between
+ * that read and the create landing leaves these escrows frozen at birth: the
+ * funding path refuses a frozen escrow, and no settle, cancel or reclaim thaws
+ * one — a trade admitted by the pre-flight would be published but fundable by
+ * no one. This re-check runs where the rule can no longer race: on the escrow
+ * accounts themselves, after the transaction that created them has confirmed.
+ *
+ * Best effort by design. A failed read skips the check and leaves the trade to
+ * the reconciler, which logs a frozen escrow on every sweep — the same trade
+ * the pre-flight world produced, rather than a broken create. An escrow that
+ * reads as absent passes: a create that did not land has no escrow to freeze.
+ *
+ * @param rpc - Solana RPC to confirm the create and read the escrows from.
+ * @param tradeId - The row id, for logs and `readEscrowState` refusals.
+ * @param swapDvp - The trade's PDA, which every escrow must name as its owner.
+ * @param legs - Both legs' escrow, mint and token program.
+ * @param signature - The create transaction's signature, to confirm first.
+ * @returns The frozen escrows' addresses.
+ */
+async function findBornFrozenEscrows(
+  rpc: ReturnType<typeof solanaRpc.createRpc>,
+  tradeId: string,
+  swapDvp: Address,
+  legs: readonly EscrowLeg[],
+  signature: Signature
+): Promise<Address[]> {
+  try {
+    const confirmation = await solanaRpc.confirmTransaction(rpc, signature, { timeoutMs: 15_000 });
+    if (confirmation.err) {
+      // The create failed on chain, so there is nothing to admit and the
+      // observation below records the failure as it always has.
+      return [];
+    }
+    const states = await Promise.all(
+      legs.map((leg) => readEscrowState(rpc, leg, swapDvp, tradeId))
+    );
+    return legs.filter((_, index) => states[index]?.frozen === true).map((leg) => leg.escrow);
+  } catch (error) {
+    getLogger().warn(
+      { error, tradeId },
+      "dvp create: could not verify the escrows were not created frozen; the reconciler keeps watching"
+    );
+    return [];
+  }
+}
+
 /**
  * Creates a DvP trade on chain and records it.
  *
@@ -472,6 +534,7 @@ export async function createDvpTrade(
   // Kora pays the fee and trade-account rent. Resolve sponsorship only after
   // validation and after the durable claim has won the idempotency race.
   let signed = false;
+  let createSignature: Signature | null = null;
   try {
     const feePayment = await createProjectSponsorshipFeePayment(env, {
       organizationId: input.organizationId,
@@ -521,7 +584,7 @@ export async function createDvpTrade(
     );
     const compiled = compileTransaction(message);
     const bytes = new Uint8Array(getTransactionEncoder().encode(compiled));
-    await submitSponsoredTransaction({
+    createSignature = await submitSponsoredTransaction({
       feePayment,
       rpc,
       transaction: bytes,
@@ -553,6 +616,39 @@ export async function createDvpTrade(
     }
     throw error;
   }
+
+  // The last leg of the frozen-default admission rule. The pre-flight checked
+  // the mint before anything was signed; this checks the escrows the landed
+  // create just made, so a mint that flipped its default to frozen in between
+  // cannot leave a published trade nobody can fund. Runs only on a clean
+  // submission — an ambiguous send stays at `creating` for the chain to settle,
+  // exactly as the catch above leaves it.
+  const bornFrozen =
+    createSignature === null
+      ? []
+      : await findBornFrozenEscrows(
+          rpc,
+          id,
+          swapDvp,
+          [
+            { escrow: escrowA, tokenProgram: tokenProgramA, mint: mintA },
+            { escrow: escrowB, tokenProgram: tokenProgramB, mint: mintB },
+          ],
+          createSignature
+        );
+  if (bornFrozen.length > 0) {
+    const resolved = await repository.resolveCreate(id, "create_failed");
+    if (resolved === null) {
+      getLogger().warn(
+        { tradeId: id },
+        "dvp create: escrow created frozen but the row already advanced; the reconciler owns it now"
+      );
+    }
+    throw conflict(
+      `DvP trade ${id}: ${bornFrozen.join(", ")} was created frozen — the mint began defaulting new accounts to frozen between the pre-flight check and the create landing — so no transfer can ever fund it, and SDP refuses to publish the trade. Retry once the mint no longer defaults accounts to frozen.`
+    );
+  }
+
   const claimed = await repository.getById(
     { organizationId: input.organizationId, projectId: input.projectId },
     id
