@@ -2,11 +2,12 @@ import { createSign, generateKeyPairSync } from "node:crypto";
 import type { ExecutionContext } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
+import type { PaymentTransferRow } from "@/db/repositories";
 import app from "@/index";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
-import { MuralWebhookProcessor } from "./mural";
+import { claimMuralAccountCredit, MuralWebhookProcessor } from "./mural";
 
 /**
  * Regression for SOLA9-628 (APE-845): a signed Mural compliance-review or
@@ -136,6 +137,32 @@ describe("Mural compliance-review webhooks update cached KYC and gate settlement
       .bind(id)
       .first<{ status: string }>();
     return row?.status;
+  }
+
+  async function transferRow(id: string): Promise<PaymentTransferRow> {
+    const row = await getDb(env)
+      .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+      .bind(id)
+      .first<Record<string, unknown>>();
+    if (!row) {
+      throw new Error(`transfer ${id} was not seeded`);
+    }
+    return row as unknown as PaymentTransferRow;
+  }
+
+  async function setCachedKycStatus(status: string): Promise<void> {
+    await getDb(env)
+      .prepare(
+        `UPDATE counterparties
+            SET provider_data = jsonb_set(
+                  provider_data,
+                  '{mural,organization,kycStatus}',
+                  to_jsonb(?::text)
+                )
+          WHERE id = ?`
+      )
+      .bind(status, counterpartyId)
+      .run();
   }
 
   beforeEach(async () => {
@@ -409,5 +436,124 @@ describe("Mural compliance-review webhooks update cached KYC and gate settlement
     });
 
     expect(await cachedKycStatus()).toBe("rejected");
+  });
+
+  it("clears a cached approval when a review error arrives and keeps the refused credit replayable", async () => {
+    await getDb(env)
+      .prepare(
+        `INSERT INTO kyc_wallets (
+           id, organization_id, project_id, counterparty_id, wallet_address,
+           kyc_provider, kyc_status
+         ) VALUES (?, ?, ?, ?, ?, 'mural', 'verified')`
+      )
+      .bind(
+        "kyw_mural_compliance_errored",
+        organizationId,
+        projectId,
+        counterpartyId,
+        "mural-compliance-errored-wallet"
+      )
+      .run();
+    await seedAwaitingTransfer("xfr_mural_compliance_errored");
+
+    const errorResponse = await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_5",
+        currentStatus: { type: "error", errorDescription: "review pipeline failed" },
+      },
+    });
+    expect(errorResponse.status).toBe(200);
+
+    // The error must clear the cached approval — quotes and settlement read
+    // this cache — and drop the mirror out of `verified`.
+    expect(await cachedKycStatus()).toBe("errored");
+    const kycWallet = await getDb(env)
+      .prepare("SELECT kyc_status FROM kyc_wallets WHERE id = ?")
+      .bind("kyw_mural_compliance_errored")
+      .first<{ kyc_status: string }>();
+    expect(kycWallet).toEqual({ kyc_status: "unverified" });
+
+    const creditResponse = await sendMuralWebhook({
+      payload: {
+        type: "account_credited",
+        organizationId: muralOrganizationId,
+        accountId,
+        tokenAmount: { tokenAmount: 100, tokenSymbol: "USDC" },
+      },
+    });
+    expect(creditResponse.status).toBe(200);
+
+    // Settlement is barred, and the refusal must NOT discharge the event: the
+    // pending inbox row is what replays the credit once the error clears.
+    expect(await transferStatus("xfr_mural_compliance_errored")).toBe("awaiting_payment");
+    expect(await inboxCount()).toBe(1);
+  });
+
+  it("does not let a late approval reverse a recorded rejection", async () => {
+    const rejectionResponse = await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_6",
+        currentStatus: { type: "rejected", rejectionDescription: "KYC rejected" },
+      },
+    });
+    expect(rejectionResponse.status).toBe(200);
+    expect(await cachedKycStatus()).toBe("rejected");
+
+    const approvalResponse = await sendMuralWebhook({
+      payload: {
+        type: "compliance_review_status_changed",
+        organizationId: muralOrganizationId,
+        complianceReviewId: "review_regression_7",
+        currentStatus: { type: "approved" },
+      },
+    });
+    expect(approvalResponse.status).toBe(200);
+
+    // A stale or out-of-order approval must not re-open quote eligibility and
+    // settlement after the rejection landed.
+    expect(await cachedKycStatus()).toBe("rejected");
+  });
+
+  it("honors the compliance gate inside the atomic credit claim", async () => {
+    await seedAwaitingTransfer("xfr_mural_claim_approved");
+    const approvedTransfer = await transferRow("xfr_mural_claim_approved");
+    expect(
+      await claimMuralAccountCredit(env, {
+        transfer: approvedTransfer,
+        counterpartyId,
+        deliveryId: "delivery_claim_approved",
+        tokenAmount: 100,
+      })
+    ).toBe("completed");
+    expect(await transferStatus("xfr_mural_claim_approved")).toBe("completed");
+
+    // An already-claimed (completed) transfer reports as claimed elsewhere.
+    expect(
+      await claimMuralAccountCredit(env, {
+        transfer: approvedTransfer,
+        counterpartyId,
+        deliveryId: "delivery_claim_approved",
+        tokenAmount: 100,
+      })
+    ).toBe("already_claimed");
+
+    // A rejection that commits before the claim bars the settlement in the
+    // same statement that would move the money.
+    await setCachedKycStatus("rejected");
+    await seedAwaitingTransfer("xfr_mural_claim_rejected");
+    const rejectedTransfer = await transferRow("xfr_mural_claim_rejected");
+    expect(
+      await claimMuralAccountCredit(env, {
+        transfer: rejectedTransfer,
+        counterpartyId,
+        deliveryId: "delivery_claim_rejected",
+        tokenAmount: 100,
+      })
+    ).toBe("blocked");
+    expect(await transferStatus("xfr_mural_claim_rejected")).toBe("awaiting_payment");
   });
 });

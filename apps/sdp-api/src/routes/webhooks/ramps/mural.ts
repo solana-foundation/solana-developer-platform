@@ -126,6 +126,82 @@ async function findMuralOnrampTransfer(
   );
 }
 
+type MuralAccountCreditClaim = "completed" | "blocked" | "already_claimed";
+
+/**
+ * Claims an awaiting on-ramp transfer for an account credit in a single atomic
+ * statement, with the compliance gate inside the claim's WHERE clause: a
+ * rejection or review error that commits while the credit is in flight is
+ * honored by the very write that would settle money, so the settlement can
+ * never slip past a decision that lands concurrently with it.
+ */
+export async function claimMuralAccountCredit(
+  env: Env,
+  input: {
+    transfer: PaymentTransferRow;
+    counterpartyId: string;
+    deliveryId: string;
+    tokenAmount: number;
+  }
+): Promise<MuralAccountCreditClaim> {
+  const row = await getDb(env)
+    .prepare(
+      `WITH pt AS (
+        UPDATE payment_transfers
+           SET status = 'completed',
+               updated_at = ?,
+               amount = ?,
+               provider_data = provider_data || ?::jsonb
+         WHERE id = ?
+           AND organization_id = ?
+           AND project_id IS NOT DISTINCT FROM ?
+           AND status = 'awaiting_payment'
+           AND NOT EXISTS (
+             SELECT 1
+               FROM counterparties c
+              WHERE c.id = ?
+                AND c.status = 'active'
+                AND c.provider_data->'mural'->'organization'->>'kycStatus'
+                    IN ('rejected', 'errored')
+           )
+        RETURNING id
+      )
+      SELECT id FROM pt`
+    )
+    .bind(
+      new Date().toISOString(),
+      String(input.tokenAmount),
+      JSON.stringify({
+        mural: {
+          ...readMuralData(input.transfer),
+          accountCreditedDeliveryId: input.deliveryId,
+        },
+      }),
+      input.transfer.id,
+      input.transfer.organization_id,
+      input.transfer.project_id,
+      input.counterpartyId
+    )
+    .first<{ id: string }>();
+  if (row) {
+    return "completed";
+  }
+  // No row matched: either the compliance gate just blocked the claim, or
+  // another apply (replay or concurrent delivery) already moved the transfer
+  // out of `awaiting_payment`. Distinguish by re-reading the cached status.
+  const counterparty = await getDb(env)
+    .prepare(
+      `SELECT provider_data->'mural'->'organization'->>'kycStatus' AS kyc_status
+         FROM counterparties WHERE id = ?`
+    )
+    .bind(input.counterpartyId)
+    .first<{ kyc_status: string | null }>();
+  const complianceStatus = counterparty?.kyc_status ?? undefined;
+  return complianceStatus === "rejected" || complianceStatus === "errored"
+    ? "blocked"
+    : "already_claimed";
+}
+
 async function handleAccountCredited(
   env: Env,
   event: {
@@ -154,7 +230,15 @@ async function handleAccountCredited(
     getLogger().warn(
       `[mural webhook] refusing account credit for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
     );
-    return;
+    // Throw rather than return: a refusal that returned would discharge the
+    // inbox row and destroy the only signed record of the credit, leaving the
+    // transfer `awaiting_payment` with nothing to replay once the compliance
+    // error clears and the organization is approved again. A non-terminal
+    // failure keeps the event pending for the replay job (or parked, paging,
+    // once attempts are spent) — recoverable either way.
+    throw new Error(
+      `[mural webhook] account credit refused for counterparty ${counterparty.id}: compliance status "${complianceStatus}"`
+    );
   }
   const payments = createSystemPaymentsRepository(env);
   const replay = await getDb(env)
@@ -180,23 +264,22 @@ async function handleAccountCredited(
     return;
   }
 
-  const claimed = await payments.updateTransferStatusGuarded({
-    transferId: transfer.id,
-    organizationId: transfer.organization_id,
-    projectId: transfer.project_id,
-    fromStatuses: ["awaiting_payment"],
-    toStatus: "completed",
-    updatedAt: new Date().toISOString(),
-    amount: String(event.tokenAmount),
-    providerData: {
-      mural: {
-        ...readMuralData(transfer),
-        accountCreditedDeliveryId: event.deliveryId,
-      },
-    },
+  const claim = await claimMuralAccountCredit(env, {
+    transfer,
+    counterpartyId: counterparty.id,
+    deliveryId: event.deliveryId,
+    tokenAmount: event.tokenAmount,
   });
-  if (!claimed) {
+  if (claim === "already_claimed") {
     return;
+  }
+  if (claim === "blocked") {
+    getLogger().warn(
+      `[mural webhook] refusing account credit for counterparty ${counterparty.id}: compliance blocked at claim time`
+    );
+    throw new Error(
+      `[mural webhook] account credit refused for counterparty ${counterparty.id}: compliance blocked at claim time`
+    );
   }
   getLogger().info(
     `[mural webhook] transfer ${transfer.id} completed (payin ${event.tokenAmount})`
@@ -205,12 +288,31 @@ async function handleAccountCredited(
 
 const MURAL_TERMINAL_KYC_STATUSES: ReadonlySet<string> = new Set(["approved", "rejected"]);
 
-/** A non-decision status arriving after a recorded decision is a replayed stale event. */
+/**
+ * Whether an incoming KYC status must not overwrite the cached state.
+ *
+ * A recorded `rejected` is a delivered compliance decision and stays sticky: a
+ * late or replayed event — a stale `approved`, a review `error`, or a
+ * pre-decision status — must never reverse it, because an approval applied
+ * after a rejection re-opens quote eligibility and account-credit settlement.
+ * Only a fresh signed `rejected` re-applies, idempotently.
+ *
+ * A review `error` is a provider processing failure, not a decision: it is
+ * never stale, so it clears a cached approval (settlement treats `errored` as
+ * blocking). A replayed error clearing a newer approval is fail-safe —
+ * settlement stays blocked until the next signed approval arrives — while an
+ * ignored error would leave money moving on a review the provider no longer
+ * has.
+ */
 function isStaleMuralKycStatus(counterparty: CounterpartyRow, incoming: MuralKycStatus): boolean {
-  if (MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
+  const cached = readCachedMuralOrganizationKycStatus(counterparty);
+  if (cached === "rejected") {
+    return incoming !== "rejected";
+  }
+  if (incoming === "errored" || MURAL_TERMINAL_KYC_STATUSES.has(incoming)) {
     return false;
   }
-  return MURAL_TERMINAL_KYC_STATUSES.has(readCachedMuralOrganizationKycStatus(counterparty) ?? "");
+  return MURAL_TERMINAL_KYC_STATUSES.has(cached ?? "");
 }
 
 function readCachedMuralOrganizationKycStatus(counterparty: CounterpartyRow): string | undefined {
