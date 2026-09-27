@@ -258,6 +258,60 @@ describe("PrivateChannelTransferRepository (postgres)", () => {
     expect(row.recipient_verified_wallet_id).toBe(RECIPIENT_WALLET_A_ID);
   });
 
+  it("countNonTerminalByProject counts pending and submitted transfers across every instance of the tenant", async () => {
+    // Admission needs an active instance, and a project holds at most one, so
+    // each instance is admitted while active and retired right after. The
+    // count must still see rows bound to retired instances (SOLA9-468).
+    const db = getDb(env);
+    const seedInstanceRow = (id: string, projectId: string) =>
+      db
+        .prepare(
+          `INSERT INTO private_channel_instances (
+             id, organization_id, project_id, gateway_url,
+             escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+           ) VALUES (?, ?, ?, 'https://gateway.example/' || ?,
+              'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+        )
+        .bind(id, TEST_ORG.id, projectId, id)
+        .run();
+    const retire = (id: string) =>
+      db
+        .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+        .bind(id)
+        .run();
+
+    await seedTransfer();
+    await seedSubmitted();
+    await retire(TEST_INSTANCE_ID);
+    await seedInstanceRow("pci_pct_repo_other", TEST_PROJECT_ID);
+    await seedTransfer({ instanceId: "pci_pct_repo_other" });
+    await retire("pci_pct_repo_other");
+    await seedInstanceRow("pci_pct_repo_prod", `${TEST_PROJECT_ID}_production`);
+    const otherProject = await seedSubmitted({
+      instanceId: "pci_pct_repo_prod",
+      projectId: `${TEST_PROJECT_ID}_production`,
+    });
+    // Terminal rows drop out of the count.
+    await repo.updateTransfer({
+      id: otherProject.id,
+      status: "confirmed",
+      expectedStatus: "submitted",
+    });
+
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).toBe(3);
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+      })
+    ).toBe(0);
+  });
+
   it("maps a submitted transfer without exposing internal audit fields", async () => {
     const row = await seedSubmitted();
 

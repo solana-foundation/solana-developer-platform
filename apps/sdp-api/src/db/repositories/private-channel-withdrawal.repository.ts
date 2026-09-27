@@ -109,6 +109,8 @@ export interface PrivateChannelWithdrawalRepository {
   listNonTerminal(limit: number): Promise<PrivateChannelWithdrawalRow[]>;
   /** Delete guard. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
+  /** Replacement guard: in-flight withdrawals on any instance of the tenant. */
+  countNonTerminalByProject(scope: WithdrawalProjectScope): Promise<number>;
   /** Merge `patch` into `context` JSONB atomically (see deposit repo). */
   patchContext(id: string, patch: PrivateChannelTransferContext): Promise<void>;
 }

@@ -216,6 +216,59 @@ describe("PrivateChannelDepositRepository (postgres)", () => {
     expect(await repo.countNonTerminalByInstance(TEST_INSTANCE_ID)).toBe(0);
   });
 
+  it("countNonTerminalByProject counts in-flight deposits across every instance of the tenant", async () => {
+    // Admission needs an active instance, and a project holds at most one, so
+    // each instance is admitted while active and retired right after. The
+    // count must still see rows bound to retired instances (SOLA9-468).
+    const db = getDb(env);
+    const retire = (id: string) =>
+      db
+        .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+        .bind(id)
+        .run();
+    const seedInstanceRow = (id: string, projectId: string) =>
+      db
+        .prepare(
+          `INSERT INTO private_channel_instances (
+             id, organization_id, project_id, gateway_url,
+             escrow_program_id, withdraw_program_id, escrow_instance_addr, auth_url, is_active
+           ) VALUES (?, ?, ?, 'https://gateway.example/' || ?,
+             'escrow_program', 'withdraw_program', 'escrow_instance', 'https://auth.example', TRUE)`
+        )
+        .bind(id, TEST_ORG.id, projectId, id)
+        .run();
+
+    const created = await repo.createDeposit(makeInput());
+    await retire(TEST_INSTANCE_ID);
+    await seedInstanceRow("inst_pcd_2", TEST_PROJECT_ID);
+    await repo.createDeposit(makeInput({ instanceId: "inst_pcd_2" }));
+    await retire("inst_pcd_2");
+    await seedInstanceRow("inst_pcd_prod", `${TEST_PROJECT_ID}_production`);
+    const otherProject = await repo.createDeposit(
+      makeInput({ instanceId: "inst_pcd_prod", projectId: `${TEST_PROJECT_ID}_production` })
+    );
+    // Drive one to terminal; it must drop out of the count.
+    await repo.updateDeposit({
+      id: created?.id ?? "",
+      status: "failed",
+      failureReason: "x",
+      expectedStatus: "pending",
+    });
+
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).toBe(1);
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: `${TEST_PROJECT_ID}_production`,
+      })
+    ).toBe(otherProject === null ? 0 : 1);
+  });
+
   it("scopes idempotency reservations to the project", async () => {
     await repo.createDeposit(makeInput({ idempotencyKey: "idem_scoped" }));
     const read = (projectId: string) =>

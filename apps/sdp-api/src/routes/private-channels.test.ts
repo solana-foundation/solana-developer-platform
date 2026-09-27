@@ -309,6 +309,250 @@ describe("Private Channels routes", () => {
     expect(getBody.data.instance).toBeNull();
   });
 
+  it("POST /instance/disconnect drains first: in-flight transfer → 409, admission closed, retry disconnects", async () => {
+    probeConnectionMock.mockResolvedValueOnce(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_transfers (
+             id, organization_id, project_id, instance_id, channel_id,
+             sender_private_channel_user_id, recipient_private_channel_user_id,
+             sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
+             mint, amount, status, signature
+           ) VALUES ('pct_inflight', ?, ?, ?, 'pch_inflight', 'pcu_sender', 'pcu_recipient',
+                     'w_sender', 'w_recipient',
+                     '11111111111111111111111111111111', '22222222222222222222222222222222',
+                     'mint1', '1', 'submitted', 'sig_inflight')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId)
+      .run();
+
+    // In-flight transfer: disconnect refuses but the drain is durable.
+    const refused = await app.request(
+      "/v1/private-channels/instance/disconnect",
+      { method: "POST", headers: authHeaders(), body: "{}" },
+      env
+    );
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { error: { message: string } };
+    expect(refusedBody.error.message).toContain("draining for disconnect");
+    expect(refusedBody.error.message).toContain("1 transfer(s)");
+
+    // The instance stays connected: a different gateway cannot replace it
+    // while the transfer is unresolved (SOLA9-468).
+    const replaced = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ ...SANDBOX_DEFAULTS, gatewayUrl: "http://34.71.147.163:9901" }),
+      },
+      env
+    );
+    expect(replaced.status).toBe(409);
+
+    // The barrier is atomic with admission: the guarded INSERT refuses now.
+    const admitted = await db
+      .prepare(
+        `INSERT INTO private_channel_transfers (
+             id, organization_id, project_id, instance_id, channel_id,
+             sender_private_channel_user_id, recipient_private_channel_user_id,
+             sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
+             mint, amount, status, signature
+           )
+           SELECT 'pct_late', ?, ?, ?, 'pch_inflight', 'pcu_sender', 'pcu_recipient',
+                  'w_sender', 'w_recipient',
+                  '11111111111111111111111111111111', '22222222222222222222222222222222',
+                  'mint1', '1', 'submitted', 'sig_late'
+            WHERE EXISTS (
+              SELECT 1 FROM private_channel_instances i
+               WHERE i.id = ? AND i.is_active = TRUE AND i.draining_at IS NULL
+            )
+        RETURNING id`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId, instanceId)
+      .first<{ id: string }>();
+    expect(admitted).toBeNull();
+
+    // The transfer settles; the retry now disconnects cleanly.
+    await db
+      .prepare(
+        "UPDATE private_channel_transfers SET status = 'confirmed' WHERE id = 'pct_inflight'"
+      )
+      .run();
+    const retried = await app.request(
+      "/v1/private-channels/instance/disconnect",
+      { method: "POST", headers: authHeaders(), body: "{}" },
+      env
+    );
+    expect(retried.status).toBe(200);
+    const retriedBody = (await retried.json()) as { data: { instance: { isActive: boolean } } };
+    expect(retriedBody.data.instance.isActive).toBe(false);
+
+    const getRes = await app.request(
+      "/v1/private-channels/instance",
+      { headers: authHeaders() },
+      env
+    );
+    const getBody = (await getRes.json()) as { data: PrivateChannelInstanceEnvelope };
+    expect(getBody.data.instance).toBeNull();
+  });
+
+  it("POST /instance/disconnect counts deposits and withdrawals too, and names each in the refusal", async () => {
+    probeConnectionMock.mockResolvedValueOnce(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO private_channel_deposits (
+               id, organization_id, project_id, instance_id, wallet_id,
+               depositor, recipient, mint, amount, context
+             ) VALUES ('pcd_inflight', ?, ?, ?, 'w1', 'dep1', 'rec1', 'mint1', '1', '{}'::jsonb)`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId),
+      db
+        .prepare(
+          `INSERT INTO private_channel_withdrawals (
+               id, organization_id, project_id, instance_id, wallet_id,
+               owner, destination, mint, amount, context
+             ) VALUES ('pcw_inflight', ?, ?, ?, 'w1', 'own1', 'dest1', 'mint1', '1', '{}'::jsonb)`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId),
+      db
+        .prepare(
+          `INSERT INTO private_channel_transfers (
+               id, organization_id, project_id, instance_id, channel_id,
+               sender_private_channel_user_id, recipient_private_channel_user_id,
+               sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
+               mint, amount, status, signature
+             ) VALUES ('pct_inflight_all', ?, ?, ?, 'pch_inflight', 'pcu_sender', 'pcu_recipient',
+                       'w_sender', 'w_recipient',
+                       '11111111111111111111111111111111', '22222222222222222222222222222222',
+                       'mint1', '1', 'submitted', 'sig_inflight')`
+        )
+        .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId),
+    ]);
+
+    const refused = await app.request(
+      "/v1/private-channels/instance/disconnect",
+      { method: "POST", headers: authHeaders(), body: "{}" },
+      env
+    );
+    expect(refused.status).toBe(409);
+    const refusedBody = (await refused.json()) as { error: { message: string } };
+    expect(refusedBody.error.message).toContain("1 deposit(s), 1 withdrawal(s), and 1 transfer(s)");
+
+    await db.batch([
+      db.prepare("UPDATE private_channel_deposits SET status = 'failed' WHERE id = 'pcd_inflight'"),
+      db.prepare(
+        "UPDATE private_channel_withdrawals SET status = 'failed' WHERE id = 'pcw_inflight'"
+      ),
+      db.prepare(
+        "UPDATE private_channel_transfers SET status = 'confirmed' WHERE id = 'pct_inflight_all'"
+      ),
+    ]);
+    const retried = await app.request(
+      "/v1/private-channels/instance/disconnect",
+      { method: "POST", headers: authHeaders(), body: "{}" },
+      env
+    );
+    expect(retried.status).toBe(200);
+  });
+
+  it("POST /instance refuses a different gateway while a historical instance has in-flight movements, but reconnecting the original gateway stays available", async () => {
+    probeConnectionMock.mockResolvedValue(successProbe());
+    const created = await app.request(
+      "/v1/private-channels/instance",
+      { method: "POST", headers: authHeaders(), body: JSON.stringify(SANDBOX_DEFAULTS) },
+      env
+    );
+    const createdBody = (await created.json()) as { data: { instance: { id: string } } };
+    const instanceId = createdBody.data.instance.id;
+    const db = getDb(env);
+    await db
+      .prepare(
+        `INSERT INTO private_channel_transfers (
+             id, organization_id, project_id, instance_id, channel_id,
+             sender_private_channel_user_id, recipient_private_channel_user_id,
+             sender_wallet_id, recipient_verified_wallet_id, sender, recipient,
+             mint, amount, status, signature
+           ) VALUES ('pct_historic', ?, ?, ?, 'pch_historic', 'pcu_sender', 'pcu_recipient',
+                     'w_sender', 'w_recipient',
+                     '11111111111111111111111111111111', '22222222222222222222222222222222',
+                     'mint1', '1', 'submitted', 'sig_historic')`
+      )
+      .bind(TEST_ORG.id, TEST_PROJECT.id, instanceId)
+      .run();
+    // Retire the instance out from under the transfer — the state the
+    // pre-fix disconnect left behind (SOLA9-468).
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(instanceId)
+      .run();
+
+    const gatewayUrl = "http://34.71.147.163:9902";
+    const originalAllowlist = env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST;
+    env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = gatewayUrl;
+    try {
+      const replaced = await app.request(
+        "/v1/private-channels/instance",
+        {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ ...SANDBOX_DEFAULTS, gatewayUrl }),
+        },
+        env
+      );
+      expect(replaced.status).toBe(409);
+      const replacedBody = (await replaced.json()) as { error: { message: string } };
+      expect(replacedBody.error.message).toMatch(/in flight/i);
+      expect(replacedBody.error.message).toMatch(/previous/i);
+    } finally {
+      env.PRIVATE_CHANNEL_EGRESS_ALLOWLIST = originalAllowlist;
+    }
+
+    // Reactivating the original gateway stays available: that reconnect is
+    // the recovery path for the stranded transfer.
+    const reactivated = await app.request(
+      "/v1/private-channels/instance",
+      {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ ...SANDBOX_DEFAULTS, confirmReactivate: true }),
+      },
+      env
+    );
+    expect(reactivated.status).toBe(200);
+    const reactivatedBody = (await reactivated.json()) as {
+      data: { instance: { id: string; isActive: boolean } };
+    };
+    expect(reactivatedBody.data.instance.id).toBe(instanceId);
+    expect(reactivatedBody.data.instance.isActive).toBe(true);
+  });
+
+  it("POST /instance/disconnect returns 404 when there is no active row", async () => {
+    const res = await app.request(
+      "/v1/private-channels/instance/disconnect",
+      { method: "POST", headers: authHeaders(), body: "{}" },
+      env
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("POST /instance requires confirmReactivate when a same-gateway inactive row exists", async () => {
     probeConnectionMock.mockResolvedValue(successProbe());
     await app.request(

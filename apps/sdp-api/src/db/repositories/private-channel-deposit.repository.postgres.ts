@@ -205,6 +205,23 @@ export function createPostgresPrivateChannelDepositRepository(
       return row.count;
     },
 
+    async countNonTerminalByProject(scope) {
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*)::int AS count FROM private_channel_deposits
+             WHERE organization_id = ? AND project_id = ?
+               AND status IN ('pending', 'submitted', 'confirmed')`
+        )
+        .bind(scope.organizationId, scope.projectId)
+        .first<{ count: number }>();
+      // The gateway-replacement gate reads this count, so a missing or
+      // non-numeric row must not read as "nothing in flight" (SOLA9-468).
+      if (typeof row?.count !== "number") {
+        throw new Error("private_channel_deposits in-flight count returned no numeric row");
+      }
+      return row.count;
+    },
+
     async patchContext(id: string, patch: PrivateChannelTransferContext) {
       // jsonb || jsonb is a right-biased merge — the patch wins for shared keys.
       await db

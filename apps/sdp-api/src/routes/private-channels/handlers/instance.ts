@@ -28,9 +28,12 @@ import {
 } from "@/services/private-channels";
 import type { AppContext } from "../context";
 import {
+  getPrivateChannelDepositRepository,
   getPrivateChannelInstanceRepository,
   getPrivateChannelRepository,
+  getPrivateChannelTransferRepository,
   getPrivateChannelUserRepository,
+  getPrivateChannelWithdrawalRepository,
   loadPrivateChannelProjectRpcClient,
 } from "../context";
 import { emitLifecycle, emitMember } from "../helpers";
@@ -141,6 +144,24 @@ export const connectPrivateChannelInstance = async (
     }
     row = await repo.reactivateAndUpdate({ id: existingByGateway.id, ...input });
   } else {
+    // A brand-new instance id is what strands history: replay authorizes a
+    // movement against its own stored instance_id (see routes/private-channels/
+    // replay.ts), so once a different gateway owns the project's single active
+    // slot, an in-flight row bound to a retired instance can only be resolved
+    // by reconnecting that gateway. Refuse the replacement while any historical
+    // instance still has movements in flight (SOLA9-468). Reactivating a
+    // gateway's own row is untouched — that reconnect is the recovery path.
+    const [deposits, withdrawals, transfers] = await Promise.all([
+      getPrivateChannelDepositRepository(c).countNonTerminalByProject(scope),
+      getPrivateChannelWithdrawalRepository(c).countNonTerminalByProject(scope),
+      getPrivateChannelTransferRepository(c).countNonTerminalByProject(scope),
+    ]);
+    if (deposits > 0 || withdrawals > 0 || transfers > 0) {
+      throw new AppError(
+        "CONFLICT",
+        `This project has ${deposits} deposit(s), ${withdrawals} withdrawal(s), and ${transfers} transfer(s) still in flight on a previous Private Channels instance. Reconnect that instance's gateway and let them settle or fail before connecting a different one.`
+      );
+    }
     row = await repo.createActive({
       ...scope,
       createdBy: auth.userId ?? null,
@@ -299,20 +320,98 @@ export const disconnectPrivateChannelInstance = async (c: AppContext) => {
   const projectId = requireProjectId(c);
 
   const repo = getPrivateChannelInstanceRepository(c);
-  const row = await repo.deactivateActive({
-    organizationId: auth.organizationId,
-    projectId,
-  });
-  if (!row) {
+  const scope = { organizationId: auth.organizationId, projectId };
+
+  // Disconnecting retires the gateway this project's movements run against, so
+  // it uses the same durable drain/admission barrier as deletion (HOO-1011,
+  // SOLA9-468): the draining flag must persist even when the disconnect below
+  // is refused, so every later admission keeps refusing. A transfer still
+  // `pending`/`submitted` has no reconciler — replay resolves it only against
+  // its OWN instance — so a disconnect that landed while movements were in
+  // flight, followed by a different-gateway replacement, would strand them.
+  const draining = await repo.beginDraining(scope);
+  if (!draining) {
     throw notFound("Active private channel instance");
   }
+  const drainToken = draining.draining_token;
+  if (drainToken === null) {
+    throw new AppError(
+      "CONFLICT",
+      "The Private Channels instance is no longer draining. Try again."
+    );
+  }
 
-  await emitLifecycle(c, row, PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_DISCONNECTED, {
-    payload: { gatewayUrl: row.gateway_url },
+  // Counting and deactivating are ONE unit under the instance row lock.
+  // Admission inserts take the same lock, so the counts cannot grow between
+  // the check and the disconnect, and a failure anywhere rolls the disconnect
+  // back while leaving the committed drain in place for a retry.
+  const outcome = await getDb(c.env).transaction(async (tx) => {
+    const client = asTransactionalClient(tx);
+    const instances = createPostgresPrivateChannelInstanceRepository(client);
+    const locked = await instances.lockActiveForDeletion(scope, drainToken);
+    if (!locked) {
+      return { deactivated: false as const, inFlight: null, locked: null, row: null };
+    }
+
+    const [deposits, withdrawals, transfers] = await Promise.all([
+      createPostgresPrivateChannelDepositRepository(client).countNonTerminalByInstance(locked.id),
+      createPostgresPrivateChannelWithdrawalRepository(client).countNonTerminalByInstance(
+        locked.id
+      ),
+      createPostgresPrivateChannelTransferRepository(client).countNonTerminalByInstance(locked.id),
+    ]);
+    if (deposits > 0 || withdrawals > 0 || transfers > 0) {
+      return {
+        deactivated: false as const,
+        inFlight: { deposits, withdrawals, transfers },
+        locked,
+        row: null,
+      };
+    }
+
+    const deactivated = await instances.deactivateActive(scope);
+    if (!deactivated) {
+      throw new AppError("CONFLICT", "The active Private Channels instance changed. Try again.");
+    }
+    return { deactivated: true as const, inFlight: null, locked, row: deactivated };
   });
 
+  if (!outcome.deactivated) {
+    if (!outcome.inFlight) {
+      // The drain this disconnect established is gone: the instance was resumed
+      // (or replaced) while the request was running, and disconnecting whatever
+      // is active now would contradict the answer that resume already gave.
+      throw new AppError(
+        "CONFLICT",
+        "This instance was resumed or replaced while the disconnect was running; nothing was disconnected. Try again if you still want it disconnected."
+      );
+    }
+    // The drain stays in place on purpose, exactly as a refused deletion does:
+    // reverting it would reopen admission and turn disconnect back into a
+    // retry against a moving target. Updating the connection clears the drain,
+    // so the operator keeps an explicit way to resume without editing the
+    // database.
+    const { deposits, withdrawals, transfers } = outcome.inFlight;
+    throw new AppError(
+      "CONFLICT",
+      `This instance is draining for disconnect: ${deposits} deposit(s), ${withdrawals} withdrawal(s), and ${transfers} transfer(s) are still in flight. New movements are refused; retry once they settle or fail, or update the connection to resume this instance.`
+    );
+  }
+
+  // Emitted from the row the transaction actually locked and deactivated, only
+  // after that commit: `draining` was read before the drain, so a concurrent
+  // disconnect-and-reconnect in between would have this request announce a
+  // disconnection of an instance it did not disconnect.
+  const disconnectedInstance = outcome.locked;
+  await emitLifecycle(
+    c,
+    disconnectedInstance,
+    PRIVATE_CHANNEL_EVENT_TYPES.LIFECYCLE_INSTANCE_DISCONNECTED,
+    { payload: { gatewayUrl: disconnectedInstance.gateway_url } }
+  );
+
   const response: PrivateChannelInstanceResponse = {
-    instance: mapPrivateChannelInstanceRow(row),
+    instance: mapPrivateChannelInstanceRow(outcome.row),
   };
   return success(c, response);
 };

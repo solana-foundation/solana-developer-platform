@@ -107,6 +107,8 @@ export interface PrivateChannelDepositRepository {
   listNonTerminal(limit: number): Promise<PrivateChannelDepositRow[]>;
   /** Delete guard: an instance can't be deleted while deposits are in flight. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
+  /** Replacement guard: in-flight deposits on any instance of the tenant. */
+  countNonTerminalByProject(scope: DepositProjectScope): Promise<number>;
   /**
    * Merge `patch` into `context` JSONB atomically. Used by the oracle to record
    * debounce markers (e.g. lastStuckWarningAt) without racing the poll update.

@@ -229,6 +229,40 @@ describe("PrivateChannelWithdrawalRepository (postgres)", () => {
     void inFlight;
   });
 
+  it("countNonTerminalByProject counts in-flight withdrawals across every instance of the tenant", async () => {
+    // Admission needs an active instance, and a project holds at most one, so
+    // each instance is admitted while active and retired right after. The
+    // count must still see rows bound to retired instances (SOLA9-468).
+    const db = getDb(env);
+    await repo.createWithdrawal(makeInput({ instanceId: TEST_INSTANCE_ID }));
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = ?")
+      .bind(TEST_INSTANCE_ID)
+      .run();
+    await seedInstance("inst_pcw_2");
+    await repo.createWithdrawal(makeInput({ instanceId: "inst_pcw_2" }));
+    await db
+      .prepare("UPDATE private_channel_instances SET is_active = FALSE WHERE id = 'inst_pcw_2'")
+      .run();
+    await seedInstance("inst_pcw_prod", TEST_PRODUCTION_PROJECT_ID);
+    await repo.createWithdrawal(
+      makeInput({ instanceId: "inst_pcw_prod", projectId: TEST_PRODUCTION_PROJECT_ID })
+    );
+
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+      })
+    ).toBe(2);
+    expect(
+      await repo.countNonTerminalByProject({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PRODUCTION_PROJECT_ID,
+      })
+    ).toBe(1);
+  });
+
   it("holds one withdrawal per idempotency key within a tenant", async () => {
     const first = await repo.createWithdrawal(
       makeInput({ idempotencyKey: "idem_shared", idempotencyFingerprint: "fp_idem_shared" })

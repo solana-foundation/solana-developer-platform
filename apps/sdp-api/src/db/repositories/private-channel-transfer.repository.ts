@@ -112,6 +112,12 @@ export interface PrivateChannelTransferRepository {
   /** In-flight transfers (pending/submitted) for the delete-drain gate. */
   countNonTerminalByInstance(instanceId: string): Promise<number>;
   /**
+   * In-flight transfers across every instance of the tenant, active or not.
+   * Gates connecting a different gateway while any historical instance still
+   * has unresolved transfers (SOLA9-468).
+   */
+  countNonTerminalByProject(scope: PrivateChannelTransferProjectScope): Promise<number>;
+  /**
    * The row that already claimed `idempotencyKey` in this tenant, or null.
    * Scoped to (organization, project) to match the unique index, so one
    * tenant's key can neither collide with nor probe for another's.
