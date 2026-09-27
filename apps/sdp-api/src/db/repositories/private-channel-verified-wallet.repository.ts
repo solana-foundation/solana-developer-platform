@@ -99,13 +99,18 @@ export interface PrivateChannelVerifiedWalletRepository {
    */
   revokeVerifiedWallet(input: RevokeVerifiedWalletInput): Promise<boolean>;
   /**
-   * Persist an upstream binding that must be revoked even though its identity
-   * became disabled before the normal mirror write. Disable retries enumerate
-   * this row, so a failed compensating SPC delete remains recoverable.
+   * Decide — under the revocation-epoch row lock — whether a stale
+   * verification's compensating SPC delete may still run. Returns false when a
+   * newer verification of the same identity has already re-created the mirror:
+   * its upstream binding is the one the compensating delete would remove, so
+   * the caller must stand down. Otherwise advances the epoch — the same
+   * barrier a revocation uses, so any verification that has not landed yet is
+   * refused — and records the pending-revocation retry marker for the binding
+   * in the same transaction, so a failed or interrupted compensation stays
+   * recoverable by the principal-disable cleanup that enumerates these
+   * markers. Single-writer contract as for upsert.
    */
-  recordPendingRevocation(
-    input: UpsertVerifiedWalletInput
-  ): Promise<PrivateChannelWalletRevocationRow>;
+  claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput): Promise<boolean>;
   /** Pending upstream revocations for one identity and instance. */
   listPendingRevocations(
     userId: string,

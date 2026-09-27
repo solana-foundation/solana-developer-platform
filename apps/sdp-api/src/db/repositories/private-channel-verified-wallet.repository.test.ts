@@ -1,6 +1,6 @@
 import { SANDBOX_DEFAULTS } from "@sdp/private-channels";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { getDb } from "@/db";
+import { type DatabaseClient, getDb, type PreparedStatement } from "@/db";
 import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
@@ -8,6 +8,24 @@ import { seedTestDatabase } from "@/test/mocks/db";
 import { createPostgresPrivateChannelInstanceRepository } from "./private-channel-instance.repository.postgres";
 import type { PrivateChannelVerifiedWalletRepository } from "./private-channel-verified-wallet.repository";
 import { createPostgresPrivateChannelVerifiedWalletRepository } from "./private-channel-verified-wallet.repository.postgres";
+
+/**
+ * Signal the test once a `SELECT ... FOR UPDATE` on the revocation-epoch row
+ * has returned (the row lock is then held). The wrapper must survive the
+ * `.bind()` chain — the repository always calls `prepare().bind().first()`.
+ */
+function signalAfterEpochRead(statement: PreparedStatement, signal: () => void): PreparedStatement {
+  return {
+    bind: (...values: unknown[]) => signalAfterEpochRead(statement.bind(...values), signal),
+    first: async <T>(columnName?: string) => {
+      const row = await statement.first<T>(columnName);
+      signal();
+      return row;
+    },
+    all: <T>() => statement.all<T>(),
+    run: () => statement.run(),
+  };
+}
 
 const TEST_PROJECT_ID = "prj_pcvw_repo_test";
 const PCU_ID = "pcu_pcvw_repo_test";
@@ -185,25 +203,24 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     expect(await repo.listByUserAndInstance(PCU_ID, instanceA)).toEqual([]);
   });
 
-  it("records a disabled identity's upstream binding for later cleanup", async () => {
-    const db = getDb(env);
-    await db
-      .prepare("UPDATE private_channel_users SET disabled_at = sdp_iso_now() WHERE id = ?")
-      .bind(PCU_ID)
-      .run();
-
-    const marker = await repo.recordPendingRevocation({
-      ...scope,
-      userId: PCU_ID,
-      instanceId: instanceA,
-      walletId: "wal_1",
-      pubkey: PUBKEY_A,
-    });
-
-    expect(marker).toMatchObject({ user_id: PCU_ID, instance_id: instanceA, pubkey: PUBKEY_A });
-    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
+  it("the cleanup claim records a retry marker and advances the epoch atomically", async () => {
+    // The mirror from an earlier verification is already gone (revoked), but
+    // the identity's late upstream binding may still exist: the claim records
+    // the retry marker so the next principal-disable cleanup finds it.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toHaveLength(1);
-    // The revoke removes the retry marker with the mirror and advances the epoch.
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+
+    // A successful compensating revoke removes the marker again with the
+    // mirror; the epoch never resets.
     await expect(
       repo.revokeVerifiedWallet({
         ...scope,
@@ -213,16 +230,42 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       })
     ).resolves.toBe(true);
     await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
-    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(2);
   });
 
-  it("records cleanup independently when another identity owns the same pubkey", async () => {
+  it("the cleanup claim stands down while the same identity's mirror exists", async () => {
+    await repo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_1",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+
+    // A newer verification of the same identity has re-created the mirror: a
+    // stale verification's compensating delete must not remove its binding.
+    await expect(
+      repo.claimStaleVerificationCleanup({
+        ...scope,
+        userId: PCU_ID,
+        instanceId: instanceA,
+        walletId: "wal_1",
+        pubkey: PUBKEY_A,
+      })
+    ).resolves.toBe(false);
+    await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.listPendingRevocations(PCU_ID, instanceA)).resolves.toEqual([]);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(0);
+  });
+
+  it("the cleanup claim records cleanup independently when another identity owns the same pubkey", async () => {
     const db = getDb(env);
     await db
       .prepare(
         `INSERT INTO private_channel_users (
-           id, organization_id, project_id, instance_id, name, is_default, disabled_at
-         ) VALUES (?, ?, ?, ?, 'Disabled', FALSE, sdp_iso_now())`
+           id, organization_id, project_id, instance_id, name, is_default
+         ) VALUES (?, ?, ?, ?, 'Second', FALSE)`
       )
       .bind(SECOND_PCU_ID, TEST_ORG.id, TEST_PROJECT_ID, instanceA)
       .run();
@@ -235,20 +278,24 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
       expectedRevocationEpoch: 0,
     });
 
+    // The mirror belongs to the first identity, so the second identity's stale
+    // verification may compensate its own late binding: the claim advances the
+    // epoch and records its own retry marker without touching that mirror.
     await expect(
-      repo.recordPendingRevocation({
+      repo.claimStaleVerificationCleanup({
         ...scope,
         userId: SECOND_PCU_ID,
         instanceId: instanceA,
-        walletId: "wal_disabled",
+        walletId: "wal_stale",
         pubkey: PUBKEY_A,
       })
-    ).resolves.toMatchObject({ user_id: SECOND_PCU_ID, pubkey: PUBKEY_A });
+    ).resolves.toBe(true);
 
     await expect(repo.findByInstanceAndPubkey(scope, instanceA, PUBKEY_A)).resolves.toMatchObject({
       user_id: PCU_ID,
     });
     await expect(repo.listPendingRevocations(SECOND_PCU_ID, instanceA)).resolves.toHaveLength(1);
+    await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
   });
 
   it("lists wallets by user and instance", async () => {
@@ -360,7 +407,7 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     ).resolves.toMatchObject({ pubkey: PUBKEY_A, wallet_id: "wal_1" });
   });
 
-  it("an upsert overlapping an uncommitted revocation cannot resurrect the mirror", async () => {
+  it("an upsert that holds the revocation barrier lands and cannot outlive the revocation", async () => {
     // The mirror from an earlier verification; no revocation has happened yet,
     // so the epoch row does not exist and this upsert creates it at 0.
     await repo.upsert({
@@ -373,18 +420,59 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
     });
 
     const db = getDb(env);
-    let releaseRevocation!: () => void;
-    const revocationGate = new Promise<void>((resolve) => {
-      releaseRevocation = resolve;
-    });
-    let signalRevocationApplied!: () => void;
-    const revocationApplied = new Promise<void>((resolve) => {
-      signalRevocationApplied = resolve;
+    let signalEpochLockHeld!: () => void;
+    const epochLockHeld = new Promise<void>((resolve) => {
+      signalEpochLockHeld = resolve;
     });
 
-    // The local half of a first-ever revocation, applied but left uncommitted
-    // while the overlapping upsert runs: the epoch advance (which creates the
-    // row) plus the mirror removal, in the revocation's statement order.
+    // The conditional upsert pins its epoch read with SELECT ... FOR UPDATE.
+    // Signal only once that statement has RETURNED — the row lock is then
+    // held — so the revocation below is guaranteed to block on the barrier
+    // instead of committing before the upsert ever reads the epoch. Without
+    // this gate the revocation could commit first and the test would pass
+    // without exercising the lock at all (and an implementation that reads
+    // the epoch unlocked would time out waiting for a signal never sent).
+    const instrumentedDb: DatabaseClient = {
+      prepare: (query) => db.prepare(query),
+      queryOne: (query, params) => db.queryOne(query, params),
+      queryMany: (query, params) => db.queryMany(query, params),
+      execute: (query, params) => db.execute(query, params),
+      batch: (statements) => db.batch(statements),
+      transaction: (callback) =>
+        db.transaction((tx) =>
+          callback({
+            prepare: (query) => {
+              const statement = tx.prepare(query);
+              if (
+                query.includes("private_channel_wallet_revocation_epochs") &&
+                query.includes("FOR UPDATE")
+              ) {
+                return signalAfterEpochRead(statement, signalEpochLockHeld);
+              }
+              return statement;
+            },
+            queryOne: (query, params) => tx.queryOne(query, params),
+            queryMany: (query, params) => tx.queryMany(query, params),
+            execute: (query, params) => tx.execute(query, params),
+          })
+        ),
+    };
+    const instrumentedRepo = createPostgresPrivateChannelVerifiedWalletRepository(instrumentedDb);
+
+    // The overlapping verification observed epoch 0 before its SPC handshake
+    // and reaches the barrier while no revocation is committed yet.
+    const overlappingUpsert = instrumentedRepo.upsert({
+      ...scope,
+      userId: PCU_ID,
+      instanceId: instanceA,
+      walletId: "wal_overlap",
+      pubkey: PUBKEY_A,
+      expectedRevocationEpoch: 0,
+    });
+    await epochLockHeld;
+
+    // The revocation starts while the upsert holds the barrier, so it blocks
+    // until the upsert commits and only then removes the mirror it wrote.
     const revocation = db.transaction(async (tx) => {
       await tx
         .prepare(
@@ -403,26 +491,18 @@ describe("PrivateChannelVerifiedWalletRepository (postgres)", () => {
         )
         .bind(PCU_ID, instanceA, PUBKEY_A)
         .run();
-      signalRevocationApplied();
-      await revocationGate;
     });
-    await revocationApplied;
 
-    // The overlapping verification observed epoch 0 before its SPC handshake.
-    // It must lose once the revocation commits, however long it waits.
-    const overlappingUpsert = repo.upsert({
-      ...scope,
-      userId: PCU_ID,
-      instanceId: instanceA,
-      walletId: "wal_overlap",
+    // The upsert observed the epoch it expected and lands — and the mirror it
+    // wrote is then removed by the revocation, never outliving it. An
+    // implementation that reads the epoch without the lock would resurrect
+    // the mirror here (the revocation commits between its read and insert).
+    await expect(overlappingUpsert).resolves.toMatchObject({
+      wallet_id: "wal_overlap",
       pubkey: PUBKEY_A,
-      expectedRevocationEpoch: 0,
     });
-    const upsertLoses = expect(overlappingUpsert).rejects.toMatchObject({ code: "CONFLICT" });
-    releaseRevocation();
     await revocation;
 
-    await upsertLoses;
     await expect(repo.listByUserAndInstance(PCU_ID, instanceA)).resolves.toEqual([]);
     await expect(repo.getRevocationEpoch(instanceA, PUBKEY_A)).resolves.toBe(1);
   });

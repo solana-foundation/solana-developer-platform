@@ -150,33 +150,87 @@ export function createPostgresPrivateChannelVerifiedWalletRepository(
       return mirrorDeleted > 0 || markerDeleted > 0;
     },
 
-    async recordPendingRevocation(input: UpsertVerifiedWalletInput) {
-      const row = await db
-        .prepare(
-          `INSERT INTO private_channel_wallet_revocations (
-               id, organization_id, project_id, user_id, instance_id,
-               wallet_id, pubkey
-             )
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+    async claimStaleVerificationCleanup(input: UpsertVerifiedWalletInput) {
+      // The compensating SPC delete of a stale verification must never race a
+      // fresh verification: both it and the conditional upsert serialize on
+      // the epoch row lock, so whichever transaction commits first decides.
+      // Holding that lock while reading the mirror makes the stand-down check
+      // exact — a mirror row that belongs to this identity can only be a
+      // newer verification's (the revocation this request lost to removed the
+      // caller's own row), so its binding must not be deleted. When the claim
+      // wins, the epoch advance refuses any verification that has not landed
+      // yet, and the retry marker is recorded in the same transaction: if the
+      // compensating delete then fails or the process dies, the next
+      // principal-disable cleanup still finds the late upstream binding.
+      return db.transaction(async (tx) => {
+        await tx
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocation_epochs (
+                 organization_id, project_id, instance_id, pubkey, epoch
+               )
+               VALUES (?, ?, ?, ?, 0)
+             ON CONFLICT (instance_id, pubkey) DO NOTHING`
+          )
+          .bind(input.organizationId, input.projectId, input.instanceId, input.pubkey)
+          .run();
+
+        await tx
+          .prepare(
+            `SELECT epoch
+                FROM private_channel_wallet_revocation_epochs
+               WHERE instance_id = ?
+                 AND pubkey = ?
+               FOR UPDATE`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .first<{ epoch: number }>();
+
+        const mirror = await tx
+          .prepare(
+            `SELECT user_id
+                FROM private_channel_verified_wallets
+               WHERE instance_id = ?
+                 AND pubkey = ?`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .first<{ user_id: string }>();
+        if (mirror?.user_id === input.userId) {
+          return false;
+        }
+
+        await tx
+          .prepare(
+            `UPDATE private_channel_wallet_revocation_epochs
+                 SET epoch = private_channel_wallet_revocation_epochs.epoch + 1,
+                     updated_at = sdp_iso_now()
+               WHERE instance_id = ?
+                 AND pubkey = ?`
+          )
+          .bind(input.instanceId, input.pubkey)
+          .run();
+        await tx
+          .prepare(
+            `INSERT INTO private_channel_wallet_revocations (
+                 id, organization_id, project_id, user_id, instance_id,
+                 wallet_id, pubkey
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (user_id, instance_id, pubkey) DO UPDATE
                SET wallet_id = excluded.wallet_id,
-                   updated_at = sdp_iso_now()
-          RETURNING *`
-        )
-        .bind(
-          generatePrivateChannelVerifiedWalletId(),
-          input.organizationId,
-          input.projectId,
-          input.userId,
-          input.instanceId,
-          input.walletId,
-          input.pubkey
-        )
-        .first<Record<string, unknown>>();
-      if (!row) {
-        throw conflict("Could not record the wallet binding for cleanup.");
-      }
-      return mapPrivateChannelWalletRevocationRow(row);
+                   updated_at = sdp_iso_now()`
+          )
+          .bind(
+            generatePrivateChannelVerifiedWalletId(),
+            input.organizationId,
+            input.projectId,
+            input.userId,
+            input.instanceId,
+            input.walletId,
+            input.pubkey
+          )
+          .run();
+        return true;
+      });
     },
 
     async listPendingRevocations(userId: string, instanceId: string) {

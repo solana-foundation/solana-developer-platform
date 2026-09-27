@@ -13,9 +13,10 @@
  * removes the mirror, so an in-flight verification whose upstream binding was
  * concurrently revoked cannot recreate `private_channel_verified_wallets`
  * after `deleteWallet` succeeded (SOLA9-664). When the epoch race is lost, the
- * upstream binding this request created is revoked again (idempotent) and a
- * disabled identity first records a durable retry marker, so no late binding
- * survives a completed cleanup.
+ * upstream binding this request created is revoked again (idempotent) unless a
+ * newer verification has already re-created the mirror, and the cleanup claim
+ * records a durable retry marker either way, so no late binding survives a
+ * completed cleanup.
  *
  * Signing is exact-wallet-specific via `createOrgSignerForCustodyWallet` (not
  * `SigningService.sign`, which signs with the scope-default wallet). The
@@ -283,26 +284,39 @@ export async function verifyPrivateChannelWallet(
       // verify-wallet created the upstream binding, so the completed cleanup
       // did not necessarily cover the binding this request just created. The
       // compensating delete is idempotent (SPC answers 400 for an already
-      // unlinked wallet and that converges), so always run it after a lost
-      // race. For a disabled identity, persist the durable retry marker first:
-      // if SPC is unavailable, the next disable retry enumerates this row and
-      // tries the revocation again.
+      // unlinked wallet and that converges), so it must run after a lost race
+      // — but never over a newer verification: the claim takes the
+      // revocation-epoch row lock and stands down when a fresh verification
+      // of this identity has already re-created the mirror, and otherwise
+      // advances the epoch and records the durable retry marker in the same
+      // transaction, so a failed or interrupted SPC delete leaves the late
+      // binding recoverable by the next principal-disable cleanup.
+      let cleanup: "claimed" | "superseded" | "undecided" = "undecided";
       try {
-        if (disabled) {
-          await verifiedWalletRepo.recordPendingRevocation({
-            ...scope,
-            userId: pcUser.id,
-            instanceId: instance.id,
-            walletId,
-            pubkey,
-          });
-        }
-        await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
-      } catch (cleanupError) {
+        cleanup = (await verifiedWalletRepo.claimStaleVerificationCleanup({
+          ...scope,
+          userId: pcUser.id,
+          instanceId: instance.id,
+          walletId,
+          pubkey,
+        }))
+          ? "claimed"
+          : "superseded";
+      } catch (claimError) {
         getLogger().warn(
-          { principalId: pcUser.id, instanceId: instance.id, cleanupError },
-          "private-channel wallet: could not revoke a late binding after a rejected mirror"
+          { principalId: pcUser.id, instanceId: instance.id, claimError },
+          "private-channel wallet: could not claim the late-binding cleanup after a rejected mirror"
         );
+      }
+      if (cleanup === "claimed") {
+        try {
+          await revokeWalletWithSession(env, { scope, instance, pcUser, client, spcAuth }, pubkey);
+        } catch (cleanupError) {
+          getLogger().warn(
+            { principalId: pcUser.id, instanceId: instance.id, cleanupError },
+            "private-channel wallet: could not revoke a late binding after a rejected mirror"
+          );
+        }
       }
     }
     if (revokedWhileVerifying) {

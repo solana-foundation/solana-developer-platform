@@ -74,7 +74,7 @@ let verifiedRepo: {
   upsert: ReturnType<typeof vi.fn>;
   getRevocationEpoch: ReturnType<typeof vi.fn>;
   revokeVerifiedWallet: ReturnType<typeof vi.fn>;
-  recordPendingRevocation: ReturnType<typeof vi.fn>;
+  claimStaleVerificationCleanup: ReturnType<typeof vi.fn>;
   listPendingRevocations: ReturnType<typeof vi.fn>;
   findByInstanceAndPubkey: ReturnType<typeof vi.fn>;
   listByUserAndInstance: ReturnType<typeof vi.fn>;
@@ -124,11 +124,7 @@ beforeEach(async () => {
     }),
     getRevocationEpoch: vi.fn().mockResolvedValue(0),
     revokeVerifiedWallet: vi.fn().mockResolvedValue(true),
-    recordPendingRevocation: vi.fn().mockResolvedValue({
-      id: "pcvw_cleanup",
-      wallet_id: WALLET_ID,
-      pubkey: PUBKEY,
-    }),
+    claimStaleVerificationCleanup: vi.fn().mockResolvedValue(true),
     listPendingRevocations: vi.fn().mockResolvedValue([]),
     findByInstanceAndPubkey: vi.fn().mockResolvedValue({
       id: "pcvw_1",
@@ -362,10 +358,15 @@ describe("verifyPrivateChannelWallet", () => {
       code: "CONFLICT",
     });
 
-    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
-    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "pcu_1",
+        instanceId: "pci_1",
+        walletId: WALLET_ID,
+        pubkey: PUBKEY,
+      })
     );
+    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
     expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
     );
@@ -383,37 +384,49 @@ describe("verifyPrivateChannelWallet", () => {
     });
 
     // The winning revocation's SPC delete may have run before this request's
-    // verify-wallet created the binding, so the compensation must still run —
-    // but an active identity records no cleanup marker.
+    // verify-wallet created the binding, so the compensation must still run.
+    // The cleanup claim records the durable retry marker together with the
+    // epoch advance (verified against postgres in the repository tests).
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(1);
     expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
     expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
     );
-    expect(verifiedRepo.recordPendingRevocation).not.toHaveBeenCalled();
   });
 
-  it("records a cleanup marker for a disabled identity even when a revocation won the race", async () => {
+  it("stands down when a fresh verification has already re-created the mirror", async () => {
     verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
     verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
-    principalRepo.getById.mockResolvedValue({
-      ...pcUser,
-      disabled_at: "2026-08-31T00:00:00.000Z",
+    // A newer verification of the same identity landed after the revocation:
+    // the mirror is back, so the compensating delete would remove ITS binding.
+    verifiedRepo.claimStaleVerificationCleanup.mockResolvedValue(false);
+
+    await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: expect.stringContaining("revoked while it was being verified"),
     });
+
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(1);
+    expect(client.deleteWallet).not.toHaveBeenCalled();
+    expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
+  });
+
+  it("skips the compensation when the cleanup claim cannot be decided", async () => {
+    verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
+    verifiedRepo.getRevocationEpoch.mockResolvedValueOnce(0).mockResolvedValue(1);
+    verifiedRepo.claimStaleVerificationCleanup.mockRejectedValue(new Error("database unavailable"));
 
     await expect(verifyPrivateChannelWallet(env, auth, "prj_1", WALLET_ID)).rejects.toMatchObject({
       code: "CONFLICT",
     });
 
-    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
-    );
-    expect(client.deleteWallet).toHaveBeenCalledWith("jwt", PUBKEY);
-    expect(verifiedRepo.revokeVerifiedWallet).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "pcu_1", instanceId: "pci_1", pubkey: PUBKEY })
-    );
+    // Without the claim the request cannot tell its own late binding from a
+    // fresh verification's, so it must not delete anything upstream.
+    expect(client.deleteWallet).not.toHaveBeenCalled();
+    expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
   });
 
-  it("keeps a cleanup marker when late-binding revocation fails", async () => {
+  it("keeps the claimed cleanup recoverable when the compensating SPC delete fails", async () => {
     verifiedRepo.upsert.mockRejectedValue({ code: "CONFLICT" });
     principalRepo.getById.mockResolvedValue({
       ...pcUser,
@@ -427,7 +440,10 @@ describe("verifyPrivateChannelWallet", () => {
       code: "CONFLICT",
     });
 
-    expect(verifiedRepo.recordPendingRevocation).toHaveBeenCalledTimes(1);
+    // The claim (which records the retry marker) succeeded; the compensating
+    // delete failed and must not remove the mirror or the marker — the next
+    // principal-disable cleanup retries the revocation.
+    expect(verifiedRepo.claimStaleVerificationCleanup).toHaveBeenCalledTimes(1);
     expect(verifiedRepo.revokeVerifiedWallet).not.toHaveBeenCalled();
   });
 
