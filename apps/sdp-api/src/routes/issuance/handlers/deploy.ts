@@ -42,7 +42,7 @@ import {
   beginApprovedWalletOperationEffect,
 } from "@/services/policy/approved-operation-replay";
 import { dryRunPolicyCandidate } from "@/services/policy/candidate-evaluation.service";
-import { TokenService } from "@/services/token.service";
+import type { TokenService } from "@/services/token.service";
 import type { Env } from "@/types/env";
 import {
   createIssuanceMosaicService,
@@ -1403,10 +1403,7 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
     // disagrees with (that state would conflict the retry's own checks).
     const deployedToken = recoveredFromPrepared
       ? await getDb(c.env).transaction(async (tx) => {
-          const txTokenService = new TokenService(
-            asTransactionalClient(tx),
-            getRequestTenantScope(c)
-          );
+          const txTokenService = getTenantTokenService(c, asTransactionalClient(tx));
           await txTokenService.restoreDeployingTokenSnapshot({
             tokenId,
             template: mintSnapshot.template,
