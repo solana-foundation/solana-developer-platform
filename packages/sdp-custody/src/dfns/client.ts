@@ -424,6 +424,7 @@ async function dfnsRequestRaw(
       requestUrl: url,
       location,
       status: current.status,
+      userActionToken,
     });
   }
 
@@ -451,9 +452,10 @@ async function followDfnsRedirect(
     requestUrl: URL;
     location: string;
     status: number;
+    userActionToken?: string;
   }
 ): Promise<DfnsRawResponse> {
-  const { method, normalizedPath, requestUrl, location, status } = redirect;
+  const { method, normalizedPath, requestUrl, location, status, userActionToken } = redirect;
   const target = resolveDfnsRedirectTarget(requestUrl, location);
 
   if (!target || target.origin !== requestUrl.origin) {
@@ -481,7 +483,7 @@ async function followDfnsRedirect(
   }
 
   throw new SigningError(
-    `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath}): status=${follow.status} code=${summarizeUpstreamErrorBody(follow.rawBody, follow.status, heldUpstreamSecrets(ctx))}`,
+    `${ctx.providerLabel} API redirect follow-up failed (${method} ${normalizedPath}): status=${follow.status} code=${summarizeUpstreamErrorBody(follow.rawBody, follow.status, heldUpstreamSecrets(ctx, userActionToken))}`,
     "NETWORK_ERROR"
   );
 }

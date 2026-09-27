@@ -215,4 +215,36 @@ describe("dfns signer upstream error redaction", () => {
     assert.match(error.message, /contentType=unrecognized/);
     assert.ok(!error.message.includes("sk_live_platform_secret"));
   });
+
+  it("does not echo the user action token from a redirect follow-up error", async () => {
+    // Greptile finding on this PR: the original POST carries the short,
+    // separator-bearing `x-dfns-useraction` token, and a provider answering the
+    // same-origin redirect follow-up can echo that token back in the follow-up
+    // error body — so the token must be held as a known secret there too.
+    serveHandshake((url, init) => {
+      if ((init?.method ?? "GET") === "POST" && url.pathname === "/keys/key_poc/signatures") {
+        return new Response(null, {
+          status: 307,
+          headers: { Location: "/keys/key_poc/signatures/follow_poc" },
+        });
+      }
+      if (
+        (init?.method ?? "GET") === "GET" &&
+        url.pathname === "/keys/key_poc/signatures/follow_poc"
+      ) {
+        return jsonResponse({ code: "user_action_poc" }, 403);
+      }
+      return null;
+    });
+
+    const signer = await createSigner();
+    const error = await captureSignerError(signer);
+
+    assert.ok(error instanceof SignerError);
+    assert.match(
+      error.message,
+      /redirect follow-up failed \(POST \/keys\/key_poc\/signatures\): status=403 code=unavailable/
+    );
+    assert.ok(!error.message.includes("user_action_poc"));
+  });
 });
