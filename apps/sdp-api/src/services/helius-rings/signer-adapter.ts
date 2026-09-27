@@ -302,16 +302,18 @@ export async function signRingsMessage(input: SignRingsMessageInput): Promise<st
  * lookup is scoped to the organization and to active wallets, so an owner
  * custody no longer controls fails here rather than at the chain.
  *
- * The recorded row is still the first candidate when the caller has one and it
- * still qualifies: with several rows holding the owner's key, signing through
- * the row the caller provisioned against honors the authorization the key
- * alone cannot express. The config store only sees `custody_configs` wallets,
- * so when the key-based lookups miss there, the resolver re-queries through
- * the connection-aware custody path before giving up: an owner provisioned
- * under an active custody connection (the BYOK path) is otherwise unreachable
- * and every provisioning attempt strands its Rings row in `pending`. Either
- * way the signer is built from one exact custody-wallet row and must still
- * hold the owner's key.
+ * The recorded row is still the first candidate when the caller has one and
+ * the tenant still owns it holding the key: with several rows holding the
+ * owner's key, signing through the row the caller provisioned against honors
+ * the authorization the key alone cannot express, and a runtime denial of
+ * that row is raised by its admission rather than bypassed through another
+ * row. The config store only sees `custody_configs` wallets, so when the
+ * key-based lookups miss there, the resolver re-queries through the
+ * connection-aware custody path before giving up: an owner provisioned under
+ * an active custody connection (the BYOK path) is otherwise unreachable and
+ * every provisioning attempt strands its Rings row in `pending`. Either way
+ * the signer is built from one exact custody-wallet row and must still hold
+ * the owner's key.
  */
 async function resolveOwnerSigner(
   input: Pick<
@@ -322,7 +324,7 @@ async function resolveOwnerSigner(
   const runtimeTargets = new CustodyRuntimeTargets(getDb(input.env), input.env, new Map());
 
   if (input.custodyWalletId) {
-    const recorded = await runtimeTargets.findSignableWalletRecordById({
+    const recorded = await runtimeTargets.findAuthorizedWalletRecordById({
       organizationId: input.organizationId,
       projectId: input.projectId,
       custodyWalletId: input.custodyWalletId,

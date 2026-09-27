@@ -37,7 +37,7 @@ const env = {} as Env;
 const findActiveWalletByPublicKey = vi.hoisted(() => vi.fn());
 const createOrgSignerForCustodyWallet = vi.hoisted(() => vi.fn());
 const findConnectionWalletsByAddress = vi.hoisted(() => vi.fn());
-const findSignableWalletRecordById = vi.hoisted(() => vi.fn());
+const findAuthorizedWalletRecordById = vi.hoisted(() => vi.fn());
 
 vi.mock("@/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/services/stores/custody-config.store", () => ({
@@ -48,7 +48,7 @@ vi.mock("@/services/stores/custody-config.store", () => ({
 vi.mock("@/services/domain/signing/custody-runtime-target", () => ({
   CustodyRuntimeTargets: class {
     findConnectionWalletsByAddress = findConnectionWalletsByAddress;
-    findSignableWalletRecordById = findSignableWalletRecordById;
+    findAuthorizedWalletRecordById = findAuthorizedWalletRecordById;
   },
 }));
 vi.mock("@/services/solana/signer", () => ({ createOrgSignerForCustodyWallet }));
@@ -375,7 +375,7 @@ describe("signRingsOuterTransaction", () => {
      */
     it("prefers the custody row recorded on the rings wallet while it still qualifies", async () => {
       const signature = new Uint8Array(64).fill(15) as SignatureBytes;
-      findSignableWalletRecordById.mockResolvedValue({
+      findAuthorizedWalletRecordById.mockResolvedValue({
         id: "cwlt_recorded",
         provider: "privy",
       });
@@ -390,7 +390,7 @@ describe("signRingsOuterTransaction", () => {
         signInput({ custodyWalletId: "cwlt_recorded" })
       );
 
-      expect(findSignableWalletRecordById).toHaveBeenCalledWith(
+      expect(findAuthorizedWalletRecordById).toHaveBeenCalledWith(
         expect.objectContaining({
           organizationId: "org_1",
           projectId: "prj_1",
@@ -412,11 +412,11 @@ describe("signRingsOuterTransaction", () => {
     });
 
     // The recorded row is a preference, never a dependency: once it no longer
-    // qualifies (moved off the tenant, inactive, rekeyed, connection paused),
+    // backs the key in this tenant (moved off the tenant, inactive, rekeyed),
     // resolution falls back to the key-based paths instead of failing.
     it("falls back to the key-based paths when the recorded row no longer qualifies", async () => {
       const signature = new Uint8Array(64).fill(17) as SignatureBytes;
-      findSignableWalletRecordById.mockResolvedValue(null);
+      findAuthorizedWalletRecordById.mockResolvedValue(null);
       findActiveWalletByPublicKey.mockResolvedValue({
         id: "cw_owner",
         publicKey: FEE_PAYER,
@@ -428,7 +428,7 @@ describe("signRingsOuterTransaction", () => {
 
       await signRingsOuterTransaction(signInput({ custodyWalletId: "cwlt_recorded" }));
 
-      expect(findSignableWalletRecordById).toHaveBeenCalledWith(
+      expect(findAuthorizedWalletRecordById).toHaveBeenCalledWith(
         expect.objectContaining({ custodyWalletId: "cwlt_recorded" })
       );
       expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
@@ -437,6 +437,49 @@ describe("signRingsOuterTransaction", () => {
         "prj_1",
         "cw_owner"
       );
+    });
+
+    /**
+     * Regression (Greptile P1, "paused connection can be bypassed"): a runtime
+     * denial of the recorded row — the connection the operation was authorized
+     * for is paused or unavailable — must surface as that row's admission
+     * failure. It must not send resolution hunting for another row holding
+     * the same key, which would sign the operation through a connection the
+     * recorded row's denial was meant to stop.
+     */
+    it("does not bypass a paused recorded connection through another row", async () => {
+      findAuthorizedWalletRecordById.mockResolvedValue({
+        id: "cwlt_recorded",
+        provider: "privy",
+      });
+      findConnectionWalletsByAddress.mockResolvedValue([
+        connectionCandidate({ id: "cwlt_connection_live" }),
+      ]);
+      createOrgSignerForCustodyWallet.mockRejectedValue(
+        new AppError(
+          "FORBIDDEN",
+          "Wallet execution is paused. Retry after wallet execution is available.",
+          {
+            reason: "runtime_execution_paused",
+          }
+        )
+      );
+
+      const error = await rejection(
+        signRingsOuterTransaction(signInput({ custodyWalletId: "cwlt_recorded" }))
+      );
+
+      // The recorded row's own admission refused; no other row was consulted.
+      expect(createOrgSignerForCustodyWallet).toHaveBeenCalledWith(
+        env,
+        "org_1",
+        "prj_1",
+        "cwlt_recorded"
+      );
+      expect(findActiveWalletByPublicKey).not.toHaveBeenCalled();
+      expect(findConnectionWalletsByAddress).not.toHaveBeenCalled();
+      expect(error).toMatchObject({ failureCode: "signer_failed", retryable: false });
+      expect((error as Error).message).toContain("paused");
     });
 
     // The provider gate does not stop at the config path: a connection wallet

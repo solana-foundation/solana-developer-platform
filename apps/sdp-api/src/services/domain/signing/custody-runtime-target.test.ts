@@ -1305,16 +1305,18 @@ describe("CustodyRuntimeTargets", () => {
   /**
    * The Rings owner resolver prefers the custody row recorded on the rings
    * wallet over any other row holding the owner's key, so the record-id
-   * lookup has to be exact about what still qualifies: the tenant must own
-   * the row, the row must be active and hold the queried key, and a
-   * connection-owned row must be able to sign now.
+   * lookup has to be exact about what still counts as that row: the tenant
+   * must own it, it must be active, and it must hold the queried key. A
+   * connection that cannot sign right now does not disqualify the row —
+   * its admission names the denial instead of another row serving the
+   * signature.
    */
-  it("findSignableWalletRecordById returns an active connection row that can sign", async () => {
+  it("findAuthorizedWalletRecordById returns an active connection row that can sign", async () => {
     const connection = await seedConnection();
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.findSignableWalletRecordById({
+      targets.findAuthorizedWalletRecordById({
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         custodyWalletId: `cwlt_${connection.id}`,
@@ -1323,12 +1325,12 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toEqual({ id: `cwlt_${connection.id}`, provider: "privy" });
   });
 
-  it("findSignableWalletRecordById returns an active config row it still holds", async () => {
+  it("findAuthorizedWalletRecordById returns an active config row it still holds", async () => {
     const config = await seedConfig({ provider: "privy" });
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
     await expect(
-      targets.findSignableWalletRecordById({
+      targets.findAuthorizedWalletRecordById({
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         custodyWalletId: `cwlt_${config.id}`,
@@ -1337,22 +1339,25 @@ describe("CustodyRuntimeTargets", () => {
     ).resolves.toEqual({ id: `cwlt_${config.id}`, provider: "privy" });
   });
 
-  it("findSignableWalletRecordById hides a connection row that cannot sign now", async () => {
+  it("findAuthorizedWalletRecordById keeps a connection row that cannot sign now", async () => {
     const connection = await seedConnection({ lastCheckStatus: "retry_unknown" });
     const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
+    // Returned, not hidden: the caller builds the signer from this exact row
+    // so its runtime admission refuses with the custody state, rather than
+    // the lookup sending it to another row holding the same key.
     await expect(
-      targets.findSignableWalletRecordById({
+      targets.findAuthorizedWalletRecordById({
         organizationId: ORGANIZATION_ID,
         projectId: PROJECT_ID,
         custodyWalletId: `cwlt_${connection.id}`,
         publicKey: CONNECTION_PUBLIC_KEY,
       })
-    ).resolves.toBeNull();
+    ).resolves.toEqual({ id: `cwlt_${connection.id}`, provider: "privy" });
   });
 
   it.each(["rekeyed", "inactive", "foreign"] as const)(
-    "findSignableWalletRecordById hides a %s recorded row",
+    "findAuthorizedWalletRecordById hides a %s recorded row",
     async (scenario) => {
       const connection = await seedConnection();
       if (scenario === "rekeyed") {
@@ -1370,7 +1375,7 @@ describe("CustodyRuntimeTargets", () => {
       const targets = new CustodyRuntimeTargets(getDb(env), env, new Map());
 
       await expect(
-        targets.findSignableWalletRecordById({
+        targets.findAuthorizedWalletRecordById({
           organizationId: ORGANIZATION_ID,
           projectId: scenario === "foreign" ? "prj_foreign" : PROJECT_ID,
           custodyWalletId: `cwlt_${connection.id}`,

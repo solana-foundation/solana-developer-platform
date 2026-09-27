@@ -490,45 +490,34 @@ export class CustodyRuntimeTargets {
   }
 
   /**
-   * One exact custody-wallet row by record id, returned only while the tenant
-   * still owns it, the row is active, it still holds `publicKey`, and — for a
-   * connection-owned row — its connection can sign now. Provisioning records
-   * the row id on the flows it authorizes (a Rings wallet, for one), so
-   * signing can prefer that row over any other row holding the same key. A
-   * row that no longer qualifies returns null and the caller falls back to
-   * key-based resolution; admission still re-locks the row when its signer is
-   * built.
+   * One exact custody-wallet row by record id, returned while the tenant
+   * still owns it, the row is active, and it still holds `publicKey`.
+   * Provisioning records the row id on the flows it authorizes (a Rings
+   * wallet, for one), so signing prefers that row over any other row holding
+   * the same key — including when its connection is paused or otherwise
+   * unavailable: the runtime admission raised while building the signer names
+   * that denial instead of letting a different row's connection serve the
+   * signature. Null means the recorded row no longer backs the key in this
+   * tenant, and the caller falls back to key-based resolution; admission
+   * still re-locks the row when its signer is built.
    */
-  async findSignableWalletRecordById(params: {
+  async findAuthorizedWalletRecordById(params: {
     organizationId: string;
     projectId: string;
     custodyWalletId: string;
     publicKey: string;
   }): Promise<{ id: string; provider: CustodyProvider } | null> {
-    const row = await this.db.queryOne<
-      CustodyConnectionRuntimeAvailabilityFacts & {
-        id: string;
-        public_key: string;
-        connection_provider: string | null;
-        config_provider: string | null;
-      }
-    >(
-      `SELECT w.id, w.public_key,
+    const row = await this.db.queryOne<{
+      id: string;
+      connection_provider: string | null;
+      config_provider: string | null;
+    }>(
+      `SELECT w.id,
               c.provider AS connection_provider,
-              cfg.provider AS config_provider,
-              c.status AS connection_status, c.last_check_status,
-              pc.status AS credential_status, c.provider_account_fingerprint,
-              c.default_custody_wallet_id,
-              default_wallet.wallet_id AS default_wallet_id,
-              default_wallet.public_key AS default_wallet_public_key,
-              default_wallet.status AS default_wallet_status
+              cfg.provider AS config_provider
          FROM custody_wallets w
          LEFT JOIN custody_connections c ON c.id = w.custody_connection_id
-         LEFT JOIN provider_credentials pc ON pc.id = c.provider_credential_id
          LEFT JOIN custody_configs cfg ON cfg.id = w.custody_config_id
-         LEFT JOIN custody_wallets default_wallet
-           ON default_wallet.id = c.default_custody_wallet_id
-          AND default_wallet.custody_connection_id = c.id
         WHERE w.id = ?
           AND w.status = 'active'
           AND w.public_key = ?
@@ -552,14 +541,10 @@ export class CustodyRuntimeTargets {
       return null;
     }
 
+    // The WHERE clause admits exactly one ownership path, so exactly one of
+    // the two providers is set.
     if (row.connection_provider !== null) {
-      const provider = this.parseProvider(row.connection_provider);
-      // A paused or otherwise unavailable connection steps aside: the
-      // key-based fallback can still serve the signature through a row whose
-      // connection can sign now.
-      return isCustodyConnectionOwnerRuntimeAvailable(this.env, provider, row)
-        ? { id: row.id, provider }
-        : null;
+      return { id: row.id, provider: this.parseProvider(row.connection_provider) };
     }
     return row.config_provider === null
       ? null
