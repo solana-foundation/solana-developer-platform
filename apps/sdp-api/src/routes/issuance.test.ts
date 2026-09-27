@@ -11058,6 +11058,81 @@ describe("Issuance Routes", () => {
         }
       });
 
+      it("rejects a freeze-less mint for a freezable token even with no prepare-time agreement", async () => {
+        ensureRpcUrl();
+
+        const token = await seedIssuedToken({
+          id: "tok_deploy_confirm_freeze_missing",
+          mintAddress: null,
+          status: "pending",
+          uri: null,
+          signingWalletId: DEFAULT_ISSUANCE_PROVIDER_WALLET_ID,
+          isFreezable: true,
+          requiresAllowlist: false,
+        });
+
+        const createOrgSignerSpy = vi
+          .spyOn(SolanaServices, "createOrgSignerForCustodyWallet")
+          .mockResolvedValue({ address: TEST_SOLANA_ADDRESSES.wallet2 } as never);
+        const getSignatureStatusesSpy = vi
+          .spyOn(SolanaRpc, "getSignatureStatuses")
+          .mockResolvedValueOnce([
+            { slot: 100n, confirmations: 10n, confirmationStatus: "confirmed", err: null },
+          ]);
+        const accountExistsSpy = vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true);
+        // No prepare marker at all: with no agreement recorded, the landed
+        // mint must match the claimed row exactly — a freezable token cannot
+        // record a mint that skipped its freeze authority.
+        const getTransactionSpy = vi.spyOn(SolanaRpc, "getTransaction").mockResolvedValueOnce({
+          slot: 100n,
+          err: null,
+          instructions: [
+            {
+              programId: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+              accounts: [],
+              parsedType: "initializeMint2",
+              info: {
+                mint: TEST_SOLANA_ADDRESSES.mint,
+                mintAuthority: TEST_SOLANA_ADDRESSES.wallet2,
+                freezeAuthority: null,
+              },
+            },
+          ],
+        });
+
+        try {
+          const res = await app.request(
+            `/v1/issuance/tokens/${token.id}/deploy/confirm`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}`,
+              },
+              body: JSON.stringify({
+                signature: testSignature("5freezeMissingSig"),
+                mint: TEST_SOLANA_ADDRESSES.mint,
+              }),
+            },
+            env
+          );
+
+          expect(res.status).toBe(400);
+          const stillPending = await new TokenService(getDb(env)).getToken({
+            tokenId: token.id,
+            organizationId: TEST_PROJECT.organizationId,
+            projectId: TEST_PROJECT.id,
+          });
+          expect(stillPending?.mintAddress).toBeNull();
+          expect(stillPending?.status).toBe("pending");
+        } finally {
+          createOrgSignerSpy.mockRestore();
+          getSignatureStatusesSpy.mockRestore();
+          accountExistsSpy.mockRestore();
+          getTransactionSpy.mockRestore();
+        }
+      });
+
       it("still rejects a landed mint matching neither the moved row nor the prepare-time agreement", async () => {
         ensureRpcUrl();
 

@@ -213,6 +213,10 @@ async function recordConfirmedDeploy(params: {
   // The pending deploy-prepare marker (APE-848) when prepare recorded one:
   // confirmed in place instead of writing a second deploy row.
   preparedTransaction?: TokenTransaction | null;
+  // True when this confirm recorded the mint from the marker's prepare-time
+  // agreement after the profile had moved on (APE-848 recovery) — stamped on
+  // the deploy record so the reviewed-profile divergence stays auditable.
+  recoveredFromPreparedSnapshot?: boolean;
 }): Promise<Awaited<ReturnType<TokenService["setTokenDeployed"]>>> {
   const {
     tokenService,
@@ -228,6 +232,7 @@ async function recordConfirmedDeploy(params: {
     slot,
     deployedToken,
     preparedTransaction,
+    recoveredFromPreparedSnapshot,
   } = params;
   try {
     const initialPermanentDelegate = getInitialPermanentDelegateAuthority(token, custodyAddress);
@@ -268,6 +273,7 @@ async function recordConfirmedDeploy(params: {
         mintAuthority: custodyAddress,
         freezeAuthority,
         ablListAddress: listAddress ?? null,
+        ...(recoveredFromPreparedSnapshot ? { recoveredFromPreparedSnapshot: true } : {}),
       },
     });
 
@@ -1142,12 +1148,14 @@ function verifyMintAuthorities(params: {
   const { claimed, custodyAddress, mintInitialization, preparedSnapshot } = params;
   const currentFreezeAuthority = claimed.isFreezable ? custodyAddress : null;
   // Only a server-recorded agreement (the marker's preparedSnapshot) counts —
-  // the request never names authorities.
-  const preparedFreezeAuthority = preparedSnapshot
+  // the request never names authorities. Undefined — not null — when there is
+  // no agreement: a null here must mean "the agreement says non-freezable",
+  // never "anything a missing freeze authority matches".
+  const preparedFreezeAuthority: Address | null | undefined = preparedSnapshot
     ? preparedSnapshot.isFreezable
       ? custodyAddress
       : null
-    : null;
+    : undefined;
   // The RPC's parsed instruction info is loosely typed; the equality check
   // below has already narrowed the value to one of the Address-typed
   // expectations this server derived.
@@ -1157,7 +1165,7 @@ function verifyMintAuthorities(params: {
   if (
     mintInitialization.info?.mintAuthority !== custodyAddress ||
     (actualFreezeAuthority !== currentFreezeAuthority &&
-      actualFreezeAuthority !== preparedFreezeAuthority)
+      (preparedFreezeAuthority === undefined || actualFreezeAuthority !== preparedFreezeAuthority))
   ) {
     throw badRequest("Deploy transaction did not use the expected mint authorities");
   }
@@ -1437,9 +1445,12 @@ export const confirmDeploy = async (c: ValidatedBodyContext<typeof confirmDeploy
       slot: verified.status.slot,
       deployedToken,
       preparedTransaction,
+      recoveredFromPreparedSnapshot: recoveredFromPrepared,
     });
 
-    await auditService.completeCritical(c, auditIntent);
+    await auditService.completeCritical(c, auditIntent, {
+      metadata: recoveredFromPrepared ? { recoveredFromPreparedSnapshot: true } : undefined,
+    });
     return success(c, { token: toPublicToken(updatedToken) });
   } catch (error) {
     if (!deploymentRecorded) {
