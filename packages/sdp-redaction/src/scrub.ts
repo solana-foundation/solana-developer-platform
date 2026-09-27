@@ -54,35 +54,46 @@ const PII_ASSIGNMENT_PATTERN = new RegExp(
 // of 8+ digits is long enough to exclude the numbers prose legitimately
 // carries (statuses, ports, postal codes, compact dates).
 //
-// Two guards keep the run from reaching past the prose it is meant for:
+// The scan walks maximal identifier-shaped tokens — runs of letters, digits,
+// `_`, and the base64 separators `+` and `/` — and redacts the digit runs of
+// any token that carries no letter or `_`. A digit run inside a letter-bearing
+// token is part of an identifier, not a bare value: base58 mints and wallets,
+// base64 signatures, and UUID- or prefix-styled resource ids
+// (`pcred_…-ff3129488570`, `aint_11549796-…`, `tx_…-98765432-…`) all carry
+// long digit runs, and that digit evidence is exactly what audit metadata and
+// replay recovery have to keep readable. A token of digits and separators
+// alone is prose again, no matter which characters join the number — so
+// `account 000123456789/01` is covered, not just whitespace-delimited values.
+// Padding `=` is deliberately outside the token class: it never abuts a digit
+// run inside valid base64, but it does label prose (`account=000123456789`),
+// and no other rule catches that form.
 //
-// - The lookarounds demand prose delimiters (whitespace, sentence
-//   punctuation, a string boundary) on both sides. A digit run inside a
-//   longer token is part of an identifier, not a bare value: base58 mints and
-//   wallets, base64 signatures (`+/=` padding included), and UUID- or
-//   prefix-styled resource ids (`pcred_…-ff3129488570`, `aint_11549796-…`)
-//   all carry long digit runs, and that digit evidence is exactly what audit
-//   metadata and replay recovery have to keep readable.
-// - A value that is nothing but digits is a structured numeric field, not
-//   prose. Issuance outcomes persist the Solana slot as a string and replay
-//   recovery re-parses it; labelled storage (`accountNumber: "…"`) is caught
-//   by key before this runs, so a bare number alone in a string is never the
-//   only evidence of an instrument.
-//
-// The bounded quantifier is linear: one match consumes the whole run, so
-// there is nothing to rescan (the EMAIL_PATTERN DoS note above).
-const PII_DIGIT_RUN_PATTERN = /(?<![A-Za-z0-9_+/=-])\d{8,}(?![A-Za-z0-9_+/=-])/g;
+// The scan is linear: the token pattern is a single character-class repeat
+// that consumes each token in one match, and the digit-run pass inside it is
+// likewise one match per run — nothing is rescanned per offset (the
+// EMAIL_PATTERN DoS note above).
+const IDENTIFIER_TOKEN_PATTERN = /[A-Za-z0-9_+/-]+/g;
+const TOKEN_HAS_LETTER_PATTERN = /[A-Za-z_]/;
+const PII_DIGIT_RUN_PATTERN = /\d{8,}/g;
 
 /**
- * Applies `PII_DIGIT_RUN_PATTERN` to prose. A value that is a single digit run
- * end to end is a numeric field serialized as a string — a slot, an amount, an
- * epoch — and passes through untouched.
+ * Applies the shape rule to prose. A value that is a single digit run end to
+ * end is a numeric field serialized as a string — a slot, an amount, an epoch
+ * — and the audit sink passes it through untouched: issuance outcomes persist
+ * the Solana slot as a string and replay recovery re-parses it, and labelled
+ * storage (`accountNumber: "…"`) is caught by key before this runs. The
+ * telemetry sink redacts the same shape instead, because a provider error
+ * message that is nothing but the instrument number arrives with no key and
+ * no label, and no reader of a log line or trace needs the digits — the same
+ * redact/mask asymmetry as the email rules above.
  */
-function scrubDigitRuns(value: string): string {
-  if (/^\d+$/.test(value.trim())) {
+function scrubDigitRuns(value: string, emails: EmailMode): string {
+  if (emails === "mask" && /^\d+$/.test(value.trim())) {
     return value;
   }
-  return value.replace(PII_DIGIT_RUN_PATTERN, REDACTED);
+  return value.replace(IDENTIFIER_TOKEN_PATTERN, (token) =>
+    TOKEN_HAS_LETTER_PATTERN.test(token) ? token : token.replace(PII_DIGIT_RUN_PATTERN, REDACTED)
+  );
 }
 
 /**
@@ -118,7 +129,8 @@ function scrubString(value: string, emails: EmailMode): string {
       .replace(
         PII_ASSIGNMENT_PATTERN,
         (_match, key: string, separator: string) => `${key}${separator}${REDACTED}`
-      )
+      ),
+    emails
   );
 }
 

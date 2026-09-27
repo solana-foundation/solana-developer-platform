@@ -149,11 +149,11 @@ describe("scrubTelemetry", () => {
     }
   });
 
-  it("keeps a numeric string value readable as structured evidence", () => {
+  it("keeps a numeric string value readable as structured audit evidence", () => {
     // Issuance outcomes persist the Solana slot as a string and replay
-    // recovery re-parses it; the same shape carries amounts and epochs. A
-    // whole-string number is a field value, not prose, and survives.
-    assert.equal(scrubTelemetryString("343425201"), "343425201");
+    // recovery re-parses it; the same shape carries amounts and epochs. In a
+    // structured field the value is labelled upstream, so the audit sink
+    // keeps it readable.
     assert.deepEqual(
       scrubAuditMetadata({ slot: "343425201", ledgerSequence: "343425202", amount: "10000000" }),
       { slot: "343425201", ledgerSequence: "343425202", amount: "10000000" }
@@ -166,6 +166,30 @@ describe("scrubTelemetry", () => {
       scrubTelemetryString("Transfer rejected (account 000123456789); contact support"),
       "Transfer rejected (account [REDACTED]); contact support"
     );
+  });
+
+  it("redacts an account number joined to a check digit by a separator", () => {
+    // `/` and `-` are base64 characters, but a token that carries no letter is
+    // prose, not signature evidence, so the identifier guard does not protect
+    // a number joined by either.
+    assert.equal(
+      scrubTelemetryString("Transfer rejected for account 000123456789/01"),
+      "Transfer rejected for account [REDACTED]/01"
+    );
+    assert.equal(
+      scrubTelemetryString("Transfer rejected for account 000123456789-01"),
+      "Transfer rejected for account [REDACTED]-01"
+    );
+  });
+
+  it("redacts a bare instrument number a provider sends as its whole message", () => {
+    // A provider error message that is nothing but the account number arrives
+    // with no key and no label, and no reader of a log line or trace needs
+    // the digits — the telemetry side of the redact/mask asymmetry.
+    assert.equal(scrubTelemetryString("000123456789"), "[REDACTED]");
+    const scrubbed = scrubTelemetry({ error: "000123456789" });
+
+    assert.equal((scrubbed as { error: string }).error, "[REDACTED]");
   });
 
   it("survives a circular payload rather than throwing inside a send path", () => {
@@ -277,6 +301,22 @@ describe("scrubTelemetryString — pathological input", () => {
   // it, so 160KB of "%" was ~41s of blocked event loop.
   it("scrubs a long run of local-part characters in linear time", () => {
     const payload = "%".repeat(200_000);
+
+    const startedAt = process.hrtime.bigint();
+    scrubTelemetryString(payload);
+    const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    assert.ok(
+      elapsedMs < 1_000,
+      `expected a linear scan, took ${elapsedMs.toFixed(0)}ms (quadratic regression)`
+    );
+  });
+
+  it("scrubs a long run of identifier separators in linear time", () => {
+    // `-`, `/`, and `+` are token characters, so a body of nothing else is
+    // one long scan candidate: the token walk has to consume it in one pass,
+    // not retry per offset.
+    const payload = "-".repeat(200_000);
 
     const startedAt = process.hrtime.bigint();
     scrubTelemetryString(payload);
