@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { getAuth } from "@/lib/auth";
 import { badRequest, badRequestQuery, notFound, walletNotFound } from "@/lib/errors";
+import { PREPARED_DEPLOY_FENCE_MS } from "@/lib/issuance/profile-deployment-snapshot";
 import { paginated } from "@/lib/response";
 import {
   assertApiKeyWalletAccess,
@@ -254,6 +255,12 @@ export const listTokenTransactions = async (c: AppContext) => {
   if (!token) {
     throw notFound("Token");
   }
+
+  // Expire stale client-signed prepare markers before serving history, so an
+  // abandoned (or confirmed-failed) prepare no longer reads as a deployment in
+  // progress (APE-848 review): the sweep marks past-fence rows failed, and
+  // confirm still recovers such a marker's prepare-time agreement.
+  await tokenService.expireStalePreparedDeploys(tokenId, PREPARED_DEPLOY_FENCE_MS);
 
   const offset = (page - 1) * pageSize;
 

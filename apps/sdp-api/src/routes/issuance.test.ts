@@ -3105,6 +3105,53 @@ describe("Issuance Routes", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("expires a stale prepare marker so history does not show a deployment in progress", async () => {
+      const token = await seedIssuedToken();
+      // An abandoned client-signed prepare whose blockhash can no longer be
+      // valid, and a fresh one that may still land. Serving history closes the
+      // stale marker (same expiry the profile-save fence applies) so it reads
+      // as an expired attempt rather than a deployment in progress; the fresh
+      // one keeps holding its fence.
+      await seedIssuanceTransaction({
+        id: "ptx_stale_prepare",
+        tokenId: token.id,
+        type: "deploy",
+        status: "pending",
+        params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
+        createdAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+      });
+      await seedIssuanceTransaction({
+        id: "ptx_fresh_prepare",
+        tokenId: token.id,
+        type: "deploy",
+        status: "pending",
+        params: { operation: "deploy", mode: "prepare", mint: TEST_SOLANA_ADDRESSES.mint },
+        createdAt: new Date().toISOString(),
+      });
+
+      const res = await app.request(
+        `/v1/issuance/tokens/${token.id}/transactions`,
+        {
+          method: "GET",
+          headers: { Authorization: `Bearer ${TEST_PROJECT_API_KEY.raw}` },
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.meta.total).toBe(2);
+      const byId = (
+        txs: Array<{ id: string; status: string; error?: string | null }>,
+        id: string
+      ) => txs.find((tx) => tx.id === id);
+      const stale = byId(body.data, "ptx_stale_prepare");
+      const fresh = byId(body.data, "ptx_fresh_prepare");
+      expect(stale?.status).toBe("failed");
+      expect(stale?.error).toBe("Prepared deploy expired without confirmation");
+      expect(fresh?.status).toBe("pending");
+    });
   });
 
   describe("GET /v1/issuance/transactions", () => {
