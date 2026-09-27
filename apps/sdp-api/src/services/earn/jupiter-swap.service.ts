@@ -3,6 +3,7 @@ import {
   providerNotConfigured,
   providerUnavailable,
 } from "@sdp/earn/errors";
+import { extractProviderErrorMessage } from "@sdp/earn/fetch";
 import type { EarnVaultInstruction, EarnVaultTransactionPlan } from "@sdp/earn/types";
 import { isAddress } from "@sdp/solana/address";
 import { formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
@@ -51,6 +52,14 @@ import type { VaultDeadline } from "./vault-deadline";
 const DEFAULT_JUPITER_SWAP_API_URL = "https://api.jup.ag/swap/v2";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Telemetry bound for upstream error text. The shared extractor already runs
+ * the telemetry denylist over the provider's sentence; this caps how much of
+ * it a log line can carry, so an upstream body cannot size a log entry.
+ * Matches the diagnostic bound used for vault-movement reconciliation errors.
+ */
+const PROVIDER_DETAIL_LOG_BOUND = 300;
 
 /**
  * Account headroom asked of Jupiter's router, below its 64 default: the swap
@@ -767,8 +776,12 @@ export async function fetchJupiterSwapLeg(
     const detail = await readJupiterError(response);
     if (response.status >= 400 && response.status < 500 && response.status !== 429) {
       // Jupiter's 4xx names a request problem: no route for the pair, an
-      // untradable (e.g. devnet) mint, or an amount below route minimums.
-      throw badRequest(`Jupiter could not route this swap: ${detail}`);
+      // untradable (e.g. devnet) mint, or an amount below route minimums. The
+      // upstream text itself stays out of the response — the error string is
+      // response-controlled and has carried serialized provider bodies — so
+      // the caller gets a stable refusal naming the status we observed
+      // (SOLA9-506); the bounded, scrubbed detail is for telemetry alone.
+      throw badRequest(`Jupiter could not route this swap (upstream ${response.status})`);
     }
     getLogger().error(
       { status: response.status, detail },
@@ -884,7 +897,9 @@ export async function fetchJupiterSwapQuote(
   if (!response.ok) {
     const detail = await readJupiterError(response);
     if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-      throw badRequest(`Jupiter could not quote this swap: ${detail}`);
+      // Same boundary as the build leg: a stable caller-fault refusal with no
+      // provider-selected text in it (SOLA9-506).
+      throw badRequest(`Jupiter could not quote this swap (upstream ${response.status})`);
     }
     getLogger().error(
       { status: response.status, detail },
@@ -924,14 +939,25 @@ export async function fetchJupiterSwapQuote(
   };
 }
 
+/**
+ * The upstream explanation, parsed by the shared Earn provider error extractor
+ * rather than a local parser: it reads `error` as both object and bare string
+ * (plus `message`/`reason`), picks the first non-blank candidate, and runs the
+ * telemetry denylist over the result before it is used anywhere. The bound
+ * keeps a provider body from sizing a log line; nothing here is reflected to
+ * the API caller — the 4xx refusals above carry only the stable message.
+ */
 async function readJupiterError(response: Response): Promise<string> {
+  let parsed: unknown;
   try {
-    const body = (await response.json()) as { error?: unknown };
-    if (typeof body?.error === "string" && body.error.trim()) return body.error.trim();
+    parsed = await response.json();
   } catch {
-    // Fall through to the status line.
+    parsed = undefined;
   }
-  return `HTTP ${response.status}`;
+  return extractProviderErrorMessage(parsed, `HTTP ${response.status}`).slice(
+    0,
+    PROVIDER_DETAIL_LOG_BOUND
+  );
 }
 
 /**

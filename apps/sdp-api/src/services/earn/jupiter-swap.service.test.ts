@@ -566,7 +566,7 @@ describe("fetchJupiterSwapLeg", () => {
     });
   });
 
-  it("surfaces a Jupiter 400 as a caller-fault refusal carrying Jupiter's own reason", async () => {
+  it("surfaces a Jupiter 400 as a caller-fault refusal without provider-selected text", async () => {
     fetchMock.mockImplementation(
       async () =>
         new Response(JSON.stringify({ error: "No route found for this pair" }), { status: 400 })
@@ -574,9 +574,14 @@ describe("fetchJupiterSwapLeg", () => {
 
     const attempt = fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request());
     await expect(attempt).rejects.toBeInstanceOf(AppError);
+    // The upstream error string is response-controlled (SOLA9-506): the
+    // refusal is stable and carries none of it.
     await expect(
       fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
-    ).rejects.toThrowError(/No route found for this pair/);
+    ).rejects.toThrowError(/Jupiter could not route this swap \(upstream 400\)/);
+    await expect(
+      fetchJupiterSwapLeg(swapEnv(), createVaultDeadline(), request())
+    ).rejects.not.toThrowError(/No route found/);
   });
 
   it("answers a Jupiter 5xx as an upstream failure, never a caller fault", async () => {
@@ -687,20 +692,20 @@ describe("fetchJupiterSwapQuote", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("maps an upstream 4xx to a caller-readable refusal", async () => {
+  it("maps an upstream 4xx to a stable caller-fault refusal", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: "No route found for this pair" }), { status: 400 })
     );
-    await expect(
-      fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
-        inputMint: USDC,
-        outputMint: PYUSD,
-        sourceAmount: "25",
-      })
-    ).rejects.toSatisfy(
-      (error: unknown) =>
-        error instanceof AppError && String(error.message).includes("No route found")
+    const attempt = fetchJupiterSwapQuote(swapEnv(), createVaultDeadline(), {
+      inputMint: USDC,
+      outputMint: PYUSD,
+      sourceAmount: "25",
+    });
+    await expect(attempt).rejects.toBeInstanceOf(AppError);
+    await expect(attempt).rejects.toThrowError(
+      /Jupiter could not quote this swap \(upstream 400\)/
     );
+    await expect(attempt).rejects.not.toThrowError(/No route found/);
   });
 
   it("refuses a quote outside the requested contract", async () => {
