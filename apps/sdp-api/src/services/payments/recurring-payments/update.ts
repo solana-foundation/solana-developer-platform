@@ -227,7 +227,10 @@ function toLegacySourceWalletSnapshot(
  * identity. Translate the retried request into that vocabulary so recovery
  * still compares the exact same update — a different replacement wallet,
  * amount, or schedule keeps failing the comparison — instead of permanently
- * rejecting predecessor-era updates.
+ * rejecting predecessor-era updates. When the attempt recorded its
+ * replacement plan, the retried custody wallet also matches by carrying the
+ * plan owner's public key: the on-chain identity the original attempt
+ * executed against outlives wallet_id rewrites of the custody-wallet row.
  */
 function legacyUpdateAttemptMatchesRequest(
   attempt: PaymentRecurringPaymentUpdateAttemptRow,
@@ -238,6 +241,8 @@ function legacyUpdateAttemptMatchesRequest(
     afterValues: Record<string, unknown>;
     oldSourceWalletId: string | null;
     newSourceWalletId: string | null;
+    newSourcePublicKey: string | null;
+    planOwner: { walletId: string; publicKey: string } | null;
   }
 ): boolean {
   const translated = {
@@ -247,7 +252,61 @@ function legacyUpdateAttemptMatchesRequest(
     beforeValues: toLegacySourceWalletSnapshot(input.beforeValues, input.oldSourceWalletId),
     afterValues: toLegacySourceWalletSnapshot(input.afterValues, input.newSourceWalletId),
   };
-  return attempt.mode === input.mode && updateAttemptMatchesRequest(attempt, translated);
+  if (attempt.mode !== input.mode || !updateAttemptMatchesRequest(attempt, translated)) {
+    const recordedPublicKey = input.planOwner?.publicKey ?? null;
+    if (
+      recordedPublicKey === null ||
+      input.newSourcePublicKey !== recordedPublicKey ||
+      !attempt.changed_fields.includes(LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD)
+    ) {
+      return false;
+    }
+    const {
+      [LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD]: _recordedSourceWalletId,
+      ...restAttemptAfterValues
+    } = attempt.after_values;
+    const {
+      [LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD]: _retriedSourceWalletId,
+      ...restTranslatedAfterValues
+    } = translated.afterValues;
+    if (
+      attempt.mode !== input.mode ||
+      !sameStringSet(attempt.changed_fields, translated.changedFields) ||
+      !sameFlatRecord(attempt.before_values, translated.beforeValues) ||
+      !sameFlatRecord(restAttemptAfterValues, restTranslatedAfterValues)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The replacement plan recorded on a side-effected legacy attempt pins the
+ * exact custody identity the original attempt executed against (wallet_id
+ * plus public key, the same identity pair migration 0073 pins parents by).
+ * Resolve it by the attempt's recorded plan pointer without constraining the
+ * owner wallet_id: the legacy snapshot's wallet_id vocabulary can drift from
+ * the plan's owner row, and the recorded public key is the identity the
+ * recovery proof needs.
+ */
+async function resolveLegacyAttemptPlanOwner(
+  db: DatabaseExecutor,
+  attempt: PaymentRecurringPaymentUpdateAttemptRow,
+  input: { organizationId: string; projectId: string }
+): Promise<{ walletId: string; publicKey: string } | null> {
+  if (attempt.new_plan_id === null) {
+    return null;
+  }
+  const plan = await db.queryOne<{ owner_wallet_id: string; owner_address: string }>(
+    `SELECT owner_wallet_id, owner_address
+       FROM payment_subscription_plans
+      WHERE id = ?
+        AND organization_id = ?
+        AND project_id = ?`,
+    [attempt.new_plan_id, input.organizationId, input.projectId]
+  );
+  return plan ? { walletId: plan.owner_wallet_id, publicKey: plan.owner_address } : null;
 }
 
 /**
@@ -260,11 +319,12 @@ function legacyUpdateAttemptMatchesRequest(
  * Attempts that already created their replacement plan resolve through the
  * plan owner instead — the wallet_id plus public key pair the original
  * attempt executed against — so recorded work stays recoverable even when the
- * wallet_id alone is ambiguous. When even that pair is duplicated across
- * custody-wallet rows, the recorded plan owner still proves the on-chain
- * identity: the retry resumes when the retried wallet carries the recorded
- * public key instead of rejecting every retry of an already-authorized
- * replacement forever.
+ * wallet_id alone is ambiguous. When that pair is duplicated across
+ * custody-wallet rows, or the snapshot's wallet_id no longer matches any row
+ * carrying the recorded key, the recorded plan owner still proves the
+ * on-chain identity: the retry resumes when the retried wallet carries the
+ * recorded public key instead of rejecting every retry of an
+ * already-authorized replacement forever.
  */
 type LegacyCustodyIdentityResolution = "matched" | "different" | "ambiguous" | "missing";
 
@@ -275,6 +335,7 @@ async function resolveLegacyAttemptCustodyIdentity(
     organizationId: string;
     projectId: string;
     newSourceCustodyWalletId: string | null;
+    planOwner: { walletId: string; publicKey: string } | null;
   }
 ): Promise<LegacyCustodyIdentityResolution> {
   if (!attempt.changed_fields.includes(LEGACY_SOURCE_WALLET_SNAPSHOT_FIELD)) {
@@ -284,19 +345,7 @@ async function resolveLegacyAttemptCustodyIdentity(
   if (input.newSourceCustodyWalletId === null || typeof snapshotWalletId !== "string") {
     return "ambiguous";
   }
-  let ownerPublicKey: string | null = null;
-  if (attempt.new_plan_id !== null) {
-    const plan = await db.queryOne<{ owner_address: string }>(
-      `SELECT owner_address
-         FROM payment_subscription_plans
-        WHERE id = ?
-          AND organization_id = ?
-          AND project_id = ?
-          AND owner_wallet_id = ?`,
-      [attempt.new_plan_id, input.organizationId, input.projectId, snapshotWalletId]
-    );
-    ownerPublicKey = plan?.owner_address ?? null;
-  }
+  const ownerPublicKey = input.planOwner?.publicKey ?? null;
   const wallets = await db.queryMany<{ id: string }>(
     `SELECT wallet.id
        FROM custody_wallets wallet
@@ -322,13 +371,14 @@ async function resolveLegacyAttemptCustodyIdentity(
     ]
   );
   if (wallets.length !== 1) {
-    if (wallets.length >= 2 && ownerPublicKey !== null) {
-      // Duplicate custody-wallet rows share the recorded wallet_id plus
-      // public-key pair, so no single row proves which row the original
-      // attempt selected. The recorded plan owner still proves the on-chain
-      // identity the recorded work executed against: resume when the retried
-      // wallet carries exactly that identity instead of rejecting every
-      // retry — an already-authorized replacement could otherwise never
+    if (ownerPublicKey !== null) {
+      // No single wallet row proves which row the original attempt selected:
+      // the recorded wallet_id plus public-key pair is duplicated across
+      // custody-wallet rows, or no row carries the pair anymore (the
+      // surviving row was re-keyed). The recorded plan owner still proves the
+      // on-chain identity the recorded work executed against: resume when the
+      // retried wallet carries exactly that identity instead of rejecting
+      // every retry — an already-authorized replacement could otherwise never
       // finalize.
       const retriedWallet = await db.queryOne<{ public_key: string }>(
         `SELECT wallet.public_key
@@ -649,6 +699,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   afterValues: Record<string, unknown>;
   newSourceCustodyWalletId: string | null;
   newSourceWalletId: string | null;
+  newSourcePublicKey: string | null;
   createdBy: string | null;
   nowIso: string;
   recoveringStaleUpdate: boolean;
@@ -665,6 +716,10 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
         existing.new_source_custody_wallet_id === null && usesLegacySourceWalletSnapshot(existing);
       let resume = false;
       if (legacySnapshot) {
+        const planOwner = await resolveLegacyAttemptPlanOwner(input.db, existing, {
+          organizationId: input.organizationId,
+          projectId: input.projectId,
+        });
         if (
           !legacyUpdateAttemptMatchesRequest(existing, {
             mode: input.mode,
@@ -673,6 +728,8 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
             afterValues: input.afterValues,
             oldSourceWalletId: input.claimed.source_wallet_id,
             newSourceWalletId: input.newSourceWalletId,
+            newSourcePublicKey: input.newSourcePublicKey,
+            planOwner,
           })
         ) {
           throw conflict("Recurring payment update recovery must retry the same update");
@@ -681,6 +738,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
           organizationId: input.organizationId,
           projectId: input.projectId,
           newSourceCustodyWalletId: input.newSourceCustodyWalletId,
+          planOwner,
         });
         if (identity === "matched") {
           resume = true;
@@ -1994,6 +2052,7 @@ export async function updateRecurringPayment(input: {
       afterValues: resolved.afterValues,
       newSourceCustodyWalletId: sourceChanged ? resolved.sourceWallet.id : null,
       newSourceWalletId: resolved.sourceWallet.walletId,
+      newSourcePublicKey: resolved.sourceWallet.publicKey,
       createdBy: input.createdBy,
       nowIso,
       recoveringStaleUpdate,
