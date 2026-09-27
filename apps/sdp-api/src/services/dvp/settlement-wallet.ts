@@ -13,11 +13,14 @@
  * SDP's leg, never a reuse of it.
  */
 
+import { canProviderSign } from "@sdp/custody";
 import { type Address, address } from "@solana/kit";
 import type { Context } from "hono";
 import { getDb } from "@/db";
+import { conflict } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import { provisionApiKeyWallet } from "@/services/api-key-wallet-provisioning.service";
+import { CustodyRuntimeTargets } from "@/services/domain/signing/custody-runtime-target";
 import type { Env } from "@/types/env";
 
 /** Shown in the custody wallet list so this wallet is not a mystery row. */
@@ -72,6 +75,24 @@ export async function getOrCreateDvpSettlementWallet(
     getLogger().warn(
       { projectId: scope.projectId, deactivatedCustodyWalletId: replacing },
       "dvp: the project's settlement wallet is no longer active; provisioning a replacement. Trades created under the old authority can no longer be settled or cancelled by anyone."
+    );
+  }
+
+  // Fail closed BEFORE the provider is asked for a wallet or the mapping is
+  // persisted. The settlement authority signs every settle and cancel, so a
+  // lifecycle-only custody default (Anchorage) would mint an authority that
+  // can never close the trades bound to it — create would succeed and both
+  // closes would fail at signer resolution (SOLA9-606). A mapping that already
+  // exists under such a provider is refused by runtime admission in create.
+  const target = await new CustodyRuntimeTargets(getDb(env), env, new Map()).resolve({
+    kind: "effective",
+    organizationId: scope.organizationId,
+    projectId: scope.projectId,
+  });
+  if (target && !canProviderSign(target.provider)) {
+    throw conflict(
+      `DvP settlement requires a custody provider that can sign transactions; provider does not support transaction signing: ${target.provider}`,
+      { reason: "provider_cannot_sign" }
     );
   }
 

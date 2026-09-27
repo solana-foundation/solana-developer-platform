@@ -1,4 +1,9 @@
-import { CUSTODY_PROVIDERS, type CustodyProvider, normalizePrivyWalletId } from "@sdp/custody";
+import {
+  CUSTODY_PROVIDERS,
+  type CustodyProvider,
+  canProviderSign,
+  normalizePrivyWalletId,
+} from "@sdp/custody";
 import { isFullSigningPort, SigningError, type SigningPort } from "@sdp/custody/signing";
 import type {
   CustodyConnectionCheckStatus,
@@ -344,6 +349,18 @@ export class CustodyRuntimeTargets {
     }
     this.assertRuntimeExecutionAllowed(target, params.custodyWalletId);
     await assertCustodyProviderEntitled(this.env, this.db, params.organizationId, target.provider);
+    // Runtime execution means signing with this wallet. A lifecycle-only
+    // provider (Anchorage) can hold an active, entitled wallet that still can
+    // never sign, so admitting it would let signing-dependent flows — DvP
+    // create above all — bind trades to an authority that can neither settle
+    // nor cancel them (SOLA9-606). Refuse here, at every admission site,
+    // instead of at signer resolution after the money is already committed.
+    if (!canProviderSign(target.provider)) {
+      this.logUnavailable(target, "provider_cannot_sign", params.custodyWalletId);
+      throw conflict(`Provider does not support transaction signing: ${target.provider}`, {
+        reason: "provider_cannot_sign",
+      });
+    }
   }
 
   async listWallets(params: {
@@ -1498,6 +1515,7 @@ export class CustodyRuntimeTargets {
       | "runtime_disabled"
       | "runtime_execution_paused"
       | "runtime_execution_unavailable"
+      | "provider_cannot_sign"
       | "connection_unusable"
       | "connection_changed"
       | "credential_secret_unavailable"
