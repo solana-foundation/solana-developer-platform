@@ -149,6 +149,47 @@ describe("scrubTelemetry", () => {
     }
   });
 
+  it("keeps an all-digit Solana address readable", () => {
+    // The system program id is 32 ones — base58 has no zero, so an all-digit
+    // address is a token of 32-44 base58 digits. It prefixes every transaction
+    // log, and no account number reaches 32 digits, so the shape rule must
+    // treat it as an identifier, not prose.
+    const systemProgramId = "11111111111111111111111111111111";
+    const message = `Program ${systemProgramId} invoke [1]`;
+
+    assert.equal(scrubTelemetryString(message), message);
+    assert.equal(scrubTelemetry({ error: message }).error, message);
+    assert.equal(
+      scrubTelemetryString(
+        "landed at slot 343425201 for 4444444444444444444444444444444444444444444"
+      ),
+      "landed at slot [REDACTED] for 4444444444444444444444444444444444444444444"
+    );
+    assert.deepEqual(
+      scrubAuditMetadata({ program: `Program ${systemProgramId} consumed 9999 compute units` }),
+      { program: `Program ${systemProgramId} consumed 9999 compute units` }
+    );
+  });
+
+  it("still redacts digit runs that only look address-adjacent", () => {
+    // Sparing is anchored to the base58 shape: a zero disqualifies the token
+    // (base58 has none), and a run below 32 or above 44 digits is not an
+    // address. Every account-number form keeps its redaction.
+    const values = [
+      "Transfer rejected for account 000123456789",
+      "Transfer rejected for account 000123456789/01",
+      "Transfer rejected (account 000123456789); contact support",
+      "Wire for 1234567812345678 declined: insufficient funds",
+      "1111111111111111111111111111111",
+      "111111111111111111111111111111111111111111111111111",
+    ];
+
+    for (const value of values) {
+      assert.notEqual(scrubTelemetryString(value), value, `under-redacted ${value}`);
+    }
+    assert.equal(scrubTelemetryString("00000000000000000000000000000000"), "[REDACTED]");
+  });
+
   it("keeps a numeric string value readable as structured audit evidence", () => {
     // Issuance outcomes persist the Solana slot as a string and replay
     // recovery re-parses it; the same shape carries amounts and epochs. In a

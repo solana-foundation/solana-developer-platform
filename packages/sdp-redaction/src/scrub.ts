@@ -68,6 +68,14 @@ const PII_ASSIGNMENT_PATTERN = new RegExp(
 // run inside valid base64, but it does label prose (`account=000123456789`),
 // and no other rule catches that form.
 //
+// One letterless shape is an identifier all the same: a run of 32-44 base58
+// digits (`[1-9]` — base58 has no zero) is the all-digit form of a Solana
+// address. The system program id is 32 ones and prefixes every transaction
+// log, so redacting it would mangle the most common line in telemetry, and no
+// account number reaches 32 digits — a zero or a separator disqualifies the
+// token, which is what keeps every account-number form above covered.
+const BASE58_ADDRESS_PATTERN = /^[1-9]{32,44}$/;
+//
 // The scan is linear: the token pattern is a single character-class repeat
 // that consumes each token in one match, and the digit-run pass inside it is
 // likewise one match per run — nothing is rescanned per offset (the
@@ -92,7 +100,9 @@ function scrubDigitRuns(value: string, emails: EmailMode): string {
     return value;
   }
   return value.replace(IDENTIFIER_TOKEN_PATTERN, (token) =>
-    TOKEN_HAS_LETTER_PATTERN.test(token) ? token : token.replace(PII_DIGIT_RUN_PATTERN, REDACTED)
+    TOKEN_HAS_LETTER_PATTERN.test(token) || BASE58_ADDRESS_PATTERN.test(token)
+      ? token
+      : token.replace(PII_DIGIT_RUN_PATTERN, REDACTED)
   );
 }
 
