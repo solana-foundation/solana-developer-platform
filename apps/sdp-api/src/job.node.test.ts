@@ -266,9 +266,30 @@ describe("runCronJob", () => {
       deadlineMs: 90_000,
     });
     expect(performance.now()).toBe(40_000);
+    // Warmup is capped by the budget left after startup minus the replay's
+    // guaranteed slice (90_000 − 10_000 − 30_000), below its own 120s ceiling.
     expect(waitForEgress).toHaveBeenCalledWith(
-      expect.objectContaining({ deadlineMs: 120_000, intervalMs: 5_000 })
+      expect.objectContaining({ deadlineMs: 50_000, intervalMs: 5_000 })
     );
+  });
+
+  it("caps egress warmup to nothing once the run budget is already spent", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    vi.mocked(process.uptime).mockReturnValue(110);
+    vi.mocked(solanaRpc.createRpc).mockReturnValue({} as ReturnType<typeof solanaRpc.createRpc>);
+    vi.mocked(waitForEgress).mockResolvedValue({
+      ready: false,
+      elapsedMs: 0,
+      attempts: 1,
+    });
+    await runCronJob();
+    // No remaining budget after the 20s shutdown reserve: warmup gets a zero
+    // cap so the webhook replay cannot be left with a deadline already in the
+    // past by warmup itself.
+    expect(waitForEgress).toHaveBeenCalledWith(
+      expect.objectContaining({ deadlineMs: 0, intervalMs: 5_000 })
+    );
+    expect(trackPendingTransfers).toHaveBeenCalledOnce();
   });
 
   it("passes an exhausted cleanup budget without skipping money ticks or renewing the allowance", async () => {

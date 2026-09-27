@@ -45,6 +45,16 @@ import type { Env } from "@/types/env";
 
 const MAX_MANAGED_SCHEDULER_GAP_MINUTES = 5;
 const SHUTDOWN_RESERVE_MS = 20_000;
+/**
+ * Egress warmup can never eat the last slice of the run: the durable ramp
+ * webhook replay is a managed deployment's ONLY replay pass, so it must get
+ * real time even when warmup runs long. Warmup is capped so this slice always
+ * remains, and the replay claims rows only while the deadline leaves time —
+ * claiming with the budget spent would start an apply inside the platform's
+ * kill window and burn the row's attempt for nothing.
+ */
+const REPLAY_MIN_BUDGET_MS = 30_000;
+const MAX_EGRESS_WARMUP_MS = 120_000;
 
 /**
  * One-shot reconciliation entrypoint for the managed Cloud Run Job — the only
@@ -137,9 +147,16 @@ export async function runCronJob(): Promise<void> {
   }
   if (probeRpc) {
     const rpc = probeRpc;
+    // Cap warmup by the budget left after startup, minus the replay's
+    // guaranteed slice: a warmup that ran to its own deadline could leave the
+    // webhook replay no time at all.
+    const warmupDeadlineMs = Math.min(
+      MAX_EGRESS_WARMUP_MS,
+      Math.max(0, runDeadlineMs - performance.now() - REPLAY_MIN_BUDGET_MS)
+    );
     const egress = await waitForEgress({
       probe: () => rpc.getBlockHeight({ commitment: "confirmed" }).send(),
-      deadlineMs: 120_000,
+      deadlineMs: warmupDeadlineMs,
       intervalMs: 5_000,
     });
     if (egress.ready) {
