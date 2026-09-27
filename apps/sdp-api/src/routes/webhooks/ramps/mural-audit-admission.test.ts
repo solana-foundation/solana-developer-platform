@@ -702,7 +702,7 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
         organization: {
           id: muralOrganizationId,
           kycStatus: "approved",
-          __sdpLifecycleDeliveryId: "mural_event_regression_earlier_delivery",
+          __sdpKycLifecycleDeliveryId: "mural_event_regression_earlier_delivery",
         },
       },
     });
@@ -1103,7 +1103,7 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
         organization: {
           id: muralOrganizationId,
           kycStatus: "approved",
-          __sdpLifecycleDeliveryId: deliveryId,
+          __sdpKycLifecycleDeliveryId: deliveryId,
         },
       },
     });
@@ -1126,7 +1126,7 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       .bind(counterpartyId)
       .first<{
         provider_data: {
-          mural?: { organization?: { kycStatus?: string; __sdpLifecycleDeliveryId?: string } };
+          mural?: { organization?: { kycStatus?: string; __sdpKycLifecycleDeliveryId?: string } };
         };
       }>();
     const wallet = await getDb(env)
@@ -1134,7 +1134,7 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       .bind(kycWalletId)
       .first<{ kyc_status: string }>();
     expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("approved");
-    expect(counterparty?.provider_data.mural?.organization?.__sdpLifecycleDeliveryId).toBe(
+    expect(counterparty?.provider_data.mural?.organization?.__sdpKycLifecycleDeliveryId).toBe(
       deliveryId
     );
     expect(wallet?.kyc_status).toBe("verified");
@@ -1178,5 +1178,111 @@ describe("Mural lifecycle webhook audit admission (SOLA9-580)", () => {
       .prepare("SELECT count(*)::int AS count FROM audit_ledger_anchors")
       .first<{ count: number }>();
     expect(anchors?.count).toBe(auditRows.length);
+  });
+
+  /**
+   * Delivery stamps are scope-scoped: a TOS acceptance landing after a
+   * committed KYC approval replaces the TOS stamp, never the KYC one. A
+   * retried KYC delivery therefore still finds its own stamp next to the
+   * committed KYC status, resolves its stranded intent as applied, and is
+   * acknowledged without a duplicate admission — even though the other
+   * scope's delivery wrote to the same organization record in between.
+   */
+  it("keeps a committed KYC delivery's evidence when a TOS delivery replaced the other scope's stamp", async () => {
+    const timestamp = new Date().toISOString();
+    const eventBody = {
+      id: "mural_event_regression_kyc_retry_after_tos",
+      payload: {
+        type: "verification_status_changed",
+        organizationId: muralOrganizationId,
+        currentStatus: { type: "approved", approvedAt: "2026-09-25T00:00:00.000Z" },
+      },
+    };
+    // Same digest the processor stamps on the verified body.
+    const body = JSON.stringify(eventBody);
+    const deliveryId = createHash("sha256").update(`${timestamp}.${body}`).digest("hex");
+    await seedCounterparty({
+      mural: {
+        organization: {
+          id: muralOrganizationId,
+          // The KYC approval committed (stamp names this delivery), and a TOS
+          // acceptance landed afterwards, stamping the other scope.
+          kycStatus: "approved",
+          __sdpKycLifecycleDeliveryId: deliveryId,
+          tosStatus: "ACCEPTED",
+          __sdpTosLifecycleDeliveryId: "mural_event_regression_later_tos_delivery",
+        },
+      },
+    });
+    // The prior KYC attempt's transaction committed both of its writes.
+    await getDb(env)
+      .prepare("UPDATE kyc_wallets SET kyc_status = 'verified' WHERE id = ?")
+      .bind(kycWalletId)
+      .run();
+    const strandedIntentId = `aint_${randomUUID()}`;
+    const { applied } = await signAndApply(eventBody, {
+      timestamp,
+      beforeApply: (id) => insertStrandedIntent(strandedIntentId, id),
+    });
+    expect(applied).toBe(true);
+
+    // The committed state is untouched by the retry.
+    const counterparty = await getDb(env)
+      .prepare("SELECT provider_data FROM counterparties WHERE id = ?")
+      .bind(counterpartyId)
+      .first<{
+        provider_data: {
+          mural?: {
+            organization?: {
+              kycStatus?: string;
+              __sdpKycLifecycleDeliveryId?: string;
+              tosStatus?: string;
+              __sdpTosLifecycleDeliveryId?: string;
+            };
+          };
+        };
+      }>();
+    expect(counterparty?.provider_data.mural?.organization?.kycStatus).toBe("approved");
+    expect(counterparty?.provider_data.mural?.organization?.__sdpKycLifecycleDeliveryId).toBe(
+      deliveryId
+    );
+    expect(counterparty?.provider_data.mural?.organization?.tosStatus).toBe("ACCEPTED");
+    expect(counterparty?.provider_data.mural?.organization?.__sdpTosLifecycleDeliveryId).toBe(
+      "mural_event_regression_later_tos_delivery"
+    );
+    const inbox = await getDb(env)
+      .prepare("SELECT count(*)::int AS count FROM ramp_webhook_events")
+      .first<{ count: number }>();
+    expect(inbox?.count).toBe(0);
+
+    // Only the stranded intent exists — no duplicate admission — and the
+    // committed KYC change is recorded as applied, not aborted.
+    const auditRows = await readAuditRows(organizationId);
+    const intents = auditRows.filter(
+      (row) =>
+        row.action === "maintenance" &&
+        row.resource_type === "audit_ledger" &&
+        parseMetadata(row).auditPhase === "intent"
+    );
+    expect(intents).toHaveLength(1);
+    expect(sole(intents).resource_id).toBe(strandedIntentId);
+    expect(sole(intents).request_id).toBe(deliveryId);
+
+    const outcomes = auditRows.filter(
+      (row) =>
+        row.action === "update" &&
+        row.resource_type === "counterparty" &&
+        parseMetadata(row).auditPhase === "outcome"
+    );
+    expect(outcomes).toHaveLength(1);
+    expect(sole(outcomes).status).toBe("success");
+    const outcomeMetadata = parseMetadata(sole(outcomes)) as {
+      auditIntentId?: string;
+      result?: string;
+      resolvedByRetry?: boolean;
+    };
+    expect(outcomeMetadata.auditIntentId).toBe(strandedIntentId);
+    expect(outcomeMetadata.result).toBe("applied");
+    expect(outcomeMetadata.resolvedByRetry).toBe(true);
   });
 });

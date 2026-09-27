@@ -238,6 +238,21 @@ function readMuralOrganizationId(
   return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
+/** The delivery stamp a lifecycle scope writes, read back as a string or undefined. */
+function readLifecycleStamp(
+  organization: Record<string, unknown> | undefined,
+  kind: "kyc_status" | "tos_accepted"
+): string | undefined {
+  // Per-scope stamps: a KYC delivery's committed evidence must survive a TOS
+  // delivery landing later (and vice versa) — one shared stamp would let the
+  // other scope's write erase the proof and misrecord a committed change.
+  const stamp =
+    kind === "kyc_status"
+      ? organization?.__sdpKycLifecycleDeliveryId
+      : organization?.__sdpTosLifecycleDeliveryId;
+  return typeof stamp === "string" ? stamp : undefined;
+}
+
 /** A non-decision status arriving after a recorded decision is a replayed stale event. */
 function isStaleMuralKycStatus(
   currentOrganization: Record<string, unknown> | undefined,
@@ -274,14 +289,22 @@ async function resolveStrandedLifecycleIntents(
           AND intent.request_id = ?
           AND intent.action = 'maintenance'
           AND intent.resource_type = 'audit_ledger'
-          AND pg_input_is_valid(intent.metadata, 'jsonb')
-          AND intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+          AND CASE
+            WHEN intent.metadata IS NOT NULL
+                 AND pg_input_is_valid(intent.metadata, 'jsonb')
+            THEN intent.metadata::jsonb ->> 'auditPhase' = 'intent'
+            ELSE false
+          END
           AND NOT EXISTS (
             SELECT 1
               FROM audit_logs AS outcome
-             WHERE pg_input_is_valid(outcome.metadata, 'jsonb')
-               AND outcome.metadata::jsonb ->> 'auditPhase' = 'outcome'
-               AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+             WHERE CASE
+               WHEN outcome.metadata IS NOT NULL
+                    AND pg_input_is_valid(outcome.metadata, 'jsonb')
+               THEN outcome.metadata::jsonb ->> 'auditPhase' = 'outcome'
+                    AND outcome.metadata::jsonb ->> 'auditIntentId' = intent.resource_id
+               ELSE false
+             END
           )`
     )
     .bind(organizationId, deliveryId)
@@ -439,10 +462,7 @@ async function applyMuralLifecycleToCurrentOwner(
       // state stamped by THIS delivery with the target status proves one of
       // them committed. Anything else proves none of them did — a status that
       // merely matches is not proof (its stamp names an earlier delivery).
-      const stampedDeliveryId =
-        typeof currentOrganization?.__sdpLifecycleDeliveryId === "string"
-          ? currentOrganization.__sdpLifecycleDeliveryId
-          : undefined;
+      const stampedDeliveryId = readLifecycleStamp(currentOrganization, event.kind);
       const effectiveStatus =
         event.kind === "kyc_status"
           ? currentOrganization?.kycStatus
@@ -494,10 +514,12 @@ async function applyMuralLifecycleToCurrentOwner(
       // delivery stamp rides in the same patch: it is the only proof the
       // post-failure verification below can use that THIS transaction — not
       // some earlier delivery that already stored the same status — committed.
+      // Stamps are scope-scoped so the other lifecycle scope's writes can
+      // never erase this scope's committed evidence.
       const organization: Record<string, unknown> =
         event.kind === "kyc_status"
-          ? { kycStatus: event.kycStatus, __sdpLifecycleDeliveryId: event.deliveryId }
-          : { tosStatus: "ACCEPTED", __sdpLifecycleDeliveryId: event.deliveryId };
+          ? { kycStatus: event.kycStatus, __sdpKycLifecycleDeliveryId: event.deliveryId }
+          : { tosStatus: "ACCEPTED", __sdpTosLifecycleDeliveryId: event.deliveryId };
       await createPostgresCounterpartiesRepository(client).patchMuralOrganizationById({
         organizationId: event.organizationId,
         organization,
@@ -601,10 +623,7 @@ async function recordLifecycleIntentOutcomeAfterFailure(
       : undefined;
     const effectiveStatus =
       event.kind === "kyc_status" ? currentOrganization?.kycStatus : currentOrganization?.tosStatus;
-    const stampedDeliveryId =
-      typeof currentOrganization?.__sdpLifecycleDeliveryId === "string"
-        ? currentOrganization.__sdpLifecycleDeliveryId
-        : undefined;
+    const stampedDeliveryId = readLifecycleStamp(currentOrganization, event.kind);
     committed =
       survivor !== undefined &&
       effectiveStatus === newStatus &&
