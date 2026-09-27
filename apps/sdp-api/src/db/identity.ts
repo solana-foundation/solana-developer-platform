@@ -27,19 +27,22 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import {
+  DatabaseIdentityError,
+  databaseIdentityConfigStatement,
+} from "../../scripts/lib/database-identity.mjs";
+
+// The GUC statement builder and its error type live in
+// scripts/lib/database-identity.mjs so privileged maintenance CLIs stamp the
+// exact same identity contract as the pooled application client. Re-exported
+// here to keep the application import surface unchanged.
+export { DatabaseIdentityError, databaseIdentityConfigStatement };
 
 export type DatabaseIdentity =
   | { readonly kind: "tenant"; readonly organizationId: string }
   | { readonly kind: "system"; readonly component: string }
   | { readonly kind: "operator"; readonly actor: string; readonly reason: string }
   | { readonly kind: "none"; readonly component: string };
-
-export class DatabaseIdentityError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DatabaseIdentityError";
-  }
-}
 
 const identityStorage = new AsyncLocalStorage<DatabaseIdentity>();
 
@@ -116,52 +119,4 @@ export function runWithoutDatabaseIdentity<T>(component: string, fn: () => T): T
  */
 export function setDefaultDatabaseIdentityForTesting(identity: DatabaseIdentity | undefined): void {
   defaultIdentity = identity;
-}
-
-/**
- * GUC values travel as escaped literals because the stamp must be `SET LOCAL`
- * utility commands, which cannot be parameterized. With
- * standard_conforming_strings (the PostgreSQL default) doubling single quotes
- * is a complete escape; NUL can never appear in a valid value and is refused
- * outright.
- */
-function quoteGucLiteral(value: string): string {
-  if (value.includes("\0")) {
-    throw new DatabaseIdentityError("A database identity value cannot contain NUL");
-  }
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-/**
- * The statement text the client runs to stamp the current identity onto a
- * transaction. `SET LOCAL` is transaction-local, so pooled connection reuse
- * can never leak one caller's identity into another's statements — and,
- * unlike `SELECT set_config(...)`, it is a utility command that takes no
- * snapshot, so a transaction callback can still open with
- * `SET TRANSACTION ISOLATION LEVEL ...`.
- */
-export function databaseIdentityConfigStatement(identity: DatabaseIdentity): { text: string } {
-  let organizationId = "";
-  let actor = "";
-  switch (identity.kind) {
-    case "tenant":
-      organizationId = identity.organizationId;
-      break;
-    case "system":
-      actor = identity.component;
-      break;
-    case "operator":
-      actor = identity.actor;
-      break;
-    case "none":
-      throw new DatabaseIdentityError(
-        "A 'none' identity must not be stamped onto a database session"
-      );
-  }
-  return {
-    text:
-      `SET LOCAL app.tenant_isolation_identity = ${quoteGucLiteral(identity.kind)}; ` +
-      `SET LOCAL app.tenant_isolation_organization_id = ${quoteGucLiteral(organizationId)}; ` +
-      `SET LOCAL app.tenant_isolation_actor = ${quoteGucLiteral(actor)}`,
-  };
 }

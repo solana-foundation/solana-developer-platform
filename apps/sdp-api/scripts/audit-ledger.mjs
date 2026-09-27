@@ -1,10 +1,20 @@
 import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import Redis from "ioredis";
 import pg from "pg";
+import { databaseIdentitySessionConfigStatement } from "./lib/database-identity.mjs";
 
 const { Client } = pg;
 const EXTERNAL_CHECKPOINT_KEY = "cache:audit-ledger:checkpoint:v1";
 const AUDIT_LEDGER_SESSION_LOCK_KEY = "sdp:audit-ledger:external-checkpoint";
+/**
+ * The fixed component actor this script stamps with the system database
+ * identity — the same contract the application audit writer uses
+ * (src/db/identity.ts via scripts/lib/database-identity.mjs). Without it the
+ * forced tenant-isolation RLS hides every ledger row, and the invoker-security
+ * `sdp_verify_audit_ledger()` would hash, count, and certify an empty view.
+ */
+export const AUDIT_LEDGER_SYSTEM_COMPONENT = "script:audit-ledger";
 
 const ADVANCE_CHECKPOINT_LUA = `
 local current = redis.call('GET', KEYS[1])
@@ -169,7 +179,46 @@ function parseOptions(args, allowed) {
   return values;
 }
 
-async function inspect(client, redis, approvedCheckpoint) {
+/**
+ * Stamp this script's dedicated PostgreSQL session with the system database
+ * identity. Session scope is safe here because the client is single-purpose
+ * and exits with the process; the GUC contract itself comes from the shared
+ * identity helper so the CLI cannot diverge from application semantics.
+ */
+export function systemIdentitySessionStatement() {
+  return databaseIdentitySessionConfigStatement({
+    kind: "system",
+    component: AUDIT_LEDGER_SYSTEM_COMPONENT,
+  }).text;
+}
+
+/**
+ * Fail closed unless the connected session actually carries the expected
+ * system identity. An unstamped (or wrongly stamped) session sees only the
+ * RLS-hidden empty ledger, which must never be evaluated, certified, or
+ * written through.
+ */
+export async function requireStampedSystemIdentity(client) {
+  const stamped = await client.query(`
+    SELECT current_setting('app.tenant_isolation_identity', true) AS identity,
+           current_setting('app.tenant_isolation_actor', true) AS actor
+  `);
+  const identity = stamped.rows[0]?.identity ?? null;
+  const actor = stamped.rows[0]?.actor ?? null;
+  if (identity !== "system" || actor !== AUDIT_LEDGER_SYSTEM_COMPONENT) {
+    throw new Error(
+      "Audit-ledger session is missing the required system database identity " +
+        `(identity: ${JSON.stringify(identity)}, actor: ${JSON.stringify(actor)}). ` +
+        "An unstamped session sees only the RLS-hidden empty ledger, which must never be " +
+        `certified; stamp the ${JSON.stringify(AUDIT_LEDGER_SYSTEM_COMPONENT)} system identity ` +
+        "before any ledger read, verifier call, advisory lock, or write."
+    );
+  }
+  return { identity, actor };
+}
+
+export async function inspect(client, redis, approvedCheckpoint) {
+  const systemIdentity = await requireStampedSystemIdentity(client);
   const externalCheckpoint =
     approvedCheckpoint === undefined
       ? await redis.get(EXTERNAL_CHECKPOINT_KEY)
@@ -250,6 +299,7 @@ async function inspect(client, redis, approvedCheckpoint) {
     expectedCheckpoint,
     runtimeRoleProtected,
     runtimeRole: posture?.runtime_role ?? null,
+    systemIdentity: systemIdentity.actor,
     tableOwner: posture?.table_owner ?? null,
     superuser: posture?.rolsuper ?? null,
     bypassRls: posture?.rolbypassrls ?? null,
@@ -434,6 +484,11 @@ async function main() {
   const redis = new Redis(redisUrl, { maxRetriesPerRequest: 3 });
   await Promise.all([client.connect(), redis.ping()]);
   try {
+    // Stamp the dedicated session with the system identity before any ledger
+    // read, verifier call, advisory lock, or write. Every command below —
+    // verify, checkpoint, bootstrap — evaluates the ledger through this
+    // stamped session, and inspect() refuses to run without the stamp.
+    await client.query(systemIdentitySessionStatement());
     if (command === "checkpoint") {
       const options = parseOptions(args, new Set(["operator", "reason", "ticket"]));
       if (!options.operator?.trim() || !options.reason?.trim()) {
@@ -468,7 +523,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+// Run only when executed directly (`pnpm --filter @sdp/api audit:ledger ...`),
+// so tests can import the exported inspection functions without side effects.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

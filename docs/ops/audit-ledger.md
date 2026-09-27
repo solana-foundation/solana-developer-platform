@@ -26,6 +26,8 @@ pnpm --filter @sdp/api audit:ledger verify
 
 The command exits nonzero if the chain/anchor set is invalid, PostgreSQL disagrees with the Redis checkpoint, a critical intent is stale and unresolved, or the connected runtime role can bypass the database controls. Store its JSON output in the deployment/operations log. `headHash` remains suitable for an additional incident or change record before privileged maintenance.
 
+The CLI stamps its dedicated PostgreSQL session with the shared system database identity (component actor `script:audit-ledger`, the same contract the application audit writer uses) before any ledger read, verifier call, advisory lock, or write, and reports the stamped actor as `systemIdentity`. It refuses to run when that stamp is absent: an unstamped session sees only the RLS-hidden empty ledger, which must never be certified as a valid empty chain.
+
 After this migration is applied and before API/worker traffic is enabled, record the migration's exact terminal sequence and SHA-256 head in the protected deployment approval. With writers still stopped, initialize Redis once using those independently approved values:
 
 ```sh
