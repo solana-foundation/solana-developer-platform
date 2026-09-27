@@ -17,6 +17,9 @@ import {
   compileTransaction,
   createTransactionMessage,
   getBase58Codec,
+  getBase64Encoder,
+  getSignatureFromTransaction,
+  getTransactionDecoder,
   getTransactionEncoder,
   pipe,
   setTransactionMessageFeePayer,
@@ -49,6 +52,7 @@ const CUSTODY_CONFIG_ID = "cfg_regression_marker_loss";
 const CUSTODY_WALLET_ID = "cwlt_regression_marker_loss";
 const WALLET_ID = "wallet_regression_marker_loss";
 const TRANSFER_ID = "xfr_regression_marker_loss";
+const RETRY_TRANSFER_ID = "xfr_regression_marker_loss_retry";
 const SIGNATURE =
   "4hXTCkRzt9WyecNzV1XPgCDfGAZzQKNxLXgynz5QDuWJ5NFkqjAvuA3P73N5MtZ7e8KQLD6tPBm53RsNkUqJZiy" as Signature;
 const BLOCKHASH = getBase58Codec().decode(new Uint8Array(32).fill(7)) as Blockhash;
@@ -72,6 +76,41 @@ function buildTransaction(blockhash: Blockhash): Uint8Array {
       )
   );
   return new Uint8Array(getTransactionEncoder().encode(compileTransaction(message)));
+}
+
+async function createTransferRow(transferId: string): Promise<PaymentTransferRow> {
+  const db = getDb(env);
+  const repository = createPostgresPaymentsRepository(db);
+  const transfer = await repository.createTransfer({
+    id: transferId,
+    organizationId: ORGANIZATION_ID,
+    projectId: PROJECT_ID,
+    custodyWalletId: CUSTODY_WALLET_ID,
+    walletId: WALLET_ID,
+    counterpartyId: null,
+    sourceAddress: TEST_MOCK_FEE_PAYER,
+    destinationAddress: TEST_MOCK_FEE_PAYER,
+    token: "SOL",
+    amount: "1",
+    memo: null,
+    type: "transfer",
+    direction: "outbound",
+    status: "processing",
+    provider: null,
+    providerReference: null,
+    deliveryMode: null,
+    fiatCurrency: null,
+    fiatAmount: null,
+    providerData: {},
+    serializedTx: null,
+    signature: null,
+    slot: null,
+    initiatedByKeyId: null,
+    idempotencyKey: transferId,
+    idempotencyFingerprint: `${transferId}-fingerprint`,
+  });
+  if (!transfer) throw new Error("Failed to create regression payment transfer");
+  return transfer;
 }
 
 async function seedPaymentTransfer(): Promise<PaymentTransferRow> {
@@ -110,37 +149,7 @@ async function seedPaymentTransfer(): Promise<PaymentTransferRow> {
       .bind(CUSTODY_WALLET_ID, CUSTODY_CONFIG_ID, WALLET_ID, TEST_MOCK_FEE_PAYER),
   ]);
 
-  const repository = createPostgresPaymentsRepository(db);
-  const transfer = await repository.createTransfer({
-    id: TRANSFER_ID,
-    organizationId: ORGANIZATION_ID,
-    projectId: PROJECT_ID,
-    custodyWalletId: CUSTODY_WALLET_ID,
-    walletId: WALLET_ID,
-    counterpartyId: null,
-    sourceAddress: TEST_MOCK_FEE_PAYER,
-    destinationAddress: TEST_MOCK_FEE_PAYER,
-    token: "SOL",
-    amount: "1",
-    memo: null,
-    type: "transfer",
-    direction: "outbound",
-    status: "processing",
-    provider: null,
-    providerReference: null,
-    deliveryMode: null,
-    fiatCurrency: null,
-    fiatAmount: null,
-    providerData: {},
-    serializedTx: null,
-    signature: null,
-    slot: null,
-    initiatedByKeyId: null,
-    idempotencyKey: "regression-marker-loss",
-    idempotencyFingerprint: "regression-marker-loss-fingerprint",
-  });
-  if (!transfer) throw new Error("Failed to create regression payment transfer");
-  return transfer;
+  return createTransferRow(TRANSFER_ID);
 }
 
 describe("managed sponsorship marker response loss", () => {
@@ -316,10 +325,40 @@ describe("managed sponsorship marker response loss", () => {
     });
     expect(usageAfterSettlement.hour.project).toBe(0);
 
-    // A corrected retry is admitted again: the freed budget supports it.
-    await expect(feePayment.signAndSend(buildTransaction(RETRY_BLOCKHASH))).resolves.toBe(
-      SIGNATURE
+    // A corrected retry is admitted again: the freed budget supports it, and
+    // the corrected transfer must submit through the same durable
+    // marker-and-broadcast boundary as the original payment.
+    const correctedTransfer = await createTransferRow(RETRY_TRANSFER_ID);
+    const correctedSubmissionStore = createTransferSignedSubmissionStore(
+      paymentsRepository,
+      correctedTransfer
     );
-    expect(signCalls).toBe(1);
+    let sendCalls = 0;
+    const broadcastRpc = {
+      sendTransaction: (encodedTransaction: string) => ({
+        send: async () => {
+          sendCalls += 1;
+          const signed = getTransactionDecoder().decode(
+            getBase64Encoder().encode(encodedTransaction)
+          );
+          return getSignatureFromTransaction(signed);
+        },
+      }),
+    } as unknown as SolanaRpc;
+    const retrySignature = await submitSponsoredTransaction({
+      feePayment,
+      rpc: broadcastRpc,
+      transaction: buildTransaction(RETRY_BLOCKHASH),
+      lastValidBlockHeight: 100n,
+      store: correctedSubmissionStore,
+    });
+    // The corrected submission signed again, broadcast exactly once, and its
+    // durable marker committed cleanly on the corrected transfer row.
+    expect(signCalls).toBe(2);
+    expect(sendCalls).toBe(1);
+    expect(await correctedSubmissionStore.submittedRow()).toMatchObject({
+      signature: retrySignature,
+      submission_started_at: expect.any(String),
+    });
   });
 });
