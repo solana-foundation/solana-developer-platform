@@ -249,6 +249,7 @@ describe("reconcileDvpTrades", () => {
           side,
           cursor: null,
           cursorSlotComplete: false,
+          probe: null,
           scannedAt,
         });
       }

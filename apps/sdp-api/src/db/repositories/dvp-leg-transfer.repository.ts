@@ -63,6 +63,14 @@ export interface DvpLegTransferScan {
    */
   cursorSlotComplete: boolean;
   /**
+   * Where the next sweep's probe of the region behind the cursor resumes, with
+   * its slot; null to probe from the cursor itself. The fallback's probe reads
+   * the region only it reaches — where a node's omission sits — a few pages at
+   * a time, and this is how far the last one got. A probe that ran to its end
+   * drops the point, so the next one starts behind the position again.
+   */
+  probe: { signature: Signature; slot: string } | null;
+  /**
    * When a read last got through to the newest signature with nothing left
    * provisional; null when none has, which makes the leg due.
    */
@@ -100,6 +108,8 @@ const scanRowSchema = z.object({
   cursor_signature: z.string().nullable(),
   cursor_slot: z.string().regex(/^\d+$/).nullable(),
   cursor_slot_complete: z.boolean(),
+  probe_signature: z.string().nullable(),
+  probe_slot: z.string().regex(/^\d+$/).nullable(),
   scanned_at: z.string().nullable(),
 });
 
@@ -125,6 +135,11 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
     // The table's CHECK makes this unreachable; a half cursor is never read as none.
     throw new Error("dvp_leg_transfer_scans row carries half a cursor");
   }
+  if ((parsed.probe_signature === null) !== (parsed.probe_slot === null)) {
+    // The table's CHECK makes this unreachable; a half probe point is never
+    // read as none.
+    throw new Error("dvp_leg_transfer_scans row carries half a probe point");
+  }
   return {
     side: parsed.side,
     cursor:
@@ -132,6 +147,10 @@ function toScan(row: Record<string, unknown>): DvpLegTransferScan {
         ? null
         : { signature: signature(parsed.cursor_signature), slot: parsed.cursor_slot },
     cursorSlotComplete: parsed.cursor_slot_complete,
+    probe:
+      parsed.probe_signature === null || parsed.probe_slot === null
+        ? null
+        : { signature: signature(parsed.probe_signature), slot: parsed.probe_slot },
     scannedAt: parsed.scanned_at,
   };
 }
@@ -267,9 +286,10 @@ export function createPostgresDvpLegTransferRepository(
     async listScans(tradeId) {
       const result = await db
         .prepare(
-          `SELECT side, cursor_signature, cursor_slot, cursor_slot_complete, scanned_at
-             FROM dvp_leg_transfer_scans
-            WHERE trade_id = ?`
+          `SELECT side, cursor_signature, cursor_slot, cursor_slot_complete,
+                probe_signature, probe_slot, scanned_at
+           FROM dvp_leg_transfer_scans
+          WHERE trade_id = ?`
         )
         .bind(tradeId)
         .all<Record<string, unknown>>();
@@ -281,32 +301,48 @@ export function createPostgresDvpLegTransferRepository(
       const cursorSlot = scan.cursor === null ? null : scan.cursor.slot;
       // The watermark qualifies the cursor, so a naked one is never stored.
       const cursorSlotComplete = scan.cursor === null ? false : scan.cursorSlotComplete;
+      const probeSignature = scan.probe === null ? null : scan.probe.signature;
+      const probeSlot = scan.probe === null ? null : scan.probe.slot;
       // All three CASEs read the stored row as it was before this statement,
-      // so the signature, its slot and the slot's watermark move together.
+      // so the signature, its slot and the slot's watermark move together. The
+      // probe point is the sweep's own word for where its probe stopped: a
+      // slower sweep overwriting a deeper one only costs the next probe a
+      // re-listing of pages it already resolved, never a transfer.
       const cursorAdvances = `EXCLUDED.cursor_slot IS NOT NULL
-               AND (dvp_leg_transfer_scans.cursor_slot IS NULL
-                    OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)`;
+             AND (dvp_leg_transfer_scans.cursor_slot IS NULL
+                  OR EXCLUDED.cursor_slot::numeric >= dvp_leg_transfer_scans.cursor_slot::numeric)`;
       await db
         .prepare(
-          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, scanned_at)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (trade_id, side)
-           DO UPDATE SET
-             cursor_signature = CASE
-               WHEN ${cursorAdvances}
-               THEN EXCLUDED.cursor_signature
-               ELSE dvp_leg_transfer_scans.cursor_signature END,
-             cursor_slot = CASE
-               WHEN ${cursorAdvances}
-               THEN EXCLUDED.cursor_slot
-               ELSE dvp_leg_transfer_scans.cursor_slot END,
-             cursor_slot_complete = CASE
-               WHEN ${cursorAdvances}
-               THEN EXCLUDED.cursor_slot_complete
-               ELSE dvp_leg_transfer_scans.cursor_slot_complete END,
-             scanned_at = EXCLUDED.scanned_at`
+          `INSERT INTO dvp_leg_transfer_scans (trade_id, side, cursor_signature, cursor_slot, cursor_slot_complete, probe_signature, probe_slot, scanned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (trade_id, side)
+         DO UPDATE SET
+           cursor_signature = CASE
+             WHEN ${cursorAdvances}
+             THEN EXCLUDED.cursor_signature
+             ELSE dvp_leg_transfer_scans.cursor_signature END,
+           cursor_slot = CASE
+             WHEN ${cursorAdvances}
+             THEN EXCLUDED.cursor_slot
+             ELSE dvp_leg_transfer_scans.cursor_slot END,
+           cursor_slot_complete = CASE
+             WHEN ${cursorAdvances}
+             THEN EXCLUDED.cursor_slot_complete
+             ELSE dvp_leg_transfer_scans.cursor_slot_complete END,
+           probe_signature = EXCLUDED.probe_signature,
+           probe_slot = EXCLUDED.probe_slot,
+           scanned_at = EXCLUDED.scanned_at`
         )
-        .bind(tradeId, scan.side, cursorSignature, cursorSlot, cursorSlotComplete, scan.scannedAt)
+        .bind(
+          tradeId,
+          scan.side,
+          cursorSignature,
+          cursorSlot,
+          cursorSlotComplete,
+          probeSignature,
+          probeSlot,
+          scan.scannedAt
+        )
         .run();
     },
   };

@@ -198,6 +198,7 @@ describe("DvpLegTransferRepository", () => {
         side: "a",
         cursor: { signature: sig(1), slot: "420" },
         cursorSlotComplete: false,
+        probe: null,
         scannedAt: null,
       });
 
@@ -210,6 +211,7 @@ describe("DvpLegTransferRepository", () => {
             side: "b",
             cursor: null,
             cursorSlotComplete: false,
+            probe: null,
             scannedAt: null,
           })
         )
@@ -224,12 +226,14 @@ describe("DvpLegTransferRepository", () => {
       side: "a",
       cursor: null,
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(7), slot: "700" },
       cursorSlotComplete: true,
+      probe: null,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
 
@@ -238,9 +242,44 @@ describe("DvpLegTransferRepository", () => {
         side: "a",
         cursor: { signature: sig(7), slot: "700" },
         cursorSlotComplete: true,
+        probe: null,
         scannedAt: "2026-09-15T00:00:00.000Z",
       },
     ]);
+  });
+
+  // The probe of the region behind the position reads a few pages per sweep
+  // and saves where it stopped, so the next sweep's probe resumes below that;
+  // a probe that ran to its end drops the point, and the next one starts
+  // behind the position again.
+  it("saves and drops the probe's resume point", async () => {
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(4), slot: "400" },
+      scannedAt: null,
+    });
+
+    expect(await repo.listScans(TRADE_ID)).toEqual([
+      {
+        side: "a",
+        cursor: { signature: sig(9), slot: "900" },
+        cursorSlotComplete: false,
+        probe: { signature: sig(4), slot: "400" },
+        scannedAt: null,
+      },
+    ]);
+
+    await repo.saveScan(TRADE_ID, {
+      side: "a",
+      cursor: { signature: sig(9), slot: "900" },
+      cursorSlotComplete: false,
+      probe: null,
+      scannedAt: "2026-09-15T00:00:00.000Z",
+    });
+
+    expect((await repo.listScans(TRADE_ID)).find((scan) => scan.side === "a")?.probe).toBeNull();
   });
 
   // Two sweeps can overlap. The slower one, working from an older read, must
@@ -250,30 +289,35 @@ describe("DvpLegTransferRepository", () => {
       side: "a",
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: true,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(8), slot: "899" },
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
     await repo.saveScan(TRADE_ID, {
       side: "b",
       cursor: null,
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "b",
       cursor: { signature: sig(3), slot: "300" },
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "b",
       cursor: null,
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
 
@@ -283,6 +327,7 @@ describe("DvpLegTransferRepository", () => {
       side: "a",
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: true,
+      probe: null,
       scannedAt: "2026-09-15T00:00:00.000Z",
     });
     expect(scans.find((scan) => scan.side === "b")?.cursor).toEqual({
@@ -302,18 +347,21 @@ describe("DvpLegTransferRepository", () => {
       side: "a",
       cursor: { signature: sig(9), slot: "900" },
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: { signature: sig(8), slot: "900" },
       cursorSlotComplete: true,
+      probe: null,
       scannedAt: null,
     });
     await repo.saveScan(TRADE_ID, {
       side: "a",
       cursor: null,
       cursorSlotComplete: false,
+      probe: null,
       scannedAt: null,
     });
 
@@ -321,6 +369,7 @@ describe("DvpLegTransferRepository", () => {
       side: "a",
       cursor: { signature: sig(8), slot: "900" },
       cursorSlotComplete: true,
+      probe: null,
       scannedAt: null,
     });
   });
