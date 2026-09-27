@@ -158,12 +158,21 @@ export const createToken = async (c: ValidatedBodyContext<typeof createTokenSche
   // Persisting the caller's raw flag would fail such a freshly created token
   // as drifted against its own default profile, so creation persists the
   // resolved flag — exactly what the settings-driven create-with-profile path
-  // already does.
+  // already does. The lock is not a silent override of an explicit choice:
+  // `isFreezable: false` against a freeze-locked family is a conflicting
+  // request and is rejected rather than quietly flipped.
   const defaultProfileCategory = categoryForTemplate(resolved.template);
-  const isFreezable =
-    resolveAssetCapability(defaultProfileCategory, "generic")?.settings.freezeAccounts === "locked"
-      ? true
-      : body.isFreezable;
+  const freezeLocked =
+    resolveAssetCapability(defaultProfileCategory, "generic")?.settings.freezeAccounts === "locked";
+  if (freezeLocked && body.isFreezable === false) {
+    throw badRequest(
+      `isFreezable: false conflicts with the "${resolved.template}" template: this asset family always deploys with freeze accounts enabled`,
+      {
+        errors: [{ field: "isFreezable", reason: "template_requires_freeze_accounts" }],
+      }
+    );
+  }
+  const isFreezable = freezeLocked ? true : body.isFreezable;
 
   const signingWallet = body.signingCustodyWalletId
     ? await resolveIssuanceWallet({

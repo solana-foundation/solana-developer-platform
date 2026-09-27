@@ -487,11 +487,11 @@ describe("asset profile PATCH binds pending advanced settings to the deployment 
     expect(deployJson.error?.message).toContain("signingCustodyWalletId");
   });
 
-  it("persists the resolver's freeze flag when a locked template drives creation", async () => {
-    // The plain token-create path runs no settings resolution, but the default
-    // profile it derives still resolves through the capability registry: a
-    // stablecoin locks freezeAccounts on, so persisting the caller's raw
-    // isFreezable: false would fail this fresh token as drifted at deploy time.
+  it("rejects an explicit isFreezable: false against a freeze-locked template", async () => {
+    // The capability registry locks freezeAccounts on for the regulated
+    // families, so the resolver always derives isFreezable: true there. A
+    // caller explicitly declining freeze on such a family is a conflicting
+    // request: reject it instead of silently persisting the resolved flag.
     const response = await app.request(
       "/v1/issuance/tokens",
       {
@@ -502,6 +502,28 @@ describe("asset profile PATCH binds pending advanced settings to the deployment 
           symbol: "LOCKED",
           template: "stablecoin",
           isFreezable: false,
+        }),
+      },
+      env
+    );
+    expect(response.status).toBe(400);
+    const json = (await response.json()) as SuccessJson;
+    expect(json.error?.message).toContain("isFreezable");
+  });
+
+  it("persists the resolved freeze flag when a locked template drives creation", async () => {
+    // Without an explicit conflicting flag, a freeze-locked template still
+    // persists the resolver's isFreezable: true (never the raw default), and
+    // the fresh token passes the deploy-time snapshot check.
+    const response = await app.request(
+      "/v1/issuance/tokens",
+      {
+        method: "POST",
+        headers: headers(ADMIN_KEY.raw),
+        body: JSON.stringify({
+          name: "Locked Freeze Token",
+          symbol: "LOCKED",
+          template: "stablecoin",
         }),
       },
       env
