@@ -682,7 +682,10 @@ async function resolveEntry(
   known: ReadonlyMap<Signature, DvpLegTransfer>,
   budget: DvpLegTransferBudget,
   memo: DvpLegTransferReadMemo
-): Promise<{ step: "resolved"; recorded: boolean } | { step: "stop"; reason: EntryStop }> {
+): Promise<
+  | { step: "resolved"; recorded: boolean; unreadable?: DvpEscrowHistoryEntry }
+  | { step: "stop"; reason: EntryStop }
+> {
   // A transaction that failed moved no token; no need to read it.
   if (entry.failed) {
     return { step: "resolved", recorded: false };
@@ -740,7 +743,7 @@ async function resolveEntry(
     // caught-up node may yet serve it in a shape the ledger can read. It
     // costs the budget again next sweep, and a transfer sitting in it stays
     // reachable.
-    return { step: "resolved", recorded: false };
+    return { step: "resolved", recorded: false, unreadable: entry };
   }
   if (reading.kind === "none") {
     memo.remember(leg, entry.signature, { kind: "none" });
@@ -929,15 +932,17 @@ async function readTheSweep(
  * with, the walk got through the region behind the cursor, the read was not
  * cut off above the position, and the probe's listing ran to its end. The
  * region behind the position is only accounted for when all of those hold,
- * and a position whose behind is unaccounted for is never a safe bound.
+ * and a position whose behind is unaccounted for is never a safe bound. No
+ * position at all is never proven.
  */
 function provenPosition(
+  cursor: { signature: Signature; slot: string } | null,
   watermark: boolean,
   probeEnded: boolean,
   chunked: boolean,
   probeComplete: boolean
 ): boolean {
-  return watermark && probeEnded && !chunked && probeComplete;
+  return cursor !== null && watermark && probeEnded && !chunked && probeComplete;
 }
 
 /**
@@ -968,6 +973,25 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
 }
 
 /**
+ * Whether the walk skipped an unreadable transaction the position now stands
+ * past: the position only ever moves forward, so one at the position's slot
+ * or older sits behind it, where a bounded read never lists it again and only
+ * the probe reaches. The answer was never resolved with confidence, so the
+ * next sweep has to list the transaction again and ask for its balances once
+ * more.
+ */
+function standsPastAnUnreadableSkip(
+  unreadableOldest: DvpEscrowHistoryEntry | undefined,
+  cursor: { signature: Signature; slot: string } | null
+): boolean {
+  return (
+    unreadableOldest !== undefined &&
+    cursor !== null &&
+    BigInt(unreadableOldest.slot) <= BigInt(cursor.slot)
+  );
+}
+
+/**
  * Where the next sweep's probe of the region behind the position resumes. A
  * probe the cap stopped saves the signature below which it stopped, so the
  * region's oldest end is reached a few pages further down with every sweep;
@@ -987,6 +1011,11 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
  * accumulating. A gap read the cap stopped saves where it stopped instead —
  * everything between there and the position is listed, and the next probe
  * continues below it toward the older end.
+ *
+ * The point never travels past an unreadable transaction either: a sweep that
+ * skipped one behind the position saves nothing, for a point below it would
+ * leave it skipped for good — the next sweep probes from the position again,
+ * where the transaction is listed and its balances asked for once more.
  */
 function resumePoint(
   fallbackRan: boolean,
@@ -995,9 +1024,13 @@ function resumePoint(
   probeDeepest: { signature: Signature; slot: string } | null,
   gapComplete: boolean,
   gapDeepest: { signature: Signature; slot: string } | null,
-  unlistedBehindPosition: boolean
+  unlistedBehindPosition: boolean,
+  unreadableBehindPosition: boolean
 ): { signature: Signature; slot: string } | null {
   if (!fallbackRan || !probeEnded) {
+    return null;
+  }
+  if (unreadableBehindPosition) {
     return null;
   }
   if (unlistedBehindPosition && !gapComplete) {
@@ -1086,6 +1119,10 @@ export async function syncDvpLegTransfers(
   // Whether the walk advanced onto the deepest listed signature: only then
   // may the position stand there.
   let deepestReached = false;
+  // The oldest transaction whose balances the walk could not read with
+  // confidence. The walk runs oldest first, so the first skip of its kind is
+  // the oldest one this sweep saw.
+  let unreadableOldest: DvpEscrowHistoryEntry | undefined;
   // The walk resolves the listings oldest first — the probe of the region
   // behind the cursor before the bounded read ahead of it, so the ledger's
   // sequence keeps the transfers in the order the chain lists them.
@@ -1112,6 +1149,9 @@ export async function syncDvpLegTransfers(
       continue;
     }
     recorded += outcome.recorded ? 1 : 0;
+    // The walk runs oldest first, so the first skip of its kind this sweep saw
+    // is the oldest one.
+    unreadableOldest ??= outcome.unreadable;
     if (finalizedSoFar && entry.finalized) {
       const advanced = advancedPosition(
         cursor,
@@ -1163,10 +1203,13 @@ export async function syncDvpLegTransfers(
     // proves the position it read on to either: the region it skipped sits
     // immediately behind the position, where only the next sweep's probe
     // sees it.
-    cursorSlotComplete:
-      cursor === null
-        ? false
-        : provenPosition(cursorSlotComplete, probeEnded, chunked, probeComplete),
+    cursorSlotComplete: provenPosition(
+      cursor,
+      cursorSlotComplete,
+      probeEnded,
+      chunked,
+      probeComplete
+    ),
     probe: resumePoint(
       bounded !== null,
       probeComplete,
@@ -1174,7 +1217,8 @@ export async function syncDvpLegTransfers(
       probeDeepest,
       gapComplete,
       gapDeepest,
-      standsBeforeAnUnlistedRegion(chunked, deepestReached)
+      standsBeforeAnUnlistedRegion(chunked, deepestReached),
+      standsPastAnUnreadableSkip(unreadableOldest, cursor)
     ),
     scannedAt: settled ? new Date(now).toISOString() : null,
   });

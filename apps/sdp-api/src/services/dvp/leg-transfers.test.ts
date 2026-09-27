@@ -1050,6 +1050,197 @@ describe("syncDvpLegTransfers", () => {
     expect(rows.has(sig(1))).toBe(true);
   });
 
+  // An unreadable transaction the position now stands past — one in the region
+  // between the position and the cursor the probe probed below — is resolved
+  // no further than "could not read with confidence". A resume point below it
+  // would start the next probe past it, and a bounded read never lists behind
+  // the position, so its transfer would never be retried. The sweep therefore
+  // saves no point: the next probe starts behind the position, where the
+  // transaction is listed and its balances asked for once more.
+  it("drops the probe's resume point past an unreadable transaction behind the position", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(13_000, 12_001);
+      }
+      if (before === sig(12_001)) {
+        return page(12_000, 11_001);
+      }
+      if (before === sig(11_001)) {
+        return page(11_000, 10_001);
+      }
+      // The region above the cursor alone exceeds the scan cap: the read is
+      // cut off three pages down, and the position is stood at the deepest
+      // signature it listed.
+      if (until === sig(4_000) && before === null) {
+        return page(10_000, 9_001);
+      }
+      if (until === sig(4_000) && before === sig(9_001)) {
+        return page(9_000, 8_001);
+      }
+      if (until === sig(4_000) && before === sig(8_001)) {
+        return page(8_000, 7_001);
+      }
+      // The read of the region the bounded read never listed, between the
+      // cursor and the deepest signature it listed: two full pages and a
+      // short one, so it ran through. One transaction in it does not read.
+      if (until === sig(4_000) && before === sig(7_001)) {
+        return [...page(7_000, 6_501), ...history([6_500]), ...page(6_499, 6_001)];
+      }
+      if (until === sig(4_000) && before === sig(6_001)) {
+        return page(6_000, 5_001);
+      }
+      if (until === sig(4_000) && before === sig(5_001)) {
+        return page(5_000, 4_501);
+      }
+      // The probe of the region behind the position: three full pages, so it
+      // stops at the cap with the region's oldest end unlisted.
+      if (before === sig(4_000)) {
+        return page(3_999, 3_000);
+      }
+      if (before === sig(3_000)) {
+        return page(2_999, 2_000);
+      }
+      // The second sweep lists nothing new above the position, and its probe
+      // starts behind the position, where the unreadable transaction sits.
+      if (until === sig(7_001)) {
+        return [];
+      }
+      if (before === sig(7_001)) {
+        return history([6_500]);
+      }
+      return [];
+    });
+    served.set(sig(6_500), "malformed");
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(4_000), slot: "4000" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The position stands at the deepest signature the bounded read listed,
+    // but no resume point travels below it: the probe of the region behind the
+    // position ran past an unreadable transaction, and a point below it would
+    // leave that transaction skipped for good.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_001), slot: "7001" },
+      cursorSlotComplete: false,
+      probe: null,
+      scannedAt: null,
+    });
+
+    // The next sweep's probe starts behind the position, lists the unreadable
+    // transaction again, and this time the cluster serves it in a shape the
+    // ledger can read, so its transfer is recorded after all.
+    served.set(sig(6_500), transaction({ post: "100" }));
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 });
+
+    expect(rows.has(sig(6_500))).toBe(true);
+  });
+
+  // An unreadable transaction above the position is another matter: the
+  // bounded read lists everything newer than the position again, so the
+  // transaction is asked for once more regardless of the probe, and the
+  // probe's resume point travels as it would have.
+  it("keeps the probe's resume point when the unreadable transaction stands above the position", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(13_000, 12_001);
+      }
+      if (before === sig(12_001)) {
+        return page(12_000, 11_001);
+      }
+      if (before === sig(11_001)) {
+        return page(11_000, 10_001);
+      }
+      // The region above the cursor alone exceeds the scan cap, and one of
+      // its transactions does not read.
+      if (until === sig(4_000) && before === null) {
+        return [...page(10_000, 9_501), ...history([9_500]), ...page(9_499, 9_001)];
+      }
+      if (until === sig(4_000) && before === sig(9_001)) {
+        return page(9_000, 8_001);
+      }
+      if (until === sig(4_000) && before === sig(8_001)) {
+        return page(8_000, 7_001);
+      }
+      // The read of the region the bounded read never listed: two full pages
+      // and a short one, so it ran through.
+      if (until === sig(4_000) && before === sig(7_001)) {
+        return page(7_000, 6_001);
+      }
+      if (until === sig(4_000) && before === sig(6_001)) {
+        return page(6_000, 5_001);
+      }
+      if (until === sig(4_000) && before === sig(5_001)) {
+        return page(5_000, 4_501);
+      }
+      // The probe of the region behind the position: three full pages, so it
+      // stops at the cap with the region's oldest end unlisted.
+      if (before === sig(4_000)) {
+        return page(3_999, 3_000);
+      }
+      if (before === sig(3_000)) {
+        return page(2_999, 2_000);
+      }
+      if (before === sig(2_000)) {
+        return page(1_999, 1_000);
+      }
+      return [];
+    });
+    served.set(sig(9_500), "malformed");
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(4_000), slot: "4000" },
+        cursorSlotComplete: false,
+        probe: null,
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 }
+    );
+
+    // The unreadable transaction stands above the position, where the bounded
+    // read lists it again, so the probe's resume point travels with the
+    // position exactly as it would have.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7_001), slot: "7001" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(1_000), slot: "1000" },
+      scannedAt: null,
+    });
+  });
+
   // When the region behind the position runs deeper than the scan cap itself,
   // the sweep's read of it stops at the cap with its oldest end unlisted. The
   // point saved is then where that read stopped, not where the probe below
