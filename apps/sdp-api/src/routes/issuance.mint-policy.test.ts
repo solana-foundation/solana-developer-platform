@@ -515,4 +515,52 @@ describe("issuance mint policy gate — ATA rent leg", () => {
     expect(body.error.message).toContain("changed after policy evaluation");
     expect(mintToSpy).not.toHaveBeenCalled();
   });
+
+  it("rejects an ABL mint on rent coverage before allowlisting the destination", async () => {
+    const wallet = await seedMintPolicyWallet("abl");
+    const token = await seedMintPolicyToken({
+      id: "tok_mint_policy_abl",
+      signingWalletId: wallet.walletId,
+    });
+    await getDb(env)
+      .prepare("UPDATE issued_tokens SET allowlist_enabled = 1, abl_list_address = ? WHERE id = ?")
+      .bind(TEST_SOLANA_ADDRESSES.wallet3, token.id)
+      .run();
+    await putWalletPolicy(wallet.walletId, [
+      {
+        id: "allow-small-token-mint",
+        kind: "amount",
+        asset: token.symbol,
+        max: "1",
+        action: "allow",
+      },
+    ]);
+    // The gate's preflight sees an existing ATA (no rent leg to evaluate); by
+    // the execution boundary the ATA is gone. The rent check must reject the
+    // mint before the on-chain allowlist add — an execution effect that could
+    // not be undone by failing afterward.
+    vi.spyOn(SolanaRpc, "accountExists").mockResolvedValueOnce(true).mockResolvedValue(false);
+    vi.spyOn(SolanaServices, "createOrgSignerForCustodyWallet").mockResolvedValue({
+      address: MINT_AUTHORITY,
+    } as never);
+    const isWalletOnListSpy = vi
+      .spyOn(MosaicService.prototype, "isWalletOnList")
+      .mockResolvedValue(false);
+    const addToListSpy = vi
+      .spyOn(MosaicService.prototype, "addToList")
+      .mockResolvedValue(undefined as never);
+    const mintToSpy = vi
+      .spyOn(MosaicService.prototype, "mintTo")
+      .mockResolvedValue({ signature: "sig_abl_rent", slot: 1n, tokenAccount: "ata" } as never);
+
+    const response = await postMint(token.id, TEST_SOLANA_ADDRESSES.wallet2);
+    const body = (await response.json()) as { error: { code: string; message: string } };
+
+    expect(response.status).toBe(403);
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toContain("changed after policy evaluation");
+    expect(isWalletOnListSpy).not.toHaveBeenCalled();
+    expect(addToListSpy).not.toHaveBeenCalled();
+    expect(mintToSpy).not.toHaveBeenCalled();
+  });
 });

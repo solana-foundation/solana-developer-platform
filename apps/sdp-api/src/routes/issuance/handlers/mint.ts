@@ -920,6 +920,22 @@ export const executeMint = async (c: AppContext) => {
       requiredWalletPermissions: ["tokens:write"],
     });
     const mosaic = createIssuanceMosaicService(c, signer, "sponsored");
+
+    // The allowlist add below is the mint's first execution effect: it cannot
+    // be undone by failing afterward, and beginning it fences the approved
+    // effect. The gate preflighted the destination ATA before enforcement and
+    // a destination owner can close an empty ATA in between, so verify the
+    // rent coverage first — a mint this check rejects must fail without
+    // allowlisting the destination (SOLA9-464).
+    if (ablListAddress) {
+      await assertMintAtaRentCoveredByEvaluation({
+        env: c.env,
+        mint: mintAddress,
+        destination,
+        evaluatedAtaRent: gate.enforcement.operation.rawPayload.ataRent,
+      });
+    }
+
     addedToAllowlist = ablListAddress
       ? await syncDestinationToOnChainAllowlist({
           c,
