@@ -5,6 +5,7 @@ import {
   deriveKaminoWithdrawQuote,
   detectDepositCapClamp,
   exitInstructionCount,
+  idleCoveredShareBaseUnits,
   type KaminoDepositEstimate,
   type KaminoExitPlanObservation,
   liquidityCappedShareBaseUnits,
@@ -320,6 +321,73 @@ describe("liquidityCappedShareBaseUnits", () => {
     const { oracle } = scaledPlanner(1_499_998n);
     await expect(
       liquidityCappedShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isFullyCoverable: oracle })
+    ).resolves.toBe(999_999n);
+  });
+});
+
+describe("idleCoveredShareBaseUnits", () => {
+  /** A planner that opens a reserve leg once `floor(candidate x 1.5)` passes `idleCapacity`. */
+  function idlePlanner(idleCapacity: bigint) {
+    let evaluations = 0;
+    const oracle = async (candidate: bigint) => {
+      evaluations += 1;
+      return (candidate * 3n) / 2n <= idleCapacity;
+    };
+    return { evaluations: () => evaluations, oracle };
+  }
+
+  it("finds the exact boundary where a reserve leg would open", async () => {
+    const { evaluations, oracle } = idlePlanner(499_999n);
+    await expect(
+      idleCoveredShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isIdleCovered: oracle })
+    ).resolves.toBe(333_333n);
+    // Binary search over the boundary, not a linear scan.
+    expect(evaluations()).toBeLessThan(30);
+  });
+
+  it("returns the ceiling untouched when the whole exit is idle-covered", async () => {
+    await expect(
+      idleCoveredShareBaseUnits({
+        ceilingBaseUnits: 1_000_000n,
+        isIdleCovered: async () => true,
+      })
+    ).resolves.toBe(1_000_000n);
+  });
+
+  it("returns zero when even the empty exit would draw reserves", async () => {
+    await expect(
+      idleCoveredShareBaseUnits({
+        ceilingBaseUnits: 1_000_000n,
+        isIdleCovered: async () => false,
+      })
+    ).resolves.toBe(0n);
+  });
+
+  it("returns zero for a zero ceiling without evaluating the planner", async () => {
+    let evaluations = 0;
+    await expect(
+      idleCoveredShareBaseUnits({
+        ceilingBaseUnits: 0n,
+        isIdleCovered: async () => {
+          evaluations += 1;
+          return true;
+        },
+      })
+    ).resolves.toBe(0n);
+    expect(evaluations).toBe(0);
+  });
+
+  it("converges when only a one-base-unit sliver of the ceiling is idle-covered", async () => {
+    const { oracle } = idlePlanner(1n);
+    await expect(
+      idleCoveredShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isIdleCovered: oracle })
+    ).resolves.toBe(1n);
+  });
+
+  it("converges when the boundary sits one base unit below the ceiling", async () => {
+    const { oracle } = idlePlanner(1_499_998n);
+    await expect(
+      idleCoveredShareBaseUnits({ ceilingBaseUnits: 1_000_000n, isIdleCovered: oracle })
     ).resolves.toBe(999_999n);
   });
 });

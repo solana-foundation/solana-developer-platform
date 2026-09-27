@@ -19,6 +19,7 @@ import { kaminoClusterConfig } from "./programs";
 import {
   deriveKaminoDepositQuote,
   deriveKaminoWithdrawQuote,
+  idleCoveredShareBaseUnits,
   type KaminoDepositQuote,
   type KaminoDepositQuoteInput,
   type KaminoExitPlanObservation,
@@ -798,8 +799,10 @@ async function readUnstakedShareBaseUnits(
  * total `shares` still reports the holding. The ceiling is kept only when the
  * quote derived from the very same plan reports no issue for an exit of that
  * size — a liquidity-covered exit at or below the vault's `minWithdrawAmount`
- * is refused too (`BELOW_MINIMUM_WITHDRAWAL`) — so the ceiling and the quote
- * can never disagree about what is immediately executable.
+ * is refused too (`BELOW_MINIMUM_WITHDRAWAL`) — and when the refusal comes
+ * from a split reserve leg, the read falls back to the largest exit the idle
+ * liquidity alone fills, whose plan never opens a leg to split. So the ceiling
+ * and the quote can never disagree about what is immediately executable.
  */
 export async function readKaminoPosition(
   runtime: KaminoRuntime,
@@ -848,6 +851,14 @@ export async function readKaminoPosition(
    */
   let withdrawableBase = 0n;
   try {
+    // The global config feeds only the withdrawal ceiling, so its failure must
+    // never discard a successfully read rate: the load starts beside the
+    // reserve read (the position read's deadline is shared, so reads that can
+    // run together must never be serialized), is settled into `undefined`
+    // here and is only judged inside the ceiling's own guard below.
+    const globalConfigPromise = loadKvaultGlobalConfig(runtime, input.vault, config, rpc).catch(
+      () => undefined
+    );
     const reserves = await loadStateOnlyReserves(
       runtime,
       input.vault,
@@ -856,13 +867,6 @@ export async function readKaminoPosition(
       rpc,
       config.klendProgramId,
       config.slotDurationMs
-    );
-    // The global config feeds only the withdrawal ceiling, so its failure must
-    // never discard a successfully read rate: the load travels beside the rate
-    // read (one round trip, as before) but is settled into `undefined` here and
-    // only judged inside the ceiling's own guard below.
-    const globalConfigPromise = loadKvaultGlobalConfig(runtime, input.vault, config, rpc).catch(
-      () => undefined
     );
     rawRate = await client.getTokensPerShareSingleVault(
       state,
@@ -925,28 +929,45 @@ export async function readKaminoPosition(
               });
         // Liquidity is not the only thing the quote refuses: the program
         // applies `minWithdrawAmount` to EACH withdraw instruction's net, so
-        // an exit the vault's liquidity fully covers can still fall at or
-        // below that minimum and be refused with BELOW_MINIMUM_WITHDRAWAL —
-        // and no smaller quantity clears a minimum that the ceiling's own
-        // aggregate net fails. Derive the quote for the ceiling itself and
-        // keep the ceiling only when it prices clean; anything else fails
-        // closed to zero rather than offer an amount that cannot be withdrawn
+        // an exit the vault's liquidity fully covers can still be refused
+        // with BELOW_MINIMUM_WITHDRAWAL because one leg of the split falls
+        // at or below that minimum. Keep the ceiling only when it prices
+        // clean; when a leg is short, fall back to the largest IDLE-ONLY
+        // exit — its plan never opens a reserve leg, so it cannot be split
+        // below the minimum — and report zero only when even that is refused
         // (understating availability is always the safe direction).
         if (liquidityCeiling > 0n) {
-          const ceilingPlan = await client.getShareExitLiquidityPlan(
-            state,
-            input.slot as Kit2,
-            reserves,
-            new Decimal(formatDecimalAmount(liquidityCeiling, shareDecimals)),
-            unstakedShares,
-            rate,
-            withdrawalPenalties as Kit2
-          );
-          const ceilingIssues = deriveKaminoWithdrawQuote(
-            observeKaminoExitPlan(ceilingPlan, withdrawalPenalties, state, assetDecimals)
-          ).issues;
-          if (ceilingIssues.length === 0) {
+          const planAt = async (candidateBaseUnits: bigint) =>
+            client.getShareExitLiquidityPlan(
+              state,
+              input.slot as Kit2,
+              reserves,
+              new Decimal(formatDecimalAmount(candidateBaseUnits, shareDecimals)),
+              unstakedShares,
+              rate,
+              withdrawalPenalties as Kit2
+            );
+          const quoteIssues = async (candidateBaseUnits: bigint) =>
+            deriveKaminoWithdrawQuote(
+              observeKaminoExitPlan(
+                await planAt(candidateBaseUnits),
+                withdrawalPenalties,
+                state,
+                assetDecimals
+              )
+            ).issues;
+          if ((await quoteIssues(liquidityCeiling)).length === 0) {
             withdrawableBase = liquidityCeiling;
+          } else {
+            const idleCeiling = await idleCoveredShareBaseUnits({
+              ceilingBaseUnits: liquidityCeiling,
+              isIdleCovered: async (candidate) =>
+                ((await planAt(candidate)).reserveTokenLamportsToWithdraw as Map<unknown, unknown>)
+                  .size === 0,
+            });
+            if (idleCeiling > 0n && (await quoteIssues(idleCeiling)).length === 0) {
+              withdrawableBase = idleCeiling;
+            }
           }
         }
       }

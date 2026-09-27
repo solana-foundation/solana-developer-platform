@@ -248,6 +248,35 @@ export function deriveKaminoWithdrawQuote(
 }
 
 /**
+ * The largest integer share base units at or below `ceilingBaseUnits` where a
+ * monotone predicate holds, found by binary search with the caller's oracle.
+ *
+ * The search verifies both ends rather than trusting the caller's precondition:
+ * a predicate that fails at zero yields zero, and one that holds at the ceiling
+ * needs no search. If the predicate is not actually monotone the search still
+ * returns a verified point — it can only understate, never overstate.
+ */
+async function monotoneShareCeilingBaseUnits(input: {
+  /** The largest share quantity, in base units, worth considering. */
+  ceilingBaseUnits: bigint;
+  /** Whether the predicate holds for an exit of exactly this many share base units. */
+  holdsAt: (candidateBaseUnits: bigint) => Promise<boolean>;
+}): Promise<bigint> {
+  const { ceilingBaseUnits: ceiling, holdsAt } = input;
+  if (ceiling <= 0n) return 0n;
+  if (!(await holdsAt(0n))) return 0n;
+  if (await holdsAt(ceiling)) return ceiling;
+  let low = 0n;
+  let high = ceiling;
+  while (high - low > 1n) {
+    const mid = low + (high - low) / 2n;
+    if (await holdsAt(mid)) low = mid;
+    else high = mid;
+  }
+  return low;
+}
+
+/**
  * The largest share quantity, in integer share base units, whose exit plan the
  * vault's current liquidity can fully cover.
  *
@@ -272,19 +301,34 @@ export async function liquidityCappedShareBaseUnits(input: {
   /** Whether an exit of exactly this many share base units is fully coverable right now. */
   isFullyCoverable: (candidateBaseUnits: bigint) => Promise<boolean>;
 }): Promise<bigint> {
-  const { ceilingBaseUnits: ceiling, isFullyCoverable } = input;
-  if (ceiling <= 0n) return 0n;
-  // Verify both ends rather than trusting the caller's precondition: the empty
-  // exit is coverable unless the planner has drifted, and a confirmed ceiling
-  // needs no search.
-  if (!(await isFullyCoverable(0n))) return 0n;
-  if (await isFullyCoverable(ceiling)) return ceiling;
-  let low = 0n;
-  let high = ceiling;
-  while (high - low > 1n) {
-    const mid = low + (high - low) / 2n;
-    if (await isFullyCoverable(mid)) low = mid;
-    else high = mid;
-  }
-  return low;
+  return monotoneShareCeilingBaseUnits({
+    ceilingBaseUnits: input.ceilingBaseUnits,
+    holdsAt: input.isFullyCoverable,
+  });
+}
+
+/**
+ * The largest share quantity, in integer share base units, whose exit plan
+ * draws on the vault's idle liquidity alone — no reserve legs.
+ *
+ * This is the position-read's fallback ceiling when the full liquidity ceiling
+ * prices dirty: the program applies `minWithdrawAmount` to EACH withdraw
+ * instruction's net, so the plan that fills the liquidity ceiling can split
+ * off a reserve leg below that minimum even though a smaller exit the idle
+ * liquidity fills on its own prices clean. Drawing no reserve liquidity is
+ * monotone in the share amount — the idle liquidity is drawn first, and a
+ * reserve leg only opens once it cannot cover — so the same binary search
+ * applies, with the caller's planner as the oracle. A non-monotone planner
+ * can only understate, never overstate.
+ */
+export async function idleCoveredShareBaseUnits(input: {
+  /** The largest share quantity, in share base units, worth considering. */
+  ceilingBaseUnits: bigint;
+  /** Whether an exit of exactly this many share base units draws no reserve liquidity. */
+  isIdleCovered: (candidateBaseUnits: bigint) => Promise<boolean>;
+}): Promise<bigint> {
+  return monotoneShareCeilingBaseUnits({
+    ceilingBaseUnits: input.ceilingBaseUnits,
+    holdsAt: input.isIdleCovered,
+  });
 }

@@ -339,6 +339,37 @@ describe("oracle-free Kamino SDK execution", () => {
   });
 
   /**
+   * The global config feeds only the withdrawal ceiling, but the position read
+   * shares one deadline across every read: the config fetch must start beside
+   * the reserve read, not queue behind it, or two reads that fit the deadline
+   * when run together can exhaust it in sequence and time out the portfolio.
+   */
+  it("starts the global-config read beside the reserve read, not after it", async () => {
+    let configFetchStarted = false;
+    let resolveReserves: ((states: unknown[]) => void) | undefined;
+    mocks.fetchReserveStates.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveReserves = resolve;
+        })
+    );
+    mocks.fetchGlobalConfig.mockImplementation(() => {
+      configFetchStarted = true;
+      return Promise.resolve({ withdrawalPenaltyBps: "0", withdrawalPenaltyLamports: "0" });
+    });
+
+    const pending = readKaminoPosition(runtime, { owner: OWNER, slot: 123n, vault: VAULT });
+    // The reserve read is still pending here; the config fetch must already
+    // have started beside it.
+    for (let waited = 0; waited < 250 && !configFetchStarted; waited += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect(configFetchStarted).toBe(true);
+    resolveReserves?.([reserveState]);
+    await expect(pending).resolves.toMatchObject({ shares: "1", withdrawableShares: "1" });
+  });
+
+  /**
    * The program applies `minWithdrawAmount` to EACH withdraw instruction's
    * net, so an exit the vault's liquidity fully covers can still fall at or
    * below that minimum and be refused with BELOW_MINIMUM_WITHDRAWAL — exactly
@@ -368,6 +399,44 @@ describe("oracle-free Kamino SDK execution", () => {
     ).resolves.toMatchObject({
       issues: [expect.objectContaining({ code: "BELOW_MINIMUM_WITHDRAWAL" })],
     });
+  });
+
+  /**
+   * The fail-closed ceiling above must not hide an exit that CAN be withdrawn:
+   * when filling the liquidity ceiling opens a small reserve leg whose net is
+   * at or below `minWithdrawAmount`, the ceiling itself prices dirty — but the
+   * largest exit the idle liquidity alone fills never opens a reserve leg, so
+   * it prices clean and is the availability the dashboard should show. Here:
+   * 0.5 idle tokens plus 0.3 freely withdrawable reserve tokens against 1
+   * share priced at 1.5 — the liquidity ceiling (0.533333) splits into two
+   * legs the 0.4 minimum refuses, while the idle-only exit (0.333333) clears.
+   */
+  it("falls back to the largest idle-only exit when the liquidity ceiling splits below the minimum", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      minWithdrawAmount: integer(400_000),
+      tokenAvailable: integer(500_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 50_000;
+
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "0.533333", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      issues: [expect.objectContaining({ code: "BELOW_MINIMUM_WITHDRAWAL" })],
+    });
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "0.333333", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({ issues: [] });
+
+    const position = await readKaminoPosition(runtime, {
+      owner: OWNER,
+      slot: 123n,
+      vault: VAULT,
+    });
+    expect(position.shares).toBe("1");
+    expect(position.tokenValue).toBe("1.5");
+    expect(position.withdrawableShares).toBe("0.333333");
   });
 
   /**
