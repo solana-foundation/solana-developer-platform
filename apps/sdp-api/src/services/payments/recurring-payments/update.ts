@@ -415,15 +415,25 @@ async function resolveLegacyAttemptCustodyIdentity(
  * A recorded signature only proves recorded on-chain work when its
  * transaction confirmed successfully — an authorization or cancellation
  * transaction can confirm with an error, leaving the signature journaled but
- * nothing executed. Probe the recorded signature's outcome: true when the
- * transaction failed on-chain, false when it succeeded. Unknown outcomes
- * (RPC errors, confirmation timeouts) propagate — recovery must not silently
- * treat recorded work as absent.
+ * nothing executed. Resolve the recorded signature's outcome: true when the
+ * transaction failed on-chain, false when it succeeded. Outcomes pre-warmed
+ * before the claim are read from `recordedOutcomes`; a miss (a raced
+ * replacement of the in-flight attempt) falls back to a direct RPC check.
+ * Unknown outcomes (RPC errors, confirmation timeouts) propagate — recovery
+ * must not silently treat recorded work as absent.
  */
 async function legacyAttemptSignatureFailedOnChain(
   env: Env,
-  signature: string | null
+  signature: string | null,
+  recordedOutcomes: Map<string, boolean>
 ): Promise<boolean> {
+  if (signature === null) {
+    return false;
+  }
+  const recorded = recordedOutcomes.get(signature);
+  if (recorded !== undefined) {
+    return recorded;
+  }
   const parsed = parseNullableStoredSignature(signature);
   if (parsed === null) {
     return false;
@@ -745,6 +755,7 @@ async function resolveStaleLegacyUpdateAttempt(input: {
   db: DatabaseExecutor;
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
+  recordedSignatureOutcomes: Map<string, boolean>;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
@@ -802,10 +813,20 @@ async function resolveStaleLegacyUpdateAttempt(input: {
   ) {
     // A recorded signature is not proof the transaction succeeded: check the
     // confirmed on-chain outcome before treating the replacement as
-    // authorized or the old subscription as canceled.
+    // authorized or the old subscription as canceled. The outcomes were
+    // probed before the claim (see the pre-warmed map), so this lookup never
+    // polls Solana while holding the payment lock.
     const [authorizationFailed, oldCancelFailed] = await Promise.all([
-      legacyAttemptSignatureFailedOnChain(input.env, input.existing.authorization_signature),
-      legacyAttemptSignatureFailedOnChain(input.env, input.existing.old_cancel_signature),
+      legacyAttemptSignatureFailedOnChain(
+        input.env,
+        input.existing.authorization_signature,
+        input.recordedSignatureOutcomes
+      ),
+      legacyAttemptSignatureFailedOnChain(
+        input.env,
+        input.existing.old_cancel_signature,
+        input.recordedSignatureOutcomes
+      ),
     ]);
     const replacementFinalizedOnChain =
       (input.existing.authorization_signature !== null && !authorizationFailed) ||
@@ -859,6 +880,7 @@ async function getOrCreateRecurringPaymentUpdateAttempt(input: {
   db: DatabaseExecutor;
   env: Env;
   recurringRepo: PaymentRecurringPaymentsRepository;
+  recordedSignatureOutcomes: Map<string, boolean>;
   claimed: PaymentRecurringPaymentRow;
   organizationId: string;
   projectId: string;
@@ -2147,6 +2169,37 @@ export async function updateRecurringPayment(input: {
   const recoveringStaleUpdate = isUpdatingRecurringPaymentStatus(settled.recurringPayment.status);
   const claimUpdatedAt = new Date().toISOString();
   const staleBefore = getRecurringPaymentOperationStaleBefore(nowIso);
+  // A stale legacy recovery may need the on-chain outcome of the in-flight
+  // attempt's recorded authorization/cancellation signatures. Resolve them
+  // BEFORE the claim so the RPC polling never runs inside the transaction
+  // holding the claimed payment's row lock; the recovery reads the pre-warmed
+  // outcomes and only falls back to an in-transaction check if the attempt
+  // was replaced in between.
+  const recordedSignatureOutcomes = new Map<string, boolean>();
+  if (recoveringStaleUpdate) {
+    const pendingAttempt = await recurringRepo.getLatestUpdateAttempt({
+      organizationId: input.organizationId,
+      projectId: input.projectId,
+      recurringPaymentId: settled.recurringPayment.id,
+      statuses: IN_FLIGHT_RECURRING_PAYMENT_ATTEMPT_STATUSES,
+    });
+    if (
+      pendingAttempt &&
+      pendingAttempt.new_source_custody_wallet_id === null &&
+      usesLegacySourceWalletSnapshot(pendingAttempt)
+    ) {
+      await Promise.all(
+        [pendingAttempt.authorization_signature, pendingAttempt.old_cancel_signature]
+          .filter((recorded): recorded is string => recorded !== null)
+          .map(async (recorded) => {
+            recordedSignatureOutcomes.set(
+              recorded,
+              await legacyAttemptSignatureFailedOnChain(input.env, recorded, new Map())
+            );
+          })
+      );
+    }
+  }
   const claimResult = await getDb(input.env).transaction(async (tx) => {
     const transactionRepo = createPostgresPaymentRecurringPaymentsRepository(tx);
     const claimed = sourceChanged
@@ -2171,6 +2224,7 @@ export async function updateRecurringPayment(input: {
       db: tx,
       env: input.env,
       recurringRepo: transactionRepo,
+      recordedSignatureOutcomes,
       claimed,
       organizationId: input.organizationId,
       projectId: input.projectId,
