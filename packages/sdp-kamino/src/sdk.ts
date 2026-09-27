@@ -21,6 +21,7 @@ import {
   deriveKaminoWithdrawQuote,
   type KaminoDepositQuote,
   type KaminoDepositQuoteInput,
+  type KaminoExitPlanObservation,
   type KaminoWithdrawQuote,
   type KaminoWithdrawQuoteInput,
   liquidityCappedShareBaseUnits,
@@ -782,9 +783,11 @@ async function readUnstakedShareBaseUnits(
  * One wallet's holding in one vault, read live.
  *
  * `tokenValue` is shares × exchange rate. The rate read is allowed to fail
- * independently of the share read: a position whose size is known but whose
- * value is not renders "—" for the value, which is the module rule everywhere
- * else in Earn and strictly better than a fabricated number.
+ * independently of the share read AND of the withdrawal-availability read
+ * below it: a position whose size is known but whose value is not renders "—"
+ * for the value, and a position whose value is known but whose availability
+ * is not still reports that value, which is the module rule everywhere else
+ * in Earn and strictly better than a fabricated number.
  *
  * `withdrawableShares` is the LIQUIDITY-AWARE exit ceiling, not the unstaked
  * balance: the largest share quantity whose `getShareExitLiquidityPlan` — the
@@ -792,9 +795,11 @@ async function readUnstakedShareBaseUnits(
  * penalties — can fully cover from the vault's idle plus reserve liquidity
  * right now. When that plan cannot be observed (rate, reserve or global-config
  * read failed) the field reports "0" rather than an unverified balance, and
- * total `shares` still reports the holding. A full exit the vault cannot fill
- * is exactly the exit the builder refuses, so the ceiling and the quote can
- * never disagree about what is immediately executable.
+ * total `shares` still reports the holding. The ceiling is kept only when the
+ * quote derived from the very same plan reports no issue for an exit of that
+ * size — a liquidity-covered exit at or below the vault's `minWithdrawAmount`
+ * is refused too (`BELOW_MINIMUM_WITHDRAWAL`) — so the ceiling and the quote
+ * can never disagree about what is immediately executable.
  */
 export async function readKaminoPosition(
   runtime: KaminoRuntime,
@@ -843,18 +848,22 @@ export async function readKaminoPosition(
    */
   let withdrawableBase = 0n;
   try {
-    const [reserves, globalConfig] = await Promise.all([
-      loadStateOnlyReserves(
-        runtime,
-        input.vault,
-        client,
-        state,
-        rpc,
-        config.klendProgramId,
-        config.slotDurationMs
-      ),
-      loadKvaultGlobalConfig(runtime, input.vault, config, rpc),
-    ]);
+    const reserves = await loadStateOnlyReserves(
+      runtime,
+      input.vault,
+      client,
+      state,
+      rpc,
+      config.klendProgramId,
+      config.slotDurationMs
+    );
+    // The global config feeds only the withdrawal ceiling, so its failure must
+    // never discard a successfully read rate: the load travels beside the rate
+    // read (one round trip, as before) but is settled into `undefined` here and
+    // only judged inside the ceiling's own guard below.
+    const globalConfigPromise = loadKvaultGlobalConfig(runtime, input.vault, config, rpc).catch(
+      () => undefined
+    );
     rawRate = await client.getTokensPerShareSingleVault(
       state,
       input.slot as Kit2,
@@ -864,46 +873,88 @@ export async function readKaminoPosition(
     const rate = requireNonNegativeFiniteDecimal("vault exchange rate", rawRate);
     assertActive();
     const unstakedShares = new Decimal(formatDecimalAmount(unstakedBase, shareDecimals));
-    // The effective penalties the quote and the builder both price with; planning
-    // the ceiling with anything smaller could clear it past what the quote allows.
-    const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
-    const fullPlan = await client.getShareExitLiquidityPlan(
-      state,
-      input.slot as Kit2,
-      reserves,
-      unstakedShares,
-      unstakedShares,
-      rate,
-      withdrawalPenalties as Kit2
-    );
-    const remaining = lamportsToBaseUnits(
-      "unfilled exit amount",
-      fullPlan.remainingNetTokenLamportsToWithdraw
-    );
-    withdrawableBase =
-      remaining <= 0n
-        ? unstakedBase
-        : await liquidityCappedShareBaseUnits({
-            ceilingBaseUnits: unstakedBase,
-            isFullyCoverable: async (candidate) => {
-              const candidateShares = new Decimal(formatDecimalAmount(candidate, shareDecimals));
-              const candidatePlan = await client.getShareExitLiquidityPlan(
-                state,
-                input.slot as Kit2,
-                reserves,
-                candidateShares,
-                unstakedShares,
-                rate,
-                withdrawalPenalties as Kit2
-              );
-              return (
-                lamportsToBaseUnits(
-                  "candidate exit plan",
-                  candidatePlan.remainingNetTokenLamportsToWithdraw
-                ) <= 0n
-              );
-            },
-          });
+    // Value and availability fail independently. Everything inside this guard
+    // can only lower the ceiling to zero — it never touches `rawRate` — so a
+    // position whose exit plan cannot be observed still reports its value.
+    try {
+      const globalConfig = await globalConfigPromise;
+      if (globalConfig !== undefined) {
+        // The effective penalties the quote and the builder both price with;
+        // planning the ceiling with anything smaller could clear it past what
+        // the quote allows.
+        const withdrawalPenalties = effectiveWithdrawalPenalties(state, globalConfig);
+        const assetDecimals = mintDecimals(state.tokenMintDecimals, "tokenMintDecimals");
+        const fullPlan = await client.getShareExitLiquidityPlan(
+          state,
+          input.slot as Kit2,
+          reserves,
+          unstakedShares,
+          unstakedShares,
+          rate,
+          withdrawalPenalties as Kit2
+        );
+        const remaining = lamportsToBaseUnits(
+          "unfilled exit amount",
+          fullPlan.remainingNetTokenLamportsToWithdraw
+        );
+        const liquidityCeiling =
+          remaining <= 0n
+            ? unstakedBase
+            : await liquidityCappedShareBaseUnits({
+                ceilingBaseUnits: unstakedBase,
+                isFullyCoverable: async (candidate) => {
+                  const candidateShares = new Decimal(
+                    formatDecimalAmount(candidate, shareDecimals)
+                  );
+                  const candidatePlan = await client.getShareExitLiquidityPlan(
+                    state,
+                    input.slot as Kit2,
+                    reserves,
+                    candidateShares,
+                    unstakedShares,
+                    rate,
+                    withdrawalPenalties as Kit2
+                  );
+                  return (
+                    lamportsToBaseUnits(
+                      "candidate exit plan",
+                      candidatePlan.remainingNetTokenLamportsToWithdraw
+                    ) <= 0n
+                  );
+                },
+              });
+        // Liquidity is not the only thing the quote refuses: the program
+        // applies `minWithdrawAmount` to EACH withdraw instruction's net, so
+        // an exit the vault's liquidity fully covers can still fall at or
+        // below that minimum and be refused with BELOW_MINIMUM_WITHDRAWAL —
+        // and no smaller quantity clears a minimum that the ceiling's own
+        // aggregate net fails. Derive the quote for the ceiling itself and
+        // keep the ceiling only when it prices clean; anything else fails
+        // closed to zero rather than offer an amount that cannot be withdrawn
+        // (understating availability is always the safe direction).
+        if (liquidityCeiling > 0n) {
+          const ceilingPlan = await client.getShareExitLiquidityPlan(
+            state,
+            input.slot as Kit2,
+            reserves,
+            new Decimal(formatDecimalAmount(liquidityCeiling, shareDecimals)),
+            unstakedShares,
+            rate,
+            withdrawalPenalties as Kit2
+          );
+          const ceilingIssues = deriveKaminoWithdrawQuote(
+            observeKaminoExitPlan(ceilingPlan, withdrawalPenalties, state, assetDecimals)
+          ).issues;
+          if (ceilingIssues.length === 0) {
+            withdrawableBase = liquidityCeiling;
+          }
+        }
+      }
+    } catch {
+      // The exit plan cannot be observed: availability fails closed and stays
+      // at zero. `rawRate` above is deliberately untouched, so the value block
+      // below still prices the holding.
+    }
   } catch {
     rawRate = undefined;
   }
@@ -1063,6 +1114,48 @@ export async function quoteKaminoDeposit(
 }
 
 /**
+ * The quote's own view of an exit plan, in integer token base units: one entry
+ * per withdraw instruction the exit will emit, in plan order — the
+ * idle-liquidity leg when the plan draws on it, then each reserve leg — plus
+ * the plan's aggregate net, the flat penalty it was priced with, the vault's
+ * minimum withdrawal and the asset scale. Shared by `quoteKaminoWithdraw` and
+ * the position-read ceiling so both judge a plan by exactly the same
+ * derivation, and the ceiling can never disagree with the quote about what is
+ * executable.
+ */
+function observeKaminoExitPlan(
+  plan: Kit2,
+  withdrawalPenalties: ReturnType<typeof effectiveWithdrawalPenalties>,
+  state: Kit2,
+  assetDecimals: number
+): KaminoExitPlanObservation {
+  const availableLeg = lamportsToBaseUnits(
+    "idle-liquidity exit leg",
+    plan.availableTokenLamportsToWithdraw
+  );
+  const legNetBaseUnits = [
+    ...(availableLeg > 0n ? [availableLeg] : []),
+    ...[...(plan.reserveTokenLamportsToWithdraw as Map<unknown, Kit2>).values()].map((leg) =>
+      lamportsToBaseUnits("reserve exit leg", leg)
+    ),
+  ];
+  return {
+    netBaseUnits: lamportsToBaseUnits("net exit amount", plan.netTokenLamportsToWithdraw),
+    flatPenaltyBaseUnits: lamportsToBaseUnits(
+      "flat withdrawal penalty",
+      withdrawalPenalties.withdrawalPenaltyLamports
+    ),
+    legNetBaseUnits,
+    remainingBaseUnits: lamportsToBaseUnits(
+      "unfilled exit amount",
+      plan.remainingNetTokenLamportsToWithdraw
+    ),
+    minimumWithdrawalBaseUnits: bigintField("minimum withdrawal", state.minWithdrawAmount),
+    assetDecimals,
+  };
+}
+
+/**
  * Quote an exit: the tokens `shares` would return right now, net of the
  * effective withdrawal penalties and lowered for a split exit (see
  * `conservativeExitNetBaseUnits`). A READ, same posture as the deposit quote.
@@ -1121,30 +1214,7 @@ export async function quoteKaminoWithdraw(
   }
   assertActive();
 
-  // One entry per withdraw instruction the exit will emit, in plan order: the
-  // idle-liquidity leg when the plan draws on it, then each reserve leg.
-  const availableLeg = lamportsToBaseUnits(
-    "idle-liquidity exit leg",
-    plan.availableTokenLamportsToWithdraw
+  return deriveKaminoWithdrawQuote(
+    observeKaminoExitPlan(plan, withdrawalPenalties, state, assetDecimals)
   );
-  const legNetBaseUnits = [
-    ...(availableLeg > 0n ? [availableLeg] : []),
-    ...[...(plan.reserveTokenLamportsToWithdraw as Map<unknown, Kit2>).values()].map((leg) =>
-      lamportsToBaseUnits("reserve exit leg", leg)
-    ),
-  ];
-  return deriveKaminoWithdrawQuote({
-    netBaseUnits: lamportsToBaseUnits("net exit amount", plan.netTokenLamportsToWithdraw),
-    flatPenaltyBaseUnits: lamportsToBaseUnits(
-      "flat withdrawal penalty",
-      withdrawalPenalties.withdrawalPenaltyLamports
-    ),
-    legNetBaseUnits,
-    remainingBaseUnits: lamportsToBaseUnits(
-      "unfilled exit amount",
-      plan.remainingNetTokenLamportsToWithdraw
-    ),
-    minimumWithdrawalBaseUnits: bigintField("minimum withdrawal", state.minWithdrawAmount),
-    assetDecimals,
-  });
 }

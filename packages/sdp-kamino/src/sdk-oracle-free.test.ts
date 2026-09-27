@@ -318,6 +318,82 @@ describe("oracle-free Kamino SDK execution", () => {
     expect(position.withdrawableShares).toBe("0");
   });
 
+  /**
+   * The global config feeds only the withdrawal ceiling. When its read fails
+   * while the rate and reserves are readable, the position must keep its
+   * calculable value and report only availability as unknown: the ceiling's
+   * failure lands in its own guard and must never discard the rate the value
+   * block prices with.
+   */
+  it("keeps the position value when only the withdrawal ceiling cannot be observed", async () => {
+    mocks.fetchGlobalConfig.mockRejectedValue(new Error("global config unavailable"));
+
+    const position = await readKaminoPosition(runtime, {
+      owner: OWNER,
+      slot: 123n,
+      vault: VAULT,
+    });
+    expect(position.shares).toBe("1");
+    expect(position.tokenValue).toBe("1.5");
+    expect(position.withdrawableShares).toBe("0");
+  });
+
+  /**
+   * The program applies `minWithdrawAmount` to EACH withdraw instruction's
+   * net, so an exit the vault's liquidity fully covers can still fall at or
+   * below that minimum and be refused with BELOW_MINIMUM_WITHDRAWAL — exactly
+   * what `quoteKaminoWithdraw` reports for the same amount. The ceiling must
+   * not offer an amount the quote refuses: a liquidity-capped exit at or
+   * below the minimum leaves nothing withdrawable (no smaller quantity clears
+   * a minimum the ceiling's own net fails).
+   */
+  it("reports nothing withdrawable when the liquidity-capped exit is at or below the minimum withdrawal", async () => {
+    mocks.getState.mockResolvedValue({
+      ...state,
+      minWithdrawAmount: integer(2_000_000),
+      tokenAvailable: integer(500_000),
+      vaultAllocationStrategy: [{ ctokenAllocation: integer(1_000_000), reserve: RESERVE }],
+    });
+    mocks.freelyAvailableLiquidity = 100_000;
+
+    const position = await readKaminoPosition(runtime, {
+      owner: OWNER,
+      slot: 123n,
+      vault: VAULT,
+    });
+    expect(position.shares).toBe("1");
+    expect(position.withdrawableShares).toBe("0");
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "0.733333", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      issues: [expect.objectContaining({ code: "BELOW_MINIMUM_WITHDRAWAL" })],
+    });
+  });
+
+  /**
+   * Same refusal on the full-balance shortcut: the whole exit is covered by
+   * idle liquidity, but its net is at or below the vault's minimum, so the
+   * quote refuses the full balance too and the read must fail closed instead
+   * of reporting the holding as immediately withdrawable.
+   */
+  it("refuses the full balance when even the fully covered exit is below the minimum withdrawal", async () => {
+    mocks.getState.mockResolvedValue({ ...state, minWithdrawAmount: integer(2_000_000) });
+
+    const position = await readKaminoPosition(runtime, {
+      owner: OWNER,
+      slot: 123n,
+      vault: VAULT,
+    });
+    expect(position.shares).toBe("1");
+    expect(position.tokenValue).toBe("1.5");
+    expect(position.withdrawableShares).toBe("0");
+    await expect(
+      quoteKaminoWithdraw(runtime, { shares: "1", slot: 123n, vault: VAULT })
+    ).resolves.toMatchObject({
+      issues: [expect.objectContaining({ code: "BELOW_MINIMUM_WITHDRAWAL" })],
+    });
+  });
+
   it("ceiling and quote agree: the capped amount quotes clean while the full balance reports short liquidity", async () => {
     mocks.getState.mockResolvedValue({
       ...state,
