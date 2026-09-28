@@ -135,6 +135,14 @@ type MuralAccountCreditClaim = "completed" | "blocked" | "already_claimed";
  * rejection or review error that commits while the credit is in flight is
  * honored by the very write that would settle money, so the settlement can
  * never slip past a decision that lands concurrently with it.
+ *
+ * The gate reads the counterparty under a row lock (`FOR UPDATE`): the
+ * lifecycle handler writes a compliance decision to that same row, so the
+ * claim cannot snapshot an `approved` state and complete while a rejection
+ * commits — it either waits on the lock and then sees the decision (blocked),
+ * or wins the lock and orders the credit strictly before the rejection. The
+ * two applies therefore always serialize into a state a sequential replay of
+ * the same signed events would also produce.
  */
 export async function claimMuralAccountCredit(
   env: Env,
@@ -147,29 +155,33 @@ export async function claimMuralAccountCredit(
 ): Promise<MuralAccountCreditClaim> {
   const row = await getDb(env)
     .prepare(
-      `WITH pt AS (
-        UPDATE payment_transfers
-           SET status = 'completed',
-               updated_at = ?,
-               amount = ?,
-               provider_data = provider_data || ?::jsonb
-         WHERE id = ?
-           AND organization_id = ?
-           AND project_id IS NOT DISTINCT FROM ?
-           AND status = 'awaiting_payment'
-           AND NOT EXISTS (
-             SELECT 1
-               FROM counterparties c
-              WHERE c.id = ?
-                AND c.status = 'active'
-                AND c.provider_data->'mural'->'organization'->>'kycStatus'
-                    IN ('rejected', 'errored')
-           )
-        RETURNING id
-      )
-      SELECT id FROM pt`
+      `WITH counterparty_lock AS (
+         SELECT status,
+                provider_data->'mural'->'organization'->>'kycStatus'
+                    AS mural_kyc_status
+           FROM counterparties
+          WHERE id = ?
+          FOR UPDATE
+       )
+       UPDATE payment_transfers
+          SET status = 'completed',
+              updated_at = ?,
+              amount = ?,
+              provider_data = provider_data || ?::jsonb
+        WHERE id = ?
+          AND organization_id = ?
+          AND project_id IS NOT DISTINCT FROM ?
+          AND status = 'awaiting_payment'
+          AND NOT EXISTS (
+            SELECT 1
+              FROM counterparty_lock
+             WHERE status = 'active'
+               AND mural_kyc_status IN ('rejected', 'errored')
+          )
+        RETURNING id`
     )
     .bind(
+      input.counterpartyId,
       new Date().toISOString(),
       String(input.tokenAmount),
       JSON.stringify({
@@ -180,8 +192,7 @@ export async function claimMuralAccountCredit(
       }),
       input.transfer.id,
       input.transfer.organization_id,
-      input.transfer.project_id,
-      input.counterpartyId
+      input.transfer.project_id
     )
     .first<{ id: string }>();
   if (row) {
