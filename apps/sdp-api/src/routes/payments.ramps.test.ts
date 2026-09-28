@@ -1811,6 +1811,29 @@ describe("Payments routes — ramps", () => {
     expect(row?.status).toBe("awaiting_payment");
   });
   describe("sandbox pay-in simulation", () => {
+    let originalMuralSandboxApiKey: string | undefined;
+    let originalMuralSandboxTransferApiKey: string | undefined;
+    let originalCoinbaseApiKeyId: string | undefined;
+    let originalCoinbaseApiKeySecret: string | undefined;
+
+    beforeEach(() => {
+      originalMuralSandboxApiKey = env.MURAL_PAY_SANDBOX_API_KEY;
+      originalMuralSandboxTransferApiKey = env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY;
+      originalCoinbaseApiKeyId = env.COINBASE_CDP_API_KEY_ID;
+      originalCoinbaseApiKeySecret = env.COINBASE_CDP_API_KEY_SECRET;
+      env.MURAL_PAY_SANDBOX_API_KEY = "test-mural-simulation-api-key";
+      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = "test-mural-simulation-transfer-api-key";
+      env.COINBASE_CDP_API_KEY_ID = "test-coinbase-simulation-api-key-id";
+      env.COINBASE_CDP_API_KEY_SECRET = "test-coinbase-simulation-api-key-secret";
+    });
+
+    afterEach(() => {
+      env.MURAL_PAY_SANDBOX_API_KEY = originalMuralSandboxApiKey;
+      env.MURAL_PAY_SANDBOX_TRANSFER_API_KEY = originalMuralSandboxTransferApiKey;
+      env.COINBASE_CDP_API_KEY_ID = originalCoinbaseApiKeyId;
+      env.COINBASE_CDP_API_KEY_SECRET = originalCoinbaseApiKeySecret;
+    });
+
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
     const LIGHTSPARK_SIM_SEED = {
       provider: "lightspark",
@@ -1999,6 +2022,41 @@ describe("Payments routes — ramps", () => {
       expect(body.error.message).toContain("already requested for this transfer");
 
       simulateSpy.mockRestore();
+    });
+
+    it("rejects an unavailable provider before calling it or claiming the simulation slot", async () => {
+      const transferId = "xfr_lightspark_sim_unavailable";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        counterpartyId,
+      });
+      const before = await readSimulationTransfer(transferId);
+      const originalLightsparkSandboxSecret = env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET;
+      env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockResolvedValue({ accepted: true });
+
+      try {
+        const res = await simulateRequest(transferId);
+
+        expect(res.status).toBe(403);
+        const body: { error: { code: string; message: string } } = await res.json();
+        expect(body.error).toMatchObject({
+          code: "FORBIDDEN",
+          message: "Lightspark is not configured in this environment.",
+        });
+        expect(simulateSpy).not.toHaveBeenCalled();
+        const transfer = await readSimulationTransfer(transferId);
+        expect(transfer).not.toBeNull();
+        expect(transfer?.provider_data).not.toHaveProperty("sandboxSimulation");
+        expect(transfer).toEqual(before);
+      } finally {
+        env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = originalLightsparkSandboxSecret;
+        simulateSpy.mockRestore();
+      }
     });
 
     it("releases the simulation slot on a definitive provider rejection so the transfer can be retried", async () => {

@@ -1127,7 +1127,7 @@ export class LightsparkRampClient implements RampProvider {
     { env, mode }: RampRuntimeContext,
     payload: { quoteId: string; currencyCode: string }
   ): Promise<unknown> {
-    return this.request<typeof payload, unknown>(readLightsparkConfig(env, mode), "sandbox/send", {
+    return this.request<unknown, typeof payload>(readLightsparkConfig(env, mode), "sandbox/send", {
       method: "POST",
       body: payload,
     });

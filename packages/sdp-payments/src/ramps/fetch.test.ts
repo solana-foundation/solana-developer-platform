@@ -19,7 +19,7 @@ describe("isDefinitiveProviderRejection", () => {
     [
       "409",
       new SdpPaymentsError("BAD_REQUEST", "x", { provider: "mural", providerStatus: 409 }),
-      true,
+      false,
     ],
     [
       "408",

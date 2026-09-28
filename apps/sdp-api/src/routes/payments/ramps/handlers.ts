@@ -28,8 +28,8 @@ import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../co
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
 import { MURAL_SANDBOX_PAYIN_RAIL_BY_CURRENCY } from "./providers/mural";
-
 import type { cancelRampTransferSchema, simulateSandboxTransferSchema } from "./schemas";
+import { assertRampProviderAvailable } from "./shared";
 
 export async function cancelRampTransfer(c: ValidatedBodyContext<typeof cancelRampTransferSchema>) {
   const input = c.req.valid("json");
@@ -107,6 +107,7 @@ export async function simulateSandboxTransfer(
   if (transfer.provider === null) {
     throw internalError("On-ramp transfer has no provider.");
   }
+  await assertRampProviderAvailable(c, transfer.provider, scope.auth.organizationId);
   if (transfer.counterparty_id === null) {
     throw internalError("On-ramp transfer has no counterparty.");
   }

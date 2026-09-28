@@ -47,7 +47,7 @@ describe("0119 sandbox simulation claim key", () => {
           '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'),
          ('xfr_without_0119', 'org_0119', 'prj_0119', 'wal_0119', 'USDC', 'onramp', 'inbound', 'awaiting_payment',
           'bvnk', 'ref_without_0119', 'manual_instructions', 'USD', '120.50',
-          '{"bvnk":{"payin":{"transactionId":"tx_0119"}}}',
+          '{"bvnk":{}}',
           '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`
     );
 
@@ -66,7 +66,7 @@ describe("0119 sandbox simulation claim key", () => {
       },
       {
         id: "xfr_without_0119",
-        provider_data: { bvnk: { payin: { transactionId: "tx_0119" } } },
+        provider_data: { bvnk: {} },
       },
     ]);
     await client.query("ROLLBACK");
