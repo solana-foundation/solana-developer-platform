@@ -1260,17 +1260,27 @@ describe("syncDvpLegTransfers", () => {
   // A join outgrown by the retry cap drops its newest asks, and the probe's
   // resume point falls with them: a point that stood would start the next
   // probe below the dropped transactions, whose region behind the position
-  // nothing else lists.
+  // nothing else lists. The next sweep shows the recovery: its probe starts
+  // behind the position, lists the dropped asks again, and the walk collects
+  // them once more.
   it("drops the probe's resume point when the merged retry list outgrows the cap", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
     listSignatures.mockResolvedValue([]);
     const ownRetries = Array.from({ length: 40 }, (_, index) => ({
       signature: sig(index + 1),
       slot: String(index + 1),
       finalized: true,
     }));
+    // The concurrent sweep's own asks, all behind the position it saved.
     const freshRetries = Array.from({ length: 40 }, (_, index) => ({
-      signature: sig(index + 1_000),
-      slot: String(index + 1_000),
+      signature: sig(index + 641),
+      slot: String(index + 641),
       finalized: true,
     }));
     const mine = {
@@ -1298,10 +1308,10 @@ describe("syncDvpLegTransfers", () => {
 
     await syncDvpLegTransfers(reader, transfers, LEG, mine, { remaining: 10 }, NOW);
 
-    // The merged list keeps the oldest 64 asks and drops the rest, and the
-    // point travels below the position only while the list fits: the next
-    // probe starts behind the position, where the dropped ones are listed
-    // and collected once more.
+    // The merged list keeps the oldest 64 asks and drops the rest — the sweep
+    // own's newest sixteen, at slots 35 to 40 — and the point travels below
+    // the position only while the list fits: the next probe starts behind the
+    // position, where the dropped ones are listed and collected once more.
     expect(saveScan).toHaveBeenCalledTimes(2);
     expect(saved[0]).toEqual({
       side: "a",
@@ -1311,6 +1321,57 @@ describe("syncDvpLegTransfers", () => {
       unreadableRetries: [...freshRetries, ...ownRetries].slice(0, 64),
       scannedAt: null,
       version: "1",
+    });
+
+    // The next sweep's walk from the top exceeds the scan cap, so the
+    // fallback reads on from the merged row's position: the region above the
+    // cursor, the part of it that read never listed, and the probe of the
+    // region behind the position — which starts behind the position itself,
+    // because the overflow dropped the point.
+    listSignatures.mockImplementation(async (_escrow, { before }) => {
+      if (before === sig(8)) {
+        return [...page(799, 41), ...history([40, 39, 38, 37, 36, 35], { failed: false })];
+      }
+      if (before === sig(1_001)) {
+        return page(1_000, 801);
+      }
+      if (before === sig(2_001)) {
+        return page(2_000, 1_001);
+      }
+      if (before === sig(3_001)) {
+        return page(3_000, 2_001);
+      }
+      return page(4_000, 3_001);
+    });
+    // The twenty oldest asks the merged list kept read clean this time, and
+    // the dropped ones come back malformed again.
+    for (const retry of freshRetries.slice(0, 20)) {
+      served.set(retry.signature, transaction({ post: "100" }));
+    }
+    for (const retry of ownRetries.slice(34)) {
+      served.set(retry.signature, "malformed");
+    }
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 40 }, NOW);
+
+    // The probe ran from the position down — the point the overflow dropped —
+    // and listed the dropped asks, which the walk read once more.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(8), until: null });
+    expect(readTransaction).toHaveBeenCalledWith(sig(35));
+    // The settled asks leave the list, and the dropped ones, collected again
+    // behind the position, take their place: nothing the cap dropped stays
+    // unreachable.
+    expect(saved[1]).toEqual({
+      side: "a",
+      cursor: { signature: sig(1_001), slot: "1001" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [
+        ...freshRetries.slice(20),
+        ...ownRetries.slice(0, 24),
+        ...ownRetries.slice(34),
+      ],
+      scannedAt: null,
     });
   });
 
