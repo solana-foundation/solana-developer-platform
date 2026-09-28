@@ -8,8 +8,9 @@ export const healthResponseSchema = z
       example: "2025-01-01T00:00:00.000Z",
     }),
     version: z.string().openapi({ description: "Service version.", example: "0.1.0" }),
-    build: z.string().openapi({
-      description: "Git commit the running image was built from, or `local` outside a built image.",
+    build: z.string().optional().openapi({
+      description:
+        "Git commit the running image was built from, or `local` outside a built image. Development environments only.",
       example: "4e36bc2490e5b8f1d6c3a7e2f9b0d4c8a1e6f3b2",
     }),
     environment: z.string().openapi({ description: "Runtime environment.", example: "production" }),

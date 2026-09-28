@@ -34,6 +34,20 @@ describe("Health routes", () => {
       expect(((await built.json()) as { build: string }).build).toBe(sha);
       expect(((await local.json()) as { build: string }).build).toBe("local");
     });
+
+    it("does not report the build commit in production", async () => {
+      const res = await app.request(
+        "/health",
+        {},
+        {
+          ...env,
+          ENVIRONMENT: "production",
+          SDP_BUILD_SHA: "4e36bc2490e5b8f1d6c3a7e2f9b0d4c8a1e6f3b2",
+        }
+      );
+
+      expect(await res.json()).not.toHaveProperty("build");
+    });
   });
 
   describe("GET /health/ready", () => {
