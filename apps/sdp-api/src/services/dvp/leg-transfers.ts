@@ -1178,12 +1178,16 @@ function resumePoint(
 /**
  * The two retry lists joined, the fresh row's entries first, a signature
  * counted once. Both sweeps' asks stay owed: whichever write lands, a
- * transaction either sweep could not read is still asked about.
+ * transaction either sweep could not read is still asked about. A join
+ * outgrown by the cap keeps the oldest asks and drops the newest, and
+ * `overflowed` says it did, so the caller can let the probe's resume point
+ * fall with them: the next probe starts behind the position, where the
+ * dropped transactions are listed and collected once more.
  */
 function mergeUnreadableRetries(
   fresh: DvpLegTransferScan["unreadableRetries"],
   mine: DvpLegTransferScan["unreadableRetries"]
-): DvpLegTransferScan["unreadableRetries"] {
+): { retries: DvpLegTransferScan["unreadableRetries"]; overflowed: boolean } {
   const entries = [...fresh];
   const seen = new Set(entries.map((retry) => retry.signature));
   for (const retry of mine) {
@@ -1192,7 +1196,10 @@ function mergeUnreadableRetries(
       entries.push(retry);
     }
   }
-  return entries.slice(0, UNREADABLE_RETRY_CAP);
+  return {
+    retries: entries.slice(0, UNREADABLE_RETRY_CAP),
+    overflowed: entries.length > UNREADABLE_RETRY_CAP,
+  };
 }
 
 /**
@@ -1200,9 +1207,12 @@ function mergeUnreadableRetries(
  * row has outgrown -- a concurrent sweep saved first -- is refused, and the
  * sweep merges what that one left behind: the fresh row's position and probe
  * stand, and the two retry lists join so neither sweep's unreadable
- * transactions lose their ask. One merge is attempted; a second refusal
- * leaves the row as the concurrent sweep wrote it, and the leg stays due, so
- * the next sweep reads the row fresh and walks again.
+ * transactions lose their ask -- unless the join outgrows the retry cap,
+ * where the newest asks fall out and the probe's resume point falls with
+ * them, so the next probe lists the dropped transactions once more. One
+ * merge is attempted; a second refusal leaves the row as the concurrent
+ * sweep wrote it, and the leg stays due, so the next sweep reads the row
+ * fresh and walks again.
  */
 async function persistTheScan(
   transfers: DvpLegTransferRepository,
@@ -1215,11 +1225,20 @@ async function persistTheScan(
   }
   const fresh = (await transfers.listScans(leg.tradeId)).find((row) => row.side === leg.side);
   if (fresh !== undefined) {
+    const { retries: merged, overflowed } = mergeUnreadableRetries(
+      fresh.unreadableRetries,
+      scan.unreadableRetries
+    );
     await transfers.saveScan(
       leg.tradeId,
       {
         ...fresh,
-        unreadableRetries: mergeUnreadableRetries(fresh.unreadableRetries, scan.unreadableRetries),
+        // Asks that fell out of the joined list lose the probe's resume point
+        // with them, exactly as a list outgrown by one sweep's own asks does:
+        // the next probe starts behind the position, where the dropped
+        // transactions are listed and collected once more.
+        probe: overflowed ? null : fresh.probe,
+        unreadableRetries: merged,
       },
       fresh.version
     );

@@ -1257,6 +1257,63 @@ describe("syncDvpLegTransfers", () => {
     });
   });
 
+  // A join outgrown by the retry cap drops its newest asks, and the probe's
+  // resume point falls with them: a point that stood would start the next
+  // probe below the dropped transactions, whose region behind the position
+  // nothing else lists.
+  it("drops the probe's resume point when the merged retry list outgrows the cap", async () => {
+    listSignatures.mockResolvedValue([]);
+    const ownRetries = Array.from({ length: 40 }, (_, index) => ({
+      signature: sig(index + 1),
+      slot: String(index + 1),
+      finalized: true,
+    }));
+    const freshRetries = Array.from({ length: 40 }, (_, index) => ({
+      signature: sig(index + 1_000),
+      slot: String(index + 1_000),
+      finalized: true,
+    }));
+    const mine = {
+      side: "a" as const,
+      cursor: { signature: sig(7), slot: "700" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: ownRetries,
+      scannedAt: null,
+      version: "0",
+    };
+    // The concurrent sweep's row: its own 40 retries behind a probe point,
+    // and a stamp the sweep's read predates by the time its write lands.
+    const concurrent = {
+      side: "a" as const,
+      cursor: { signature: sig(8), slot: "800" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(6), slot: "600" },
+      unreadableRetries: freshRetries,
+      scannedAt: null,
+      version: "1",
+    };
+    saveScan.mockImplementationOnce(async () => false);
+    listScans.mockImplementationOnce(async () => [concurrent]);
+
+    await syncDvpLegTransfers(reader, transfers, LEG, mine, { remaining: 10 }, NOW);
+
+    // The merged list keeps the oldest 64 asks and drops the rest, and the
+    // point travels below the position only while the list fits: the next
+    // probe starts behind the position, where the dropped ones are listed
+    // and collected once more.
+    expect(saveScan).toHaveBeenCalledTimes(2);
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(8), slot: "800" },
+      cursorSlotComplete: false,
+      probe: null,
+      unreadableRetries: [...freshRetries, ...ownRetries].slice(0, 64),
+      scannedAt: null,
+      version: "1",
+    });
+  });
+
   // An unreadable transaction above the position is another matter: the
   // bounded read lists everything newer than the position again, so the
   // transaction is asked for once more regardless of the probe, and the probe
