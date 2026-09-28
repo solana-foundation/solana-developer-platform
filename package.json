@@ -64,6 +64,7 @@
     "build:api": "turbo run build --filter=@sdp/api",
     "check:env-contract": "node scripts/check-env-contract.mjs",
     "check:env-configurator-drift": "node scripts/check-env-configurator-drift.mjs",
+    "check:migration-compat": "node scripts/check-migration-compat.mjs",
     "check:module-boundaries": "node scripts/check-module-boundaries.mjs",
     "check:pinned-dependencies": "node scripts/check-pinned-dependency-versions.mjs",
     "check:kamino-dependency-boundary": "node scripts/check-kamino-dependency-boundary.mjs",
