@@ -2110,6 +2110,7 @@ describe("Payments routes — ramps", () => {
       transferId: string;
       seed: Omit<Parameters<typeof seedSimulatableTransfer>[0], "id" | "counterpartyId">;
       counterpartyProviderData: Record<string, unknown>;
+      status: number;
       message: string;
     }[] = [
       {
@@ -2121,6 +2122,7 @@ describe("Payments routes — ramps", () => {
           status: "settling",
         },
         counterpartyProviderData: {},
+        status: 409,
         message: "not awaiting payment",
       },
       {
@@ -2128,6 +2130,7 @@ describe("Payments routes — ramps", () => {
         transferId: "xfr_sim_rejected_offramp",
         seed: { ...LIGHTSPARK_SIM_SEED, providerReference: "Quote:sim-offramp", type: "offramp" },
         counterpartyProviderData: {},
+        status: 400,
         message: "Only on-ramp transfers",
       },
       {
@@ -2139,6 +2142,7 @@ describe("Payments routes — ramps", () => {
           providerReference: "Quote:coinbase-sim-1",
         },
         counterpartyProviderData: {},
+        status: 400,
         message: "not available for provider: coinbase",
       },
       {
@@ -2155,13 +2159,14 @@ describe("Payments routes — ramps", () => {
         counterpartyProviderData: {
           mural: { organization: { id: "org_sim_1", kycStatus: "approved" } },
         },
+        status: 400,
         message: "does not support EUR",
       },
     ];
 
     it.each(REJECTED_BEFORE_CLAIM_CASES)(
       "rejects $name before calling the provider or claiming the simulation slot",
-      async ({ transferId, seed, counterpartyProviderData, message }) => {
+      async ({ transferId, seed, counterpartyProviderData, status, message }) => {
         const counterpartyId = await seedCounterparty({ providerData: counterpartyProviderData });
         await seedSimulatableTransfer({ ...seed, id: transferId, counterpartyId });
         const before = await readSimulationTransfer(transferId);
@@ -2174,7 +2179,7 @@ describe("Payments routes — ramps", () => {
         try {
           const res = await simulateRequest(transferId);
 
-          expect(res.status).toBe(400);
+          expect(res.status).toBe(status);
           const body: { error: { message: string } } = await res.json();
           expect(body.error.message).toContain(message);
           for (const spy of spies) {

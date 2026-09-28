@@ -98,7 +98,7 @@ export async function simulateSandboxTransfer(
     throw badRequest("Only on-ramp transfers can be simulated.");
   }
   if (transfer.status !== "awaiting_payment") {
-    throw badRequest(`Transfer is not awaiting payment (status: ${transfer.status}).`);
+    throw conflict(`Transfer is not awaiting payment (status: ${transfer.status}).`);
   }
   if (transfer.custody_wallet_id === null) {
     throw internalError("On-ramp transfer has no destination custody wallet.");
