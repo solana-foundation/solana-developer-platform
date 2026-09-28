@@ -1146,9 +1146,12 @@ function settledRead(
  * of the region behind the position was itself cut off by the cap. The part
  * of that region the gap read never listed sits behind the position all the
  * same, wherever the walk stood: a point below the cursor would start the
- * next probe past it for good, so while the gap read has not run through, the
- * point saved is where the gap read stopped, and the next probe continues
- * below it toward the cursor and the older end.
+ * next probe past it for good. The fallback's first probe starts at the
+ * cursor, behind that remainder, so the point saved is the gap read's own —
+ * the next probe lists the remainder and reads on below it. A probe that
+ * resumed below a saved point has listed, and the walk resolved, its way
+ * down from there, so its own deepest point carries: the depth past sweeps
+ * reached is not reset to the gap's point while the region above it waits.
  *
  * The point never travels past an unreadable transaction either: the sweep
  * asks for each one it skipped again directly, by signature, so the probe's
@@ -1158,6 +1161,7 @@ function settledRead(
  */
 function resumePoint(
   fallbackRan: boolean,
+  probe: { signature: Signature; slot: string } | null,
   probeComplete: boolean,
   probeEnded: boolean,
   probeDeepest: { signature: Signature; slot: string } | null,
@@ -1169,7 +1173,7 @@ function resumePoint(
     return null;
   }
   if (!gapComplete) {
-    return gapDeepest;
+    return probe === null ? gapDeepest : (probeDeepest ?? gapDeepest);
   }
   return probeComplete ? null : probeDeepest;
 }
@@ -1449,6 +1453,7 @@ export async function syncDvpLegTransfers(
       ),
       probe: resumePoint(
         bounded !== null,
+        probe,
         probeComplete,
         probeEnded,
         probeDeepest,

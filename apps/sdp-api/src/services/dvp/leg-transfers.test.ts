@@ -1649,6 +1649,17 @@ describe("syncDvpLegTransfers", () => {
       if (until === null && before === sig(7)) {
         return history([6, 5, 4, 3, 2, 1], { failed: true });
       }
+      // The second sweep's probe resumes below the gap read's point and
+      // reads its three pages down from there.
+      if (until === null && before === sig(3_001)) {
+        return page(3_000, 2_001);
+      }
+      if (until === null && before === sig(2_001)) {
+        return page(2_000, 1_001);
+      }
+      if (until === null && before === sig(1_001)) {
+        return page(1_000, 1);
+      }
       return [];
     });
     // The oldest signature the bounded read listed is provisional, so the
@@ -1689,8 +1700,11 @@ describe("syncDvpLegTransfers", () => {
     await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 }, NOW);
 
     // The next sweep's probe resumed below the gap read's point, listing the
-    // part of the region no read had listed before.
+    // part of the region no read had listed before — and the point that
+    // travels with the scan is the probe's own deepest signature, so the
+    // depth it reached is not reset to the gap's point on the next save.
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(3_001), until: null });
+    expect(saved[1]?.probe).toEqual({ signature: sig(1), slot: "1" });
   });
 
   // A region of the history full of transactions that moved nothing — an
