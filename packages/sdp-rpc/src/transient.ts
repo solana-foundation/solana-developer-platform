@@ -48,6 +48,41 @@ export function isTransientRpcError(error: unknown): boolean {
   );
 }
 
+const MAX_CAUSE_DEPTH = 5;
+
+/**
+ * Detects an RPC provider throttling response (HTTP 429) on the error or
+ * anywhere in its `cause` chain, from `@solana/kit`'s HTTP transport or the
+ * relay transport's `RpcHttpStatusError`.
+ *
+ * @param error - The failure to inspect.
+ * @returns The provider's `Retry-After` in whole seconds when it sent a numeric one, or `null` when throttled without one; `null` for the whole result when the failure is not throttling.
+ */
+export function getRpcThrottling(error: unknown): { retryAfterSeconds: number | null } | null {
+  let current: unknown = error;
+  for (let depth = 0; depth < MAX_CAUSE_DEPTH && current; depth += 1) {
+    if (
+      isSolanaError(current, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
+      current.context.statusCode === 429
+    ) {
+      return { retryAfterSeconds: parseRetryAfterSeconds(current.context.headers) };
+    }
+    if (current instanceof RpcHttpStatusError && current.httpStatus === 429) {
+      return { retryAfterSeconds: null };
+    }
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return null;
+}
+
+function parseRetryAfterSeconds(headers: Headers | undefined): number | null {
+  const value = headers?.get("retry-after")?.trim();
+  if (!value || !/^\d+$/.test(value)) {
+    return null;
+  }
+  return Number(value);
+}
+
 /**
  * Returns `true` when an RPC failure is a gateway HTTP 401. `@solana/kit`'s HTTP
  * transport puts that on `error.context.statusCode`; do not widen past 401 (see

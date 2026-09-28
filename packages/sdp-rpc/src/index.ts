@@ -9,6 +9,7 @@ export {
 } from "./config";
 export { RpcHttpStatusError, SdpRpcError, type SdpRpcErrorCode, solanaRpcError } from "./errors";
 export {
+  getRpcThrottling,
   isForbiddenRpcError,
   isTransientRpcError,
   isUnauthorizedRpcError,
