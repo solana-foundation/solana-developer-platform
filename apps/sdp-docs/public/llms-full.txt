@@ -1456,6 +1456,8 @@ body: JSON.stringify({
 }),
 ```
 
+Some extensions are only writable when the mint is created and can never be added afterwards. `confidentialTransfers` is one of them — if you may ever want encrypted transfer amounts for this token, set it here. See [Confidential Transfers](/docs/tokens/confidential-transfers).
+
 </Tab>
 </Tabs>
 </StepPanel>
@@ -1883,6 +1885,260 @@ Safe to include in automated post-mint workflows.
 </Step>
 
 </HowItWorks>
+
+---
+
+### Confidential Transfers
+Source: https://platform.solana.com/docs/tokens/confidential-transfers
+
+> Move token amounts between two holders with the amount encrypted onchain, using Token-2022 confidential balances.
+
+Confidential balances are a Token-2022 extension that hides transfer **amounts** onchain. Sender, recipient and mint stay public; only the amount is encrypted, under an ElGamal keypair derived from each holder's wallet.
+
+A confidential transfer is not a single call. Value has to be moved into encryption first, and an incoming amount lands in a *pending* balance that the recipient must apply before it is spendable. This page shows the whole sequence for the common case: one wallet sending an encrypted amount to another.
+
+<Callout type="warn">
+Confidential transfers are **devnet only**. Every endpoint under `/confidential` returns `503` when `SOLANA_NETWORK` is not `devnet`.
+</Callout>
+
+## Prerequisites
+
+- **Two SDP wallets**, both in the same project. Arbitrary Solana addresses will not work — SDP has to sign with each of them, both to derive its confidential keys and to apply its own incoming balance.
+- **Both wallets funded with devnet SOL.** Confidential operations pay their own fees and account rent rather than routing through the relayer. Around `0.05` SOL per wallet is comfortable.
+- **A custody provider that can sign raw messages** — `local`, `turnkey` or `privy`. Key derivation signs a fixed message, and a provider that randomizes its signatures derives different keys on every call. `local` cannot be used for a two-wallet transfer at all: it signs every wallet with the same key, so both sides resolve to one address.
+- `tokens:write` permission, plus `tokens:admin` for `transfer`, `withdraw` and `approve`.
+
+<Callout type="warn">
+Confidential balances must be enabled **when the mint is created**. The extension is written at `InitializeMint` and cannot be added to a token that is already deployed.
+</Callout>
+
+## How it works
+
+<HowItWorks>
+
+<Step number={1} title="Create the token with confidential balances">
+
+Pass the `confidentialTransfers` extension under `overrides.extensions`, then deploy as usual. A top-level `extensions` key is stripped by the schema, and the mint comes out without it.
+
+<StepPanel>
+
+```typescript title="create-confidential-token.ts"
+body: JSON.stringify({
+  name: "Confidential Token",
+  symbol: "CONF",
+  decimals: 6,
+  template: "custom",
+  isMintable: true,
+  signingCustodyWalletId: "cwlt_abc123",
+  overrides: {
+    extensions: {
+      confidentialTransfers: { policy: "opt-in" },
+    },
+  },
+}),
+```
+
+`policy` decides who may transact confidentially:
+
+| Policy | Behaviour |
+|---|---|
+| `opt-in` | Any holder may configure their own account and start transacting. No approval step. |
+| `whitelist` | Each configured account must additionally be approved by the mint's confidential transfer authority. |
+
+Then [deploy the token](/docs/tokens/deploy-a-token) as normal.
+
+</StepPanel>
+
+</Step>
+
+<Step number={2} title="Give both wallets a token account">
+
+Every confidential operation acts on an existing associated token account. `configure` will **not** create one — a wallet with no account for the mint fails with `TOKEN_ACCOUNT_NOT_FOUND`.
+
+<StepPanel>
+
+[Mint](/docs/tokens/mint-and-burn) to both wallets. The sender needs a real working balance; the recipient only needs enough to bring its account into existence.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/mint \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "signingCustodyWalletId": "cwlt_abc123",
+    "mint": { "destination": "<SENDER_ADDRESS>", "amount": "1000" }
+  }'
+```
+
+Repeat for the recipient with `"amount": "1"`.
+
+</StepPanel>
+
+</Step>
+
+<Step number={3} title="Configure each account">
+
+`configure` registers the holder's ElGamal public key on their token account and initializes the confidential extension. Run it once **per wallet**, on both sides.
+
+<StepPanel>
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/configure \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletAddress": "<SENDER_ADDRESS>" }'
+```
+
+Configure spans several onchain transactions — proof context setup, the configure itself, then cleanup — and settles on the last one.
+
+It runs **once** per account. Calling it a second time returns `409`; emptying an account closes its balances but leaves the extension initialized, so re-configuring is a conflict rather than a no-op.
+
+On a `whitelist` mint, follow each configure with an approve, signed by the mint's confidential transfer authority. This step names the **token account**, not the wallet, and needs `tokens:admin`:
+
+```bash title="Terminal — whitelist policy only"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/approve \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "accountAddress": "<SENDER_TOKEN_ACCOUNT>" }'
+```
+
+</StepPanel>
+
+</Step>
+
+<Step number={4} title="Move the sender's balance into encryption">
+
+Minted tokens sit in the account's public balance. `deposit` moves them into the confidential pending balance; `apply-pending` makes them spendable.
+
+<StepPanel>
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/deposit \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletAddress": "<SENDER_ADDRESS>", "amount": "400" }'
+
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/apply-pending \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletAddress": "<SENDER_ADDRESS>" }'
+```
+
+Skipping `apply-pending` is the most common mistake: the deposit succeeds, the balance reads zero, and the transfer in the next step fails for insufficient funds.
+
+</StepPanel>
+
+</Step>
+
+<Step number={5} title="Send the confidential transfer">
+
+The amount is encrypted under both holders' keys and proved in zero knowledge. Nothing onchain reveals how much moved.
+
+<StepPanel>
+
+Requires `tokens:admin` — the amount cannot be reviewed after the fact, so transfers sit at a higher tier than deposits.
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/transfer \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "walletAddress": "<SENDER_ADDRESS>",
+    "destination": "<RECIPIENT_ADDRESS>",
+    "amount": "200"
+  }'
+```
+
+A transfer may take several onchain transactions to build its proofs. The response returns one transaction record; when the operation spanned more than one, every signature is recorded in `data.transaction.params.planSignatures`, and the last is the settling one.
+
+</StepPanel>
+
+</Step>
+
+<Step number={6} title="Apply the incoming balance">
+
+The transferred amount arrives in the **recipient's** pending balance. Until the recipient applies it, their available balance still reads zero and they cannot spend it.
+
+<StepPanel>
+
+```bash title="Terminal"
+curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/apply-pending \
+  -H "Authorization: Bearer sk_test_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "walletAddress": "<RECIPIENT_ADDRESS>" }'
+```
+
+This is signed by the recipient's wallet, which is why the recipient must be an SDP wallet rather than an external address.
+
+</StepPanel>
+
+</Step>
+
+<Step number={7} title="Read the balances">
+
+Decrypting a balance needs the holder's keys, so SDP re-derives them per request from that wallet's signature.
+
+<StepPanel>
+
+```bash title="Terminal"
+curl "https://api.solana.com/v1/issuance/tokens/tok_abc123/confidential/balance?walletAddress=<RECIPIENT_ADDRESS>" \
+  -H "Authorization: Bearer sk_test_..."
+```
+
+```json title="Response"
+{
+  "data": {
+    "confidentialBalance": {
+      "tokenAccount": "...",
+      "walletAddress": "...",
+      "approved": true,
+      "availableBalance": "200000000",
+      "pendingBalance": null
+    }
+  }
+}
+```
+
+`pendingBalance` is `null` unless you pass `decryptPendingBalance=true`. Recovering it is a discrete-log search over the ElGamal ciphertext, so it is opt-in rather than free.
+
+</StepPanel>
+
+</Step>
+
+</HowItWorks>
+
+## Amounts and units
+
+Requests take decimal strings in UI units — `"200"` means two hundred tokens. The balance endpoint returns **base units**, so at `decimals: 6` a balance of two hundred tokens reads `"200000000"`.
+
+## Closing out
+
+To take value back out of encryption, reverse the entry path:
+
+| Operation | Permission | Effect |
+|---|---|---|
+| `withdraw` | `tokens:admin` | Moves an amount from the confidential available balance back to the public balance. |
+| `empty` | `tokens:write` | Closes the confidential balances on an account. Requires the account to be at zero — apply any pending balance and withdraw first, or it returns `409`. |
+
+## Encrypted supply
+
+A mint created with the `ConfidentialMintBurn` extension keeps its **total supply** encrypted too. Those mints use `mint`, `burn` and `apply-pending-burn` in place of `deposit` and `withdraw`, and reject the conversion operations outright, since there is no public side to convert to or from. `mint` and `apply-pending-burn` take two wallets: `signingCustodyWalletId` for the mint authority that signs, and `supplyCustodyWalletId` for the supply authority whose confidential keys the proofs are built against.
+
+## Errors
+
+| Status | Code | Cause |
+|---|---|---|
+| `400` | `TOKEN_ACCOUNT_NOT_FOUND` | The wallet has no token account for this mint, or the account has not been configured yet. |
+| `400` | `CONFIDENTIAL_NOT_ENABLED` | The mint was created without the extension. It cannot be added now. |
+| `400` | — | The account is not approved to transact. The mint uses the `whitelist` policy; run `approve` first. |
+| `409` | — | The account is already configured, or still holds a balance when you tried to empty it. |
+| `409` | `CONFIDENTIAL_KEYS_MISMATCH` | The keys derived from the signing wallet do not match the ElGamal key registered on the account — usually the wrong wallet, or a custody provider whose signatures are not reproducible. |
+| `503` | — | Not devnet. |
+
+## Related
+
+- [Create a Token](/docs/tokens/create-a-token) — where the `confidentialTransfers` extension has to be set.
+- [Mint and Burn](/docs/tokens/mint-and-burn) — public supply operations, and how both wallets get a token account.
+- [Issuance API reference](/docs/reference/api/issuance) — request and response schemas for every confidential endpoint.
 
 ---
 
