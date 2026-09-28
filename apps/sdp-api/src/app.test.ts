@@ -30,6 +30,7 @@ const PII_UNEXPECTED_ERROR_PATH = "/__pii_unexpected_error_test_throw";
 const RPC_THROTTLED_PATH = "/__rpc_throttled_test_throw";
 const RPC_THROTTLED_NO_HINT_PATH = "/__rpc_throttled_no_hint_test_throw";
 const RPC_THROTTLED_LONG_HINT_PATH = "/__rpc_throttled_long_hint_test_throw";
+const FEE_THROTTLED_PATH = "/__fee_throttled_test_throw";
 
 function kitHttpError(statusCode: number, headers: Record<string, string> = {}) {
   return new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
@@ -142,6 +143,13 @@ function buildApp(observability: Observability) {
   });
   app.all(RPC_THROTTLED_NO_HINT_PATH, () => {
     throw new RpcHttpStatusError(429, "RPC request failed with HTTP 429");
+  });
+  app.all(FEE_THROTTLED_PATH, () => {
+    throw new FeePaymentError(
+      "Transaction submission failed",
+      "SUBMISSION_FAILED",
+      kitHttpError(429, { "Retry-After": "11" })
+    );
   });
   app.all(RPC_THROTTLED_LONG_HINT_PATH, () => {
     throw kitHttpError(429, { "Retry-After": "3600" });
@@ -470,6 +478,18 @@ describe("createApp onError capture", () => {
 });
 
 describe("createApp onError RPC provider throttling", () => {
+  let ipSuffix = 0;
+  // Each request gets its own client IP so this block does not share the
+  // anonymous per-IP rate-limit bucket the rest of the file has drained.
+  const requestFromFreshIp = (app: ReturnType<typeof buildApp>, path: string) => {
+    ipSuffix += 1;
+    return app.request(
+      path,
+      { headers: { "x-forwarded-for": `198.51.100.${ipSuffix}` } },
+      { ...baseEnv, TRUST_PROXY_HEADERS: "true" }
+    );
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -480,7 +500,7 @@ describe("createApp onError RPC provider throttling", () => {
     const { obs, captureException } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(RPC_THROTTLED_PATH, {}, baseEnv);
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_PATH);
 
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("7");
@@ -500,7 +520,7 @@ describe("createApp onError RPC provider throttling", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(RPC_THROTTLED_NO_HINT_PATH, {}, baseEnv);
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_NO_HINT_PATH);
 
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("5");
@@ -510,9 +530,19 @@ describe("createApp onError RPC provider throttling", () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
-    const res = await app.request(RPC_THROTTLED_LONG_HINT_PATH, {}, baseEnv);
+    const res = await requestFromFreshIp(app, RPC_THROTTLED_LONG_HINT_PATH);
 
     expect(res.status).toBe(503);
     expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("maps a fee submission that failed on provider throttling to 503", async () => {
+    const { obs } = makeObservability();
+    const app = buildApp(obs);
+
+    const res = await requestFromFreshIp(app, FEE_THROTTLED_PATH);
+
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("11");
   });
 });

@@ -65,18 +65,20 @@ export function getRpcThrottling(error: unknown): { retryAfterSeconds: number | 
       isSolanaError(current, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) &&
       current.context.statusCode === 429
     ) {
-      return { retryAfterSeconds: parseRetryAfterSeconds(current.context.headers) };
+      return {
+        retryAfterSeconds: parseRetryAfterSeconds(current.context.headers?.get("retry-after")),
+      };
     }
     if (current instanceof RpcHttpStatusError && current.httpStatus === 429) {
-      return { retryAfterSeconds: null };
+      return { retryAfterSeconds: parseRetryAfterSeconds(current.retryAfter) };
     }
     current = current instanceof Error ? current.cause : undefined;
   }
   return null;
 }
 
-function parseRetryAfterSeconds(headers: Headers | undefined): number | null {
-  const value = headers?.get("retry-after")?.trim();
+function parseRetryAfterSeconds(header: string | null | undefined): number | null {
+  const value = header?.trim();
   if (!value || !/^\d+$/.test(value)) {
     return null;
   }

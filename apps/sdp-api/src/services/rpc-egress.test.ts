@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { isTransientRpcError } from "@sdp/rpc";
+import { getRpcThrottling, isTransientRpcError } from "@sdp/rpc";
 import { confirmTransaction, createRpcFromTransport } from "@sdp/rpc/solana";
 import type { Signature } from "@solana/kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -27,7 +27,7 @@ beforeAll(async () => {
   server = createServer((req, res) => {
     const status = req.url?.match(/^\/status\/(\d{3})$/);
     if (status) {
-      res.writeHead(Number(status[1]));
+      res.writeHead(Number(status[1]), status[1] === "429" ? { "Retry-After": "30" } : {});
       res.end();
       return;
     }
@@ -136,6 +136,14 @@ describe("createRpcTransportForTarget", () => {
       expect(isTransientRpcError(error)).toBe(true);
     }
   );
+
+  it("carries the upstream Retry-After on a throttled response", async () => {
+    const transport = createRpcTransportForTarget({ endpoint: `${origin}/status/429` });
+
+    const error = await transport({ payload }).catch((caught: unknown) => caught);
+
+    expect(getRpcThrottling(error)).toEqual({ retryAfterSeconds: 30 });
+  });
 
   it.each([400, 401, 403, 404])(
     "does not classify an upstream HTTP %i as transient",

@@ -228,6 +228,10 @@ test("reports provider throttling for a relay 429 and through a cause chain", as
       retryAfterSeconds: null,
     }
   );
+  assert.deepEqual(
+    getRpcThrottling(new RpcHttpStatusError(429, "RPC request failed with HTTP 429", "30")),
+    { retryAfterSeconds: 30 }
+  );
   const wrapped = new Error("balance read failed", {
     cause: await kitHttpError(429, "Too Many Requests", { "Retry-After": "3" }),
   });
@@ -244,4 +248,13 @@ test("does not report throttling for other failures", async () => {
   assert.equal(getRpcThrottling(new Error("429 Too Many Requests")), null);
   assert.equal(getRpcThrottling(solanaRpcError("rate limited")), null);
   assert.equal(getRpcThrottling(undefined), null);
+});
+
+test("stops looking for throttling past five causes", async () => {
+  let nested: unknown = new RpcHttpStatusError(429, "RPC request failed with HTTP 429");
+  for (let depth = 0; depth < 4; depth += 1) {
+    nested = new Error(`wrap ${depth}`, { cause: nested });
+  }
+  assert.deepEqual(getRpcThrottling(nested), { retryAfterSeconds: null });
+  assert.equal(getRpcThrottling(new Error("wrap 4", { cause: nested })), null);
 });

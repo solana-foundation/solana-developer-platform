@@ -476,6 +476,34 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
       );
     }
 
+    const throttled = getRpcThrottling(err);
+    if (throttled) {
+      const retryAfterSeconds = Math.min(
+        Math.max(throttled.retryAfterSeconds ?? RPC_THROTTLED_DEFAULT_RETRY_AFTER_SECONDS, 1),
+        RPC_THROTTLED_MAX_RETRY_AFTER_SECONDS
+      );
+      logEvent("warn", {
+        event: "sdp_api_rpc_throttled",
+        method: c.req.method,
+        path: c.req.path,
+        request_id: requestId,
+        retry_after_seconds: retryAfterSeconds,
+        ...describeError(err),
+      });
+      c.header("Retry-After", String(retryAfterSeconds));
+      c.header("X-SDP-Trace-ID", traceId);
+      return c.json(
+        {
+          error: {
+            code: "SERVICE_UNAVAILABLE",
+            message: "The Solana RPC provider is rate limiting requests. Retry shortly.",
+          },
+          meta: { requestId },
+        },
+        503
+      );
+    }
+
     if (
       err instanceof SdpRpcError ||
       err instanceof SdpPaymentsError ||
@@ -558,34 +586,6 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
           meta: { requestId },
         },
         fireblocksBlocked.status
-      );
-    }
-
-    const throttled = getRpcThrottling(err);
-    if (throttled) {
-      const retryAfterSeconds = Math.min(
-        Math.max(throttled.retryAfterSeconds ?? RPC_THROTTLED_DEFAULT_RETRY_AFTER_SECONDS, 1),
-        RPC_THROTTLED_MAX_RETRY_AFTER_SECONDS
-      );
-      logEvent("warn", {
-        event: "sdp_api_rpc_throttled",
-        method: c.req.method,
-        path: c.req.path,
-        request_id: requestId,
-        retry_after_seconds: retryAfterSeconds,
-        ...describeError(err),
-      });
-      c.header("Retry-After", String(retryAfterSeconds));
-      c.header("X-SDP-Trace-ID", traceId);
-      return c.json(
-        {
-          error: {
-            code: "SERVICE_UNAVAILABLE",
-            message: "The Solana RPC provider is rate limiting requests. Retry shortly.",
-          },
-          meta: { requestId },
-        },
-        503
       );
     }
 

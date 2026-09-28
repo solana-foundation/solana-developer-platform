@@ -1,4 +1,5 @@
 import { compareDecimalAmounts } from "@sdp/payments/decimal";
+import { getRpcThrottling } from "@sdp/rpc";
 import * as solanaRpc from "@sdp/rpc/solana";
 import { assertValidAddress } from "@sdp/solana/address";
 import { parseDecimalAmount } from "@sdp/solana/amount";
@@ -594,7 +595,19 @@ async function settleTransferExecutionFailure(
     await onConcurrentChainVerdict?.(settled);
     return success(c, toPayload(settled));
   }
-  throw mapTransferExecutionError(error);
+  throw toTransferExecutionFailure(error);
+}
+
+/**
+ * Keeps an RPC provider throttling failure intact so the app answers 503 with
+ * the provider's Retry-After; every other failure goes through
+ * `mapTransferExecutionError`.
+ *
+ * @param error - The transfer execution failure.
+ * @returns The error the route should throw.
+ */
+export function toTransferExecutionFailure(error: unknown): unknown {
+  return getRpcThrottling(error) ? error : mapTransferExecutionError(error);
 }
 
 /**
