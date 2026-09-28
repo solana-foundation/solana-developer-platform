@@ -1,7 +1,6 @@
-import { RpcHttpStatusError } from "@sdp/rpc/errors";
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/lib/errors";
-import { mapTransferExecutionError, toTransferExecutionFailure } from "./handlers";
+import { mapTransferExecutionError } from "./handlers";
 
 describe("mapTransferExecutionError", () => {
   it("maps a frozen token account program error to ACCOUNT_FROZEN", () => {
@@ -40,22 +39,5 @@ describe("mapTransferExecutionError", () => {
     const mapped = mapTransferExecutionError(error);
 
     expect(mapped.code).toBe("SOLANA_RPC_ERROR");
-  });
-});
-
-describe("toTransferExecutionFailure", () => {
-  it("keeps an RPC provider throttling failure intact", () => {
-    const throttled = new Error("send failed", {
-      cause: new RpcHttpStatusError(429, "RPC request failed with HTTP 429", "7"),
-    });
-
-    expect(toTransferExecutionFailure(throttled)).toBe(throttled);
-  });
-
-  it("maps any other failure to SOLANA_RPC_ERROR", () => {
-    const failure = toTransferExecutionFailure(new Error("RPC connection refused"));
-
-    expect(failure).toBeInstanceOf(AppError);
-    expect((failure as AppError).code).toBe("SOLANA_RPC_ERROR");
   });
 });

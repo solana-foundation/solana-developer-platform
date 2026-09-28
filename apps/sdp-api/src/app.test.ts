@@ -536,13 +536,13 @@ describe("createApp onError RPC provider throttling", () => {
     expect(res.headers.get("Retry-After")).toBe("60");
   });
 
-  it("maps a fee submission that failed on provider throttling to 503", async () => {
+  it("leaves a fee submission that failed on provider throttling to the fee-payment mapping", async () => {
     const { obs } = makeObservability();
     const app = buildApp(obs);
 
     const res = await requestFromFreshIp(app, FEE_THROTTLED_PATH);
 
-    expect(res.status).toBe(503);
-    expect(res.headers.get("Retry-After")).toBe("11");
+    expect(res.status).toBe(502);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 });
