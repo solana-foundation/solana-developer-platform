@@ -24,6 +24,16 @@ describe("Health routes", () => {
       expect(body.environment).toBe("development");
       expect(body.timestamp).toBeDefined();
     });
+
+    it("reports the commit the image was built from", async () => {
+      const sha = "4e36bc2490e5b8f1d6c3a7e2f9b0d4c8a1e6f3b2";
+
+      const built = await app.request("/health", {}, { ...env, SDP_BUILD_SHA: sha });
+      const local = await app.request("/health", {}, { ...env, SDP_BUILD_SHA: undefined });
+
+      expect(((await built.json()) as { build: string }).build).toBe(sha);
+      expect(((await local.json()) as { build: string }).build).toBe("local");
+    });
   });
 
   describe("GET /health/ready", () => {

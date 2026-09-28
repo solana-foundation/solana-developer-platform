@@ -17,6 +17,8 @@
 
 Vercel's git integration builds previews for pull-request branches only; `apps/sdp-web/vercel.json` skips git-triggered builds on `main`, so sdp-web reaches production exclusively through the release flow's production deployment job.
 
+Release QA runs on the stage dashboard at `app-preview.solana.com`. Its `stage` Vercel environment builds every push to `main` and calls the stage API (`api-preview.solana.com`), so both halves match `main`. Pull-request preview dashboards call the dev API, which is redeployed only by `deploy-dev` labels and manual dispatch, so a preview verifies the web change only. Before trusting an API-side result on a preview, compare the `build` field of `GET /health` on `api-dev.solana.com` with the commit under test.
+
 The hosted API runs as a Node.js container on Cloud Run. Dev and production use separate GCP projects, Artifact Registry repositories, services, migration jobs, and cron jobs.
 
 ## GitHub and GCP Setup

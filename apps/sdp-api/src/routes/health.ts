@@ -17,6 +17,7 @@ health.get("/", async (c) => {
     status: "ok",
     timestamp,
     version: c.env.API_VERSION,
+    build: c.env.SDP_BUILD_SHA?.trim() || "local",
     environment: c.env.ENVIRONMENT,
   };
 
