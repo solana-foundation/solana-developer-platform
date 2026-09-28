@@ -210,9 +210,10 @@ pnpm dlx vercel@60.1.3 deploy --prod
 ```
 
 `link` runs once per checkout and writes the gitignored `.vercel/`. Plain
-`deploy` gives a preview URL to check first; `deploy --prod` promotes to the
-production URL. The CLI uploads your working tree, so uncommitted changes ship
-too. Run the [validation](#validation) commands before deploying.
+`deploy` gives a preview URL to check first. `deploy --prod` is a separate
+production build from the same tree, not a promotion of that preview, and uses
+the Production environment variables. The CLI uploads your working tree, so
+uncommitted changes ship too. Run the [validation](#validation) commands before deploying.
 
 ## Configuration
 
