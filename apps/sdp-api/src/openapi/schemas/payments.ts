@@ -2355,11 +2355,3 @@ export const onrampQuoteResponseSchema = z
     }),
   })
   .openapi({ description: "On-ramp quote response payload." });
-
-export const sandboxTransferSimulationResponseSchema = z
-  .object({
-    transaction: z
-      .record(z.string(), z.unknown())
-      .openapi({ description: "Provider sandbox transaction response." }),
-  })
-  .openapi({ description: "Sandbox transfer simulation response payload." });

@@ -1959,7 +1959,7 @@ describe("Payments routes — ramps", () => {
 
       const res = await simulateRequest(SIMULATE_TRANSFER_ID);
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(204);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
       expect(simulateSpy).toHaveBeenCalledWith(
         expect.anything(),
@@ -1993,7 +1993,7 @@ describe("Payments routes — ramps", () => {
       const first = await simulateRequest(transferId);
       const second = await simulateRequest(transferId);
 
-      expect(first.status).toBe(200);
+      expect(first.status).toBe(204);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
       expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
         quoteId: "Quote:sim-1",
@@ -2054,7 +2054,7 @@ describe("Payments routes — ramps", () => {
         }),
         firstStatus: 400,
         claimAfterFailure: false,
-        secondStatus: 200,
+        secondStatus: 204,
         providerCalls: 2,
       },
       {
@@ -2215,7 +2215,7 @@ describe("Payments routes — ramps", () => {
 
       const res = await simulateRequest(transferId);
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(204);
       expect(simulateSpy).toHaveBeenCalledTimes(1);
       expect(simulateSpy).toHaveBeenCalledWith(expect.anything(), {
         organizationId: "org_sim_1",

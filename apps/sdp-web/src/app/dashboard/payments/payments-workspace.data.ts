@@ -260,19 +260,6 @@ interface WalletBalancesEnvelope {
   };
 }
 
-interface SandboxTransferSimulationEnvelope {
-  data?: {
-    transaction?: {
-      id?: string;
-      status?: string;
-      quoteId?: string;
-    };
-  };
-  error?: {
-    message?: string;
-  };
-}
-
 function resolveWalletBalancesSnapshot(
   envelope: WalletBalancesEnvelope
 ): PaymentWalletBalancesSnapshot | null {
@@ -828,7 +815,10 @@ export async function fetchCounterpartyAccounts(
 
 type SandboxTransferSimulationInput = { transferId: string };
 
-export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {
+export async function simulateSandboxTransfer(
+  input: SandboxTransferSimulationInput,
+  t: Translate
+): Promise<void> {
   const response = await fetch("/api/dashboard/payments/ramps/sandbox/simulate", {
     method: "POST",
     headers: {
@@ -836,20 +826,17 @@ export async function simulateSandboxTransfer(input: SandboxTransferSimulationIn
     },
     body: JSON.stringify(input),
   });
-  const body = (await response.json().catch(() => ({}))) as SandboxTransferSimulationEnvelope;
 
   if (!response.ok) {
     throw new Error(
       getApiError(
-        body,
+        await response.json().catch(() => null),
         t("DashboardPayments.workspace.sandboxSimulationRequestFailed", {
           status: response.status,
         })
       )
     );
   }
-
-  return body.data?.transaction ?? null;
 }
 
 export async function runComplianceCheck(

@@ -20,7 +20,7 @@ import {
 } from "@/db/repositories";
 import { requireProjectId } from "@/lib/auth";
 import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/errors";
-import { success } from "@/lib/response";
+import { noContent, success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
 import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
@@ -200,5 +200,5 @@ export async function simulateSandboxTransfer(
   if (!outcome.claimed) {
     throw conflict("Sandbox simulation was already requested for this transfer.");
   }
-  return success(c, { transaction: outcome.result });
+  return noContent(c);
 }

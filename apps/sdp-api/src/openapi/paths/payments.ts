@@ -56,7 +56,6 @@ import {
   preparePaymentSubscriptionCollectionResponse,
   preparePaymentSubscriptionLifecycleResponse,
   preparePaymentSubscriptionPlanResponse,
-  sandboxTransferSimulationResponse,
   transferBatchEstimateResponse,
   transferBatchListResponse,
   transferBatchResponse,
@@ -942,7 +941,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
     tags: ["Payments"],
     summary: "Simulate sandbox transfer",
     operationId: "simulateSandboxTransfer",
-    description: "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+    description:
+      "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer that is awaiting payment. The provider request is derived from the transfer and sent at most once per transfer: a repeat returns 409. The transfer's status then advances through the provider's webhook.",
     security: [{ apiKeyAuth: [] }],
     request: {
       headers: projectScopeHeaders,
@@ -952,11 +952,8 @@ export function registerPaymentsPaths(registry: OpenAPIRegistry) {
       },
     },
     responses: {
-      200: {
-        description: "Sandbox transfer simulated",
-        content: jsonContent(sandboxTransferSimulationResponse),
-      },
-      ...errorResponses(errorResponseSchema, [400, 401, 403, 500]),
+      204: { description: "Sandbox pay-in requested from the provider" },
+      ...errorResponses(errorResponseSchema, [400, 401, 403, 404, 409, 500, 503]),
     },
   });
 }

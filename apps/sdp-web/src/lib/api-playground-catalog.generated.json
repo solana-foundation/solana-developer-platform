@@ -5460,15 +5460,7 @@
             "required": true
           }
         ],
-        "expectedResponse": {
-          "data": {
-            "transaction": {}
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
+        "expectedResponse": {}
       },
       {
         "id": "list-unified-transactions",
