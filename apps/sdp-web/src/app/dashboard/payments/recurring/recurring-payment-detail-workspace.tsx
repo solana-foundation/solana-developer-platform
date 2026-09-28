@@ -31,7 +31,7 @@ import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspac
 import { EntityLink } from "@/components/entity-link";
 import { TokenMark } from "@/components/token-mark";
 import { Button } from "@/components/ui/button";
-import { Combobox } from "@/components/ui/combobox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -437,6 +437,35 @@ function rebindTokenForWallet(
   return nextWalletId === payment.sourceCustodyWalletId ? payment.token : "";
 }
 
+/**
+ * The currency picker's options: the selected wallet's balance-derived
+ * inventory, plus the payment's own token while its wallet is selected — the
+ * balances feed omits zero-balance token accounts, so the stored token is
+ * offered explicitly to stay (re)selectable in the picker.
+ */
+function withStoredTokenOption(
+  assetOptions: ComboboxOption[],
+  payment: Pick<PaymentRecurringPayment, "token" | "sourceCustodyWalletId">,
+  selectedCustodyWalletId: string,
+  tokenLabel: string,
+  t: Translate
+): ComboboxOption[] {
+  if (
+    selectedCustodyWalletId !== payment.sourceCustodyWalletId ||
+    assetOptions.some((asset) => asset.value === payment.token)
+  ) {
+    return assetOptions;
+  }
+  return [
+    ...assetOptions,
+    {
+      value: payment.token,
+      label: tokenLabel,
+      description: t("DashboardPayments.ramps.balanceAvailable", { amount: "0" }),
+    },
+  ];
+}
+
 /* react-doctor-disable-next-line no-high-complexity-react-function -- pre-existing orchestration: the detail workspace keeps the editor modal, wallet/currency re-binding and lifecycle actions in one component */
 export function RecurringPaymentDetailWorkspace({
   recurringPayment,
@@ -482,11 +511,26 @@ export function RecurringPaymentDetailWorkspace({
   const scheduleLabel = formatPeriodHours(recurringPayment.periodHours, t);
   const paymentReferenceLabel = shortenAddress(recurringPayment.id);
   const sourceWalletLabel = walletLabel(wallet, recurringPayment.sourceProviderWalletId);
+  const resolvedToken = resolveTokenByMint(
+    recurringPayment.token,
+    issuedTokensByMint,
+    resolveTokenLabel(recurringPayment.token, wallets)
+  );
   // Currency options follow the mutable funding-wallet selection, so a
   // replacement wallet never leaves the previous wallet's token selected.
   const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? null, {}, t);
-  const selectedTokenIsHeld = selectedTokenIsHeldFor(
+  // The balances feed omits zero-balance token accounts, so the payment's own
+  // token is offered explicitly while its wallet is selected: the stored pair
+  // stays (re)selectable in the picker even without a balance to display.
+  const editorAssetOptions = withStoredTokenOption(
     assetOptions,
+    recurringPayment,
+    selectedCustodyWalletId,
+    resolvedToken.tokenName,
+    t
+  );
+  const selectedTokenIsHeld = selectedTokenIsHeldFor(
+    editorAssetOptions,
     selectedToken,
     recurringPayment,
     selectedCustodyWalletId
@@ -642,12 +686,6 @@ export function RecurringPaymentDetailWorkspace({
       setSavingPayment(false);
     }
   };
-
-  const resolvedToken = resolveTokenByMint(
-    recurringPayment.token,
-    issuedTokensByMint,
-    resolveTokenLabel(recurringPayment.token, wallets)
-  );
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -975,15 +1013,15 @@ export function RecurringPaymentDetailWorkspace({
                 setSelectedToken(value);
                 setPaymentValidationError(null);
               }}
-              options={assetOptions}
+              options={editorAssetOptions}
               placeholder={
-                assetOptions.length === 0
+                editorAssetOptions.length === 0
                   ? t("DashboardPayments.recurring.noTokenBalances")
                   : t("DashboardPayments.recurring.selectCurrency")
               }
               searchPlaceholder={t("DashboardPayments.ramps.searchCurrencies")}
               icon={<CreditCardIcon />}
-              disabled={savingPayment || assetOptions.length === 0}
+              disabled={savingPayment || editorAssetOptions.length === 0}
             />
             <div className="space-y-2">
               <Label htmlFor="recurring-payment-edit-amount">

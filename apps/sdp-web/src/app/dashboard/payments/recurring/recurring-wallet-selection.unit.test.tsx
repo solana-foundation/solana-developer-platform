@@ -493,4 +493,35 @@ describe("Recurring payment funding-wallet token integrity", () => {
     await waitFor(() => expect(writes).toHaveLength(1));
     expect(writes[0]).toEqual({ amount: "5" });
   });
+
+  it("offers the payment's zero-balance token for reselection in the picker", async () => {
+    // The stored token's account has a zero balance, so the balances feed
+    // omits it: the picker must still offer the stored token while its own
+    // wallet is selected, so the user can reselect it without a wallet
+    // round trip or closing and reopening the editor.
+    const zeroBalance = { ...walletA, balances: [] };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes("/wallets?")) {
+        return Response.json({ data: { wallets: [zeroBalance] } });
+      }
+      if (init?.method === "PATCH") {
+        writes.push(JSON.parse(String(init.body)));
+      }
+      return Response.json({ data: { recurringPayment: payment } });
+    });
+    renderDetailWorkspace([zeroBalance]);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.click(screen.getByRole("button", { name: "Currency" }));
+    await user.click(screen.getByRole("button", { name: /USDC/ }));
+    await user.clear(screen.getByLabelText("Amount"));
+    await user.type(screen.getByLabelText("Amount"), "5");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toEqual({ amount: "5" });
+  });
 });
