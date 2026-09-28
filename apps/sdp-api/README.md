@@ -16,7 +16,12 @@ The SDP API provides a unified interface for blockchain operations on Solana, in
 
 ## Public API Routes
 
-The API exposes these public REST endpoints. Most require an API key or session token. Earn catalogue, quote, and unsigned-build routes also accept anonymous requests; submission, positions, movements, and other control-plane routes remain authenticated.
+The API exposes these public REST endpoints. Most require an API key or session
+token. Earn strategy reads, deposit/direct-withdrawal previews and unsigned
+instant builds, withdrawal-route discovery, and queued-withdrawal previews also
+accept anonymous requests. Submits, queued request/cancellation actions,
+positions, movements, earnings, and the rest of the tenant control plane remain
+authenticated.
 
 | Family | Path | Use Case |
 |---|---|---|

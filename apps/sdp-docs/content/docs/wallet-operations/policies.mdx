@@ -129,13 +129,13 @@ A `velocity` rule caps volume over a rolling window instead of per operation:
 
 ```json title="velocity-rule.json"
 {
-  "id": "daily-usdc-deposits",
+  "id": "daily-usdc-transfers",
   "kind": "velocity",
   "scope": "organization",
   "window": "P1D",
   "max": "100000",
   "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  "operationTypes": ["earn_vault_deposit"],
+  "operationTypes": ["payment_transfer_execute"],
   "action": "approval_required"
 }
 ```
@@ -163,7 +163,7 @@ These are wallet-policy selectors, not API-key permissions. API-key permissions 
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
 | `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
 | `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
-| `program` | On-chain program interactions signed by the wallet. | Earn vault deposits |
+| `program` | On-chain program interactions signed by the wallet. | No current public operation type |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
 
 Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
@@ -186,7 +186,6 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
 | `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
 | `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
-| `earn_vault_deposit` | `program` | Deposits custody-wallet assets into a supported non-custodial Earn vault. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |

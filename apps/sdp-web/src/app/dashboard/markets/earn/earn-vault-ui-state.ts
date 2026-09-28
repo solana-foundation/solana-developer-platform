@@ -1,5 +1,6 @@
 import type { EarnVaultDirectMovementStatus, EarnVaultMovementStatus } from "@sdp/types";
 import type { BadgeVariant } from "@/components/ui/badge";
+import type { useTranslations } from "@/i18n/provider";
 
 export type EarnVaultPositionUiStatus = "pending" | "active";
 
@@ -48,6 +49,22 @@ export function earnVaultPositionStatusDisplay(
   }
 
   return { label: activeLabel, variant: "success" };
+}
+
+/**
+ * The status badge for a vault position, in the module's own pending/active
+ * copy. Every surface that badges a position reads the same two labels, so
+ * the pair is named here once instead of once per call site.
+ */
+export function earnVaultPositionStatusLabels(
+  status: EarnVaultPositionUiStatus,
+  t: ReturnType<typeof useTranslations>
+): EarnVaultPositionStatusDisplay {
+  return earnVaultPositionStatusDisplay(
+    status,
+    t("DashboardMarkets.treasury.positionStatusPending"),
+    t("DashboardMarkets.treasury.positionStatusActive")
+  );
 }
 
 /**

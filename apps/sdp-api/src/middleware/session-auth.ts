@@ -64,6 +64,7 @@ export function sessionAuthMiddleware() {
 
 /** Authenticate a session when present, without requiring a session cookie. */
 export function optionalSessionAuth(options: { rejectInvalid?: boolean } = {}) {
+  const rejectInvalid = options.rejectInvalid ?? true;
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const sessionId = getCookie(c, SESSION_COOKIE_NAME);
 
@@ -88,9 +89,10 @@ export function optionalSessionAuth(options: { rejectInvalid?: boolean } = {}) {
           updateLastActivity(getDb(c.env), sessionId);
         });
       } catch (error) {
-        // Ignore errors for optional auth, but never rate limiting — a
-        // limited user must not proceed as anonymous.
-        if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
+        // An invalid presented session is rejected by default (a credential
+        // must never silently downgrade to anonymous), but never rate
+        // limiting — a limited user must not proceed as anonymous either.
+        if (rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
           throw error;
         }
       }

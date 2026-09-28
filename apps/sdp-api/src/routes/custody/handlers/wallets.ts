@@ -286,6 +286,7 @@ export const createWallet = async (c: ValidatedBodyContext<typeof createWalletSc
       label: body.label,
       purpose: body.purpose,
       setDefault: body.setDefault,
+      auditContext: c,
     });
 
     const response: CustodyWalletResponse = {

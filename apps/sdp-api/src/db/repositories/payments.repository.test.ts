@@ -1,3 +1,4 @@
+import type { PaymentTransferStatus } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -301,6 +302,267 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         updatedAt: "2026-08-31T10:00:00.000Z",
       })
     ).resolves.toBeNull();
+  });
+
+  describe("claimTransferDestination", () => {
+    const pending = "pending" satisfies PaymentTransferStatus;
+    const settling = "settling" satisfies PaymentTransferStatus;
+    const depositWallet = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+    const otherWallet = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
+    const sourceWallet = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+    const updatedAt = "2026-08-31T12:00:00.000Z";
+
+    async function createRamp(destinationAddress: string | null, memo: string | null) {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "destination-claim" }),
+        type: "offramp",
+        status: pending,
+        sourceAddress: sourceWallet,
+        destinationAddress,
+        token: "USDC",
+        amount: "25",
+        memo,
+        provider: "moneygram",
+        providerReference: "mg_session_destination_claim",
+        deliveryMode: "session_widget",
+        fiatCurrency: "USD",
+        fiatAmount: "25",
+        providerData: { moneygram: { transactionId: "mg_tx_destination_claim" } },
+      });
+      if (transfer === null) {
+        throw new Error("Expected transfer creation to succeed");
+      }
+      return transfer;
+    }
+
+    it("sets destination, memo and updated_at when the destination is null", async () => {
+      const transfer = await createRamp(null, null);
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+      const expected = {
+        ...transfer,
+        destination_address: depositWallet,
+        memo: "mg_memo_destination_claim",
+        updated_at: updatedAt,
+      };
+
+      await expect(
+        repo.claimTransferDestination({
+          ...scope,
+          expectedStatus: pending,
+          destinationAddress: depositWallet,
+          memo: "mg_memo_destination_claim",
+          updatedAt,
+        })
+      ).resolves.toEqual(expected);
+      expect(transfer.updated_at).not.toBe(updatedAt);
+      await expect(repo.getTransferById(scope)).resolves.toEqual(expected);
+    });
+
+    it.each([
+      {
+        name: "destination already set",
+        destinationAddress: otherWallet,
+        memo: "mg_existing_memo",
+        expectedStatus: pending,
+        organizationId: TEST_ORG.id,
+      },
+      {
+        name: "status differs",
+        destinationAddress: null,
+        memo: null,
+        expectedStatus: settling,
+        organizationId: TEST_ORG.id,
+      },
+      {
+        name: "foreign organization",
+        destinationAddress: null,
+        memo: null,
+        expectedStatus: pending,
+        organizationId: "org_mg_foreign",
+      },
+    ] satisfies {
+      name: string;
+      destinationAddress: string | null;
+      memo: string | null;
+      expectedStatus: PaymentTransferStatus;
+      organizationId: string;
+    }[])("returns null and leaves the row unchanged for $name", async (input) => {
+      const transfer = await createRamp(input.destinationAddress, input.memo);
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferDestination({
+          ...scope,
+          organizationId: input.organizationId,
+          expectedStatus: input.expectedStatus,
+          destinationAddress: depositWallet,
+          memo: "mg_memo_destination_claim",
+          updatedAt,
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+
+    it("stores a null memo as SQL NULL", async () => {
+      const transfer = await createRamp(null, null);
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+      const expected = {
+        ...transfer,
+        destination_address: depositWallet,
+        memo: null,
+        updated_at: updatedAt,
+      };
+
+      await expect(
+        repo.claimTransferDestination({
+          ...scope,
+          expectedStatus: pending,
+          destinationAddress: depositWallet,
+          memo: null,
+          updatedAt,
+        })
+      ).resolves.toEqual(expected);
+      await expect(repo.getTransferById(scope)).resolves.toEqual(expected);
+      await expect(
+        getDb(env)
+          .prepare("SELECT memo IS NULL AS memo_is_null FROM payment_transfers WHERE id = ?")
+          .bind(transfer.id)
+          .first<{ memo_is_null: boolean }>()
+      ).resolves.toEqual({ memo_is_null: true });
+    });
+  });
+
+  describe("claimTransferProviderData", () => {
+    const pending: PaymentTransferStatus = "pending";
+    const processing: PaymentTransferStatus = "processing";
+
+    it("claims an unset path and persists provider data and updated_at", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-unset" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+      const providerData = { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } };
+      const updatedAt = "2026-08-31T12:00:00.000Z";
+
+      const updated = await repo.claimTransferProviderData({
+        ...scope,
+        expectedStatus: pending,
+        claimPath: ["moneygram", "transactionId"],
+        providerData,
+        updatedAt,
+      });
+
+      expect(updated).toMatchObject({
+        id: transfer.id,
+        provider_data: providerData,
+        updated_at: updatedAt,
+      });
+      expect(transfer.updated_at).not.toBe(updatedAt);
+      await expect(repo.getTransferById(scope)).resolves.toEqual({
+        ...transfer,
+        provider_data: providerData,
+        updated_at: updatedAt,
+      });
+    });
+
+    it("returns null and leaves the row unchanged when the path is already set", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-occupied" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1", transactionId: "mg_tx_existing" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+
+    it("returns null and leaves the row unchanged when the status differs", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-status" }),
+        status: processing,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+
+    it("returns null and leaves the row unchanged for a different organization", async () => {
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "provider-data-claim-organization" }),
+        status: pending,
+        provider: "moneygram",
+        providerData: { moneygram: { a: "1" } },
+      });
+      if (!transfer) throw new Error("Expected transfer creation to succeed");
+      const scope = {
+        transferId: transfer.id,
+        organizationId: TEST_ORG.id,
+        projectId: null,
+      };
+
+      await expect(
+        repo.claimTransferProviderData({
+          ...scope,
+          organizationId: "org_someone_else",
+          expectedStatus: pending,
+          claimPath: ["moneygram", "transactionId"],
+          providerData: { moneygram: { a: "1", transactionId: "mg_tx_claim_1" } },
+          updatedAt: "2026-08-31T12:00:00.000Z",
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
   });
 
   it("sets a provider reference once and permits only an exact replay", async () => {

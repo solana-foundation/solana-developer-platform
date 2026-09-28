@@ -50,7 +50,13 @@ export class KeychainPrivyAdapter extends BaseKeychainAdapter {
       walletId: denormalizePrivyWalletId(normalizedWalletId),
       apiBaseUrl: this.config.apiBaseUrl,
       requestDelayMs: this.config.requestDelayMs,
+    }).catch((error: unknown) => {
+      if (this.signerByWalletId.get(cacheKey) === created) {
+        this.signerByWalletId.delete(cacheKey);
+      }
+      throw error;
     });
+
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }

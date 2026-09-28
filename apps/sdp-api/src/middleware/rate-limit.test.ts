@@ -249,26 +249,42 @@ describe("Rate limiting", () => {
   });
 
   describe("optionalAuth", () => {
-    function optionalAuthApp(): Hono<{ Bindings: Env }> {
+    function optionalAuthApp(options: { rejectInvalid?: boolean } = {}): Hono<{ Bindings: Env }> {
       const mini = new Hono<{ Bindings: Env }>();
       mini.onError((err, c) => {
-        if (err instanceof AppError && err.code === "RATE_LIMITED") {
-          return c.json(err.toResponse(), 429);
+        if (err instanceof AppError) {
+          return c.json(err.toResponse(), err.statusCode as 429 | 401);
         }
         throw err;
       });
       mini.use("*", kvStoreMiddleware());
-      mini.use("*", optionalAuth());
+      mini.use("*", optionalAuth(options));
       mini.get("/resource", (c) => c.json({ identity: currentDatabaseIdentity() }));
       return mini;
     }
 
-    it("swallows auth failures for unknown keys", async () => {
+    it("rejects an unknown key by default instead of degrading to anonymous", async () => {
       const res = await optionalAuthApp().request(
         "/resource",
         { headers: { Authorization: "Bearer sk_test_unknown_key" } },
         env
       );
+
+      expect(res.status).toBe(401);
+    });
+
+    it("can be configured to swallow an invalid key as anonymous", async () => {
+      const res = await optionalAuthApp({ rejectInvalid: false }).request(
+        "/resource",
+        { headers: { Authorization: "Bearer sk_test_unknown_key" } },
+        env
+      );
+
+      expect(res.status).toBe(200);
+    });
+
+    it("admits a truly anonymous request without a key", async () => {
+      const res = await optionalAuthApp().request("/resource", {}, env);
 
       expect(res.status).toBe(200);
     });

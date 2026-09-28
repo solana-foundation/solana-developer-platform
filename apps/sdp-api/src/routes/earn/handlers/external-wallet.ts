@@ -26,6 +26,7 @@ import type {
   EarnExternalWalletWithdrawalResponse,
   EarnExternalWalletWithdrawalTransactionResponse,
   EarnVaultDirectMovementStatus,
+  SdpEnvironment,
 } from "@sdp/types";
 import { earnDepositStyle, earnWithdrawSlippageFloor } from "@sdp/types/provider-access";
 import type { z } from "zod";
@@ -39,6 +40,7 @@ import {
 } from "@/db/repositories/earn-movements.repository";
 import { type ApiKeyContext, getAuth, getOptionalAuth, requireProjectId } from "@/lib/auth";
 import { badRequest, internalError, notFound } from "@/lib/errors";
+import { isEarnHastraDexExitConfigured } from "@/lib/feature-flags";
 import { encodeKeysetCursor } from "@/lib/keyset-cursor";
 import { success } from "@/lib/response";
 import { isDryRunRequest } from "@/middleware/dry-run";
@@ -130,6 +132,25 @@ type EarnExternalWalletWithdrawalPreviewBody = z.output<
 type EarnExternalWalletSubmitBody = z.output<typeof earnExternalWalletSubmitSchema>;
 
 const EXTERNAL_POSITION_PAGE_SIZE = 100;
+const MAX_IN_FLIGHT_EXTERNAL_PORTFOLIOS = 256;
+
+interface ExternalWalletPortfolioObservation {
+  holdings: ExternalWalletHolding[];
+  live: Map<string, HydratedVaultPositionValue>;
+}
+
+/**
+ * Coalesce identical live portfolio reads while they are in flight.
+ *
+ * This is deliberately not a cache: the entry disappears as soon as the read
+ * settles, so the next poll still observes fresh chain state. It only prevents
+ * simultaneous dashboard loads or tabs on one instance from multiplying the
+ * same database scan and provider fan-out.
+ */
+const inFlightExternalWalletPortfolios = new Map<
+  string,
+  Promise<ExternalWalletPortfolioObservation>
+>();
 
 /**
  * GET /v1/earn/external-wallet/positions/summary: complete live portfolio for
@@ -147,32 +168,13 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
   const environment = resolveSdpEnvironment(c);
   const auth = getAuth(c);
   const projectId = requireProjectId(c);
-  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
-
-  const rows = await collectAllExternalWalletPositionRows((before) =>
-    repo.listExternalWalletPositions({
-      organizationId: auth.organizationId,
-      projectId,
-      environment,
-      limit: EXTERNAL_POSITION_PAGE_SIZE,
-      before,
-    })
+  const portfolio = await observeExternalWalletPortfolio(
+    c,
+    auth.organizationId,
+    projectId,
+    environment
   );
-  const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
-  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
-    ownerKind: "external-wallet",
-  });
-  await closeEmptyHydratedPositions(
-    (positionId, observedUpdatedAt) =>
-      repo.closeVaultPositionIfEmpty({
-        positionId,
-        organizationId: auth.organizationId,
-        observedUpdatedAt,
-      }),
-    holdings,
-    live
-  );
-  const summary = summarizeExternalWalletPositions(holdings, live, {
+  const summary = summarizeExternalWalletPositions(portfolio.holdings, portfolio.live, {
     includeOwnerAddresses,
     includePositions,
   });
@@ -193,6 +195,63 @@ export async function getEarnExternalWalletPositionSummary(c: AppContext) {
     summary,
   };
   return success(c, response);
+}
+
+function observeExternalWalletPortfolio(
+  c: AppContext,
+  organizationId: string,
+  projectId: string,
+  environment: SdpEnvironment
+): Promise<ExternalWalletPortfolioObservation> {
+  const key = JSON.stringify([organizationId, projectId, environment]);
+  const existing = inFlightExternalWalletPortfolios.get(key);
+  if (existing) return existing;
+
+  const observation = loadExternalWalletPortfolio(c, organizationId, projectId, environment);
+  if (inFlightExternalWalletPortfolios.size >= MAX_IN_FLIGHT_EXTERNAL_PORTFOLIOS) {
+    return observation;
+  }
+  inFlightExternalWalletPortfolios.set(key, observation);
+  const clear = () => {
+    if (inFlightExternalWalletPortfolios.get(key) === observation) {
+      inFlightExternalWalletPortfolios.delete(key);
+    }
+  };
+  void observation.then(clear, clear);
+  return observation;
+}
+
+async function loadExternalWalletPortfolio(
+  c: AppContext,
+  organizationId: string,
+  projectId: string,
+  environment: SdpEnvironment
+): Promise<ExternalWalletPortfolioObservation> {
+  const repo = createPostgresEarnMovementsRepository(getDb(c.env));
+  const rows = await collectAllExternalWalletPositionRows((before) =>
+    repo.listExternalWalletPositions({
+      organizationId,
+      projectId,
+      environment,
+      limit: EXTERNAL_POSITION_PAGE_SIZE,
+      before,
+    })
+  );
+  const holdings = rows.map((row) => requireExternalWalletHolding(row, projectId));
+  const live = await hydrateVaultPositions(c, environment, holdings.map(toHydratableHolding), {
+    ownerKind: "external-wallet",
+  });
+  await closeEmptyHydratedPositions(
+    (positionId, observedUpdatedAt) =>
+      repo.closeVaultPositionIfEmpty({
+        positionId,
+        organizationId,
+        observedUpdatedAt,
+      }),
+    holdings,
+    live
+  );
+  return { holdings, live };
 }
 
 /**
@@ -895,7 +954,11 @@ export async function createEarnExternalWalletWithdrawalTransaction(
   // Same provider-policy exit floor as the custody withdrawal: a non-null
   // `withdrawalSlippage` refuses a floor-less build (caller-fixable 400,
   // derived from the withdrawal preview — never an admission gate).
-  if (body.minAmountOut === undefined && earnWithdrawSlippageFloor(target.provider) !== null) {
+  const withdrawalFloor =
+    target.provider === "hastra" && !isEarnHastraDexExitConfigured(c.env)
+      ? null
+      : earnWithdrawSlippageFloor(target.provider);
+  if (body.minAmountOut === undefined && withdrawalFloor !== null) {
     throw badRequest(
       `minAmountOut is required for this withdrawal because ${target.provider} declares a withdrawal slippage policy.`
     );

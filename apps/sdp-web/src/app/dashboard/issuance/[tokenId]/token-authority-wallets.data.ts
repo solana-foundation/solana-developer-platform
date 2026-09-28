@@ -2,85 +2,50 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { z } from "zod";
-import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { paymentsWalletsResponseSchema } from "@/app/dashboard/payments/payments-page.data";
 
-type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-interface AuthorityWalletsEnvelope {
-  data?: {
-    authorityWallets?: PaymentsDashboardWallet[];
-    authorityWalletsError?: string | null;
-  };
-  error?: {
-    message?: string;
-  };
-}
-
-export interface TokenAuthorityWalletsData {
-  authorityWallets: PaymentsDashboardWallet[];
-  authorityWalletsError: string | null;
-  // Optional only for pre-existing persisted dashboard cache entries.
-  allowlistAuthority?: string | null;
-  allowlistAuthorityError?: string | null;
-  freezeAuthority?: string | null;
-  freezeAuthorityError?: string | null;
-  metadataAuthority?: string | null;
-  metadataAuthorityError?: string | null;
-  pauseAuthority?: string | null;
-  pauseAuthorityError?: string | null;
-}
-
-const liveAuthoritiesSchema = z.object({
-  allowlistAuthority: z.string().min(1).nullable(),
-  allowlistAuthorityError: z.string().nullable(),
-  freezeAuthority: z.string().min(1).nullable().optional(),
-  freezeAuthorityError: z.string().nullable().optional(),
-  metadataAuthority: z.string().min(1).nullable(),
-  metadataAuthorityError: z.string().nullable(),
-  pauseAuthority: z.string().min(1).nullable().optional(),
-  pauseAuthorityError: z.string().nullable().optional(),
+const tokenAuthoritiesResponseSchema = z.object({
+  data: z.object({
+    allowlistAuthority: z.string().min(1).nullable(),
+    freezeAuthority: z.string().min(1).nullable(),
+    metadataAuthority: z.string().min(1).nullable(),
+    pauseAuthority: z.string().min(1).nullable(),
+  }),
 });
 
-function getApiError(body: AuthorityWalletsEnvelope, fallback: string): string {
-  if (typeof body.error?.message === "string" && body.error.message) {
-    return body.error.message;
-  }
+const TOKEN_AUTHORITIES_QUERY =
+  "includeAllowlistAuthority=true&includeFreezeAuthority=true&includeMetadataAuthority=true&includePauseAuthority=true";
 
-  return fallback;
+const AUTHORITY_WALLETS_PATH = "/api/dashboard/wallets?view=summary";
+
+export type TokenAuthorityWalletsData = z.infer<typeof tokenAuthoritiesResponseSchema>["data"] & {
+  authorityWallets: PaymentsDashboardWallet[];
+};
+
+async function fetchParsed<Output>(path: string, schema: z.ZodType<Output>): Promise<Output> {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status})`);
+  }
+  return schema.parse(await response.json());
 }
 
+/**
+ * Loads the token's live operation authorities and the custody wallets that can sign for them.
+ * Both reads go through their canonical dashboard proxies and are fanned out here on the client.
+ *
+ * @param tokenId - Issuance token id.
+ * @returns Live authorities plus the signer wallet inventory.
+ */
 export async function fetchTokenAuthorityWallets(
-  tokenId: string,
-  t: Translate,
-  options: {
-    signal?: AbortSignal;
-  } = {}
+  tokenId: string
 ): Promise<TokenAuthorityWalletsData> {
-  const response = await fetch(
-    `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}/authority-wallets`,
-    {
-      method: "GET",
-      cache: "no-store",
-      signal: options.signal,
-    }
-  );
-  const body = (await response.json().catch(() => ({}))) as AuthorityWalletsEnvelope;
-
-  if (!response.ok) {
-    throw new Error(
-      getApiError(
-        body,
-        t("DashboardIssuance.management.authorityWalletRequestFailed", {
-          status: response.status,
-        })
-      )
-    );
-  }
-
-  return {
-    ...liveAuthoritiesSchema.parse(body.data),
-    authorityWallets: Array.isArray(body.data?.authorityWallets) ? body.data.authorityWallets : [],
-    authorityWalletsError:
-      typeof body.data?.authorityWalletsError === "string" ? body.data.authorityWalletsError : null,
-  };
+  const [authorities, wallets] = await Promise.all([
+    fetchParsed(
+      `/api/dashboard/issuance/tokens/${encodeURIComponent(tokenId)}?${TOKEN_AUTHORITIES_QUERY}`,
+      tokenAuthoritiesResponseSchema
+    ),
+    fetchParsed(AUTHORITY_WALLETS_PATH, paymentsWalletsResponseSchema),
+  ]);
+  return { ...authorities.data, authorityWallets: wallets.data.wallets };
 }

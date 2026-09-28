@@ -125,6 +125,12 @@ const PARTNER_ROWS: { category: string; Icon: LucideIcon; partners: Partner[] }[
       { name: "Triton", h: 21, src: "/docs/images/partners/triton.svg" },
       { name: "Alchemy", h: 22, src: "/docs/images/partners/alchemy.svg" },
       { name: "QuickNode", h: 22, src: "/docs/images/partners/quicknode.svg" },
+      { name: "Nodit", h: 22, src: "/docs/images/partners/nodit.svg" },
+      {
+        name: "Validation Cloud",
+        h: 22,
+        src: "/docs/images/partners/validation-cloud.svg",
+      },
     ],
   },
 ];

@@ -38,7 +38,7 @@ import {
 } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatTokenQuantity, formatUsd, shortenMarketAddress, tokenSymbol } from "./earn-format";
+import { formatTokenValue, shortenMarketAddress, tokenSymbol } from "./earn-format";
 import { sumDecimalStrings, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultDeposit,
@@ -49,6 +49,9 @@ import {
   fetchEarnVaultDepositPreview,
   useEarnVaultDepositOutcome,
 } from "./earn-program-data";
+
+export { EarnVaultDepositOutcomeTracker } from "./earn-outcome-trackers";
+
 import { strategySourceLabel, strategyToken } from "./earn-program-presentation";
 import {
   forgetVaultDepositFloor,
@@ -82,7 +85,7 @@ import {
 import { VaultQuoteNotices, VaultSlippageSection } from "./earn-vault-slippage-section";
 import {
   earnVaultDepositUiState,
-  earnVaultPositionStatusDisplay,
+  earnVaultPositionStatusLabels,
   vaultOutcomeTone,
 } from "./earn-vault-ui-state";
 
@@ -491,7 +494,7 @@ function DepositWalletPicker({
               : balance === undefined
                 ? t("DashboardEarn.deposit.vaultBalanceUnknown")
                 : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                    amount: formatUsd(balance, locale, 2),
+                    amount: formatTokenValue(balance, depositMint, locale),
                   })}
           </span>
         </label>
@@ -623,12 +626,12 @@ function depositMovementCopy(outcome: DepositMovementOutcome, t: Translation) {
 }
 
 function DepositMovementResult({
+  fundingMint,
   outcome,
-  symbol,
   onClose,
 }: {
+  fundingMint: string | undefined;
   outcome: DepositMovementOutcome;
-  symbol: string;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -642,11 +645,7 @@ function DepositMovementResult({
     ? null
     : earnProviderDepositSettlement(deposit.strategy.provider) === "provider_order"
       ? null
-      : earnVaultPositionStatusDisplay(
-          earnVaultDepositUiState(deposit.status).positionStatus,
-          t("DashboardMarkets.treasury.positionStatusPending"),
-          t("DashboardMarkets.treasury.positionStatusActive")
-        );
+      : earnVaultPositionStatusLabels(earnVaultDepositUiState(deposit.status).positionStatus, t);
   const status = sharedStatus?.label ?? copy.status;
   const statusVariant: BadgeVariant = sharedStatus?.variant ?? copy.statusVariant;
   const processing =
@@ -675,7 +674,7 @@ function DepositMovementResult({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.withdraw.amountLabel")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(outcome.amount, locale, symbol)}
+            {formatTokenValue(outcome.amount, fundingMint, locale)}
           </dd>
         </div>
         <div className="flex items-baseline justify-between gap-5">
@@ -698,51 +697,18 @@ function DepositMovementResult({
 }
 
 function DepositResult({
+  fundingMint,
   outcome,
-  symbol,
   onClose,
 }: {
+  fundingMint: string | undefined;
   outcome: DepositOutcome;
-  symbol: string;
   onClose: () => void;
 }) {
   if (outcome.kind === "approval_pending") {
     return <DepositApprovalResult onClose={onClose} outcome={outcome} />;
   }
-  return <DepositMovementResult onClose={onClose} outcome={outcome} symbol={symbol} />;
-}
-
-interface EarnVaultDepositOutcomeTrackerProps {
-  movementId: string;
-  /** Keep the table's status badge current while the movement advances. */
-  onUpdated?: (deposit: EarnVaultDepositRecord) => void;
-  /** Refresh the balances the deposit changed, then retire the tracker. */
-  onSettled?: (deposit: EarnVaultDepositRecord) => void;
-}
-
-/**
- * Keeps a recorded deposit under observation independently of the dismissible
- * modal, which is the whole point: the modal's success screen is a receipt for
- * a SIGNATURE, and the customer will close it long before the chain has
- * decided. Treasury mounts one of these per in-flight deposit; the canonical
- * hook polls until the movement is `confirmed` or `failed`, reports the result
- * exactly once, and then asks the caller to retire it. Treasury owns the
- * visible status so a long-running chain operation never depends on a toast.
- *
- * Deliberately NOT mounted for an approval-gated deposit: that path throws
- * `SIGNING_PENDING` with an approval id and NO movement id, because no movement
- * row exists until someone approves it. There is nothing to poll by id, and a
- * tracker that pretended otherwise would poll a movement that does not exist
- * and quietly report nothing (PRO-1692 — the approval path needs its own
- * answer, either a wallet-operation poll or a server-side attempt record).
- */
-export function EarnVaultDepositOutcomeTracker({
-  movementId,
-  onSettled,
-  onUpdated,
-}: EarnVaultDepositOutcomeTrackerProps) {
-  useEarnVaultDepositOutcome(movementId, onSettled, onUpdated);
-  return null;
+  return <DepositMovementResult fundingMint={fundingMint} onClose={onClose} outcome={outcome} />;
 }
 
 export interface EarnVaultDepositModalProps {
@@ -762,6 +728,8 @@ export interface EarnVaultDepositModalProps {
       custodyWalletId: string;
       /** False when an approval already executed this replayed intent. */
       projectBalance: boolean;
+      /** Client clock when the POST began; a positions read that landed earlier cannot contain this deposit. */
+      submittedAt: number;
     }
   ) => void;
   onMovementUpdated?: (deposit: EarnVaultDepositRecord) => void;
@@ -934,6 +902,7 @@ function DepositSwapReviewNotice({
 function DepositReviewDetails({
   amount,
   backing,
+  fundingMint,
   fundingSymbol,
   minSharesOut,
   quote,
@@ -944,6 +913,7 @@ function DepositReviewDetails({
 }: {
   amount: string;
   backing: string | undefined;
+  fundingMint: string | undefined;
   fundingSymbol: string;
   minSharesOut: string | undefined;
   quote: VaultQuoteState<EarnVaultDepositPreview>;
@@ -959,7 +929,9 @@ function DepositReviewDetails({
     <dl className="mt-5 grid gap-3 rounded-xl bg-fill-subtle px-4 py-3 text-sm">
       <div className="flex items-baseline justify-between gap-5">
         <dt className="text-tertiary">{t("DashboardEarn.deposit.vaultAmount")}</dt>
-        <dd className="text-right tabular-nums text-primary">{formatUsd(amount, locale, 2)}</dd>
+        <dd className="text-right tabular-nums text-primary">
+          {formatTokenValue(amount, fundingMint, locale)}
+        </dd>
       </div>
       {selectedWallet ? (
         <div className="flex items-baseline justify-between gap-5">
@@ -1097,7 +1069,11 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
             ? selectedWalletBalance === undefined
               ? t("DashboardEarn.deposit.vaultBalanceUnknown")
               : t("DashboardEarn.deposit.vaultBalanceAvailable", {
-                  amount: formatUsd(selectedWalletBalance, locale, 2),
+                  amount: formatTokenValue(
+                    selectedWalletBalance,
+                    fundingToken?.mint ?? depositMint,
+                    locale
+                  ),
                 })
             : null}
         </div>
@@ -1125,6 +1101,7 @@ function DepositDetailsStep(props: DepositDetailsStepProps) {
 interface DepositReviewStepProps {
   amount: string;
   backing: string | undefined;
+  fundingMint: string | undefined;
   fundingSymbol: string;
   minSharesOut: string | undefined;
   onBack: () => void;
@@ -1150,6 +1127,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
   const {
     amount,
     backing,
+    fundingMint,
     fundingSymbol,
     minSharesOut,
     onBack,
@@ -1179,6 +1157,7 @@ function DepositReviewStep(props: DepositReviewStepProps) {
       <DepositReviewDetails
         amount={amount}
         backing={backing}
+        fundingMint={fundingMint}
         fundingSymbol={fundingSymbol}
         minSharesOut={minSharesOut}
         quote={quote}
@@ -1471,6 +1450,7 @@ export function EarnVaultDepositModal({
     // resubmit mints a fresh key — a second approval request for one intent.
     // The controller still exists, but it gates the UI below, never the
     // request or the key bookkeeping.
+    const submittedAt = Date.now();
     const result = await createEarnVaultDeposit(
       {
         strategyId: strategy.id,
@@ -1527,6 +1507,7 @@ export function EarnVaultDepositModal({
         // position is denominated in the vault token. Wait for the provider
         // value instead of presenting those unlike amounts as one balance.
         projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
+        submittedAt,
       });
     }
   }
@@ -1583,7 +1564,11 @@ export function EarnVaultDepositModal({
         <div className="p-6" ref={contentRef}>
           <EarnFlowStepper currentStep={progressStep} steps={progressSteps} />
           <EarnFlowTransition stepKey={panelKey}>
-            <DepositResult outcome={visibleOutcome} symbol={fundingSymbol} onClose={onClose} />
+            <DepositResult
+              fundingMint={fundingToken?.mint}
+              outcome={visibleOutcome}
+              onClose={onClose}
+            />
           </EarnFlowTransition>
         </div>
       </Modal>
@@ -1648,6 +1633,7 @@ export function EarnVaultDepositModal({
                 amountValidation.kind === "valid" ? amountValidation.canonicalAmount : amountInput
               }
               backing={backing}
+              fundingMint={fundingToken?.mint}
               fundingSymbol={fundingSymbol}
               minSharesOut={minSharesOut}
               onBack={() => {

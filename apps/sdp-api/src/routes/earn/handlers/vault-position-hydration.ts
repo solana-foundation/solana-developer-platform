@@ -43,6 +43,13 @@ export async function hydrateVaultPositions(
   positions: readonly HydratableVaultPosition[],
   options: VaultPositionHydrationOptions
 ): Promise<Map<string, HydratedVaultPositionValue>> {
+  // One request gets one absolute provider budget. Giving every queued owner a
+  // fresh deadline makes worst-case latency grow with portfolio size: eight
+  // slow owners finish, then the next eight each receive another full timeout.
+  // Sharing the deadline keeps the fail-soft contract while bounding the
+  // route. Jobs that have not started when the budget expires are reported as
+  // unavailable instead of extending caller latency indefinitely.
+  const hydrationDeadline = createVaultDeadline();
   const byProvider = new Map<string, HydratableVaultPosition[]>();
   for (const position of positions) {
     const providerPositions = byProvider.get(position.provider);
@@ -78,9 +85,7 @@ export async function hydrateVaultPositions(
         owner,
         positionCount: ownerPositions.length,
         hydrate: async () => {
-          // The concurrency queue may wait behind many other owners. Give each
-          // live read its own external-call budget when it actually starts.
-          const client = resolveVaultDirectClient(c.env, provider, createVaultDeadline());
+          const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
           const snapshots = await client.readVaultPositions(earnRuntime(c), {
             owner,
@@ -212,18 +217,16 @@ export async function closeEmptyHydratedPositions(
   const empty = positions.filter(
     (position) => position.closedAt === null && live.get(position.id)?.shares === "0"
   );
-  await Promise.all(
-    empty.map(async (position) => {
-      try {
-        // `updatedAt` was read with the row, BEFORE the live balance: it is the
-        // snapshot boundary the repository checks under the position lock.
-        await close(position.id, position.updatedAt);
-      } catch (error) {
-        getLogger().warn(
-          { positionId: position.id, error },
-          "vault position close-out on read failed; the next read retries"
-        );
-      }
-    })
+  const settled = await mapSettledWithConcurrency(empty, 8, (position) =>
+    // `updatedAt` was read with the row, BEFORE the live balance: it is the
+    // snapshot boundary the repository checks under the position lock.
+    close(position.id, position.updatedAt)
   );
+  settled.forEach((result, index) => {
+    if (result.status !== "rejected") return;
+    getLogger().warn(
+      { positionId: empty[index]?.id, error: result.reason },
+      "vault position close-out on read failed; the next read retries"
+    );
+  });
 }

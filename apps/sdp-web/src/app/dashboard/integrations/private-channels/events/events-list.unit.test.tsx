@@ -58,7 +58,7 @@ vi.mock("@/components/ui/select", () => ({
 }));
 
 import { shortenAddress } from "@/app/dashboard/payments/payments-overview.utils";
-import { getMessages } from "@/i18n/messages";
+import { englishSourceMessages, getMessages, loadMessages, type Messages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { EventsList } from "./events-list";
 
@@ -110,11 +110,13 @@ function renderEvents(
   props: Partial<ComponentProps<typeof EventsList>> & {
     initialEvents?: PrivateChannelEventDto[];
   } = {},
-  locale: "en" | "fr" = "en"
+  locale: "en" | "fr" = "en",
+  messages: Messages = locale === "en" ? getMessages(locale) : englishSourceMessages
 ) {
   return render(
-    <I18nProvider locale={locale} messages={getMessages(locale)}>
+    <I18nProvider locale={locale} messages={messages}>
       <EventsList
+        projectId={props.projectId ?? "project_test"}
         initialEvents={props.initialEvents ?? [makeEvent()]}
         initialHasMore={props.initialHasMore ?? false}
         initialNextCursor={props.initialNextCursor ?? null}
@@ -302,7 +304,7 @@ describe("EventsList", () => {
     ).toBeTruthy();
   });
 
-  it("formats row amounts for the French locale without losing precision", () => {
+  it("formats row amounts for the French locale without losing precision", async () => {
     renderEvents(
       {
         initialEvents: [
@@ -316,7 +318,8 @@ describe("EventsList", () => {
           }),
         ],
       },
-      "fr"
+      "fr",
+      await loadMessages("fr")
     );
 
     // FR private-channels catalog is release-bot owned; product branches fall back to EN copy.
@@ -363,6 +366,7 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(1, {
+        projectId: "project_test",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,
       });
@@ -374,6 +378,7 @@ describe("EventsList", () => {
 
     await waitFor(() => {
       expect(mocks.loadProjectEventsAction).toHaveBeenNthCalledWith(2, {
+        projectId: "project_test",
         before: "cursor_transfer",
         family: PRIVATE_CHANNEL_EVENT_FAMILIES.TRANSFER,
         limit: 50,

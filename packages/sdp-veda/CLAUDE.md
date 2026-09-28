@@ -88,13 +88,14 @@ own refusals — `RESTRICTED_REDEMPTION` when a withdraw authority is set,
 `WITHDRAW_REFUSED` with the SDK's own sentence, which the API maps to a 400.
 
 Veda's OTHER exit is exposed through `EarnVaultQueuedWithdrawProvider`, not the
-instant movement interface. The package reads queue limits, previews and builds
-the request, returns its deterministic request PDA, reads open/request state,
-builds post-deadline cancellation, and parses requested/cancelled/fulfilled
-events. Veda's solver owns fulfilment; SDP observes that landed account/event
-truth and never treats the SDK preview in `expectedRequest` as settlement.
-Both capabilities are reported independently, and SDP never silently
-substitutes one for the other.
+instant movement interface. The package reads live queue limits and exposes the
+shared BoringQueue 90-day maximum deadline, previews and builds the request,
+returns its deterministic request PDA, reads open/request state, builds
+post-deadline cancellation, and parses requested/cancelled/fulfilled events.
+Veda's solver owns fulfilment; SDP observes that landed account/event truth and
+never treats the SDK preview in `expectedRequest` as settlement. Both
+capabilities are reported independently, and SDP never silently substitutes one
+for the other.
 
 ## Slippage protection is never invented
 

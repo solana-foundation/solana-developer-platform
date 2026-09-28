@@ -708,7 +708,7 @@ export class MosaicService {
   ): Promise<MosaicTransactionResult> {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
-    const feePayer = await this.resolveFeePayer(fallbackFeePayer);
+    const feePayer = await this.resolveFeePayer(fallbackFeePayer, false);
 
     // SDK signature: (rpc, mint, recipient, amount, mintAuthority, feePayer)
     // Note: amount is decimal number, SDK converts using mint decimals
@@ -738,7 +738,7 @@ export class MosaicService {
   ): Promise<MosaicTransaction & { tokenAccount: Address }> {
     const fallbackFeePayer =
       options.feePayer === this.signer.address ? this.signer : options.feePayer;
-    const feePayer = await this.resolveFeePayer(fallbackFeePayer);
+    const feePayer = await this.resolveFeePayer(fallbackFeePayer, true);
 
     const fullTx = await createMintToTransaction(
       this.rpc,
@@ -761,7 +761,7 @@ export class MosaicService {
    * Prepare a Token-2022 transfer transaction (unsigned) for client signing.
    */
   async prepareTransfer(options: TransferOptions): Promise<MosaicTransaction> {
-    const feePayer = await this.resolveFeePayer(options.feePayer);
+    const feePayer = await this.resolveFeePayer(options.feePayer, true);
 
     const fullTx = await createTransferTransaction({
       rpc: this.rpc,
@@ -1870,9 +1870,10 @@ export class MosaicService {
   }
 
   private async resolveFeePayer(
-    fallback: Address | TransactionSigner
+    fallback: Address | TransactionSigner,
+    forClientSigning: boolean
   ): Promise<Address | TransactionSigner> {
-    if (!this.feePayment) {
+    if (!this.feePayment || forClientSigning) {
       return fallback;
     }
 

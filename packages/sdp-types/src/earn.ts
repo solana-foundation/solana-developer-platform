@@ -4,14 +4,14 @@ import { WELL_KNOWN_TOKENS } from "./well-known-tokens";
 /**
  * Solana Earn (SDP Markets V1) — shared wire contracts.
  *
- * Earn is a stablecoin deposit facility: organizations browse a catalogue of
- * yield strategies (DeFi protocols or tokenized RWAs, fronted by vault-infra
- * providers), fund a shared portfolio wallet, and withdraw to addresses they
- * control. Custodial portfolio balances are read live from the provider, while
- * non-custodial vault ownership and movement records are durable and their
- * balances are hydrated live. SDP-initiated portfolio withdrawals are recorded
- * in a ledger — "Record"-suffixed types are ledger rows, `EarnPortfolio*`
- * types are live provider reads (PRO-1628 / ADR 0002 addendum).
+ * Earn is a stablecoin deposit facility: organizations and external-wallet
+ * integrators browse a catalogue of DeFi vaults and tokenized RWAs, then use
+ * provider-built transactions to enter or exit a strategy. Current providers
+ * are non-custodial; the retained portfolio-wallet contracts support a future
+ * custodial provider. Durable movements and position claims live in SDP's
+ * unified ledger while balances are hydrated live. "Record"-suffixed types are
+ * ledger rows; `EarnPortfolio*` types are live provider reads (PRO-1628 / ADR
+ * 0002 addendum).
  *
  * Registries follow ADR 0001 (asset profiles): closed unions defined in code,
  * open TEXT columns in Postgres, Zod validation at the app layer — adding a
@@ -168,6 +168,8 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   jupiter: "Jupiter",
   // The USDY issuer; `providers/ondo/client.ts` reports it as the row's curator.
   ondo: "Ondo",
+  // Hastra operates the PRIME wrapper and vault programs over Figure's assets.
+  hastra: "Hastra",
   aave_v3: "Aave V3",
 };
 
@@ -313,7 +315,14 @@ export interface EarnVaultPosition {
    * Absent when no lock applies or when live provider state is unavailable.
    */
   unlockTimestamp?: string | null;
-  /** Deposit-token value, absent when the provider cannot hydrate the position. */
+  /**
+   * Value of the position in the deposit token (`tokenMint`), as the provider reports it:
+   * shares × rate for rate-based vaults, an exit quote for the whole position for quote-based
+   * providers (Veda, Ondo), so it does not scale to other share amounts. A deposit-token
+   * amount, not a share count and not a USD conversion. Every Earn deposit token is a USD
+   * stablecoin, so at par this is a dollar figure. Absent when the provider cannot hydrate the
+   * position.
+   */
   tokenValue?: string;
 }
 
@@ -340,7 +349,11 @@ export interface EarnExternalWalletPosition {
   withdrawableShares?: string;
   /** Unix epoch seconds when provider-locked shares become eligible to exit, when applicable. */
   unlockTimestamp?: string | null;
-  /** Deposit-token value, absent when the live provider read failed. */
+  /**
+   * Provider-reported value of the shares in the deposit token (`tokenMint`), by rate or by
+   * exit quote: a dollar figure at par, never a share count. Absent when the live provider
+   * read failed.
+   */
   tokenValue?: string;
 }
 
@@ -357,7 +370,10 @@ export interface EarnExternalWalletTokenTotal {
   walletCount: number;
   positionCount: number;
   unavailablePositionCount: number;
-  /** Absent when any contributing position is unavailable, so the total is never partial. */
+  /**
+   * Sum of the positions' `tokenValue` in `tokenMint`, a dollar figure at par. Absent when any
+   * contributing position is unavailable, so the total is never partial.
+   */
   tokenValue?: string;
 }
 
@@ -561,17 +577,32 @@ export interface EarnVaultWithdrawalsPage {
   nextCursor: string | null;
 }
 
+/** BoringQueue's hard upper bound for a solver window: 90 days. */
+export const EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS = 90 * 24 * 60 * 60;
+
 /** One asset's live provider queue limits. These are chain state, never UI defaults. */
 export interface EarnVaultQueuedWithdrawalTerms {
   assetMint: string;
   allowWithdrawals: boolean;
   secondsToMaturity: number;
   minimumSecondsToDeadline: number;
+  maximumSecondsToDeadline: number;
   minimumDiscountBps: number;
   maximumDiscountBps: number;
   /** Decimal string in vault-share units. */
   minimumShares: string;
   shareDecimals: number;
+}
+
+/** Live terms for an operator-completed par redemption. */
+export interface EarnVaultParRedemptionTerms {
+  intermediateMint: string;
+  assetMint: string;
+  minimumShares: string;
+  shareDecimals: number;
+  assetDecimals: number;
+  cancelable: boolean;
+  operatorSettled: true;
 }
 
 /** Independently available exit routes for one owned vault position. */
@@ -590,6 +621,8 @@ export interface EarnVaultWithdrawalOptions {
   withdrawAuthority: string | null;
   queueState: string | null;
   queueAsset: EarnVaultQueuedWithdrawalTerms | null;
+  /** Independent par-redemption route; null when the provider has none. */
+  parRedemption?: EarnVaultParRedemptionTerms | null;
 }
 
 /** Queue quote inputs shared by preview and request creation. */
@@ -601,6 +634,19 @@ export interface EarnVaultQueuedWithdrawalTermsRequest {
   /** Solver window, in seconds after maturity. */
   deadlineSeconds: number;
 }
+
+/** Request inputs for an operator-completed par redemption. */
+export interface EarnVaultParRedemptionTermsRequest {
+  positionId: string;
+  /** Decimal string in vault-share units. */
+  shares: string;
+  mechanism: "operatorRedemption";
+}
+
+/** Backwards-compatible queue input or the explicit par-redemption variant. */
+export type EarnVaultAsyncWithdrawalTermsRequest =
+  | (EarnVaultQueuedWithdrawalTermsRequest & { mechanism?: "solverQueue" })
+  | EarnVaultParRedemptionTermsRequest;
 
 /** Pre-execution queue quote. Landed request state replaces these expected values. */
 export interface EarnVaultQueuedWithdrawalPreview {
@@ -615,6 +661,19 @@ export interface EarnVaultQueuedWithdrawalPreview {
   maturityTimestamp: string;
   /** Unix epoch seconds, kept as a decimal string for JSON safety. */
   deadlineTimestamp: string;
+  blockingIssues: Array<{ code: string; message: string }>;
+}
+
+export interface EarnVaultParRedemptionPreview {
+  positionId: string;
+  mechanism: "operatorRedemption";
+  shares: string;
+  shareDecimals: number;
+  intermediateMint: string;
+  intermediateAmount: string;
+  assetMint: string;
+  assets: string;
+  assetDecimals: number;
   blockingIssues: Array<{ code: string; message: string }>;
 }
 
@@ -638,19 +697,22 @@ export interface EarnVaultWithdrawalRequestRecord {
   ownerAddress: string;
   requestAddress: string;
   status: EarnVaultWithdrawalRequestStatus;
+  mechanism?: "solverQueue" | "operatorRedemption";
   assetMint: string;
   shareMint: string;
+  intermediateMint?: string | null;
+  intermediateAmount?: string | null;
   shares: string;
   quotedAssets: string;
   shareDecimals: number;
   assetDecimals: number;
-  discountBps: number;
+  discountBps: number | null;
   /** Provider request nonce, populated only after the request lands on chain. */
   nonce: string | null;
   /** Provider-recorded Unix creation time, populated from landed chain state. */
   creationTimestamp: string | null;
-  maturityTimestamp: string;
-  deadlineTimestamp: string;
+  maturityTimestamp: string | null;
+  deadlineTimestamp: string | null;
   creationSignature: string | null;
   cancelSignature: string | null;
   closingSignature: string | null;
@@ -827,8 +889,11 @@ export interface EarnExternalWalletWithdrawalRequestTransactionResponse {
     Partial<EarnExternalWalletExitReference> & {
       action: EarnExternalWalletWithdrawalRequestAction;
       requestAddress: string;
+      mechanism: "solverQueue" | "operatorRedemption";
       shares?: string;
       assets?: string;
+      intermediateMint?: string;
+      intermediateAmount?: string;
       discountBps?: number;
       maturityTimestamp?: string;
       deadlineTimestamp?: string;

@@ -14,6 +14,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 import {
+  createProjectBoundSdpApiClient,
   createRequestScopedSdpApiClients,
   createSdpApiClient,
   proxyToSdpApi,
@@ -122,6 +123,43 @@ describe("createRequestScopedSdpApiClients", () => {
     expect(organizationHeaders.has("x-project-id")).toBe(false);
     expect(projectHeaders.get("Authorization")).toBe("Bearer token_test");
     expect(projectHeaders.get("x-project-id")).toBe("project_test");
+  });
+
+  it("logs a query-bearing request without the query string", async () => {
+    mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+    const fetchMock = apiFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const infoMock = vi.mocked(console.info);
+
+    const { projectClient } = await createRequestScopedSdpApiClients({
+      getToken: vi.fn().mockResolvedValue("token_test"),
+    });
+    await projectClient?.request("/v1/payments/transfers?secret=sk_pasted_credential", {
+      method: "POST",
+    });
+
+    // The upstream request keeps the caller's query; the log event must not.
+    const upstreamCalls = fetchMock.mock.calls.filter(([input]) =>
+      requestUrl(input).includes("secret=sk_pasted_credential")
+    );
+    expect(upstreamCalls).toHaveLength(1);
+    expect(requestUrl(upstreamCalls[0]?.[0])).toBe(
+      "https://api.example.test/v1/payments/transfers?secret=sk_pasted_credential"
+    );
+
+    const loggedEvents = infoMock.mock.calls
+      .map(([payload]) => payload)
+      .filter((payload): payload is string => typeof payload === "string")
+      .map((payload) => JSON.parse(payload) as { event: string; path: string })
+      .filter((event) => event.event === "sdp_web_api_request");
+    const transferEvents = loggedEvents.filter((event) =>
+      event.path.startsWith("/v1/payments/transfers")
+    );
+    expect(transferEvents).toHaveLength(1);
+    expect(transferEvents[0]?.path).toBe("/v1/payments/transfers");
+    expect(infoMock.mock.calls.map(([payload]) => String(payload)).join("\n")).not.toContain(
+      "sk_pasted_credential"
+    );
   });
 
   it("still returns an org client when no project is selected", async () => {
@@ -357,5 +395,70 @@ describe("createSdpApiClient project resolution", () => {
     // layout treats a failed list load as non-authoritative.
     const headers = headersOf(callsTo(fetchMock, "/v1/api-keys")[0]);
     expect(headers.get("x-project-id")).toBe("project_stale");
+  });
+});
+
+// Server actions that must stay bound to the page they were rendered with name
+// their project explicitly instead of re-reading the mutable selection cookie.
+describe("createProjectBoundSdpApiClient", () => {
+  const originalApiBaseUrl = process.env.SDP_API_BASE_URL;
+
+  beforeEach(() => {
+    process.env.SDP_API_BASE_URL = "https://api.example.test";
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.auth.mockResolvedValue({
+      userId: "user_test",
+      orgId: "org_test",
+      getToken: vi.fn().mockResolvedValue("token_test"),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    mocks.cookies.mockReset();
+    mocks.auth.mockReset();
+
+    if (originalApiBaseUrl === undefined) {
+      delete process.env.SDP_API_BASE_URL;
+    } else {
+      process.env.SDP_API_BASE_URL = originalApiBaseUrl;
+    }
+  });
+
+  it("pins the requested project even while the cookie names another", async () => {
+    mocks.cookies.mockResolvedValue(cookieJar("project_other"));
+    const fetchMock = apiFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = await createProjectBoundSdpApiClient("project_test");
+    await client.fetch("/v1/private-channels/events");
+
+    const headers = headersOf(callsTo(fetchMock, "/v1/private-channels/events")[0]);
+    expect(headers.get("Authorization")).toBe("Bearer token_test");
+    expect(headers.get("x-project-id")).toBe("project_test");
+  });
+
+  it("refuses a project the organization does not list without calling upstream", async () => {
+    mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+    const fetchMock = apiFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createProjectBoundSdpApiClient("project_unlisted")).rejects.toThrow(
+      "Requested project is not available for this organization"
+    );
+    expect(callsTo(fetchMock, "/v1/private-channels/events")).toHaveLength(0);
+  });
+
+  it("fails closed when the project list cannot be loaded", async () => {
+    mocks.cookies.mockResolvedValue(cookieJar("project_test"));
+    vi.stubGlobal(
+      "fetch",
+      apiFetchMock({ projects: () => new Response("temporarily unavailable", { status: 503 }) })
+    );
+
+    await expect(createProjectBoundSdpApiClient("project_test")).rejects.toThrow(
+      "SDP API request failed (503)"
+    );
   });
 });

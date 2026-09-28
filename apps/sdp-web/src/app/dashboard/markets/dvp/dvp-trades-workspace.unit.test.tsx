@@ -20,8 +20,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ChangeEvent, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import {
   OTHER_ADDRESS,
   OWN_ADDRESS,
@@ -96,7 +95,7 @@ function renderWorkspace({
   statusFilter?: "all" | "open" | "ready" | "closed";
 }): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpTradesWorkspace
         error={error}
         inbound={inbound}
@@ -104,7 +103,7 @@ function renderWorkspace({
         statusFilter={statusFilter}
         trades={trades}
       />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 
@@ -229,7 +228,7 @@ describe("DvpTradesWorkspace", () => {
   it("keeps keystrokes typed while its own URL write is in flight", () => {
     vi.useFakeTimers();
     const view = render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -237,7 +236,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
@@ -250,7 +249,7 @@ describe("DvpTradesWorkspace", () => {
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abc" } });
     // …then the echo lands: the input must keep the newer text.
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -258,7 +257,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("abc");
@@ -267,7 +266,7 @@ describe("DvpTradesWorkspace", () => {
   it("writes a pending search and a new status as one filter state", () => {
     vi.useFakeTimers();
     render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -275,7 +274,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "ab" } });
@@ -297,7 +296,7 @@ describe("DvpTradesWorkspace", () => {
   it("adopts an externally navigated search and drops the superseded flush", () => {
     vi.useFakeTimers();
     const view = render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -305,7 +304,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "abacus" } });
@@ -315,7 +314,7 @@ describe("DvpTradesWorkspace", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -323,7 +322,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={[trade(), trade({ id: "dvp_2" })]}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("bamboo");
 
@@ -339,7 +338,7 @@ describe("DvpTradesWorkspace", () => {
   it("starts from page one when browser navigation changes the search", () => {
     const trades = Array.from({ length: 12 }, (_, index) => trade({ id: `dvp_${index + 1}` }));
     const view = render(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -347,7 +346,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={trades}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
@@ -358,7 +357,7 @@ describe("DvpTradesWorkspace", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     view.rerender(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <DvpTradesWorkspace
           error={null}
           inbound={[]}
@@ -366,7 +365,7 @@ describe("DvpTradesWorkspace", () => {
           statusFilter="all"
           trades={trades}
         />
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     expect(screen.getByText("Page 1 of 2")).toBeTruthy();

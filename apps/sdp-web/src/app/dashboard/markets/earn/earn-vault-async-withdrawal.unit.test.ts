@@ -7,6 +7,7 @@ const queueTerms = {
   allowWithdrawals: true,
   secondsToMaturity: 60,
   minimumSecondsToDeadline: 300,
+  maximumSecondsToDeadline: 7_776_000,
   minimumDiscountBps: 10,
   maximumDiscountBps: 100,
   minimumShares: "1",
@@ -72,6 +73,38 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
     });
   });
 
+  it("maps an operator-settled par redemption independently of instant liquidity", () => {
+    const parRedemption = {
+      intermediateMint: "wylds",
+      assetMint: "usdc",
+      minimumShares: "2000",
+      shareDecimals: 6,
+      assetDecimals: 6,
+      cancelable: true,
+      operatorSettled: true as const,
+    };
+    expect(
+      earnVaultAsyncWithdrawalRoute({
+        positionId: "position_1",
+        instant: false,
+        providerOrder: false,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+        parRedemption,
+      })
+    ).toEqual({
+      kind: "operator_redemption",
+      summary: {
+        titleKey: "DashboardEarn.exitRoute.parTitle",
+        messageKey: "DashboardEarn.exitRoute.parDescription",
+        values: {},
+      },
+      terms: parRedemption,
+    });
+  });
+
   it("fails closed instead of silently preferring one of two delayed mechanisms", () => {
     expect(
       earnVaultAsyncWithdrawalRoute({
@@ -82,6 +115,29 @@ describe("earnVaultAsyncWithdrawalRoute", () => {
         withdrawAuthority: "authority",
         queueState: "queue",
         queueAsset: queueTerms,
+      })
+    ).toBeNull();
+  });
+
+  it("fails closed when par redemption overlaps another delayed contract", () => {
+    expect(
+      earnVaultAsyncWithdrawalRoute({
+        positionId: "position_1",
+        instant: false,
+        providerOrder: true,
+        queued: false,
+        withdrawAuthority: null,
+        queueState: null,
+        queueAsset: null,
+        parRedemption: {
+          intermediateMint: "wylds",
+          assetMint: "usdc",
+          minimumShares: "2000",
+          shareDecimals: 6,
+          assetDecimals: 6,
+          cancelable: true,
+          operatorSettled: true,
+        },
       })
     ).toBeNull();
   });

@@ -12,11 +12,17 @@ import {
 } from "@sdp/types/ramp-destinations";
 import type { CounterpartyRequirements } from "@sdp/types/ramp-requirements";
 import { z } from "zod";
-import { estimateNotAvailable, providerNotConfigured, providerUnavailable } from "../../../errors";
+import {
+  estimateNotAvailable,
+  internalError,
+  providerNotConfigured,
+  providerUnavailable,
+} from "../../../errors";
 import { providerFetchJson } from "../../fetch";
 import { readyCounterparty } from "../../requirements";
 import {
   isActiveIso4217CurrencyCode,
+  paymentTransferUuid,
   RAMP_RAIL_DUMPS,
   requireEnv,
   UNREPORTED_COUNTRY_SUPPORT,
@@ -36,6 +42,8 @@ import type {
 } from "../../types";
 
 const MONEYGRAM_SANDBOX_BASE_URL = "https://playground.xramps.moneygram.com";
+
+const MONEYGRAM_REQUEST_TIMEOUT_MS = 30_000;
 
 export const MONEYGRAM_DECLARED_RAIL_SUPPORT = {
   onramp: {
@@ -103,7 +111,65 @@ const sessionSchema = z.object({
   sessionToken: z.string().trim().min(1),
   sessionId: z.string().trim().min(1),
   widgetUrl: z.string().trim().min(1),
+  walletType: z.literal("custodial"),
 });
+
+const MONEYGRAM_AWAITING_FUNDS_STATUS = "awaiting_funds";
+
+const listedTransactionSchema = z.object({
+  transactionId: z.string().trim().min(1),
+  customerIdentifier: z.string().trim().min(1),
+  mgiProfileId: z.string().trim().min(1).nullable(),
+  transactionType: z.enum(["cash-in", "cash-out"]),
+  sendAsset: z.string().trim().min(1),
+  sendChain: z.string().trim().min(1),
+});
+
+const transactionListSchema = z.object({
+  transactions: z.array(listedTransactionSchema),
+});
+
+const transactionStatusSchema = z.object({
+  status: z.string().trim().min(1),
+  asset: z.string().trim().min(1),
+  depositAddress: z.string().trim().min(1).optional(),
+  depositMemo: z.string().trim().min(1).optional(),
+  sendAmount: z.string().trim().min(1).optional(),
+});
+
+/**
+ * The deposit instruction MoneyGram is waiting on for a committed off-ramp:
+ * the Ramps status API says `awaiting_funds` and names the address and amount.
+ */
+export interface MoneygramAwaitingDeposit {
+  depositAddress: string;
+  depositMemo?: string;
+  sendAmount: string;
+}
+
+interface MoneygramSessionInput {
+  customerIdentifier: string;
+  walletAddress: string;
+  walletTransactionId: string;
+}
+
+/**
+ * A MoneyGram transaction proven to belong to the counterparty: it carries the
+ * customerIdentifier SDP sent when the counterparty's sessions were minted.
+ */
+export interface MoneygramOwnedTransaction {
+  profileId: string;
+  transactionType: "cash-in" | "cash-out";
+}
+
+type MoneygramSession = z.infer<typeof sessionSchema>;
+
+function requireWalletTransactionId(paymentTransferId: string | undefined): string {
+  if (paymentTransferId === undefined) {
+    throw internalError("MoneyGram sessions require the SDP payment transfer id.");
+  }
+  return paymentTransferUuid(paymentTransferId);
+}
 
 function requireMoneygramSecretKey(
   env: Record<string, string | undefined>,
@@ -258,9 +324,13 @@ export class MoneygramRampClient implements RampProvider {
 
   async createOnrampQuote(
     ctx: RampRuntimeContext,
-    _input: RampOnrampQuoteInput
+    input: RampOnrampQuoteInput
   ): Promise<PaymentRampQuote> {
-    return this.createSessionQuote(ctx, "on-ramp");
+    return this.createSessionQuote(ctx, "on-ramp", {
+      customerIdentifier: input.externalCustomerId,
+      walletAddress: input.destinationWalletAddress,
+      walletTransactionId: requireWalletTransactionId(input.paymentTransferId),
+    });
   }
 
   async estimateOfframp(
@@ -321,9 +391,160 @@ export class MoneygramRampClient implements RampProvider {
 
   async createOfframpQuote(
     ctx: RampRuntimeContext,
-    _input: RampOfframpQuoteInput
+    input: RampOfframpQuoteInput
   ): Promise<PaymentRampQuote> {
-    return this.createSessionQuote(ctx, "off-ramp");
+    return this.createSessionQuote(ctx, "off-ramp", {
+      customerIdentifier: input.externalCustomerId,
+      walletAddress: input.sourceWalletAddress,
+      walletTransactionId: requireWalletTransactionId(input.paymentTransferId),
+    });
+  }
+
+  /**
+   * Reads the committed off-ramp MoneyGram is waiting to be funded, so the deposit
+   * address and amount come from the Ramps API under our secret key rather than
+   * from the widget callback in the browser.
+   *
+   * @param ctx - Provider env and environment mode.
+   * @param transactionId - The Ramps transaction id surfaced by `onTransactionCreated`.
+   * @returns The deposit address, optional memo, and USDC amount MoneyGram expects.
+   * @throws When the transaction is not `awaiting_funds`, is not USDC, or has no deposit instruction yet.
+   */
+  async getAwaitingDeposit(
+    { env, mode }: RampRuntimeContext,
+    transactionId: string
+  ): Promise<MoneygramAwaitingDeposit> {
+    const secretKey = requireMoneygramSecretKey(env, mode);
+    const response = await providerFetchJson<unknown>(
+      this.id,
+      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/transactions/${encodeURIComponent(transactionId)}/status`,
+      {
+        method: "GET",
+        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
+      }
+    );
+    const parsed = transactionStatusSchema.safeParse(response);
+    if (!parsed.success) {
+      throw providerUnavailable("MoneyGram transaction status response is malformed.", {
+        provider: this.id,
+        issues: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+    const { status, asset, depositAddress, depositMemo, sendAmount } = parsed.data;
+    if (status !== MONEYGRAM_AWAITING_FUNDS_STATUS) {
+      throw providerUnavailable(`MoneyGram transaction is ${status}, not awaiting funds.`, {
+        provider: this.id,
+        transactionId,
+      });
+    }
+    if (asset !== "USDC") {
+      throw providerUnavailable(`MoneyGram transaction asset is ${asset}, not USDC.`, {
+        provider: this.id,
+        transactionId,
+      });
+    }
+    if (!depositAddress || !sendAmount) {
+      throw providerUnavailable("MoneyGram transaction has no deposit instruction yet.", {
+        provider: this.id,
+        transactionId,
+      });
+    }
+    return { depositAddress, sendAmount, ...(depositMemo ? { depositMemo } : {}) };
+  }
+
+  /**
+   * Finds the MoneyGram transaction the widget reported and proves it belongs to
+   * the counterparty: it must carry the customerIdentifier SDP sent and be USDC on
+   * Solana. The browser supplies the transaction id, so nothing about it is
+   * trusted until MoneyGram confirms these under the secret key.
+   *
+   * MoneyGram's transaction list is partner-wide and, as of the Sep 2026 sandbox,
+   * ignores every filter and pagination parameter; the status endpoint carries no
+   * customer reference, and the session's `walletTransactionId` is not echoed as
+   * the transaction's `partnerTransactionId`, so there is no per-transfer bind
+   * available. The list is scanned client-side and only the fields above are
+   * parsed, never the per-transaction KYC data.
+   *
+   * @param ctx - Provider env and environment mode.
+   * @param input.transactionId - The Ramps transaction id the widget surfaced.
+   * @param input.customerIdentifier - The identifier SDP sent for the counterparty.
+   * @returns The owned transaction, or null when no transaction with that id belongs to this customer.
+   * @throws When the transaction is owned but is not USDC on Solana, or has no MoneyGram profile.
+   */
+  async findOwnedTransaction(
+    { env, mode }: RampRuntimeContext,
+    input: { transactionId: string; customerIdentifier: string }
+  ): Promise<MoneygramOwnedTransaction | null> {
+    const secretKey = requireMoneygramSecretKey(env, mode);
+    const response = await providerFetchJson<unknown>(
+      this.id,
+      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/transactions`,
+      {
+        method: "GET",
+        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
+      }
+    );
+    const parsed = transactionListSchema.safeParse(response);
+    if (!parsed.success) {
+      throw providerUnavailable("MoneyGram transaction list response is malformed.", {
+        provider: this.id,
+        issues: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+    const owned = parsed.data.transactions.find(
+      (transaction) =>
+        transaction.transactionId === input.transactionId &&
+        transaction.customerIdentifier === input.customerIdentifier
+    );
+    if (!owned) {
+      return null;
+    }
+    if (owned.sendAsset !== "USDC" || owned.sendChain !== "solana") {
+      throw providerUnavailable(
+        `MoneyGram transaction is ${owned.sendAsset} on ${owned.sendChain}, not USDC on Solana.`,
+        { provider: this.id, transactionId: input.transactionId }
+      );
+    }
+    if (owned.mgiProfileId === null) {
+      throw providerUnavailable("MoneyGram transaction has no customer profile yet.", {
+        provider: this.id,
+        transactionId: input.transactionId,
+      });
+    }
+    return { profileId: owned.mgiProfileId, transactionType: owned.transactionType };
+  }
+
+  /**
+   * Custodial partner records reject a session without a customerIdentifier; the
+   * counterparty id is the stable identifier MoneyGram keys its KYC profile on.
+   * SDP only integrates the custodial contract (deposit-address funding from a
+   * custody wallet), so a session minted as non-custodial is a misconfigured
+   * partner record and fails the parse.
+   */
+  private async mintSession(
+    secretKey: string,
+    input: MoneygramSessionInput
+  ): Promise<MoneygramSession> {
+    const session = await providerFetchJson<unknown, MoneygramSessionInput & { chain: "solana" }>(
+      this.id,
+      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/sessions`,
+      {
+        method: "POST",
+        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
+        body: { ...input, chain: "solana" },
+        signal: AbortSignal.timeout(MONEYGRAM_REQUEST_TIMEOUT_MS),
+      }
+    );
+    const parsed = sessionSchema.safeParse(session);
+    if (!parsed.success) {
+      throw providerUnavailable("MoneyGram session response is malformed.", {
+        provider: this.id,
+        issues: z.flattenError(parsed.error).fieldErrors,
+      });
+    }
+    return parsed.data;
   }
 
   /**
@@ -332,30 +553,15 @@ export class MoneygramRampClient implements RampProvider {
    */
   private async createSessionQuote(
     { env, mode }: RampRuntimeContext,
-    widgetMode: "on-ramp" | "off-ramp"
+    widgetMode: "on-ramp" | "off-ramp",
+    input: MoneygramSessionInput
   ): Promise<PaymentRampQuote> {
     const secretKey = requireMoneygramSecretKey(env, mode);
-    const session = await providerFetchJson<unknown, Record<never, never>>(
-      this.id,
-      `${MONEYGRAM_SANDBOX_BASE_URL}/api/v1/sessions`,
-      {
-        method: "POST",
-        headers: { "x-api-key": secretKey, "User-Agent": "sdp-api/ramps" },
-        body: {},
-      }
-    );
-
-    const parsed = sessionSchema.safeParse(session);
-    if (!parsed.success) {
-      throw providerUnavailable("MoneyGram session response is malformed.", {
-        provider: this.id,
-        issues: z.flattenError(parsed.error).fieldErrors,
-      });
-    }
+    const session = await this.mintSession(secretKey, input);
 
     // The dashboard loads this URL into the MoneyGram SDK and derives its API
     // base from its origin, so anything but HTTPS on an approved host fails closed.
-    const destination = checkRampDestination(parsed.data.widgetUrl, [
+    const destination = checkRampDestination(session.widgetUrl, [
       ...MONEYGRAM_WIDGET_APPROVED_HOSTS,
     ]);
     if (!destination.ok) {
@@ -369,13 +575,13 @@ export class MoneygramRampClient implements RampProvider {
 
     return {
       provider: this.id,
-      id: parsed.data.sessionId,
+      id: session.sessionId,
       status: "pending",
       deliveryMode: "session_widget",
-      sessionToken: parsed.data.sessionToken,
-      sessionId: parsed.data.sessionId,
+      sessionToken: session.sessionToken,
+      sessionId: session.sessionId,
       widgetUrl: widgetUrl.toString(),
-      expiresAt: moneygramSessionExpiry(parsed.data.sessionToken),
+      expiresAt: moneygramSessionExpiry(session.sessionToken),
     };
   }
 }

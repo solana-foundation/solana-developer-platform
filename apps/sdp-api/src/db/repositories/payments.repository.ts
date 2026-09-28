@@ -1,3 +1,4 @@
+import { PAYMENT_TRANSFER_ID_PREFIX } from "@sdp/payments/ramps/shared";
 import {
   isRampTransferType,
   type PaymentTransactionKind,
@@ -59,7 +60,7 @@ export interface PaymentTransferRow {
 }
 
 export function generatePaymentTransferId(): string {
-  return `xfr_${crypto.randomUUID()}`;
+  return `${PAYMENT_TRANSFER_ID_PREFIX}${crypto.randomUUID()}`;
 }
 
 export type ConfirmedTransferPollVerdict = {
@@ -237,6 +238,54 @@ export interface PaymentsRepository {
     fiatAmount?: string | null;
     providerData?: Record<string, unknown>;
     error?: string | null;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Sets the destination and memo of a transfer only while its destination is
+   * still unset and the status is unchanged, so a provider-allocated deposit
+   * address is written exactly once: a concurrent second write matches zero
+   * rows and gets null.
+   *
+   * @param input.transferId - The transfer being claimed.
+   * @param input.organizationId - Tenant scope.
+   * @param input.projectId - Tenant scope.
+   * @param input.expectedStatus - The status the claim was computed from.
+   * @param input.destinationAddress - The provider's deposit address.
+   * @param input.memo - The memo the provider requires on the deposit, or null.
+   * @param input.updatedAt - Timestamp written on success.
+   * @returns The updated row, or null when the destination was already set or the row moved.
+   */
+  claimTransferDestination(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    expectedStatus: PaymentTransferStatus;
+    destinationAddress: string;
+    memo: string | null;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
+  /**
+   * Merges `providerData` into the row only while `claimPath` inside
+   * provider_data is still unset and the status is unchanged, so concurrent
+   * claims of the same field are decided by the row: exactly one writer
+   * matches, every other caller gets null and must re-read to compare.
+   *
+   * @param input.transferId - The transfer being claimed.
+   * @param input.organizationId - Tenant scope.
+   * @param input.projectId - Tenant scope.
+   * @param input.expectedStatus - The status the claim was computed from.
+   * @param input.claimPath - JSON path inside provider_data that must be NULL for the write to apply.
+   * @param input.providerData - Top-level provider_data keys to merge on success.
+   * @param input.updatedAt - Timestamp written on success.
+   * @returns The updated row, or null when the field was already claimed or the row moved.
+   */
+  claimTransferProviderData(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    expectedStatus: PaymentTransferStatus;
+    claimPath: readonly string[];
+    providerData: Record<string, unknown>;
+    updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**

@@ -60,6 +60,21 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Checks that an API-supplied Solana Pay URL is safe to render as a link
+ * target and QR payload: parseable and https or the solana-pay scheme.
+ * `new URL` alone accepts `javascript:` and `data:` schemes, which must
+ * never reach an href even though the API derives the URL itself.
+ */
+function isRenderablePayUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "solana:";
+  } catch {
+    return false;
+  }
+}
+
 export default async function PayPage({ params }: { params: Promise<{ token: string }> }) {
   const t = await getTranslations();
   const locale = await getRequestLocale();
@@ -77,7 +92,8 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
   }
   const request = (await response.json()) as PayRequest;
 
-  const payUrl = request.solanaPayUrl;
+  const payUrl =
+    request.solanaPayUrl && isRenderablePayUrl(request.solanaPayUrl) ? request.solanaPayUrl : null;
   const statusPanel =
     request.status === "awaiting_payment" ? null : getStatusPanels(t)[request.status];
 

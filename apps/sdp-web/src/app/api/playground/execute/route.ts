@@ -165,7 +165,9 @@ export async function POST(request: Request) {
 
     logRouteResult(trace, response.status, {
       method,
-      path,
+      // The query string is user-authored and may carry a pasted secret; log
+      // the route only.
+      path: path.split("?", 1)[0],
       ok: response.ok,
     });
 

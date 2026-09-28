@@ -1,3 +1,4 @@
+import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types";
 import { isoDateTimeSchema, successResponseSchema, z } from "./base";
 
 // ---------------------------------------------------------------------------
@@ -481,6 +482,314 @@ export const earnExternalWalletWithdrawalPreviewResponse = successResponseSchema
   ])
 );
 
+const earnAsyncWithdrawalSharesSchema = earnDecimalAmountSchema.openapi({
+  description: "Shares to place into the selected asynchronous exit, in share units.",
+  example: "10",
+});
+
+const earnQueuedWithdrawalTermsFields = {
+  shares: earnAsyncWithdrawalSharesSchema,
+  mechanism: z.literal("solverQueue").optional().openapi({
+    description:
+      "Selects the solver queue. May be omitted for backwards compatibility; operator redemptions must be explicit.",
+  }),
+  discountBps: z.number().int().min(0).max(10_000).openapi({
+    description:
+      "Discount offered to a solver, in basis points. It must stay inside the live queueAsset minimum and maximum.",
+    example: 25,
+  }),
+  deadlineSeconds: z
+    .number()
+    .int()
+    .positive()
+    .max(EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS)
+    .openapi({
+      description:
+        "Solver window after maturity, in seconds. It must stay inside the live queueAsset minimum and maximum.",
+      example: 86_400,
+    }),
+} as const;
+
+const earnQueuedWithdrawalAssetSchema = z.object({
+  assetMint: earnSolanaMintSchema,
+  allowWithdrawals: z.boolean().openapi({
+    description: "Whether this asset's queue currently accepts new requests.",
+  }),
+  secondsToMaturity: z.number().int().nonnegative().openapi({
+    description: "Delay after request creation before a solver may fulfil it.",
+    example: 86_400,
+  }),
+  minimumSecondsToDeadline: z.number().int().nonnegative().openapi({
+    description: "Shortest solver window accepted after maturity.",
+    example: 3_600,
+  }),
+  maximumSecondsToDeadline: z
+    .number()
+    .int()
+    .positive()
+    .max(EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS)
+    .openapi({
+      description: "Longest solver window accepted after maturity.",
+      example: EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS,
+    }),
+  minimumDiscountBps: z.number().int().min(0).max(10_000).openapi({ example: 0 }),
+  maximumDiscountBps: z.number().int().min(0).max(10_000).openapi({ example: 500 }),
+  minimumShares: earnDecimalAmountSchema.openapi({
+    description: "Smallest request accepted by the queue, in share units.",
+    example: "1",
+  }),
+  shareDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
+});
+
+const earnParRedemptionOptionsSchema = z.object({
+  intermediateMint: earnSolanaMintSchema.openapi({
+    description:
+      "Token created or delegated by the request transaction and later burned by the operator.",
+  }),
+  assetMint: earnSolanaMintSchema.openapi({
+    description: "Token the operator pays when the redemption completes.",
+  }),
+  minimumShares: earnDecimalAmountSchema.openapi({
+    description: "Smallest operator-redemption request, in position-share units.",
+    example: "1",
+  }),
+  shareDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
+  assetDecimals: z.number().int().min(0).max(38).openapi({ example: 6 }),
+  cancelable: z.boolean().openapi({
+    description: "Whether the owner may revoke an open request before the operator completes it.",
+  }),
+  operatorSettled: z.literal(true).openapi({
+    description: "Always true: a provider operator must complete the eventual asset payout.",
+  }),
+});
+
+const earnQueuedWithdrawalOptionsFields = {
+  instant: z.boolean().openapi({
+    description: "Whether an atomic withdrawal is independently available.",
+  }),
+  providerOrder: z.boolean().openapi({
+    description: "Whether a provider-managed delayed order is independently available.",
+  }),
+  queued: z.boolean().openapi({
+    description:
+      "Whether the cancellable on-chain queue is currently available. Never infer this from liquidityTerm alone.",
+  }),
+  withdrawAuthority: z.string().nullable().openapi({
+    description: "The vault's configured withdrawal authority, or null without a queue.",
+  }),
+  queueState: z.string().nullable().openapi({
+    description: "The provider queue account, or null without a queue.",
+  }),
+  queueAsset: earnQueuedWithdrawalAssetSchema.nullable().openapi({
+    description:
+      "Live asset-specific queue limits. Null when this asset has no queue configuration.",
+  }),
+  parRedemption: earnParRedemptionOptionsSchema.nullable().openapi({
+    description:
+      "Live issuer/operator redemption terms. Null when this strategy has no operator-completed par route.",
+  }),
+} as const;
+
+const earnParRedemptionTermsFields = {
+  shares: earnAsyncWithdrawalSharesSchema,
+  mechanism: z.literal("operatorRedemption").openapi({
+    description:
+      "Selects an issuer/operator-completed par redemption with no solver discount or deadline.",
+  }),
+} as const;
+
+export const earnExternalWalletWithdrawalOptionsRequest = z
+  .union([earnExternalWalletPositionLocatorSchema, earnExternalWalletStrategyLocatorSchema])
+  .openapi({
+    description:
+      "Discover each available exit route at action time. Authenticated callers name a tenant position; anonymous callers name a strategy and owner.",
+  });
+
+export const earnExternalWalletWithdrawalOptionsResponse = successResponseSchema(
+  z.union([
+    earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalOptionsFields),
+    z
+      .object({ strategyId: z.string().openapi({ example: "earn_strategy_example" }) })
+      .extend(earnQueuedWithdrawalOptionsFields),
+  ])
+);
+
+export const earnExternalWalletQueuedWithdrawalPreviewRequest = z
+  .union([
+    earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnQueuedWithdrawalTermsFields),
+    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionTermsFields),
+    earnExternalWalletStrategyLocatorSchema.extend(earnParRedemptionTermsFields),
+  ])
+  .openapi({
+    description:
+      "Preview a solver-queue or operator-redemption request against live provider limits. Read-only: nothing is built or persisted.",
+  });
+
+const earnQueuedWithdrawalPreviewFields = {
+  assetMint: earnSolanaMintSchema,
+  shares: earnDecimalAmountSchema,
+  shareDecimals: z.number().int().min(0).max(38),
+  assets: earnDecimalAmountSchema.openapi({
+    description: "Expected payout after the selected discount, in asset units.",
+    example: "9.975",
+  }),
+  assetDecimals: z.number().int().min(0).max(38),
+  discountBps: z.number().int().min(0).max(10_000),
+  maturityTimestamp: z.string().regex(/^\d+$/).openapi({
+    description: "Expected Unix time when solver fulfilment may begin.",
+    example: "1789722000",
+  }),
+  deadlineTimestamp: z.string().regex(/^\d+$/).openapi({
+    description:
+      "Expected Unix deadline. Fulfilment is allowed through this instant; cancellation is allowed only after it.",
+    example: "1789808400",
+  }),
+  blockingIssues: z.array(earnVaultQuoteIssueSchema),
+} as const;
+
+const earnParRedemptionPreviewFields = {
+  mechanism: z.literal("operatorRedemption"),
+  shares: earnDecimalAmountSchema,
+  shareDecimals: z.number().int().min(0).max(38),
+  intermediateMint: earnSolanaMintSchema.openapi({
+    description: "Token the request creates or delegates for later operator settlement.",
+  }),
+  intermediateAmount: earnDecimalAmountSchema.openapi({
+    description: "Expected intermediate-token amount, in that token's units.",
+  }),
+  assetMint: earnSolanaMintSchema,
+  assets: earnDecimalAmountSchema.openapi({
+    description: "Expected par payout when the operator completes the redemption.",
+    example: "10",
+  }),
+  assetDecimals: z.number().int().min(0).max(38),
+  blockingIssues: z.array(earnVaultQuoteIssueSchema),
+} as const;
+
+export const earnExternalWalletQueuedWithdrawalPreviewResponse = successResponseSchema(
+  z.union([
+    earnExternalWalletPositionLocatorSchema.extend(earnQueuedWithdrawalPreviewFields),
+    z
+      .object({ strategyId: z.string().openapi({ example: "earn_strategy_example" }) })
+      .extend(earnQueuedWithdrawalPreviewFields),
+    earnExternalWalletPositionLocatorSchema.extend(earnParRedemptionPreviewFields),
+    z
+      .object({ strategyId: z.string().openapi({ example: "earn_strategy_example" }) })
+      .extend(earnParRedemptionPreviewFields),
+  ])
+);
+
+export const earnExternalWalletWithdrawalRequestTransactionRequest = z
+  .union([
+    earnExternalWalletPositionLocatorSchema.extend({
+      ...earnQueuedWithdrawalTermsFields,
+      feePayer: earnFeePayerRequestSchema.optional(),
+    }),
+    earnExternalWalletPositionLocatorSchema.extend({
+      ...earnParRedemptionTermsFields,
+      feePayer: earnFeePayerRequestSchema.optional(),
+    }),
+  ])
+  .openapi({
+    description:
+      "Build a keyed asynchronous withdrawal request. A solver request escrows shares; an operator redemption converts them into the provider's intermediate token. Neither action pays assets.",
+  });
+
+export const earnExternalWalletWithdrawalRequestCancelTransactionRequest = z
+  .object({
+    withdrawalRequestId: z.string().min(1).max(128).openapi({
+      example: "earn_vault_withdrawal_request_example",
+    }),
+    feePayer: earnFeePayerRequestSchema.optional(),
+  })
+  .openapi({
+    description:
+      "Build the owner-signed recovery transaction. Solver requests become cancellable at expiredCancelable; a cancelable operator redemption may be revoked while pending.",
+  });
+
+const earnQueuedWithdrawalStatusSchema = z
+  .enum([
+    "creating",
+    "pending",
+    "fulfillable",
+    "expiredCancelable",
+    "cancelling",
+    "fulfilled",
+    "cancelled",
+    "closedOrUnknown",
+    "failed",
+  ])
+  .openapi({
+    description:
+      "Durable request status. Only fulfilled, cancelled and failed are terminal. closedOrUnknown remains retryable until a finalized close event proves payout or recovery.",
+  });
+
+const earnAsyncWithdrawalRequestCommonFields = {
+  withdrawalRequestId: z.string().openapi({ example: "earn_vault_withdrawal_request_example" }),
+  positionId: z.string().openapi({ example: "earn_position_example" }),
+  provider: z.string().openapi({ example: "veda" }),
+  providerReference: z.string().openapi({ description: "The vault's on-chain address." }),
+  ownerAddress: earnOwnerAddressSchema,
+  requestAddress: z.string().openapi({ description: "Provider request account address." }),
+  status: earnQueuedWithdrawalStatusSchema,
+  assetMint: earnSolanaMintSchema,
+  shareMint: earnSolanaMintSchema,
+  shares: earnDecimalAmountSchema,
+  quotedAssets: earnDecimalAmountSchema,
+  shareDecimals: z.number().int().min(0).max(38),
+  assetDecimals: z.number().int().min(0).max(38),
+  nonce: z.string().nullable(),
+  creationTimestamp: z.string().regex(/^\d+$/).nullable(),
+  creationSignature: z.string().nullable(),
+  cancelSignature: z.string().nullable(),
+  closingSignature: z.string().nullable(),
+  assetsPaid: earnDecimalAmountSchema.nullable(),
+  failureReason: z.string().nullable(),
+  fulfilledAt: isoDateTimeSchema.nullable(),
+  cancelledAt: isoDateTimeSchema.nullable(),
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+  replayed: z.boolean().optional(),
+} as const;
+
+const earnSolverWithdrawalRequestSchema = z.object({
+  ...earnAsyncWithdrawalRequestCommonFields,
+  mechanism: z.literal("solverQueue"),
+  intermediateMint: z.null(),
+  intermediateAmount: z.null(),
+  discountBps: z.number().int().min(0).max(10_000),
+  maturityTimestamp: z.string().regex(/^\d+$/),
+  deadlineTimestamp: z.string().regex(/^\d+$/),
+});
+
+const earnOperatorRedemptionRequestSchema = z.object({
+  ...earnAsyncWithdrawalRequestCommonFields,
+  mechanism: z.literal("operatorRedemption"),
+  intermediateMint: earnSolanaMintSchema,
+  intermediateAmount: earnDecimalAmountSchema,
+  discountBps: z.null(),
+  maturityTimestamp: z.null(),
+  deadlineTimestamp: z.null(),
+});
+
+const earnAsyncWithdrawalRequestSchema = z.union([
+  earnSolverWithdrawalRequestSchema,
+  earnOperatorRedemptionRequestSchema,
+]);
+
+export const earnExternalWalletWithdrawalRequestResponse = successResponseSchema(
+  z.object({ withdrawalRequest: earnAsyncWithdrawalRequestSchema })
+);
+
+export const earnExternalWalletWithdrawalRequestsResponse = successResponseSchema(
+  z.object({
+    withdrawalRequests: z.array(earnAsyncWithdrawalRequestSchema),
+    hasMore: z.boolean(),
+    nextCursor: z.string().nullable(),
+  })
+);
+
 export const earnExternalWalletSubmitRequest = z
   .object({
     transactionId: z.string().min(1).max(128).openapi({
@@ -546,6 +855,49 @@ const earnExternalWalletTransactionSchema = z
     shareMint: z.string().openapi({ example: "hXm2xSRF5PLKGMrTvAWqKhR76MuJX5dAabeSChkjqu2" }),
   })
   .openapi({ description: "One unsigned transaction SDP built for an external wallet to sign." });
+
+const earnQueuedWithdrawalRequestBuildSchema = earnExternalWalletTransactionSchema.extend({
+  positionId: z.string().openapi({ example: "earn_position_example" }),
+  action: z.literal("request"),
+  mechanism: z.literal("solverQueue"),
+  requestAddress: z.string().openapi({ description: "Provider request account address." }),
+  shares: earnDecimalAmountSchema,
+  assets: earnDecimalAmountSchema,
+  discountBps: z.number().int().min(0).max(10_000),
+  maturityTimestamp: z.string().regex(/^\d+$/),
+  deadlineTimestamp: z.string().regex(/^\d+$/),
+});
+
+const earnOperatorRedemptionRequestBuildSchema = earnExternalWalletTransactionSchema.extend({
+  positionId: z.string().openapi({ example: "earn_position_example" }),
+  action: z.literal("request"),
+  mechanism: z.literal("operatorRedemption"),
+  requestAddress: z.string().openapi({ description: "Provider request account address." }),
+  shares: earnDecimalAmountSchema,
+  assets: earnDecimalAmountSchema,
+  intermediateMint: earnSolanaMintSchema,
+  intermediateAmount: earnDecimalAmountSchema,
+});
+
+const earnQueuedWithdrawalCancelBuildSchema = earnExternalWalletTransactionSchema.extend({
+  positionId: z.string().openapi({ example: "earn_position_example" }),
+  withdrawalRequestId: z.string().openapi({
+    example: "earn_vault_withdrawal_request_example",
+  }),
+  action: z.literal("cancel"),
+  mechanism: z.enum(["solverQueue", "operatorRedemption"]),
+  requestAddress: z.string().openapi({ description: "Provider request account address." }),
+});
+
+export const earnExternalWalletWithdrawalRequestTransactionResponse = successResponseSchema(
+  z.object({
+    transaction: z.union([
+      earnQueuedWithdrawalRequestBuildSchema,
+      earnOperatorRedemptionRequestBuildSchema,
+      earnQueuedWithdrawalCancelBuildSchema,
+    ]),
+  })
+);
 
 const earnExternalWalletDepositTransactionSchema = earnExternalWalletTransactionSchema
   .extend({
@@ -744,7 +1096,13 @@ const earnExternalWalletPositionSchema = z
         example: "1789722000",
       }),
     tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
-      description: "Live deposit-token value. Absent when hydration is unavailable.",
+      description:
+        "Live value of the position in the deposit token (`tokenMint`), as the provider reports " +
+        "it: shares × rate for rate-based vaults, an exit quote for the whole position for " +
+        "quote-based providers (Veda, Ondo), so spread and price impact are already inside it and " +
+        "it does not scale to other share amounts. A deposit-token amount, not a share count and " +
+        "not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a " +
+        "dollar figure. Absent when hydration is unavailable.",
     }),
   })
   .openapi({ description: "One live vault position owned by a partner end-user wallet." });
@@ -756,7 +1114,9 @@ const earnExternalWalletTokenTotalSchema = z.object({
   unavailablePositionCount: z.number().int().nonnegative(),
   tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
     description:
-      "Exact live total. Absent when any contributing position is unavailable, so partial money is never presented as complete.",
+      "Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue`, " +
+      "a dollar figure at par. Absent when any contributing position is unavailable, so partial " +
+      "money is never presented as complete.",
   }),
 });
 

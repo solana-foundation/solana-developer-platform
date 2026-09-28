@@ -31,6 +31,7 @@ const REFUSED_BUILD_CODES: ReadonlySet<string> = new Set([
   "INVALID_AMOUNT",
   "DEPOSIT_REFUSED",
   "WITHDRAW_REFUSED",
+  "REDEMPTION_REFUSED",
   "COMPLIANCE_APPROVAL_REQUIRED",
   "INVALID_QUEUE_PARAMETERS",
 ]);
@@ -59,7 +60,11 @@ export function rethrowVaultProviderFailure(error: unknown): never {
     // an internal failure; the caller should refresh request history.
     throw conflict(failure.message);
   }
-  if (failure?.code === "VAULT_UNREADABLE") {
+  if (
+    failure?.code === "VAULT_UNREADABLE" ||
+    failure?.code === "REQUEST_UNREADABLE" ||
+    failure?.code === "POSITION_UNREADABLE"
+  ) {
     throw providerUnavailable("Earn provider is temporarily unavailable. Try again.");
   }
   throw error;

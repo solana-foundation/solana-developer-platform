@@ -584,6 +584,7 @@ export function clerkAuthMiddleware() {
 }
 
 export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
+  const rejectInvalid = options.rejectInvalid ?? true;
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const token = extractBearerToken(c);
 
@@ -612,9 +613,10 @@ export function optionalClerkAuth(options: { rejectInvalid?: boolean } = {}) {
         c.set("clerk", clerkContext);
       });
     } catch (error) {
-      // Ignore invalid Clerk auth for optional usage, but never rate
-      // limiting — a limited user must not proceed as anonymous.
-      if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
+      // Invalid Clerk auth is rejected by default (a presented credential
+      // must never silently downgrade to anonymous), but never rate
+      // limiting — a limited user must not proceed as anonymous either.
+      if (rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
         throw error;
       }
     }

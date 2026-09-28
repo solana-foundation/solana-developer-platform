@@ -37,7 +37,7 @@ export function useTokenOperationData({
     mutate: mutateAuthorityWallets,
   } = usePersistedDashboardSWR(
     shouldLoadAuthorityWallets ? issuanceQueryKeys.authorityWallets({ tokenId: token.id }) : null,
-    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId, t),
+    ([, tokenId]: readonly [string, string]) => fetchTokenAuthorityWallets(tokenId),
     {
       refreshInterval: 60_000,
       revalidateOnFocus: true,
@@ -46,14 +46,15 @@ export function useTokenOperationData({
     {
       key: `token.${token.id}.authority-wallets`,
       ttlMs: TOKEN_AUTHORITY_WALLETS_CACHE_TTL_MS,
+      version: 2,
     }
   );
-  const authorityWalletsFetchError = requestErrorMessage(
+  const authorityWalletsError = requestErrorMessage(
     authorityWalletsRequestError,
     t("DashboardIssuance.management.unableToLoadSignerWallets")
   );
   const authorityWalletsLoading =
-    shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsFetchError;
+    shouldLoadAuthorityWallets && authorityWalletsData === undefined && !authorityWalletsError;
   const {
     data: frozenAccountsTotal,
     error: frozenAccountsRequestError,
@@ -78,11 +79,10 @@ export function useTokenOperationData({
     await globalMutate((key) => isTokenTransactionsKey(key, token.id));
     await globalMutate((key) => isTokenFrozenAccountsKey(key, token.id));
   };
-  const authorityWalletsError =
-    authorityWalletsFetchError ?? authorityWalletsData?.authorityWalletsError ?? null;
-  const authorityWallets = authorityWalletsError
-    ? []
-    : (authorityWalletsData?.authorityWallets ?? []);
+  const authorityWallets =
+    authorityWalletsError !== null || authorityWalletsData === undefined
+      ? []
+      : authorityWalletsData.authorityWallets;
   // Entries are paged by ControlListEntries. Operations rely on the API for the
   // authoritative access-control check rather than a partial client snapshot.
   const allowlistEntries: TokenAllowlistEntry[] = [];
@@ -90,7 +90,6 @@ export function useTokenOperationData({
   return {
     authorityWallets,
     authorityWalletsData,
-    authorityWalletsFetchError,
     authorityWalletsError,
     authorityWalletsLoading,
     allowlistEntries,

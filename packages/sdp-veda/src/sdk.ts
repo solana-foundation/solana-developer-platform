@@ -1,3 +1,4 @@
+import { EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS } from "@sdp/types/earn";
 import { isVedaDepositMint } from "@sdp/types/veda-programs";
 import { type Address, address, type Instruction } from "@solana/kit";
 import { createVedaClient, parseLifecycleEvents, VedaSdkError } from "@vedatech/svm-sdk";
@@ -627,6 +628,7 @@ export async function readVedaWithdrawalOptions(
             allowWithdrawals: queueAsset.allowWithdrawals,
             secondsToMaturity: queueAsset.secondsToMaturity,
             minimumSecondsToDeadline: queueAsset.minimumSecondsToDeadline,
+            maximumSecondsToDeadline: EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS,
             minimumDiscountBps: queueAsset.minimumDiscountBps,
             maximumDiscountBps: queueAsset.maximumDiscountBps,
             minimumShares: formatAtomic(queueAsset.minimumShares, shareDecimals),

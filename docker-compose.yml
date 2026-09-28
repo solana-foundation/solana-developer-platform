@@ -7,7 +7,11 @@ services:
       POSTGRES_USER: sdp
       POSTGRES_PASSWORD: sdp
     ports:
-      - "${SDP_POSTGRES_PORT:-5432}:5432"
+      # Loopback-only by default: an unauthenticated-Redis / known-password
+      # Postgres endpoint reachable on every host interface is a direct
+      # compromise path when compose is run on a shared VM. Override
+      # SDP_*_BIND to something else only deliberately.
+      - "${SDP_POSTGRES_BIND:-127.0.0.1}:${SDP_POSTGRES_PORT:-5432}:5432"
     volumes:
       - sdp-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +24,9 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "${SDP_REDIS_PORT:-6379}:6379"
+      # See the postgres port note: keep the KV/rate-limit store off every
+      # host interface by default.
+      - "${SDP_REDIS_BIND:-127.0.0.1}:${SDP_REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

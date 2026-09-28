@@ -668,7 +668,16 @@ async function solanaRpc<T>(rpcUrl: string, method: string, params: unknown[]): 
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       });
 
-      const payload = (await response.json()) as SolanaRpcResponse<T>;
+      const responseText = await response.text();
+      let payload: SolanaRpcResponse<T>;
+      try {
+        payload = JSON.parse(responseText) as SolanaRpcResponse<T>;
+      } catch (error) {
+        const parseMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Solana RPC returned ${response.status} with empty/invalid body calling ${method}: ${parseMessage}`
+        );
+      }
       if ("error" in payload) {
         throw new Error(payload.error.message ?? `Solana RPC error calling ${method}`);
       }
@@ -691,6 +700,7 @@ function isRetryableSolanaRpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
   return (
+    message.includes("empty/invalid body") ||
     message.includes("internal error") ||
     message.includes("unable to complete request") ||
     message.includes("request timed out") ||
@@ -715,8 +725,20 @@ export async function createFundedPrivyWallet(input: {
   const wallet = await signingService.createWallet(TEST_ORG.id, undefined, {
     provider: "privy",
     label: input.label,
-    setDefault: input.setDefault,
   });
+
+  if (input.setDefault) {
+    const config = await signingService.getConfigurationByProvider(TEST_ORG.id, undefined, "privy");
+    if (!config) {
+      throw new Error("Integration precondition failed: privy signer configuration not found.");
+    }
+    await getDb(env)
+      .prepare(
+        "UPDATE custody_configs SET default_wallet_id = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+      .bind(wallet.walletId, config.id)
+      .run();
+  }
 
   if (input.fundLamports && input.fundLamports > 0) {
     await fundAddressToLamports(wallet.publicKey, input.fundLamports);

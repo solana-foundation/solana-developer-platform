@@ -271,7 +271,12 @@
       "addressAutocompleteFailed": "Impossible de rechercher des adresses. Réessayez.",
       "addressDetailsFailed": "Impossible de charger cette adresse. Essayez une autre recherche.",
       "payoutAccountsTitle": "Comptes de paiement enregistrés",
-      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte."
+      "payoutAccountsDescription": "Choisissez le compte de destination de ce paiement, ou renseignez les informations ci-dessous pour effectuer un paiement vers un nouveau compte.",
+      "transferHeldForApproval": "La politique de ce wallet exige que ce transfert soit approuvé avant son envoi, MoneyGram ne peut donc pas continuer. Aucun fonds n'a encore été déplacé. Si ce transfert ne doit pas partir plus tard, annulez la demande dans Approvals.",
+      "transferApprovalPending": "En attente d'approbation",
+      "offrampHeldDescription": "Aucun fonds n'a encore été déplacé. Une fois approuvé, {amount} {token} sont envoyés à l'adresse de dépôt ci-dessous. Si le devis expire d'abord, l'envoi n'aboutira pas et vous devrez obtenir un nouveau devis.",
+      "moneygramDepositUnconfirmed": "L'adresse de dépôt MoneyGram n'a pas pu être confirmée, rien n'a donc été envoyé.",
+      "moneygramTransactionUnreported": "MoneyGram a demandé un dépôt avant de signaler la transaction, rien n'a donc été envoyé."
     },
     "onchainSend": {
       "noAssets": "Ce Wallet n'a aucun élément disponible à envoyer.",
@@ -303,7 +308,10 @@
       "transferFailed": "Échec de transfert.",
       "transferSuccess": "Votre transfert a été envoyé avec succès.",
       "transferStatus": "Statut : {status}",
-      "viewOnExplorer": "Afficher sur l'explorateur"
+      "viewOnExplorer": "Afficher sur l'explorateur",
+      "approvalPendingTitle": "En attente d'approbation",
+      "approvalPendingDescription": "La politique de ce wallet exige qu'une personne approuve le transfert avant son envoi. Aucun fonds n'a encore été déplacé.",
+      "viewApprovalRequest": "Afficher la demande d'approbation"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -338,7 +346,9 @@
       "agreementSigningTitle": "Confirmation de l'accord",
       "agreementSigningDescription": "En attente de la confirmation de l'accord signé par le fournisseur. Cela prend généralement quelques secondes.",
       "agreementConsentPrefix": "J'ai lu et j'accepte la",
-      "privacyPolicy": "politique de confidentialité"
+      "privacyPolicy": "politique de confidentialité",
+      "settlementProcessing": "Traitement chez BVNK",
+      "settlementCompleted": "Terminé"
     },
     "lightspark": {
       "verificationRequiredTitle": "Vérifiez votre identité",
@@ -490,7 +500,9 @@
       "quotedAmount": "le montant indiqué",
       "cryptoDeposit": "Dépôt {currency}",
       "virtualAccount": "Compte virtuel {currency}",
-      "payin": "{currency} payer"
+      "payin": "{currency} payer",
+      "paymentReferenceRequired": "Référence de paiement (obligatoire)",
+      "remittancePrefix": "Préfixe de remise"
     },
     "providerRisk": {
       "close": "Fermer {title}",
@@ -676,7 +688,13 @@
       "agreementSigned": "Signé",
       "agreementAwaitingSignature": "En attente de signature",
       "viewAgreement": "Accord",
-      "viewPrivacyPolicy": "Politique de confidentialité"
+      "viewPrivacyPolicy": "Politique de confidentialité",
+      "providerAccountBalanceUnavailable": "Solde indisponible",
+      "providerAccountFundingWallet": "Wallet {currency}",
+      "providerAccountWalletActive": "Actif",
+      "providerAccountWalletProvisioning": "Provisionnement",
+      "customerIdLabel": "ID client",
+      "walletIdLabel": "ID wallet"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -749,7 +767,14 @@
       "copy": "Copier {label}",
       "viewReceipt": "Afficher le reçu",
       "receipt": "Reçu",
-      "failureReason": "Raison de l'échec"
+      "failureReason": "Raison de l'échec",
+      "status": "Statut",
+      "payinId": "ID de pay-in",
+      "fiatSent": "Montant converti",
+      "cryptoToReceive": "Crypto à recevoir",
+      "received": "Reçu",
+      "credited": "Crédité",
+      "depositTx": "Tx de dépôt"
     },
     "requestFailed": "La demande a échoué.",
     "submitting": "Envoi...",

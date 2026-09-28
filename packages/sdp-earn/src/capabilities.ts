@@ -4,6 +4,7 @@ import type {
   EarnPortfolioWalletProvider,
   EarnVaultDepositQuoteProvider,
   EarnVaultDirectProvider,
+  EarnVaultParRedemptionProvider,
   EarnVaultProvider,
   EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawProvider,
@@ -207,6 +208,36 @@ export function supportsVaultQueuedWithdraw(
     Record<(typeof VAULT_QUEUED_WITHDRAW_METHODS)[number], unknown>
   >;
   return VAULT_QUEUED_WITHDRAW_METHODS.every((method) => typeof candidate[method] === "function");
+}
+
+const VAULT_PAR_REDEMPTION_METHODS = [
+  "getParRedemptionOptions",
+  "quoteParRedemption",
+  // biome-ignore lint/security/noSecrets: public provider method name, not a credential.
+  "buildParRedemptionRequest",
+  // biome-ignore lint/security/noSecrets: public provider method name, not a credential.
+  "buildParRedemptionCancel",
+  "readParRedemptionRequest",
+  // biome-ignore lint/security/noSecrets: public provider method name, not a credential.
+  "decodeParRedemptionLifecycleEvents",
+] as const satisfies readonly Exclude<
+  keyof EarnVaultParRedemptionProvider,
+  keyof EarnVaultDirectProvider
+>[];
+
+/**
+ * Capability discovery for provider-operated par redemptions. It deliberately
+ * does not imply the solver-queue capability: request/cancel/finality plumbing
+ * can be shared by the API while the economic lifecycle stays explicit.
+ */
+export function supportsVaultParRedemption(
+  client: EarnVaultProvider
+): client is EarnVaultParRedemptionProvider {
+  if (!supportsVaultDirect(client)) return false;
+  const candidate = client as Partial<
+    Record<(typeof VAULT_PAR_REDEMPTION_METHODS)[number], unknown>
+  >;
+  return VAULT_PAR_REDEMPTION_METHODS.every((method) => typeof candidate[method] === "function");
 }
 
 const DEPOSIT_ELIGIBILITY_METHODS = ["checkDepositEligibility"] as const satisfies readonly Exclude<

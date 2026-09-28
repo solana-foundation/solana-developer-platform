@@ -11,8 +11,7 @@
 import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import {
   LEG_ESCROW_A,
   LEG_ESCROW_B,
@@ -45,9 +44,9 @@ afterEach(() => {
 /** The page with the on-chain details opened, as text. */
 function renderDetailWithOnChainOpen(value: DvpTrade): string {
   const { container } = render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
   fireEvent.click(within(container).getByRole("button", { name: "On-chain details" }));
   return container.textContent;
@@ -61,9 +60,9 @@ const FUNDED = { observedAmount: "1000", funded: true, surplus: null, frozen: fa
 
 function renderDetail(value: DvpTrade): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 
@@ -98,9 +97,9 @@ describe("DvpTradeDetailWorkspace", () => {
         },
       });
       const { container } = render(
-        <I18nProvider locale="en" messages={getMessages("en")}>
+        <EnglishTestI18n>
           <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
-        </I18nProvider>
+        </EnglishTestI18n>
       );
 
       expect(
@@ -139,9 +138,9 @@ describe("DvpTradeDetailWorkspace", () => {
           },
         });
         const { container } = render(
-          <I18nProvider locale="en" messages={getMessages("en")}>
+          <EnglishTestI18n>
             <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
-          </I18nProvider>
+          </EnglishTestI18n>
         );
 
         const button = within(container).getByRole("button", {
@@ -213,9 +212,9 @@ describe("DvpTradeDetailWorkspace", () => {
         },
       });
       const { container } = render(
-        <I18nProvider locale="en" messages={getMessages("en")}>
+        <EnglishTestI18n>
           <DvpTradeDetailWorkspace cluster="devnet" trade={value} />
-        </I18nProvider>
+        </EnglishTestI18n>
       );
       const page = within(container);
       const links = () => page.getAllByRole("link", { name: "View transaction" });
@@ -373,7 +372,7 @@ describe("DvpTradeDetailWorkspace", () => {
     globalThis.fetch = vi.fn(() => new Promise<Response>(() => {}));
     try {
       const { container } = render(
-        <I18nProvider locale="en" messages={getMessages("en")}>
+        <EnglishTestI18n>
           <DvpTradeDetailWorkspace
             cluster="devnet"
             trade={trade({
@@ -385,7 +384,7 @@ describe("DvpTradeDetailWorkspace", () => {
               },
             })}
           />
-        </I18nProvider>
+        </EnglishTestI18n>
       );
       const view = within(container);
       expect(view.getByRole("button", { name: "Reclaim" })).not.toHaveProperty("disabled", true);

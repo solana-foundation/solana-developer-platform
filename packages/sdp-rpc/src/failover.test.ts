@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RpcTransport } from "@solana/kit";
+import {
+  isSolanaError,
+  type RpcTransport,
+  SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR,
+  SolanaError,
+} from "@solana/kit";
 import { resolveSolanaRpcProviderUrls } from "./config";
 import { createFailoverTransport } from "./solana";
 import type { RpcEnv } from "./types";
@@ -14,7 +19,11 @@ function makeTransport(behaviors: Array<"ok" | "http500" | "invalid">): {
     const behavior = behaviors[Math.min(state.calls, behaviors.length - 1)];
     state.calls += 1;
     if (behavior === "http500") {
-      throw new Error("HTTP error (500): Internal server error");
+      throw new SolanaError(SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR, {
+        headers: new Headers(),
+        message: "Internal Server Error",
+        statusCode: 500,
+      });
     }
     if (behavior === "invalid") {
       throw new Error("invalid params");
@@ -28,6 +37,9 @@ function makeTransport(behaviors: Array<"ok" | "http500" | "invalid">): {
     },
   };
 }
+
+const isHttp500 = (error: unknown) =>
+  isSolanaError(error, SOLANA_ERROR__RPC__TRANSPORT_HTTP_ERROR) && error.context.statusCode === 500;
 
 const request = (method: string) => ({ payload: { jsonrpc: "2.0", id: 1, method, params: [] } });
 
@@ -70,7 +82,7 @@ test("never resubmits sendTransaction through another provider", async () => {
   const b = makeTransport(["ok"]);
   const transport = createFailoverTransport([a.transport, b.transport], { stickyKey: "t4" });
 
-  await assert.rejects(() => transport(request("sendTransaction")), /500/);
+  await assert.rejects(() => transport(request("sendTransaction")), isHttp500);
   assert.equal(a.calls, 1);
   assert.equal(b.calls, 0);
 });
@@ -80,7 +92,7 @@ test("throws the last error when every provider fails transiently", async () => 
   const b = makeTransport(["http500"]);
   const transport = createFailoverTransport([a.transport, b.transport], { stickyKey: "t5" });
 
-  await assert.rejects(() => transport(request("getBalance")), /500/);
+  await assert.rejects(() => transport(request("getBalance")), isHttp500);
   assert.equal(a.calls, 1);
   assert.equal(b.calls, 1);
 });

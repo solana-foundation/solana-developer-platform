@@ -1,5 +1,5 @@
 import * as solanaRpc from "@sdp/rpc/solana";
-import { GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
+import { EARN_PROVIDERS, GENESIS_HASH_BY_CLUSTER } from "@sdp/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "@/types/env";
 import {
@@ -7,13 +7,21 @@ import {
   CLUSTER_ENDPOINT_PROOF_TTL_MS,
   resetClusterEndpointProofs,
   resolveClusterRpcUrl,
+  resolveRecordedVaultWithdrawClient,
   resolveVaultDirectClient,
+  resolveVaultParRedemptionClient,
+  resolveVaultWithdrawClient,
 } from "./execution-registry";
 import { createVaultDeadline } from "./vault-deadline";
 
 const env = {} as Env;
 const rpcUrl = "https://rpc.example.invalid";
 const executionEnv = { SOLANA_DEVNET_RPC_URL: rpcUrl } as Env;
+const hastraDexExecutionEnv = {
+  ...executionEnv,
+  EARN_HASTRA_DEX_EXIT_ENABLED: "true",
+  JUPITER_SWAP_API_KEY: "jup_test_key",
+} as Env;
 const runtime = { env: {}, environment: "sandbox" } as const;
 const depositInput = {
   providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
@@ -158,9 +166,14 @@ describe("resolveVaultDirectClient", () => {
 
   it("resolves an executing client for every provider that can move money", () => {
     const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const catalogueOnly = new Set(["upshift", "perena"]);
 
-    for (const provider of ["kamino", "veda", "jupiter_lend"]) {
+    for (const provider of EARN_PROVIDERS) {
       const client = resolveVaultDirectClient(executionEnv, provider, createVaultDeadline());
+      if (catalogueOnly.has(provider)) {
+        expect(client, provider).toBeNull();
+        continue;
+      }
       expect(client, provider).not.toBeNull();
       expect(client?.provider, provider).toBe(provider);
       // The superset, not a replacement: the executing client still catalogues.
@@ -244,6 +257,44 @@ describe("resolveVaultDirectClient", () => {
     expect(supportsVaultWithdraw(client)).toBe(true);
     expect(supportsVaultProviderOrderWithdraw(client)).toBe(true);
     expect(supportsDepositEligibility(client)).toBe(true);
+    expect(createRpc).not.toHaveBeenCalled();
+  });
+
+  it("defaults Hastra to par-only and admits the DEX capability only when configured", async () => {
+    const createRpc = vi.spyOn(solanaRpc, "createRpc");
+    const { supportsVaultParRedemption, supportsVaultWithdraw } = await import(
+      "@sdp/earn/capabilities"
+    );
+
+    const direct = resolveVaultDirectClient(executionEnv, "hastra", createVaultDeadline());
+    const par = resolveVaultParRedemptionClient(executionEnv, "hastra", createVaultDeadline());
+    const defaultDex = resolveVaultWithdrawClient(executionEnv, "hastra", createVaultDeadline());
+    const flagWithoutKey = resolveVaultWithdrawClient(
+      { ...executionEnv, EARN_HASTRA_DEX_EXIT_ENABLED: "true" } as Env,
+      "hastra",
+      createVaultDeadline()
+    );
+    const enabledDex = resolveVaultWithdrawClient(
+      hastraDexExecutionEnv,
+      "hastra",
+      createVaultDeadline()
+    );
+    const historicalDex = resolveRecordedVaultWithdrawClient(
+      executionEnv,
+      "hastra",
+      createVaultDeadline()
+    );
+
+    expect(direct).not.toBeNull();
+    expect(direct?.provider).toBe("hastra");
+    expect(direct && supportsVaultWithdraw(direct)).toBe(true);
+    expect(direct && supportsVaultParRedemption(direct)).toBe(true);
+    expect(par).not.toBeNull();
+    expect(par?.provider).toBe("hastra");
+    expect(defaultDex).toBeNull();
+    expect(flagWithoutKey).toBeNull();
+    expect(enabledDex?.provider).toBe("hastra");
+    expect(historicalDex?.provider).toBe("hastra");
     expect(createRpc).not.toHaveBeenCalled();
   });
 

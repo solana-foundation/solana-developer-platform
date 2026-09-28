@@ -177,6 +177,31 @@ describe("createApp plugin registration", () => {
     expect(body.ok).toBe(true);
   });
 
+  it("rejects a /v1 body above the global backstop limit with 413", async () => {
+    const { obs } = makeObservability();
+    const plugin: SdpPlugin = {
+      name: "body-limit-test",
+      register(v1) {
+        v1.post("/body-limit-test", (c) => c.json({ ok: true }));
+      },
+    };
+    const app = createApp({ observability: obs, plugins: [plugin] });
+
+    const res = await app.request(
+      "/v1/body-limit-test",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "x".repeat(1024 * 1024 + 1),
+      },
+      baseEnv
+    );
+
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+
   it("returns 404 for an unregistered route when no plugins are passed", async () => {
     const { obs } = makeObservability();
     const app = createApp({ observability: obs });

@@ -453,10 +453,12 @@ export function requirePermissionsWhenAuthenticated(...required: Permission[]) {
 
 /**
  * Authenticates an API key when one is present and always admits a request
- * with no API key. Surfaces that change behavior when authenticated should
- * reject invalid keys so an expired credential cannot silently downgrade.
+ * with no API key. A presented-but-invalid credential is rejected by default
+ * so an expired key can never silently downgrade to anonymous access; opt out
+ * only with `rejectInvalid: false` for surfaces that genuinely want that.
  */
 export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
+  const rejectInvalid = options.rejectInvalid ?? true;
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     const apiKey = extractApiKey(c);
 
@@ -467,7 +469,7 @@ export function optionalAuth(options: { rejectInvalid?: boolean } = {}) {
         const authMw = authMiddleware();
         await authMw(c, async () => {});
       } catch (error) {
-        if (options.rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
+        if (rejectInvalid || (error instanceof AppError && error.code === "RATE_LIMITED")) {
           throw error;
         }
       }

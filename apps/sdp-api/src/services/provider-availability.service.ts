@@ -86,7 +86,10 @@ function hasAllEnv(env: Env, keys: readonly (keyof Env)[]): boolean {
  * keys on `Env`: the template literal below must resolve to a `keyof Env` for
  * every member of this union, so widening it silently demands a credential.
  */
-type KeyPairedEarnProviderId = Exclude<EarnProviderId, "kamino" | "veda" | "jupiter_lend" | "ondo">;
+type KeyPairedEarnProviderId = Exclude<
+  EarnProviderId,
+  "kamino" | "veda" | "jupiter_lend" | "ondo" | "hastra"
+>;
 
 /**
  * Credentialed earn providers share one shape: `<PREFIX>_API_KEY` for
@@ -351,6 +354,12 @@ const PROVIDER_AVAILABILITY_DEFINITIONS = {
       credentialEnvKeys: ["JUPITER_SWAP_API_KEY"],
       isConfigured: (env) => hasEnv(env, "JUPITER_SWAP_API_KEY"),
     },
+    // Hastra's PRIME mint/stake legs and operator-redemption request are
+    // permissionless on-chain, so the provider remains configured without a
+    // Jupiter credential. Its optional market exit is admitted separately by
+    // EARN_HASTRA_DEX_EXIT_ENABLED plus JUPITER_SWAP_API_KEY; neither may gate
+    // deposits or the default par-redemption escape hatch.
+    hastra: publicApiDefinition("Hastra / Figure"),
     // One packed JSON credential per environment (OAuth2 password-grant quad —
     // clientId/clientSecret/username/password); format documented on
     // `EarnRuntimeEnvironment` in @sdp/earn. Configured means "the key is set",
@@ -386,9 +395,9 @@ export const EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER: Readonly<
  * convention, so it stays correct for a provider that needs no credential and
  * for any future one whose credential is not a key pair.
  */
-export const EARN_CREDENTIAL_ENV_KEYS: readonly string[] = Object.values(
-  EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER
-).flat();
+export const EARN_CREDENTIAL_ENV_KEYS: readonly string[] = [
+  ...new Set(Object.values(EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER).flat()),
+];
 
 /**
  * Reuse the deployment configuration checks without exposing credential values.

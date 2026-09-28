@@ -688,6 +688,7 @@ describe("queued withdrawal capability", () => {
         allowWithdrawals: true,
         secondsToMaturity: 60,
         minimumSecondsToDeadline: 120,
+        maximumSecondsToDeadline: 7_776_000,
         minimumDiscountBps: 25,
         maximumDiscountBps: 500,
         minimumShares: "0.1",
@@ -699,6 +700,7 @@ describe("queued withdrawal capability", () => {
       client.getWithdrawalOptions(sandbox, { providerReference: VAULT_A })
     ).resolves.toEqual({
       instant: false,
+      parRedemption: null,
       providerOrder: false,
       queued: true,
       withdrawAuthority: QUEUE_PROGRAM,
@@ -708,6 +710,7 @@ describe("queued withdrawal capability", () => {
         allowWithdrawals: true,
         secondsToMaturity: 60,
         minimumSecondsToDeadline: 120,
+        maximumSecondsToDeadline: 7_776_000,
         minimumDiscountBps: 25,
         maximumDiscountBps: 500,
         minimumShares: "0.1",

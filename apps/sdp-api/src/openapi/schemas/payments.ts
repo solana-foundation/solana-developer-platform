@@ -9,47 +9,59 @@ import {
   UNIFIED_TRANSACTION_MODULE_CONTRACTS,
   WALLET_OPERATION_FAMILIES,
 } from "@sdp/types";
+import { listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase } from "@/routes/payments/ramps/offramp/schemas";
 import {
   createOnrampQuoteSchema as createOnrampQuoteSchemaBase,
-  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
-  createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
-  createSubscriptionSchema as createSubscriptionSchemaBase,
-  createTransferBatchSchema as createTransferBatchSchemaBase,
-  createTransferSchema as createTransferSchemaBase,
-  estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
-  listOfframpCurrenciesQuerySchema as listOfframpCurrenciesQuerySchemaBase,
   listOnrampCurrenciesQuerySchema as listOnrampCurrenciesQuerySchemaBase,
+} from "@/routes/payments/ramps/onramp/schemas";
+import { simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase } from "@/routes/payments/ramps/schemas";
+import {
+  createRecurringPaymentSchema as createRecurringPaymentSchemaBase,
   listRecurringPaymentsQuerySchema as listRecurringPaymentsQuerySchemaBase,
-  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
-  listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
-  listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
-  listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
-  listTransfersQuerySchema as listTransfersQuerySchemaBase,
   paymentRecurringPaymentStatusSchema as paymentRecurringPaymentStatusSchemaBase,
-  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
+  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
+  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
+} from "@/routes/payments/recurring-payments/schemas";
+import {
+  createSubscriptionPlanSchema as createSubscriptionPlanSchemaBase,
+  listSubscriptionPlansQuerySchema as listSubscriptionPlansQuerySchemaBase,
   paymentSubscriptionPlanStatusSchema as paymentSubscriptionPlanStatusSchemaBase,
+  prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
+  subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
+  updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
+} from "@/routes/payments/subscription-plans/schemas";
+import {
+  createSubscriptionSchema as createSubscriptionSchemaBase,
+  listSubscriptionCollectionAttemptsQuerySchema as listSubscriptionCollectionAttemptsQuerySchemaBase,
+  listSubscriptionsQuerySchema as listSubscriptionsQuerySchemaBase,
+  paymentSubscriptionCollectionAttemptStatusSchema as paymentSubscriptionCollectionAttemptStatusSchemaBase,
   paymentSubscriptionStatusSchema as paymentSubscriptionStatusSchemaBase,
   prepareSubscriptionAuthorizationSchema as prepareSubscriptionAuthorizationSchemaBase,
   prepareSubscriptionCollectionSchema as prepareSubscriptionCollectionSchemaBase,
   prepareSubscriptionLifecycleSchema as prepareSubscriptionLifecycleSchemaBase,
-  prepareSubscriptionPlanCreateSchema as prepareSubscriptionPlanCreateSchemaBase,
-  priorityFeeSchema as priorityFeeSchemaBase,
-  recurringPaymentIdParamsSchema as recurringPaymentIdParamsSchemaBase,
-  simulateSandboxTransferSchema as simulateSandboxTransferSchemaBase,
   subscriptionIdParamsSchema as subscriptionIdParamsSchemaBase,
-  subscriptionPlanIdParamsSchema as subscriptionPlanIdParamsSchemaBase,
+} from "@/routes/payments/subscriptions/schemas";
+import {
+  createTransferBatchSchema as createTransferBatchSchemaBase,
+  estimateTransferBatchSchema as estimateTransferBatchSchemaBase,
+  listTransferBatchesQuerySchema as listTransferBatchesQuerySchemaBase,
+  priorityFeeSchema as priorityFeeSchemaBase,
   transferBatchIdParamsSchema as transferBatchIdParamsSchemaBase,
   transferBatchRecipientStatusSchema as transferBatchRecipientStatusSchemaBase,
   transferBatchStatusSchema as transferBatchStatusSchemaBase,
+} from "@/routes/payments/transfer-batches/schemas";
+import {
+  createTransferSchema as createTransferSchemaBase,
+  listTransfersQuerySchema as listTransfersQuerySchemaBase,
   transferDirectionSchema as transferDirectionSchemaBase,
-  transferIdParamsSchema as transferIdParamsSchemaBase,
   transferStatusSchema as transferStatusSchemaBase,
   transferTypeSchema as transferTypeSchemaBase,
-  updateRecurringPaymentSchema as updateRecurringPaymentSchemaBase,
-  updateSubscriptionPlanSchema as updateSubscriptionPlanSchemaBase,
+} from "@/routes/payments/transfers/schemas";
+import {
   updateWalletPolicyBaseSchema as updateWalletPolicySchemaBase,
   walletIdParamsSchema as walletIdParamsSchemaBase,
-} from "../../routes/payments/schemas";
+} from "@/routes/payments/wallet-policies/schemas";
+import { transferIdParamsSchema as transferIdParamsSchemaBase } from "../../routes/payments/schemas";
 import {
   base64Schema,
   cryptoAssetSymbolSchema,
@@ -75,11 +87,11 @@ export const tokenAmountSchema = z.string().openapi({
 
 export const policyRuleSchema = withOpenApi(updateWalletPolicySchemaBase.shape.rules.element, {
   description:
-    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always. Program-family operations include earn_vault_deposit, earn_vault_withdrawal and earn_program_withdrawal.",
+    "Wallet control profile rule. Supported kinds include operation_family, operation_type, asset, destination, amount, approval, and always.",
   example: {
-    id: "approve-vault-deposits",
+    id: "approve-batch-transfers",
     kind: "operation_type",
-    operationTypes: ["earn_vault_deposit"],
+    operationTypes: ["payment_transfer_batch_execute"],
     action: "approval_required",
   },
 });
@@ -414,9 +426,9 @@ export const updateWalletPolicyRequestSchema = updateWalletPolicySchemaBase
         "Rules for the new immutable wallet control profile revision, activated after validation.",
       example: [
         {
-          id: "approve-vault-deposits",
+          id: "approve-batch-transfers",
           kind: "operation_type",
-          operationTypes: ["earn_vault_deposit"],
+          operationTypes: ["payment_transfer_batch_execute"],
           action: "approval_required",
         },
       ],
@@ -565,9 +577,18 @@ export const transferInitiatorSchema = z
 
 export const moneygramTransferDetailsSchema = z
   .object({
+    customerId: z.string().optional().openapi({
+      description:
+        "MoneyGram profile id for the counterparty; matches the MoneyGram customer_link provider account reference.",
+      example: "mg_profile_example",
+    }),
     transactionId: z.string().optional().openapi({
       description: "MoneyGram xRamps transaction identifier.",
       example: "mgi_tx_example",
+    }),
+    mgiTransactionId: z.string().optional().openapi({
+      description: "MoneyGram-side transaction identifier used to correlate status webhooks.",
+      example: "mgi_correlation_example",
     }),
     referenceNumber: z.string().optional().openapi({
       description: "Cash pickup reference number issued by MoneyGram.",
@@ -599,8 +620,11 @@ export const moneygramTransferDetailsSchema = z
 /**
  * Provider-reported ramp settlement economics, mirroring the
  * `RampTransferSettlement` union in `@sdp/types`. BVNK on-ramp transfers
- * carry the PROCESSING variant once the payout is created and the COMPLETE
- * variant once the crypto payout settles.
+ * carry the PROCESSING variant once the payout is created, the COMPLETE
+ * variant once the crypto payout settles, and BVNK off-ramp transfers the
+ * offramp_channel variant once the confirmed channel transaction settles
+ * them. The BVNK members share the provider discriminator, so the outer
+ * union is a plain union, not a discriminated one.
  */
 const moonpayRampSettlementSchema = z
   .object({
@@ -729,11 +753,54 @@ const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
   bvnkRampCompleteSettlementSchema,
 ]);
 
-const rampTransferSettlementSchema = z.discriminatedUnion("provider", [
+const bvnkOfframpChannelSettlementSchema = z
+  .object({
+    provider: z.literal("bvnk"),
+    kind: z.literal("offramp_channel"),
+    status: z.literal("COMPLETE"),
+    channelId: z.string().openapi({ description: "BVNK channel uuid the crypto was paid into." }),
+    transactionId: z
+      .string()
+      .openapi({ description: "BVNK channel transaction uuid (event `uuid`)." }),
+    txHash: z.string().openapi({ description: "Deposit transaction hash (event `hash`)." }),
+    depositAddress: z.string().openapi({ description: "Channel deposit address the crypto paid." }),
+    cryptoCurrency: z.string().openapi({ description: "Crypto paid in (event `paidCurrency`)." }),
+    cryptoAmount: z.string().openapi({ description: "Crypto paid in, as a decimal string." }),
+    fiatCurrency: z
+      .string()
+      .openapi({ description: "Fiat credited to the funding wallet (event `walletCurrency`)." }),
+    fiatAmount: z.string().openapi({ description: "Fiat credited, as a decimal string." }),
+    displayCurrency: z
+      .string()
+      .openapi({ description: "Display currency (event `displayCurrency`)." }),
+    displayAmount: z.string().openapi({ description: "Display amount, as a decimal string." }),
+    feeCurrency: z.string().openapi({ description: "Fee currency." }),
+    feeAmount: z.string().openapi({ description: "Fee amount, as a decimal string." }),
+    networkFeeCurrency: z
+      .string()
+      .openapi({ description: "Network fee currency (event `networkFee.paidCurrency`)." }),
+    networkFeeAmount: z
+      .string()
+      .openapi({ description: "Network fee amount, as a decimal string." }),
+    exchangeRate: z.string().openapi({
+      description: "Exchange rate (event `exchangeRate.rate`), as a decimal string.",
+    }),
+    sources: z
+      .array(z.string())
+      .openapi({ description: "Source wallet addresses that paid the channel." }),
+  })
+  .openapi({ description: "BVNK off-ramp channel settlement economics." });
+
+const bvnkSettlementSchema = z.union([
+  bvnkRampSettlementSchema,
+  bvnkOfframpChannelSettlementSchema,
+]);
+
+const rampTransferSettlementSchema = z.union([
   moonpayRampSettlementSchema,
   lightsparkRampSettlementSchema,
   coinbaseRampSettlementSchema,
-  bvnkRampSettlementSchema,
+  bvnkSettlementSchema,
 ]);
 
 export const transferSchema = z

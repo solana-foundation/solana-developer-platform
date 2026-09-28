@@ -5,6 +5,10 @@ import {
 } from "@sdp/earn";
 import type { EarnRuntimeContext, EarnVaultProvider } from "@sdp/earn/types";
 import {
+  assertNotPortfolioProvider as assertHastraNotPortfolioProvider,
+  HastraVaultDirectClient,
+} from "@sdp/hastra";
+import {
   assertJupiterLendNotPortfolioProvider,
   JupiterLendVaultDirectClient,
 } from "@sdp/jupiter-lend";
@@ -21,6 +25,7 @@ import {
 import { assertWisdomTreeNotPortfolioProvider, WisdomTreeVaultDirectClient } from "@sdp/wisdomtree";
 import type { Env } from "@/types/env";
 import { assertClusterEndpoint, resolveClusterRpcUrl } from "./earn/execution-registry";
+import { createHastraSwapPort } from "./earn/hastra-swap-port";
 import { createOndoSwapPort } from "./earn/ondo-swap-port";
 import { createVaultDeadline } from "./earn/vault-deadline";
 
@@ -67,6 +72,10 @@ const ondo = new OndoVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (
   createOndoSwapPort(ctx.env as unknown as Env)
 );
 assertOndoNotPortfolioProvider(ondo);
+const hastra = new HastraVaultDirectClient(resolveProvenRpcUrl, runVaultOperation, (ctx) =>
+  createHastraSwapPort(ctx.env as unknown as Env)
+);
+assertHastraNotPortfolioProvider(hastra);
 
 /**
  * API composition root for Earn providers.
@@ -83,6 +92,7 @@ export const EARN_PROVIDER_CLIENTS = {
   jupiter_lend: jupiterLend,
   veda,
   ondo,
+  hastra,
   wisdomtree,
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 

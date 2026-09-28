@@ -270,7 +270,12 @@
       "addressAutocompleteFailed": "Chúng tôi không thể tìm kiếm địa chỉ. Thử lại.",
       "addressDetailsFailed": "Chúng tôi không tải được địa chỉ đó. Hãy thử tìm kiếm khác.",
       "payoutAccountsTitle": "Tài khoản thanh toán đã lưu",
-      "payoutAccountsDescription": "Chọn nơi nhận khoản thanh toán này, hoặc điền thông tin bên dưới để thanh toán vào tài khoản mới."
+      "payoutAccountsDescription": "Chọn nơi nhận khoản thanh toán này, hoặc điền thông tin bên dưới để thanh toán vào tài khoản mới.",
+      "transferHeldForApproval": "Chính sách của wallet này yêu cầu khoản chuyển được phê duyệt trước khi gửi, vì vậy MoneyGram không thể tiếp tục. Chưa có gì được chuyển đi. Nếu không muốn gửi sau này, hãy hủy yêu cầu trong Approvals.",
+      "transferApprovalPending": "Chờ phê duyệt",
+      "offrampHeldDescription": "Chưa có gì được chuyển đi. Sau khi được phê duyệt, {amount} {token} sẽ được gửi tới địa chỉ nạp bên dưới. Nếu Báo giá hết hạn trước, khoản gửi sẽ không được thực hiện và bạn sẽ cần Báo giá mới.",
+      "moneygramDepositUnconfirmed": "Không thể xác nhận địa chỉ nạp của MoneyGram, vì vậy không có gì được gửi.",
+      "moneygramTransactionUnreported": "MoneyGram yêu cầu nạp trước khi ghi nhận giao dịch, vì vậy không có gì được gửi."
     },
     "onchainSend": {
       "noAssets": "Wallet này không có Asset để gửi.",
@@ -302,7 +307,10 @@
       "transferFailed": "Chuyển thất bại.",
       "transferSuccess": "Chuyển của bạn đã gửi thành công.",
       "transferStatus": "Trạng thái: {status}",
-      "viewOnExplorer": "Xem trên explorer"
+      "viewOnExplorer": "Xem trên explorer",
+      "approvalPendingTitle": "Chờ phê duyệt",
+      "approvalPendingDescription": "Chính sách của wallet này yêu cầu khoản chuyển được phê duyệt trước khi gửi. Chưa có gì được chuyển đi.",
+      "viewApprovalRequest": "Xem yêu cầu phê duyệt"
     },
     "onchainReceive": {
       "wallet": "Wallet",
@@ -337,7 +345,9 @@
       "agreementSigningTitle": "Đang xác nhận thỏa thuận",
       "agreementSigningDescription": "Đang chờ nhà cung cấp xác nhận thỏa thuận đã ký. Việc này thường mất vài giây.",
       "agreementConsentPrefix": "Tôi đã đọc và đồng ý với",
-      "privacyPolicy": "chính sách quyền riêng tư"
+      "privacyPolicy": "chính sách quyền riêng tư",
+      "settlementProcessing": "Đang xử lý tại BVNK",
+      "settlementCompleted": "Hoàn tất"
     },
     "lightspark": {
       "verificationRequiredTitle": "Xác minh danh tính",
@@ -488,7 +498,9 @@
       "quotedAmount": "số tiền trong Báo giá",
       "cryptoDeposit": "Nạp {currency}",
       "virtualAccount": "Tài khoản ảo {currency}",
-      "payin": "Payin {currency}"
+      "payin": "Payin {currency}",
+      "paymentReferenceRequired": "Tham chiếu thanh toán (bắt buộc)",
+      "remittancePrefix": "Tiền tố remittance"
     },
     "providerRisk": {
       "close": "Đóng {title}",
@@ -674,7 +686,13 @@
       "agreementSigned": "Đã ký",
       "agreementAwaitingSignature": "Chờ ký",
       "viewAgreement": "Thỏa thuận",
-      "viewPrivacyPolicy": "Chính sách quyền riêng tư"
+      "viewPrivacyPolicy": "Chính sách quyền riêng tư",
+      "providerAccountBalanceUnavailable": "Số dư không khả dụng",
+      "providerAccountFundingWallet": "Wallet {currency}",
+      "providerAccountWalletActive": "Hoạt động",
+      "providerAccountWalletProvisioning": "Đang cấp phát",
+      "customerIdLabel": "Mã khách hàng",
+      "walletIdLabel": "Mã Wallet"
     },
     "playground": {
       "moonPay": "MoonPay",
@@ -781,7 +799,14 @@
       "copy": "Sao chép {label}",
       "viewReceipt": "Xem biên nhận",
       "receipt": "Biên nhận",
-      "failureReason": "Lý do thất bại"
+      "failureReason": "Lý do thất bại",
+      "status": "Trạng thái",
+      "payinId": "ID Pay-in",
+      "fiatSent": "Số tiền đã quy đổi",
+      "cryptoToReceive": "Crypto sẽ nhận",
+      "received": "Đã nhận",
+      "credited": "Đã ghi có",
+      "depositTx": "Giao dịch nạp tiền"
     },
     "requestFailed": "Yêu cầu thất bại.",
     "submitting": "Đang gửi...",

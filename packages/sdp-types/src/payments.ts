@@ -422,11 +422,44 @@ export const bvnkRampSettlementSchema = z.discriminatedUnion("status", [
 
 export type BvnkRampSettlement = z.infer<typeof bvnkRampSettlementSchema>;
 
+/**
+ * BVNK off-ramp channel settlement economics, recorded once when the
+ * confirmed channel-transaction webhook settles the transfer: the crypto
+ * received (`paidAmount`), the fiat credited to the funding wallet
+ * (`walletAmount`), the fee and network-fee legs, the exchange rate, the
+ * deposit transaction hash, and the source wallet addresses that paid the channel.
+ * Amounts are decimal strings.
+ */
+export const bvnkOfframpChannelSettlementSchema = z.object({
+  provider: z.literal("bvnk"),
+  kind: z.literal("offramp_channel"),
+  status: z.literal("COMPLETE"),
+  channelId: z.string(),
+  transactionId: z.string(),
+  txHash: z.string(),
+  depositAddress: z.string(),
+  cryptoCurrency: z.string(),
+  cryptoAmount: z.string(),
+  fiatCurrency: z.string(),
+  fiatAmount: z.string(),
+  displayCurrency: z.string(),
+  displayAmount: z.string(),
+  feeCurrency: z.string(),
+  feeAmount: z.string(),
+  networkFeeCurrency: z.string(),
+  networkFeeAmount: z.string(),
+  exchangeRate: z.string(),
+  sources: z.array(z.string()),
+});
+
+export type BvnkOfframpChannelSettlement = z.infer<typeof bvnkOfframpChannelSettlementSchema>;
+
 export type RampTransferSettlement =
   | MoonpayRampSettlement
   | LightsparkRampSettlement
   | CoinbaseRampSettlement
-  | BvnkRampSettlement;
+  | BvnkRampSettlement
+  | BvnkOfframpChannelSettlement;
 
 /** Where an off-ramp sale expects the crypto deposit, reported by the provider while awaiting payment. */
 export interface RampCryptoDeposit {
@@ -437,7 +470,11 @@ export interface RampCryptoDeposit {
 }
 
 export interface MoneygramTransferDetails {
+  /** MoneyGram's profile id for the counterparty, the same reference stored on its `customer_link` provider account. */
+  customerId?: string;
   transactionId?: string;
+  /** MoneyGram-side transaction id; the correlation key for MoneyGram status webhooks. */
+  mgiTransactionId?: string;
   referenceNumber?: string;
   payoutAmount?: number;
   payoutStatus?: string;
@@ -1477,6 +1514,13 @@ export type CoinbaseRampEvent =
   | { kind: "errored"; orderId: string; reason: string };
 
 export type MoneygramRampEvent =
+  | {
+      kind: "transaction_created";
+      sessionId: string;
+      transactionId: string;
+      mgiTransactionId?: string;
+    }
+  | { kind: "deposit_address"; sessionId: string }
   | { kind: "signed"; sessionId: string; cryptoTransferId: string }
   | {
       kind: "onramp_completed";

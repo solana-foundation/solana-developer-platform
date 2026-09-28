@@ -12,8 +12,7 @@
 import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { DvpCreateWorkspace } from "./dvp-create-workspace";
 
@@ -62,9 +61,9 @@ function renderForm(
   cluster: "devnet" | "mainnet-beta" = "devnet"
 ) {
   return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpCreateWorkspace cluster={cluster} context={{ ...context, ...overrides }} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 

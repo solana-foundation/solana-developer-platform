@@ -1,4 +1,5 @@
 import { COUNTERPARTY_ENTITY_TYPES, COUNTRY_CODES, RAMP_PROVIDERS } from "@sdp/types";
+import { rampDirectionSchema as rampDirectionSchemaBase } from "@/routes/payments/ramps/schemas";
 import {
   counterpartyEntityTypeSchema as counterpartyEntityTypeSchemaBase,
   counterpartyIdParamsSchema as counterpartyIdParamsSchemaBase,
@@ -16,7 +17,6 @@ import {
   updateCounterpartyAccountObjectSchema as updateCounterpartyAccountSchemaBase,
 } from "../../routes/counterparty-accounts/schemas";
 import { listCounterpartyProviderAccountsQuerySchema as listCounterpartyProviderAccountsQuerySchemaBase } from "../../routes/counterparty-provider-accounts/schemas";
-import { rampDirectionSchema as rampDirectionSchemaBase } from "../../routes/payments/schemas";
 import {
   isoDateTimeSchema,
   orgIdParamSchema,
@@ -667,6 +667,35 @@ export const counterpartyProviderAccountSchema = withOpenApi(
       {
         description:
           "The counterparty's provider customer link, present once the provider onboarding has started.",
+      }
+    ),
+    providerAccountReference: withOpenApi(z.string().optional(), {
+      description:
+        "The provider's own wallet/account id; present on wallet kinds once the provider assigned it.",
+      example: "a:26091815750755:c1aVEgc:1",
+    }),
+    balance: withOpenApi(
+      z
+        .discriminatedUnion("state", [
+          z.object({
+            state: z.literal("available"),
+            amount: withOpenApi(z.string(), {
+              description: "Live wallet balance as a decimal string.",
+              example: "9.90",
+            }),
+            currency: withOpenApi(z.string(), {
+              description: "Balance currency.",
+              example: "USD",
+            }),
+          }),
+          z.object({
+            state: z.literal("unavailable"),
+          }),
+        ])
+        .optional(),
+      {
+        description:
+          "Live provider-wallet balance, fetched just in time; present only on wallet kinds whose reference exists. unavailable keeps the row visible when the provider read fails.",
       }
     ),
   }),

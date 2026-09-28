@@ -74,6 +74,33 @@ export function isEarnEnabled(env: Pick<Env, "MARKETS_ENABLED" | "EARN_ENABLED">
 }
 
 /**
+ * Whether the rollout switch for Hastra's optional PRIME -> wYLDS -> Jupiter
+ * -> USDC exit is on. Off by default: Hastra's operator-settled par redemption
+ * remains the default exit rail and is intentionally independent from it.
+ */
+export function isEarnHastraDexExitEnabled(
+  env: Pick<Env, "EARN_HASTRA_DEX_EXIT_ENABLED">
+): boolean {
+  return isTruthyFlag(env.EARN_HASTRA_DEX_EXIT_ENABLED);
+}
+
+/**
+ * Whether this deployment can actually offer the optional Hastra DEX rail.
+ * The rollout switch is the product decision; the Jupiter key is the runtime
+ * prerequisite. Keeping both here prevents withdrawal-options and strategy
+ * metadata from advertising a route whose builder cannot authenticate.
+ */
+export function isEarnHastraDexExitConfigured(
+  env: Pick<Env, "EARN_HASTRA_DEX_EXIT_ENABLED" | "JUPITER_SWAP_API_KEY">
+): boolean {
+  return (
+    isEarnHastraDexExitEnabled(env) &&
+    typeof env.JUPITER_SWAP_API_KEY === "string" &&
+    env.JUPITER_SWAP_API_KEY.trim().length > 0
+  );
+}
+
+/**
  * Whether Kora sponsors an Earn vault movement on `cluster`: both the network
  * fee and the share-ATA rent a first deposit needs.
  *

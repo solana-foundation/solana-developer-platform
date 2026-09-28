@@ -137,7 +137,8 @@ const copy = vi.hoisted<Record<string, string>>(() => ({
     "The live share quote is unavailable right now, so this deposit cannot be sized safely. Try again in a moment.",
   "DashboardEarn.deposit.vaultQuoteBlocked":
     "The vault is not accepting this deposit right now: {message}",
-  "DashboardEarn.deposit.vaultSlippageToggle": "Slippage tolerance: {percent}",
+  "DashboardEarn.deposit.vaultSlippageTitle": "Slippage tolerance",
+  "DashboardEarn.deposit.vaultSlippageToggle": "Up to {percent} less than quoted",
   "DashboardEarn.deposit.vaultSlippageLabel": "Slippage tolerance (basis points)",
   "DashboardEarn.deposit.vaultSlippageHelp":
     "The deposit refuses to execute if the vault would mint fewer shares than this tolerance allows.",
@@ -668,7 +669,12 @@ describe("EarnVaultDepositModal", () => {
     // The movement is real and may still be settling: refresh and watch it.
     expect(onDeposited).toHaveBeenCalledWith(
       expect.objectContaining({ movementId: "movement_1", replayed: true }),
-      { amount: "1", custodyWalletId: "wallet_1", projectBalance: false }
+      {
+        amount: "1",
+        custodyWalletId: "wallet_1",
+        projectBalance: false,
+        submittedAt: expect.any(Number),
+      }
     );
     // Recorded deposit retires the key, so a deliberate second deposit mints
     // fresh and genuinely moves money.
@@ -860,6 +866,7 @@ describe("EarnVaultDepositModal", () => {
         amount: "1",
         custodyWalletId: "wallet_1",
         projectBalance: true,
+        submittedAt: expect.any(Number),
       });
     }
   );
@@ -893,6 +900,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "1",
       custodyWalletId: "wallet_1",
       projectBalance: false,
+      submittedAt: expect.any(Number),
     });
   });
 
@@ -1064,6 +1072,7 @@ describe("EarnVaultDepositModal", () => {
       amount: "5",
       custodyWalletId: "wallet_1",
       projectBalance: false,
+      submittedAt: expect.any(Number),
     });
     // Paying in a different token is a DIFFERENT request: the held-key
     // fingerprint must not collide with an unswapped deposit of the same

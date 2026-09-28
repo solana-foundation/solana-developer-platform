@@ -13,8 +13,7 @@ import { SPL_TOKEN_PROGRAMS } from "@sdp/types";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../../test-i18n";
 import type { DvpCreateContext } from "./dvp-create.data";
 import { useDvpCreateForm } from "./use-dvp-create-form";
 
@@ -48,11 +47,7 @@ beforeEach(() => {
 });
 
 function withI18n({ children }: { children: ReactNode }) {
-  return (
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {children}
-    </I18nProvider>
-  );
+  return <EnglishTestI18n>{children}</EnglishTestI18n>;
 }
 
 const TOKEN_2022 = SPL_TOKEN_PROGRAMS["token-2022"];

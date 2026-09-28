@@ -10,14 +10,13 @@ catalog:
   # is only ever handed encoded wire bytes, never a kit object.
   '@solana-program/system': 0.14.1
   '@solana-program/token': 0.16.1
-  # Held at 0.16.1, not moved to the 0.18.0 that @solana/mosaic-sdk pins: 0.18.0
-  # published 2026-09-16 and is still inside this workspace's 7-day release cooldown,
-  # and nothing here needs it — SDP uses only stable core exports (decodeMint,
+  # Held at the 0.17.0 main carries, not moved to the 0.18.0 that @solana/mosaic-sdk
+  # pins: nothing here needs it — SDP uses only stable core exports (decodeMint,
   # getMintSize, the metadata instruction, the program address), and every confidential
   # helper is reached through mosaic, which carries its own 0.18.0. Move this to 0.18.0
   # when the mosaic override below is swapped for the published release, so the tree
   # settles on one copy.
-  '@solana-program/token-2022': 0.16.1
+  '@solana-program/token-2022': 0.17.0
   '@solana/addresses': 8.3.0
   '@solana/codecs': 8.3.0
   '@solana/instruction-plans': 8.3.0

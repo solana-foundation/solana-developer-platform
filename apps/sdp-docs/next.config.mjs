@@ -49,6 +49,21 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Baseline for every docs route: framing/clickjacking, object and
+        // base-tag injection are never legitimate here. Production traffic
+        // also reaches this app through sdp-web's server-side /docs proxy,
+        // which is never framed either.
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+      {
         // The configurator builds a .env entirely in the browser. Restricting
         // connections to same-origin blocks cross-origin exfiltration of the values
         // typed here, while still allowing the docs framework's own same-origin

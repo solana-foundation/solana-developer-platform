@@ -539,7 +539,16 @@ describe("provider-order settlement boundary", () => {
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);
+    logEvent.mockClear();
     await reconcileEarnVaultMovements(env);
+
+    expect(logEvent).toHaveBeenCalledWith(
+      "info",
+      expect.objectContaining({
+        event: "sdp_api_earn_vault_reconciliation_tick",
+        finalized: 1,
+      })
+    );
 
     // The payment leg is irreversible, but WisdomTree has not delivered shares.
     // Keep that narrower chain fact separate from the economic lifecycle.
@@ -653,6 +662,29 @@ describe("provider-order settlement boundary", () => {
   it("leaves atomic provider finalization and position closing unchanged", async () => {
     const seeded = await seedWithdrawal();
     const receiver = seeded.movement.destination_address ?? seeded.movement.owner_address ?? "";
+    getSignatureStatuses.mockResolvedValue([
+      { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
+    ]);
+    getTransaction.mockResolvedValue(landedPayout(receiver, "1000000"));
+    readVaultPositions.mockResolvedValue(liveSnapshot(seeded.position, receiver, "0"));
+
+    const movement = await reconcileEarnVaultMovementReadThrough(env, seeded.movement);
+
+    expect(movement).toMatchObject({
+      status: "finalized",
+      settled_at: expect.any(String),
+      token_amount_settled: "1",
+    });
+    await expect(positionRow(seeded.position.id)).resolves.toMatchObject({
+      closed_at: expect.any(String),
+    });
+  });
+
+  it("keeps an admitted Hastra DEX withdrawal atomic after the rollout flag is off", async () => {
+    const seeded = await seedWithdrawal("100", "hastra");
+    const receiver = seeded.movement.destination_address ?? seeded.movement.owner_address ?? "";
+    env.EARN_HASTRA_DEX_EXIT_ENABLED = undefined;
+    env.JUPITER_SWAP_API_KEY = undefined;
     getSignatureStatuses.mockResolvedValue([
       { slot: 1n, confirmations: null, err: null, confirmationStatus: "finalized" },
     ]);

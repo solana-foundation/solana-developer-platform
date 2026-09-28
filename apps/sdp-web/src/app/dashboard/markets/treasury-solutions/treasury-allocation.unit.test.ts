@@ -564,8 +564,19 @@ describe("no two surfaces disagree", () => {
       const anyWalletUnavailable = [...summary.deploymentByWalletId.values()].some(
         (line) => line.kind === "unavailable"
       );
+
+      // Each implication is asserted in BOTH directions so a scenario with no
+      // failure state to trip (the fully-readable ones) still pins agreement
+      // instead of passing vacuously:
       if (anyWalletUnavailable) {
         expect(summary.deployedValue).toBeUndefined();
+      }
+      if (summary.deployedValue !== undefined) {
+        expect(anyWalletUnavailable).toBe(false);
+        expect(summary.unrecordedShareMints).toEqual(new Set());
+      }
+      if ((summary.unrecordedShareMints?.size ?? 0) > 0) {
+        expect(anyWalletUnavailable).toBe(true);
       }
 
       // Note the implication runs ONE way only. The converse does not hold and

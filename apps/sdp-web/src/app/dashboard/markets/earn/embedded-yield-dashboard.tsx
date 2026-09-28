@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { TokenMark } from "@/components/token-mark";
 import { Badge } from "@/components/ui/badge";
@@ -41,11 +41,7 @@ import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { truncateMiddle } from "../truncate-middle";
 import { isPositiveDecimal } from "./earn-decimal";
-import {
-  earnStrategyLiquidityLabel,
-  formatEpochSeconds,
-  formatProviderAmount,
-} from "./earn-format";
+import { earnStrategyLiquidityLabel, formatEpochSeconds, formatTokenValue } from "./earn-format";
 import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
 
@@ -454,7 +450,7 @@ function StrategyWalletDetails({
                   <p className="mt-0.5 text-sm text-primary tabular-nums">
                     {position.tokenValue === undefined
                       ? t("DashboardMarkets.earnProgram.valueUnavailable")
-                      : formatProviderAmount(position.tokenValue, locale, asset.symbol)}
+                      : formatTokenValue(position.tokenValue, asset.mint, locale)}
                   </p>
                 </div>
                 <div>
@@ -514,11 +510,15 @@ function PortfolioByStrategy({
   const t = useTranslations();
   const locale = useLocale();
   const reduceMotion = useReducedMotion();
-  const strategiesByReference = new Map(
-    (strategies ?? []).map((strategy) => [
-      earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
-      strategy,
-    ])
+  const strategiesByReference = useMemo(
+    () =>
+      new Map(
+        (strategies ?? []).map((strategy) => [
+          earnStrategyReferenceKey(strategy.provider, strategy.providerReference),
+          strategy,
+        ])
+      ),
+    [strategies]
   );
 
   return (
@@ -620,7 +620,7 @@ function PortfolioByStrategy({
                                 className="text-sm text-primary tabular-nums"
                                 key={total.tokenMint}
                               >
-                                {formatProviderAmount(total.tokenValue, locale, asset.symbol)}
+                                {formatTokenValue(total.tokenValue, asset.mint, locale)}
                               </span>
                             );
                           })}
@@ -681,9 +681,9 @@ export function EmbeddedYieldDashboard({ configureHref }: { configureHref: strin
   const { summary, error, isInitialLoading } = useEarnExternalWalletPositionSummary({
     detailsVisible: selectedStrategyId !== null,
   });
-  const positions = summary ? portfolioPositions(summary) : [];
-  const walletAges = buildAgeDistribution(positions, "wallets");
-  const positionAges = buildAgeDistribution(positions, "positions");
+  const positions = useMemo(() => (summary ? portfolioPositions(summary) : []), [summary]);
+  const walletAges = useMemo(() => buildAgeDistribution(positions, "wallets"), [positions]);
+  const positionAges = useMemo(() => buildAgeDistribution(positions, "positions"), [positions]);
 
   if (isInitialLoading) return <EmbeddedYieldPortfolioSkeleton />;
 

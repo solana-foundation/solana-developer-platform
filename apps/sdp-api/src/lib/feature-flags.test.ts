@@ -4,6 +4,8 @@ import {
   isAssetProfilesEnabled,
   isCustodyConnectionRuntimeEnabled,
   isEarnEnabled,
+  isEarnHastraDexExitConfigured,
+  isEarnHastraDexExitEnabled,
   isEarnVaultSponsorshipEnabled,
   isMarketsEnabled,
   isPrivateChannelsEnabled,
@@ -161,6 +163,37 @@ describe("isEarnEnabled", () => {
       expect(isEarnEnabled({ MARKETS_ENABLED: flag, EARN_ENABLED: flag })).toBe(true);
     }
   );
+});
+
+describe("isEarnHastraDexExitEnabled", () => {
+  it.each([undefined, "", "false", "0", "off"])("is disabled when the flag is %s", (flag) => {
+    expect(isEarnHastraDexExitEnabled({ EARN_HASTRA_DEX_EXIT_ENABLED: flag })).toBe(false);
+  });
+
+  it.each(["1", "true", " TRUE ", "yes", "on"])("honors the opt-in value %s", (flag) => {
+    expect(isEarnHastraDexExitEnabled({ EARN_HASTRA_DEX_EXIT_ENABLED: flag })).toBe(true);
+  });
+
+  it("requires both the rollout flag and the Jupiter runtime key to be configured", () => {
+    expect(
+      isEarnHastraDexExitConfigured({
+        EARN_HASTRA_DEX_EXIT_ENABLED: "true",
+        JUPITER_SWAP_API_KEY: undefined,
+      })
+    ).toBe(false);
+    expect(
+      isEarnHastraDexExitConfigured({
+        EARN_HASTRA_DEX_EXIT_ENABLED: undefined,
+        JUPITER_SWAP_API_KEY: "jup_test_key",
+      })
+    ).toBe(false);
+    expect(
+      isEarnHastraDexExitConfigured({
+        EARN_HASTRA_DEX_EXIT_ENABLED: "true",
+        JUPITER_SWAP_API_KEY: " jup_test_key ",
+      })
+    ).toBe(true);
+  });
 });
 
 describe("isEarnVaultSponsorshipEnabled", () => {

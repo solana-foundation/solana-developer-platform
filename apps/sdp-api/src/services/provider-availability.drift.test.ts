@@ -49,12 +49,13 @@ describe("earn provider credential key drift", () => {
    * carry an empty key set, so adding one here is a decision someone makes on
    * purpose.
    *
-   * Read per provider rather than by `<ID>_` prefix: Ondo's readiness key is
+   * Read per provider rather than by `<ID>_` prefix: Ondo gates readiness on
    * the platform `JUPITER_SWAP_API_KEY`, which a prefix match would misread as
-   * "declares nothing" and wave through.
+   * "declares nothing" and wave through. Hastra is intentionally keyless at
+   * the provider level; only its optional DEX rail needs that key.
    */
   it("declares credential keys for every earn provider except the known keyless ones", () => {
-    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend"]);
+    const KEYLESS_EARN_PROVIDERS = new Set(["kamino", "veda", "jupiter_lend", "hastra"]);
     const undeclared = EARN_PROVIDERS.filter(
       (provider) =>
         !KEYLESS_EARN_PROVIDERS.has(provider) &&
@@ -69,7 +70,7 @@ describe("earn provider credential key drift", () => {
    * so the set above cannot quietly carry a provider that grew a credential.
    */
   it("declares no credential keys for the known keyless providers", () => {
-    for (const provider of ["kamino", "veda", "jupiter_lend"] as const) {
+    for (const provider of ["kamino", "veda", "jupiter_lend", "hastra"] as const) {
       expect({ provider, keys: EARN_CREDENTIAL_ENV_KEYS_BY_PROVIDER[provider] }).toEqual({
         provider,
         keys: [],

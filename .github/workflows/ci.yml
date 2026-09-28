@@ -186,6 +186,7 @@ jobs:
       rest: ${{ steps.detect.outputs.rest }}
       e2e: ${{ steps.detect.outputs.e2e }}
       docker: ${{ steps.detect.outputs.docker }}
+      embedded_yield_example: ${{ steps.detect.outputs.embedded_yield_example }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -196,7 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            for scope in api rest e2e docker; do echo "${scope}=true" >> "$GITHUB_OUTPUT"; done
+            for scope in api rest e2e docker embedded_yield_example; do echo "${scope}=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
           changed=$(git diff --name-only "origin/${BASE_REF}...HEAD")
@@ -212,6 +213,7 @@ jobs:
           detect rest '^(apps/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
           detect e2e '^(apps/sdp-api/|apps/sdp-web/|packages/|package\.json|\.npmrc|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|turbo\.json|scripts/|\.github/workflows/ci\.yml)'
           detect docker '^(apps/|packages/|package\.json|\.npmrc|tsconfig\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|patches/|scripts/docker/|docker-compose(\.ci)?\.yml|\.dockerignore|\.github/workflows/ci\.yml)'
+          detect embedded_yield_example '^(examples/embedded-yield-bank/|\.github/workflows/ci\.yml)'
 
   test:
     name: Unit Tests (api ${{ matrix.shard }}/8)
@@ -368,6 +370,37 @@ jobs:
       - name: Merge coverage and enforce thresholds
         working-directory: apps/sdp-api
         run: pnpm exec vitest run --merge-reports --coverage
+
+  test_embedded_yield_example:
+    name: Unit Tests (embedded-yield-bank)
+    needs: unit_test_scope
+    if: needs.unit_test_scope.outputs.embedded_yield_example == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: examples/embedded-yield-bank
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: examples/embedded-yield-bank/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        run: pnpm test
 
   test_packages:
     name: Unit Tests (packages)

@@ -8,9 +8,8 @@ import type {
 } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
 import { resetIdempotencyKeyStoresForTests } from "@/lib/idempotency-key-store";
+import { EnglishTestI18n } from "../test-i18n";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -61,6 +60,7 @@ const terms: EarnVaultQueuedWithdrawalTerms = {
   allowWithdrawals: true,
   secondsToMaturity: 60,
   minimumSecondsToDeadline: 360,
+  maximumSecondsToDeadline: 7_776_000,
   minimumDiscountBps: 25,
   maximumDiscountBps: 75,
   minimumShares: "1",
@@ -126,9 +126,9 @@ function renderModal(
     ...overrides,
   };
   const renderUi = () => (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <EarnVaultQueuedWithdrawModal {...props} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
   return { ...render(renderUi()), props, renderUi };
 }
@@ -224,6 +224,7 @@ describe("EarnVaultQueuedWithdrawModal", () => {
     expect((screen.getByLabelText("Accept less (%)") as HTMLInputElement).value).toBe("0.25");
     expect((screen.getByLabelText("Time allowed (minutes)") as HTMLInputElement).value).toBe("6");
     expect(screen.getByText("Allowed: 0.25% to 0.75%")).toBeTruthy();
+    expect(screen.getByText("Allowed: 6 minutes to 90 days")).toBeTruthy();
     expect(
       screen.getByText("A larger reduction can make the request easier to complete.")
     ).toBeTruthy();
@@ -261,6 +262,23 @@ describe("EarnVaultQueuedWithdrawModal", () => {
       expect.objectContaining({ shares: "10" }),
       SECOND_KEY,
     ]);
+  });
+
+  it("refuses a deadline above the provider maximum before previewing", () => {
+    renderModal();
+
+    fireEvent.click(screen.getByText("Payout and timing"));
+    fireEvent.change(screen.getByLabelText("Time allowed (minutes)"), {
+      target: { value: "129601" },
+    });
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Use the allowed percentage and time range."
+    );
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    expect(mocks.fetchPreview).not.toHaveBeenCalled();
   });
 
   it("converts plain percentages and minutes back to the provider values", async () => {

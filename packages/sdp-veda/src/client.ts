@@ -313,7 +313,7 @@ export class VedaVaultDirectClient
    * every build path: with no deployment, every build on this client fails
    * closed before emitting a single instruction, so there is truthfully nothing
    * to sponsor — and the paymaster-allowlist assertions must stay answerable
-   * while `VEDA_DEPLOYMENTS` is empty.
+   * while one or more entries in `VEDA_DEPLOYMENTS` remain unconfigured.
    */
   sponsoredPrograms(cluster: SolanaCluster): readonly string[] {
     const deployment = vedaDeployment(cluster);
@@ -457,6 +457,7 @@ export class VedaVaultDirectClient
       queued: options.queued,
       withdrawAuthority: String(options.withdrawAuthority),
       queueState: options.queueState === null ? null : String(options.queueState),
+      parRedemption: null,
       queueAsset:
         options.queueAsset === null
           ? null
@@ -465,6 +466,7 @@ export class VedaVaultDirectClient
               allowWithdrawals: options.queueAsset.allowWithdrawals,
               secondsToMaturity: options.queueAsset.secondsToMaturity,
               minimumSecondsToDeadline: options.queueAsset.minimumSecondsToDeadline,
+              maximumSecondsToDeadline: options.queueAsset.maximumSecondsToDeadline,
               minimumDiscountBps: options.queueAsset.minimumDiscountBps,
               maximumDiscountBps: options.queueAsset.maximumDiscountBps,
               minimumShares: options.queueAsset.minimumShares,

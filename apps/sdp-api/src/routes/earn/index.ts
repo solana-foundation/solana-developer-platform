@@ -188,7 +188,7 @@ async function observeEarnAccessTier(c: Context<{ Bindings: Env }>, next: Next) 
 }
 
 // Hono flattens sub-app `use("*")` middleware into the parent at mount time.
-// Keep this tuple on the six optional-auth declarations so it can never run on
+// Keep this tuple on the eight optional-auth declarations so it can never run on
 // the keyed router that shares the same mount point.
 const OPTIONAL_EARN_ACCESS_MIDDLEWARE = [
   optionalEarnAuth,
@@ -307,23 +307,8 @@ optionalAuthEarn.post(
   validateBody(earnExternalWalletQueuedWithdrawalPreviewSchema),
   createEarnExternalWalletQueuedWithdrawalPreview
 );
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-request-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requirePermissionsWhenAuthenticated("earn:write"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestTransaction
-);
-optionalAuthEarn.post(
-  "/external-wallet/withdrawal-request-cancel-transactions",
-  ...OPTIONAL_EARN_ACCESS_MIDDLEWARE,
-  requirePermissionsWhenAuthenticated("earn:write"),
-  anonymousEarnRpcQuota,
-  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
-  createEarnExternalWalletWithdrawalRequestCancelTransaction
-);
-
+// Queue action builds live on the keyed router below. Unlike an instant exit,
+// their durable request id and recovery lifecycle are part of the contract.
 // Keyed routes retain dashboard auth, project membership checks, and their
 // existing permission matrix. Give anonymous callers the API-facing contract
 // before projectContextMiddleware can turn a missing project into a 400.
@@ -398,6 +383,18 @@ earn.get(
   requirePermissions("earn:read"),
   meteredQuota(EARN_CHAIN_READ_QUOTA),
   getEarnExternalWalletEarnings
+);
+earn.post(
+  "/external-wallet/withdrawal-request-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletWithdrawalRequestTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestTransaction
+);
+earn.post(
+  "/external-wallet/withdrawal-request-cancel-transactions",
+  requirePermissions("earn:write"),
+  validateBody(earnExternalWalletWithdrawalRequestCancelTransactionSchema),
+  createEarnExternalWalletWithdrawalRequestCancelTransaction
 );
 earn.get(
   "/external-wallet/withdrawal-requests",
@@ -540,8 +537,10 @@ earn.get(
   requirePermissions("earn:read", "wallets:read"),
   getEarnVaultWithdrawalRequest
 );
-// Recovery is intentionally not policy-gated: after the deadline this only
-// returns escrowed shares to the same owner wallet.
+// Recovery is intentionally not policy-gated: it only releases the caller's
+// provider request. Solver queues return escrowed shares after their deadline;
+// operator redemptions revoke the claim and leave the redeemed intermediate
+// asset in the same owner wallet.
 earn.post(
   "/vault-withdrawal-requests/:withdrawalRequestId/cancel",
   requirePermissions("earn:write", "wallets:read"),
@@ -567,8 +566,9 @@ earn.get(
   getEarnVaultShareReconciliation
 );
 
-// External-wallet SUBMIT routes remain keyed. Their BUILD and preview partners
-// live on the optional-auth router above, each declared exactly once.
+// External-wallet SUBMIT routes remain keyed. Instant deposit/withdrawal builds
+// and all previews live on the optional-auth router above. Queued request and
+// cancellation builds stay keyed with the durable lifecycle they create.
 //
 // Deliberately NO `policyGate` and NO `wallets:read`, and that is not the
 // deposit route's cautionary tale repeating: wallet policy governs the org's

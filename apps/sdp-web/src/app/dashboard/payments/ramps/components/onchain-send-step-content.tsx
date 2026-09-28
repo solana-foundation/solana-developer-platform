@@ -311,7 +311,9 @@ function ReviewStep({ wizard, counterpartyName }: StepProps) {
           variant="secondary"
           className="w-full"
           iconLeft={<ExternalLinkIcon />}
-          onClick={() => window.open(explorerTxUrl(signature, cluster), "_blank")}
+          onClick={() =>
+            window.open(explorerTxUrl(signature, cluster), "_blank", "noopener,noreferrer")
+          }
         >
           {t("DashboardPayments.onchainSend.viewOnExplorer")}
         </Button>

@@ -34,7 +34,9 @@ export function mapMoneygramTransferDetails(
     return undefined;
   }
 
+  const customerId = readString(moneygram, "customerId");
   const transactionId = readString(moneygram, "transactionId");
+  const mgiTransactionId = readString(moneygram, "mgiTransactionId");
   const referenceNumber = readString(moneygram, "referenceNumber");
   const payoutAmount = readNumber(moneygram, "payoutAmount");
   const payoutStatus = readString(moneygram, "payoutStatus");
@@ -42,7 +44,9 @@ export function mapMoneygramTransferDetails(
   const solanaTxSignature = readString(moneygram, "solanaTxSignature");
   const lastWidgetError = readString(moneygram, "lastWidgetError");
   const details: MoneygramTransferDetails = {
+    ...(customerId ? { customerId } : {}),
     ...(transactionId ? { transactionId } : {}),
+    ...(mgiTransactionId ? { mgiTransactionId } : {}),
     ...(referenceNumber ? { referenceNumber } : {}),
     ...(payoutAmount !== undefined ? { payoutAmount } : {}),
     ...(payoutStatus ? { payoutStatus } : {}),

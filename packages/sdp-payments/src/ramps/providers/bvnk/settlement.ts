@@ -1,5 +1,9 @@
 import { compareDecimalAmounts, decimalStringFromNumber } from "@sdp/payments/decimal";
-import { type BvnkRampSettlement, bvnkRampSettlementSchema } from "@sdp/types";
+import {
+  type BvnkOfframpChannelSettlement,
+  type BvnkRampSettlement,
+  bvnkRampSettlementSchema,
+} from "@sdp/types";
 import {
   type BvnkOnrampTransferData,
   isBvnkPayoutCompleted,
@@ -320,6 +324,64 @@ export function buildCompleteSettlement(
     networkFeeAmountActual: observation.networkFee,
     networkFeeCurrencyActual: observation.networkFeeCurrency,
     exchangeRateActual: observation.rate,
+  };
+}
+
+/**
+ * The confirmed channel-transaction event fields the off-ramp settlement
+ * mapper reads; the webhook layer's parsed payload is structurally
+ * compatible (amounts arrive as decimal strings).
+ */
+export interface BvnkChannelTransactionConfirmedData {
+  channelId: string;
+  uuid: string;
+  hash: string;
+  address: string;
+  paidCurrency: string;
+  paidAmount: string;
+  displayCurrency: string;
+  displayAmount: string;
+  walletCurrency: string;
+  walletAmount: string;
+  feeCurrency: string;
+  feeAmount: string;
+  exchangeRate: { rate: string };
+  networkFee: { paidCurrency: string; paidAmount: string };
+  sources: string[];
+}
+
+/**
+ * Builds the off-ramp channel settlement blob from a confirmed
+ * channel-transaction event: the event's observed economics (10 USDC in,
+ * 9.9 USD credited, 0.09 USD fee, 0.99 rate, 0.00001 SOL network fee on the
+ * observed payload) recorded once at settlement.
+ *
+ * @param data - Parsed confirmed channel-transaction event data.
+ * @returns The settlement blob stored on the transfer.
+ */
+export function bvnkOfframpChannelSettlementFromEvent(
+  data: BvnkChannelTransactionConfirmedData
+): BvnkOfframpChannelSettlement {
+  return {
+    provider: "bvnk",
+    kind: "offramp_channel",
+    status: "COMPLETE",
+    channelId: data.channelId,
+    transactionId: data.uuid,
+    txHash: data.hash,
+    depositAddress: data.address,
+    cryptoCurrency: data.paidCurrency,
+    cryptoAmount: data.paidAmount,
+    fiatCurrency: data.walletCurrency,
+    fiatAmount: data.walletAmount,
+    displayCurrency: data.displayCurrency,
+    displayAmount: data.displayAmount,
+    feeCurrency: data.feeCurrency,
+    feeAmount: data.feeAmount,
+    networkFeeCurrency: data.networkFee.paidCurrency,
+    networkFeeAmount: data.networkFee.paidAmount,
+    exchangeRate: data.exchangeRate.rate,
+    sources: data.sources,
   };
 }
 

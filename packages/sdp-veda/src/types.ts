@@ -199,6 +199,7 @@ export interface VedaQueuedWithdrawalTerms {
   allowWithdrawals: boolean;
   secondsToMaturity: number;
   minimumSecondsToDeadline: number;
+  maximumSecondsToDeadline: number;
   minimumDiscountBps: number;
   maximumDiscountBps: number;
   /** Canonical decimal shares, converted from the queue's atomic minimum. */

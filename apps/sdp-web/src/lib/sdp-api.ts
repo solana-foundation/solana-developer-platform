@@ -99,6 +99,10 @@ function createSdpApiRequest(
     }
     const startedAt = performance.now();
     const method = options.method ?? "GET";
+    // The query string is caller-supplied and may carry a pasted credential
+    // (e.g. a playground request); the log keeps the route only while the
+    // upstream request still receives the full path.
+    const loggedPath = path.split("?", 1)[0];
 
     const response = await fetch(url, {
       ...options,
@@ -114,7 +118,7 @@ function createSdpApiRequest(
         source,
         requestId,
         method,
-        path,
+        path: loggedPath,
         status: response.status,
         durationMs: roundDuration(performance.now() - startedAt),
         upstreamRequestId: response.headers.get("X-Request-ID"),
@@ -360,6 +364,32 @@ export async function createSdpApiClient(traceContext?: TraceContext): Promise<S
   const projectId = await resolveRequestProjectId(token);
   if (!projectId) {
     throw new Error("Selected project required");
+  }
+  return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
+}
+
+/**
+ * Creates a client pinned to an explicit project id for server actions that
+ * must stay bound to the page they were rendered with instead of re-reading
+ * the mutable selection cookie: a feed mounted for project A keeps asking for
+ * project A even after the shared cookie has moved to B.
+ *
+ * The id is validated against this organization's project list first, so an
+ * arbitrary or no-longer-listed project is refused here rather than sent
+ * upstream. Each server-action request loads `/v1/projects` before the event
+ * request; its request-scoped cache is not shared with the earlier layout
+ * request. A failed list read fails closed — without the list
+ * there is nothing to validate the scope against. The API still authorizes
+ * the caller's membership on every request.
+ */
+export async function createProjectBoundSdpApiClient(
+  projectId: string,
+  traceContext?: TraceContext
+): Promise<SdpApiClient> {
+  const token = await getRequestClerkToken();
+  const projects = await fetchRequestProjects(token);
+  if (!projects.some((project) => project.id === projectId)) {
+    throw new Error("Requested project is not available for this organization");
   }
   return assembleSdpApiClient(createSdpApiRequest(token, projectId, traceContext));
 }

@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
   runAction: vi.fn(),
   environment: "sandbox",
   freezeAuthority: null as string | null,
-  freezeAuthorityError: null as string | null,
   pauseAuthority: null as string | null,
 }));
 const source = "3yQfmv9WiotYSDmamiow5Xt2abcvDxTzmFBSYEEGZtqe";
@@ -43,9 +42,7 @@ vi.mock("./use-token-operation-data", () => ({
     authorityWalletsError: null,
     authorityWalletsData: {
       freezeAuthority: mocks.freezeAuthority,
-      freezeAuthorityError: mocks.freezeAuthorityError,
       pauseAuthority: mocks.pauseAuthority,
-      pauseAuthorityError: null,
     },
     allowlistEntries: [],
     frozenAccounts: [],
@@ -110,7 +107,6 @@ beforeEach(() => {
   mocks.runAction.mockResolvedValue({ ok: true, message: "Done", status: 200, body: {} });
   mocks.environment = "sandbox";
   mocks.freezeAuthority = source;
-  mocks.freezeAuthorityError = null;
   mocks.pauseAuthority = null;
 });
 afterEach(cleanup);

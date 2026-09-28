@@ -3,7 +3,7 @@
 Northstar is a self-contained Next.js App Router example of a bank that offers
 **Checking** and **Savings**, where Savings is one SDP Embedded Yield strategy.
 The React UI and its server routes deploy together, while SDP builds the
-transactions and keeps the movement ledger.
+transactions and keeps the movement and queued-withdrawal ledgers.
 
 This is a real integration, not a fixture UI. It defaults to a sandbox project
 on devnet and can run a controlled production-project canary on mainnet.
@@ -26,17 +26,21 @@ affordances for the example.
 | Northstar | SDP |
 | --- | --- |
 | Checking balance | The demo wallet's balance of the strategy's deposit token, read over RPC |
-| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first strategy on `SOLANA_CLUSTER` that is DeFi, instant-liquidity, and USDC (with none qualifying, every page load fails until fixed) |
-| Savings balance and earnings | The wallet's open position in that strategy; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
+| Savings account | One `/v1/earn/strategies` entry: `DEMO_STRATEGY_ID`, or the first fundable DeFi USDC strategy on `SOLANA_CLUSTER` (with none qualifying, every page load fails until fixed) |
+| Savings balance and earnings | The wallet's open position plus valued shares held in a queued request; earnings use SDP's formula (value + finalized payouts - finalized deposits) over that strategy's movements only |
 | Move to savings | Deposit preview when the strategy requires a floor, then build, server-side sign, submit |
-| Move to checking | Token amount converted to shares at the live share price, then withdrawal preview, build, sign, submit |
+| Move to checking | Discover live withdrawal routes, then use the selected direct or queued flow without silent fallback |
+| Queued withdrawals | Preview live limits, escrow shares, restore every unfinished request after refresh, and offer owner-signed recovery only after `expiredCancelable` |
 | Recent activity | External-wallet movements whose provider and vault match the strategy, shown in the deposit token, kept after the position closes |
 
-The customer never sees shares, providers, or slippage. Northstar demonstrates
-the authenticated tier because it submits signed transactions to SDP and reads
-the resulting tenant movements and positions. A keyless integration can list
-strategies and build unsigned transactions, but it must broadcast and track
-them itself and will not appear in Northstar's or SDP's tenant ledger.
+The customer never sees shares or providers. For a queued exit they do see the
+financial choices that matter: accepted discount, maturity, solver window, and
+the fact that the first transaction escrows shares rather than paying assets.
+Northstar demonstrates the authenticated tier because it submits signed
+transactions to SDP and reads the resulting tenant movements, positions, and
+durable withdrawal requests. A keyless integration can discover and preview a
+queue, but queue builds and recovery are keyed so they cannot lose the durable
+status needed to get the customer's shares back.
 
 The SDP client lives in [`server/sdp-client.ts`](server/sdp-client.ts), the
 bank rules (strategy choice, amount to shares) in
@@ -59,6 +63,9 @@ handlers in [`src/app/api`](src/app/api).
   to index the demo.
 - Deposit and withdrawal routes accept same-origin JSON requests only, before
   any request body can reach the server-side signer.
+- Every unsigned transaction is decoded before signing. Its compiled fee payer
+  must match the configured customer or sponsor, and signing must preserve the
+  exact message bytes SDP built.
 - No secret uses a `NEXT_PUBLIC_` prefix and no secret is serialized into page
   props or API responses.
 - Transfer routes submit promptly. The browser polls every second until
@@ -69,7 +76,8 @@ handlers in [`src/app/api`](src/app/api).
   overlapping requests, flash a loading skeleton, or animate the manual refresh
   control. The transfer dialog closes as soon as SDP accepts the movement while
   balances and activity update in place.
-- A normal refresh costs two SDP calls (positions, movements) and one RPC read.
+- A normal refresh with an open position costs four SDP calls (positions,
+  movements, queued requests, and withdrawal routes) plus one RPC read.
   While a transfer submitted from this browser tab awaits confirmation, one
   chain-aware detail read makes the UI reflect Solana confirmation immediately.
   Historical unresolved movements do not restart fast polling. The strategy
@@ -82,6 +90,11 @@ handlers in [`src/app/api`](src/app/api).
   deposits and withdrawals reconcile against their combined net effect. SDP
   continues tracking protocol finalization in the background without holding
   the customer in a loading state.
+- Outstanding queued withdrawals are restored with `settled=false` across
+  every cursor page and refreshed every ten seconds. `creating` and
+  `closedOrUnknown` make savings value unavailable rather than guessing whether
+  wallet shares or a payout should count. Only `expiredCancelable` exposes the
+  share-recovery action.
 - API responses and outbound SDP reads use `no-store` caching.
 - Submit retries reuse one `Idempotency-Key`.
 - Quote-derived slippage floors and the amount-to-shares conversion use exact
@@ -188,7 +201,7 @@ that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 | `DEMO_ACCESS_PASSWORD` | Yes | HTTP Basic password protecting the page and all API routes. |
 | `DEMO_WALLET_PRIVATE_KEY` | Yes | Base58 or JSON-array Solana keypair used only by the server. Its token balance is checking. |
 | `DEMO_FEE_PAYER_PRIVATE_KEY` | No | Different funded keypair on `SOLANA_CLUSTER` that co-signs and pays network fees and account rent. This is the partner fee-payer path and does not use Kora. |
-| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first strategy on `SOLANA_CLUSTER` that is DeFi, instant-liquidity, and USDC; with none qualifying, every page load fails until fixed. |
+| `DEMO_STRATEGY_ID` | No | Catalogue id of the strategy behind savings. Otherwise the first fundable DeFi USDC strategy on `SOLANA_CLUSTER`; with none qualifying, every page load fails until fixed. |
 | `SOLANA_CLUSTER` | No | `devnet` by default, or `mainnet-beta` for a controlled production-project canary. |
 | `SOLANA_RPC_URL` | No | RPC used for direct wallet balance reads and transaction submission. Its genesis hash must match `SOLANA_CLUSTER`. |
 
@@ -206,7 +219,9 @@ low-balance keys and the smallest provider-supported amount.
    and an `sk_live_` key from that local production project.
 4. Fund only the dedicated Treasury wallet and Northstar owner/fee-payer
    addresses. Preview first, deposit a tiny USDC canary, verify the movement and
-   position, then withdraw it and verify final settlement.
+   position, discover its live withdrawal routes, then use the available direct
+   or queued exit and verify final settlement. For a queue canary, also verify
+   request restoration and post-deadline share recovery.
 
 The app verifies the RPC genesis hash before reading balances or building a
 transaction. It also refuses to select a strategy from the wrong cluster.

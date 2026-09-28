@@ -773,7 +773,7 @@ async function postRampEvent(
   provider: RampEventProvider,
   event: MoneygramRampEvent | CoinbaseRampEvent,
   t: Translate
-): Promise<TransferRecord> {
+): Promise<void> {
   const response = await fetch(`/api/dashboard/payments/ramps/events/${provider}`, {
     method: "POST",
     headers: {
@@ -781,8 +781,8 @@ async function postRampEvent(
     },
     body: JSON.stringify(event),
   });
-  const body = (await response.json().catch(() => ({}))) as TransferEnvelope;
   if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: { message?: string } };
     throw new Error(
       getApiError(
         body,
@@ -793,25 +793,13 @@ async function postRampEvent(
       )
     );
   }
-
-  if (!body.data?.transfer) {
-    throw new Error(t("DashboardPayments.workspace.rampEventMissing", { provider }));
-  }
-
-  return body.data.transfer;
 }
 
-export function postMoneygramRampEvent(
-  event: MoneygramRampEvent,
-  t: Translate
-): Promise<TransferRecord> {
+export function postMoneygramRampEvent(event: MoneygramRampEvent, t: Translate): Promise<void> {
   return postRampEvent("moneygram", event, t);
 }
 
-export function postCoinbaseRampEvent(
-  event: CoinbaseRampEvent,
-  t: Translate
-): Promise<TransferRecord> {
+export function postCoinbaseRampEvent(event: CoinbaseRampEvent, t: Translate): Promise<void> {
   return postRampEvent("coinbase", event, t);
 }
 

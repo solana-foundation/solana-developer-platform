@@ -25,6 +25,7 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
       perena: [],
       jupiter_lend: ["mainnet-beta"],
       ondo: ["mainnet-beta"],
+      hastra: ["mainnet-beta"],
       wisdomtree: [],
     });
   });
@@ -43,6 +44,8 @@ describe("EARN_PROVIDER_DEPLOYED_CLUSTERS", () => {
     expect(isVaultDirectDepositEnabled("production", "jupiter_lend")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "ondo")).toBe(false);
     expect(isVaultDirectDepositEnabled("production", "ondo")).toBe(true);
+    expect(isVaultDirectDepositEnabled("sandbox", "hastra")).toBe(false);
+    expect(isVaultDirectDepositEnabled("production", "hastra")).toBe(true);
     expect(isVaultDirectDepositEnabled("sandbox", "wisdomtree")).toBe(false);
     expect(isVaultDirectDepositEnabled("production", "wisdomtree")).toBe(false);
     expect(isVaultDirectDepositEnabled("sandbox", "upshift")).toBe(false);

@@ -117,45 +117,81 @@ balance with a live one.
   sign-off named in the PR (who reviewed, and the threat-model row the route
   lands under), and the threat model's revisit trigger fires. Never widen the
   list just to make the test pass.
-  The current contract pins six optional-auth operations: strategy list/detail,
-  vault deposit preview, external-wallet deposit build, withdrawal preview, and
-  withdrawal build. Public OpenAPI represents each as API-key auth or an empty
-  security requirement; the internal document additionally accepts Clerk and
-  session auth. Every tenant read and signed-transaction submit remains
+  **Publication hold (PRO-2038):** since PR #2005 the whole family is held out
+  of the DEFAULT public document by `EARN_PUBLIC_SURFACE_PUBLISHED` in
+  `../../openapi/spec.ts`, so api.solana.com/openapi.json, Swagger UI, the API
+  reference, Postman, the playground catalog and the AI files carry no Earn
+  until launch. The pinned list is asserted against
+  `createPublicOpenApiDocument({ publishEarn: true })`, and a sibling test
+  asserts the default document is Earn-free. Flipping the constant is the
+  sign-off PR.
+  The current contract pins eight optional-auth operations: strategy list/detail,
+  vault deposit preview, external-wallet deposit build, withdrawal preview,
+  withdrawal build, withdrawal-options discovery, and queued-withdrawal preview.
+  Public OpenAPI represents each as API-key auth or an empty security requirement;
+  the internal document additionally accepts Clerk and session auth. Every tenant
+  read, queued request/cancellation build, and signed-transaction submit remains
   authenticated.
 
-### Queued vault withdrawals (Veda)
+### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
 
-Queued exits are a separate durable resource, not a slow `earn_movement`.
-The owner-signed request only escrows shares; a later solver transaction pays
-assets, and a post-deadline owner-signed cancellation returns shares. Persist
-the lifecycle in `earn_vault_withdrawal_requests` plus its signed action rows.
-Only a verified `withdrawalFulfilled` close is projected into movement/activity
-reads, using the solver transaction's closing signature and payout; request and
-cancel transactions remain request history and must never be labelled payouts.
+Asynchronous exits are a separate durable resource, not a slow
+`earn_movement`. The `mechanism` column keeps two different economic contracts
+explicit. Veda's solver queue escrows shares; a later solver transaction pays
+assets, and a post-deadline owner-signed cancellation returns shares. Hastra's
+par request instead redeems PRIME to wYLDS and delegates that wYLDS; a Hastra
+administrator later burns it and pays USDC, while an owner cancellation may
+happen at any time and leaves the owner holding wYLDS rather than recreating
+PRIME. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+signed action rows. Only a provider-authenticated terminal fulfillment is
+projected into movement/activity reads, using the closing transaction's
+signature and payout; request and cancel transactions remain request history
+and must never be labelled payouts.
 
 The custody options/preview/create/list/detail/cancel routes are keyed. External
-wallet options, preview, unsigned request build, and unsigned cancel build use
-the optional-auth contract: anonymous calls are per-IP RPC-metered and persist
-nothing; valid keyed calls retain tenant/permission checks and durable builds.
-External submits and request history are keyed. A presented invalid credential
-always returns 401 rather than falling back to anonymous. Cancellation is an
-exit-recovery path: policy gates do not strand it, and a caller with write access
-to the exact org-owned custody wallet may recover a request whose initiating
-project was deleted; list/detail history remains exact-project scoped.
+wallet options and previews use the optional-auth contract: anonymous calls are
+per-IP RPC-metered and persist nothing. External request/cancellation builds,
+submits, and request history are keyed so every share escrow has the durable
+status and recovery surface the public contract promises. A presented invalid
+credential always returns 401 rather than falling back to anonymous.
+Cancellation is an exit-recovery path: policy gates do not strand it, and a
+caller with write access to the exact org-owned custody wallet may recover a
+request whose initiating project was deleted; list/detail history remains
+exact-project scoped.
 
 The scheduled reconciler independently advances both signed-action finality and
-provider PDA state. Landed request terms and terminal quantities come from Veda
-lifecycle events/PDA reads, and Veda log parsing accepts `Program data:` only
-inside the configured queue program's active log frame. A closed PDA without a
-matching finalized close event stays `closed_or_unknown`; missing signature
-history never proves that a live escrow failed. See ADR 0003 for the full state
-machine and recovery rationale.
+provider PDA state. Landed request terms and terminal quantities come from the
+selected provider capability's authenticated lifecycle events/PDA reads. Veda
+and Hastra log parsing each accept `Program data:` only inside their configured
+program's active log frame. A closed PDA without a matching finalized close
+event stays `closed_or_unknown`; missing signature history never proves that a
+live obligation failed. See ADR 0003 for the solver-queue state machine and
+`docs/earn/hastra-prime-inventory.md` for the operator-redemption differences.
 
-These runtime routes are intentionally absent from public OpenAPI. Promotion is
-an EARN-027 security-scope change and requires named security sign-off plus the
-pinned public-operation update; do not add generated docs or OpenAPI paths as a
-side effect of implementation.
+Open requests are a durable due queue, not a full-table poll.
+`next_check_at` is both the next useful provider read and a two-minute claim
+lease. `claimOpenRequests` takes only due rows with `FOR UPDATE SKIP LOCKED`.
+After action reconciliation, the worker claims exactly one request, processes
+it, and only then claims the next, up to 128 per tick. Do not pre-claim that
+whole cap: later rows would spend their lease waiting in memory and could be
+reclaimed by another worker. Pending requests wait until maturity or at most 15
+minutes, subject to the normal one-minute minimum, while every other open state
+stays on the one-minute cadence. A failed provider or RPC read records its error
+and moves `next_check_at` forward before the worker claims another row, so an
+expired lease cannot reclaim the same failing request for the rest of the tick.
+That update never shortens a lease another worker may already hold. Terminal
+transitions clear the schedule. A crashed worker becomes retryable when its
+lease expires, so do not replace this with an in-memory timer or scan every open
+request on every tick. Closed-PDA
+history reads fetch transactions in ordered windows of eight, then inspect
+results newest first; the bound protects RPC capacity and the ordered inspection
+preserves the former serial decision and error semantics.
+
+The external-wallet queue routes are part of the supported Embedded Yield public
+contract; custody queue routes remain internal. Any future route or
+security-declaration change remains an EARN-027 security-scope change and
+requires named security sign-off plus the pinned public-operation update; do not
+widen the surface just to make a test pass.
 
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
@@ -189,7 +225,7 @@ side effect of implementation.
     in) and `CURATED_VAULTS` (a hand-picked allowlist — a provider listed there
     shows ONLY those vaults, so a newly created one does not appear until someone
     adds it). Both push into SQL so `total` moves with the rows. Since PRO-1727
-    the allowlists are POPULATED — the six-vault V1 Kamino shelf on
+    the allowlists are POPULATED — the curated V1 Kamino shelf on
     mainnet-beta, its devnet equivalents for sandbox — so a new Kamino vault
     does not surface until someone adds it to `handlers/curation.ts`, and
     every route test seeding an uncurated reference relies on the
@@ -503,11 +539,11 @@ other's balance.
 
 ## Vault-direct routes (non-custodial positions)
 
-A second money model, added for Kamino. A `vault_direct` provider custodies
-nothing: there is no wallet to provision and no address to fund — the vault's
-account is a PROGRAM account and stablecoins sent to it are destroyed. Money
-moves only when SDP builds an instruction and signs it with one of the
-organization's own custody wallets.
+A second money model, first added for Kamino. A `vault_direct` provider
+custodies nothing: the position may be vault shares, a market receipt token, or
+a yield-bearing token, but there is no provider-managed wallet to provision or
+generic deposit address to fund. Money moves only through a provider-built
+transaction signed by the organization custody wallet or external owner.
 
 - `POST /vault-deposits` — **build + simulate + sign + record + broadcast**, in
   that order. Body `{strategyId, custodyWalletId, amount, minSharesOut?}` and a
@@ -576,7 +612,14 @@ organization's own custody wallets.
     Refuses with a typed **409 `VAULT_EXPOSURE_CAP`** only when
     `EARN_VOLUME_CAPS_ENFORCED` is truthy; otherwise (shadow mode, the
     default) it only emits `sdp_api_earn_volume_cap_evaluated` with
-    `would_block`. An unreadable exposure is a 503 in BOTH modes. A readable
+    `would_block`. The 409's `details` carry only `vaultAddress` and its
+    message is a fixed sentence: `exposure`, `projected` and `limit` are the
+    cross-tenant aggregate and go to the evaluated event ONLY, because the
+    preview and external-wallet build routes are keyless and a body that
+    named them told any anonymous caller SDP's total position in the vault
+    (SOLA9-9; `earn.vault-exposure-cap.test.ts` pins the redaction on an
+    anonymous build and preview). An unreadable exposure is a 503 in BOTH
+    modes. A readable
     TVL of 0 is NOT unreadable: it drives the share bound to 0, so at flag
     flip (PRO-1937) expect `would_block` storms on explicitly zero-TVL rows —
     expected strictness, not a bug. A vault whose metrics have not landed at
@@ -753,9 +796,10 @@ organization's own custody wallets.
   the shared refusal vocabulary (`services/earn/vault-refusals.ts`) to a 400.
   An ENFORCED cap block is appended to `blockingIssues` as
   `{ code: "VAULT_EXPOSURE_CAP" }` after the provider's own, so a partner's
-  existing handler covers both; in shadow mode the preview deliberately
-  reports nothing (the deposit would land, and a preview that says otherwise
-  is a lie) and only the evaluated event records `would_block`.
+  existing handler covers both; its `message` is the fixed sentence with no
+  figures (SOLA9-9, see the deposit gate above); in shadow mode the preview
+  deliberately reports nothing (the deposit would land, and a preview that
+  says otherwise is a lie) and only the evaluated event records `would_block`.
   The response also carries `feeSponsored` — sponsorship INTENT
   (`isEarnVaultSponsorshipEnabled` against the environment's cluster, the same
   gate `resolveVaultSponsorship` applies at execution). The withdrawal preview
@@ -870,6 +914,10 @@ organization's own custody wallets.
   matches nothing and silently returns an empty page.
   A failed chain read leaves a position UNHYDRATED rather than zero; reporting
   zero is a claim about someone's money that a failed RPC call cannot support.
+  Every owner/provider job shares one request-wide `VaultDeadline` and runs in
+  bounded waves of eight. Giving each queued owner a new deadline makes the
+  route's latency ceiling grow with portfolio size. Empty-position close-out
+  writes use the same concurrency bound and remain fail-soft.
 
 - `GET /vault-share-reconciliation` — chain-versus-ledger REPORT for the custody
   claims above (PRO-1741). The positions read can only serve what SDP recorded,
@@ -922,6 +970,18 @@ Capability dispatch is `supportsVaultDirect` (`@sdp/earn/capabilities`), resolve
 through `services/earn/execution-registry.ts` — the one place a provider id maps
 to an executing client. `EARN_PROVIDER_CLIENTS` stays the CATALOGUE registry so
 the hourly sync keeps its small dependency surface.
+
+Hastra is the exception where one executing client retains two exit builders
+but the API deliberately exposes only one by default. Its native operator par
+redemption remains available with no provider credential; the Jupiter
+wYLDS→USDC quote/build capability requires both the default-off
+`EARN_HASTRA_DEX_EXIT_ENABLED` flag and `JUPITER_SWAP_API_KEY`. Apply that gate
+only to discovery and new DEX quotes/builds. Deposits, position reads, par
+request/cancel/reconciliation, signed-build submission, and reconciliation of
+an already recorded atomic DEX movement must not inherit it. In particular,
+the movement reconciler must classify historical settlement through an ungated
+registered-client path (or equivalent durable contract), or switching the flag
+off would misclassify an atomic movement as a provider order.
 
 The every-minute vault reconciliation worker consumes
 `idx_earn_movements_unsettled` in bounded pages. Both the embedded cron and the
@@ -1064,20 +1124,21 @@ to those surfaces. Full contract: ADR 0002 addendum 2026-08-26.
 The router exposes one handler per endpoint through two access tiers. Do not
 fork a keyed and anonymous route with duplicate behavior.
 
-- **Keyless catalogue and builds:** `GET /strategies`, `GET /strategies/:id`,
-  `POST /vault-deposit-previews`, and the external-wallet deposit build,
-  withdrawal preview, and withdrawal build. A valid credential enriches the
-  same request with its existing tenant context. With no credential, the
-  request has no organization, project, entitlement, policy, custody, or
-  persistence context. When a credential is present, the route still enforces
-  its previous `earn:read` or `earn:write` scope.
+- **Keyless catalogue, discovery, and instant builds:** `GET /strategies`,
+  `GET /strategies/:id`, `POST /vault-deposit-previews`, the external-wallet
+  deposit build, direct-withdrawal preview/build, withdrawal-options discovery,
+  and queued-withdrawal preview. A valid credential enriches the same request
+  with its existing tenant context. With no credential, the request has no
+  organization, project, entitlement, policy, custody, or persistence context.
+  When a credential is present, the route still enforces its previous
+  `earn:read` or `earn:write` scope.
 - **No credential downgrade:** a presented credential must resolve completely
   or return 401. That includes an unknown, revoked, or expired API key, a Clerk
   token without organization context, and an invalid or expired session cookie.
   Only a request that presents no supported credential may continue anonymously.
-- **Keyed control plane:** submits, movements, positions, earnings, custody
-  vault routes, programs, and the aggregate feed. These retain the existing
-  permission and project boundaries.
+- **Keyed control plane:** submits, queued request/cancellation builds,
+  movements, positions, earnings, custody vault routes, programs, and the
+  aggregate feed. These retain the existing permission and project boundaries.
 - **Environment:** an authenticated project is authoritative. A keyless call
   has no project, so the caller picks the shelf: `?environment=` on the list
   (production when omitted) and the named strategy's own `environment` on
@@ -1087,8 +1148,11 @@ fork a keyed and anonymous route with duplicate behavior.
   and builds use a tighter per-IP tier plus an independently configurable RPC
   budget. Structured logs carry the tier, normalized route, and decision.
 
-An authenticated direction is BUILD then SUBMIT. An anonymous direction stops
-after BUILD and the caller broadcasts directly (`handlers/external-wallet.ts`,
+An authenticated instant direction is BUILD then SUBMIT. An anonymous instant
+direction stops after BUILD and the caller broadcasts directly. Queued request
+and cancellation directions are always keyed BUILD then SUBMIT so SDP can
+guarantee durable status and recovery (`handlers/external-wallet.ts`,
+`handlers/queued-withdrawals.ts`,
 `services/earn/vault-external-wallet.service.ts`):
 
 - `POST /external-wallet/deposit-transactions`: **build + simulate + compile,
@@ -1265,6 +1329,13 @@ their owners) and replaces the dashboard's old N-per-owner read fanout. The
 dashboard BFF (`sdp-web` `.../positions/summary/route.ts`) is the one caller
 that opts in, pinned by its unit test. Partner docs steer analytics keys to the
 default shape and detailed surfaces to the explicit opt-in.
+
+Simultaneous summary calls for the same organization, project and environment
+share only their in-flight DB scan and live hydration. This is not a cache: the
+entry is removed on settlement, and each caller applies its own detail/owner
+flags after the shared observation. Migration 0117's partial project/created
+index serves the project-wide keyset scan; keep the older owner-first index for
+the per-owner reads.
 
 The owner is a REQUIRED `?ownerAddress=` query filter on EVERY per-owner read
 (movements, positions, earnings) — one addressing style for one concept, no
@@ -1543,8 +1614,8 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
 - Whole-stack local setup (ports, flags, provider credentials, entitlement,
   troubleshooting): `packages/sdp-earn/CLAUDE.md` → "Local development".
 - **Tests must not depend on which providers are surfaced today.** No registered
-  provider is portfolio-capable today, so `POST /programs` 403s in the shipped
-  config — but idempotency, replay, gate order and environment isolation still
+  provider is portfolio-capable today, so `POST /programs` answers 501 in the
+  shipped config. Idempotency, replay, gate order and environment isolation still
   have to work for whichever provider is offered next. `earn-program.test.ts`
   therefore installs a portfolio-capable test double under a stub id and
   partial-mocks `isEarnProviderSurfaced` (a `vi.hoisted` flag, forced on in

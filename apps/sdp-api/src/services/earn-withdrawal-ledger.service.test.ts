@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { EARN_PROVIDERS } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -15,7 +16,7 @@ describe("earn withdrawal ledger — provider neutrality", () => {
       fileURLToPath(new URL("./earn-withdrawal-ledger.service.ts", import.meta.url)),
       "utf8"
     );
-    for (const providerId of ["ground", "veda", "upshift", "perena", "kamino", "jupiter_lend"]) {
+    for (const providerId of ["ground", ...EARN_PROVIDERS]) {
       expect(source.toLowerCase()).not.toContain(providerId);
     }
   });

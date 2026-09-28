@@ -1,6 +1,5 @@
 "use client";
 
-import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
 import {
   type EarnProgramWithdrawalRecord,
   type EarnStrategy,
@@ -19,9 +18,11 @@ import {
   ArrowUpIcon,
   ArrowUpRightIcon,
   InfoIcon,
+  Loader2Icon,
   RefreshCwIcon,
   WalletCardsIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
@@ -30,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
+import { Modal } from "@/components/ui/modal";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
   Table,
@@ -55,6 +57,7 @@ import {
   type EarnDepositAvailabilityLabels,
   earnProviderLabel,
   formatProviderAmount,
+  formatTokenValue,
   formatUsd,
   positionDisplayName,
   shortenMarketAddress,
@@ -67,6 +70,11 @@ import {
   formatProviderApy,
   sumDecimalStrings,
 } from "../earn/earn-market-presentation";
+import {
+  EarnVaultDepositOutcomeTracker,
+  EarnVaultWithdrawalOutcomeTracker,
+  EarnWithdrawalOutcomeTracker,
+} from "../earn/earn-outcome-trackers";
 import {
   type EarnProgram,
   type EarnVaultDepositRecord,
@@ -86,18 +94,11 @@ import {
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
 import {
-  EarnVaultDepositModal,
-  EarnVaultDepositOutcomeTracker,
-} from "../earn/earn-vault-deposit-modal";
-import { EarnVaultExitModal } from "../earn/earn-vault-exit-modal";
-import {
   earnVaultDepositUiState,
-  earnVaultPositionStatusDisplay,
+  earnVaultPositionStatusLabels,
   earnVaultWithdrawalUiState,
 } from "../earn/earn-vault-ui-state";
-import { EarnVaultWithdrawalOutcomeTracker } from "../earn/earn-vault-withdraw-modal";
 import { EarnVaultWithdrawalRequestsCard } from "../earn/earn-vault-withdrawal-requests-card";
-import { EarnWithdrawalOutcomeTracker, EarnWithdrawModal } from "../earn/earn-withdraw-modal";
 import { filterSandboxDevnetStrategies } from "./devnet-mainnet-intersection";
 import { useKaminoVaultAllocations } from "./kamino-allocations";
 import {
@@ -117,39 +118,82 @@ import {
   type TreasuryAllocation,
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
+import {
+  createVaultBalanceProjection,
+  displayedVaultBalance,
+  observeVaultMovementCommit,
+  type ProjectedVaultMovement,
+  pendingVaultProjections,
+  projectionBaseline,
+  type VaultMovementProjectionState,
+  type VaultPositionsRead,
+  vaultActivities,
+} from "./treasury-vault-balance-projection";
 
-interface VaultBalanceProjection {
-  amount: string;
-  baselineValue: string;
-  expiresAt: number;
-  projectedValue: string;
+// The three transaction surfaces account for most of this route's client
+// module graph. They are not needed to inspect a portfolio, so load each only
+// after the corresponding action opens it. Outcome polling stays in the small
+// tracker module above and remains immediate after a reload.
+export function EarnTransactionModalLoading() {
+  const t = useTranslations();
+  const label = t("Shared.SharedComponents.loading");
+  return (
+    <Modal isOpen ariaLabel={label} showCloseButton={false} size="sm">
+      <div
+        aria-live="polite"
+        className="flex min-h-28 items-center justify-center gap-2 p-6 text-sm text-secondary"
+        role="status"
+      >
+        <Loader2Icon aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+        {label}
+      </div>
+    </Modal>
+  );
 }
+
+const EarnVaultDepositModal = dynamic(
+  () => import("../earn/earn-vault-deposit-modal").then((module) => module.EarnVaultDepositModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
+const EarnVaultExitModal = dynamic(
+  () => import("../earn/earn-vault-exit-modal").then((module) => module.EarnVaultExitModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
+const EarnWithdrawModal = dynamic(
+  () => import("../earn/earn-withdraw-modal").then((module) => module.EarnWithdrawModal),
+  { loading: EarnTransactionModalLoading, ssr: false }
+);
 
 type TrackedVaultDeposit = Pick<
   EarnVaultDepositRecord,
   "failureReason" | "movementId" | "positionId" | "status"
-> & {
-  balanceProjection?: VaultBalanceProjection;
-  createdAt?: string;
-  observedOrder: number;
-  provisionalPosition?: EarnVaultPosition;
-};
-
-type VaultDepositWatchInput = Omit<TrackedVaultDeposit, "observedOrder">;
+> &
+  VaultMovementProjectionState & {
+    createdAt?: string;
+    provisionalPosition?: EarnVaultPosition;
+  };
 
 type TrackedVaultWithdrawal = Pick<
   EarnVaultWithdrawal,
   "createdAt" | "failureReason" | "movementId" | "positionId" | "status"
-> & { balanceProjection?: VaultBalanceProjection; observedOrder: number };
+> &
+  VaultMovementProjectionState;
 
-type VaultWithdrawalWatchInput = Omit<TrackedVaultWithdrawal, "observedOrder">;
+/** What a caller hands the watch lists; order and commit stamps are this file's to assign. */
+type VaultMovementWatchInput<Movement extends VaultMovementProjectionState> = Omit<
+  Movement,
+  "committedObservedAt" | "observedOrder"
+>;
 
-type TrackedVaultActivity =
-  | { kind: "deposit"; movement: TrackedVaultDeposit }
-  | { kind: "withdrawal"; movement: TrackedVaultWithdrawal };
+type VaultDepositWatchInput = VaultMovementWatchInput<TrackedVaultDeposit>;
+
+type VaultWithdrawalWatchInput = VaultMovementWatchInput<TrackedVaultWithdrawal>;
+
+type TrackedVaultActivity = ReturnType<
+  typeof vaultActivities<TrackedVaultDeposit, TrackedVaultWithdrawal>
+>[number];
 
 const MAX_VISIBLE_VAULT_ACTIVITY = 50;
-const VAULT_BALANCE_PROJECTION_TTL_MS = 60_000;
 
 const TREASURY_AVAILABILITY_LABELS = {
   available: "DashboardMarkets.treasury.depositAvailable",
@@ -217,11 +261,13 @@ function strategyTvlUsd(strategy: EarnStrategy): string | undefined {
 }
 
 function replaceTrackedVaultMovement<
-  Movement extends { movementId: string },
-  Update extends { movementId: string },
+  Movement extends ProjectedVaultMovement,
+  Update extends { movementId: string; status: string },
 >(current: readonly Movement[], updated: Update): readonly Movement[] {
   return current.map((candidate) =>
-    candidate.movementId === updated.movementId ? { ...candidate, ...updated } : candidate
+    candidate.movementId === updated.movementId
+      ? observeVaultMovementCommit({ ...candidate, ...updated })
+      : candidate
   );
 }
 
@@ -235,7 +281,7 @@ function replaceTrackedVaultMovement<
  * tombstone a settled movement would resume polling. Shared by the deposit and
  * withdrawal watchers, whose updaters are otherwise line-for-line identical.
  */
-function mergeTrackedVaultMovements<Movement extends { movementId: string; observedOrder: number }>(
+function mergeTrackedVaultMovements<Movement extends ProjectedVaultMovement>(
   current: readonly Movement[],
   incoming: readonly Movement[],
   settledIds: ReadonlySet<string>
@@ -247,13 +293,14 @@ function mergeTrackedVaultMovements<Movement extends { movementId: string; obser
     );
     if (settledIds.has(movement.movementId)) continue;
     if (existingIndex >= 0) {
-      next[existingIndex] = {
-        ...next[existingIndex],
+      const existing = next[existingIndex];
+      next[existingIndex] = observeVaultMovementCommit({
+        ...existing,
         ...movement,
-        observedOrder: next[existingIndex]?.observedOrder ?? movement.observedOrder,
-      };
+        observedOrder: existing?.observedOrder ?? movement.observedOrder,
+      });
     } else {
-      next.push(movement);
+      next.push(observeVaultMovementCommit(movement));
     }
   }
   return next.slice(-MAX_VISIBLE_VAULT_ACTIVITY);
@@ -276,65 +323,8 @@ function observeIncomingVaultMovements<Movement>(
   }));
 }
 
-function subtractUnsignedDecimalStrings(left: string, right: string): string | undefined {
-  if (
-    compareUnsignedDecimals(left, "0") === undefined ||
-    compareUnsignedDecimals(right, "0") === undefined
-  ) {
-    return undefined;
-  }
-  const scale = Math.max(decimalScale(left), decimalScale(right));
-  const difference = parseDecimalAmount(left, scale) - parseDecimalAmount(right, scale);
-  return formatDecimalAmount(difference > 0n ? difference : 0n, scale);
-}
-
-function projectedVaultBalance(
-  baselineValue: string,
-  amount: string,
-  kind: TrackedVaultActivity["kind"]
-): string | undefined {
-  return kind === "deposit"
-    ? sumDecimalStrings([baselineValue, amount])
-    : subtractUnsignedDecimalStrings(baselineValue, amount);
-}
-
-function createVaultBalanceProjection(
-  baselineValue: string | undefined,
-  amount: string,
-  kind: TrackedVaultActivity["kind"]
-): VaultBalanceProjection | undefined {
-  if (baselineValue === undefined) return undefined;
-  const projectedValue = projectedVaultBalance(baselineValue, amount, kind);
-  if (projectedValue === undefined) return undefined;
-  return {
-    amount,
-    baselineValue,
-    expiresAt: Date.now() + VAULT_BALANCE_PROJECTION_TTL_MS,
-    projectedValue,
-  };
-}
-
-function vaultBalanceProjectionIsVisible(activity: TrackedVaultActivity): boolean {
-  return activity.kind === "deposit"
-    ? activity.movement.status === "confirmed"
-    : activity.movement.status === "confirmed" || activity.movement.status === "finalized";
-}
-
-function balanceProjectionReachedProvider(
-  projection: VaultBalanceProjection,
-  kind: TrackedVaultActivity["kind"],
-  position: EarnVaultPosition | undefined
-): boolean {
-  if (!position) return kind === "withdrawal";
-  if (position.tokenValue === undefined) return false;
-  const comparison = compareUnsignedDecimals(position.tokenValue, projection.projectedValue);
-  if (comparison === undefined) return false;
-  return kind === "deposit" ? comparison >= 0 : comparison <= 0;
-}
-
 function latestVaultActivityByPosition(
-  deposits: readonly TrackedVaultDeposit[],
-  withdrawals: readonly TrackedVaultWithdrawal[]
+  activities: readonly TrackedVaultActivity[]
 ): Map<string, TrackedVaultActivity> {
   const latestActivityByPositionId = new Map<string, TrackedVaultActivity>();
   const rememberLatest = (activity: TrackedVaultActivity) => {
@@ -350,65 +340,8 @@ function latestVaultActivityByPosition(
         : activity.movement.observedOrder > current.movement.observedOrder);
     if (isNewer) latestActivityByPositionId.set(activity.movement.positionId, activity);
   };
-  for (const deposit of deposits) rememberLatest({ kind: "deposit", movement: deposit });
-  for (const withdrawal of withdrawals) {
-    rememberLatest({ kind: "withdrawal", movement: withdrawal });
-  }
+  for (const activity of activities) rememberLatest(activity);
   return latestActivityByPositionId;
-}
-
-function vaultProjectionActivities(
-  positionId: string,
-  position: EarnVaultPosition | undefined,
-  deposits: readonly TrackedVaultDeposit[],
-  withdrawals: readonly TrackedVaultWithdrawal[],
-  includePending: boolean
-): TrackedVaultActivity[] {
-  const activities: TrackedVaultActivity[] = [
-    ...deposits.map((movement) => ({ kind: "deposit" as const, movement })),
-    ...withdrawals.map((movement) => ({ kind: "withdrawal" as const, movement })),
-  ];
-  return activities
-    .filter((activity) => {
-      if (activity.movement.positionId !== positionId) return false;
-      const projection = activity.movement.balanceProjection;
-      if (
-        !projection ||
-        projection.expiresAt <= Date.now() ||
-        activity.movement.status === "failed" ||
-        (!includePending && !vaultBalanceProjectionIsVisible(activity))
-      ) {
-        return false;
-      }
-      return !balanceProjectionReachedProvider(projection, activity.kind, position);
-    })
-    .sort((left, right) => left.movement.observedOrder - right.movement.observedOrder);
-}
-
-function balanceFromProjectionActivities(
-  position: EarnVaultPosition | undefined,
-  activities: readonly TrackedVaultActivity[]
-): string | undefined {
-  if (activities.length === 0) return position?.tokenValue;
-  let balance = position?.tokenValue ?? activities[0]?.movement.balanceProjection?.baselineValue;
-  if (balance === undefined) return undefined;
-  for (const activity of activities) {
-    const amount = activity.movement.balanceProjection?.amount;
-    if (amount === undefined) continue;
-    const nextBalance = projectedVaultBalance(balance, amount, activity.kind);
-    if (nextBalance === undefined) return undefined;
-    balance = nextBalance;
-  }
-  return balance;
-}
-
-function visibleProjectedVaultBalance(
-  position: EarnVaultPosition,
-  deposits: readonly TrackedVaultDeposit[],
-  withdrawals: readonly TrackedVaultWithdrawal[]
-): string | undefined {
-  const activities = vaultProjectionActivities(position.id, position, deposits, withdrawals, false);
-  return activities.length > 0 ? balanceFromProjectionActivities(position, activities) : undefined;
 }
 
 function provisionalVaultPosition(
@@ -449,19 +382,6 @@ function displayedVaultPositions(
   return displayed;
 }
 
-function currentVaultBalance(
-  positionId: string,
-  positions: readonly EarnVaultPosition[] | undefined,
-  deposits: readonly TrackedVaultDeposit[],
-  withdrawals: readonly TrackedVaultWithdrawal[]
-): string | undefined {
-  const position = positions?.find((candidate) => candidate.id === positionId);
-  return balanceFromProjectionActivities(
-    position,
-    vaultProjectionActivities(positionId, position, deposits, withdrawals, true)
-  );
-}
-
 function TreasuryInfoTip({ label }: { label: string }) {
   return (
     <TooltipProvider>
@@ -489,11 +409,7 @@ function TreasuryPositionStatusBadge({ activity }: { activity?: TrackedVaultActi
         : earnVaultWithdrawalUiState(activity.movement.status)
       ).positionStatus
     : "active";
-  const display = earnVaultPositionStatusDisplay(
-    positionStatus,
-    t("DashboardMarkets.treasury.positionStatusPending"),
-    t("DashboardMarkets.treasury.positionStatusActive")
-  );
+  const display = earnVaultPositionStatusLabels(positionStatus, t);
   const description =
     positionStatus === "pending"
       ? t("DashboardMarkets.treasury.positionStatusPendingDescription")
@@ -580,11 +496,11 @@ function TreasuryAllocationCard({
             : "DashboardMarkets.treasury.summaryDeployedCaption",
           allocation.deployedValue === undefined
             ? undefined
-            : { value: formatUsd(allocation.deployedValue, locale, 2) }
+            : { value: formatUsd(allocation.deployedValue, locale) }
         )}
         label={t("DashboardMarkets.treasury.summaryDeposited")}
         showInfo={allocation.deployedValue === undefined}
-        value={formatUsd(allocation.deployedValue, locale, 2)}
+        value={formatUsd(allocation.deployedValue, locale)}
       />
       <TreasurySummaryFigure
         description={t(
@@ -594,7 +510,7 @@ function TreasuryAllocationCard({
         )}
         label={t("DashboardMarkets.treasury.summaryCash")}
         showInfo
-        value={formatUsd(allocation.availableCash, locale, 2)}
+        value={formatUsd(allocation.availableCash, locale)}
       />
       <TreasurySummaryFigure
         description={t(
@@ -696,7 +612,7 @@ function TreasuryWalletsCard({
                       <TreasuryInfoTip label={t("DashboardMarkets.treasury.summaryCashCaption")} />
                     </dt>
                     <dd className="text-sm text-primary tabular-nums">
-                      {formatUsd(availableTreasuryCashForWallet(wallet), locale, 2)}
+                      {formatUsd(availableTreasuryCashForWallet(wallet), locale)}
                     </dd>
                   </div>
                   {deployment.kind === "none" ? null : (
@@ -706,7 +622,7 @@ function TreasuryWalletsCard({
                       </dt>
                       <dd className="text-sm text-primary tabular-nums">
                         {deployment.kind === "value"
-                          ? formatUsd(deployment.value, locale, 2)
+                          ? formatUsd(deployment.value, locale)
                           : t("DashboardMarkets.treasury.positionValueUnavailable")}
                       </dd>
                     </div>
@@ -1066,7 +982,9 @@ function StrategyTable({
                       ? "—"
                       : position.count === 0
                         ? "—"
-                        : formatProviderAmount(position.value, locale)}
+                        : asset
+                          ? formatTokenValue(position.value, asset.mint, locale)
+                          : formatProviderAmount(position.value, locale)}
                   </p>
                   {position === null ||
                   position.unrecorded ||
@@ -1080,7 +998,7 @@ function StrategyTable({
                   {formatProviderApy(strategy.currentApy, locale)}
                 </TableCell>
                 <TableCell className="text-sm text-primary tabular-nums">
-                  {formatUsd(tvlUsd, locale, 2)}
+                  {formatUsd(tvlUsd, locale)}
                 </TableCell>
                 <TableCell>
                   <StrategyInformationCell strategy={strategy} />
@@ -1117,6 +1035,7 @@ function ActiveVaultPositionsCard({
   isLoading,
   onWithdraw,
   positions,
+  positionsReads,
   unrecordedShareMints,
   wallets,
   withdrawals,
@@ -1126,6 +1045,7 @@ function ActiveVaultPositionsCard({
   isLoading: boolean;
   onWithdraw: (position: EarnVaultPosition) => void;
   positions: readonly EarnVaultPosition[] | undefined;
+  positionsReads: readonly VaultPositionsRead[];
   unrecordedShareMints: ReadonlySet<string> | undefined;
   wallets: readonly EarnFundingWallet[];
   withdrawals: readonly TrackedVaultWithdrawal[];
@@ -1134,27 +1054,32 @@ function ActiveVaultPositionsCard({
   const locale = useLocale();
   const [balanceSortDirection, setBalanceSortDirection] =
     useState<NumericSortDirection>("descending");
+  const activities = useMemo(() => vaultActivities(deposits, withdrawals), [deposits, withdrawals]);
   const latestActivityByPositionId = useMemo(
-    () => latestVaultActivityByPosition(deposits, withdrawals),
-    [deposits, withdrawals]
+    () => latestVaultActivityByPosition(activities),
+    [activities]
   );
   const positionsWithProvisionalDeposits = useMemo(
     () => displayedVaultPositions(positions, deposits),
     [deposits, positions]
   );
+  const balanceOf = useCallback(
+    (position: EarnVaultPosition) => displayedVaultBalance(positionsReads, position.id, activities),
+    [activities, positionsReads]
+  );
   const activePositions = useMemo(
     () =>
       sortByOptionalDecimal(
         positionsWithProvisionalDeposits.filter(isOpenVaultPosition),
-        (position) =>
-          knownWireDecimal(
-            visibleProjectedVaultBalance(position, deposits, withdrawals) ?? position.tokenValue
-          ),
+        (position) => knownWireDecimal(balanceOf(position).value),
         balanceSortDirection
       ),
-    [balanceSortDirection, deposits, positionsWithProvisionalDeposits, withdrawals]
+    [balanceOf, balanceSortDirection, positionsWithProvisionalDeposits]
   );
-  const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet] as const));
+  const walletById = useMemo(
+    () => new Map(wallets.map((wallet) => [wallet.id, wallet] as const)),
+    [wallets]
+  );
 
   return (
     <section>
@@ -1235,13 +1160,12 @@ function ActiveVaultPositionsCard({
                   const asset = earnMintAsset(position.tokenMint);
                   const wallet = walletById.get(position.custodyWalletId);
                   const activity = latestActivityByPositionId.get(position.id);
-                  const projectedBalance = visibleProjectedVaultBalance(
-                    position,
-                    deposits,
-                    withdrawals
+                  const balance = balanceOf(position);
+                  const formattedBalance = formatTokenValue(
+                    balance.value,
+                    position.tokenMint,
+                    locale
                   );
-                  const displayedBalance = projectedBalance ?? position.tokenValue;
-                  const formattedBalance = formatProviderAmount(displayedBalance, locale);
                   return (
                     <TableRow key={position.id}>
                       <TableCell>
@@ -1259,21 +1183,19 @@ function ActiveVaultPositionsCard({
                       <TableCell className="text-sm text-primary tabular-nums">
                         <span
                           className={
-                            projectedBalance !== undefined
+                            balance.projected
                               ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100"
                               : undefined
                           }
-                          data-earn-vault-balance={
-                            projectedBalance !== undefined ? "projected" : "live"
-                          }
+                          data-earn-vault-balance={balance.projected ? "projected" : "live"}
                           title={
-                            projectedBalance !== undefined
+                            balance.projected
                               ? t("DashboardMarkets.treasury.positionBalanceProjected")
                               : undefined
                           }
                         >
                           <span data-earn-vault-balance-value>{formattedBalance}</span>
-                          {projectedBalance !== undefined ? (
+                          {balance.projected ? (
                             <span className="sr-only">
                               {`. ${t("DashboardMarkets.treasury.positionBalanceProjected")}`}
                             </span>
@@ -1374,13 +1296,7 @@ function ExistingProgramsCard({
                       </span>
                     </TableCell>
                     <TableCell className="text-sm text-primary tabular-nums">
-                      {formatProviderAmount(
-                        program.wallet.balance.totalUsd,
-                        locale,
-                        t("DashboardMarkets.treasury.usdSymbol"),
-                        2,
-                        2
-                      )}
+                      {formatUsd(program.wallet.balance.totalUsd, locale)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={program.wallet.status === "failed" ? "danger" : "outline"}>
@@ -1739,6 +1655,7 @@ interface TreasuryWorkspaceContentProps {
   positions: readonly EarnVaultPosition[] | undefined;
   positionsError: unknown;
   positionsLoading: boolean;
+  positionsReads: readonly VaultPositionsRead[];
   programs: readonly EarnProgram[];
   programsLoading: boolean;
   programsUnavailable: boolean;
@@ -1770,6 +1687,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     positions,
     positionsError,
     positionsLoading,
+    positionsReads,
     programs,
     programsLoading,
     programsUnavailable,
@@ -1806,6 +1724,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         isLoading={positionsLoading}
         onWithdraw={onWithdrawPosition}
         positions={readablePositions}
+        positionsReads={positionsReads}
         unrecordedShareMints={allocation.unrecordedShareMints}
         wallets={activeWallets}
         withdrawals={vaultWithdrawals}
@@ -1983,6 +1902,7 @@ export function TreasurySolutionsWorkspace({
   } = useTreasuryCatalogueShelves(sdpEnvironment);
   const {
     positions,
+    reads: positionsReads,
     error: positionsError,
     isLoading: positionsLoading,
     refresh: refreshPositions,
@@ -2063,85 +1983,43 @@ export function TreasurySolutionsWorkspace({
     setVaultWithdrawalWatches((current) => replaceTrackedVaultMovement(current, updatedWithdrawal));
   }, []);
 
-  // Each movement owns its status, provisional row, and balance projection.
-  // Provider hydration only clears those presentation hints once it can replace
-  // them, so the modal and table never race separate client-side state stores.
+  const trackedActivities = useMemo(
+    () => vaultActivities(vaultDepositWatches, vaultWithdrawalWatches),
+    [vaultDepositWatches, vaultWithdrawalWatches]
+  );
+
+  // A provisional row stands in only until the API lists the position itself.
   useEffect(() => {
+    const listed = new Set(positions?.map((position) => position.id));
     setVaultDepositWatches((current) => {
       let changed = false;
       const next = current.map((deposit) => {
-        const position = positions?.find((candidate) => candidate.id === deposit.positionId);
-        const clearProvisional =
-          deposit.provisionalPosition !== undefined && position !== undefined;
-        const clearProjection =
-          deposit.balanceProjection !== undefined &&
-          balanceProjectionReachedProvider(deposit.balanceProjection, "deposit", position);
-        if (!clearProvisional && !clearProjection) return deposit;
-        changed = true;
-        const { balanceProjection, provisionalPosition, ...movement } = deposit;
-        return {
-          ...movement,
-          ...(clearProjection ? {} : { balanceProjection }),
-          ...(clearProvisional ? {} : { provisionalPosition }),
-        };
-      });
-      return changed ? next : current;
-    });
-    setVaultWithdrawalWatches((current) => {
-      let changed = false;
-      const next = current.map((withdrawal) => {
-        const projection = withdrawal.balanceProjection;
-        if (
-          !projection ||
-          !balanceProjectionReachedProvider(
-            projection,
-            "withdrawal",
-            positions?.find((candidate) => candidate.id === withdrawal.positionId)
-          )
-        ) {
-          return withdrawal;
+        if (deposit.provisionalPosition === undefined || !listed.has(deposit.positionId)) {
+          return deposit;
         }
         changed = true;
-        const { balanceProjection: _, ...movement } = withdrawal;
+        const { provisionalPosition: _, ...movement } = deposit;
         return movement;
       });
       return changed ? next : current;
     });
   }, [positions]);
 
+  // Every committed movement asks for one fresh read. Its projection retires
+  // by itself once a read shows the shares moved (see
+  // `pendingVaultProjections`), so nothing here clears state.
+  const latestPositionsRead = positionsReads[positionsReads.length - 1];
+  const refreshRequestedFor = useRef(new Set<string>());
   useEffect(() => {
-    const projections = [...vaultDepositWatches, ...vaultWithdrawalWatches].flatMap(
-      ({ balanceProjection }) => (balanceProjection ? [balanceProjection] : [])
+    const unrequested = pendingVaultProjections(trackedActivities, latestPositionsRead).filter(
+      ({ movement }) => !refreshRequestedFor.current.has(movement.movementId)
     );
-    if (projections.length === 0) return;
-    const nextExpiry = Math.min(...projections.map(({ expiresAt }) => expiresAt));
-    const timeout = window.setTimeout(
-      () => {
-        const clearExpiredProjection = <
-          Movement extends { balanceProjection?: VaultBalanceProjection },
-        >(
-          current: readonly Movement[]
-        ): readonly Movement[] => {
-          let changed = false;
-          const next = current.map((movement) => {
-            if (!movement.balanceProjection || movement.balanceProjection.expiresAt > Date.now()) {
-              return movement;
-            }
-            changed = true;
-            const { balanceProjection: _, ...remaining } = movement;
-            return remaining as unknown as Movement;
-          });
-          return changed ? next : current;
-        };
-        setVaultDepositWatches(clearExpiredProjection);
-        setVaultWithdrawalWatches(clearExpiredProjection);
-      },
-      Math.max(0, nextExpiry - Date.now())
-    );
-    return () => window.clearTimeout(timeout);
-  }, [vaultDepositWatches, vaultWithdrawalWatches]);
+    if (unrequested.length === 0) return;
+    for (const { movement } of unrequested) refreshRequestedFor.current.add(movement.movementId);
+    refreshPositions();
+  }, [latestPositionsRead, refreshPositions, trackedActivities]);
 
-  const activeWallets = wallets ?? [];
+  const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
   // a wallet can hold receipt tokens for a strategy it has no recorded
   // position in (deposited outside SDP), and those tiles are still not cash.
@@ -2158,15 +2036,25 @@ export function TreasurySolutionsWorkspace({
   //     its error state over stale rows, so this matches that posture), and
   //   - every row actually NAMED its share mint, since a row without one
   //     contributes nothing and leaves a real vault unnameable.
-  const shareMints = treasuryShareMints(positions, strategies, strategiesError);
+  const shareMints = useMemo(
+    () => treasuryShareMints(positions, strategies, strategiesError),
+    [positions, strategies, strategiesError]
+  );
   // Every figure on this page comes from here, so no two surfaces can compute
   // the same thing differently.
-  const allocation = summarizeTreasuryAllocation({
-    positions: availableValue(positionsError, positions),
-    shareMints,
-    wallets: availableValue(walletsError, wallets),
-  });
-  const programs = programsState?.kind === "ready" ? programsState.programs : [];
+  const allocation = useMemo(
+    () =>
+      summarizeTreasuryAllocation({
+        positions: availableValue(positionsError, positions),
+        shareMints,
+        wallets: availableValue(walletsError, wallets),
+      }),
+    [positions, positionsError, shareMints, wallets, walletsError]
+  );
+  const programs = useMemo(
+    () => (programsState?.kind === "ready" ? programsState.programs : []),
+    [programsState]
+  );
   // Recovery seeds durable component state. Do not derive tracker mounts
   // directly from the live list: the list can stop returning a movement just
   // before its detail poll observes terminal state, which would unmount the
@@ -2180,18 +2068,20 @@ export function TreasurySolutionsWorkspace({
     );
   }, [addVaultWithdrawalWatches, discoveredVaultWithdrawals]);
 
-  const activeVaultDepositWatches = vaultDepositWatches.filter(
-    (deposit) => !settledVaultDepositIds.has(deposit.movementId)
+  const activeVaultDepositWatches = useMemo(
+    () => vaultDepositWatches.filter((deposit) => !settledVaultDepositIds.has(deposit.movementId)),
+    [settledVaultDepositIds, vaultDepositWatches]
   );
-  const activeVaultWithdrawalWatches = vaultWithdrawalWatches.filter(
-    (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
+  const activeVaultWithdrawalWatches = useMemo(
+    () =>
+      vaultWithdrawalWatches.filter(
+        (withdrawal) => !settledVaultWithdrawalIds.has(withdrawal.movementId)
+      ),
+    [settledVaultWithdrawalIds, vaultWithdrawalWatches]
   );
-  const portfolioApy = treasuryPortfolioApy(
-    allocation,
-    positions,
-    positionsError,
-    strategies,
-    strategiesError
+  const portfolioApy = useMemo(
+    () => treasuryPortfolioApy(allocation, positions, positionsError, strategies, strategiesError),
+    [allocation, positions, positionsError, strategies, strategiesError]
   );
   const summaryLoading = treasurySummaryLoading({
     positionsError,
@@ -2230,6 +2120,7 @@ export function TreasurySolutionsWorkspace({
         positions={positions}
         positionsError={positionsError}
         positionsLoading={positionsLoading}
+        positionsReads={positionsReads}
         programs={programs}
         programsLoading={programsLoading}
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
@@ -2256,15 +2147,11 @@ export function TreasurySolutionsWorkspace({
             const provisionalPosition = authoritativePosition
               ? undefined
               : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
-            const baselineValue =
-              currentVaultBalance(
-                deposit.positionId,
-                positions,
-                vaultDepositWatches,
-                vaultWithdrawalWatches
-              ) ?? (provisionalPosition ? "0" : undefined);
             const balanceProjection = intent.projectBalance
-              ? createVaultBalanceProjection(baselineValue, intent.amount, "deposit")
+              ? createVaultBalanceProjection(
+                  intent.amount,
+                  projectionBaseline(positionsReads, deposit.positionId, intent.submittedAt)
+                )
               : undefined;
             addVaultDepositWatches([
               {
@@ -2274,6 +2161,7 @@ export function TreasurySolutionsWorkspace({
                 positionId: deposit.positionId,
                 provisionalPosition,
                 status: deposit.status,
+                submittedAt: intent.submittedAt,
               },
             ]);
             refreshPositions();
@@ -2303,14 +2191,8 @@ export function TreasurySolutionsWorkspace({
           onWithdrawn={(withdrawal, intent) => {
             const balanceProjection = intent.projectBalance
               ? createVaultBalanceProjection(
-                  currentVaultBalance(
-                    withdrawal.positionId,
-                    positions,
-                    vaultDepositWatches,
-                    vaultWithdrawalWatches
-                  ),
                   intent.amount,
-                  "withdrawal"
+                  projectionBaseline(positionsReads, withdrawal.positionId, intent.submittedAt)
                 )
               : undefined;
             addVaultWithdrawalWatches([
@@ -2321,6 +2203,7 @@ export function TreasurySolutionsWorkspace({
                 movementId: withdrawal.movementId,
                 positionId: withdrawal.positionId,
                 status: withdrawal.status,
+                submittedAt: intent.submittedAt,
               },
             ]);
             refreshPositions();

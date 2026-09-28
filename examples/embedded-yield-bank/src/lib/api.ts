@@ -1,4 +1,11 @@
-import type { ApiErrorBody, DashboardData, TransferResult } from "@/types";
+import type {
+  ApiErrorBody,
+  DashboardData,
+  TransferResult,
+  WithdrawalCancellationResult,
+  WithdrawalIntent,
+  WithdrawalResult,
+} from "@/types";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -34,12 +41,25 @@ export async function createDeposit(amount: string): Promise<TransferResult> {
 
 /** Savings to checking. */
 export async function createWithdrawal(
-  amount: string
-): Promise<TransferResult> {
-  return request<TransferResult>("/api/withdrawals", {
+  input: WithdrawalIntent
+): Promise<WithdrawalResult> {
+  return request<WithdrawalResult>("/api/withdrawals", {
     method: "POST",
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify(input),
   });
+}
+
+/** Recover escrowed shares once the durable request becomes cancelable. */
+export async function cancelQueuedWithdrawal(
+  withdrawalRequestId: string
+): Promise<WithdrawalCancellationResult> {
+  return request<WithdrawalCancellationResult>(
+    "/api/withdrawal-cancellations",
+    {
+      method: "POST",
+      body: JSON.stringify({ withdrawalRequestId }),
+    }
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

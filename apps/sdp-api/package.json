@@ -53,6 +53,7 @@
     "@sdp/env-config": "workspace:*",
     "@sdp/helius-rings": "workspace:*",
     "@sdp/helius-rings-sdk": "workspace:*",
+    "@sdp/hastra": "workspace:*",
     "@sdp/issuance": "workspace:*",
     "@sdp/kamino": "workspace:*",
     "@sdp/jupiter-lend": "workspace:*",

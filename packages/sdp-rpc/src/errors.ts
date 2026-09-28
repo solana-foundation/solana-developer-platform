@@ -27,6 +27,15 @@ export class SdpRpcError extends Error {
   }
 }
 
+export class RpcHttpStatusError extends Error {
+  constructor(
+    public readonly httpStatus: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export function solanaRpcError(message: string, details?: Record<string, unknown>): SdpRpcError {
   return new SdpRpcError("SOLANA_RPC_ERROR", message, details);
 }

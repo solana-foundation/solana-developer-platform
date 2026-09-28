@@ -1,6 +1,5 @@
 import { hashString } from "@sdp/payments/hash";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
-import { buildBvnkCustomerRequest } from "@sdp/payments/ramps/providers/bvnk/counterparty";
 import {
   BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS,
   buildBvnkCustomerExternalReference,
@@ -12,11 +11,13 @@ import {
 } from "@sdp/payments/ramps/providers/bvnk/requirements";
 import {
   bvnkAgreementSession,
+  bvnkCollectedIndividual,
   bvnkCustomer,
   bvnkLedgerWallet,
+  bvnkVerifiedIndividualCustomer,
   bvnkWalletProfilesResponse,
 } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
-import { BVNK_FUNDING_WALLET_STATUS, type BvnkFundingWalletStatus } from "@sdp/types";
+import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -38,6 +39,7 @@ import { TEST_ORG, TEST_USER } from "@/test/fixtures/organizations";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import {
   restoreBvnkSandboxEnv,
+  seedBvnkCustomerLink,
   seedBvnkFundingWallet,
   stubBvnkSandboxEnv,
   TEST_BVNK_WALLET_ID,
@@ -51,9 +53,8 @@ const TEST_PROJECT_ID = "prj_counterparties_test";
 const TEST_CP_CUSTODY_WALLET_ID = "cwlt_counterparties_test";
 const TEST_CP_CUSTODY_CONFIG_ID = "ccfg_counterparties_test";
 const TEST_CP_WALLET_PUBLIC_KEY = "8dHEsGLpCZHZbXnFVvqWq4kMfM2pVDuNrXvVJVhQWRGZ";
-
-const BVNK_SESSION_REFERENCE = "c1d91c8b-f4a6-469e-953d-7344fdb6858c";
-const BVNK_CUSTOMER_REFERENCE = "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3";
+const BVNK_SESSION_REFERENCE = "00000000-0000-4000-8000-00000000a001";
+const BVNK_CUSTOMER_REFERENCE = "00000000-0000-4000-8000-00000000c058";
 const { agreements: BVNK_SESSION_AGREEMENTS } = bvnkAgreementSession();
 const BVNK_SESSION_AGREEMENT = {
   ...BVNK_SESSION_AGREEMENTS[0],
@@ -74,10 +75,9 @@ const BVNK_CUSTOMER_DETAIL = {
   ...bvnkCustomer({ reference: BVNK_CUSTOMER_REFERENCE }),
   verification: {
     status: "init",
-    url: "https://in.sumsub.com/websdk/p/sbx_EDHeJPPmWnBSU2Es",
+    url: "https://in.sumsub.com/websdk/p/test_verification",
   },
 };
-
 describe("Counterparties Routes", () => {
   let apiKeyHash: string;
 
@@ -201,8 +201,7 @@ describe("Counterparties Routes", () => {
   });
 
   const authHeader = `Bearer ${TEST_API_KEY.raw}`;
-
-  const createCounterparty = (body: Record<string, unknown> = {}) =>
+  const createCounterparty = (body: Record<string, unknown>) =>
     app.request(
       "/v1/counterparties",
       {
@@ -217,12 +216,6 @@ describe("Counterparties Routes", () => {
       env
     );
 
-  /**
-   * Inserts one provider-account fixture with explicit timestamps.
-   *
-   * @param input - Provider-account fixture values.
-   * @returns The inserted provider-account row.
-   */
   async function seedProviderAccount(input: {
     id: string;
     counterpartyId: string;
@@ -430,7 +423,6 @@ describe("Counterparties Routes", () => {
       expect(res.status).toBe(404);
     });
   });
-
   describe("GET /v1/counterparties/:counterpartyId/requirements", () => {
     beforeEach(() => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
@@ -442,9 +434,8 @@ describe("Counterparties Routes", () => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_SECRET = undefined;
       vi.restoreAllMocks();
     });
-
     it("surfaces the missing destination wallet for onramp requirements", async () => {
-      const created = await createCounterparty();
+      const created = await createCounterparty({});
       const cp = (await created.json()).data.counterparty;
 
       const res = await app.request(
@@ -452,7 +443,6 @@ describe("Counterparties Routes", () => {
         { headers: { Authorization: authHeader } },
         env
       );
-
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe("BAD_REQUEST");
@@ -681,7 +671,6 @@ describe("Counterparties Routes", () => {
       expect(response.status).toBe(400);
     });
   });
-
   describe("POST /v1/counterparties/:counterpartyId/requirements", () => {
     beforeEach(() => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
@@ -1038,13 +1027,13 @@ describe("Counterparties Routes", () => {
       const body = await res.json();
       expect(body.error.message).toBe("API key is not authorized for the requested wallet");
     });
-
     it("mints a v1 agreement session for the residence country and persists the link before PII", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_residence" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
       const requests: string[] = [];
       const sessionBodies: unknown[] = [];
+
       let sessionIdempotencyKey: string | null = null;
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const path = new URL(String(input)).pathname;
@@ -1074,22 +1063,14 @@ describe("Counterparties Routes", () => {
       env.BVNK_SANDBOX_HAWK_AUTH_ID = "auth";
       env.BVNK_SANDBOX_HAWK_SECRET_KEY = "secret";
       try {
-        await getDb(env)
-          .prepare(
-            `INSERT INTO counterparty_provider_accounts (
-               id, organization_id, project_id, counterparty_id, provider,
-               provider_customer_reference, kind, status, metadata
-             ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', 'archived', ?)`
-          )
-          .bind(
-            `counterparty_provider_account_9f3e2a1c-4d7b-4a8e-9c1f-2b3c4d5e6f70`,
-            TEST_ORG.id,
-            TEST_PROJECT_ID,
-            counterparty.id,
-            buildBvnkCustomerExternalReference(counterparty.id),
-            { residenceCountryCode: "US" }
-          )
-          .run();
+        await seedBvnkCustomerLink(getDb(env), {
+          organizationId: TEST_ORG.id,
+          projectId: TEST_PROJECT_ID,
+          counterpartyId: counterparty.id,
+          customerReference: buildBvnkCustomerExternalReference(counterparty.id),
+          archived: true,
+          metadata: { residenceCountryCode: "US" },
+        });
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
           {
@@ -1106,6 +1087,7 @@ describe("Counterparties Routes", () => {
           },
           env
         );
+
         expect(response.status).toBe(200);
         expect((await response.json()).data).toEqual({
           provider: "bvnk",
@@ -1193,33 +1175,21 @@ describe("Counterparties Routes", () => {
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
       }
     });
-
     it("reads back a verified BVNK customer link from its stored metadata status", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_verified" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      const rowId = `counterparty_provider_account_${crypto.randomUUID()}`;
-      await getDb(env)
-        .prepare(
-          `INSERT INTO counterparty_provider_accounts (
-            id, organization_id, project_id, counterparty_id, provider,
-            provider_customer_reference, kind, status, provider_status, metadata
-          ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'customer_link', 'active', ?, ?)`
-        )
-        .bind(
-          rowId,
-          TEST_ORG.id,
-          TEST_PROJECT_ID,
-          counterparty.id,
-          "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
-          null,
-          {
-            status: "VERIFIED",
-            residenceCountryCode: "US",
-            session: { reference: BVNK_SESSION_REFERENCE, agreements: [] },
-          }
-        )
-        .run();
+      const { id: rowId } = await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+        metadata: {
+          residenceCountryCode: "US",
+          session: { reference: BVNK_SESSION_REFERENCE, agreements: [] },
+        },
+      });
 
       const res = await app.request(
         `/v1/counterparties/${counterparty.id}/provider-accounts`,
@@ -1242,7 +1212,7 @@ describe("Counterparties Routes", () => {
           customerLink: {
             provider: "bvnk",
             id: rowId,
-            providerCustomerReference: "2a9c8a29-5030-456d-87c2-7f6cc2ee6bf3",
+            providerCustomerReference: "00000000-0000-4000-8000-00000000c058",
             status: "active",
             providerStatus: "VERIFIED",
             createdAt: expect.any(String),
@@ -1252,30 +1222,24 @@ describe("Counterparties Routes", () => {
         },
       ]);
     });
-
-    async function seedVerifiedBvnkCustomerLink(counterpartyId: string): Promise<void> {
-      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId,
-        provider: "bvnk",
-        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
-        metadata: { status: "VERIFIED" },
-      });
-    }
-
     function mockVerifiedBvnkCustomer() {
       const spy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
-        .mockResolvedValue(
-          bvnkCustomer({ reference: BVNK_CUSTOMER_REFERENCE, status: "VERIFIED" })
-        );
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_CUSTOMER_REFERENCE }));
       return spy;
     }
 
     function bvnkOnrampRequirementsRequest(counterpartyId: string) {
       return app.request(
         `/v1/counterparties/${counterpartyId}/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=USD&destinationCustodyWalletId=${TEST_CP_CUSTODY_WALLET_ID}`,
+        { headers: { "Content-Type": "application/json", Authorization: authHeader } },
+        env
+      );
+    }
+
+    function bvnkOfframpRequirementsRequest(counterpartyId: string, fiatCurrency: string) {
+      return app.request(
+        `/v1/counterparties/${counterpartyId}/requirements?provider=bvnk&direction=offramp&assetRail=usdc.solana&fiatCurrency=${fiatCurrency}`,
         { headers: { "Content-Type": "application/json", Authorization: authHeader } },
         env
       );
@@ -1298,30 +1262,17 @@ describe("Counterparties Routes", () => {
         env
       );
     }
-
-    function seedFundingWallet(
-      counterpartyId: string,
-      input: {
-        providerStatus: BvnkFundingWalletStatus;
-        metadata: Record<string, unknown>;
-      }
-    ) {
-      return seedBvnkFundingWallet(getDb(env), {
-        organizationId: TEST_ORG.id,
-        projectId: TEST_PROJECT_ID,
-        counterpartyId,
-        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
-        walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: input.providerStatus,
-        metadata: input.metadata,
-      });
-    }
-
     it("advance_recovers_missing_and_unassigned_funding_wallet: creates the missing funding wallet and still gates on customer_funding_account_provisioning", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_funding_missing" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
       const listWalletsSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "listLedgerWalletsV2")
@@ -1340,7 +1291,6 @@ describe("Counterparties Routes", () => {
         );
 
       const res = await bvnkOnrampAdvanceRequest(counterparty.id);
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -1364,16 +1314,26 @@ describe("Counterparties Routes", () => {
       walletProfileSpy.mockRestore();
       createWalletSpy.mockRestore();
     });
-
     it("advance_for_a_verified_customer_never_asks_for_residence: a POST advance without collected data returns ready once the funding wallet is provisioned", async () => {
       const created = await createCounterparty({
         externalId: "requirements_bvnk_verified_advance",
       });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
         metadata: {},
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
@@ -1393,7 +1353,6 @@ describe("Counterparties Routes", () => {
         },
         env
       );
-
       expect(res.status).toBe(200);
       const data = (await res.json()).data;
       expect(data.status).toBe("ready");
@@ -1401,16 +1360,26 @@ describe("Counterparties Routes", () => {
 
       getCustomerSpy.mockRestore();
     });
-
     it("keeps reporting customer_funding_account_provisioning while the funding wallet claim is fresh", async () => {
       const created = await createCounterparty({
         externalId: "requirements_bvnk_funding_provisioning",
       });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "claimed",
         metadata: {},
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
@@ -1422,7 +1391,6 @@ describe("Counterparties Routes", () => {
         .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
 
       const res = await bvnkOnrampRequirementsRequest(counterparty.id);
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -1436,20 +1404,29 @@ describe("Counterparties Routes", () => {
       createWalletSpy.mockRestore();
       readWalletSpy.mockRestore();
     });
-
     it("answers ready once the BVNK funding wallet is provisioned", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_funding_ready" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
         metadata: {},
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
 
       const res = await bvnkOnrampRequirementsRequest(counterparty.id);
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -1459,54 +1436,119 @@ describe("Counterparties Routes", () => {
 
       getCustomerSpy.mockRestore();
     });
+    it("gates an off-ramp requirements read on the funding wallet exactly like on-ramp when no funding row exists", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_no_funding",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
 
-    async function seedAssignedStaleProvisioningFundingWallet(
-      counterpartyId: string,
-      rowId: string,
-      stale: boolean
-    ): Promise<void> {
-      const staleAt = new Date(
-        Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS - 1000
-      ).toISOString();
-      await getDb(env)
-        .prepare(
-          `INSERT INTO counterparty_provider_accounts (
-             id, organization_id, project_id, counterparty_id, provider,
-             provider_customer_reference, kind, fiat_currency,
-             external_account_reference, provider_status, metadata, updated_at
-           ) VALUES (?, ?, ?, ?, 'bvnk', ?, 'funding_wallet', 'USD', ?, 'provisioning_funding_wallet', '{}'::jsonb, ?)`
-        )
-        .bind(
-          rowId,
-          TEST_ORG.id,
-          TEST_PROJECT_ID,
-          counterpartyId,
-          BVNK_CUSTOMER_REFERENCE,
-          TEST_BVNK_WALLET_ID,
-          stale ? staleAt : new Date().toISOString()
-        )
-        .run();
-    }
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "USD");
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "customer_funding_account_provisioning",
+      });
 
+      getCustomerSpy.mockRestore();
+    });
+    it("answers ready for an off-ramp requirements read once the funding wallet is provisioned", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_ready",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = mockVerifiedBvnkCustomer();
+
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "USD");
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "ready",
+      });
+
+      getCustomerSpy.mockRestore();
+    });
+
+    it("rejects a non-USD off-ramp fiat before any BVNK call", async () => {
+      const created = await createCounterparty({
+        externalId: "requirements_bvnk_offramp_eur",
+      });
+      expect(created.status).toBe(201);
+      const counterparty = (await created.json()).data.counterparty;
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await bvnkOfframpRequirementsRequest(counterparty.id, "EUR");
+
+      expect(res.status).toBe(200);
+      expect((await res.json()).data).toEqual({
+        provider: "bvnk",
+        direction: "offramp",
+        status: "unsupported",
+        reason: "BVNK supports USD only.",
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      fetchSpy.mockRestore();
+    });
     it("advance recovers a stale assigned provisioning funding wallet once BVNK reports it ACTIVE with a FIAT instrument", async () => {
       const created = await createCounterparty({
         externalId: "requirements_bvnk_funding_recover",
       });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedAssignedStaleProvisioningFundingWallet(
-        counterparty.id,
-        "cpa_req_funding_recover",
-        true
-      );
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "assigned",
+        metadata: {},
+        id: "cpa_req_funding_recover",
+        updatedAt: new Date(
+          Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS - 1000
+        ).toISOString(),
+      });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
       const readWalletSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
         .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID }));
 
       const res = await bvnkOnrampAdvanceRequest(counterparty.id);
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -1526,26 +1568,38 @@ describe("Counterparties Routes", () => {
       getCustomerSpy.mockRestore();
       readWalletSpy.mockRestore();
     });
-
     it("ACTIVE_without_instrument_does_not_mark_ready: an ACTIVE wallet without a FIAT instrument leaves the row provisioning", async () => {
       const created = await createCounterparty({
         externalId: "requirements_bvnk_funding_no_instrument",
       });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedAssignedStaleProvisioningFundingWallet(
-        counterparty.id,
-        "cpa_req_funding_no_instrument",
-        true
-      );
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "assigned",
+        metadata: {},
+        id: "cpa_req_funding_no_instrument",
+        updatedAt: new Date(
+          Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS - 1000
+        ).toISOString(),
+      });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
       const readWalletSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2")
         .mockResolvedValue(bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID, paymentInstruments: [] }));
 
       const res = await bvnkOnrampAdvanceRequest(counterparty.id);
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -1563,14 +1617,24 @@ describe("Counterparties Routes", () => {
       getCustomerSpy.mockRestore();
       readWalletSpy.mockRestore();
     });
-
     it("advances a verified BVNK on-ramp submit to ready once the funding wallet is provisioned", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_submit_ready" });
       expect(created.status).toBe(201);
       const counterparty = (await created.json()).data.counterparty;
-      await seedVerifiedBvnkCustomerLink(counterparty.id);
-      await seedFundingWallet(counterparty.id, {
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        customerReference: BVNK_CUSTOMER_REFERENCE,
+        status: "VERIFIED",
+      });
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: counterparty.id,
+        providerCustomerReference: BVNK_CUSTOMER_REFERENCE,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
         metadata: {},
       });
       const getCustomerSpy = mockVerifiedBvnkCustomer();
@@ -1590,7 +1654,6 @@ describe("Counterparties Routes", () => {
         },
         env
       );
-
       expect(res.status).toBe(200);
       expect((await res.json()).data).toEqual({
         provider: "bvnk",
@@ -2220,32 +2283,13 @@ describe("Counterparties Routes", () => {
         env.TRUST_PROXY_HEADERS = "true";
       }
     });
-
     it("creates the v1 customer from the full pack and flips the link reference", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_confirmed" });
       const counterparty = (await created.json()).data.counterparty;
-      const collectedData = {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1815-12-10",
-        email: "ada@example.com",
-        "address.addressLine1": "1 Main Street",
-        "address.city": "Austin",
-        "address.postalCode": "78701",
-        "address.countryCode": "US",
-        "address.stateCode": "MO",
-        "taxIdentification.number": "123-45-6789",
-        birthCountryCode: "GB",
-        nationality: "GB",
+      const collectedData = bvnkCollectedIndividual({
         "cdd.employmentStatus": "SALARIED",
-        "cdd.sourceOfFunds": "SALARY",
-        "cdd.pepStatus": "NOT_PEP",
-        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
         "cdd.expectedMonthlyVolume.amount": "1000",
-        "cdd.expectedMonthlyVolume.currency": "USD",
-        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-        "cdd.employmentIndustrySector": "INFORMATION",
-      };
+      });
       const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
       await repository.upsertProviderAccount({
         organizationId: TEST_ORG.id,
@@ -2352,7 +2396,6 @@ describe("Counterparties Routes", () => {
         expect(optionValues).not.toContain("TX");
         expect(optionValues).not.toContain("NY");
         expect(requests).toEqual([]);
-
         const response = await app.request(
           `/v1/counterparties/${counterparty.id}/requirements`,
           {
@@ -2369,6 +2412,7 @@ describe("Counterparties Routes", () => {
           },
           env
         );
+
         expect(response.status).toBe(200);
         expect((await response.json()).data).toEqual({
           provider: "bvnk",
@@ -2385,7 +2429,23 @@ describe("Counterparties Routes", () => {
           type: "individual",
           externalReference: buildBvnkCustomerExternalReference(counterparty.id),
           signedAgreementSessionReference: BVNK_SESSION_REFERENCE,
-          individual: buildBvnkCustomerRequest(collectedData, "US"),
+          individual: expect.objectContaining({
+            firstName: "Ada",
+            lastName: "Lovelace",
+            dateOfBirth: "1815-12-10",
+            address: {
+              addressLine1: "1 Main Street",
+              city: "Austin",
+              postalCode: "78701",
+              countryCode: "US",
+              stateCode: "MO",
+            },
+            taxIdentification: { number: "123-45-6789", taxResidenceCountryCode: "US" },
+            cdd: expect.objectContaining({
+              employmentStatus: "SALARIED",
+              expectedMonthlyVolume: { amount: "1000", currency: "USD" },
+            }),
+          }),
         });
         expect(createIdempotencyKey).toBe(
           (await hashString(`bvnk-customer:${counterparty.id}`)).slice(0, 36)
@@ -2454,32 +2514,13 @@ describe("Counterparties Routes", () => {
         env.BVNK_SANDBOX_HAWK_SECRET_KEY = undefined;
       }
     });
-
     it("returns customer_verifying when the fresh customer is PENDING with no Sumsub link", async () => {
       const created = await createCounterparty({ externalId: "requirements_bvnk_pending" });
       const counterparty = (await created.json()).data.counterparty;
-      const collectedData = {
-        firstName: "Ada",
-        lastName: "Lovelace",
-        dateOfBirth: "1815-12-10",
-        email: "ada@example.com",
-        "address.addressLine1": "1 Main Street",
-        "address.city": "Austin",
-        "address.postalCode": "78701",
-        "address.countryCode": "US",
-        "address.stateCode": "MO",
-        "taxIdentification.number": "123-45-6789",
-        birthCountryCode: "GB",
-        nationality: "GB",
+      const collectedData = bvnkCollectedIndividual({
         "cdd.employmentStatus": "SALARIED",
-        "cdd.sourceOfFunds": "SALARY",
-        "cdd.pepStatus": "NOT_PEP",
-        "cdd.intendedUseOfAccount": "TRANSFERS_OWN_WALLET",
         "cdd.expectedMonthlyVolume.amount": "1000",
-        "cdd.expectedMonthlyVolume.currency": "USD",
-        "cdd.estimatedYearlyIncome": "INCOME_100K_TO_250K",
-        "cdd.employmentIndustrySector": "INFORMATION",
-      };
+      });
       const repository = createPostgresCounterpartyProviderAccountsRepository(getDb(env));
       await repository.upsertProviderAccount({
         organizationId: TEST_ORG.id,
@@ -2680,7 +2721,6 @@ describe("Counterparties Routes", () => {
       expect(body.error.code).toBe("BAD_REQUEST");
     });
   });
-
   describe("GET /v1/counterparties/:counterpartyId/provider-accounts", () => {
     beforeEach(() => {
       env.LIGHTSPARK_GRID_SANDBOX_CLIENT_ID = "lightspark_client_id";
@@ -2972,6 +3012,281 @@ describe("Counterparties Routes", () => {
       );
 
       expect(response.status).toBe(503);
+    });
+    it("lists provisioned funding-wallet rows with a live available balance", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_balance" });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({
+          id: TEST_BVNK_WALLET_ID,
+          balance: { amount: 9.9, currency: "USD" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toEqual([
+        {
+          id: expect.any(String),
+          provider: "bvnk",
+          kind: "funding_wallet",
+          fiatCurrency: "USD",
+          destinationCountry: null,
+          paymentRail: null,
+          status: "active",
+          providerStatus: "provisioned_funding_wallet",
+          createdAt: expect.any(String),
+          providerAccountReference: TEST_BVNK_WALLET_ID,
+          balance: { state: "available", amount: "9.9", currency: "USD" },
+        },
+      ]);
+      expect(RAMP_PROVIDER_CLIENTS.bvnk.getLedgerWalletV2).toHaveBeenCalledWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        { walletId: TEST_BVNK_WALLET_ID }
+      );
+    });
+    it("keeps the funding-wallet row with an unavailable balance when the BVNK read fails", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_failure" });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      await seedProviderAccount({
+        id: "provider_account_usd_funding_failure",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:failure",
+        externalAccountReference: "ExternalAccount:failure",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockRejectedValue(
+        new Error("wallet read exploded")
+      );
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      const walletRow = body.data.accounts.find((account) => account.kind === "funding_wallet");
+      expect(walletRow).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+        balance: { state: "unavailable" },
+      });
+      const payoutRow = body.data.accounts.find(
+        (account) => account.id === "provider_account_usd_funding_failure"
+      );
+      expect(payoutRow).toMatchObject({
+        provider: "lightspark",
+        kind: "payout_account",
+        providerStatus: "PENDING",
+      });
+    });
+    it("keeps the funding-wallet row with an unavailable balance when the wallet read carries no balance", async () => {
+      const created = await createCounterparty({
+        externalId: "provider_accounts_funding_no_balance",
+      });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      await seedProviderAccount({
+        id: "provider_account_usd_no_balance",
+        counterpartyId: owner.id,
+        provider: "lightspark",
+        providerCustomerReference: "Customer:no_balance",
+        externalAccountReference: "ExternalAccount:no_balance",
+        fiatCurrency: "USD",
+        destinationCountry: "US",
+        paymentRail: "ACH",
+        providerStatus: "PENDING",
+        status: "active",
+        createdAt: "2026-03-01T00:00:00.000Z",
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({ id: TEST_BVNK_WALLET_ID })
+      );
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ data: [], hasMore: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toHaveLength(2);
+      const walletRow = body.data.accounts.find((account) => account.kind === "funding_wallet");
+      expect(walletRow).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+        balance: { state: "unavailable" },
+      });
+      const payoutRow = body.data.accounts.find(
+        (account) => account.id === "provider_account_usd_no_balance"
+      );
+      expect(payoutRow).toMatchObject({
+        provider: "lightspark",
+        kind: "payout_account",
+        providerStatus: "PENDING",
+      });
+    });
+    it("omits balance and reference on a provisioning funding-wallet row", async () => {
+      const walletSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2");
+      const created = await createCounterparty({
+        externalId: "provider_accounts_funding_provisioning",
+      });
+      const owner = (await created.json()).data.counterparty;
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "claimed",
+        metadata: {},
+      });
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toEqual([
+        {
+          id: expect.any(String),
+          provider: "bvnk",
+          kind: "funding_wallet",
+          fiatCurrency: "USD",
+          destinationCountry: null,
+          paymentRail: null,
+          status: "active",
+          providerStatus: "provisioning_funding_wallet",
+          createdAt: expect.any(String),
+        },
+      ]);
+      expect(walletSpy).not.toHaveBeenCalled();
+      walletSpy.mockRestore();
+    });
+    it("attaches the customer link to funding-wallet rows instead of a standalone account", async () => {
+      const created = await createCounterparty({ externalId: "provider_accounts_funding_link" });
+      const owner = (await created.json()).data.counterparty;
+      const customerLink = await createPostgresCounterpartyProviderAccountsRepository(
+        getDb(env)
+      ).upsertProviderAccount({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        provider: "bvnk",
+        providerCustomerReference: "Customer:bvnk_funding",
+      });
+      await getDb(env)
+        .prepare("UPDATE counterparty_provider_accounts SET metadata = ? WHERE id = ?")
+        .bind({ residenceCountryCode: "US" }, customerLink.id)
+        .run();
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: owner.id,
+        providerCustomerReference: "Customer:bvnk_funding",
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getLedgerWalletV2").mockResolvedValue(
+        bvnkLedgerWallet({
+          id: TEST_BVNK_WALLET_ID,
+          balance: { amount: 9.9, currency: "USD" },
+        })
+      );
+
+      const response = await app.request(
+        `/v1/counterparties/${owner.id}/provider-accounts`,
+        { headers: { Authorization: authHeader } },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { accounts: Array<Record<string, unknown>> };
+      };
+      expect(body.data.accounts).toHaveLength(1);
+      expect(body.data.accounts[0]).toMatchObject({
+        provider: "bvnk",
+        kind: "funding_wallet",
+        providerAccountReference: TEST_BVNK_WALLET_ID,
+      });
+      expect(body.data.accounts[0].customerLink).toEqual({
+        provider: "bvnk",
+        id: customerLink.id,
+        providerCustomerReference: null,
+        status: "active",
+        providerStatus: "PENDING_AGREEMENT",
+        createdAt: customerLink.created_at,
+        residenceCountryCode: "US",
+        agreements: [],
+      });
     });
   });
 

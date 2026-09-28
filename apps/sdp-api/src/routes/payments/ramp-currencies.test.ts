@@ -5,7 +5,8 @@ import { AppError } from "@/lib/errors";
 import { requirePermissions } from "@/middleware/auth";
 import { env } from "@/test/helpers/env";
 import type { Env } from "@/types/env";
-import { listOfframpCurrencies, listOnrampCurrencies } from "./handlers/ramps";
+import { listOfframpCurrencies } from "./ramps/offramp/handlers";
+import { listOnrampCurrencies } from "./ramps/onramp/handlers";
 
 type CurrencyPair = {
   source: string;

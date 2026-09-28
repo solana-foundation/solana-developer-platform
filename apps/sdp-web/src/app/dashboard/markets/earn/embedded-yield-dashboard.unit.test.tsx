@@ -8,8 +8,7 @@ import type {
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { EmbeddedYieldDashboard } from "./embedded-yield-dashboard";
 
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -84,11 +83,7 @@ function positionFixture(
 }
 
 function renderWithEnglish(children: ReactNode) {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {children}
-    </I18nProvider>
-  );
+  return render(<EnglishTestI18n>{children}</EnglishTestI18n>);
 }
 
 afterEach(() => {
@@ -148,7 +143,7 @@ describe("EmbeddedYieldDashboard", () => {
       screen.getByRole("link", { name: "Integrate Embedded Yield" }).getAttribute("href")
     ).toBe("/dashboard/markets/embedded-yield/configure");
     expect(screen.getByText("USDC Core Yield")).toBeTruthy();
-    expect(screen.getByText("1,250.42 USDC")).toBeTruthy();
+    expect(screen.getByText("$1,250.42")).toBeTruthy();
     expect(screen.getByText("Instant")).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
   });
@@ -355,7 +350,7 @@ describe("EmbeddedYieldDashboard", () => {
 
     expect(screen.getByText(/Live values are unavailable for 1 position/)).toBeTruthy();
     expect(screen.getByText("Unavailable")).toBeTruthy();
-    expect(document.body.textContent).not.toContain("0 USDC");
+    expect(document.body.textContent).not.toContain("$0.00");
   });
 
   it("renders settled portfolio data without the initial skeleton", () => {
@@ -574,7 +569,7 @@ describe("EmbeddedYieldDashboard", () => {
     const details = screen.getByRole("region", { name: "USDC Core Yield" });
     expect(screen.getByText("September 2, 2026")).toBeTruthy();
     expect(within(details).getAllByRole("article")).toHaveLength(positions.length);
-    expect(within(details).getAllByText("1 USDC")).toHaveLength(positions.length);
+    expect(within(details).getAllByText("$1.00")).toHaveLength(positions.length);
     expect(mocks.fetchPositions).not.toHaveBeenCalled();
   });
 

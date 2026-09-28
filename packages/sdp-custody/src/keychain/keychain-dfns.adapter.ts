@@ -55,7 +55,13 @@ export class KeychainDfnsAdapter extends BaseKeychainAdapter {
       walletId: normalizedWalletId,
       requestDelayMs: this.config.requestDelayMs,
       providerLabel: this.providerLabel,
+    }).catch((error: unknown) => {
+      if (this.signerByWalletId.get(cacheKey) === created) {
+        this.signerByWalletId.delete(cacheKey);
+      }
+      throw error;
     });
+
     this.signerByWalletId.set(cacheKey, created);
     return created;
   }

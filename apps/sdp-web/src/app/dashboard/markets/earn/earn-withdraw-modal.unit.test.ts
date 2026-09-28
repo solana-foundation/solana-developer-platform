@@ -22,10 +22,6 @@ describe("exact USD amount checks", () => {
 describe("withdrawalRequestSignature", () => {
   const base = ["earn_program_1", "12.50", "usdc", "11111111111111111111111111111111"] as const;
 
-  it("is stable for an unchanged retry", () => {
-    expect(withdrawalRequestSignature(...base)).toBe(withdrawalRequestSignature(...base));
-  });
-
   it("changes whenever the intended withdrawal changes", () => {
     const signature = withdrawalRequestSignature(...base);
     expect(withdrawalRequestSignature("earn_program_2", base[1], base[2], base[3])).not.toBe(

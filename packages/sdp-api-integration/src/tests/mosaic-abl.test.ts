@@ -186,19 +186,16 @@ describe.skipIf(!SOLANA_CONFIGURED || !RUN_INTEGRATION_TESTS)("Mosaic ABL Operat
 
     expect(removeRes.status).toBe(204);
 
-    // Verify removal
+    // Verify removal: the list endpoint only returns active entries, so a
+    // removed address must not appear. If removal silently failed and the
+    // entry stayed active, it would show up here.
     const listRes = await request(`/v1/issuance/tokens/${tokenId}/allowlist`);
 
     const list = (await listRes.json()) as {
       data: Array<{ address: string; status: string }>;
     };
 
-    // Entry should be revoked, not deleted
-    const revokedEntry = list.data.find((e) => e.address === TEST_WALLETS.wallet1);
-    // Depending on implementation, either filtered out or marked as revoked
-    if (revokedEntry) {
-      expect(revokedEntry.status).toBe("revoked");
-    }
+    expect(list.data.map((e) => e.address)).not.toContain(TEST_WALLETS.wallet1);
   });
 
   it("rejects duplicate allowlist entries", { timeout: 30000 }, async () => {

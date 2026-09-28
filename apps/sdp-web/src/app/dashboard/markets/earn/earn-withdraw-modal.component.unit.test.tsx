@@ -3,8 +3,7 @@
 import type { EarnPortfolioWithdrawal } from "@sdp/types";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { EarnWithdrawModal } from "./earn-withdraw-modal";
 
 const mocks = vi.hoisted(() => ({
@@ -41,14 +40,14 @@ function withdrawal(status: EarnPortfolioWithdrawal["status"]): EarnPortfolioWit
 function renderModal() {
   const onWithdrawalCreated = vi.fn();
   render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <EarnWithdrawModal
         programId="earn_program_1"
         provider="upshift"
         onClose={vi.fn()}
         onWithdrawalCreated={onWithdrawalCreated}
       />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
   return { onWithdrawalCreated };
 }

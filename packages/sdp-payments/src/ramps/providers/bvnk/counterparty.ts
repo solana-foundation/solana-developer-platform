@@ -5,19 +5,10 @@ import type {
   RampDirection,
 } from "@sdp/types/ramp-requirements";
 import { badRequest, unsupportedCounterparty } from "../../../errors";
-import { parseCollectedFields, readyCounterparty } from "../../requirements";
+import { parseCollectedFields } from "../../requirements";
 import type { ValidateCounterpartyOptions } from "../../types";
-import {
-  isBvnkWalletActive,
-  latestBvnkOfframpBeneficiary,
-  readBvnkOfframpWallet,
-} from "./provider-data";
-import {
-  BVNK_RESIDENCE_FIELDS,
-  bvnkOfframpFields,
-  bvnkOnrampFields,
-  isBvnkOfframpCurrency,
-} from "./requirements";
+import { BVNK_FUNDING_WALLET_FIAT } from "./provider-data";
+import { BVNK_RESIDENCE_FIELDS, bvnkOnrampFields } from "./requirements";
 import { type BvnkCustomerIndividual, bvnkV2CddSchema } from "./schemas";
 
 function collectedString(data: Record<string, unknown>, key: string): string {
@@ -118,46 +109,16 @@ export function validateBvnkCounterparty(
   counterparty: Counterparty,
   options: ValidateCounterpartyOptions
 ): CounterpartyRequirements {
-  const { direction, providerData, fiatCurrency } = options;
+  const { direction, fiatCurrency } = options;
 
-  if (options.direction === "offramp") {
-    if (!fiatCurrency) {
-      throw badRequest("fiatCurrency is required for BVNK off-ramp requirements.");
-    }
-    if (!isBvnkOfframpCurrency(fiatCurrency)) {
-      return unsupportedCounterparty(
-        "bvnk",
-        direction,
-        `BVNK off-ramp does not support payouts in ${fiatCurrency}.`
-      );
-    }
-    if (options.providerCustomerReference === undefined) {
-      return bvnkResidenceRequired(direction);
-    }
-    if (!latestBvnkOfframpBeneficiary(providerData, fiatCurrency)) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "collect",
-        fields: bvnkOfframpFields(fiatCurrency),
-      };
-    }
-    const wallet = readBvnkOfframpWallet(providerData, fiatCurrency);
-    if (!wallet || !isBvnkWalletActive(wallet.status)) {
-      return {
-        provider: "bvnk",
-        direction,
-        status: "customer_funding_account_provisioning",
-      };
-    }
-    return readyCounterparty("bvnk", direction);
+  if (fiatCurrency !== undefined && fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
+    return unsupportedCounterparty("bvnk", direction, "BVNK supports USD only.");
   }
-
   if (counterparty.entityType !== "individual") {
     return unsupportedCounterparty(
       "bvnk",
       direction,
-      "BVNK on-ramp supports individual counterparties only."
+      "BVNK supports individual counterparties only."
     );
   }
   return bvnkResidenceRequired(direction);

@@ -2,6 +2,7 @@ import type { PaymentsDashboardWallet } from "@sdp/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FetchResult } from "./payments-page.data";
 import {
+  fetchDashboardPaymentTransfers,
   fetchDashboardPaymentTransfersForWallets,
   fetchPaymentsWallets,
   fetchPaymentTransfers,
@@ -298,6 +299,35 @@ describe("fetchDashboardPaymentTransfersForWallets deadline", () => {
 
     expect(result.walletsNotLoaded).toBe(0);
     expect(result.data).toHaveLength(2);
+  });
+});
+
+describe("fetchDashboardPaymentTransfers", () => {
+  it("starts the persisted-history read alongside the wallet list, not behind it", async () => {
+    let answerWallets!: (response: Response) => void;
+    const walletsAnswered = new Promise<Response>((resolve) => {
+      answerWallets = resolve;
+    });
+    const request = vi.fn(async (path: string) => {
+      if (path.startsWith("/v1/wallets")) return walletsAnswered;
+      return transfersResponse([]);
+    });
+
+    const pending = fetchDashboardPaymentTransfers(request, 20);
+
+    // The persisted history does not depend on the wallet list, so both reads
+    // are in flight before the list answers; serializing them would add one
+    // round trip to every Home activity and volume poll.
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/payments/transfers?page=1&pageSize=20&includeObserved=false",
+      "/v1/wallets?includeAllProviders=true&view=summary",
+    ]);
+
+    answerWallets(Response.json({ data: { wallets: twoWallets.data } }));
+    const result = await pending;
+
+    expect(result).toMatchObject({ ok: true, data: [], walletsNotLoaded: 0 });
   });
 });
 

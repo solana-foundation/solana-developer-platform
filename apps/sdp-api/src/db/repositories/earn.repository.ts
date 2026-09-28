@@ -266,6 +266,12 @@ export interface ListEarnProviderWalletsResult {
 export interface EarnRepository {
   upsertStrategy(input: UpsertEarnStrategyInput): Promise<EarnStrategyRow | null>;
   /**
+   * Upsert one provider catalogue lane in a single database statement.
+   * The statement is atomic; callers may fall back to isolated writes to
+   * identify a malformed row without turning a partial lane into a delist.
+   */
+  upsertStrategies(inputs: readonly UpsertEarnStrategyInput[]): Promise<number>;
+  /**
    * Refresh the volatile figures on ONE already-catalogued strategy.
    *
    * Update-only by design — it can never insert. The catalogue's admission
@@ -278,6 +284,8 @@ export interface EarnRepository {
    * Returns whether a row was updated, so the caller can report coverage.
    */
   updateStrategyMetrics(input: UpdateEarnStrategyMetricsInput): Promise<boolean>;
+  /** Update a provider's volatile figures in one round trip. */
+  updateStrategyMetricsBatch(inputs: readonly UpdateEarnStrategyMetricsInput[]): Promise<number>;
   getStrategyById(strategyId: string): Promise<EarnStrategyRow | null>;
   /**
    * The catalogue row for one vault, by the identity a movement row carries

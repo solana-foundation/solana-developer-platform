@@ -133,13 +133,16 @@ nothing else; the program create still sends the body `requestId` form.
   (balance + earned; `earned` can be ABSENT with `earnedUnavailableReason` —
   render a dash, never $0), list `GET …/movements?ownerAddress=` and
   `GET …/positions?ownerAddress=` (the owner rides the query on every
-  per-owner read), and exit via
-  `…/withdrawal-transactions` + `…/withdrawals`. The treasury
+  per-owner read), and exit directly via
+  `…/withdrawal-transactions` + `…/withdrawals` or through the queued lifecycle:
+  options, queued preview, request build/submit, request list/detail, and
+  post-deadline cancellation build/submit. The treasury
   route (`/vault-deposits` + `custodyWalletId`) must not reappear in the
   snippets — a B2B2C partner cannot name a custody wallet. The optional
   partner `feePayer` (the implementor sponsoring its customers' fees) is
-  documented in the public docs guide
-  (`apps/sdp-docs/content/docs/guides/embedded-yield.mdx`). That public guide
+  documented in the docs guide
+  (`apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx`, unpublished
+  until PRO-2038). That guide
   also owns the keyless quickstart; these dashboard snippets intentionally stay
   keyed because they include submit and tenant read routes. Keep the shared
   authenticated flow aligned across both. The guide is
@@ -188,8 +191,9 @@ nothing else; the program create still sends the body `requestId` form.
   visible but disabled. The selected strategy's ID, APY, liquidity, provider,
   and availability sit in one plain line under the dropdown ("Kamino · Instant
   liquidity · 6.2% APY", APY omitted when unknown) with the ID as its own
-  copyable code block. A short intro paragraph explains the loop, then four
-  freely navigable reference tabs (client setup, deposits, reads, withdraw).
+  copyable code block. A short intro paragraph explains the loop, then five
+  freely navigable reference tabs (client setup, deposits, reads, direct
+  withdraw, queued withdraw).
   "Copy all code" copies the whole module (`buildEarnServerIntegration`), not
   just the active tab. The snippets remain server-only and the page says so in
   an info callout that links to the API keys page (a Developer key includes
@@ -225,6 +229,14 @@ nothing else; the program create still sends the body `requestId` form.
   and throws if pagination ends early, and `fetchEarnVaultPositions` follows the
   opaque keyset cursor, throwing if the cursor repeats or does not advance. A
   silently short page is hidden MONEY.
+- `earn-outcome-trackers.tsx`: the tiny always-loaded polling mounts for
+  custodial withdrawals and vault deposits/withdrawals. Treasury imports these
+  directly and dynamically loads the three large transaction modals only when
+  an action opens, so moving a tracker back into a modal would pull that modal's
+  client graph into the initial portfolio route. The modal files re-export the
+  trackers only for compatibility; new callers import this module. Every
+  deferred surface uses the shared `EarnTransactionModalLoading` fallback so
+  the first click opens an accessible loading modal while its chunk arrives.
 - `earn-withdraw-modal.tsx` — portfolio-level withdrawal: stablecoin, amount,
   Solana destination; preview → confirm → submitted. Every figure it quotes
   comes from the PROVIDER, never a local estimate (PRO-1675) — see
@@ -245,8 +257,9 @@ nothing else; the program create still sends the body `requestId` form.
   value-moving request. `walletBalanceForMint` distinguishes an absent or
   malformed RPC observation (`undefined`) from a successful observation with no
   row for the mint (a real zero) — only the latter may read as "no funds".
-  It also exports `EarnVaultDepositOutcomeTracker`, the null-rendering watcher
-  Treasury mounts per in-flight deposit — the modal's success screen is a
+  It re-exports `EarnVaultDepositOutcomeTracker` for compatibility; the
+  null-rendering watcher lives in `earn-outcome-trackers.tsx` so Treasury can
+  poll without eagerly loading this modal. The modal's success screen is a
   receipt for a SIGNATURE, and the customer closes it long before the chain has
   decided.
 - `earn-vault-deposit-tracking.ts` — the per-tab `sessionStorage` holding the
@@ -357,7 +370,8 @@ nothing else; the program create still sends the body `requestId` form.
   the deposit modal's key lifecycle exactly, including the held-key pre-flight
   (`fetchEarnVaultWithdrawalsByRequestId`) and the absorbed-by-approval
   outcome. The result screen links the withdrawal transaction in Explorer.
-  Exports `EarnVaultWithdrawalOutcomeTracker`, mounted once per withdrawal.
+  It re-exports `EarnVaultWithdrawalOutcomeTracker` from the lightweight
+  tracker module, mounted once per withdrawal.
   Its five-second detail poll reports the terminal movement back to Treasury;
   Treasury keeps the latest state in the Active positions status column rather
   than announcing a long-running chain result with a toast.
@@ -490,6 +504,24 @@ never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
 about whether the deposit landed.
 
+Treasury's optimistic balance lives in the pure module
+`../treasury-solutions/treasury-vault-balance-projection.ts`. A committed
+deposit or atomic withdrawal is added to the latest hydrated positions read,
+and counts as contained in a read only when that read shows the position's
+SHARES moved off a baseline taken from a read that landed before the POST
+began (the modals report `submittedAt`), attributed to it either because the
+read started after this tab saw the commit or because no other movement
+could have moved them. No hydrated pre-POST baseline means no projection;
+timing alone is never evidence, and direction is deliberately not required
+(an unseen opposite move would otherwise pin a projection over a value that
+already contains it). `useEarnVaultPositions` keeps the recent `reads`
+(client clock at both ends) for exactly that. Nothing compares balances to
+decide a projection is done: Kamino's live value reproduces a deposit
+exactly while Veda's redeemable value lands a hair under it, and the old
+threshold rule double counted the latter until a TTL expired. A share move
+from a source the tab cannot see, or two movements overlapping on one
+position, can misjudge a movement for one read cycle; the next read heals it.
+
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
@@ -569,6 +601,16 @@ distinguish every six-decimal value once balances exceed 2^53. So:
   `compareDecimalAmounts`) rather than restating that arithmetic.
 - `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
   which formats it exactly — no `Number` round trip, no manual grouping.
+- Dollars are `formatUsd`: two decimals, truncated, `<$0.01` for a non-zero
+  sub-cent value, never a third decimal. A deposit-token amount (a position's
+  `tokenValue`, a wallet balance in the deposit token, a withdrawal ceiling or
+  quote) goes through `formatTokenValue(value, mint, locale)`, which renders a
+  USD-stable mint as dollars at par and anything else as a token quantity with
+  its symbol. Every Earn deposit token is a USD stablecoin
+  (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so today that is always dollars; the
+  `isUsdStable` guard is what keeps a future non-stable vault from lying. Do
+  not call `formatProviderAmount` or `formatTokenQuantity` on a deposit-token
+  amount directly.
 - `sumDecimalStrings` (`earn-market-presentation.tsx`) adds at the widest scale
   in `BigInt` and formats back.
 - The one deliberate `Number` is `formatProviderApy`, on a RATE (`0.062`) rather

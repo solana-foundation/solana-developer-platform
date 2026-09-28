@@ -1,4 +1,5 @@
 import type {
+  EarnVaultParRedemptionTerms,
   EarnVaultQueuedWithdrawalTerms,
   EarnVaultWithdrawalOptions,
   EarnVaultWithdrawalRequestRecord,
@@ -29,13 +30,23 @@ export type EarnVaultAsyncWithdrawalRoute =
   | {
       kind: "provider_order";
       summary: EarnVaultAsyncWithdrawalSummary;
+    }
+  | {
+      kind: "operator_redemption";
+      summary: EarnVaultAsyncWithdrawalSummary;
+      terms: EarnVaultParRedemptionTerms;
     };
 
 /** Product event emitted by a mechanism adapter, never a bare queue record. */
-export type EarnVaultAsyncWithdrawalEvent = {
-  kind: "queue";
-  request: EarnVaultWithdrawalRequestRecord;
-};
+export type EarnVaultAsyncWithdrawalEvent =
+  | {
+      kind: "queue";
+      request: EarnVaultWithdrawalRequestRecord;
+    }
+  | {
+      kind: "operator_redemption";
+      request: EarnVaultWithdrawalRequestRecord;
+    };
 
 /** Convert today's wire-level queue fields into the extensible product route. */
 export function earnVaultAsyncWithdrawalRoute(
@@ -43,10 +54,14 @@ export function earnVaultAsyncWithdrawalRoute(
 ): EarnVaultAsyncWithdrawalRoute | null {
   const queueAsset = options.queued ? options.queueAsset : null;
   const hasQueue = queueAsset !== null;
-  // The chooser currently renders one delayed mechanism. If the API ever
-  // advertises two, silently preferring either would hide a materially
-  // different exit contract; fail closed until the chooser can present both.
-  if (hasQueue && options.providerOrder) return null;
+  const parRedemption = options.parRedemption ?? null;
+  // The chooser currently renders one delayed mechanism alongside an optional
+  // atomic exit. Silently preferring among delayed contracts would hide a
+  // materially different settlement model, so fail closed if the API ever
+  // advertises more than one of them for a position.
+  const delayedRouteCount =
+    Number(hasQueue) + Number(options.providerOrder) + Number(!!parRedemption);
+  if (delayedRouteCount > 1) return null;
   // Preserve the established queue route when it is live. The two mechanisms
   // are distinct: a queue has a cancellable request account; a provider order
   // transfers shares now and pays assets later outside that transaction.
@@ -70,6 +85,17 @@ export function earnVaultAsyncWithdrawalRoute(
         messageKey: "DashboardEarn.exitRoute.providerOrderDescription",
         values: {},
       },
+    };
+  }
+  if (parRedemption) {
+    return {
+      kind: "operator_redemption",
+      summary: {
+        titleKey: "DashboardEarn.exitRoute.parTitle",
+        messageKey: "DashboardEarn.exitRoute.parDescription",
+        values: {},
+      },
+      terms: parRedemption,
     };
   }
   return null;

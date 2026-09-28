@@ -2,19 +2,28 @@ import { createHmac } from "node:crypto";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOnrampRemittance } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
-import { BVNK_FUNDING_WALLET_STATUS, type PaymentTransferStatus } from "@sdp/types";
-import { describe, expect, it, vi } from "vitest";
+import { bvnkVerifiedIndividualCustomer } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
+import {
+  BVNK_FUNDING_WALLET_STATUS,
+  type CounterpartyProviderAccount,
+  type MoneygramRampEvent,
+  type PaymentRampQuote,
+  type PaymentTransferStatus,
+} from "@sdp/types";
+import type { Address } from "@solana/addresses";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
+import type { CounterpartyProviderAccountRow } from "@/db/repositories/counterparty-provider-account.repository";
+import type { PaymentTransferRow } from "@/db/repositories/payments.repository";
 import app from "@/index";
 import * as tokenAccounts from "@/routes/payments/token-accounts";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import {
   bvnkSeedCustomerReference,
+  seedBvnkCustomerLink,
   seedBvnkFundingWallet,
   seedBvnkOnrampPayoutIssued,
   seedBvnkOnrampTransfer,
-  TEST_BVNK_OFFRAMP_WALLET_ID,
   TEST_BVNK_WALLET_ID,
 } from "@/test/helpers/bvnk";
 import { env } from "@/test/helpers/env";
@@ -120,9 +129,11 @@ async function seedRampEventTransfer(params: {
   provider: "coinbase" | "moneygram";
   providerReference: string;
   type: "onramp" | "offramp";
-  amount?: string;
-  providerData?: Record<string, unknown>;
-}): Promise<void> {
+  amount: string;
+  providerData: Record<string, unknown>;
+}): Promise<string> {
+  const counterpartyId = await seedCounterparty({ id: `cpty_${params.id}` });
+  const status = "pending" satisfies PaymentTransferStatus;
   const now = new Date().toISOString();
   await getDb(env)
     .prepare(
@@ -130,8 +141,8 @@ async function seedRampEventTransfer(params: {
          id, organization_id, project_id, wallet_id, source_address, destination_address,
          token, amount, memo, type, direction, status, provider, provider_reference,
          delivery_mode, fiat_currency, fiat_amount, provider_data, signature, serialized_tx,
-         initiated_by_key_id, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)`
+         initiated_by_key_id, created_at, updated_at, counterparty_id
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       params.id,
@@ -141,26 +152,27 @@ async function seedRampEventTransfer(params: {
       params.type === "offramp" ? TEST_SOLANA_ADDRESSES.wallet1 : null,
       params.type === "onramp" ? TEST_SOLANA_ADDRESSES.wallet2 : null,
       "USDC",
-      params.amount ?? "25",
+      params.amount,
       null,
       params.type,
       params.type === "onramp" ? "inbound" : "outbound",
-      "pending",
+      status,
       params.provider,
       params.providerReference,
-      "hosted",
+      params.provider === "moneygram" ? "session_widget" : "hosted",
       "USD",
       "25",
-      params.providerData ?? {},
+      params.providerData,
       null,
       null,
       null,
       now,
-      now
+      now,
+      counterpartyId
     )
     .run();
+  return counterpartyId;
 }
-
 describe("Payments routes — ramps", () => {
   installPaymentsRouteTestHooks();
 
@@ -291,7 +303,6 @@ describe("Payments routes — ramps", () => {
     const body = (await response.json()) as { error: { message: string } };
     expect(body.error.message).toContain('Unrecognized key: "destinationWallet"');
   });
-
   it("rejects a provider walletId value passed as destinationCustodyWalletId", async () => {
     const counterpartyId = await seedCounterparty({
       externalId: "provider_walletid_as_custody_id",
@@ -320,12 +331,11 @@ describe("Payments routes — ramps", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(
-      await getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>()
+      await getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>()
     ).toEqual({ count: 0 });
   });
-
   it("creates a hosted quote for an exact Connection wallet row", async () => {
     await seedActiveConnectionWallet();
     const counterpartyId = await seedCounterparty({ externalId: "connection_ramp_wallet" });
@@ -352,9 +362,9 @@ describe("Payments routes — ramps", () => {
 
     expect(response.status).toBe(200);
     expect(
-      await getDb(env)
-        .prepare("SELECT custody_wallet_id FROM payment_transfers")
-        .first<{ custody_wallet_id: string | null }>()
+      await getDb(env).prepare("SELECT custody_wallet_id FROM payment_transfers").first<{
+        custody_wallet_id: string | null;
+      }>()
     ).toEqual({ custody_wallet_id: TEST_CONNECTION_CUSTODY_WALLET_ID });
   });
 
@@ -759,7 +769,6 @@ describe("Payments routes — ramps", () => {
       provider_reference: null,
     });
   });
-
   it("dry-runs an on-ramp quote with zero writes", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_onramp_dry_run" });
 
@@ -788,19 +797,17 @@ describe("Payments routes — ramps", () => {
     expect(await response.json()).toMatchObject({
       data: { decision: "allow", criteria: [] },
     });
-
     const [transferCount, operationCount] = await Promise.all([
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>(),
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-        .first<{ count: number }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
+        count: number;
+      }>(),
     ]);
     expect(transferCount).toEqual({ count: 0 });
     expect(operationCount).toEqual({ count: 0 });
   });
-
   it("dry-runs an off-ramp quote with zero writes", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "moonpay_offramp_dry_run" });
 
@@ -829,14 +836,13 @@ describe("Payments routes — ramps", () => {
     expect(await response.json()).toMatchObject({
       data: { decision: "allow", criteria: [] },
     });
-
     const [transferCount, operationCount] = await Promise.all([
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM payment_transfers")
-        .first<{ count: number }>(),
-      getDb(env)
-        .prepare("SELECT COUNT(*)::int AS count FROM wallet_operations")
-        .first<{ count: number }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM payment_transfers").first<{
+        count: number;
+      }>(),
+      getDb(env).prepare("SELECT COUNT(*)::int AS count FROM wallet_operations").first<{
+        count: number;
+      }>(),
     ]);
     expect(transferCount).toEqual({ count: 0 });
     expect(operationCount).toEqual({ count: 0 });
@@ -975,106 +981,280 @@ describe("Payments routes — ramps", () => {
     const offrampBody = (await offrampRes.json()) as { error: { code: string } };
     expect(offrampBody.error.code).toBe("UNSUPPORTED_CORRIDOR");
   });
-
-  it("fails loudly when a BVNK off-ramp quote has no customer-link row", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "customer_456",
-      providerData: {
-        bvnk: {
-          offramp: {
-            wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
-            beneficiaries: {
-              "USD:abc123": {
-                key: "USD:abc123",
-                fiatCurrency: "USD",
-                accountType: "ACH",
-                createdAt: "2026-06-01T00:00:00.000Z",
-              },
-            },
-          },
-        },
-      },
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    const res = await app.request(
-      "/v1/payments/ramps/offramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "bvnk",
-          counterpartyId,
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
-          fiatCurrency: "USD",
-          cryptoAmount: "75.25",
-          rampsMemo: { invoice: "INV-123", po: "PO-9" },
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("CONFLICT");
-    expect(body.error.message).toContain("not provisioned for bvnk offramp");
-    expect(fetchSpy).not.toHaveBeenCalled();
-    fetchSpy.mockRestore();
-  });
-
-  it("rejects a BVNK off-ramp quote until the payout beneficiary is provisioned", async () => {
-    const counterpartyId = await seedCounterparty({
-      externalId: "customer_456",
-      providerData: {
-        bvnk: {
-          offramp: {
-            wallets: { USD: { id: TEST_BVNK_OFFRAMP_WALLET_ID, status: "ACTIVE" } },
-          },
-        },
-      },
-    });
-
-    const res = await app.request(
-      "/v1/payments/ramps/offramp/quote",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${TEST_API_KEY.raw}`,
-        },
-        body: JSON.stringify({
-          provider: "bvnk",
-          counterpartyId,
-          sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
-          assetRail: "usdc.solana",
-          fiatCurrency: "USD",
-          cryptoAmount: "75.25",
-        }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(409);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("CONFLICT");
-  });
-
-  describe("BVNK on-ramp quote (rules-free prebook)", () => {
-    const BVNK_QUOTE_CUSTOMER = "bvnk_quote_customer_1";
-
-    async function seedVerifiedCounterparty(externalId: string): Promise<string> {
+  describe("BVNK off-ramp quote (funding-wallet channel)", () => {
+    const BVNK_OFFRAMP_CUSTOMER = "bvnk_offramp_test_customer";
+    async function seedProvisionedOfframpCounterparty(externalId: string): Promise<string> {
       const counterpartyId = await seedCounterparty({ externalId });
-      await createPostgresCounterpartyProviderAccountsRepository(getDb(env)).upsertProviderAccount({
+      await seedBvnkCustomerLink(getDb(env), {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
         counterpartyId,
+        customerReference: BVNK_OFFRAMP_CUSTOMER,
+        status: "VERIFIED",
+      });
+      return counterpartyId;
+    }
+
+    function bvnkOfframpQuoteRequest(counterpartyId: string, overrides?: Record<string, unknown>) {
+      return app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "bvnk",
+            counterpartyId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "75.25",
+            ...overrides,
+          }),
+        },
+        env
+      );
+    }
+
+    function mockBvnkChannelQuote() {
+      return {
         provider: "bvnk",
-        providerCustomerReference: BVNK_QUOTE_CUSTOMER,
-        metadata: { status: "VERIFIED" },
+        id: "channel_offramp_test_1",
+        status: "pending",
+        deliveryMode: "manual_instructions",
+        paymentInstructions: [
+          {
+            provider: "bvnk",
+            kind: "crypto_deposit",
+            fiatCurrency: "USD",
+            cryptoCurrency: "USDC",
+            destinationAddress: TEST_SOLANA_ADDRESSES.wallet2 as Address,
+            network: "SOLANA",
+            reference: "sdp_offramp_xfr_1",
+            instructionsNotes:
+              "Send USDC on SOLANA to the deposit address. BVNK converts it to USD and credits the counterparty's BVNK USD wallet.",
+          },
+        ],
+      } satisfies PaymentRampQuote;
+    }
+
+    it("fails before prebooking when the funding wallet is not provisioned, and writes no transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_no_funding_wallet"
+      );
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.message).toContain("not provisioned for bvnk offramp");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+
+      const transfer = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ count: number }>();
+      expect(transfer?.count).toBe(0);
+    });
+    it("opens the off-ramp channel on the funding wallet with an ORIGINATOR party and prebooks the transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_provisioned"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }));
+      const channelSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+        .mockResolvedValue(mockBvnkChannelQuote());
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        data: { transferId: string; quote: { id: string; deliveryMode: string } };
+      };
+      expect(body.data.transferId.startsWith("xfr_")).toBe(true);
+      expect(body.data.quote.id).toBe("channel_offramp_test_1");
+      expect(body.data.quote.deliveryMode).toBe("manual_instructions");
+
+      const input = channelSpy.mock.calls[0]?.[1];
+      expect(input?.paymentTransferId).toBe(body.data.transferId);
+      expect(input?.bvnkFundingWalletId).toBe(TEST_BVNK_WALLET_ID);
+      expect(input?.externalCustomerId).toBe(BVNK_OFFRAMP_CUSTOMER);
+      expect(input?.bvnkCompliance?.partyDetails[0]?.type).toBe("ORIGINATOR");
+      expect(input?.bvnkCompliance?.partyDetails[0]?.firstName).toBe("Ada");
+
+      const transfer = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE counterparty_id = ?"
+        )
+        .bind(counterpartyId)
+        .first<{
+          status: string;
+          provider_reference: string | null;
+          provider_data: Record<string, unknown>;
+        }>();
+      expect(transfer?.status).toBe("awaiting_payment");
+      expect(transfer?.provider_reference).toBe("channel_offramp_test_1");
+      expect(transfer?.provider_data).toEqual({
+        cryptoDeposit: { destinationAddress: TEST_SOLANA_ADDRESSES.wallet2, amount: "75.25" },
+        bvnk: {
+          channel: {
+            id: "channel_offramp_test_1",
+            walletId: TEST_BVNK_WALLET_ID,
+            customerReference: BVNK_OFFRAMP_CUSTOMER,
+          },
+        },
+      });
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+    it("rejects the off-ramp quote when the fresh BVNK customer status is no longer verified, patches the link, and writes no transfer", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_fresh_rejected"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer").mockResolvedValue({
+        ...bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }),
+        status: "REJECTED",
+      });
+      const channelSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote");
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as {
+        error: { code: string; details: { customerStatus: string } };
+      };
+      expect(body.error.code).toBe("CONFLICT");
+      expect(body.error.details.customerStatus).toBe("REJECTED");
+      expect(channelSpy).not.toHaveBeenCalled();
+      const transfers = await getDb(env)
+        .prepare("SELECT COUNT(*) AS count FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ count: number }>();
+      expect(transfers?.count).toBe(0);
+      const link = await getDb(env)
+        .prepare(
+          "SELECT metadata->>'status' AS status FROM counterparty_provider_accounts WHERE counterparty_id = ? AND provider = 'bvnk' AND kind = 'customer_link'"
+        )
+        .bind(counterpartyId)
+        .first<{ status: string }>();
+      expect(link?.status).toBe("REJECTED");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+    it("keeps the prebooked transfer pending when the quote has no crypto deposit instruction", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_missing_instruction"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer").mockResolvedValue(
+        bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER })
+      );
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote").mockResolvedValue({
+        ...mockBvnkChannelQuote(),
+        paymentInstructions: [],
+      });
+      const response = await bvnkOfframpQuoteRequest(counterpartyId);
+      expect(response.status).toBe(500);
+      const body = (await response.json()) as {
+        error: {
+          code: string;
+          message: string;
+        };
+      };
+      expect(body.error.code).toBe("INTERNAL_ERROR");
+      const transfer = await getDb(env)
+        .prepare(
+          "SELECT status, provider_reference, provider_data FROM payment_transfers WHERE counterparty_id = ?"
+        )
+        .bind(counterpartyId)
+        .first<{
+          status: PaymentTransferStatus;
+          provider_reference: string | null;
+          provider_data: Record<string, unknown>;
+        }>();
+      expect(transfer).toMatchObject({ status: "pending", provider_reference: null });
+      expect(transfer?.provider_data).not.toHaveProperty("cryptoDeposit");
+      expect(transfer?.provider_data).not.toHaveProperty("bvnk.channel");
+    });
+    it("marks the prebooked transfer failed when the channel call errors", async () => {
+      const counterpartyId = await seedProvisionedOfframpCounterparty(
+        "customer_offramp_channel_error"
+      );
+      await seedBvnkFundingWallet(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        providerCustomerReference: BVNK_OFFRAMP_CUSTOMER,
+        walletId: TEST_BVNK_WALLET_ID,
+        stage: "provisioned",
+        metadata: {},
+      });
+      const getCustomerSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "getCustomer")
+        .mockResolvedValue(bvnkVerifiedIndividualCustomer({ reference: BVNK_OFFRAMP_CUSTOMER }));
+      const channelSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOfframpQuote")
+        .mockRejectedValue(new Error("channel exploded"));
+
+      const res = await bvnkOfframpQuoteRequest(counterpartyId);
+
+      expect(res.status).toBe(500);
+
+      const transfer = await getDb(env)
+        .prepare("SELECT status FROM payment_transfers WHERE counterparty_id = ?")
+        .bind(counterpartyId)
+        .first<{ status: string }>();
+      expect(transfer?.status).toBe("failed");
+
+      getCustomerSpy.mockRestore();
+      channelSpy.mockRestore();
+    });
+  });
+  describe("BVNK on-ramp quote (rules-free prebook)", () => {
+    const BVNK_QUOTE_CUSTOMER = "bvnk_quote_customer_1";
+    async function seedVerifiedCounterparty(externalId: string): Promise<string> {
+      const counterpartyId = await seedCounterparty({ externalId });
+      await seedBvnkCustomerLink(getDb(env), {
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        counterpartyId,
+        customerReference: BVNK_QUOTE_CUSTOMER,
+        status: "VERIFIED",
       });
       return counterpartyId;
     }
@@ -1122,7 +1302,6 @@ describe("Payments routes — ramps", () => {
         ],
       };
     }
-
     it("prebooks the transfer, gets the ledger wallet, and answers instructions carrying the SDP-ONRAMP reference without touching rules or the funding wallet", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_provisioned");
       const fundingRow = await seedBvnkFundingWallet(getDb(env), {
@@ -1131,7 +1310,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       const walletSpy = vi
@@ -1203,9 +1382,9 @@ describe("Payments routes — ramps", () => {
       });
 
       walletSpy.mockRestore();
+
       payoutSpy.mockRestore();
     });
-
     it("fails the prebooked transfer when the ledger wallet read rejects", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_wallet_fail");
       await seedBvnkFundingWallet(getDb(env), {
@@ -1214,7 +1393,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       const walletSpy = vi
@@ -1245,7 +1424,6 @@ describe("Payments routes — ramps", () => {
 
       walletSpy.mockRestore();
     });
-
     it("answers counterpartyNotProvisioned while the funding wallet is provisioning", async () => {
       const counterpartyId = await seedVerifiedCounterparty("d1b_quote_provisioning");
       await seedBvnkFundingWallet(getDb(env), {
@@ -1254,7 +1432,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: BVNK_QUOTE_CUSTOMER,
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioning,
+        stage: "claimed",
         metadata: {},
       });
       const walletSpy = vi
@@ -1358,9 +1536,6 @@ describe("Payments routes — ramps", () => {
       };
       expect((await fetchTransfer(A3_TRANSFER_ID)).data.transfer).toEqual(expectedBefore);
 
-      // The "after payout" row is built through the REAL transitions
-      // (seedBvnkOnrampPayinApplied → seedBvnkOnrampPayoutIssued), never by
-      // attaching a settlement to an awaiting_payment row.
       const issued = await seedBvnkOnrampPayoutIssued(getDb(env), {
         organizationId: TEST_ORG.id,
         projectId: TEST_PROJECT.id,
@@ -1529,7 +1704,6 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("settling");
   });
-
   it("cancels an awaiting BVNK on-ramp transfer after the custody-wallet authz without touching BVNK", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_onramp" });
     await seedBvnkOnrampTransfer(getDb(env), {
@@ -1548,7 +1722,7 @@ describe("Payments routes — ramps", () => {
       counterpartyId,
       providerCustomerReference: "bvnk_cancel_onramp",
       walletId: TEST_BVNK_WALLET_ID,
-      providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+      stage: "provisioned",
       metadata: {},
     });
     const payoutSpy = vi.spyOn(RAMP_PROVIDER_CLIENTS.bvnk, "createOnrampPayout");
@@ -1586,8 +1760,6 @@ describe("Payments routes — ramps", () => {
 
   it("denies canceling a BVNK on-ramp transfer outside the custody-wallet authz", async () => {
     const counterpartyId = await seedCounterparty({ externalId: "d1b_cancel_authz" });
-    // The transfer points at a real custody wallet that the API key does not
-    // hold, so the FK holds and the exact-access authz denies the cancel.
     await getDb(env)
       .prepare(
         `INSERT INTO custody_wallets
@@ -1635,10 +1807,8 @@ describe("Payments routes — ramps", () => {
       .first<{ status: string }>();
     expect(row?.status).toBe("awaiting_payment");
   });
-
   describe("BVNK sandbox pay-in simulation", () => {
     const SIMULATE_TRANSFER_ID = "xfr_123e4567-e89b-12d3-a456-426614174abc";
-
     async function seedBvnkSimulatableTransfer(overrides?: {
       status?: PaymentTransferStatus;
       custodyWalletId?: string;
@@ -1651,7 +1821,7 @@ describe("Payments routes — ramps", () => {
         counterpartyId,
         providerCustomerReference: "bvnk_simulate_1",
         walletId: TEST_BVNK_WALLET_ID,
-        providerStatus: BVNK_FUNDING_WALLET_STATUS.provisioned,
+        stage: "provisioned",
         metadata: {},
       });
       await seedBvnkOnrampTransfer(getDb(env), {
@@ -1763,12 +1933,16 @@ describe("Payments routes — ramps", () => {
       provider: "coinbase",
       providerReference: "coinbase_order_advisory",
       type: "onramp",
+      amount: "25",
+      providerData: {},
     });
     await seedRampEventTransfer({
       id: "xfr_moneygram_advisory",
       provider: "moneygram",
       providerReference: "moneygram_session_advisory",
       type: "onramp",
+      amount: "25",
+      providerData: {},
     });
 
     const coinbase = await app.request(
@@ -1796,8 +1970,8 @@ describe("Payments routes — ramps", () => {
       env
     );
 
-    expect(coinbase.status).toBe(200);
-    expect(moneygram.status).toBe(200);
+    expect(coinbase.status).toBe(204);
+    expect(moneygram.status).toBe(204);
     const rows = await getDb(env)
       .prepare(
         `SELECT id, status, provider_data
@@ -1813,6 +1987,561 @@ describe("Payments routes — ramps", () => {
     }
   });
 
+  describe("MoneyGram custodial events", () => {
+    const MG_DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+    const MG_OTHER_WALLET = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
+    const sessionId = "mg_session_deposit_1";
+    const transferId = "xfr_0f1e2d3c-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
+    const activeStatus = "active" satisfies CounterpartyProviderAccount["status"];
+    const pendingStatus = "pending" satisfies PaymentTransferStatus;
+    const settlingStatus = "settling" satisfies PaymentTransferStatus;
+    const confirmedStatus = "confirmed" satisfies PaymentTransferStatus;
+    let counterpartyId: string;
+    const deposit = {
+      depositAddress: MG_DEPOSIT_WALLET,
+      sendAmount: "25",
+      depositMemo: "mg_memo_1",
+    };
+    const transactionEvent = {
+      kind: "transaction_created",
+      sessionId,
+      transactionId: "mg_tx_created_1",
+      mgiTransactionId: "mgi_tx_created_1",
+    } satisfies MoneygramRampEvent;
+
+    beforeEach(async () => {
+      counterpartyId = await seedRampEventTransfer({
+        id: transferId,
+        provider: "moneygram",
+        providerReference: sessionId,
+        type: "offramp",
+        amount: "25",
+        providerData: {},
+      });
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.moneygram, "getAwaitingDeposit").mockResolvedValue(deposit);
+      vi.spyOn(RAMP_PROVIDER_CLIENTS.moneygram, "findOwnedTransaction").mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-out",
+      });
+    });
+
+    afterEach(() => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).mockRestore();
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockRestore();
+    });
+
+    async function postEvent(event: MoneygramRampEvent): Promise<Response> {
+      return app.request(
+        "/v1/payments/ramps/moneygram/events",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(event),
+        },
+        env
+      );
+    }
+
+    async function readTransfer(id: string): Promise<PaymentTransferRow> {
+      const row = await getDb(env)
+        .prepare("SELECT * FROM payment_transfers WHERE id = ?")
+        .bind(id)
+        .first<PaymentTransferRow>();
+      if (row === null) {
+        throw new Error(`Missing seeded transfer ${id}`);
+      }
+      return row;
+    }
+
+    async function pinDeposit(): Promise<void> {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      expect((await postEvent({ kind: "deposit_address", sessionId })).status).toBe(204);
+    }
+
+    async function readMoneygramProviderAccounts(): Promise<CounterpartyProviderAccountRow[]> {
+      const rows = await getDb(env)
+        .prepare(
+          `SELECT * FROM counterparty_provider_accounts
+           WHERE counterparty_id = ? AND provider = 'moneygram'
+           ORDER BY id`
+        )
+        .bind(counterpartyId)
+        .all<CounterpartyProviderAccountRow>();
+      return rows.results;
+    }
+
+    it("creates and lists one active MoneyGram customer_link on transaction_created", async () => {
+      expect(await readMoneygramProviderAccounts()).toHaveLength(0);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: transactionEvent.transactionId,
+          customerIdentifier: counterpartyId,
+        }
+      );
+      const transfer = await readTransfer(transferId);
+      expect(transfer.counterparty_id).toBe(counterpartyId);
+      expect(transfer.provider_data).toMatchObject({ moneygram: { customerId: "mg_profile_1" } });
+      const rows = await readMoneygramProviderAccounts();
+      expect(rows).toHaveLength(1);
+      expect(rows).toMatchObject([
+        {
+          counterparty_id: counterpartyId,
+          provider: "moneygram",
+          kind: "customer_link",
+          status: activeStatus,
+          provider_customer_reference: "mg_profile_1",
+        },
+      ]);
+
+      const listed = await app.request(
+        `/v1/counterparties/${counterpartyId}/provider-accounts`,
+        { headers: { Authorization: `Bearer ${TEST_API_KEY.raw}` } },
+        env
+      );
+
+      expect(listed.status).toBe(200);
+      const listedBody: { data: { accounts: CounterpartyProviderAccount[] } } = await listed.json();
+      expect(listedBody).toMatchObject({
+        data: {
+          accounts: rows.map((row) => ({
+            id: row.id,
+            provider: "moneygram",
+            kind: "customer_link",
+            status: activeStatus,
+            customerLink: {
+              id: row.id,
+              provider: "moneygram",
+              providerCustomerReference: "mg_profile_1",
+              status: activeStatus,
+            },
+          })),
+        },
+      });
+    });
+
+    it("verifies ownership for a second transfer and reuses the same MoneyGram customer_link", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: transactionEvent.transactionId,
+          customerIdentifier: counterpartyId,
+        }
+      );
+      const links = await readMoneygramProviderAccounts();
+      expect(links).toHaveLength(1);
+      const [link] = links;
+      expect(link).toMatchObject({
+        kind: "customer_link",
+        status: activeStatus,
+        provider_customer_reference: "mg_profile_1",
+      });
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, counterparty_id, source_address,
+             token, amount, type, direction, status, provider, provider_reference,
+             delivery_mode, fiat_currency, fiat_amount, provider_data, created_at, updated_at
+           ) SELECT ?, organization_id, project_id, wallet_id, counterparty_id, source_address,
+                    token, amount, type, direction, ?, provider, ?,
+                    'session_widget', fiat_currency, fiat_amount, '{}'::jsonb,
+                    sdp_iso_now(), sdp_iso_now()
+             FROM payment_transfers WHERE id = ?`
+        )
+        .bind(
+          "xfr_1f2e3d4c-5b6a-4d7c-8f9e-0a1b2c3d4e5f",
+          pendingStatus,
+          "mg_session_deposit_2",
+          transferId
+        )
+        .run();
+
+      const response = await postEvent({
+        kind: "transaction_created",
+        sessionId: "mg_session_deposit_2",
+        transactionId: "mg_tx_created_2",
+      });
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledTimes(2);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: "mg_tx_created_2",
+          customerIdentifier: counterpartyId,
+        }
+      );
+      const moneygram = {
+        customerId: link.provider_customer_reference,
+        transactionId: "mg_tx_created_2",
+      };
+      expect(await readTransfer("xfr_1f2e3d4c-5b6a-4d7c-8f9e-0a1b2c3d4e5f")).toMatchObject({
+        counterparty_id: counterpartyId,
+        status: pendingStatus,
+        provider_data: { moneygram },
+      });
+      const updatedLinks = await readMoneygramProviderAccounts();
+      expect(updatedLinks).toHaveLength(1);
+      expect(updatedLinks).toMatchObject([
+        { id: link.id, status: activeStatus, provider_customer_reference: "mg_profile_1" },
+      ]);
+    });
+
+    it("rejects transaction_created without pinning a transaction or customer_link when ownership lookup fails", async () => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockRejectedValue(
+        new Error("MoneyGram ownership lookup failed")
+      );
+      const before = await readTransfer(transferId);
+      expect(before.provider_data).not.toHaveProperty("moneygram.transactionId");
+      expect(await readMoneygramProviderAccounts()).toHaveLength(0);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.ok).toBe(false);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: transactionEvent.transactionId,
+          customerIdentifier: counterpartyId,
+        }
+      );
+      const after = await readTransfer(transferId);
+      expect(after).toEqual(before);
+      expect(after.provider_data).not.toHaveProperty("moneygram.transactionId");
+      expect(await readMoneygramProviderAccounts()).toHaveLength(0);
+    });
+
+    it("rejects an unowned transaction without pinning data or creating a customer_link", async () => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue(null);
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { message: "MoneyGram transaction does not belong to this session." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
+      expect(before.provider_data).not.toHaveProperty("moneygram.transactionId");
+      expect(before.provider_data).not.toHaveProperty("moneygram.customerId");
+      expect(await readMoneygramProviderAccounts()).toHaveLength(0);
+    });
+
+    it("rejects cash-in ownership for an off-ramp without pinning data or creating a customer_link", async () => {
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-in",
+      });
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { message: "MoneyGram transaction direction does not match this transfer." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
+      expect(await readMoneygramProviderAccounts()).toHaveLength(0);
+    });
+
+    it("keeps one unchanged MoneyGram customer_link when transaction_created is replayed", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      const before = await readMoneygramProviderAccounts();
+      expect(before).toHaveLength(1);
+      expect(before).toMatchObject([
+        { kind: "customer_link", provider_customer_reference: "mg_profile_1" },
+      ]);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(204);
+      const after = await readMoneygramProviderAccounts();
+      expect(after).toHaveLength(1);
+      expect(after).toEqual(before);
+    });
+
+    it("keeps the existing MoneyGram customer_link unchanged when transaction_created conflicts", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      const before = await readMoneygramProviderAccounts();
+      expect(before).toHaveLength(1);
+      expect(before).toMatchObject([
+        { kind: "customer_link", provider_customer_reference: "mg_profile_1" },
+      ]);
+
+      const response = await postEvent({ ...transactionEvent, transactionId: "mg_tx_created_2" });
+
+      expect(response.status).toBe(409);
+      const after = await readMoneygramProviderAccounts();
+      expect(after).toHaveLength(1);
+      expect(after).toEqual(before);
+    });
+
+    it("pins transaction_created identifiers without advancing a pending off-ramp", async () => {
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(204);
+      const moneygram = {
+        customerId: "mg_profile_1",
+        transactionId: "mg_tx_created_1",
+        mgiTransactionId: "mgi_tx_created_1",
+      };
+      expect(await readTransfer(transferId)).toMatchObject({
+        status: pendingStatus,
+        provider_data: { moneygram },
+      });
+    });
+
+    it("replays transaction_created with the same id without changing the row", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent(transactionEvent);
+
+      expect(response.status).toBe(204);
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("rejects a different transaction id for an already bound session", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ ...transactionEvent, transactionId: "mg_tx_created_2" });
+
+      expect(response.status).toBe(409);
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("pins transaction_created identifiers on an on-ramp", async () => {
+      const onrampCounterpartyId = await seedRampEventTransfer({
+        id: "xfr_2f3e4d5c-6b7a-4e8d-9f0e-1a2b3c4d5e6f",
+        provider: "moneygram",
+        providerReference: "mg_session_onramp_created_1",
+        type: "onramp",
+        amount: "25",
+        providerData: {},
+      });
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-in",
+      });
+
+      const response = await postEvent({
+        ...transactionEvent,
+        sessionId: "mg_session_onramp_created_1",
+      });
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        {
+          transactionId: transactionEvent.transactionId,
+          customerIdentifier: onrampCounterpartyId,
+        }
+      );
+      const moneygram = {
+        customerId: "mg_profile_1",
+        transactionId: "mg_tx_created_1",
+        mgiTransactionId: "mgi_tx_created_1",
+      };
+      expect(await readTransfer("xfr_2f3e4d5c-6b7a-4e8d-9f0e-1a2b3c4d5e6f")).toMatchObject({
+        status: pendingStatus,
+        provider_data: { moneygram },
+      });
+    });
+
+    it("pins deposit_address from the provider using the committed transaction id", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+
+      const response = await postEvent({ kind: "deposit_address", sessionId });
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ mode: "sandbox" }),
+        "mg_tx_created_1"
+      );
+      const moneygram = {
+        customerId: "mg_profile_1",
+        transactionId: "mg_tx_created_1",
+        mgiTransactionId: "mgi_tx_created_1",
+      };
+      const row = await readTransfer(transferId);
+      expect(row).toMatchObject({
+        destination_address: MG_DEPOSIT_WALLET,
+        memo: "mg_memo_1",
+        status: pendingStatus,
+        provider_data: { moneygram },
+      });
+    });
+
+    it("rejects deposit_address before transaction_created without calling MoneyGram", async () => {
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ kind: "deposit_address", sessionId });
+
+      expect(response.status).toBe(409);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).not.toHaveBeenCalled();
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("rejects a provider deposit amount that differs from the quoted amount", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).mockResolvedValue({
+        ...deposit,
+        sendAmount: "24",
+      });
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ kind: "deposit_address", sessionId });
+
+      expect(response.status).toBe(409);
+      const row = await readTransfer(transferId);
+      expect(row).toEqual(before);
+      expect(row.destination_address).toBeNull();
+      expect(row.memo).toBeNull();
+    });
+
+    it("replays deposit_address without calling MoneyGram again", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET destination_address = ?, memo = ? WHERE id = ?")
+        .bind(MG_DEPOSIT_WALLET, "mg_memo_1", transferId)
+        .run();
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({ kind: "deposit_address", sessionId });
+
+      expect(response.status).toBe(204);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).not.toHaveBeenCalled();
+      expect(await readTransfer(transferId)).toEqual(before);
+    });
+
+    it("rejects deposit_address on an on-ramp", async () => {
+      await seedRampEventTransfer({
+        id: "xfr_3f4e5d6c-7b8a-4f9e-8a1f-2b3c4d5e6f7a",
+        provider: "moneygram",
+        providerReference: "mg_session_onramp_deposit_1",
+        type: "onramp",
+        amount: "25",
+        providerData: {},
+      });
+      vi.mocked(RAMP_PROVIDER_CLIENTS.moneygram.findOwnedTransaction).mockResolvedValue({
+        profileId: "mg_profile_1",
+        transactionType: "cash-in",
+      });
+      expect(
+        (await postEvent({ ...transactionEvent, sessionId: "mg_session_onramp_deposit_1" })).status
+      ).toBe(204);
+      const before = await readTransfer("xfr_3f4e5d6c-7b8a-4f9e-8a1f-2b3c4d5e6f7a");
+
+      const response = await postEvent({
+        kind: "deposit_address",
+        sessionId: "mg_session_onramp_deposit_1",
+      });
+
+      expect(response.status).toBe(400);
+      expect(RAMP_PROVIDER_CLIENTS.moneygram.getAwaitingDeposit).not.toHaveBeenCalled();
+      expect(await readTransfer("xfr_3f4e5d6c-7b8a-4f9e-8a1f-2b3c4d5e6f7a")).toEqual(before);
+    });
+
+    it("rejects signed without a pinned deposit address and keeps the ramp pending", async () => {
+      expect((await postEvent(transactionEvent)).status).toBe(204);
+      const before = await readTransfer(transferId);
+
+      const response = await postEvent({
+        kind: "signed",
+        sessionId,
+        cryptoTransferId: "xfr_mg_deposit_leg",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: { message: "MoneyGram deposit address has not been recorded for this session." },
+      });
+      expect(await readTransfer(transferId)).toEqual(before);
+      expect(before.status).toBe(pendingStatus);
+      expect(before.destination_address).toBeNull();
+    });
+
+    it.each([
+      {
+        name: "rejects a crypto leg sent to a different deposit address",
+        destination: MG_OTHER_WALLET,
+        responseStatus: 400,
+        status: pendingStatus,
+      },
+      {
+        name: "starts settlement for a signed crypto leg sent to the pinned deposit address",
+        destination: MG_DEPOSIT_WALLET,
+        responseStatus: 204,
+        status: settlingStatus,
+      },
+    ] satisfies {
+      name: string;
+      destination: string;
+      responseStatus: number;
+      status: PaymentTransferStatus;
+    }[])("$name", async ({ destination, responseStatus, status }) => {
+      await pinDeposit();
+      const now = new Date().toISOString();
+      await getDb(env)
+        .prepare(
+          `INSERT INTO payment_transfers (
+             id, organization_id, project_id, wallet_id, source_address, destination_address,
+             token, amount, type, direction, status, signature, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          "xfr_mg_deposit_leg",
+          TEST_ORG.id,
+          TEST_PROJECT.id,
+          TEST_WALLET_ID,
+          TEST_SOLANA_ADDRESSES.wallet1,
+          destination,
+          "USDC",
+          "25",
+          "transfer",
+          "outbound",
+          confirmedStatus,
+          "sig_mg_deposit_1",
+          now,
+          now
+        )
+        .run();
+
+      const response = await postEvent({
+        kind: "signed",
+        sessionId,
+        cryptoTransferId: "xfr_mg_deposit_leg",
+      });
+
+      expect(response.status).toBe(responseStatus);
+      const row = await readTransfer(transferId);
+      expect(row.status).toBe(status);
+      expect(row.destination_address).toBe(MG_DEPOSIT_WALLET);
+      expect(row.memo).toBe("mg_memo_1");
+      if (responseStatus === 204) {
+        expect(row.provider_data.moneygram).toMatchObject({
+          cryptoTransferId: "xfr_mg_deposit_leg",
+          solanaTxSignature: "sig_mg_deposit_1",
+        });
+      } else {
+        expect(await response.json()).toMatchObject({
+          error: { message: "Crypto transfer was not sent to the MoneyGram deposit address." },
+        });
+        expect(row.provider_data.moneygram).not.toHaveProperty("cryptoTransferId");
+      }
+    });
+  });
+
   it("rejects a MoneyGram crypto leg whose amount does not match the session", async () => {
     const headers = {
       Authorization: `Bearer ${TEST_API_KEY.raw}`,
@@ -1824,7 +2553,17 @@ describe("Payments routes — ramps", () => {
       providerReference: "moneygram_session_amount_guard",
       type: "offramp",
       amount: "25",
+      providerData: {
+        moneygram: {
+          transactionId: "mg_tx_amount_guard",
+        },
+      },
     });
+    const depositWallet = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+    await getDb(env)
+      .prepare("UPDATE payment_transfers SET destination_address = ? WHERE id = ?")
+      .bind(depositWallet, "xfr_moneygram_amount_guard")
+      .run();
     const now = new Date().toISOString();
     await getDb(env)
       .prepare(
@@ -1839,12 +2578,12 @@ describe("Payments routes — ramps", () => {
         TEST_PROJECT.id,
         TEST_WALLET_ID,
         TEST_SOLANA_ADDRESSES.wallet1,
-        TEST_SOLANA_ADDRESSES.wallet2,
+        depositWallet,
         "USDC",
         "24",
         "transfer",
         "outbound",
-        "confirmed",
+        "confirmed" satisfies PaymentTransferStatus,
         "moneygram-wrong-amount-signature",
         now,
         now
@@ -1866,11 +2605,14 @@ describe("Payments routes — ramps", () => {
     );
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Crypto transfer amount does not match the off-ramp amount." },
+    });
     const transfer = await getDb(env)
       .prepare("SELECT status FROM payment_transfers WHERE id = ?")
       .bind("xfr_moneygram_amount_guard")
-      .first<{ status: string }>();
-    expect(transfer?.status).toBe("pending");
+      .first<{ status: PaymentTransferStatus }>();
+    expect(transfer).toMatchObject({ status: "pending" satisfies PaymentTransferStatus });
   });
 
   describe("metered quotas", () => {
@@ -1934,11 +2676,6 @@ describe("Payments routes — ramps", () => {
     const SESSION_ID = "ses_ramps_environment";
     const PRODUCTION_PROJECT_ID = `${TEST_PROJECT.id}_production`;
 
-    /**
-     * Dashboard (session) callers resolve their environment from the
-     * membership-verified x-project-id project; this seeds the org member, a
-     * production sibling of the hooks' sandbox project, and a session.
-     */
     async function seedSessionAuth(): Promise<void> {
       await getDb(env).batch([
         getDb(env)
@@ -1972,11 +2709,6 @@ describe("Payments routes — ramps", () => {
       );
     }
 
-    // A schema-valid, nonexistent-counterparty mural payload: the mural branch
-    // resolves the counterparty from the DB before ever making a provider
-    // call, so it distinguishes "blocked by the environment guard" (403,
-    // before the payload is inspected) from "past the guard" (404, from the
-    // in-process DB lookup) without a network mock.
     const NONEXISTENT_MURAL_SIMULATE_BODY = {
       provider: "mural",
       payload: { counterpartyId: "cpty_does_not_exist", amount: 100, fiatCurrency: "USD" },
@@ -1985,9 +2717,6 @@ describe("Payments routes — ramps", () => {
     it("refuses the sandbox simulator from a production-project session", async () => {
       await seedSessionAuth();
 
-      // Session callers used to hardcode to sandbox, so a production-project
-      // session could run sandbox simulations inside production tenant scope.
-      // The guard now sees the real project environment.
       const res = await simulateAsSession(PRODUCTION_PROJECT_ID, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(403);
@@ -1998,9 +2727,6 @@ describe("Payments routes — ramps", () => {
     it("still lets sandbox-project sessions past the environment guard", async () => {
       await seedSessionAuth();
 
-      // A nonexistent counterparty is rejected downstream of the guard, so a
-      // 404 (rather than 403) proves the request got PAST the environment
-      // guard — sandbox sessions are unchanged.
       const res = await simulateAsSession(TEST_PROJECT.id, NONEXISTENT_MURAL_SIMULATE_BODY);
 
       expect(res.status).toBe(404);
@@ -2010,6 +2736,7 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("ramp session and destination binding", () => {
+    const MG_DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
     const MONEYGRAM_WIDGET_URL = "https://playground.xramps.moneygram.com/widget?intent=transfer";
 
     function moneygramSessionJwt(expSeconds: number): string {
@@ -2019,16 +2746,15 @@ describe("Payments routes — ramps", () => {
 
     function moneygramSessionResponse(params: {
       sessionId: string;
-      widgetUrl?: string;
-      expSeconds?: number;
+      widgetUrl: string;
+      expSeconds: number;
     }): Response {
       return new Response(
         JSON.stringify({
-          sessionToken: moneygramSessionJwt(
-            params.expSeconds ?? Math.floor(Date.now() / 1000) + 3600
-          ),
+          sessionToken: moneygramSessionJwt(params.expSeconds),
           sessionId: params.sessionId,
-          widgetUrl: params.widgetUrl ?? MONEYGRAM_WIDGET_URL,
+          widgetUrl: params.widgetUrl,
+          walletType: "custodial",
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
@@ -2062,18 +2788,20 @@ describe("Payments routes — ramps", () => {
     it("creates a MoneyGram session quote bound to the session expiry", async () => {
       const counterpartyId = await seedCounterparty({ externalId: "moneygram_bind_happy" });
       const expSeconds = Math.floor(Date.now() / 1000) + 3600;
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(
-          moneygramSessionResponse({ sessionId: "mg_sess_bind_1", expSeconds })
-        );
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        moneygramSessionResponse({
+          sessionId: "mg_sess_bind_1",
+          expSeconds,
+          widgetUrl: MONEYGRAM_WIDGET_URL,
+        })
+      );
 
       const res = await createMoneygramOnrampQuote(counterpartyId, "25");
 
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        data: { quote: { sessionId: string; widgetUrl: string; expiresAt?: string } };
-      };
+      const body: {
+        data: { quote: { sessionId: string; widgetUrl: string; expiresAt: string } };
+      } = await res.json();
       expect(body.data.quote.sessionId).toBe("mg_sess_bind_1");
       const widgetUrl = new URL(body.data.quote.widgetUrl);
       expect(widgetUrl.origin).toBe("https://playground.xramps.moneygram.com");
@@ -2082,12 +2810,82 @@ describe("Payments routes — ramps", () => {
 
       const row = await getDb(env)
         .prepare(
-          `SELECT provider_data FROM payment_transfers
+          `SELECT id, provider_data FROM payment_transfers
            WHERE provider = 'moneygram' AND provider_reference = 'mg_sess_bind_1'`
         )
-        .first<{ provider_data: { rampQuote?: { expiresAt?: string } } }>();
-      expect(row?.provider_data.rampQuote?.expiresAt).toBe(
-        new Date(expSeconds * 1000).toISOString()
+        .first<{ id: string; provider_data: { rampQuote: { expiresAt: string } } }>();
+      expect(row).toMatchObject({
+        provider_data: { rampQuote: { expiresAt: new Date(expSeconds * 1000).toISOString() } },
+      });
+      if (row === null) {
+        throw new Error("Missing MoneyGram session transfer");
+      }
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://playground.xramps.moneygram.com/api/v1/sessions",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            customerIdentifier: counterpartyId,
+            walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+            walletTransactionId: row.id.slice(4),
+            chain: "solana",
+          }),
+        })
+      );
+      fetchSpy.mockRestore();
+    });
+
+    it("binds the MoneyGram off-ramp session to the created transfer UUID", async () => {
+      const counterpartyId = await seedCounterparty({ externalId: "mg_bind_offramp_1" });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        moneygramSessionResponse({
+          sessionId: "mg_session_offramp_bind_1",
+          expSeconds: Math.floor(Date.now() / 1000) + 3600,
+          widgetUrl: MONEYGRAM_WIDGET_URL,
+        })
+      );
+
+      const response = await app.request(
+        "/v1/payments/ramps/offramp/quote",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${TEST_API_KEY.raw}`,
+          },
+          body: JSON.stringify({
+            provider: "moneygram",
+            counterpartyId,
+            sourceCustodyWalletId: TEST_CUSTODY_WALLET_ID,
+            assetRail: "usdc.solana",
+            fiatCurrency: "USD",
+            cryptoAmount: "25",
+          }),
+        },
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const row = await getDb(env)
+        .prepare(
+          `SELECT id FROM payment_transfers
+           WHERE provider = 'moneygram' AND provider_reference = 'mg_session_offramp_bind_1'`
+        )
+        .first<{ id: string }>();
+      if (row === null) {
+        throw new Error("Missing MoneyGram off-ramp transfer");
+      }
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://playground.xramps.moneygram.com/api/v1/sessions",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            customerIdentifier: counterpartyId,
+            walletAddress: TEST_SOLANA_ADDRESSES.wallet1,
+            walletTransactionId: row.id.slice(4),
+            chain: "solana",
+          }),
+        })
       );
       fetchSpy.mockRestore();
     });
@@ -2097,6 +2895,7 @@ describe("Payments routes — ramps", () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
         moneygramSessionResponse({
           sessionId: "mg_sess_hostile_1",
+          expSeconds: Math.floor(Date.now() / 1000) + 3600,
           widgetUrl: "http://playground.xramps.moneygram.com/widget",
         })
       );
@@ -2121,9 +2920,27 @@ describe("Payments routes — ramps", () => {
       const counterpartyId = await seedCounterparty({ externalId: "moneygram_bind_reuse" });
       const fetchSpy = vi
         .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }))
-        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }))
-        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_reuse_1" }));
+        .mockResolvedValueOnce(
+          moneygramSessionResponse({
+            sessionId: "mg_sess_reuse_1",
+            expSeconds: Math.floor(Date.now() / 1000) + 3600,
+            widgetUrl: MONEYGRAM_WIDGET_URL,
+          })
+        )
+        .mockResolvedValueOnce(
+          moneygramSessionResponse({
+            sessionId: "mg_sess_reuse_1",
+            expSeconds: Math.floor(Date.now() / 1000) + 3600,
+            widgetUrl: MONEYGRAM_WIDGET_URL,
+          })
+        )
+        .mockResolvedValueOnce(
+          moneygramSessionResponse({
+            sessionId: "mg_sess_reuse_1",
+            expSeconds: Math.floor(Date.now() / 1000) + 3600,
+            widgetUrl: MONEYGRAM_WIDGET_URL,
+          })
+        );
 
       const created = await createMoneygramOnrampQuote(counterpartyId, "25");
       expect(created.status).toBe(200);
@@ -2158,16 +2975,20 @@ describe("Payments routes — ramps", () => {
           "xfr_moneygram_foreign_tenant",
           "org_other_tenant",
           "wallet_other_tenant",
-          TEST_SOLANA_ADDRESSES.wallet2,
+          MG_DEPOSIT_WALLET,
           "mg_sess_foreign_1",
           {},
           now,
           now
         )
         .run();
-      const fetchSpy = vi
-        .spyOn(globalThis, "fetch")
-        .mockResolvedValueOnce(moneygramSessionResponse({ sessionId: "mg_sess_foreign_1" }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        moneygramSessionResponse({
+          sessionId: "mg_sess_foreign_1",
+          expSeconds: Math.floor(Date.now() / 1000) + 3600,
+          widgetUrl: MONEYGRAM_WIDGET_URL,
+        })
+      );
 
       const res = await createMoneygramOnrampQuote(counterpartyId, "25");
 
@@ -2183,8 +3004,19 @@ describe("Payments routes — ramps", () => {
         provider: "moneygram",
         providerReference: "moneygram_session_expired",
         type: "offramp",
-        providerData: { rampQuote: { expiresAt: "2020-01-01T00:00:00.000Z" } },
+        providerData: {
+          rampQuote: { expiresAt: "2020-01-01T00:00:00.000Z" },
+          moneygram: {
+            transactionId: "mg_tx_expired_1",
+          },
+        },
+        amount: "25",
       });
+
+      await getDb(env)
+        .prepare("UPDATE payment_transfers SET destination_address = ? WHERE id = ?")
+        .bind(MG_DEPOSIT_WALLET, "xfr_moneygram_expired_session")
+        .run();
 
       const res = await app.request(
         "/v1/payments/ramps/moneygram/events",
@@ -2210,12 +3042,6 @@ describe("Payments routes — ramps", () => {
   });
 
   describe("lightspark offramp quote account selection", () => {
-    /**
-     * Inserts one counterparty provider-account row with explicit values.
-     *
-     * @param input - Row values for the fixture.
-     * @returns The inserted row id.
-     */
     async function seedLightsparkProviderAccount(input: {
       id: string;
       counterpartyId: string;
@@ -2251,12 +3077,6 @@ describe("Payments routes — ramps", () => {
       return input.id;
     }
 
-    /**
-     * Seeds a lightspark counterparty with a Grid customer link and payout accounts.
-     *
-     * @param accounts - Corridor account fixtures to insert for the counterparty.
-     * @returns The counterparty id.
-     */
     async function seedLightsparkCounterparty(
       accounts: readonly {
         id: string;
@@ -2292,11 +3112,6 @@ describe("Payments routes — ramps", () => {
       return counterpartyId;
     }
 
-    /**
-     * Mocks the Grid quote endpoint with a valid locked-sending quote.
-     *
-     * @returns The installed fetch spy.
-     */
     function mockGridQuote() {
       const quotePage = JSON.stringify({
         id: "Quote:qt_selection_test",

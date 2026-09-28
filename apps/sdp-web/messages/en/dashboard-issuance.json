@@ -573,7 +573,6 @@
       "lockSupplyAlreadyLocked": "Supply is already locked — the mint authority has been revoked.",
       "lockSupplyAmountUnavailable": "The remaining supply could not be calculated for this token.",
       "lockSupplyDestinationRequired": "Enter a destination for the newly minted supply.",
-      "authorityWalletRequestFailed": "Authority wallet request failed ({status}).",
       "unableToLoadSignerWallets": "Unable to load signer wallets.",
       "loadingSignerWallets": "Loading signer wallets…",
       "onlyAdminsCanEditAuthorities": "Only admins can edit token authorities.",

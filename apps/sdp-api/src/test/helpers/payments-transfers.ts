@@ -8,7 +8,7 @@ import app from "@/index";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { transferResponse } from "@/openapi/paths/responses";
 import { errorResponseSchema } from "@/openapi/schemas/base";
-import type { createTransferSchema } from "@/routes/payments/schemas";
+import type { createTransferSchema } from "@/routes/payments/transfers/schemas";
 import { replaceApiKeyWalletBindings } from "@/services/api-key-wallets.service";
 import { TEST_SOLANA_ADDRESSES } from "@/test/fixtures/tokens";
 import { env } from "@/test/helpers/env";

@@ -145,6 +145,7 @@
         "**/*.test.tsx",
         "**/*.test.js",
         "**/*.test.jsx",
+        "**/test-fixtures.ts",
         "**/test/**/*.ts",
         "**/test/**/*.tsx",
         "**/test/**/*.js",

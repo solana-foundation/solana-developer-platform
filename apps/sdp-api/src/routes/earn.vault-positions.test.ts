@@ -531,6 +531,9 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(response.status).toBe(200);
     expect(readVaultPositions).toHaveBeenCalledTimes(10);
     expect(maximum).toBe(8);
+    expect(
+      new Set(resolveVaultDirectClient.mock.calls.map(([, , deadline]) => deadline)).size
+    ).toBe(1);
   });
 });
 

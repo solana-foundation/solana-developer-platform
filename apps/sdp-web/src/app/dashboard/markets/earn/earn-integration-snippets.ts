@@ -18,7 +18,8 @@ import { DEFAULT_SDP_API_URL, type EarnStrategy } from "@sdp/types";
  * The sections concatenate into one server module. `@solana/kit` is the only
  * Solana SDK referenced, and only by the optional sponsor signer.
  *
- * The public docs guide (apps/sdp-docs/content/docs/guides/embedded-yield.mdx)
+ * The docs guide (apps/sdp-docs/content/unpublished/guides/embedded-yield.mdx,
+ * unpublished until PRO-2038)
  * documents this same authenticated flow plus the keyless catalogue and
  * unsigned-build tier. Keep the shared contract aligned in both.
  */
@@ -31,7 +32,7 @@ export interface EarnIntegrationSections {
   portfolio: string;
   /** Money out: preview, build the exit, customer signs, submit. */
   withdraw: string;
-  /** Asynchronous money out: request, observe solver outcome, or recover shares. */
+  /** Asynchronous money out: request solver or operator settlement, then observe or cancel. */
   asyncWithdraw: string;
 }
 
@@ -40,6 +41,22 @@ export type EarnIntegrationStrategy = Pick<
   "id" | "depositSlippage" | "withdrawalSlippage"
 >;
 
+/**
+ * The catalogue's suggested tolerance is interpolated into code a partner
+ * copies onto their server and runs with SDP_API_KEY in scope, so the emitted
+ * text must be nothing but an integer literal. The strategies read does not
+ * re-validate the row at runtime (the `number` here is a compile-time claim),
+ * so this is the enforcement point: a finite integer inside the 1–1000 bps
+ * range `floorForTolerance` itself accepts passes through, and any other
+ * value — a string, an object, a payload smuggling statements — falls back to
+ * the documented default instead of being spelled into the module.
+ */
+function snippetToleranceBps(value: number | undefined): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 1_000
+    ? value
+    : 10;
+}
+
 export function buildEarnIntegrationSections(
   strategy: EarnIntegrationStrategy,
   apiBaseUrl?: string
@@ -47,10 +64,10 @@ export function buildEarnIntegrationSections(
   const requiresDepositFloor = strategy.depositSlippage?.quoteRequired === true;
   const requiresWithdrawalFloor = strategy.withdrawalSlippage?.quoteRequired === true;
   const depositSlippageInput = requiresDepositFloor
-    ? `  slippageBps = ${strategy.depositSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.depositSlippage?.defaultToleranceBps)},\n`
     : "";
   const withdrawalSlippageInput = requiresWithdrawalFloor
-    ? `  slippageBps = ${strategy.withdrawalSlippage?.defaultToleranceBps ?? 10},\n`
+    ? `  slippageBps = ${snippetToleranceBps(strategy.withdrawalSlippage?.defaultToleranceBps)},\n`
     : "";
   const depositSlippageType = requiresDepositFloor
     ? "  /** Customer-selected slippage tolerance in basis points. */\n  slippageBps?: number;\n"
@@ -137,11 +154,34 @@ async function sdpFetch(path: string, init?: RequestInit) {
   return result.data;
 }
 
-/** The catalogue: every strategy id and its live APY. */
+/** The complete catalogue: every strategy id and its live APY. */
 export async function listEarnStrategies() {
-  return sdpFetch("/v1/earn/strategies?page=1&pageSize=100", {
-    headers: sdpHeaders(),
-  });
+  const strategies = [];
+  const seenStrategyIds = new Set();
+  const pageSize = 100;
+  const maximumPages = 100;
+  for (let page = 1; page <= maximumPages; page += 1) {
+    const data = await sdpFetch(
+      \`/v1/earn/strategies?\${new URLSearchParams({ page: String(page), pageSize: String(pageSize) })}\`,
+      { headers: sdpHeaders() }
+    );
+    let added = 0;
+    for (const strategy of data.strategies) {
+      if (seenStrategyIds.has(strategy.id)) continue;
+      seenStrategyIds.add(strategy.id);
+      strategies.push(strategy);
+      added += 1;
+    }
+    if (strategies.length >= data.total) return strategies;
+    if (added === 0) {
+      throw new Error("SDP strategy pagination made no progress before the reported total");
+    }
+  }
+  throw new Error(
+    "SDP strategy pagination exceeded " +
+      maximumPages +
+      " pages before the reported total"
+  );
 }
 
 /** What a deposit would mint right now. Read-only; nothing is built. */
@@ -166,6 +206,42 @@ export async function previewEarnWithdrawal(positionId: string, shares: string) 
 
 export type EarnTransactionSigner = (transactionBase64: string) => Promise<string>;
 
+function transactionMessageBytes(transactionBase64: string): Uint8Array {
+  let bytes: Uint8Array;
+  try {
+    bytes = Uint8Array.from(atob(transactionBase64), (character) => character.charCodeAt(0));
+  } catch {
+    throw new Error("Signer returned invalid base64 transaction bytes");
+  }
+  // A Solana wire transaction begins with a compact-u16 signature count,
+  // followed by 64 bytes per signature. Everything after that is the message.
+  let signatureCount = 0;
+  let shift = 0;
+  let cursor = 0;
+  while (true) {
+    const byte = bytes[cursor];
+    if (byte === undefined || cursor >= 3) throw new Error("Signer returned invalid transaction bytes");
+    signatureCount |= (byte & 0x7f) << shift;
+    cursor += 1;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  const messageOffset = cursor + signatureCount * 64;
+  if (messageOffset >= bytes.length) throw new Error("Signer returned invalid transaction bytes");
+  return bytes.subarray(messageOffset);
+}
+
+function assertSameTransactionMessage(expectedBase64: string, candidateBase64: string) {
+  const expected = transactionMessageBytes(expectedBase64);
+  const candidate = transactionMessageBytes(candidateBase64);
+  if (
+    expected.length !== candidate.length ||
+    expected.some((byte, index) => byte !== candidate[index])
+  ) {
+    throw new Error("Signer changed the transaction message; refusing to sponsor it");
+  }
+}
+
 /** Collect every signature the built transaction requires. */
 export async function signEarnTransaction(
   built: { transaction: string; feePayer?: string },
@@ -173,9 +249,12 @@ export async function signEarnTransaction(
   sponsorSigner?: EarnTransactionSigner
 ) {
   const customerSigned = await customerSigner(built.transaction);
+  assertSameTransactionMessage(built.transaction, customerSigned);
   if (!built.feePayer) return customerSigned;
   if (!sponsorSigner) throw new Error("Sponsor signature is required for this transaction");
-  return sponsorSigner(customerSigned);
+  const sponsorSigned = await sponsorSigner(customerSigned);
+  assertSameTransactionMessage(built.transaction, sponsorSigned);
+  return sponsorSigned;
 }
 
 /**
@@ -183,13 +262,24 @@ export async function signEarnTransaction(
  * Base64 in, base64 out, the same shape your customer wallet integration
  * returns. Requires @solana/kit. Never use it for a customer's key.
  */
-export async function createSponsorSigner(secretKey: Uint8Array): Promise<EarnTransactionSigner> {
+export async function createSponsorSigner(
+  secretKey: Uint8Array,
+  expectedFeePayer: string
+): Promise<EarnTransactionSigner> {
   const kit = await import("@solana/kit");
   const keyPair = await kit.createKeyPairFromBytes(secretKey);
+  const signerAddress = await kit.getAddressFromPublicKey(keyPair.publicKey);
+  if (signerAddress !== expectedFeePayer) {
+    throw new Error("Sponsor key does not match the configured fee payer");
+  }
   return async (transactionBase64) => {
     const transaction = kit
       .getTransactionDecoder()
       .decode(kit.getBase64Encoder().encode(transactionBase64));
+    const message = kit.getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+    if (message.staticAccounts[0] !== expectedFeePayer) {
+      throw new Error("Transaction fee payer does not match the configured sponsor");
+    }
     const signed = await kit.partiallySignTransaction([keyPair], transaction);
     return kit.getBase64EncodedWireTransaction(signed);
   };
@@ -386,9 +476,10 @@ export async function submitEarnWithdrawal({
 }`;
 
   const asyncWithdraw = `/**
- * Read atomic, provider-order, and queued routes independently. Atomic exits
- * pay in one transaction; provider orders settle later; queued requests escrow
- * shares under the provider's on-chain queue terms.
+ * Read atomic, provider-order, solver-queue, and operator-redemption routes
+ * independently. Atomic exits pay in one transaction; the other routes settle
+ * later. Check parRedemption separately from queued: a provider may expose one,
+ * both, or neither.
  */
 export async function getEarnWithdrawalOptions(positionId: string) {
   return sdpFetch("/v1/earn/external-wallet/withdrawal-options", {
@@ -396,6 +487,53 @@ export async function getEarnWithdrawalOptions(positionId: string) {
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId }),
   });
+}
+
+function compareDecimalStrings(left: string, right: string): number {
+  const parse = (value: string) => {
+    if (!/^\\d+(\\.\\d+)?$/.test(value)) throw new Error("Invalid decimal amount");
+    const [whole, fraction = ""] = value.split(".");
+    return { whole: whole.replace(/^0+(?=\\d)/, ""), fraction: fraction.replace(/0+$/, "") };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  const scale = Math.max(a.fraction.length, b.fraction.length);
+  const aAtoms = BigInt(a.whole + a.fraction.padEnd(scale, "0"));
+  const bAtoms = BigInt(b.whole + b.fraction.padEnd(scale, "0"));
+  return aAtoms === bAtoms ? 0 : aAtoms < bAtoms ? -1 : 1;
+}
+
+function assertQueuedWithdrawalTerms(
+  options: any,
+  shares: string,
+  discountBps: number,
+  deadlineSeconds: number
+) {
+  const terms = options.queueAsset;
+  if (!options.queued || !terms?.allowWithdrawals) {
+    throw new Error("Queued withdrawals are not currently available for this position");
+  }
+  if (compareDecimalStrings(shares, terms.minimumShares) < 0) {
+    throw new Error(\`Queued withdrawals require at least \${terms.minimumShares} shares\`);
+  }
+  if (
+    !Number.isInteger(discountBps) ||
+    discountBps < terms.minimumDiscountBps ||
+    discountBps > terms.maximumDiscountBps
+  ) {
+    throw new Error(
+      \`discountBps must be between \${terms.minimumDiscountBps} and \${terms.maximumDiscountBps}\`
+    );
+  }
+  if (
+    !Number.isInteger(deadlineSeconds) ||
+    deadlineSeconds < terms.minimumSecondsToDeadline ||
+    deadlineSeconds > terms.maximumSecondsToDeadline
+  ) {
+    throw new Error(
+      \`deadlineSeconds must be between \${terms.minimumSecondsToDeadline} and \${terms.maximumSecondsToDeadline}\`
+    );
+  }
 }
 
 /** Preview exact queue terms from live chain state before building. */
@@ -410,10 +548,27 @@ export async function previewEarnQueuedWithdrawal({
   discountBps: number;
   deadlineSeconds: number;
 }) {
+  const options = await getEarnWithdrawalOptions(positionId);
+  assertQueuedWithdrawalTerms(options, shares, discountBps, deadlineSeconds);
   return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
     method: "POST",
     headers: sdpHeaders(),
     body: JSON.stringify({ positionId, shares, discountBps, deadlineSeconds }),
+  });
+}
+
+/** Preview the operator-completed redemption at par before building. */
+export async function previewEarnParRedemption({
+  positionId,
+  shares,
+}: {
+  positionId: string;
+  shares: string;
+}) {
+  return sdpFetch("/v1/earn/external-wallet/queued-withdrawal-previews", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({ positionId, shares, mechanism: "operatorRedemption" }),
   });
 }
 
@@ -434,6 +589,17 @@ export async function buildEarnQueuedWithdrawalRequest({
   deadlineSeconds: number;
   feePayer?: string;
 }) {
+  const preview = await previewEarnQueuedWithdrawal({
+    positionId,
+    shares,
+    discountBps,
+    deadlineSeconds,
+  });
+  if (preview.blockingIssues.length > 0) {
+    throw new Error(
+      preview.blockingIssues.map((issue: { message: string }) => issue.message).join("; ")
+    );
+  }
   const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
     method: "POST",
     headers: sdpHeaders(),
@@ -449,7 +615,36 @@ export async function buildEarnQueuedWithdrawalRequest({
   return data.transaction;
 }
 
-export async function submitEarnQueuedWithdrawalRequest(input: {
+/**
+ * Build an unsigned par-redemption request. Landing it converts the position's
+ * shares into the provider's intermediate asset and delegates later settlement
+ * at par to the operator; it does NOT pay the deposit asset immediately.
+ */
+export async function buildEarnParRedemptionRequest({
+  positionId,
+  shares,
+  feePayer,
+}: {
+  positionId: string;
+  shares: string;
+  feePayer?: string;
+}) {
+  const data = await sdpFetch("/v1/earn/external-wallet/withdrawal-request-transactions", {
+    method: "POST",
+    headers: sdpHeaders(),
+    body: JSON.stringify({
+      positionId,
+      shares,
+      mechanism: "operatorRedemption",
+      ...(feePayer ? { feePayer } : {}),
+    }),
+  });
+  // Includes requestAddress, intermediateMint, intermediateAmount, and expected assets.
+  return data.transaction;
+}
+
+/** Submit either signed solver-queue or operator-redemption request build. */
+export async function submitEarnWithdrawalRequest(input: {
   transactionId: string;
   signedTransaction: string;
   idempotencyKey: string;
@@ -470,7 +665,7 @@ export async function submitEarnQueuedWithdrawalRequest(input: {
  * states are fulfilled, cancelled, and failed. closedOrUnknown is retryable:
  * SDP is still indexing the close event to distinguish payout from recovery.
  */
-export async function getEarnQueuedWithdrawalRequest(withdrawalRequestId: string) {
+export async function getEarnWithdrawalRequest(withdrawalRequestId: string) {
   const data = await sdpFetch(
     \`/v1/earn/external-wallet/withdrawal-requests/\${encodeURIComponent(withdrawalRequestId)}\`,
     { headers: sdpHeaders() }
@@ -478,11 +673,59 @@ export async function getEarnQueuedWithdrawalRequest(withdrawalRequestId: string
   return data.withdrawalRequest;
 }
 
+/** Restore every non-terminal request after startup, reconnect, or browser refresh. */
+export async function listPendingEarnQueuedWithdrawals(ownerAddress: string) {
+  const withdrawalRequests = [];
+  const seenCursors = new Set();
+  let cursor;
+  do {
+    const query = new URLSearchParams({ ownerAddress, settled: "false" });
+    if (cursor) query.set("before", cursor);
+    const data = await sdpFetch(
+      \`/v1/earn/external-wallet/withdrawal-requests?\${query}\`,
+      { headers: sdpHeaders() }
+    );
+    withdrawalRequests.push(...data.withdrawalRequests);
+    if (!data.hasMore) return withdrawalRequests;
+    if (!data.nextCursor || seenCursors.has(data.nextCursor)) {
+      throw new Error("SDP queued-withdrawal cursor did not advance");
+    }
+    seenCursors.add(data.nextCursor);
+    cursor = data.nextCursor;
+  } while (true);
+}
+
+export async function waitForEarnQueuedWithdrawal(
+  withdrawalRequestId: string,
+  { signal, intervalMs = 5_000 }: { signal?: AbortSignal; intervalMs?: number } = {}
+) {
+  const terminal = new Set(["fulfilled", "cancelled", "failed"]);
+  while (true) {
+    signal?.throwIfAborted();
+    const request = await getEarnQueuedWithdrawalRequest(withdrawalRequestId);
+    if (terminal.has(request.status)) return request;
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal?.reason ?? new Error("Polling aborted"));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, intervalMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
+  }
+}
+
 /**
- * Once status is expiredCancelable, build the holder's recovery transaction.
- * Cancelling before the deadline is rejected by the provider's queue program.
+ * Build the holder's cancellation transaction. A solverQueue request must first
+ * reach expiredCancelable; cancelling it before its deadline is rejected. An
+ * operatorRedemption request is cancellable while pending, until the operator
+ * completes and closes it. Refresh the request immediately before building.
  */
-export async function buildEarnQueuedWithdrawalCancellation({
+export async function buildEarnWithdrawalRequestCancellation({
   withdrawalRequestId,
   feePayer,
 }: {
@@ -503,7 +746,8 @@ export async function buildEarnQueuedWithdrawalCancellation({
   return data.transaction;
 }
 
-export async function submitEarnQueuedWithdrawalCancellation(input: {
+/** Submit a signed cancellation build for either asynchronous mechanism. */
+export async function submitEarnWithdrawalRequestCancellation(input: {
   transactionId: string;
   signedTransaction: string;
   idempotencyKey: string;

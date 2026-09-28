@@ -1,14 +1,18 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createOpenApiDocument, createPublicOpenApiDocument } from "./spec";
 
 interface TestJsonSchema {
   anyOf?: TestJsonSchema[];
+  enum?: unknown[];
   example?: unknown;
   items?: TestJsonSchema;
   not?: TestJsonSchema;
+  nullable?: boolean;
   oneOf?: TestJsonSchema[];
   properties?: Record<string, TestJsonSchema>;
   required?: string[];
+  type?: string;
 }
 
 function getJsonSchema(value: unknown): TestJsonSchema {
@@ -27,6 +31,12 @@ function getJsonExamples(value: unknown) {
 
 function getWalletResponseSchema(value: unknown): TestJsonSchema {
   return getJsonSchema(value).properties?.data?.properties?.wallet ?? {};
+}
+
+function literalEarnPaths(source: string): string[] {
+  return Array.from(new Set(source.match(/\/v1\/earn\/[A-Za-z0-9{}._/-]+/g) ?? []))
+    .filter((path) => !path.endsWith("/"))
+    .sort();
 }
 
 function getWalletListItemSchema(value: unknown): TestJsonSchema {
@@ -81,9 +91,30 @@ describe("OpenAPI spec", () => {
     ]);
   });
 
+  it("holds the Earn family out of the public document until launch", () => {
+    // PUBLICATION HOLD (PRO-2038). The default public document, which is what
+    // api.solana.com/openapi.json, Swagger UI, the API reference, the Postman
+    // collection, the playground catalog and the AI files are built from,
+    // carries no Earn operation and no Earn tag. Flipping
+    // EARN_PUBLIC_SURFACE_PUBLISHED is a PRO-1872 security sign-off PR; when it
+    // flips, move these assertions to the publishable document below.
+    const publicDocument = createPublicOpenApiDocument();
+    expect(Object.keys(publicDocument.paths ?? {}).filter((p) => p.startsWith("/v1/earn"))).toEqual(
+      []
+    );
+    expect(publicDocument.tags?.map((tag) => tag.name)).not.toContain("Earn");
+    expect(JSON.stringify(publicDocument)).not.toMatch(/\/v1\/earn/);
+    // Deliberately still present: the wallet-policy `operationTypes` enum keeps
+    // `earn_vault_deposit`, `earn_vault_withdrawal` and `earn_program_withdrawal`,
+    // because the policy API accepts them today and the public schema must not
+    // lie about accepted values. Nothing else in the document names Earn.
+  });
+
   it("publishes the caller-signed money routes and keeps retired button-configuration paths out", () => {
     const internal = createOpenApiDocument();
-    const publicDocument = createPublicOpenApiDocument();
+    // The publishable Earn document: what partners see once PRO-2038 flips the
+    // hold. Pinned here so the contract cannot drift while it is held.
+    const publicDocument = createPublicOpenApiDocument({ publishEarn: true });
 
     expect(internal.components?.securitySchemes?.clerkBearerAuth).toMatchObject({
       type: "http",
@@ -128,6 +159,14 @@ describe("OpenAPI spec", () => {
         "POST /v1/earn/external-wallet/withdrawal-previews",
         "POST /v1/earn/external-wallet/withdrawal-transactions",
         "POST /v1/earn/external-wallet/withdrawals",
+        "POST /v1/earn/external-wallet/withdrawal-options",
+        "POST /v1/earn/external-wallet/queued-withdrawal-previews",
+        "POST /v1/earn/external-wallet/withdrawal-request-transactions",
+        "POST /v1/earn/external-wallet/withdrawal-requests",
+        "GET /v1/earn/external-wallet/withdrawal-requests",
+        "GET /v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "POST /v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        "POST /v1/earn/external-wallet/withdrawal-request-cancellations",
       ].sort()
     );
     expect(Object.keys(publicDocument.paths["/v1/transactions"])).toEqual(["get"]);
@@ -154,6 +193,8 @@ describe("OpenAPI spec", () => {
       { method: "post", path: "/v1/earn/external-wallet/deposit-transactions" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawal-previews" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawal-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-options" },
+      { method: "post", path: "/v1/earn/external-wallet/queued-withdrawal-previews" },
     ] as const;
     const keyedOnlyOperations = [
       { method: "get", path: "/v1/earn/external-wallet/positions/summary" },
@@ -163,6 +204,21 @@ describe("OpenAPI spec", () => {
       { method: "get", path: "/v1/earn/external-wallet/earnings" },
       { method: "post", path: "/v1/earn/external-wallet/deposits" },
       { method: "post", path: "/v1/earn/external-wallet/withdrawals" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-request-transactions" },
+      { method: "post", path: "/v1/earn/external-wallet/withdrawal-requests" },
+      { method: "get", path: "/v1/earn/external-wallet/withdrawal-requests" },
+      {
+        method: "get",
+        path: "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+      },
+      {
+        method: "post",
+        path: "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+      },
+      {
+        method: "post",
+        path: "/v1/earn/external-wallet/withdrawal-request-cancellations",
+      },
     ] as const;
 
     expect(
@@ -278,6 +334,113 @@ describe("OpenAPI spec", () => {
     expect(Buffer.from(signedTransactionExample as string, "base64").toString("base64")).toBe(
       signedTransactionExample
     );
+  });
+
+  it("keeps every literal Embedded Yield guide route in the publishable Earn document", () => {
+    const publicDocument = createPublicOpenApiDocument({ publishEarn: true });
+    // The guide is unpublished until PRO-2038 (apps/sdp-docs/CLAUDE.md,
+    // "Unpublishing a Page") but its route contract is still pinned here.
+    const guide = readFileSync(
+      new URL("../../../sdp-docs/content/unpublished/guides/embedded-yield.mdx", import.meta.url),
+      "utf8"
+    );
+    const generatedModule = readFileSync(
+      new URL(
+        "../../../sdp-web/src/app/dashboard/markets/earn/earn-integration-snippets.ts",
+        import.meta.url
+      ),
+      "utf8"
+    );
+    const referencedPaths = literalEarnPaths(`${guide}\n${generatedModule}`);
+
+    expect(referencedPaths).toEqual(
+      expect.arrayContaining([
+        "/v1/earn/external-wallet/withdrawal-options",
+        "/v1/earn/external-wallet/queued-withdrawal-previews",
+        "/v1/earn/external-wallet/withdrawal-request-transactions",
+        "/v1/earn/external-wallet/withdrawal-requests",
+        "/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}",
+        "/v1/earn/external-wallet/withdrawal-request-cancel-transactions",
+        "/v1/earn/external-wallet/withdrawal-request-cancellations",
+      ])
+    );
+    for (const path of referencedPaths) {
+      expect(publicDocument.paths?.[path], `Missing public OpenAPI path: ${path}`).toBeDefined();
+    }
+  });
+
+  it("publishes both asynchronous withdrawal mechanisms with their exact row shapes", () => {
+    const doc = createPublicOpenApiDocument({ publishEarn: true });
+    const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
+
+    const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
+    expect(buildRequest.anyOf).toHaveLength(2);
+    const operatorRequest = buildRequest.anyOf?.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorRequest?.required).toEqual(
+      expect.arrayContaining(["positionId", "shares", "mechanism"])
+    );
+    expect(operatorRequest?.properties).not.toHaveProperty("strategyId");
+    expect(operatorRequest?.properties).not.toHaveProperty("discountBps");
+    expect(operatorRequest?.properties).not.toHaveProperty("deadlineSeconds");
+
+    const options = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
+    );
+    const optionsVariants = options.properties?.data?.anyOf ?? [];
+    expect(optionsVariants).toHaveLength(2);
+    for (const variant of optionsVariants) {
+      expect(variant.properties?.parRedemption).toMatchObject({
+        nullable: true,
+        required: expect.arrayContaining([
+          "intermediateMint",
+          "assetMint",
+          "minimumShares",
+          "cancelable",
+          "operatorSettled",
+        ]),
+      });
+    }
+
+    const preview = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/queued-withdrawal-previews"]?.post?.responses?.["200"]
+    );
+    const operatorPreview = preview.properties?.data?.anyOf?.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorPreview?.required).toEqual(
+      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount", "assets"])
+    );
+
+    const record = getJsonSchema(
+      doc.paths?.["/v1/earn/external-wallet/withdrawal-requests/{withdrawalRequestId}"]?.get
+        ?.responses?.["200"]
+    );
+    const recordVariants = record.properties?.data?.properties?.withdrawalRequest?.anyOf ?? [];
+    expect(recordVariants).toHaveLength(2);
+    const operatorRecord = recordVariants.find((variant) =>
+      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorRecord?.properties?.intermediateMint?.type).toBe("string");
+    expect(operatorRecord?.properties?.intermediateAmount?.type).toBe("string");
+    expect(operatorRecord?.properties?.discountBps?.nullable).toBe(true);
+    expect(operatorRecord?.properties?.maturityTimestamp?.nullable).toBe(true);
+    expect(operatorRecord?.properties?.deadlineTimestamp?.nullable).toBe(true);
+
+    const buildResponse = getJsonSchema(requestPath?.post?.responses?.["200"]);
+    const buildVariants = buildResponse.properties?.data?.properties?.transaction?.anyOf ?? [];
+    const operatorBuild = buildVariants.find(
+      (variant) =>
+        variant.properties?.action?.enum?.includes("request") &&
+        variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+    );
+    expect(operatorBuild?.required).toEqual(
+      expect.arrayContaining(["mechanism", "intermediateMint", "intermediateAmount"])
+    );
+    expect(operatorBuild?.properties).not.toHaveProperty("discountBps");
+    expect(operatorBuild?.properties).not.toHaveProperty("maturityTimestamp");
+    expect(operatorBuild?.properties).not.toHaveProperty("deadlineTimestamp");
   });
 
   it("documents allowlist search/label filters and the labels endpoint", () => {
@@ -544,8 +707,10 @@ describe("OpenAPI spec", () => {
       "Compliance",
       "Counterparties",
       "Asset Profiles",
-      "Earn",
     ]);
+    expect(
+      createPublicOpenApiDocument({ publishEarn: true }).tags?.map((tag) => tag.name)
+    ).toContain("Earn");
 
     expect(doc.paths?.["/v1/auth/me"]).toBeUndefined();
     expect(doc.paths?.["/v1/organizations/{orgId}"]).toBeUndefined();

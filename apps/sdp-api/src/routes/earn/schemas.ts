@@ -4,6 +4,7 @@ import {
   EARN_LIQUIDITY_TERMS,
   EARN_MOVEMENT_DIRECTIONS,
   EARN_PORTFOLIO_TOKENS,
+  EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS,
   EARN_STRATEGY_SOURCE_KINDS,
   EARN_SWAP_MAX_SLIPPAGE_BPS,
   SOLANA_CLUSTERS,
@@ -424,38 +425,66 @@ export const earnVaultWithdrawalPreviewSchema = z.object({
 export const earnVaultWithdrawalsQuerySchema = earnVaultMovementsQuerySchema;
 
 // ---------------------------------------------------------------------------
-// Queued vault withdrawals. These intentionally use their own request
-// resource rather than `earn_movements`: a finalized request transaction has
-// only escrowed shares, while fulfillment is a later solver transaction.
+// Asynchronous vault withdrawals. These intentionally use their own request
+// resource rather than `earn_movements`: a finalized request transaction is
+// not a payout. Veda escrows shares for a later solver transaction; Hastra
+// converts PRIME to delegated wYLDS for a later operator settlement.
 // ---------------------------------------------------------------------------
 
 const earnVaultQueuedWithdrawalTermsShape = {
   shares: earnWithdrawalSharesSchema,
+  mechanism: z.literal("solverQueue").optional(),
   discountBps: z.number().int().min(0).max(10_000),
   /** Seconds after maturity during which a solver may fulfill the request. */
-  deadlineSeconds: z.number().int().positive().max(31_536_000),
+  deadlineSeconds: z.number().int().positive().max(EARN_QUEUED_WITHDRAWAL_MAXIMUM_DEADLINE_SECONDS),
+} as const;
+
+const earnVaultParRedemptionTermsShape = {
+  shares: earnWithdrawalSharesSchema,
+  mechanism: z.literal("operatorRedemption"),
 } as const;
 
 export const earnVaultWithdrawalOptionsSchema = z
   .object({ positionId: earnWithdrawalPositionIdSchema })
   .strict();
 
-export const earnVaultQueuedWithdrawalPreviewSchema = z
-  .object({
-    positionId: earnWithdrawalPositionIdSchema,
-    ...earnVaultQueuedWithdrawalTermsShape,
-  })
-  .strict();
+export const earnVaultQueuedWithdrawalPreviewSchema = z.union([
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultQueuedWithdrawalTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionTermsShape,
+    })
+    .strict(),
+]);
 
-export const earnVaultWithdrawalRequestSchema = z
-  .object({
-    positionId: earnWithdrawalPositionIdSchema,
-    ...earnVaultQueuedWithdrawalTermsShape,
-    requestId: z
-      .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
-      .optional(),
-  })
-  .strict();
+const earnVaultWithdrawalRequestIdShape = {
+  requestId: z
+    .never(`Use the ${IDEMPOTENCY_KEY_HEADER} header; body requestId is not accepted`)
+    .optional(),
+} as const;
+
+export const earnVaultWithdrawalRequestSchema = z.union([
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultQueuedWithdrawalTermsShape,
+      ...earnVaultWithdrawalRequestIdShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionTermsShape,
+      ...earnVaultWithdrawalRequestIdShape,
+    })
+    .strict(),
+]);
 
 export const earnVaultWithdrawalRequestParamsSchema = z
   .object({ withdrawalRequestId: z.string().min(1).max(128) })
@@ -601,11 +630,7 @@ export const earnExternalWalletWithdrawalPreviewSchema = z.union([
   }),
 ]);
 
-const earnExternalWalletQueuedTermsShape = {
-  ...earnVaultQueuedWithdrawalTermsShape,
-} as const;
-
-/** Optional-auth locator shared by queued exit options, previews and builds. */
+/** Optional-auth locator shared by queued exit options and previews. */
 export const earnExternalWalletWithdrawalOptionsSchema = z.union([
   z.object({ positionId: earnWithdrawalPositionIdSchema }).strict(),
   z
@@ -620,14 +645,27 @@ export const earnExternalWalletQueuedWithdrawalPreviewSchema = z.union([
   z
     .object({
       positionId: earnWithdrawalPositionIdSchema,
-      ...earnExternalWalletQueuedTermsShape,
+      ...earnVaultQueuedWithdrawalTermsShape,
     })
     .strict(),
   z
     .object({
       strategyId: z.string().min(1),
       ownerAddress: solanaOwnerAddressSchema,
-      ...earnExternalWalletQueuedTermsShape,
+      ...earnVaultQueuedWithdrawalTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      positionId: earnWithdrawalPositionIdSchema,
+      ...earnVaultParRedemptionTermsShape,
+    })
+    .strict(),
+  z
+    .object({
+      strategyId: z.string().min(1),
+      ownerAddress: solanaOwnerAddressSchema,
+      ...earnVaultParRedemptionTermsShape,
     })
     .strict(),
 ]);
@@ -637,35 +675,24 @@ export const earnExternalWalletWithdrawalRequestTransactionSchema = z.union([
     .object({
       positionId: earnWithdrawalPositionIdSchema,
       ...earnExternalWalletFeePayerShape,
-      ...earnExternalWalletQueuedTermsShape,
+      ...earnVaultQueuedWithdrawalTermsShape,
     })
     .strict(),
   z
     .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
+      positionId: earnWithdrawalPositionIdSchema,
       ...earnExternalWalletFeePayerShape,
-      ...earnExternalWalletQueuedTermsShape,
+      ...earnVaultParRedemptionTermsShape,
     })
     .strict(),
 ]);
 
-export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z.union([
-  z
-    .object({
-      withdrawalRequestId: z.string().min(1).max(128),
-      ...earnExternalWalletFeePayerShape,
-    })
-    .strict(),
-  z
-    .object({
-      strategyId: z.string().min(1),
-      ownerAddress: solanaOwnerAddressSchema,
-      requestAddress: solanaOwnerAddressSchema,
-      ...earnExternalWalletFeePayerShape,
-    })
-    .strict(),
-]);
+export const earnExternalWalletWithdrawalRequestCancelTransactionSchema = z
+  .object({
+    withdrawalRequestId: z.string().min(1).max(128),
+    ...earnExternalWalletFeePayerShape,
+  })
+  .strict();
 
 export const earnExternalWalletWithdrawalRequestsQuerySchema = z
   .object({

@@ -3,8 +3,7 @@
 import type { EarnVaultWithdrawalRequestRecord } from "@sdp/types";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 
 const mocks = vi.hoisted(() => ({
   cancelRequest: vi.fn(),
@@ -57,9 +56,9 @@ function request(
 
 function renderCard(onChanged = vi.fn()) {
   const renderUi = () => (
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <EarnVaultWithdrawalRequestsCard onChanged={onChanged} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
   return {
     ...render(renderUi()),
@@ -196,9 +195,46 @@ describe("EarnVaultWithdrawalRequestsCard", () => {
     expect(screen.queryByText("Waiting for payment")).toBeNull();
     expect(
       screen.getByText(
-        /4.9875 USDC expected · payment can start after Unavailable · get shares back after Unavailable/
+        /\$4.98 expected · payment can start after Unavailable · get shares back after Unavailable/
       )
     ).toBeTruthy();
+  });
+
+  it("shows pending operator redemption without solver dates and permits cancellation", async () => {
+    const refresh = vi.fn();
+    const par = {
+      ...request("par_request", "pending"),
+      provider: "hastra",
+      mechanism: "operatorRedemption" as const,
+      intermediateMint: "wylds",
+      intermediateAmount: "2500",
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    };
+    mocks.useRequests.mockReturnValue({
+      withdrawalRequests: [par],
+      error: undefined,
+      isLoading: false,
+      refresh,
+    });
+    mocks.cancelRequest.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { ...par, status: "cancelling" },
+    });
+
+    renderCard();
+
+    expect(screen.getByText("Awaiting operator")).toBeTruthy();
+    expect(screen.getByText(/expected at par · awaiting operator settlement/)).toBeTruthy();
+    expect(screen.queryByText(/payment can start after/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel and keep wYLDS" }));
+    await waitFor(() => expect(mocks.cancelRequest).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Cancelling")).toBeTruthy();
+    expect(screen.getByText(/cancelling the operator request/)).toBeTruthy();
+    expect(screen.queryByText(/awaiting operator settlement/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel and keep wYLDS" })).toBeNull();
   });
 
   it("renders nothing once the server-side open feed is empty", () => {

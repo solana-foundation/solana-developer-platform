@@ -106,7 +106,6 @@ export function useTokenOperations({
   const {
     authorityWallets,
     authorityWalletsData,
-    authorityWalletsFetchError,
     authorityWalletsError,
     authorityWalletsLoading,
     allowlistEntries,
@@ -208,15 +207,13 @@ export function useTokenOperations({
     authorityWalletsError,
     canManageTokenAdmin,
     freezeAuthorityError:
-      authorityWalletsFetchError ??
-      authorityWalletsData?.freezeAuthorityError ??
+      authorityWalletsError ??
       (authorityWalletsData?.freezeAuthority === undefined
         ? t("DashboardIssuance.management.loadingSignerWallets")
         : null),
     pauseAuthority: authorityWalletsData?.pauseAuthority,
     pauseAuthorityError:
-      authorityWalletsFetchError ??
-      authorityWalletsData?.pauseAuthorityError ??
+      authorityWalletsError ??
       (authorityWalletsData?.pauseAuthority === undefined
         ? t("DashboardIssuance.management.loadingSignerWallets")
         : null),
@@ -229,8 +226,7 @@ export function useTokenOperations({
       authorityWallets,
       metadataAuthority: authorityWalletsData?.metadataAuthority ?? null,
       metadataAuthorityError:
-        authorityWalletsFetchError ??
-        authorityWalletsData?.metadataAuthorityError ??
+        authorityWalletsError ??
         (authorityWalletsData?.metadataAuthority === undefined
           ? t("DashboardIssuance.management.loadingSignerWallets")
           : null),
@@ -330,7 +326,7 @@ export function useTokenOperations({
   // A list has its own live authority; it need not be the token freeze authority.
   // Database-only allowlists still need no signer.
   const allowlistDisabledReason = token.ablListAddress
-    ? (authorityWalletsData?.allowlistAuthorityError ??
+    ? (authorityWalletsError ??
       (authorityWalletsData?.allowlistAuthority === undefined
         ? t("DashboardIssuance.management.loadingSignerWallets")
         : allowlistSignerSelection.unavailableReason))

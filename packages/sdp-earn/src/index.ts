@@ -1,5 +1,6 @@
 import type { EarnProviderId } from "@sdp/types/provider-access";
 import { providerNotConfigured } from "./errors";
+import { HastraEarnClient } from "./providers/hastra/client";
 import { JupiterLendEarnClient } from "./providers/jupiter-lend/client";
 import { KaminoEarnClient } from "./providers/kamino/client";
 import { OndoEarnClient } from "./providers/ondo/client";
@@ -13,6 +14,7 @@ export {
   supportsDepositEligibility,
   supportsLiveMetrics,
   supportsPortfolioWallets,
+  supportsVaultParRedemption,
   supportsVaultProviderOrderWithdraw,
   supportsVaultQueuedWithdraw,
   supportsWithdrawalApprovals,
@@ -26,6 +28,7 @@ export {
   SdpEarnError,
   type SdpEarnErrorCode,
 } from "./errors";
+export { HastraEarnClient } from "./providers/hastra/client";
 export { JupiterLendEarnClient } from "./providers/jupiter-lend/client";
 export { KaminoEarnClient } from "./providers/kamino/client";
 export { OndoEarnClient } from "./providers/ondo/client";
@@ -56,6 +59,19 @@ export type {
   EarnPortfolioWithdrawalStatusInput,
   EarnRuntimeContext,
   EarnRuntimeEnvironment,
+  EarnVaultParRedemptionCancelInput,
+  EarnVaultParRedemptionExpectedRequest,
+  EarnVaultParRedemptionLifecycleEvent,
+  EarnVaultParRedemptionLifecycleInput,
+  EarnVaultParRedemptionOptions,
+  EarnVaultParRedemptionProvider,
+  EarnVaultParRedemptionQuote,
+  EarnVaultParRedemptionQuoteInput,
+  EarnVaultParRedemptionRequest,
+  EarnVaultParRedemptionRequestInput,
+  EarnVaultParRedemptionRequestLookup,
+  EarnVaultParRedemptionRequestPlan,
+  EarnVaultParRedemptionRequestReadInput,
   EarnVaultProvider,
   EarnVaultProviderOrderWithdrawProvider,
   EarnVaultQueuedWithdrawalCancelInput,
@@ -97,6 +113,7 @@ export const EARN_PROVIDER_CLIENTS = {
   kamino: new KaminoEarnClient(),
   jupiter_lend: new JupiterLendEarnClient(),
   ondo: new OndoEarnClient(),
+  hastra: new HastraEarnClient(),
   wisdomtree: new WisdomTreeEarnClient(),
 } as const satisfies Record<EarnProviderId, EarnVaultProvider>;
 

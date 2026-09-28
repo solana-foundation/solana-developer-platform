@@ -3,6 +3,12 @@ import type { useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
 
 /**
+ * The one corner every DvP action toast rises from, named once so a
+ * reposition is an edit here rather than a sweep across every call.
+ */
+export const DVP_TOAST_POSITION = { position: "bottom-right" } as const;
+
+/**
  * The action every DvP success toast carries: a click through to the
  * transaction it reports, on the trade's cluster. Whatever SDP just sent can
  * be checked on chain from the toast that says so, without hunting for it on

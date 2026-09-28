@@ -12,8 +12,7 @@ import { cleanup, fireEvent, render as mount, waitFor, within } from "@testing-l
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Table, TableBody } from "@/components/ui/table";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { InboundRows } from "./dvp-inbound-rows";
 import type { DvpInboundLeg, DvpInboundTrade } from "./dvp-trades.data";
 
@@ -74,13 +73,13 @@ function trade(overrides: Partial<DvpInboundTrade> = {}): DvpInboundTrade {
 
 function render(trades: DvpInboundTrade[]): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <Table>
         <TableBody>
           <InboundRows trades={trades} />
         </TableBody>
       </Table>
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 
@@ -94,13 +93,13 @@ describe("InboundRows", () => {
       isRuntimeExecutionAllowed: true,
     };
     const { container } = mount(
-      <I18nProvider locale="en" messages={getMessages("en")}>
+      <EnglishTestI18n>
         <Table>
           <TableBody>
             <InboundRows trades={[value]} />
           </TableBody>
         </Table>
-      </I18nProvider>
+      </EnglishTestI18n>
     );
 
     expect(within(container).getByRole("link", { name: "Funding desk" }).getAttribute("href")).toBe(
@@ -123,13 +122,13 @@ describe("InboundRows", () => {
       const value = trade();
       value.legs.b.party.actionWallet = actionWallet;
       const { container } = mount(
-        <I18nProvider locale="en" messages={getMessages("en")}>
+        <EnglishTestI18n>
           <Table>
             <TableBody>
               <InboundRows trades={[value]} />
             </TableBody>
           </Table>
-        </I18nProvider>
+        </EnglishTestI18n>
       );
 
       const button = within(container).getByRole("button", { name: "Fund your leg" });

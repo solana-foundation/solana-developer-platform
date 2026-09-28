@@ -5,8 +5,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { EarnIntegrationGuide } from "./earn-integration-guide";
 import {
   buildEarnIntegrationSections,
@@ -114,11 +113,7 @@ vi.mock("@/components/ui/code-block", () => ({
 }));
 
 function renderWithEnglish(children: ReactNode) {
-  return render(
-    <I18nProvider locale="en" messages={getMessages("en")}>
-      {children}
-    </I18nProvider>
-  );
+  return render(<EnglishTestI18n>{children}</EnglishTestI18n>);
 }
 
 afterEach(() => {
@@ -151,7 +146,7 @@ describe("EarnIntegrationGuide", () => {
 
     // All five concerns stay visible as navigation, while only the active code
     // slice renders. This keeps the whole flow findable without a wizard.
-    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Asynchronous exits"];
+    const navigationNames = ["Client", "Deposits", "Portfolio", "Withdraw", "Queued withdrawals"];
     const serverFlow = screen.getByLabelText("Server flow");
     expect(within(serverFlow).getAllByRole("button")).toHaveLength(5);
     expect(
@@ -189,7 +184,12 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain('"Idempotency-Key": idempotencyKey');
     expect(code).not.toContain("crypto.randomUUID()");
     expect(code).toContain('const STRATEGY_ID = "earn_strategy_live"');
-    expect(code).toContain("/v1/earn/strategies?page=1&pageSize=100");
+    expect(code).toContain(
+      "new URLSearchParams({ page: String(page), pageSize: String(pageSize) })"
+    );
+    expect(code).toContain("strategy pagination made no progress before the reported total");
+    expect(code).toContain("const maximumPages = 100");
+    expect(code).toContain("strategy pagination exceeded");
     expect(code).toContain("ownerAddress");
     // The preview helpers ship for every strategy, but a strategy with no
     // slippage contract must not compute or send a floor from one.
@@ -204,7 +204,7 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("strategyId: STRATEGY_ID");
     expect(code).not.toContain("sourceTokenMint");
     expect(code).not.toContain("EMBEDDED_YIELD_STRATEGY");
-    expect(code.match(/return data\.transaction;/g)).toHaveLength(4);
+    expect(code.match(/return data\.transaction;/g)).toHaveLength(5);
     expect(code).not.toContain("custodyWalletId");
     expect(code).not.toContain("vault-deposits");
     expect(code).not.toContain("requestId");
@@ -223,6 +223,10 @@ describe("EarnIntegrationGuide", () => {
     expect(code).toContain("/v1/earn/external-wallet/withdrawals");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-transactions");
     expect(code).toContain("/v1/earn/external-wallet/withdrawal-request-cancel-transactions");
+    expect(code).toContain("previewEarnParRedemption");
+    expect(code).toContain("buildEarnParRedemptionRequest");
+    expect(code).toContain('mechanism: "operatorRedemption"');
+    expect(code).toContain("operatorRedemption request is cancellable while pending");
     expect(code).toContain("waitForEarnMovement");
     expect(code).toContain("intervalMs = 1_000");
     expect(code).not.toContain('movement.status === "confirmed"');

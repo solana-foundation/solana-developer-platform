@@ -22,6 +22,7 @@ else
 fi
 KORA_SURFPOOL_MODE="${KORA_SURFPOOL_MODE:-shim}"
 KORA_SURFPOOL_RUNTIME="${KORA_SURFPOOL_RUNTIME:-embedded}"
+KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS="${KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS:-180}"
 KORA_SHIM_RPC_TIMEOUT_MS="${KORA_SHIM_RPC_TIMEOUT_MS:-120000}"
 KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS="${KORA_SHIM_SEND_TRANSACTION_TIMEOUT_MS:-30000}"
 KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS="${KORA_SURFPOOL_ABL_REMOVE_TIMEOUT_MS:-15000}"
@@ -139,15 +140,30 @@ wait_for_json_rpc() {
   return 1
 }
 
+surfpool_process_running() {
+  if [ ! -f "${SURFPOOL_PID_FILE}" ]; then
+    return 0
+  fi
+  local pid
+  pid="$(cat "${SURFPOOL_PID_FILE}")"
+  if [ -n "${pid}" ] && kill -0 "${pid}" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 wait_for_surfpool_info() {
   local attempts="${1:-60}"
   for _ in $(seq 1 "${attempts}"); do
     if [ -f "${SURFPOOL_INFO_FILE}" ]; then
-      SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)"
-      if json_rpc_ok "${SURFPOOL_RPC_URL}"; then
+      if SURFPOOL_RPC_URL="$(json_file_field "${SURFPOOL_INFO_FILE}" rpcUrl)" && json_rpc_ok "${SURFPOOL_RPC_URL}"; then
         export SURFPOOL_RPC_URL
         return 0
       fi
+    fi
+    if ! surfpool_process_running; then
+      echo "Embedded Surfpool process exited before becoming healthy. See ${SURFPOOL_LOG}." >&2
+      return 1
     fi
     sleep 1
   done
@@ -208,7 +224,21 @@ start_embedded_surfpool() {
     exec node scripts/kora-surfpool-surfnet.mjs
   ) >"${SURFPOOL_LOG}" 2>&1 &
   echo "$!" >"${SURFPOOL_PID_FILE}"
-  wait_for_surfpool_info 90
+  wait_for_surfpool_info "${KORA_SURFPOOL_STARTUP_TIMEOUT_SECONDS}"
+}
+
+start_embedded_surfpool_with_retry() {
+  if start_embedded_surfpool; then
+    return 0
+  fi
+
+  echo "Embedded Surfpool startup failed; retrying once after a clean teardown." >&2
+  stop_pid_file "${SURFPOOL_PID_FILE}"
+  rm -f "${SURFPOOL_INFO_FILE}"
+  if [ -f "${SURFPOOL_LOG}" ]; then
+    mv "${SURFPOOL_LOG}" "${SURFPOOL_LOG}.attempt1"
+  fi
+  start_embedded_surfpool
 }
 
 start_cli_surfpool() {
@@ -256,7 +286,7 @@ require_command pnpm
 case "${KORA_SURFPOOL_RUNTIME}" in
   embedded)
     configure_embedded_remote_rpc
-    start_embedded_surfpool
+    start_embedded_surfpool_with_retry
     ;;
   cli)
     start_cli_surfpool

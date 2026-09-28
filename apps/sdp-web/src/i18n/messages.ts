@@ -1,209 +1,76 @@
 import type { AppLocale } from "@/i18n/config";
-import dashboardApprovals from "../../messages/en/dashboard-approvals.json";
-import dashboardCustody from "../../messages/en/dashboard-custody.json";
-import dashboardEarn from "../../messages/en/dashboard-earn.json";
-// No localized dashboard-helius-rings.json yet: product branches ship English
-// source only; localized copy lands via the translation bot on the release PR.
-import dashboardHeliusRings from "../../messages/en/dashboard-helius-rings.json";
-import dashboardIssuance from "../../messages/en/dashboard-issuance.json";
-import dashboardPayments from "../../messages/en/dashboard-payments.json";
-import dashboardPolicies from "../../messages/en/dashboard-policies.json";
-import dashboardPrivateChannels from "../../messages/en/dashboard-private-channels.json";
-import shared from "../../messages/en/shared.json";
-import en from "../../messages/en.json";
-import esDashboardApprovals from "../../messages/es/dashboard-approvals.json";
-import esDashboardCustody from "../../messages/es/dashboard-custody.json";
-import esDashboardIssuance from "../../messages/es/dashboard-issuance.json";
-import esDashboardPayments from "../../messages/es/dashboard-payments.json";
-import esDashboardPolicies from "../../messages/es/dashboard-policies.json";
-import esDashboardPrivateChannels from "../../messages/es/dashboard-private-channels.json";
-import esShared from "../../messages/es/shared.json";
-import es from "../../messages/es.json";
-import frDashboardApprovals from "../../messages/fr/dashboard-approvals.json";
-import frDashboardCustody from "../../messages/fr/dashboard-custody.json";
-// No fr/dashboard-earn.json: product branches ship English source only; the
-// translation bot adds localized Earn copy on the release PR. Earn keys fall
-// back to English via mergeLocalizedMessages until then.
-import frDashboardIssuance from "../../messages/fr/dashboard-issuance.json";
-import frDashboardPayments from "../../messages/fr/dashboard-payments.json";
-import frDashboardPolicies from "../../messages/fr/dashboard-policies.json";
-import frShared from "../../messages/fr/shared.json";
-import fr from "../../messages/fr.json";
-import ptDashboardApprovals from "../../messages/pt/dashboard-approvals.json";
-import ptDashboardCustody from "../../messages/pt/dashboard-custody.json";
-import ptDashboardIssuance from "../../messages/pt/dashboard-issuance.json";
-import ptDashboardPayments from "../../messages/pt/dashboard-payments.json";
-import ptDashboardPolicies from "../../messages/pt/dashboard-policies.json";
-import ptDashboardPrivateChannels from "../../messages/pt/dashboard-private-channels.json";
-import ptShared from "../../messages/pt/shared.json";
-import pt from "../../messages/pt.json";
-import viDashboardApprovals from "../../messages/vi/dashboard-approvals.json";
-import viDashboardCustody from "../../messages/vi/dashboard-custody.json";
-import viDashboardEarn from "../../messages/vi/dashboard-earn.json";
-import viDashboardIssuance from "../../messages/vi/dashboard-issuance.json";
-import viDashboardPayments from "../../messages/vi/dashboard-payments.json";
-import viDashboardPolicies from "../../messages/vi/dashboard-policies.json";
-import viDashboardPrivateChannels from "../../messages/vi/dashboard-private-channels.json";
-import viShared from "../../messages/vi/shared.json";
-import vi from "../../messages/vi.json";
+import { englishSourceMessages } from "./locales/en";
+import {
+  type MessageKeyFor,
+  mergeLocalizedMessages,
+  mergeLocalizedMessagesWithEmbeddedYieldBrand,
+  type TranslationValues,
+  translate,
+} from "./translate";
 
-export const englishSourceMessages = {
-  ...en,
-  ...dashboardApprovals,
-  ...dashboardCustody,
-  ...dashboardEarn,
-  ...dashboardHeliusRings,
-  ...dashboardIssuance,
-  ...dashboardPayments,
-  ...dashboardPolicies,
-  ...dashboardPrivateChannels,
-  Shared: shared,
+export type { MessageKeyFor, TranslationValues };
+export {
+  englishSourceMessages,
+  mergeLocalizedMessages,
+  mergeLocalizedMessagesWithEmbeddedYieldBrand,
+  translate,
 };
 
 export type Messages = typeof englishSourceMessages;
 
-type LocalizedMessages<TValue> = {
-  [TKey in keyof TValue]?: TValue[TKey] extends string ? string : LocalizedMessages<TValue[TKey]>;
-};
+export type MessageKey = MessageKeyFor<Messages>;
 
-export function mergeLocalizedMessages<TValue>(
-  fallback: TValue,
-  localized: LocalizedMessages<TValue> | undefined
-): TValue {
-  return mergeLocalizedValue(fallback, localized) as TValue;
-}
-
-export function mergeLocalizedMessagesWithEmbeddedYieldBrand<TValue>(
-  fallback: TValue,
-  localized: LocalizedMessages<TValue> | undefined
-): TValue {
-  // Temporary bridge: remove this variant after the translation release PR
-  // replaces legacy Earn brand references in every localized catalog.
-  return mergeLocalizedValue(fallback, localized, true) as TValue;
-}
-
-function mergeLocalizedValue(
-  fallback: unknown,
-  localized: unknown,
-  preserveEmbeddedYieldBrand = false
-): unknown {
-  if (typeof fallback === "string") {
-    const resolved = typeof localized === "string" ? localized : fallback;
-    return preserveEmbeddedYieldBrand && fallback.includes("Embedded Yield")
-      ? resolved.replace(/\bEarn\b/g, "Embedded Yield")
-      : resolved;
-  }
-  if (!fallback || typeof fallback !== "object" || Array.isArray(fallback)) {
-    return fallback;
-  }
-
-  const localizedRecord =
-    localized && typeof localized === "object" && !Array.isArray(localized)
-      ? (localized as Record<string, unknown>)
-      : {};
-  return Object.fromEntries(
-    Object.entries(fallback).map(([key, fallbackValue]) => [
-      key,
-      mergeLocalizedValue(fallbackValue, localizedRecord[key], preserveEmbeddedYieldBrand),
-    ])
+/**
+ * The English source catalog, available synchronously everywhere: it is the
+ * merge fallback, the OpenGraph image reads it at module scope, and the global
+ * error boundary paints with it before a localized catalog can load.
+ *
+ * Localized catalogs are only reachable through `loadMessages`, which loads
+ * them as separate async chunks. Keeping them out of the synchronous module
+ * graph keeps roughly 1.5 MB of localized JSON out of the client bundle that
+ * every page ships.
+ */
+export function getMessages(locale: AppLocale): Messages {
+  if (locale === "en") return englishSourceMessages;
+  throw new Error(
+    `Only the English catalog is synchronous. Await loadMessages("${locale}") for localized catalogs.`
   );
 }
 
-const esCatalog = {
-  ...es,
-  ...esDashboardApprovals,
-  ...esDashboardCustody,
-  ...esDashboardIssuance,
-  ...esDashboardPayments,
-  ...esDashboardPolicies,
-  ...esDashboardPrivateChannels,
-  Shared: esShared,
-} satisfies LocalizedMessages<Messages>;
+const localizedMessages = new Map<Exclude<AppLocale, "en">, Promise<Messages>>();
 
-const esMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, esCatalog);
+/**
+ * The merged catalog for a locale: the English source with every localized
+ * value that release automation has filled in so far. English resolves
+ * without loading anything; each other locale is loaded once per runtime and
+ * cached (the promise, so concurrent first callers share one merge).
+ */
+export async function loadMessages(locale: AppLocale): Promise<Messages> {
+  if (locale === "en") return englishSourceMessages;
 
-const frCatalog = {
-  ...fr,
-  ...frDashboardApprovals,
-  ...frDashboardCustody,
-  ...frDashboardIssuance,
-  ...frDashboardPayments,
-  ...frDashboardPolicies,
-  Shared: frShared,
-} satisfies LocalizedMessages<Messages>;
+  const cached = localizedMessages.get(locale);
+  if (cached) return cached;
 
-const frMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, frCatalog);
-
-const ptCatalog = {
-  ...pt,
-  ...ptDashboardApprovals,
-  ...ptDashboardCustody,
-  ...ptDashboardIssuance,
-  ...ptDashboardPayments,
-  ...ptDashboardPolicies,
-  ...ptDashboardPrivateChannels,
-  Shared: ptShared,
-} satisfies LocalizedMessages<Messages>;
-
-const ptMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, ptCatalog);
-
-const viCatalog = {
-  ...vi,
-  ...viDashboardApprovals,
-  ...viDashboardCustody,
-  ...viDashboardEarn,
-  ...viDashboardIssuance,
-  ...viDashboardPayments,
-  ...viDashboardPolicies,
-  ...viDashboardPrivateChannels,
-  Shared: viShared,
-} satisfies LocalizedMessages<Messages>;
-
-const viMessages = mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, viCatalog);
-
-export type MessageKeyFor<TValue> = TValue extends string
-  ? ""
-  : {
-      [TKey in Extract<keyof TValue, string>]: TValue[TKey] extends string
-        ? TKey
-        : `${TKey}.${MessageKeyFor<TValue[TKey]>}`;
-    }[Extract<keyof TValue, string>];
-
-export type MessageKey = MessageKeyFor<Messages>;
-export type TranslationValues = Record<string, string | number>;
-
-const messagesByLocale: Record<AppLocale, Messages> = {
-  en: englishSourceMessages,
-  es: esMessages,
-  fr: frMessages,
-  pt: ptMessages,
-  vi: viMessages,
-};
-
-export function getMessages(locale: AppLocale): Messages {
-  return messagesByLocale[locale];
-}
-
-export function translate<TMessages>(
-  messages: TMessages,
-  key: MessageKeyFor<TMessages> & string,
-  values?: TranslationValues
-): string {
-  const message = key.split(".").reduce<unknown>((value, segment) => {
-    return value && typeof value === "object"
-      ? (value as Record<string, unknown>)[segment]
-      : undefined;
-  }, messages);
-
-  if (typeof message !== "string") {
-    throw new Error(`Missing translation for ${key}`);
-  }
-
-  return message.replace(/\{(\w+)\}/g, (_, name: string) => {
-    const value = values?.[name];
-    if (value === undefined) {
-      throw new Error(`Missing interpolation value ${name} for ${key}`);
+  const pending = (async (): Promise<Messages> => {
+    switch (locale) {
+      case "es": {
+        const { catalog } = await import("./locales/es");
+        return mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, catalog);
+      }
+      case "fr": {
+        const { catalog } = await import("./locales/fr");
+        return mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, catalog);
+      }
+      case "pt": {
+        const { catalog } = await import("./locales/pt");
+        return mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, catalog);
+      }
+      case "vi": {
+        const { catalog } = await import("./locales/vi");
+        return mergeLocalizedMessagesWithEmbeddedYieldBrand(englishSourceMessages, catalog);
+      }
     }
-    return String(value);
-  });
+  })();
+  localizedMessages.set(locale, pending);
+  return pending;
 }

@@ -1,6 +1,7 @@
 import type { SdpEnvironment } from "./api-keys";
 import { CUSTODY_PROVIDERS, type CustodyProvider } from "./custody";
 import { EARN_EXECUTION_MODELS, type EarnPortfolioToken } from "./earn";
+import { HASTRA_DEPLOYMENTS } from "./hastra-programs";
 import { JUPITER_LEND_EARN_PROGRAM_IDS } from "./jupiter-lend-programs";
 import { KAMINO_KVAULT_DEPOSIT_FLOOR_SUPPORT, KAMINO_KVAULT_PROGRAM_IDS } from "./kamino-programs";
 import { ONDO_DEPLOYMENTS } from "./ondo-programs";
@@ -34,15 +35,17 @@ export type RampProviderId = (typeof RAMP_PROVIDERS)[number];
 /**
  * Vault-infra partners fronting Earn yield strategies.
  *
- * All current providers are **vault-direct providers** (Kamino, Veda): they
- * front on-chain vaults that an
- *   organization custody wallet or an end user's external wallet deposits
- *   into. Their catalogue client implements the base `EarnVaultProvider`
- *   contract; a separate execution package implements `EarnVaultDirectProvider`.
+ * Every executing provider currently uses the **vault-direct** model: Kamino,
+ * Veda, Jupiter Lend, Ondo, and the pre-launch WisdomTree integration. They
+ * front an on-chain vault or yield-bearing token that an organization custody
+ * wallet or an end user's external wallet deposits into. Their catalogue client
+ * implements the base `EarnVaultProvider` contract; a separate execution
+ * package implements `EarnVaultDirectProvider`.
  *
- * Kamino and Veda are keyless today: their catalogue and execution paths read
- * public on-chain state, so the API availability service excludes them rather
- * than demanding keys that nothing reads.
+ * Kamino, Veda, and Jupiter Lend use public APIs or on-chain state. Ondo's
+ * execution readiness depends on the platform Jupiter key. WisdomTree uses
+ * environment-specific Connect credentials. The availability registry owns
+ * those distinctions; do not infer credentials from the deposit style.
  */
 export const EARN_PROVIDERS = [
   "veda",
@@ -51,6 +54,7 @@ export const EARN_PROVIDERS = [
   "kamino",
   "jupiter_lend",
   "ondo",
+  "hastra",
   "wisdomtree",
 ] as const;
 export type EarnProviderId = (typeof EARN_PROVIDERS)[number];
@@ -70,6 +74,7 @@ export const EARN_PROGRAM_SOLANA_PAYOUT_TOKENS = {
   kamino: [],
   jupiter_lend: [],
   ondo: [],
+  hastra: [],
   // Redemptions pay USDC back, but through the vault-direct model (the org's
   // own wallet sends fund tokens), never through a program-style payout rail.
   wisdomtree: [],
@@ -140,9 +145,16 @@ export const EARN_PROVIDER_SURFACING = {
   // Mainnet-only like Jupiter Lend: the production catalogue carries the USDY
   // row and production projects may execute against it (the deposit is a
   // Jupiter-routed USDC→USDY swap, `@sdp/ondo`); the sandbox copy arrives
-  // through the PRO-1742 mirror, browse-only. No `currentApy` until a rate
-  // source lands (PRO-1833) — the row renders "—" rather than a derived figure.
+  // through the PRO-1742 mirror, browse-only. The `currentApy` source is the
+  // issuer's public assets API (PRO-1833); no figure is derived from token price
+  // or wallet balances.
   ondo: true,
+  // Registered WIP. SDP has verified only Hastra's mainnet token/config
+  // deployment, so sandbox will eventually receive a browse-only mirror while
+  // production execution remains gated on the integration's end-to-end release
+  // review. Flip this last, per the Earn provider playbook; exits stay
+  // registered while it is false.
+  hastra: false,
   // Registered ahead of launch: catalogue, execution client and eligibility
   // checks are integrated, but the go-live gate (playbook §4: flip LAST, in its
   // own PR, after an end-to-end deposit works) has not been passed — WisdomTree
@@ -158,17 +170,19 @@ export const EARN_PROVIDER_SURFACING = {
  * - `custodial` — SDP provisions a provider-managed portfolio wallet and the
  *   customer funds THAT address. SDP never signs; it watches the address and the
  *   provider deploys on its own rebalance. (No current provider uses this.)
- * - `vault_direct`: the vault is non-custodial and takes an on-chain program
- *   instruction signed by the organization's selected custody wallet or an end
- *   user's external wallet. There is no provider deposit address to fund; SDP
- *   builds the transaction and either submits the custody-signed form or
- *   verifies and submits the caller-signed form. Kamino and Veda.
+ * - `vault_direct`: the position is non-custodial and reached through an
+ *   on-chain transaction signed by the organization's selected custody wallet
+ *   or an end user's external wallet. There is no generic provider deposit
+ *   address to fund; SDP builds the transaction and either submits the
+ *   custody-signed form or verifies and submits the caller-signed form. Every
+ *   current provider uses this shape, including the registered but pre-launch
+ *   WisdomTree integration.
  *
  * **The difference is load-bearing in the UI and is not cosmetic.** A custodial
- * program has a real deposit ADDRESS a customer can send USDC to. A K-Vault does
- * not: its `providerReference` is the vault's program account, and presenting it
- * as a send target would destroy funds. Any surface that says "send funds to X"
- * must branch on this.
+ * program has a real deposit ADDRESS a customer can fund without a provider-built
+ * transaction. A vault-direct `providerReference` may be a vault, market, or mint,
+ * and presenting it as a send target can destroy or strand funds. Any surface
+ * that says "send funds to X" must branch on this.
  *
  * Declared here rather than derived from a provider id at each call site, and
  * exhaustive over `EarnProviderId` so a new provider must state its shape. It
@@ -213,6 +227,9 @@ export const EARN_PROVIDER_DEPOSIT_STYLE = {
   // USDY balance in the organization's own wallet. There is no address to
   // fund, so `vault_direct` is the truthful shape here too.
   ondo: "vault_direct",
+  // One owner-signed transaction performs USDC -> wYLDS -> PRIME. Hastra does
+  // not expose a deposit address and never takes custody of the signing key.
+  hastra: "vault_direct",
   // WisdomTree's on-receipt deposit wallet LOOKS like a fundable address, but
   // presenting it as one would strand money: attribution runs through the
   // SENDING wallet's KYC registration, so USDC from an unregistered wallet is
@@ -235,6 +252,9 @@ export const EARN_PROVIDER_DEPOSIT_SETTLEMENT = {
   kamino: "atomic",
   jupiter_lend: "atomic",
   ondo: "atomic",
+  // The ordinary deposit transaction mints wYLDS and stakes it for PRIME in
+  // the same Solana transaction; there is no provider order after finality.
+  hastra: "atomic",
   wisdomtree: "provider_order",
 } as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
 
@@ -251,6 +271,11 @@ export const EARN_PROVIDER_WITHDRAWAL_SETTLEMENT = {
   kamino: "atomic",
   jupiter_lend: "atomic",
   ondo: "atomic",
+  // When the optional DEX rail is admitted, PRIME -> wYLDS -> USDC completes
+  // in one transaction. Hastra's default at-par operator redemption uses its
+  // separate asynchronous lifecycle and does not change those atomic-movement
+  // reconciliation semantics.
+  hastra: "atomic",
   wisdomtree: "provider_order",
 } as const satisfies Record<EarnProviderId, "atomic" | "provider_order">;
 
@@ -319,6 +344,10 @@ export const EARN_PROVIDER_DEPOSIT_SLIPPAGE_FLOOR = {
   // so an ordinary spread move between quote and landing does not fail the
   // deposit, still tight enough to bound what a route can take.
   ondo: { defaultToleranceBps: 50 },
+  // Hastra v0.0.6 deposit instructions carry no caller-supplied output floor.
+  // The support table below prevents production's default policy from
+  // inventing one the on-chain programs cannot enforce.
+  hastra: null,
   wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
@@ -334,6 +363,7 @@ export const EARN_PROVIDER_DEPOSIT_FLOOR_SUPPORT = {
   kamino: "enforceable",
   jupiter_lend: "enforceable",
   ondo: "enforceable",
+  hastra: "unsupported",
   wisdomtree: "unsupported",
 } as const satisfies Record<EarnProviderId, "enforceable" | "unsupported">;
 
@@ -417,6 +447,10 @@ export const EARN_PROVIDER_WITHDRAW_SLIPPAGE_FLOOR = {
   jupiter_lend: { defaultToleranceBps: 10 },
   // The exit is the reverse market swap; same floor contract as the deposit.
   ondo: { defaultToleranceBps: 50 },
+  // When the optional DEX rail is enabled, PRIME is redeemed to wYLDS and the
+  // second leg is a live Jupiter market swap. Its builder requires this bound
+  // on final USDC output; runtime surfaces hide it while that rail is off.
+  hastra: { defaultToleranceBps: 50 },
   wisdomtree: null,
 } as const satisfies Record<EarnProviderId, { defaultToleranceBps: number } | null>;
 
@@ -461,6 +495,7 @@ export const EARN_PROVIDER_DEPLOYED_CLUSTERS = {
   kamino: deployedClusters(KAMINO_KVAULT_PROGRAM_IDS),
   jupiter_lend: deployedClusters(JUPITER_LEND_EARN_PROGRAM_IDS),
   ondo: deployedClusters(ONDO_DEPLOYMENTS),
+  hastra: deployedClusters(HASTRA_DEPLOYMENTS),
   // Registered but deliberately not depositable until the organization model
   // and provider-order settlement are release-ready. Mainnet identities live
   // in `wisdomtree-programs.ts`; this is the money-in admission gate.

@@ -8,8 +8,7 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { getMessages } from "@/i18n/messages";
-import { I18nProvider } from "@/i18n/provider";
+import { EnglishTestI18n } from "../test-i18n";
 import { testLeg, testTrade } from "./dvp.fixtures";
 import { DvpCloseActions } from "./dvp-close-actions";
 import type { DvpSettlementAvailability, DvpTrade, DvpTradeStatus } from "./dvp-trade";
@@ -59,9 +58,9 @@ function renderActions(
   pending: ReadonlySet<DvpPendingAction> = new Set()
 ): string {
   return renderToStaticMarkup(
-    <I18nProvider locale="en" messages={getMessages("en")}>
+    <EnglishTestI18n>
       <DvpCloseActions onAct={vi.fn()} pending={pending} trade={value} />
-    </I18nProvider>
+    </EnglishTestI18n>
   );
 }
 

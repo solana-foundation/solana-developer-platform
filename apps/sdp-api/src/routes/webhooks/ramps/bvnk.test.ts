@@ -1,3 +1,4 @@
+import { bvnkConfirmedChannelEvent } from "@sdp/payments/ramps/providers/bvnk/test-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   BVNK_WEBHOOK_TIMESTAMP,
@@ -38,7 +39,7 @@ describe("BvnkWebhookProcessor.parse", () => {
           name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
           status: "ACTIVE",
           balance: { amount: 0, currency: "USD" },
-          customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477", name: "Synthetic Customer" },
+          customer: { id: "00000000-0000-4000-8000-00000000c057", name: "Synthetic Customer" },
           createdAt: "2026-09-18T00:00:00.000Z",
           updatedAt: "2026-09-18T01:00:00.000Z",
           paymentInstruments: [
@@ -57,7 +58,7 @@ describe("BvnkWebhookProcessor.parse", () => {
         id: "a:synthetic:wallet:1",
         name: "sdp:onramp:counterparty_provider_account_402478d1-2f23-4559-b3e1-58a0f693de9b",
         status: "ACTIVE",
-        customer: { id: "2acdd3e5-7166-4b04-8115-6ad3ccd66477" },
+        customer: { id: "00000000-0000-4000-8000-00000000c057" },
         bankAccount: { accountNumber: "900473221558", code: "LEADUS49XXX", bankName: "LEAD BANK" },
       },
     });
@@ -124,53 +125,72 @@ describe("BvnkWebhookProcessor.parse", () => {
       },
     });
   });
-
   it("parses a channel transaction-detected webhook", () => {
     const processor = new BvnkWebhookProcessor();
-
-    expect(processor.parse(bvnkChannelTransactionEvent("transaction-detected"))).toEqual({
+    expect(processor.parse(bvnkChannelTransactionEvent("transaction-detected", {}))).toEqual({
       event: "bvnk:payment:channel:transaction-detected",
-      data: { reference: "bvnk-sandbox-test-payment" },
+      data: { reference: "sdp_offramp_xfr_00000000-0000-4000-8000-0000000000f2" },
     });
   });
-
-  it("parses a channel transaction SDP did not create without throwing", () => {
+  it("parses an unowned confirmed channel reference without attributing it", () => {
     const processor = new BvnkWebhookProcessor();
-
-    expect(
-      processor.parse(
-        bvnkChannelTransactionEvent("transaction-confirmed", {
-          uuid: "tx_1",
-          walletCurrency: "USD",
-          walletAmount: 4.95,
-        })
-      )
-    ).toEqual({
+    const result = processor.parse(
+      bvnkConfirmedChannelEvent({ reference: "unowned_test_reference" })
+    );
+    expect(result).toMatchObject({
       event: "bvnk:payment:channel:transaction-confirmed",
-      data: {
-        reference: "bvnk-sandbox-test-payment",
-        walletAmount: "4.95",
-      },
+      data: { reference: "unowned_test_reference" },
     });
   });
-
-  it("accepts an sdp_offramp reference and stringifies its walletAmount", () => {
+  it("parses the full confirmed payload retaining only settlement and proof fields", () => {
     const processor = new BvnkWebhookProcessor();
-
-    expect(
-      processor.parse(
-        bvnkChannelTransactionEvent("transaction-confirmed", {
-          reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
-          walletAmount: 100,
-        })
-      )
-    ).toEqual({
-      event: "bvnk:payment:channel:transaction-confirmed",
-      data: {
-        reference: "sdp_offramp_xfr_123e4567-e89b-12d3-a456-426614174000",
-        walletAmount: "100",
-      },
+    const result = processor.parse(bvnkConfirmedChannelEvent({}));
+    expect(result.event).toBe("bvnk:payment:channel:transaction-confirmed");
+    if (result.event !== "bvnk:payment:channel:transaction-confirmed")
+      throw new Error("Expected confirmed event");
+    expect(Object.keys(result.data).sort()).toEqual(
+      [
+        "channelId",
+        "walletId",
+        "reference",
+        "uuid",
+        "hash",
+        "address",
+        "paidCurrency",
+        "displayCurrency",
+        "walletCurrency",
+        "feeCurrency",
+        "paidAmount",
+        "displayAmount",
+        "walletAmount",
+        "feeAmount",
+        "exchangeRate",
+        "networkFee",
+        "sources",
+        "embeddedCustomerDetails",
+      ].sort()
+    );
+    expect(result.data).toMatchObject({
+      channelId: "01000000-0000-7000-8000-00000000c002",
+      walletId: "a:10000000000002:TESTWLT:1",
+      reference: "sdp_offramp_xfr_00000000-0000-4000-8000-0000000000f2",
+      uuid: "01000000-0000-7000-8000-00000000c7a1",
+      paidCurrency: "USDC",
+      displayCurrency: "USD",
+      walletCurrency: "USD",
+      feeCurrency: "USD",
+      paidAmount: "10",
+      displayAmount: "9.9",
+      walletAmount: "9.9",
+      feeAmount: "0.09",
+      embeddedCustomerDetails: { reference: "00000000-0000-4000-8000-00000000c058" },
     });
+    expect(result.data.exchangeRate).toEqual({ rate: "0.99" });
+    expect(result.data.networkFee).toEqual({ paidCurrency: "SOL", paidAmount: "0.00001" });
+    expect(result.data.sources).toEqual([
+      "TestSourceWa11etOne111111111111111111111111",
+      "TestSourceWa11etTwo111111111111111111111111",
+    ]);
   });
 
   it("ignores an unhandled BVNK event instead of throwing", () => {

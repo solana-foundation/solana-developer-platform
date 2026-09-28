@@ -45,4 +45,20 @@ describe("vaultAsyncWithdrawalRequestFingerprint", () => {
       vaultAsyncWithdrawalRequestFingerprint(intent)
     );
   });
+
+  it("separates operator redemption from a solver queue without queue-only fields", () => {
+    const operatorIntent = {
+      projectId: intent.projectId,
+      positionId: intent.positionId,
+      shares: intent.shares,
+      route: { kind: "operator_redemption" as const },
+    };
+
+    expect(vaultAsyncWithdrawalRequestFingerprint(operatorIntent)).toBe(
+      JSON.stringify(["project_1", "position_1", "5", "operator_redemption"])
+    );
+    expect(vaultAsyncWithdrawalRequestFingerprint(operatorIntent)).not.toBe(
+      vaultAsyncWithdrawalRequestFingerprint(intent)
+    );
+  });
 });

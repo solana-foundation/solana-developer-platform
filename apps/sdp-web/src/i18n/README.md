@@ -10,7 +10,7 @@ Eve receives the locale rules in `.github/translation-guidance.json` plus the na
 
 Use `await getTranslations()` in Server Components and `useTranslations()` in Client Components. Both accept only keys that exist in the English catalog. For dates, numbers, lists, and relative time, construct the native `Intl` formatter with the resolved locale rather than pinning it to `en-US`.
 
-To add a locale, add its BCP-47 tag to `supportedLocales`, add a same-shaped catalog, and register it in `messagesByLocale`. The request resolver gives a valid locale cookie priority, then uses `Accept-Language`, falling back to English. A future language picker should persist its selection in the `sdp-locale` cookie.
+To add a locale, add its BCP-47 tag to `supportedLocales`, add a same-shaped catalog, and register a catalog module for it in `src/i18n/locales/` so `loadMessages` can resolve it. The English source catalog is synchronous everywhere (merge fallback, OpenGraph image, global error boundary's first paint); localized catalogs load as separate async chunks through `loadMessages`, so they stay out of the client bundle every page ships. The request resolver gives a valid locale cookie priority, then uses `Accept-Language`, falling back to English. A future language picker should persist its selection in the `sdp-locale` cookie.
 
 `pnpm --filter sdp-web check:i18n` detects new JSX text, accessible labels, placeholders, and common label/title/description properties. Existing copy is intentionally tracked in `ui-copy-baseline.json` during this groundwork phase; migrate an entry to the catalog and refresh that baseline in the same PR. Never add new user-facing copy to the baseline.
 

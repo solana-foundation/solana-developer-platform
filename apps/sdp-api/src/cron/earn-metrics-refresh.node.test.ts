@@ -17,6 +17,7 @@ import {
 const mocks = vi.hoisted(() => ({
   providerClients: {} as Record<string, EarnVaultProvider>,
   updateStrategyMetrics: vi.fn(),
+  updateStrategyMetricsBatch: vi.fn(),
   listStrategyFigures: vi.fn(),
   logEvent: vi.fn(),
   guardDepositMints: vi.fn(async (_env: unknown, _cluster: string) => 0),
@@ -35,6 +36,7 @@ vi.mock("@sdp/earn", async (importOriginal) => {
 vi.mock("@/db/repositories", () => ({
   createEarnRepository: vi.fn(() => ({
     updateStrategyMetrics: mocks.updateStrategyMetrics,
+    updateStrategyMetricsBatch: mocks.updateStrategyMetricsBatch,
     listStrategyFigures: mocks.listStrategyFigures,
   })),
 }));
@@ -75,6 +77,13 @@ beforeEach(() => {
     delete mocks.providerClients[key];
   }
   mocks.updateStrategyMetrics.mockResolvedValue(true);
+  mocks.updateStrategyMetricsBatch.mockImplementation(async (inputs: unknown[]) => {
+    let updated = 0;
+    for (const input of inputs) {
+      if (await mocks.updateStrategyMetrics(input)) updated += 1;
+    }
+    return updated;
+  });
   mocks.listStrategyFigures.mockResolvedValue([]);
 });
 
@@ -257,9 +266,11 @@ describe("refreshEarnStrategyMetrics", () => {
 
     await expect(refreshEarnStrategyMetrics(env)).resolves.toBeUndefined();
 
-    // The failed row is retried by the next tick five minutes later; it must
-    // not cost the rest of the shelf its refresh.
-    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(4);
+    // The atomic batch falls back to isolated writes, so one bad attempt does
+    // not cost the rest of the shelf its refresh. The fifth call is the failed
+    // row observed once inside this test's batch adapter and once in fallback.
+    expect(mocks.updateStrategyMetricsBatch).toHaveBeenCalledTimes(2);
+    expect(mocks.updateStrategyMetrics).toHaveBeenCalledTimes(5);
   });
 
   it("tolerates references the catalogue does not hold", async () => {

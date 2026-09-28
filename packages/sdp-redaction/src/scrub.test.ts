@@ -33,6 +33,25 @@ describe("scrubTelemetry", () => {
     });
   });
 
+  it("redacts key material by key, including the Solana keypair JSON field name", () => {
+    // `secretKey` is the field a Solana keypair JSON file uses for the full
+    // 64-byte secret; `mnemonic` and `seedPhrase` are the recovery-secret
+    // spellings. A sibling resource id stays readable.
+    const scrubbed = scrubTelemetry({
+      secretKey: "jZ2ZCg8BfJqknAfGCgerDECGjTzXAHAqdBPLDdBZqMkEAAAAAAAAAAQ==",
+      signingKeyId: "sk_01HZY",
+      mnemonic: "test test test test test test test test test test bottom brake",
+      seedPhrase: "test test test test test test test test test test bottom brake",
+    });
+
+    assert.deepEqual(scrubbed, {
+      secretKey: "[REDACTED]",
+      signingKeyId: "sk_01HZY",
+      mnemonic: "[REDACTED]",
+      seedPhrase: "[REDACTED]",
+    });
+  });
+
   it("redacts an end-user owner address by key while the treasury address survives", () => {
     const scrubbed = scrubTelemetry({
       event: "sdp_api_earn_split_swap_orphaned",

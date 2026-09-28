@@ -42,6 +42,10 @@ const CREDENTIAL_KEYS = new Set([
   "pem",
   "secret",
   "setcookie",
+  // `signingKey` names key material far more often than metadata, so the bare
+  // form is a credential while `signingKeyId` stays readable as a resource id
+  // (the DFNS provider config persists one).
+  "signingkey",
   "token",
 ]);
 
@@ -51,7 +55,19 @@ const CREDENTIAL_KEYS = new Set([
 // `request.headers` payload.
 const CREDENTIAL_KEY_SUFFIXES = ["secret", "password", "token", "pem", "apikey"];
 
-const CREDENTIAL_KEY_FRAGMENTS = ["privatekey", "secretpayload"];
+// Key-material names that no suffix or exact rule above catches. `secretKey`
+// is the literal field a Solana keypair JSON file uses for the full 64-byte
+// secret — the single most damaging object a blockchain telemetry payload can
+// carry — and `mnemonic`/`seedPhrase` are the two standard spellings of the
+// wallet recovery secret. Fragments, so `payerSecretKey` and `seedMnemonic`
+// are covered too; nothing in NEVER_REDACTED_KEYS contains any of them.
+const CREDENTIAL_KEY_FRAGMENTS = [
+  "privatekey",
+  "secretpayload",
+  "secretkey",
+  "mnemonic",
+  "seedphrase",
+];
 
 /** Exact-match PII keys, grouped by the category they belong to. */
 const PII_KEYS = new Set([
