@@ -1,1 +1,0 @@
-UPDATE payment_transfers SET provider_data = jsonb_set(provider_data, '{sandboxSimulation}', provider_data #> '{bvnk,simulation}') #- '{bvnk,simulation}' WHERE provider_data #> '{bvnk,simulation}' IS NOT NULL;

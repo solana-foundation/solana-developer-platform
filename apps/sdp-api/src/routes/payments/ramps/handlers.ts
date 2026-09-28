@@ -2,6 +2,7 @@ import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import {
   BVNK_FUNDING_WALLET_FIAT,
   bvnkOnrampRemittance,
+  readBvnkOnrampTransferData,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import {
   readMuralOrganization,
@@ -134,6 +135,12 @@ export async function simulateSandboxTransfer(
       break;
     }
     case "bvnk": {
+      // TODO(PRO-2035): remove with the legacy `bvnk.simulation` codec field.
+      if (readBvnkOnrampTransferData(transfer.provider_data).simulation !== undefined) {
+        throw conflict(
+          "Sandbox simulation was already requested for this transfer. Create a new quote."
+        );
+      }
       const fundingRow = await createPostgresCounterpartyProviderAccountsRepository(
         getDb(c.env)
       ).getAccountByKindAndCurrency({

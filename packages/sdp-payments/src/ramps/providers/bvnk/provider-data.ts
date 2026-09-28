@@ -164,6 +164,13 @@ export const bvnkOnrampTransferDataSchema = z
       })
       .strict()
       .optional(),
+    // TODO(PRO-2035): drop once no devnet row carries the pre-PRO-2035 marker; simulate now claims top-level `provider_data.sandboxSimulation` and never writes this.
+    simulation: z
+      .object({
+        requestedAt: z.string().min(1),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type BvnkOnrampTransferData = z.infer<typeof bvnkOnrampTransferDataSchema>;
