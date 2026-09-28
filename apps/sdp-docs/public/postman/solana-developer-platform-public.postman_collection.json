@@ -1888,10 +1888,10 @@
               }
             ],
             "url": "{{baseUrl}}/v1/payments/ramps/sandbox/simulate",
-            "description": "Sandbox-only helper that simulates provider-specific transfer completion flows.",
+            "description": "Sandbox-only. Simulates the fiat pay-in for an on-ramp transfer awaiting payment, at most once per transfer.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"provider\": \"lightspark\",\n  \"payload\": {\n    \"quoteId\": \"\",\n    \"currencyCode\": \"USD\",\n    \"currencyAmount\": 0\n  }\n}",
+              "raw": "{\n  \"transferId\": \"xfr_example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

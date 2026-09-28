@@ -56,12 +56,15 @@ export function internalError(
   return new SdpPaymentsError("INTERNAL_ERROR", message, details);
 }
 
-export function rateLimited(message?: string): SdpPaymentsError {
-  return new SdpPaymentsError("RATE_LIMITED", message);
+export function rateLimited(message?: string, details?: Record<string, unknown>): SdpPaymentsError {
+  return new SdpPaymentsError("RATE_LIMITED", message, details);
 }
 
-export function providerNotConfigured(message?: string): SdpPaymentsError {
-  return new SdpPaymentsError("PROVIDER_NOT_CONFIGURED", message);
+export function providerNotConfigured(
+  message?: string,
+  details?: Record<string, unknown>
+): SdpPaymentsError {
+  return new SdpPaymentsError("PROVIDER_NOT_CONFIGURED", message, details);
 }
 
 export function providerUnavailable(
