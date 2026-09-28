@@ -223,7 +223,7 @@ test("reports provider throttling for a Kit HTTP 429 with its Retry-After", asyn
 
 test("reports provider throttling for a relay 429 and through a cause chain", async () => {
   assert.deepEqual(
-    getRpcThrottling(new RpcHttpStatusError(429, "RPC request failed with HTTP 429")),
+    getRpcThrottling(new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null)),
     {
       retryAfterSeconds: null,
     }
@@ -242,7 +242,7 @@ test("does not report throttling for other failures", async () => {
   assert.equal(getRpcThrottling(await kitHttpError(503, "Service Unavailable")), null);
   assert.equal(getRpcThrottling(await kitHttpError(400, "Bad Request")), null);
   assert.equal(
-    getRpcThrottling(new RpcHttpStatusError(502, "RPC request failed with HTTP 502")),
+    getRpcThrottling(new RpcHttpStatusError(502, "RPC request failed with HTTP 502", null)),
     null
   );
   assert.equal(getRpcThrottling(new Error("429 Too Many Requests")), null);
@@ -251,7 +251,7 @@ test("does not report throttling for other failures", async () => {
 });
 
 test("stops looking for throttling past five causes", async () => {
-  let nested: unknown = new RpcHttpStatusError(429, "RPC request failed with HTTP 429");
+  let nested: unknown = new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null);
   for (let depth = 0; depth < 4; depth += 1) {
     nested = new Error(`wrap ${depth}`, { cause: nested });
   }

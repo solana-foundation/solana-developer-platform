@@ -66,7 +66,7 @@ export function getRpcThrottling(error: unknown): { retryAfterSeconds: number | 
       current.context.statusCode === 429
     ) {
       return {
-        retryAfterSeconds: parseRetryAfterSeconds(current.context.headers?.get("retry-after")),
+        retryAfterSeconds: parseRetryAfterSeconds(current.context.headers.get("retry-after")),
       };
     }
     if (current instanceof RpcHttpStatusError && current.httpStatus === 429) {

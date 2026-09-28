@@ -31,7 +31,7 @@ export class RpcHttpStatusError extends Error {
   constructor(
     public readonly httpStatus: number,
     message: string,
-    public readonly retryAfter: string | null = null
+    public readonly retryAfter: string | null
   ) {
     super(message);
   }

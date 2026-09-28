@@ -142,7 +142,7 @@ function buildApp(observability: Observability) {
     throw new Error("balance read failed", { cause: kitHttpError(429, { "Retry-After": "7" }) });
   });
   app.all(RPC_THROTTLED_NO_HINT_PATH, () => {
-    throw new RpcHttpStatusError(429, "RPC request failed with HTTP 429");
+    throw new RpcHttpStatusError(429, "RPC request failed with HTTP 429", null);
   });
   app.all(FEE_THROTTLED_PATH, () => {
     throw new FeePaymentError(
