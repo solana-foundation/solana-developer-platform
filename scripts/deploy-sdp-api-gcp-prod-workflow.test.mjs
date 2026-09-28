@@ -260,7 +260,7 @@ test("every migrating deploy is ordered against the schema prod last applied", (
   );
   assert.match(
     workflow,
-    /if \[\[ -n "\$\{RELEASE_SHA\}" \]\]; then\n\s+echo "Prod schema position is unknown/
+    /if \[\[ -z "\$\{APPLIED_SCHEMA_SHA\}" \]\]; then\n\s+echo "Prod schema position is unknown/
   );
   const read = workflow.indexOf("- name: Read the schema position prod last applied");
   const refuse = workflow.indexOf("- name: Refuse a deploy that is behind prod");
@@ -552,4 +552,105 @@ test("rollback verification falls back to the signing origin at the same pinned 
     /ORIGIN_IMAGE="ghcr\.io\/\$\{\{ github\.repository_owner \}\}\/sdp\/sdp-api@\$\{IMAGE##\*@\}"/
   );
   assert.match(workflow, /cosign verify "\$\{ORIGIN_IMAGE\}" "\$\{verify_flags\[@\]\}"/);
+});
+
+// Execute the actual schema guard from the workflow against a stubbed git, so
+// CI fails when the shell behavior breaks even if the text fragments above
+// still match.
+const guardMatch = workflow.match(
+  /- name: Refuse a non-migrating deploy that carries unapplied migrations\n\s+if: \$\{\{ inputs\.release_sha != '' \|\| \(github\.event_name == 'workflow_dispatch' && !inputs\.approved_schema\) \}\}\n\s+run: \|\n([\s\S]*?)\n(?=\n)/
+);
+assert.ok(guardMatch, "schema guard block not found in workflow");
+const schemaGuardBlock = guardMatch[1];
+const APPLIED_GIT_SHA = "aaaa0000000000000000000000000000000000000000".slice(0, 40);
+
+function runSchemaGuard({ appliedSchemaSha, gitScript }) {
+  const dir = mkdtempSync(join(tmpdir(), "schema-guard-"));
+  const gitPath = join(dir, "git");
+  writeFileSync(gitPath, gitScript);
+  chmodSync(gitPath, 0o755);
+  const script = [
+    "set -euo pipefail",
+    `APPLIED_SCHEMA_SHA="${appliedSchemaSha}"`,
+    `DEPLOY_IMAGE_SHA="${APPLIED_GIT_SHA}"`,
+    'MIGRATE_JOB="sdp-prod-api-public-migrate"',
+    schemaGuardBlock,
+    "echo GUARD_PASSED",
+  ].join("\n");
+  try {
+    const out = execFileSync("bash", ["-c", script], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      encoding: "utf8",
+    });
+    return { code: 0, out };
+  } catch (err) {
+    return { code: err.status, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+
+const gitBehindNoPending = `#!/usr/bin/env bash
+if [[ "$1" == "merge-base" ]]; then
+  exit 1
+fi
+if [[ "$1" == "diff" ]]; then
+  exit 0
+fi
+echo "unexpected git invocation: $*" >&2
+exit 127
+`;
+
+const gitBehindWithPending = `#!/usr/bin/env bash
+if [[ "$1" == "merge-base" ]]; then
+  exit 1
+fi
+if [[ "$1" == "diff" ]]; then
+  echo "apps/sdp-api/src/db/migrations/postgres/0100_new_table.sql"
+  exit 0
+fi
+echo "unexpected git invocation: $*" >&2
+exit 127
+`;
+
+const gitAtAppliedSchema = `#!/usr/bin/env bash
+if [[ "$1" == "merge-base" ]]; then
+  exit 0
+fi
+echo "unexpected git invocation: $*" >&2
+exit 127
+`;
+
+test("schema guard fails closed while prod's schema position is unknown", () => {
+  const r = runSchemaGuard({ appliedSchemaSha: "", gitScript: gitBehindNoPending });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Prod schema position is unknown/);
+  assert.match(r.out, /Seed sdp_schema_sha/);
+  assert.doesNotMatch(r.out, /GUARD_PASSED/);
+});
+
+test("schema guard passes early when the deploy image is at prod's applied schema", () => {
+  const r = runSchemaGuard({
+    appliedSchemaSha: APPLIED_GIT_SHA,
+    gitScript: gitAtAppliedSchema,
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /Prod schema position is unknown/);
+  assert.doesNotMatch(r.out, /carries migration changes/);
+});
+
+test("schema guard passes a non-migrating deploy that adds no migration past prod", () => {
+  const r = runSchemaGuard({
+    appliedSchemaSha: APPLIED_GIT_SHA,
+    gitScript: gitBehindNoPending,
+  });
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /GUARD_PASSED/);
+});
+
+test("schema guard refuses a non-migrating deploy that carries unapplied migrations", () => {
+  const r = runSchemaGuard({
+    appliedSchemaSha: APPLIED_GIT_SHA,
+    gitScript: gitBehindWithPending,
+  });
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /carries migration changes prod has not applied/);
 });

@@ -235,16 +235,11 @@ jobs:
 
       - name: Refuse a non-migrating deploy that carries unapplied migrations
         if: ${{ inputs.release_sha != '' || (github.event_name == 'workflow_dispatch' && !inputs.approved_schema) }}
-        env:
-          RELEASE_SHA: ${{ inputs.release_sha }}
         run: |
           set -euo pipefail
           if [[ -z "${APPLIED_SCHEMA_SHA}" ]]; then
-            if [[ -n "${RELEASE_SHA}" ]]; then
-              echo "Prod schema position is unknown, so this release cannot prove its migrations were applied. Seed sdp_schema_sha on ${MIGRATE_JOB} (docs/ops/release-operations.md) and rerun." >&2
-              exit 1
-            fi
-            exit 0
+            echo "Prod schema position is unknown, so this deploy cannot prove it matches the schema prod last applied (a manual redeploy never runs migrations). Seed sdp_schema_sha on ${MIGRATE_JOB} (docs/ops/release-operations.md) and rerun." >&2
+            exit 1
           fi
           if git merge-base --is-ancestor "${DEPLOY_IMAGE_SHA}" "${APPLIED_SCHEMA_SHA}"; then
             exit 0
