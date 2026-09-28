@@ -1,4 +1,4 @@
-import type { PaymentTransferStatus } from "@sdp/types";
+import { NON_TERMINAL_RAMP_TRANSFER_STATUSES, type PaymentTransferStatus } from "@sdp/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { isPostgresUniqueViolation } from "@/db/postgres-utils";
@@ -562,6 +562,151 @@ describe("PaymentsRepository.updateTransferStatusGuarded (postgres)", () => {
         })
       ).resolves.toBeNull();
       await expect(repo.getTransferById(scope)).resolves.toEqual(transfer);
+    });
+  });
+
+  describe("claimTransferProviderData and releaseTransferProviderDataClaim", () => {
+    const scope = {
+      transferId: "xfr_sandbox_simulation_claim",
+      organizationId: TEST_ORG.id,
+      projectId: TEST_PROJECT_ID,
+    };
+    const providerData = { bvnk: {} };
+    const claimValue = { requestedAt: "2026-09-01T12:00:00.000Z" };
+    const claimInput: Parameters<PaymentsRepository["claimTransferProviderData"]>[0] = {
+      ...scope,
+      expectedStatus: "awaiting_payment" satisfies PaymentTransferStatus,
+      claimPath: ["sandboxSimulation"],
+      providerData: { sandboxSimulation: claimValue },
+      updatedAt: claimValue.requestedAt,
+    };
+    const releaseInput: Parameters<PaymentsRepository["releaseTransferProviderDataClaim"]>[0] = {
+      ...scope,
+      expectedStatus: claimInput.expectedStatus,
+      claimPath: claimInput.claimPath,
+      claimValue,
+      updatedAt: "2026-09-01T12:01:00.000Z",
+    };
+
+    beforeEach(async () => {
+      await getDb(env)
+        .prepare(
+          `INSERT INTO counterparties
+             (id, organization_id, project_id, entity_type, display_name, created_by)
+           VALUES (?, ?, ?, 'individual', 'Simulation claim test', ?)
+           ON CONFLICT (id) DO NOTHING`
+        )
+        .bind("cpty_sandbox_simulation_claim", TEST_ORG.id, TEST_PROJECT_ID, TEST_USER.id)
+        .run();
+      const transfer = await repo.createTransfer({
+        ...transferInput({ suffix: "sandbox_simulation_claim" }),
+        projectId: TEST_PROJECT_ID,
+        counterpartyId: "cpty_sandbox_simulation_claim",
+        sourceAddress: null,
+        token: "USDC",
+        amount: null,
+        type: "onramp",
+        direction: "inbound",
+        status: claimInput.expectedStatus,
+        provider: "bvnk",
+        providerReference: scope.transferId,
+        deliveryMode: "manual_instructions",
+        fiatCurrency: "USD",
+        fiatAmount: "25.00",
+        providerData,
+      });
+      expect(transfer).not.toBeNull();
+    });
+
+    async function claimSimulation() {
+      const claimed = await repo.claimTransferProviderData(claimInput);
+      if (claimed === null) throw new Error("Expected simulation claim to succeed");
+      return claimed;
+    }
+
+    it("allows exactly one concurrent claim and stores the winner's value", async () => {
+      const competingValue = { requestedAt: "2026-09-01T12:00:01.000Z" };
+      const results = await Promise.all([
+        repo.claimTransferProviderData(claimInput),
+        repo.claimTransferProviderData({
+          ...claimInput,
+          providerData: { sandboxSimulation: competingValue },
+          updatedAt: competingValue.requestedAt,
+        }),
+      ]);
+
+      expect(results.filter((row) => row === null)).toHaveLength(1);
+      const winners = results.filter((row) => row !== null);
+      expect(winners).toHaveLength(1);
+      const winner = winners[0];
+      if (winner === undefined) throw new Error("Expected one winning simulation claim");
+      expect(winner.provider_data.sandboxSimulation).toEqual(
+        results[0] === null ? competingValue : claimValue
+      );
+      const stored = await repo.getTransferById(scope);
+      expect(stored?.provider_data.sandboxSimulation).toEqual(
+        winner.provider_data.sandboxSimulation
+      );
+      expect(stored).toEqual(winner);
+    });
+
+    it("retains the matching claim when the transfer status has advanced", async () => {
+      await claimSimulation();
+      const advanced = await repo.updateTransferStatusGuarded({
+        ...scope,
+        fromStatuses: NON_TERMINAL_RAMP_TRANSFER_STATUSES,
+        toStatus: "settling",
+        updatedAt: "2026-09-01T12:00:30.000Z",
+      });
+      expect(advanced).toMatchObject({
+        status: "settling",
+        provider_data: { ...providerData, sandboxSimulation: claimValue },
+      });
+
+      await expect(repo.releaseTransferProviderDataClaim(releaseInput)).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(advanced);
+    });
+
+    it("retains the stored claim when the release value differs", async () => {
+      const claimed = await claimSimulation();
+
+      await expect(
+        repo.releaseTransferProviderDataClaim({
+          ...releaseInput,
+          claimValue: { requestedAt: "2026-09-01T12:00:01.000Z" },
+        })
+      ).resolves.toBeNull();
+      await expect(repo.getTransferById(scope)).resolves.toEqual(claimed);
+    });
+
+    it.each(["organization", "project"] as const)(
+      "retains the claim when released from a different %s scope",
+      async (parent) => {
+        const claimed = await claimSimulation();
+        const otherScope =
+          parent === "organization"
+            ? { organizationId: "org_other_simulation_claim" }
+            : { projectId: projects.production.id };
+
+        await expect(
+          repo.releaseTransferProviderDataClaim({ ...releaseInput, ...otherScope })
+        ).resolves.toBeNull();
+        await expect(repo.getTransferById(scope)).resolves.toEqual(claimed);
+      }
+    );
+
+    it("releases a matching claim while preserving all other provider data", async () => {
+      const claimed = await claimSimulation();
+
+      const released = await repo.releaseTransferProviderDataClaim(releaseInput);
+
+      expect(released).toEqual({
+        ...claimed,
+        provider_data: providerData,
+        updated_at: releaseInput.updatedAt,
+      });
+      expect(released?.provider_data).not.toHaveProperty("sandboxSimulation");
+      await expect(repo.getTransferById(scope)).resolves.toEqual(released);
     });
   });
 

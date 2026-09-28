@@ -5456,19 +5456,11 @@
             "description": "Generated from this operation's public OpenAPI request schema.",
             "kind": "textarea",
             "valueType": "json",
-            "defaultValue": "{\n  \"provider\": \"lightspark\",\n  \"payload\": {\n    \"quoteId\": \"quote_example\",\n    \"currencyCode\": \"USD\"\n  }\n}",
+            "defaultValue": "{\n  \"transferId\": \"xfr_example\"\n}",
             "required": true
           }
         ],
-        "expectedResponse": {
-          "data": {
-            "transaction": {}
-          },
-          "meta": {
-            "requestId": "req_example",
-            "timestamp": "2025-01-01T00:00:00.000Z"
-          }
-        }
+        "expectedResponse": {}
       },
       {
         "id": "list-unified-transactions",

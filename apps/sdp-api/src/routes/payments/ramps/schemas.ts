@@ -1,6 +1,5 @@
 import {
   COUNTRY_CODES,
-  MURAL_SANDBOX_PAYIN_CURRENCIES,
   OFFRAMP_CRYPTO_RAILS,
   ONRAMP_CRYPTO_RAILS,
   RAMP_PROVIDERS,
@@ -32,33 +31,6 @@ export const cancelRampTransferSchema = z.object({
   transferId: z.string().min(1),
 });
 
-const simulateLightsparkSandboxTransferPayloadSchema = z.object({
-  quoteId: z.string().min(1),
-  currencyCode: z.enum(["USD", "USDC"]).default("USD"),
-  currencyAmount: z.number().int().positive().optional(),
-});
-
-const simulateBvnkSandboxPayinPayloadSchema = z.object({
+export const simulateSandboxTransferSchema = z.strictObject({
   transferId: z.string().min(1),
 });
-
-const simulateMuralSandboxPayinPayloadSchema = z.object({
-  counterpartyId: z.string().min(1),
-  amount: z.number().positive(),
-  fiatCurrency: z.enum(MURAL_SANDBOX_PAYIN_CURRENCIES),
-});
-
-export const simulateSandboxTransferSchema = z.discriminatedUnion("provider", [
-  z.object({
-    provider: z.literal("lightspark"),
-    payload: simulateLightsparkSandboxTransferPayloadSchema,
-  }),
-  z.object({
-    provider: z.literal("bvnk"),
-    payload: simulateBvnkSandboxPayinPayloadSchema,
-  }),
-  z.object({
-    provider: z.literal("mural"),
-    payload: simulateMuralSandboxPayinPayloadSchema,
-  }),
-]);

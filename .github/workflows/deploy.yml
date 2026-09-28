@@ -28,7 +28,6 @@ jobs:
     outputs:
       api: ${{ steps.detect.outputs.api }}
       prod: ${{ steps.detect.outputs.prod }}
-      prod_hold: ${{ steps.detect.outputs.prod_hold }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -64,35 +63,12 @@ jobs:
           echo "api=$api" >> "$GITHUB_OUTPUT"
           echo "Services to deploy: api=$api (api carries the worker, cron, and migrate jobs — one image)" >> "$GITHUB_STEP_SUMMARY"
 
-          # Prod merge deploys are held while main carries migrations the last
-          # release does not: schema changes ship through a release. Deciding
-          # that here, before the prod job exists, keeps a hold from failing
-          # the run, promoting an unused image into prod Artifact Registry, or
-          # posting "[FAILED] stage → prod" for a merge that was never going
-          # to prod. A gate that cannot run fails this job instead, so a broken
-          # gate never masquerades as a hold and silently suppresses prod. The
-          # prod workflow keeps the same gate as its own backstop.
           prod=false
-          prod_hold=""
           if [ "$api" = true ] && [ "$EVENT_NAME" = push ] && [ "$CONTINUOUS_PROD_DEPLOY" = true ] \
             && [[ "$HEAD_COMMIT_MESSAGE" != "chore(main): release"* ]]; then
-            gate_status=0
-            verdict="$(.github/scripts/prod-merge-gate.sh)" || gate_status=$?
-            case "$gate_status" in
-              0) prod=true ;;
-              2) prod_hold="$verdict" ;;
-              *)
-                echo "::error::Prod merge gate could not be evaluated (exit ${gate_status})."
-                exit 1
-                ;;
-            esac
-          fi
-          if [ -n "$prod_hold" ]; then
-            echo "::notice::Prod merge deploy held: ${prod_hold}. Schema changes ship through a release; cut it and merge deploys resume."
-            echo "Prod: held (${prod_hold})" >> "$GITHUB_STEP_SUMMARY"
+            prod=true
           fi
           echo "prod=$prod" >> "$GITHUB_OUTPUT"
-          echo "prod_hold=$prod_hold" >> "$GITHUB_OUTPUT"
 
 
   notify-start:
@@ -118,9 +94,7 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.changes.outputs.prod == 'true' && 'stage → prod' ||
-                needs.changes.outputs.prod_hold != '' && format('stage (prod held: {0})', needs.changes.outputs.prod_hold) ||
-                'stage' }}
+            ${{ needs.changes.outputs.prod == 'true' && 'stage → prod' || 'stage' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           RUN_ID: ${{ github.run_id }}
@@ -154,7 +128,7 @@ jobs:
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data "$PAYLOAD" "$SLACK" || true
 
   notify-end:
-    needs: [changes, deploy-api-stage, deploy-api-prod]
+    needs: [changes, deploy-api-stage, schema, deploy-api-prod, request-schema-approval]
     if: always() && needs.deploy-api-stage.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 3
@@ -176,12 +150,13 @@ jobs:
         env:
           SERVICES: api
           TARGETS: >-
-            ${{ needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
-                needs.changes.outputs.prod_hold != '' && format('stage (prod held: {0})', needs.changes.outputs.prod_hold) ||
+            ${{ needs.request-schema-approval.result == 'success' && 'stage (prod held: pending migrations, approval run dispatched)' ||
+                needs.schema.outputs.pending == 'true' && 'stage (prod held: pending migrations, approval not dispatched)' ||
+                needs.deploy-api-prod.result != 'skipped' && 'stage → prod' ||
                 'stage' }}
           OUTCOME: >-
-            ${{ (needs.deploy-api-stage.result == 'failure' || needs.deploy-api-prod.result == 'failure') && 'FAILED' ||
-                (needs.deploy-api-stage.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled') && 'CANCELLED' ||
+            ${{ (needs.deploy-api-stage.result == 'failure' || needs.schema.result == 'failure' || needs.deploy-api-prod.result == 'failure' || needs.request-schema-approval.result == 'failure') && 'FAILED' ||
+                (needs.deploy-api-stage.result == 'cancelled' || needs.schema.result == 'cancelled' || needs.deploy-api-prod.result == 'cancelled' || needs.request-schema-approval.result == 'cancelled') && 'CANCELLED' ||
                 'SUCCESS' }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -226,18 +201,80 @@ jobs:
       id-token: write
     uses: ./.github/workflows/deploy-sdp-api-gcp-stage.yml
 
+  schema:
+    name: Check pending migrations against prod
+    needs: changes
+    if: needs.changes.outputs.prod == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      pending: ${{ steps.pending.outputs.pending }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.DEPLOY_WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+
+      - name: Diff migrations against the schema prod last applied
+        id: pending
+        run: |
+          set -euo pipefail
+          applied="$(gcloud run jobs describe sdp-prod-api-public-migrate \
+            --region us-central1 --project solana-developer-platform \
+            --format 'value(metadata.labels.sdp_schema_sha)')"
+          if [[ "${applied}" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "${applied}^{commit}" 2>/dev/null; then
+            pending="$(git diff --name-only "${applied}..HEAD" -- apps/sdp-api/src/db/migrations/postgres)"
+          else
+            pending="prod schema position unknown (sdp_schema_sha=${applied:-unset}); see docs/ops/release-operations.md to seed it"
+          fi
+          if [[ -n "${pending}" ]]; then
+            echo "pending=true" >> "${GITHUB_OUTPUT}"
+            printf 'Prod merge deploy held. Once stage is green this run dispatches "Apply pending migrations to prod"; approve it in the release-production environment. Pending:\n\n%s\n' "${pending}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "pending=false" >> "${GITHUB_OUTPUT}"
+          fi
+
   deploy-api-prod:
     name: sdp-api + worker + cron — prod
-    needs: [changes, deploy-api-stage]
+    needs: [changes, deploy-api-stage, schema]
     if: >-
       needs.changes.outputs.prod == 'true' &&
+      needs.schema.outputs.pending == 'false' &&
       github.event_name == 'push' &&
       vars.CONTINUOUS_PROD_DEPLOY == 'true' &&
       !startsWith(github.event.head_commit.message, 'chore(main): release')
     permissions:
+      actions: read
       contents: read
       id-token: write
       packages: read
     uses: ./.github/workflows/deploy-sdp-api-gcp-prod.yml
     with:
       image_sha: ${{ github.sha }}
+
+  request-schema-approval:
+    name: Request schema approval
+    needs: [deploy-api-stage, schema]
+    if: needs.schema.outputs.pending == 'true' && needs.deploy-api-stage.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the approval run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run apply-prod-migrations.yml --repo "${{ github.repository }}" --ref main -f image_sha="${{ github.sha }}"
