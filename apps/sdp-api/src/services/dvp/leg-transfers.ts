@@ -1008,7 +1008,11 @@ async function removeDroppedTransfers(
  * cursor is trusted only until the audit falls due, for the same reason: the
  * node that proved the slot could have been listing straight past a hole it
  * holds, and only an unbounded walk serves what a bounded one never lists
- * again.
+ * again. Nor is a proven cursor whose scan never settled trusted at all —
+ * the audit is scheduled by the scan time, so a read that never got through
+ * has no audit coming to re-examine its proof, and the next read takes the
+ * whole history from the top (past the cap, the fallback reads on from the
+ * saved cursor and probes the region behind it, where the omission sits).
  */
 function historyBound(scan: SeenScan | null, now: number): Signature | null {
   if (scan?.cursorSlotComplete !== true) {
@@ -1016,7 +1020,7 @@ function historyBound(scan: SeenScan | null, now: number): Signature | null {
   }
   const scannedAt = scan.scannedAt;
   if (
-    scannedAt !== null &&
+    scannedAt === null ||
     Math.floor(Date.parse(scannedAt) / HISTORY_AUDIT_MS) < Math.floor(now / HISTORY_AUDIT_MS)
   ) {
     return null;
@@ -1119,17 +1123,6 @@ function settledRead(
 }
 
 /**
- * Whether the position was stood at the deepest signature a chunked read
- * listed: the region immediately behind it — the part of the region above the
- * cursor that read never listed — is only accounted for once the sweep's own
- * read of it ran through, and until then no point below the cursor may
- * travel with the position.
- */
-function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean): boolean {
-  return chunked && deepestReached;
-}
-
-/**
  * Where the next sweep's probe of the region behind the position resumes. A
  * probe the cap stopped saves the signature below which it stopped, so the
  * region's oldest end is reached a few pages further down with every sweep;
@@ -1146,9 +1139,16 @@ function standsBeforeAnUnlistedRegion(chunked: boolean, deepestReached: boolean)
  * that region ran through: the probe's own point then stands, and the next
  * probe resumes below it rather than behind the position, keeping the depth
  * past sweeps reached however much newer history the escrow keeps
- * accumulating. A gap read the cap stopped saves where it stopped instead —
- * everything between there and the position is listed, and the next probe
- * continues below it toward the older end.
+ * accumulating.
+ *
+ * The walk itself can stop — or stall on a provisional signature — before it
+ * ever reached the deepest signature the bounded read listed, while the read
+ * of the region behind the position was itself cut off by the cap. The part
+ * of that region the gap read never listed sits behind the position all the
+ * same, wherever the walk stood: a point below the cursor would start the
+ * next probe past it for good, so while the gap read has not run through, the
+ * point saved is where the gap read stopped, and the next probe continues
+ * below it toward the cursor and the older end.
  *
  * The point never travels past an unreadable transaction either: the sweep
  * asks for each one it skipped again directly, by signature, so the probe's
@@ -1163,13 +1163,12 @@ function resumePoint(
   probeDeepest: { signature: Signature; slot: string } | null,
   gapComplete: boolean,
   gapDeepest: { signature: Signature; slot: string } | null,
-  unlistedBehindPosition: boolean,
   overflowedRetries: boolean
 ): { signature: Signature; slot: string } | null {
   if (!fallbackRan || !probeEnded || overflowedRetries) {
     return null;
   }
-  if (unlistedBehindPosition && !gapComplete) {
+  if (!gapComplete) {
     return gapDeepest;
   }
   return probeComplete ? null : probeDeepest;
@@ -1455,7 +1454,6 @@ export async function syncDvpLegTransfers(
         probeDeepest,
         gapComplete,
         gapDeepest,
-        standsBeforeAnUnlistedRegion(chunked, deepestReached),
         overflowed
       ),
       unreadableRetries,

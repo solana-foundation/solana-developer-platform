@@ -440,6 +440,38 @@ describe("syncDvpLegTransfers", () => {
     expect(saved[0]?.cursor).toEqual({ signature: sig(2_000), slot: "2000" });
   });
 
+  // A proven cursor whose scan never settled has no audit stamp, and the
+  // audit is what re-examines the proof — a listing can have run straight
+  // past a hole the node holds. Without a scan time no audit ever falls due,
+  // so the read takes the whole history from the top instead of bounding
+  // itself at the cursor for good.
+  it("does not bound itself at a proven cursor that never settled", async () => {
+    listSignatures.mockImplementation(async (_escrow, page) =>
+      page.until === null ? history([4]) : []
+    );
+    served.set(sig(4), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(3), slot: "3" },
+        cursorSlotComplete: true,
+        probe: null,
+        unreadableRetries: [],
+        version: "0",
+        scannedAt: null,
+      },
+      { remaining: 10 },
+      NOW
+    );
+
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: null, until: null });
+    expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, { before: null, until: sig(3) });
+  });
+
   // An escrow address can outlive a trade. What happened there before this
   // trade existed is not this trade's history.
   it("reads no further back than the trade's creation, less the create clock skew", async () => {
@@ -1560,6 +1592,105 @@ describe("syncDvpLegTransfers", () => {
     });
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(2_000), until: null });
     expect(listSignatures).not.toHaveBeenCalledWith(ESCROW, { before: sig(1_000), until: null });
+  });
+
+  // The walk can stall on a provisional signature before it ever reached the
+  // deepest signature the bounded read listed, while the read of the region
+  // behind the position was itself cut off by the cap. The part of that
+  // region the gap read never listed sits behind the position all the same,
+  // wherever the walk stood — so the point saved is where the gap read
+  // stopped, and the next probe continues below it toward the older end
+  // instead of resuming behind the cursor, which would skip the unlisted
+  // part for good.
+  it("continues the unlisted gap when the walk never reached the deepest listed signature", async () => {
+    const page = (high: number, low: number) =>
+      history(
+        Array.from({ length: high - low + 1 }, (_, index) => high - index),
+        {
+          failed: true,
+        }
+      );
+    listSignatures.mockImplementation(async (_escrow, { before, until }) => {
+      // The walk from the top exceeds the scan cap on every sweep.
+      if (until === null && before === null) {
+        return page(9_000, 8_001);
+      }
+      if (until === null && before === sig(8_001)) {
+        return page(8_000, 7_001);
+      }
+      if (until === null && before === sig(7_001)) {
+        return page(7_000, 6_001);
+      }
+      // The region above the cursor alone exceeds the scan cap: the read is
+      // cut off three pages down, and the deepest signature it listed is
+      // 6001.
+      if (until === sig(7) && before === null) {
+        return page(9_000, 8_001);
+      }
+      if (until === sig(7) && before === sig(8_001)) {
+        return page(8_000, 7_001);
+      }
+      if (until === sig(7) && before === sig(7_001)) {
+        return [...page(7_000, 6_002), ...history([6_001], { finalized: false })];
+      }
+      // The read of the region the bounded read never listed: three full
+      // pages, so it stops at the cap with its oldest end unlisted.
+      if (until === sig(7) && before === sig(6_001)) {
+        return page(6_000, 5_001);
+      }
+      if (until === sig(7) && before === sig(5_001)) {
+        return page(5_000, 4_001);
+      }
+      if (until === sig(7) && before === sig(4_001)) {
+        return page(4_000, 3_001);
+      }
+      // The probe of the region below the cursor: short, so it ran to its
+      // end.
+      if (until === null && before === sig(7)) {
+        return history([6, 5, 4, 3, 2, 1], { failed: true });
+      }
+      return [];
+    });
+    // The oldest signature the bounded read listed is provisional, so the
+    // walk never advances onto it — nor onto anything newer — and the
+    // position stays where it was.
+    served.set(sig(6_001), transaction({ post: "100" }));
+
+    await syncDvpLegTransfers(
+      reader,
+      transfers,
+      LEG,
+      {
+        side: "a",
+        cursor: { signature: sig(7), slot: "7" },
+        cursorSlotComplete: false,
+        probe: null,
+        unreadableRetries: [],
+        version: "0",
+        scannedAt: "2026-09-15T00:00:00.000Z",
+      },
+      { remaining: 10 },
+      NOW
+    );
+
+    // The point that travels with the position is where the gap read
+    // stopped, not behind the cursor. The position stays where it was: the
+    // walk never advanced onto the provisional signature, so the deepest
+    // listed one was never reached.
+    expect(saved[0]).toEqual({
+      side: "a",
+      cursor: { signature: sig(7), slot: "7" },
+      cursorSlotComplete: false,
+      probe: { signature: sig(3_001), slot: "3001" },
+      unreadableRetries: [],
+      scannedAt: null,
+    });
+
+    await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 10 }, NOW);
+
+    // The next sweep's probe resumed below the gap read's point, listing the
+    // part of the region no read had listed before.
+    expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(3_001), until: null });
   });
 
   // A region of the history full of transactions that moved nothing — an
