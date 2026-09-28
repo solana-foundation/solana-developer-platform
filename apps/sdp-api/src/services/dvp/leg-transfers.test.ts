@@ -1309,7 +1309,7 @@ describe("syncDvpLegTransfers", () => {
     await syncDvpLegTransfers(reader, transfers, LEG, mine, { remaining: 10 }, NOW);
 
     // The merged list keeps the oldest 64 asks and drops the rest — the sweep
-    // own's newest sixteen, at slots 35 to 40 — and the point travels below
+    // own's newest sixteen, at slots 25 to 40 — and the point travels below
     // the position only while the list fits: the next probe starts behind the
     // position, where the dropped ones are listed and collected once more.
     expect(saveScan).toHaveBeenCalledTimes(2);
@@ -1330,7 +1330,12 @@ describe("syncDvpLegTransfers", () => {
     // because the overflow dropped the point.
     listSignatures.mockImplementation(async (_escrow, { before }) => {
       if (before === sig(8)) {
-        return [...page(799, 41), ...history([40, 39, 38, 37, 36, 35], { failed: false })];
+        return [
+          ...page(799, 41),
+          ...history([40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25], {
+            failed: false,
+          }),
+        ];
       }
       if (before === sig(1_001)) {
         return page(1_000, 801);
@@ -1344,20 +1349,20 @@ describe("syncDvpLegTransfers", () => {
       return page(4_000, 3_001);
     });
     // The twenty oldest asks the merged list kept read clean this time, and
-    // the dropped ones come back malformed again.
+    // every dropped one comes back malformed again.
     for (const retry of freshRetries.slice(0, 20)) {
       served.set(retry.signature, transaction({ post: "100" }));
     }
-    for (const retry of ownRetries.slice(34)) {
+    for (const retry of ownRetries.slice(24)) {
       served.set(retry.signature, "malformed");
     }
 
     await syncDvpLegTransfers(reader, transfers, LEG, saved[0], { remaining: 40 }, NOW);
 
     // The probe ran from the position down — the point the overflow dropped —
-    // and listed the dropped asks, which the walk read once more.
+    // and listed every dropped ask, which the walk read once more.
     expect(listSignatures).toHaveBeenCalledWith(ESCROW, { before: sig(8), until: null });
-    expect(readTransaction).toHaveBeenCalledWith(sig(35));
+    expect(readTransaction).toHaveBeenCalledWith(sig(25));
     // The settled asks leave the list, and the dropped ones, collected again
     // behind the position, take their place: nothing the cap dropped stays
     // unreachable.
@@ -1366,11 +1371,7 @@ describe("syncDvpLegTransfers", () => {
       cursor: { signature: sig(1_001), slot: "1001" },
       cursorSlotComplete: false,
       probe: null,
-      unreadableRetries: [
-        ...freshRetries.slice(20),
-        ...ownRetries.slice(0, 24),
-        ...ownRetries.slice(34),
-      ],
+      unreadableRetries: [...freshRetries.slice(20), ...ownRetries],
       scannedAt: null,
     });
   });
