@@ -2499,7 +2499,14 @@ describe("Earn program — governed payout, execution and blast radius (HOO-1559
         operationFamily: "program",
         operationType: "earn_program_withdrawal",
       })
-    ).resolves.not.toBeNull();
+    ).resolves.toMatchObject({
+      organization_id: TEST_ORG.id,
+      project_id: TEST_PROJECT.id,
+      wallet_id: program.provider_wallet_ref,
+      operation_family: "program",
+      operation_type: "earn_program_withdrawal",
+      status: "created",
+    });
 
     // Another family naming the same provider wallet must NOT inherit the
     // admission: proving ownership through an Earn link row is a statement
