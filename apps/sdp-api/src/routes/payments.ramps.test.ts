@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { providerUnavailable } from "@sdp/payments/errors";
+import { badRequest, providerUnavailable } from "@sdp/payments/errors";
 import { RAMP_PROVIDER_CLIENTS } from "@sdp/payments/ramps";
 import { bvnkOnrampRemittance } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import type { BvnkLedgerWalletV2 } from "@sdp/payments/ramps/providers/bvnk/schemas";
@@ -2001,7 +2001,7 @@ describe("Payments routes — ramps", () => {
       simulateSpy.mockRestore();
     });
 
-    it("releases the simulation slot when the provider call fails so the transfer can be retried", async () => {
+    it("releases the simulation slot on a definitive provider rejection so the transfer can be retried", async () => {
       const transferId = "xfr_lightspark_sim_release";
       const counterpartyId = await seedCounterparty({ providerData: {} });
       await seedSimulatableTransfer({
@@ -2011,12 +2011,17 @@ describe("Payments routes — ramps", () => {
       });
       const simulateSpy = vi
         .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
-        .mockRejectedValueOnce(providerUnavailable("Grid sandbox send failed"))
+        .mockRejectedValueOnce(
+          badRequest("Grid rejected the sandbox send", {
+            provider: "lightspark",
+            providerStatus: 400,
+          })
+        )
         .mockResolvedValueOnce({ accepted: true });
 
       const first = await simulateRequest(transferId);
 
-      expect(first.status).toBe(503);
+      expect(first.status).toBe(400);
       const failedTransfer = await readSimulationTransfer(transferId);
       expect(failedTransfer?.status).toBe("awaiting_payment");
       expect(failedTransfer?.provider_data).not.toHaveProperty("sandboxSimulation");
@@ -2027,6 +2032,39 @@ describe("Payments routes — ramps", () => {
       expect(simulateSpy).toHaveBeenCalledTimes(2);
       const retriedTransfer = await readSimulationTransfer(transferId);
       expect(retriedTransfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+
+      simulateSpy.mockRestore();
+    });
+
+    it("retains the simulation slot on an ambiguous provider failure and rejects a retry", async () => {
+      const transferId = "xfr_lightspark_sim_ambiguous";
+      const counterpartyId = await seedCounterparty({ providerData: {} });
+      await seedSimulatableTransfer({
+        ...LIGHTSPARK_SIM_SEED,
+        id: transferId,
+        counterpartyId,
+      });
+      const simulateSpy = vi
+        .spyOn(RAMP_PROVIDER_CLIENTS.lightspark, "sandboxSend")
+        .mockRejectedValueOnce(
+          providerUnavailable("Failed to reach the lightspark API", { provider: "lightspark" })
+        );
+
+      const first = await simulateRequest(transferId);
+
+      expect(first.status).toBe(503);
+      const failedTransfer = await readSimulationTransfer(transferId);
+      expect(failedTransfer?.status).toBe("awaiting_payment");
+      expect(failedTransfer?.provider_data.sandboxSimulation?.requestedAt).toBeTruthy();
+
+      const second = await simulateRequest(transferId);
+
+      expect(second.status).toBe(409);
+      expect(simulateSpy).toHaveBeenCalledTimes(1);
+      const body: { error: { message: string } } = await second.json();
+      expect(body.error.message).toBe(
+        "Sandbox simulation was already requested for this transfer."
+      );
 
       simulateSpy.mockRestore();
     });

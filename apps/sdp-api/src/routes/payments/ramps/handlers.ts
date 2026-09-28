@@ -23,6 +23,7 @@ import { badRequest, conflict, forbidden, internalError, notFound } from "@/lib/
 import { success } from "@/lib/response";
 import type { ValidatedBodyContext } from "@/middleware/validate";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import { sendOnceUnderTransferClaim } from "@/services/payments/transfer-claim";
 import { getPaymentsRepository, rampRuntime, resolveSdpEnvironment } from "../context";
 import { mapTransferRow } from "../mappers";
 import { assertPaymentWalletExactAccess, resolveScope } from "../wallets";
@@ -186,35 +187,17 @@ export async function simulateSandboxTransfer(
     }
   }
 
-  const now = new Date().toISOString();
-  const claim = { requestedAt: now };
-  const claimed = await repository.claimTransferProviderData({
+  const outcome = await sendOnceUnderTransferClaim({
+    repository,
     transferId: transfer.id,
     organizationId: scope.auth.organizationId,
     projectId,
     expectedStatus: "awaiting_payment",
-    claimPath: ["sandboxSimulation"],
-    providerData: { sandboxSimulation: claim },
-    updatedAt: now,
+    claimKey: "sandboxSimulation",
+    send: simulate,
   });
-  if (claimed === null) {
+  if (!outcome.claimed) {
     throw conflict("Sandbox simulation was already requested for this transfer.");
   }
-
-  let transaction: unknown;
-  try {
-    transaction = await simulate();
-  } catch (error) {
-    await repository.releaseTransferProviderDataClaim({
-      transferId: transfer.id,
-      organizationId: scope.auth.organizationId,
-      projectId,
-      expectedStatus: "awaiting_payment",
-      claimPath: ["sandboxSimulation"],
-      claimValue: claim,
-      updatedAt: new Date().toISOString(),
-    });
-    throw error;
-  }
-  return success(c, { transaction });
+  return success(c, { transaction: outcome.result });
 }
