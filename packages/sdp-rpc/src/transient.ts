@@ -79,10 +79,17 @@ export function getRpcThrottling(error: unknown): { retryAfterSeconds: number | 
 
 function parseRetryAfterSeconds(header: string | null | undefined): number | null {
   const value = header?.trim();
-  if (!value || !/^\d+$/.test(value)) {
+  if (!value) {
     return null;
   }
-  return Number(value);
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+  const at = Date.parse(value);
+  if (Number.isNaN(at)) {
+    return null;
+  }
+  return Math.max(Math.ceil((at - Date.now()) / 1000), 0);
 }
 
 /**

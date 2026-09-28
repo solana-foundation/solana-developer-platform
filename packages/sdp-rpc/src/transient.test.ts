@@ -211,12 +211,22 @@ test("reports provider throttling for a Kit HTTP 429 with its Retry-After", asyn
     { retryAfterSeconds: 7 }
   );
   assert.deepEqual(getRpcThrottling(await kitHttpError(429, "")), { retryAfterSeconds: null });
+  const inTwentySeconds = new Date(Date.now() + 20_000).toUTCString();
+  const dated = getRpcThrottling(
+    await kitHttpError(429, "Too Many Requests", { "Retry-After": inTwentySeconds })
+  );
+  assert.ok(dated?.retryAfterSeconds !== null && dated?.retryAfterSeconds !== undefined);
+  assert.ok(dated.retryAfterSeconds >= 18 && dated.retryAfterSeconds <= 21);
   assert.deepEqual(
     getRpcThrottling(
       await kitHttpError(429, "Too Many Requests", {
         "Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT",
       })
     ),
+    { retryAfterSeconds: 0 }
+  );
+  assert.deepEqual(
+    getRpcThrottling(await kitHttpError(429, "Too Many Requests", { "Retry-After": "soon" })),
     { retryAfterSeconds: null }
   );
 });
