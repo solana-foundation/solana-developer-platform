@@ -625,38 +625,76 @@ function sectionSource(boundary: OrderedBoundary): string {
 }
 
 describe("value-moving authorization and replay conformance", () => {
-  it("covers every required value-moving family", () => {
-    // `earn` appears twice: money-in (vault deposits) and money-out (vault
-    // withdrawals) are separately gated routes, and each carries its own
-    // authorization boundary and replay evidence. `issuance` repeats for the
-    // same reason: authority updates, seize, force-burn, burn, freeze,
-    // unfreeze, pause, unpause, deploy, allowlist add and allowlist remove
-    // are separately gated execute routes. `dvp` appears twice for fund and
-    // settle, the two actions that commit value; reclaim and cancel are the
-    // recovery paths and are deliberately ungoverned (routes/dvp/policy.ts).
-    expect(contracts.map((contract) => contract.family).sort()).toEqual([
-      "batch",
-      "custody",
-      "dvp",
-      "dvp",
-      "earn",
-      "earn",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "issuance",
-      "payments",
-      "ramps",
-      "recurring",
-    ]);
+  it("registers each authorization boundary exactly once", () => {
+    // The contracts array is hand-maintained, so a copy-pasted entry can point
+    // two contracts at one boundary while the real route goes unregistered.
+    // The family multiplicity is deliberate, not an inventory to keep in sync
+    // by hand: `earn` appears twice for money-in (vault deposits) and
+    // money-out (vault withdrawals), `issuance` once per separately gated
+    // execute route (authority updates, seize, force-burn, burn, freeze,
+    // unfreeze, pause, unpause, deploy, allowlist add and remove), and `dvp`
+    // twice for fund and settle, the two actions that commit value (reclaim
+    // and cancel are the recovery paths and are deliberately ungoverned —
+    // routes/dvp/policy.ts).
+    const boundaries = contracts.map(
+      (contract) => `${contract.authorization.file}${contract.authorization.section}`
+    );
+    expect(new Set(boundaries).size).toBe(boundaries.length);
+  });
+
+  it("has no production signing sink outside the scanned roots", () => {
+    // The earn vault-deposit route shipped ungoverned because
+    // `apps/sdp-api/src/services/earn` was missing from
+    // `valueMovingSourceRoots`, and nothing failed: the sink catalog below
+    // only inventories files inside the roots it is given. This check sweeps
+    // the whole production tree (the API app plus the two shared signing
+    // packages; test-support packages are out of scope), so a new signing
+    // sink outside the scanned roots fails here instead of surfacing as an
+    // ungoverned money-moving path.
+    const sinkPattern =
+      /\.(signAndSend|signAsFeePayer|prepareOwnedSubmission)\(|\b(signTransactionMessageWithSigners)\(/g;
+    const productionTrees = [
+      "apps/sdp-api/src",
+      "packages/sdp-issuance/src",
+      "packages/sdp-solana/src",
+    ];
+    const covered = (relativePath: string) =>
+      valueMovingSourceRoots.some(
+        (root) => relativePath === root || relativePath.startsWith(`${root}/`)
+      );
+    const uncovered: Record<string, string[]> = {};
+    for (const tree of productionTrees) {
+      for (const file of sourceFiles(path.join(repositoryRoot, tree))) {
+        const relativePath = path.relative(repositoryRoot, file);
+        if (covered(relativePath)) {
+          continue;
+        }
+        const sinks = [
+          ...new Set(
+            [...readFileSync(file, "utf8").matchAll(sinkPattern)].map(
+              (match) => match[1] ?? match[2]
+            )
+          ),
+        ].sort();
+        if (sinks.length > 0) {
+          uncovered[relativePath] = sinks;
+        }
+      }
+    }
+    expect(uncovered).toEqual({
+      // Budget-reservation wrapper around the provider's own signing sink;
+      // the value-moving callers that submit through it are pinned above.
+      "apps/sdp-api/src/services/sponsorship-budget.service.ts": [
+        "signAndSend",
+        "signAsFeePayer",
+      ],
+      // Owned-submission lifecycle wrapped around the same provider sink.
+      "apps/sdp-api/src/services/sponsorship.service.ts": ["signAndSend", "signAsFeePayer"],
+      // Documentation comment only — no call site.
+      "apps/sdp-api/src/services/domain/signing.service.ts": [
+        "signTransactionMessageWithSigners",
+      ],
+    });
   });
 
   it.each(contracts)("authorizes $family from trusted context before signing", (contract) => {
