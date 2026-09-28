@@ -498,20 +498,37 @@ export const setDefaultWallet = async (c: ValidatedBodyContext<typeof setDefault
     previous = await db.transaction(async (tx) => {
       // Lock the owner before reading its previous default so concurrent
       // selections cannot be attributed to this request in the audit outcome.
+      // The lock must be taken on its own statement: when a concurrent commit
+      // makes PostgreSQL re-evaluate a locked row, the joined custody_wallets
+      // row is only rechecked against the tuple already fetched, so joining
+      // here would resolve the superseded pointer and report no match at all.
+      const locked = await tx.queryOne<{ owner_id: string }>(
+        wallet.custodyConnectionId
+          ? `SELECT id AS owner_id FROM custody_connections
+             WHERE id = ? AND organization_id = ? AND project_id = ?
+             FOR UPDATE`
+          : `SELECT id AS owner_id FROM custody_configs
+             WHERE id = ? AND organization_id = ? AND project_id IS NOT DISTINCT FROM ?
+             FOR UPDATE`,
+        [ownerId, actor.organizationId, projectId ?? null]
+      );
+      if (!locked) throw conflict("Wallet signing is not initialized");
+
+      // Resolve the previous default now that the row is ours: this statement
+      // takes a fresh READ COMMITTED snapshot, so it observes whatever the
+      // lock let through, and nothing can move the pointer until we commit.
       const current = await tx.queryOne<typeof previous>(
         wallet.custodyConnectionId
           ? `SELECT c.default_custody_wallet_id AS custody_wallet_id, w.wallet_id
              FROM custody_connections c
              LEFT JOIN custody_wallets w ON w.id = c.default_custody_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id = ?
-             FOR UPDATE OF c`
+             WHERE c.id = ?`
           : `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
              FROM custody_configs c
              LEFT JOIN custody_wallets w
                ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
-             WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
-             FOR UPDATE OF c`,
-        [ownerId, actor.organizationId, projectId ?? null]
+             WHERE c.id = ?`,
+        [ownerId]
       );
       if (!current) throw conflict("Wallet signing is not initialized");
 
