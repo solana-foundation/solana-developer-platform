@@ -933,7 +933,11 @@ transaction signed by the organization custody wallet or external owner.
   shares; a claim with an unsettled movement is excluded — the ledger already
   explains that disagreement and the sweep settles it; so is one with an open
   queued withdrawal request, whose shares were escrowed or burned ahead of the
-  payout, until that request is terminal). A duplicated share mint
+  payout, until that request is terminal). A CANCELLED operator redemption
+  never recreates the shares it burned, so a wallet balance of the
+  intermediate it delegated (Hastra wYLDS, the claim read's
+  `retained_intermediate_mints`) backs that claim; a failed request burned
+  nothing and backs nothing. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.

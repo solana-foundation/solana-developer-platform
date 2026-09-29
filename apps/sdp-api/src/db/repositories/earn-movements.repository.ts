@@ -353,8 +353,9 @@ export interface EarnMovementsRepository {
    * The COMPLETE set of claims `listVaultPositions` would serve (same
    * visibility predicate, unpaged — a reconciliation over a page would clear
    * discrepancies it never looked at), each with whether any of its movements
-   * is still unsettled and whether a queued withdrawal request on it is still
-   * open. Read-only input to share reconciliation (PRO-1741);
+   * is still unsettled, whether a queued withdrawal request on it is still
+   * open, and the intermediate mints its cancelled operator redemptions left
+   * in the wallet. Read-only input to share reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
    */
@@ -364,7 +365,11 @@ export interface EarnMovementsRepository {
     custodyWalletIds: readonly string[];
   }): Promise<
     Array<
-      EarnPositionRow & { has_unsettled_movements: boolean; has_open_withdrawal_requests: boolean }
+      EarnPositionRow & {
+        has_unsettled_movements: boolean;
+        has_open_withdrawal_requests: boolean;
+        retained_intermediate_mints: string[];
+      }
     >
   >;
   /** External-wallet vault claims, exact-project scoped, newest first. */
@@ -1391,6 +1396,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // and the every-minute sweep will settle it either way. An open queued
       // request explains it too (the shares are escrowed or burned ahead of
       // the payout), with the same predicate closeVaultPositionIfEmpty uses.
+      // A cancelled operator redemption never recreates the shares it burned:
+      // the owner keeps the intermediate it delegated (Hastra wYLDS), so its
+      // mint is returned for the service to accept as backing.
       const result = await db
         .prepare(
           `SELECT *,
@@ -1408,7 +1416,15 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                         'creating', 'pending', 'fulfillable',
                         'expired_cancelable', 'cancelling', 'closed_or_unknown'
                       )
-                  ) AS has_open_withdrawal_requests
+                  ) AS has_open_withdrawal_requests,
+                  ARRAY(
+                    SELECT DISTINCT retained.intermediate_mint
+                    FROM earn_vault_withdrawal_requests retained
+                    WHERE retained.position_id = earn_positions.id
+                      AND retained.mechanism = 'operator_redemption'
+                      AND retained.status = 'cancelled'
+                      AND retained.intermediate_mint IS NOT NULL
+                  ) AS retained_intermediate_mints
              FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
              ORDER BY created_at DESC, id DESC`
@@ -1418,6 +1434,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           EarnPositionRow & {
             has_unsettled_movements: boolean;
             has_open_withdrawal_requests: boolean;
+            retained_intermediate_mints: string[];
           }
         >();
       return result.results ?? [];

@@ -436,7 +436,9 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
       .openapi({
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
-          "unsettled movement are excluded: the ledger already explains that disagreement.",
+          "unsettled movement or an open queued withdrawal request are excluded: the ledger " +
+          "already explains that disagreement. So is a position whose wallet still holds the " +
+          "intermediate token a cancelled operator redemption left in place of its shares.",
       }),
     unreadableWallets: z
       .array(

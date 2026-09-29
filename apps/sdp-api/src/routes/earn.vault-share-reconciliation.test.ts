@@ -61,6 +61,8 @@ const SHARE_MINT_CATALOGUED = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const SHARE_MINT_RECORDED = "So11111111111111111111111111111111111111112";
 const SHARE_MINT_EMPTY = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
 const SHARE_MINT_MIRROR = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+/** The intermediate (Hastra wYLDS) an operator redemption delegates. */
+const OPERATOR_INTERMEDIATE_MINT = "BVfHastraWylds1111111111111111111111111111";
 const API_KEY = { id: "key_share_reconciliation", raw: "sk_test_share_reconciliation" };
 const OPEN_WITHDRAWAL_REQUEST_STATUSES = [
   "creating",
@@ -271,7 +273,7 @@ async function seedCustodyWithdrawalRequest(params: {
       solverQueue ? 25 : null,
       solverQueue ? 1700000060 : null,
       solverQueue ? 1700000120 : null,
-      solverQueue ? null : "BVfHastraWylds1111111111111111111111111111",
+      solverQueue ? null : OPERATOR_INTERMEDIATE_MINT,
       solverQueue ? null : "1.01",
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
@@ -456,6 +458,70 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       ]);
     }
   );
+
+  describe("after an operator redemption", () => {
+    // Cancellation revokes Hastra's delegate but never mints the burned PRIME
+    // back, so a wallet can hold the intermediate and none of the shares.
+    async function claimAfterOperatorRedemption(status: "cancelled" | "failed") {
+      const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "hastra" });
+      await finalizeMovement(claim.movement.id);
+      await seedCustodyWithdrawalRequest({
+        position: claim.position,
+        mechanism: "operator_redemption",
+        status,
+      });
+      return claim;
+    }
+
+    it("lets a cancelled redemption's retained intermediate back only its own claim", async () => {
+      await claimAfterOperatorRedemption("cancelled");
+      const unrelated = await createPosition({ shareMint: SHARE_MINT_RECORDED });
+      await finalizeMovement(unrelated.movement.id);
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({
+          positionId: unrelated.position.id,
+          shareMint: SHARE_MINT_RECORDED,
+        }),
+      ]);
+      // The intermediate is not a catalogued share mint, so it is never an
+      // unrecorded holding either.
+      expect(body.data.unrecordedHoldings).toEqual([]);
+      expect(body.data.unreadableWallets).toEqual([]);
+    });
+
+    it("reports a cancelled claim once the wallet holds neither its shares nor the intermediate", async () => {
+      const claim = await claimAfterOperatorRedemption("cancelled");
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
+      ]);
+    });
+
+    it("does not let the intermediate back a claim whose redemption failed", async () => {
+      // A failed request never landed and burned nothing, so the ledger does
+      // not explain an intermediate balance.
+      const claim = await claimAfterOperatorRedemption("failed");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
+      ]);
+    });
+  });
 
   it("never reads or reports a wallet outside the key's binding scope", async () => {
     await seedSecondProjectAWallet();

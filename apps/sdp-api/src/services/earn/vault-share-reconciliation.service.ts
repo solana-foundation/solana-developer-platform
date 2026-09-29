@@ -39,6 +39,12 @@ export interface ReconcilableVaultClaim {
   label: string;
   has_unsettled_movements: boolean;
   has_open_withdrawal_requests: boolean;
+  /**
+   * Intermediate mints (Hastra wYLDS) that a CANCELLED operator redemption on
+   * this claim left in the wallet. Cancellation does not recreate the burned
+   * shares, so a held balance of one of these still backs the claim.
+   */
+  retained_intermediate_mints: readonly string[];
 }
 
 export interface ReconcilableShareMintedStrategy {
@@ -223,6 +229,8 @@ export async function reconcileVaultShareHoldings(input: {
         continue;
       }
       if (balancesByMint.has(claim.share_mint)) continue;
+      // A cancelled redemption left its intermediate in place of the shares.
+      if (claim.retained_intermediate_mints.some((mint) => balancesByMint.has(mint))) continue;
       report.unbackedPositions.push({
         positionId: claim.id,
         custodyWalletId: wallet.id,
