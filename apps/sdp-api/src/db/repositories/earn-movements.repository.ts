@@ -1408,68 +1408,90 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
       // open one's delegated intermediate still sits in the wallet. The
       // amounts come back per status class so the service can tell which
-      // balance is provably whose.
+      // balance is provably whose. Requests are aggregated once per tenant
+      // (the tenant/created index) and joined by position, because the
+      // request table has no position index and the claim set is unpaged.
       const result = await db
         .prepare(
-          `SELECT *,
+          `WITH open_requests AS (
+             SELECT queued.position_id,
+                    array_agg(queued.id ORDER BY queued.created_at, queued.id) AS ids
+               FROM earn_vault_withdrawal_requests queued
+              WHERE queued.organization_id = ?
+                AND queued.environment = ?
+                AND queued.status IN (
+                  'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+              GROUP BY queued.position_id
+           ),
+           redemption_amounts AS (
+             SELECT redemption.position_id,
+                    redemption.intermediate_mint,
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status = 'cancelled'), 0)::text
+                      AS retained,
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status IN (
+                        'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
+                      )), 0)::text
+                      AS in_flight,
+                    -- May or may not hold its intermediate: a 'creating'
+                    -- request can land before the request row advances, and a
+                    -- 'closed_or_unknown' one was either burned or cancelled.
+                    COALESCE(SUM(redemption.intermediate_amount::numeric)
+                      FILTER (WHERE redemption.status IN (
+                        'creating', 'closed_or_unknown'
+                      )), 0)::text
+                      AS unresolved
+               FROM earn_vault_withdrawal_requests redemption
+              WHERE redemption.organization_id = ?
+                AND redemption.environment = ?
+                AND redemption.mechanism = 'operator_redemption'
+                AND redemption.intermediate_mint IS NOT NULL
+                AND redemption.status IN (
+                  'cancelled', 'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+              GROUP BY redemption.position_id, redemption.intermediate_mint
+           ),
+           intermediates_by_position AS (
+             SELECT position_id,
+                    json_agg(json_build_object(
+                      'mint', intermediate_mint,
+                      'retained', retained,
+                      'in_flight', in_flight,
+                      'unresolved', unresolved
+                    ) ORDER BY intermediate_mint) AS intermediates
+               FROM redemption_amounts
+              GROUP BY position_id
+           )
+           SELECT earn_positions.*,
                   EXISTS (
                     SELECT 1
                     FROM earn_movements unsettled
                     WHERE unsettled.position_id = earn_positions.id
                       AND unsettled.status IN ('requested', 'submitted', 'confirmed')
                   ) AS has_unsettled_movements,
-                  COALESCE(
-                    (SELECT array_agg(queued.id ORDER BY queued.created_at, queued.id)
-                       FROM earn_vault_withdrawal_requests queued
-                      WHERE queued.position_id = earn_positions.id
-                        AND queued.status IN (
-                          'creating', 'pending', 'fulfillable',
-                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                        )),
-                    ARRAY[]::text[]
-                  ) AS open_withdrawal_request_ids,
-                  COALESCE((
-                    SELECT json_agg(json_build_object(
-                             'mint', intermediate.intermediate_mint,
-                             'retained', intermediate.retained,
-                             'in_flight', intermediate.in_flight,
-                             'unresolved', intermediate.unresolved
-                           ) ORDER BY intermediate.intermediate_mint)
-                    FROM (
-                      SELECT redemption.intermediate_mint,
-                             COALESCE(SUM(redemption.intermediate_amount::numeric)
-                               FILTER (WHERE redemption.status = 'cancelled'), 0)::text
-                               AS retained,
-                             COALESCE(SUM(redemption.intermediate_amount::numeric)
-                               FILTER (WHERE redemption.status IN (
-                                 'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
-                               )), 0)::text
-                               AS in_flight,
-                             -- May or may not hold its intermediate: a
-                             -- 'creating' request can land before the request
-                             -- row advances, and a 'closed_or_unknown' one
-                             -- was either burned or cancelled.
-                             COALESCE(SUM(redemption.intermediate_amount::numeric)
-                               FILTER (WHERE redemption.status IN (
-                                 'creating', 'closed_or_unknown'
-                               )), 0)::text
-                               AS unresolved
-                      FROM earn_vault_withdrawal_requests redemption
-                      WHERE redemption.position_id = earn_positions.id
-                        AND redemption.mechanism = 'operator_redemption'
-                        AND redemption.intermediate_mint IS NOT NULL
-                        AND redemption.status IN (
-                          'cancelled', 'creating', 'pending', 'fulfillable',
-                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                        )
-                      GROUP BY redemption.intermediate_mint
-                    ) intermediate
-                  ), '[]'::json) AS redemption_intermediates
+                  COALESCE(open_requests.ids, ARRAY[]::text[]) AS open_withdrawal_request_ids,
+                  COALESCE(intermediates_by_position.intermediates, '[]'::json)
+                    AS redemption_intermediates
              FROM earn_positions
+             LEFT JOIN open_requests ON open_requests.position_id = earn_positions.id
+             LEFT JOIN intermediates_by_position
+               ON intermediates_by_position.position_id = earn_positions.id
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
-             ORDER BY created_at DESC, id DESC`
+             ORDER BY earn_positions.created_at DESC, earn_positions.id DESC`
         )
-        .bind(params.organizationId, params.environment, params.custodyWalletIds)
+        .bind(
+          params.organizationId,
+          params.environment,
+          params.organizationId,
+          params.environment,
+          params.organizationId,
+          params.environment,
+          params.custodyWalletIds
+        )
         .all<
           EarnPositionRow & {
             has_unsettled_movements: boolean;
