@@ -11,7 +11,8 @@ import type { UnifiedTransactionSource } from "./types";
  * the way the customer experienced it. Until then (in flight, or a payout the
  * settlement could not observe) the row keeps the share quantity and share
  * mint, so amount and token always describe the same unit. Deposits are
- * unaffected: their token amount is their settled amount.
+ * valued only after receipt observation for Kamino; legacy projections are
+ * hidden until repair establishes the actual debit.
  */
 export const earnUnifiedTransactionSource = {
   sql: (helpers) => `SELECT
@@ -28,6 +29,9 @@ export const earnUnifiedTransactionSource = {
     ELSE em.denomination
   END AS token,
   CASE
+    WHEN em.provider = 'kamino' AND em.execution_model = 'vault_direct'
+      AND em.direction = 'deposit' AND em.status = 'finalized'
+      AND em.deposit_receipt_observed_at IS NULL THEN NULL::text
     WHEN em.status IN (${helpers.moduleStatusesOf("succeeded").join(", ")})
       THEN COALESCE(em.token_amount_settled, em.amount_settled)
     ELSE em.amount_requested

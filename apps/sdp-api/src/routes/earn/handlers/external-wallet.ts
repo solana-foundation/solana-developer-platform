@@ -486,7 +486,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  *
  * `earned` is live current value, plus the observed token payouts of
  * finalized withdrawals, minus finalized SDP deposits (chain for the first,
- * ledger for the other two), and it is stated only when it is exact. Three
+ * ledger for the other two), and it is stated only when it is exact. Four
  * things make it unstatable, each reported by name and none of them ever
  * coerced to zero:
  *
@@ -494,6 +494,8 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  * - a movement is still settling, so the chain and the ledger describe
  *   different moments (`movements_pending` — detail polling performs a bounded
  *   live chain read and the scheduled reconciler remains the recovery path);
+ * - a finalized deposit has no observed receipt (`deposits_not_valued`),
+ *   leaving `totalDeposited` incomplete;
  * - a finalized withdrawal has NO observed payout (`withdrawals_not_valued`):
  *   exits are ledgered in SHARES, and the deposit-token payout is observed
  *   from the landed transaction at settlement (`token_amount_settled`,
@@ -561,8 +563,9 @@ interface MutableTokenEarnings {
 
 /** Higher wins when several positions leave a token's earned unstatable. */
 const EARNED_UNAVAILABLE_PRIORITY: Record<EarnExternalWalletEarnedUnavailableReason, number> = {
-  live_value_unavailable: 3,
-  movements_pending: 2,
+  live_value_unavailable: 4,
+  movements_pending: 3,
+  deposits_not_valued: 2,
   withdrawals_not_valued: 1,
 };
 
@@ -652,6 +655,7 @@ function earnedUnavailableReason(
 ): EarnExternalWalletEarnedUnavailableReason | null {
   if (liveTokenValue === undefined) return "live_value_unavailable";
   if (totals && totals.unsettledMovementCount > 0) return "movements_pending";
+  if (totals && totals.unvaluedDepositCount > 0) return "deposits_not_valued";
   // A valued withdrawal is a ledger fact like a deposit; only an UNVALUED one
   // (no observed payout) leaves the figure inexact.
   if (totals && totals.unvaluedWithdrawalCount > 0) return "withdrawals_not_valued";
@@ -1486,7 +1490,7 @@ function toExternalWalletMovementWire(
     denomination: movement.denomination,
     tokenMint,
     tokenAmount:
-      movement.direction === "deposit"
+      movement.direction === "deposit" && movement.provider !== "kamino"
         ? (movement.token_amount_settled ?? movement.amount_requested)
         : movement.token_amount_settled,
     failureReason: movement.failure_reason,

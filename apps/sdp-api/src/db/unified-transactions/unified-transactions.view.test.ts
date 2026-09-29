@@ -364,6 +364,21 @@ describe("unified_transactions view (postgres)", () => {
     });
   });
 
+  it("withholds a legacy Kamino deposit projection until its actual receipt is recorded", async () => {
+    const id = await seedEarn("finalized");
+    const read = () =>
+      getDb(env).queryOne<{ amount: string | null; token: string }>(
+        "SELECT amount, token FROM unified_transactions WHERE module = 'earn' AND id = ?",
+        [id]
+      );
+    expect(await read()).toEqual({ amount: null, token: "token-mint" });
+    await getDb(env).execute(
+      "UPDATE earn_movements SET amount_settled = '0.3', token_amount_settled = '0.3', shares_out = '0.29', deposit_receipt_observed_at = sdp_iso_now() WHERE id = ?",
+      [id]
+    );
+    expect(await read()).toEqual({ amount: "0.3", token: "token-mint" });
+  });
+
   it("keeps the share quantity and share mint while a withdrawal's payout is unvalued", async () => {
     await expect(seedVaultWithdrawal("earn_withdrawal_unvalued", null)).resolves.toEqual({
       kind: "withdraw",

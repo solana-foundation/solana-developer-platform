@@ -268,6 +268,13 @@ export class KaminoVaultDirectClient
     ctx: EarnRuntimeContext,
     input: EarnVaultWithdrawInput
   ): Promise<EarnVaultTransactionPlan> {
+    if (input.minAmountOut !== undefined) {
+      throw new SdpKaminoError(
+        "WITHDRAW_REFUSED",
+        "Kamino withdrawals cannot enforce minAmountOut on chain. The withdrawal quote is " +
+          "an estimate, not a guaranteed payout; this requested floor cannot be honored."
+      );
+    }
     const plan = await this.withRuntime(
       ctx,
       "Building the vault withdrawal",

@@ -27,18 +27,19 @@ Things that will bite:
   `shares_out` to the commitment states, so recording it could only succeed by
   erasing an observation SDP made. Do not add a transition without checking the
   constraint it would have to violate.
-- **`earn_positions.share_ata_rent_funder` is a PROJECTION, never assigned
-  directly** (migrations 0066 + 0067). Each vault movement records on its OWN row
-  whether it was observed to create the share account and who it charged
-  (`creates_share_account`, `share_ata_rent_funder`), and the position column is
-  recomputed by `projectShareAccountRentFunder`: the newest claim that has not
-  failed. Both directions claim (an exit consolidating auxiliary accounts can
-  create the ATA itself), a movement that lost its idempotency insert has no row
-  to contribute, and `advanceVaultMovement` re-projects on failure so a claim
-  cannot outlive a transaction that never landed. Do not write the position
-  column by hand: a direct write is exactly the unrepairable stale attribution
-  the projection exists to prevent. It is authoritative only while the share
-  account exists, which is the only window anything reads it.
+- **Kamino settlement uses receipts, never requested maxima** (0119).
+  `advanceVaultMovement` leaves deposit amounts unknown until a finalized
+  receipt is supplied; `recordKaminoDepositReceipt` repairs missing receipts
+  once, scoped by organization and movement. Earnings must withhold `earned`
+  while a finalized deposit has no observed amount. Exposure may conservatively
+  count the requested maximum until then. Migration 0119 is additive: legacy
+  projections remain in storage for rollback compatibility, but mapped reads
+  and earnings ignore them without `deposit_receipt_observed_at`.
+- **Kamino creation claims never authorize rent refunds.** The position's
+  `share_ata_rent_funder` is cleared by new Kamino writes; historical claims are
+  ignored by the builder. Other providers retain the legacy projection. Kamino
+  share ATAs retain rent for an explicit owner-authorized close, including
+  newly created accounts that could have been pre-funded.
 - **Every movement needs a holding, and a missing one must never fail a money
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.

@@ -1,4 +1,5 @@
 import { supportsVaultProviderOrderWithdraw } from "@sdp/earn/capabilities";
+import { type KaminoDepositReceipt, readKaminoDepositReceipt } from "@sdp/kamino";
 import {
   createRpc,
   getSignatureStatuses,
@@ -422,17 +423,13 @@ async function reconcileMovement(
     chain.currentBlockHeight !== null &&
     chain.currentBlockHeight > BigInt(lastValidBlockHeight)
   ) {
-    // A `requested` row was never broadcast, so past its blockhash it genuinely
-    // cannot land: expire it on the first observation. A `submitted` row is
-    // different (PRO-1904): RPC history is not complete, and the `confirmed`
-    // guard above exists for exactly that reason, so one null answer is not
-    // proof the transaction did not land. Expiring a landed movement is a
-    // terminal false `failed` with the shares sitting in the vault, so the
-    // sweep parks the row on the first null observation and expires it only
-    // when a LATER tick sees the signature unknown again. A tick that finds
-    // the signature in between moves the row forward through the branches
-    // above and the mark becomes inert.
-    if (movement.status === "submitted" && movement.unknown_signature_observed_at === null) {
+    // A requested row can have landed after an ambiguous broadcast or a crash
+    // before the submitted write. Both states need corroborating observations:
+    // one missing RPC result must not turn a successful transfer into a failure.
+    if (movement.unknown_signature_observed_at === null) {
+      if (movement.status === "requested" && !(await markSubmitted(ledger, movement))) {
+        return "unchanged";
+      }
       await ledger.recordUnknownSignatureObservation({
         movementId: movement.id,
         organizationId: movement.organization_id,
@@ -548,16 +545,21 @@ async function settleMovement(
   chain: ChainObservation
 ): Promise<void> {
   const position =
-    movement.direction === "withdrawal"
+    movement.direction === "withdrawal" || movement.provider === "kamino"
       ? await ledger.getPositionById({
           organizationId: movement.organization_id,
           environment: movement.environment,
           positionId: movement.position_id,
         })
       : null;
-  const tokenAmountSettled = position
-    ? await observeWithdrawalPayout(chain.rpc, movement, position)
-    : null;
+  const tokenAmountSettled =
+    position && movement.direction === "withdrawal"
+      ? await observeWithdrawalPayout(chain.rpc, movement, position)
+      : null;
+  const depositReceipt =
+    position && movement.direction === "deposit" && movement.provider === "kamino"
+      ? await observeKaminoDepositReceipt(chain, movement, position)
+      : null;
 
   const observedAt = new Date().toISOString();
   const settled = await ledger.advanceVaultMovement({
@@ -567,10 +569,101 @@ async function settleMovement(
     confirmedAt: observedAt,
     settledAt: observedAt,
     ...(movement.direction === "withdrawal" ? { tokenAmountSettled } : {}),
+    ...(depositReceipt ? { depositReceipt } : {}),
   });
-  if (settled && position) {
+  if (settled && position && movement.direction === "withdrawal") {
     await closePositionIfEmpty(env, ledger, settled, position);
   }
+}
+
+async function observeKaminoDepositReceipt(
+  chain: Pick<ChainObservation, "cluster" | "rpcUrl">,
+  movement: EarnMovementRow,
+  position: EarnPositionRow
+): Promise<KaminoDepositReceipt | null> {
+  const owner = position.owner_address ?? movement.source_address;
+  if (
+    !movement.signature ||
+    !owner ||
+    !position.vault_address ||
+    !position.token_mint ||
+    !position.share_mint ||
+    movement.vault_address !== position.vault_address ||
+    movement.denomination !== position.token_mint
+  )
+    return null;
+  try {
+    return await readKaminoDepositReceipt(chain, {
+      signature: movement.signature,
+      owner,
+      vault: position.vault_address,
+      tokenMint: position.token_mint,
+      shareMint: position.share_mint,
+      requestedAmount: movement.amount_requested,
+    });
+  } catch (error) {
+    getLogger().warn(
+      { movementId: movement.id, signature: movement.signature, error: errorMessage(error) },
+      "earn vault reconciliation: Kamino deposit receipt not observed"
+    );
+    return null;
+  }
+}
+
+/** Repair missing receipts without guessing from intent, wallet net deltas or current balances. */
+export async function repairUnvaluedKaminoDeposits(
+  env: Env,
+  { limit = 25, now = Date.now() }: { limit?: number; now?: number } = {}
+): Promise<WithdrawalPayoutRepairStats> {
+  const ledger = createPostgresEarnMovementsRepository(getDb(env));
+  const movements = await ledger.claimUnvaluedKaminoDeposits({
+    limit,
+    retryBefore: new Date(now - WITHDRAWAL_PAYOUT_REPAIR_RETRY_MS).toISOString(),
+  });
+  const stats = { claimed: movements.length, repaired: 0, unobserved: 0, errors: 0 };
+  for (const [environment, rows] of groupByEnvironment(movements)) {
+    const cluster = earnClusterFor(environment);
+    const rpcUrl = resolveClusterRpcUrl(env, cluster);
+    try {
+      await assertClusterEndpoint(env, cluster, rpcUrl);
+    } catch (error) {
+      stats.errors += rows.length;
+      getLogger().error(
+        { error, environment },
+        "earn Kamino deposit repair: cluster verification failed"
+      );
+      continue;
+    }
+    for (const movement of rows) {
+      try {
+        const position = await ledger.getPositionById({
+          organizationId: movement.organization_id,
+          environment: movement.environment,
+          positionId: movement.position_id,
+        });
+        const receipt = position
+          ? await observeKaminoDepositReceipt({ cluster, rpcUrl }, movement, position)
+          : null;
+        if (!receipt) {
+          stats.unobserved += 1;
+          continue;
+        }
+        const recorded = await ledger.recordKaminoDepositReceipt({
+          movementId: movement.id,
+          organizationId: movement.organization_id,
+          ...receipt,
+        });
+        if (recorded) stats.repaired += 1;
+      } catch (error) {
+        stats.errors += 1;
+        getLogger().error(
+          { movementId: movement.id, error: errorMessage(error) },
+          "earn Kamino deposit receipt repair failed"
+        );
+      }
+    }
+  }
+  return stats;
 }
 
 /**

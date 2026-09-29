@@ -39,7 +39,7 @@ const readOwnerMintBalance = vi.hoisted(() => vi.fn());
 const getBlockHeight = vi.hoisted(() => vi.fn());
 
 // The one chain read the submit makes itself: the confirmed block height that
-// gates the pre-record expiry refusal (and the post-broadcast expiry verdict).
+// gates the pre-record expiry refusal.
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
   createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
@@ -435,18 +435,23 @@ describe("buildExternalWalletDepositTransaction", () => {
     expect(row?.builds).toBe(0);
   });
 
-  it("names Jupiter Lend's floor refusal as slippage exceeded", async () => {
-    simulateVaultPlan.mockResolvedValue({
-      ok: false,
-      error: "custom program error: 0x1771",
-      logs: ["Program log: AnchorError. Error Code: FTokenMinAmountOut."],
-    });
-    await expect(buildExternalWalletDepositTransaction(env, depositInput())).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      details: { reason: "slippage_exceeded" },
-      message: expect.stringContaining("slippage"),
-    });
-  });
+  it.each(["FTokenMinAmountOut", "SharesOutBelowMinimum"])(
+    "names %s as slippage exceeded",
+    async (marker) => {
+      simulateVaultPlan.mockResolvedValue({
+        ok: false,
+        error: "custom program error: 0x1771",
+        logs: [`Program log: AnchorError. Error Code: ${marker}.`],
+      });
+      await expect(
+        buildExternalWalletDepositTransaction(env, depositInput())
+      ).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        details: { reason: "slippage_exceeded" },
+        message: expect.stringContaining("slippage"),
+      });
+    }
+  );
 });
 
 describe("buildExternalWalletDepositTransaction (swap-funded)", () => {
@@ -1028,10 +1033,9 @@ describe("submitExternalWalletDeposit", () => {
     expect(result.movement.status).toBe("submitted");
   });
 
-  it("fails the movement at once when preflight proves the blockhash expired", async () => {
+  it("leaves an expired-blockhash refusal reconcilable after an external broadcast", async () => {
     broadcastVaultTransaction.mockRejectedValue(preflightBlockhashNotFound());
-    // Open at the pre-record check, closed by the time the refusal is examined.
-    getBlockHeight.mockResolvedValueOnce(361n).mockResolvedValueOnce(362n);
+    getBlockHeight.mockResolvedValueOnce(361n);
     const built = await buildDepositRow(depositInput());
     const result = await submitDeposit(
       built,
@@ -1040,15 +1044,13 @@ describe("submitExternalWalletDeposit", () => {
     );
 
     expect(result.replayed).toBe(false);
-    expect(result.movement.status).toBe("failed");
-    expect(result.movement.failure_reason).toBe(
-      "Transaction blockhash expired before confirmation"
-    );
+    expect(result.movement.status).toBe("requested");
+    expect(result.movement.failure_reason).toBeNull();
     const persisted = await getDb(env)
       .prepare("SELECT status FROM earn_movements WHERE id = ?")
       .bind(result.movement.id)
       .first<{ status: string }>();
-    expect(persisted?.status).toBe("failed");
+    expect(persisted?.status).toBe("requested");
   });
 
   it("keeps a preflight blockhash refusal reconcilable while the window is open", async () => {
@@ -1209,7 +1211,7 @@ describe("partner fee payer (caller-provided)", () => {
       .prepare("SELECT share_ata_rent_funder FROM earn_positions WHERE id = ?")
       .bind(result.position.id)
       .first<{ share_ata_rent_funder: string | null }>();
-    expect(position?.share_ata_rent_funder).toBe(partnerAddress);
+    expect(position?.share_ata_rent_funder).toBeNull();
   });
 
   it("rejects a submit the fee payer has not co-signed", async () => {

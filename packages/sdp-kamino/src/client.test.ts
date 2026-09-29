@@ -57,6 +57,25 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(typeof client.buildVaultWithdrawal).toBe("function");
   });
 
+  it("refuses an unsupported withdrawal floor before resolving an RPC or building", async () => {
+    const resolveRpc = vi.fn(async () => "https://example.invalid");
+    const probe = new KaminoVaultDirectClient(resolveRpc, runOperation);
+
+    await expect(
+      probe.buildVaultWithdrawal(
+        { env: {}, environment: "production" },
+        {
+          providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+          owner: "11111111111111111111111111111112",
+          shares: "2",
+          minAmountOut: "1.99",
+        }
+      )
+    ).rejects.toMatchObject({ code: "WITHDRAW_REFUSED" });
+    expect(resolveRpc).not.toHaveBeenCalled();
+    expect(mocks.buildKaminoWithdrawPlan).not.toHaveBeenCalled();
+  });
+
   it("prices the withdrawal against one slot and maps the plan", async () => {
     const resolvedRpcUrl = "https://devnet.example.invalid";
     const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
