@@ -166,7 +166,7 @@ export async function paymentsDemoResponse(
     }
     const fixture = demoWorldBody(world, path);
     if (fixture !== undefined) return Response.json(fixture);
-    const flow = demoFlowRead(parts.segments, parts.params, world);
+    const flow = demoFlowRead(parts.segments, parts.params, world, now);
     if (flow) return respond(flow);
     return DEMO_RESOURCES.has(resource) || path.includes("demo_") ? notInDemo() : null;
   }

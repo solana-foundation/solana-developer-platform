@@ -349,15 +349,53 @@ function bvnkAgreements(direction: "onramp" | "offramp"): CounterpartyRequiremen
   };
 }
 
+/** How long BVNK reviews a contact's identity check, then takes to open the contact's account. */
+const BVNK_REVIEW_MS = 8_000;
+const BVNK_ACCOUNT_SETUP_MS = 5_000;
+/** Where BVNK's hosted identity check opens; demo mode approves it with Simulate verification. */
+const BVNK_VERIFICATION_URL = "https://www.bvnk.com/";
+
 /**
- * Where a demo contact stands with a ramp provider. Most are ready at once; BVNK first asks the
- * contact to accept its agreements; a Lightspark payout asks which bank account to pay, offering
- * the ones saved and a form for a new one.
+ * Where a demo contact stands with BVNK, as its onboarding runs: the agreements to accept, then
+ * the identity check waiting for the contact, then BVNK's review for a few seconds once Simulate
+ * verification approves it, then the account BVNK opens, then ready.
+ */
+function bvnkStanding(
+  world: DemoWorld,
+  counterpartyId: string,
+  direction: "onramp" | "offramp",
+  now: Date
+): CounterpartyRequirements {
+  const key = consentKey("bvnk", counterpartyId);
+  if (!world.consents.includes(key)) return bvnkAgreements(direction);
+  const approvedAt = world.verifications[key];
+  if (approvedAt === undefined) {
+    return {
+      provider: "bvnk",
+      direction,
+      status: "customer_verification_required",
+      verificationUrl: BVNK_VERIFICATION_URL,
+    };
+  }
+  const elapsed = now.getTime() - approvedAt;
+  if (elapsed < BVNK_REVIEW_MS)
+    return { provider: "bvnk", direction, status: "customer_verifying" };
+  if (elapsed < BVNK_REVIEW_MS + BVNK_ACCOUNT_SETUP_MS) {
+    return { provider: "bvnk", direction, status: "customer_funding_account_provisioning" };
+  }
+  return { provider: "bvnk", direction, status: "ready" };
+}
+
+/**
+ * Where a demo contact stands with a ramp provider. Most are ready at once; BVNK first runs its
+ * onboarding (agreements, then an identity check); a Lightspark payout asks which bank account to
+ * pay, offering the ones saved and a form for a new one.
  */
 function requirementsFor(
   world: DemoWorld,
   counterpartyId: string,
-  params: URLSearchParams
+  params: URLSearchParams,
+  now: Date
 ): CounterpartyRequirements {
   const provider = params.get("provider") ?? PAYOUT_ACCOUNT_PROVIDER;
   const direction = params.get("direction") === "offramp" ? "offramp" : "onramp";
@@ -369,9 +407,7 @@ function requirementsFor(
       reason: "That provider isn't part of the demo.",
     };
   }
-  if (provider === "bvnk" && !world.consents.includes(consentKey(provider, counterpartyId))) {
-    return bvnkAgreements(direction);
-  }
+  if (provider === "bvnk") return bvnkStanding(world, counterpartyId, direction, now);
   if (provider !== "lightspark") return { provider, direction, status: "ready" };
   if (direction === "onramp") return { provider, direction, status: "ready" };
   return {
@@ -398,12 +434,21 @@ function advanceRequirements({ segments, body, world, now }: WriteContext): Demo
   if ("failure" in input) return input.failure;
   const { provider, direction, fiatCurrency, collectedData, providerAccountId } = input.data;
   if (!isRampProvider(provider)) return error(400, "That provider isn't part of the demo.");
-  if (provider === "bvnk" && !world.consents.includes(consentKey(provider, counterpartyId))) {
-    if (input.data.agreementConsent !== true) {
-      return record([], () => ok({ data: bvnkAgreements(direction) }));
+  if (provider === "bvnk") {
+    const standing = bvnkStanding(world, counterpartyId, direction, now);
+    if (standing.status !== "counterparty_collect_agreement" || !input.data.agreementConsent) {
+      return record([], () => ok({ data: standing }));
     }
+    // Accepting the agreements moves the contact on to BVNK's identity check.
     return record([{ k: "consent", id: counterpartyId, at: now.getTime(), provider }], () =>
-      ok({ data: { provider, direction, status: "ready" } })
+      ok({
+        data: bvnkStanding(
+          { ...world, consents: [...world.consents, consentKey(provider, counterpartyId)] },
+          counterpartyId,
+          direction,
+          now
+        ),
+      })
     );
   }
   if (provider !== "lightspark" || direction === "onramp") {
@@ -849,6 +894,26 @@ function pairRefusal(provider: RampProviderId, from: string, to: string): DemoWr
   return error(400, `${getRampProviderLabel(provider)} doesn't run ${from} to ${to}.`);
 }
 
+/** Whether a contact finished a provider's onboarding; only BVNK runs one in the demo. */
+function onboardedWith(
+  provider: RampProviderId,
+  world: DemoWorld,
+  counterpartyId: string,
+  now: Date
+): boolean {
+  return (
+    provider !== "bvnk" || bvnkStanding(world, counterpartyId, "onramp", now).status === "ready"
+  );
+}
+
+function notOnboarded(provider: RampProviderId): DemoWriteResult {
+  return error(
+    409,
+    `${getRampProviderLabel(provider)} hasn't finished onboarding this contact.`,
+    "conflict"
+  );
+}
+
 function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const direction = segments[2] === "offramp" ? "offramp" : "onramp";
   const head = z.object({ provider: z.string() }).safeParse(body);
@@ -870,6 +935,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
     if ("failure" in input) return input.failure;
     const { counterpartyId, destinationCustodyWalletId, assetRail, fiatCurrency } = input.data;
     if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
+    if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
     const wallet = findWallet(world, destinationCustodyWalletId);
     if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
     if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
@@ -920,6 +986,7 @@ function quote({ segments, body, world, now }: WriteContext): DemoWriteResult {
   const { counterpartyId, sourceCustodyWalletId, assetRail, fiatCurrency, cryptoAmount } =
     input.data;
   if (!contactById(world, counterpartyId)) return error(404, "Contact not found.", "not_found");
+  if (!onboardedWith(provider, world, counterpartyId, now)) return notOnboarded(provider);
   const wallet = findWallet(world, sourceCustodyWalletId);
   if (!wallet) return error(404, "That wallet is not in this project.", "not_found");
   if (!pairProviders(direction, fiatCurrency, assetRail).includes(provider)) {
@@ -963,15 +1030,43 @@ const simulateSchema = z.object({
       quoteId: z.string().optional(),
       transferId: z.string().optional(),
       counterpartyId: z.string().optional(),
+      /** Demo mode's Simulate verification: the provider approves the contact's identity check. */
+      verification: z.literal("approved").optional(),
     })
     .passthrough(),
 });
+
+/** Simulate verification: BVNK approves the identity check of a contact that accepted its terms. */
+function approveVerification(
+  provider: string,
+  counterpartyId: string | undefined,
+  world: DemoWorld,
+  now: Date
+): DemoWriteResult {
+  if (provider !== "bvnk") return error(400, "Only BVNK asks for an identity check in the demo.");
+  if (!counterpartyId || !contactById(world, counterpartyId)) {
+    return error(404, "Contact not found.", "not_found");
+  }
+  const status = bvnkStanding(world, counterpartyId, "onramp", now).status;
+  if (status === "counterparty_collect_agreement") {
+    return error(409, "The contact hasn't accepted BVNK's agreements yet.", "conflict");
+  }
+  if (status !== "customer_verification_required") {
+    return error(409, "BVNK has already verified this contact.", "conflict");
+  }
+  return record([{ k: "verified", id: counterpartyId, at: now.getTime(), provider }], () =>
+    ok({ data: {} })
+  );
+}
 
 /** The sandbox's "the customer paid": the on-ramp it names settles a few seconds later. */
 function simulatePayIn({ body, world, ops, now }: WriteContext): DemoWriteResult {
   const input = parse(simulateSchema, body);
   if ("failure" in input) return input.failure;
-  const { quoteId, transferId, counterpartyId } = input.data.payload;
+  const { quoteId, transferId, counterpartyId, verification } = input.data.payload;
+  if (verification === "approved") {
+    return approveVerification(input.data.provider, counterpartyId, world, now);
+  }
   const rampOps = ops.filter((op) => op.k === "ramp" && op.dir === "onramp");
   const match =
     rampOps.find((op) => op.k === "ramp" && (op.quote === quoteId || op.id === transferId)) ??
@@ -1405,14 +1500,15 @@ export function demoWrite(method: string, context: WriteContext): DemoWriteResul
 export function demoFlowRead(
   segments: readonly string[],
   params: URLSearchParams,
-  world: DemoWorld
+  world: DemoWorld,
+  now: Date
 ): DemoAnswer | undefined {
   if (matchesShape(segments, "counterparties/*/requirements")) {
     const counterpartyId = segments[1] ?? "";
     if (!contactById(world, counterpartyId)) {
       return { status: 404, body: { error: { code: "not_found", message: "Contact not found." } } };
     }
-    return ok({ data: requirementsFor(world, counterpartyId, params) });
+    return ok({ data: requirementsFor(world, counterpartyId, params, now) });
   }
   if (matchesShape(segments, "wallets/approval-requests")) {
     return ok({ data: { approvalRequests: [] } });

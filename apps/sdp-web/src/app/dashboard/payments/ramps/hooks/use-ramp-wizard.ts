@@ -24,6 +24,7 @@ import {
   cancelRampTransfer,
   fetchAllCounterparties,
   getApiError,
+  simulateSandboxTransfer,
 } from "@/app/dashboard/payments/payments-workspace.data";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
@@ -504,6 +505,28 @@ export function useRampWizard<TId extends string>(
     }
   };
 
+  // Demo mode's stand-in for the provider's hosted identity check: the provider approves the
+  // contact, and the status poll carries the flow through the provider's review from there.
+  const [verificationSimulating, setVerificationSimulating] = useState(false);
+  const simulateVerification = async () => {
+    const counterpartyId = fields.counterpartyId;
+    if (!demo || fields.provider !== "bvnk" || !counterpartyId) return;
+    setVerificationSimulating(true);
+    try {
+      await simulateSandboxTransfer(
+        { provider: "bvnk", payload: { counterpartyId, verification: "approved" } },
+        t
+      );
+      await requirements.refreshOnboarding();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t("DashboardPayments.demo.verification.failed")
+      );
+    } finally {
+      setVerificationSimulating(false);
+    }
+  };
+
   const handleCounterpartyCreated = (created: Counterparty) => {
     setField("counterpartyId", created.id);
     void mutateCounterparties(
@@ -553,6 +576,10 @@ export function useRampWizard<TId extends string>(
     pendingAgreements: requirements.pendingAgreements,
     acceptedAgreements: requirements.acceptedAgreements,
     toggleAgreement: requirements.toggleAgreement,
+    /** Demo mode stands in for the provider's hosted identity check (BVNK's is the one it runs). */
+    verificationSimulationAvailable: demo && fields.provider === "bvnk",
+    verificationSimulating,
+    simulateVerification,
     hostedQuoteLoading,
     counterpartyDialogOpen,
     setCounterpartyDialogOpen,

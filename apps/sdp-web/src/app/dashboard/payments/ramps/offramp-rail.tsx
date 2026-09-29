@@ -31,6 +31,10 @@ function offrampPrimaryLabel(
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return wizard.verificationSimulating
+        ? t("DashboardPayments.demo.verification.simulating")
+        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
     case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
@@ -47,6 +51,8 @@ function offrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
     case wizard.isLastStep:
@@ -212,6 +218,7 @@ export function OfframpRail({
       primaryDisabled={
         wizard.hostedQuoteLoading ||
         verificationPending ||
+        wizard.verificationSimulating ||
         !wizard.canProceed ||
         (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
       }

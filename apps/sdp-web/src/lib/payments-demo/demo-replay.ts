@@ -566,6 +566,9 @@ function applyOp(world: DemoWorld, op: DemoOp, now: number): void {
     case "consent":
       if (contactById(world, op.id)) world.consents.push(consentKey(op.provider, op.id));
       return;
+    case "verified":
+      if (contactById(world, op.id)) world.verifications[consentKey(op.provider, op.id)] = op.at;
+      return;
     case "payout-account":
       applyPayoutAccount(world, op);
       return;

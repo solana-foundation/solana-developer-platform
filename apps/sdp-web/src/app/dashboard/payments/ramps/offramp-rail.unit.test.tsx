@@ -2,11 +2,12 @@
 
 import type { PaymentRampQuote, PaymentTransferStatus, PaymentTransferSummary } from "@sdp/types";
 import { address } from "@solana/kit";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
+import { PaymentsDemoProvider } from "@/lib/payments-demo/payments-demo-context";
 import { DEFAULT_RAMP_PAIR } from "@/lib/ramps";
 import type { OfframpWizard } from "./hooks/use-offramp-wizard";
 import { OfframpRail } from "./offramp-rail";
@@ -107,6 +108,9 @@ function offrampWizard(overrides: Partial<OfframpWizard>): OfframpWizard {
     onboarding: null,
     isAdvancing: false,
     retryOnboarding: noop,
+    verificationSimulationAvailable: false,
+    verificationSimulating: false,
+    simulateVerification: asyncNoop,
     hostedQuoteLoading: false,
     counterpartyDialogOpen: false,
     setCounterpartyDialogOpen: noop,
@@ -220,5 +224,35 @@ describe("OfframpRail final step", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Complete your payout");
     expect(screen.queryByText("Sending payout")).not.toBeNull();
     expect(screen.queryByRole("link", { name: "View approval request" })).toBeNull();
+  });
+});
+
+describe("OfframpRail verification in demo mode", () => {
+  it("offers Simulate verification in place of BVNK's verification page", () => {
+    const simulateVerification = vi.fn(asyncNoop);
+    mocks.wizard = offrampWizard({
+      currentStepId: "REQUIREMENTS",
+      quote: null,
+      transferStatus: undefined,
+      onboarding: {
+        provider: "bvnk",
+        direction: "offramp",
+        status: "customer_verification_required",
+        verificationUrl: "https://www.bvnk.com/",
+      },
+      verificationSimulationAvailable: true,
+      simulateVerification,
+    });
+    render(<OfframpRail {...railProps} />, {
+      wrapper: ({ children }) =>
+        wrapper({ children: <PaymentsDemoProvider value>{children}</PaymentsDemoProvider> }),
+    });
+
+    expect(screen.queryByRole("button", { name: "Complete verification" })).toBeNull();
+    expect(screen.queryByText(/BVNK's verification page doesn't open/)).not.toBeNull();
+    const button = screen.getByRole("button", { name: "Simulate verification" });
+    expect(button).toHaveProperty("disabled", false);
+    fireEvent.click(button);
+    expect(simulateVerification).toHaveBeenCalledTimes(1);
   });
 });

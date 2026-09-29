@@ -361,6 +361,8 @@ export interface CounterpartyRequirementsState {
   isAdvancing: boolean;
   /** Re-runs the advance (POST) to retry — used by the customer funding provisioning failure action. */
   retryOnboarding: () => void;
+  /** Reads the onboarding status now instead of on the poll's next tick. */
+  refreshOnboarding: () => Promise<void>;
   /** Agreements awaiting consent on the requirements step, or null when the step collects fields. */
   pendingAgreements:
     | Extract<CounterpartyRequirements, { status: "counterparty_collect_agreement" }>["agreements"]
@@ -549,7 +551,7 @@ export function useCounterpartyRequirements(
           subjectKey: `${corridorIdentity}#${advance.advanceId}`,
         })
       : null;
-  const { data: polledOnboarding } = useSWR(
+  const { data: polledOnboarding, mutate: refreshPolledOnboarding } = useSWR(
     pollKey,
     () => {
       if (advance === null || !params?.provider) {
@@ -671,6 +673,9 @@ export function useCounterpartyRequirements(
     submitRequirements,
     isAdvancing,
     retryOnboarding,
+    refreshOnboarding: async () => {
+      await refreshPolledOnboarding();
+    },
     pendingAgreements,
     acceptedAgreements,
     toggleAgreement,
