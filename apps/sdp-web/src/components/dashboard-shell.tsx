@@ -449,7 +449,8 @@ export function DashboardShell({
     custodyEnabled,
     paymentsEnabled,
     policiesEnabled,
-    newDesignPage
+    newDesignEnabled,
+    flags.newDesignModules
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
@@ -464,6 +465,7 @@ export function DashboardShell({
     policiesEnabled,
     privateChannelsEnabled,
     newDesign: newDesignEnabled,
+    newDesignModules: flags.newDesignModules,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname

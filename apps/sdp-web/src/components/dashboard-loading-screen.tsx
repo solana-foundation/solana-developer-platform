@@ -36,7 +36,8 @@ export function DashboardLoadingScreen({
     flags?.custody,
     flags?.payments,
     flags?.policies,
-    newDesignPage
+    flags?.newDesign ?? false,
+    flags?.newDesignModules
   );
 
   return (

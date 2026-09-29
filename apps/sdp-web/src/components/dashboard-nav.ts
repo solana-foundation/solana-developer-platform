@@ -28,6 +28,7 @@ import {
   DASHBOARD_PAYMENTS_SUBNAV_HREFS,
   DASHBOARD_SIDE_NAV_HREFS,
 } from "@/lib/dashboard-navigation-loading";
+import { type DesignFlags, type DesignModuleFlags, isDesignModuleOn } from "@/lib/design-modules";
 import { resolveDocsUrl } from "@/lib/docs-url";
 
 export type SubNavItem = {
@@ -106,7 +107,7 @@ export function withSubnavToggled(
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
   _privateChannelsEnabled: boolean,
-  newDesign = true
+  design: DesignFlags = { newDesign: true }
 ): SubNavItem[] {
   return [
     {
@@ -115,7 +116,7 @@ export function getPaymentsActions(
       icon: ReceiptTextIcon,
     },
     {
-      label: newDesign
+      label: isDesignModuleOn(design, "contacts")
         ? t("Shared.dashboardShell.contacts")
         : t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
@@ -254,6 +255,8 @@ export function getNavSections(
     privateChannelsEnabled: boolean;
     /** NEW DESIGN; the previous design's labels when off. */
     newDesign?: boolean;
+    /** Each design module's own flag: a redesigned area's labels follow it. */
+    newDesignModules?: DesignModuleFlags;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
@@ -297,11 +300,10 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(
-                  t,
-                  options.privateChannelsEnabled,
-                  options.newDesign ?? true
-                ),
+                children: getPaymentsActions(t, options.privateChannelsEnabled, {
+                  newDesign: options.newDesign ?? true,
+                  newDesignModules: options.newDesignModules,
+                }),
                 subnavKey: "payments" as const,
               },
             ]
