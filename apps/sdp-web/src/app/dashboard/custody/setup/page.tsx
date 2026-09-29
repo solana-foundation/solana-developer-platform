@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { privyByok } from "@/flags";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
@@ -9,6 +10,7 @@ import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-a
 import type { OnboardingStatusResponse } from "../../onboarding-status";
 import { fetchConnectionPickerOptions } from "../connections/connections.data";
 import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
+import RedesignCurrentCustodySetupPage from "./page.redesign";
 import { WalletSetupFlow } from "./wallet-setup-flow";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -58,7 +60,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
+async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -130,3 +132,5 @@ export default async function CustodySetupPage({ searchParams }: CustodySetupPag
     />
   );
 }
+
+export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage);

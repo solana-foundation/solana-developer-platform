@@ -34,6 +34,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
       capabilities: { canReadApprovals: true, canManageOrgSettings: true },
     },
     selectedProjectId: "project-cold-load",
+    dashboardCacheScope: { userId: "user-cold-load", orgId: "org-cold-load" },
     isSidebarOpen: true,
     setSidebarOpen: () => undefined,
     isProjectSwitching: false,

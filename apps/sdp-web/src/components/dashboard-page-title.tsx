@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useContext, useLayoutEffect } from "react";
+import { type ReactNode, useContext, useLayoutEffect } from "react";
 import { DashboardPageTitleContext } from "@/components/dashboard-page-title-context";
 
 /**
@@ -10,14 +10,25 @@ import { DashboardPageTitleContext } from "@/components/dashboard-page-title-con
  * a hard load shows the route's own title until hydration.
  *
  * @param props.title - The header title for the current route.
+ * @param props.mark - Shown before the title on a refresh page (a wallet's provider mark).
+ * @param props.actions - The page's own actions, before the route's header action. Pass a
+ *   stable element (memoized), since a new one each render sets the header again.
  * @returns Nothing; the shell renders the title.
  */
-export function DashboardPageTitle({ title }: { title: string }) {
+export function DashboardPageTitle({
+  title,
+  mark,
+  actions,
+}: {
+  title: string;
+  mark?: ReactNode;
+  actions?: ReactNode;
+}) {
   const setTitle = useContext(DashboardPageTitleContext);
   const pathname = usePathname();
   useLayoutEffect(() => {
-    setTitle?.({ pathname, title });
+    setTitle?.({ pathname, title, mark, actions });
     return () => setTitle?.(null);
-  }, [setTitle, pathname, title]);
+  }, [setTitle, pathname, title, mark, actions]);
   return null;
 }

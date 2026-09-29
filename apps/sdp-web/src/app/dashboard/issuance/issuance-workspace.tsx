@@ -96,11 +96,10 @@ const ISSUANCE_OVERVIEW_PANEL_CLASS = "pt-0 [overflow-anchor:none]";
 
 // The pinned header (toolbar + asset count) sits in the scroll flow and sticks to
 // the top, so cards pass *behind* it — which only works with an opaque backdrop.
-// The scrolling panel's own backdrop is the shell's `--surface` seen through the
-// content section's `bg-surface-raised/80`; alpha compositing is a plain sRGB mix,
-// so this color-mix reproduces that composite exactly, in both themes.
-const PINNED_HEADER_BG =
-  "color-mix(in srgb, var(--color-surface-raised) 80%, var(--color-surface))";
+// The scrolling panel's own backdrop is the shell's content section; --sdp-page-backdrop
+// (sdp-theme.css) is that section's colour in either design and theme: NEW DESIGN's opaque
+// `bg-surface-raised`, or the previous design's `bg-surface-raised/80` over the shell.
+const PINNED_HEADER_BG = "var(--sdp-page-backdrop)";
 
 // That backdrop is painted as a gradient rather than a flat fill: solid down to the
 // asset-count row, then out to transparent over this band. A flat fill guillotines

@@ -40,7 +40,10 @@
   },
   "tabs": {
     "overview": "Overview",
-    "apiPlayground": "API Playground"
+    "apiPlayground": "API Playground",
+    "activity": "Activity",
+    "policy": "Policy",
+    "settings": "Settings"
   },
   "authTerms": {
     "prefix": "By using the app, you agree to the",
@@ -104,6 +107,8 @@
     "requestBody": "Request body",
     "response": "Response",
     "createApiKey": "Create API key",
+    "createAnApiKey": "Create an API key",
+    "noKeyYet": "No key yet",
     "apiKeyValue": "API key value",
     "apiKeyChecking": "Checking key",
     "apiKeyInUse": "Using",
@@ -156,6 +161,9 @@
     "durationMilliseconds": "{duration}ms",
     "networkDebugSummary": "{pending} pending, {completed} completed",
     "aiInstructions": "AI instructions",
+    "copyAssistantPrompt": "Copy prompt for an assistant",
+    "assistantPromptHint": "The endpoint and your values, written out as instructions, so an assistant writes the call from them instead of inventing an id.",
+    "snippetLanguage": "Language",
     "pageOf": "Page {page} of {pageCount}",
     "previousPage": "Previous page",
     "nextPage": "Next page",
@@ -233,6 +241,7 @@
     "manage": "Manage",
     "home": "Home",
     "wallets": "Wallets",
+    "wallet": "Wallet",
     "issuance": "Issuance",
     "payments": "Payments",
     "markets": "Markets",
@@ -270,6 +279,7 @@
     "backToPolicyHistory": "Back to policy history",
     "walletControls": "Wallet controls",
     "createWallet": "Create wallet",
+    "createAWallet": "Create a wallet",
     "connections": "Connections",
     "activateProvider": "Activate provider",
     "newAsset": "New asset",
