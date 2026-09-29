@@ -290,15 +290,18 @@ export function PlaygroundApiKeySelector() {
   const pasted = usePastedApiKey();
 
   if (playgroundApiKeys.length === 0) {
+    // A refresh playground says there is no key here; its Run button becomes "Create an API
+    // key" for someone who may make one (usePlaygroundCreateKeyHref).
+    if (refresh) {
+      return (
+        <span className="text-body text-tertiary">{t("Shared.SharedComponents.noKeyYet")}</span>
+      );
+    }
     if (!dashboardAccess.capabilities.canManageApiKeys) {
       return null;
     }
 
-    return refresh ? (
-      <Link href="/dashboard/api-keys" className="text-primary underline-offset-4 hover:underline">
-        {t("Shared.SharedComponents.createApiKey")}
-      </Link>
-    ) : (
+    return (
       <Button asChild className="h-11 rounded-[14px] px-4 whitespace-nowrap">
         <Link href="/dashboard/api-keys">{t("Shared.SharedComponents.createApiKey")}</Link>
       </Button>

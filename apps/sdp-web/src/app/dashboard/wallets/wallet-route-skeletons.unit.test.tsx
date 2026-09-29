@@ -52,17 +52,18 @@ describe("wallet and custody route loading states", () => {
   it("keeps every wallet-detail section in place while data loads", () => {
     const html = renderToStaticMarkup(<WalletDetailSkeleton />);
 
-    expect(html).toContain('data-skeleton-section="wallet-controls"');
-    expect(html).toContain('data-skeleton-section="wallet-balances"');
+    expect(html).toContain('data-skeleton-section="wallet-state"');
+    expect(html).toContain('data-skeleton-section="wallet-balance"');
+    expect(html).toContain('data-skeleton-section="wallet-tokens"');
     expect(html).toContain('data-skeleton-section="wallet-activity"');
   });
 
-  it("reserves the responsive wallet search toolbar while the overview loads", () => {
+  it("reserves the two-column wallet card grid while the overview loads", () => {
     const html = renderToStaticMarkup(<WalletsLoading />);
 
-    expect(html).toContain('data-wallet-search-skeleton="true"');
-    expect(html).toContain("flex-col gap-3 sm:flex-row");
-    expect(html).toContain("sm:max-w-md");
+    expect(html).toContain('data-wallet-grid-skeleton="true"');
+    expect(html).toContain("sm:grid-cols-2");
+    expect(html).toContain("bg-surface-tile");
   });
 
   it("keeps the policy editor form, summary rail, and footer in place", () => {

@@ -23,7 +23,6 @@ function declarationsBySelector(css: string): Map<string, Map<string, string>> {
 const tokens = declarationsBySelector(read("./tokens.css"));
 const light = tokens.get(":root") ?? new Map();
 const dark = tokens.get(":root.dark") ?? new Map();
-const refresh = tokens.get('[data-sdp-theme="refresh"]') ?? new Map();
 const catalog = new Map(designTokens.map((token) => [token.name, token]));
 
 describe("design token catalog", () => {
@@ -54,12 +53,27 @@ describe("design token catalog", () => {
     assert.deepEqual(unthemedInDark, []);
   });
 
-  it("only re-points base tokens inside the refresh scope, and only at declared tokens", () => {
-    for (const [name, value] of refresh) {
-      assert.ok(light.has(name), `${name} is not a base token`);
-      const reference = value.match(/^var\((--[\w-]+)\)$/)?.[1];
-      assert.ok(reference && light.has(reference), `${name} must point at a declared token`);
+  it("points every product name at a palette token", () => {
+    const productNames = designTokens.filter(
+      (token) =>
+        ["surface", "text", "fill", "border", "status"].includes(token.group) ||
+        token.name === "--font-sans" ||
+        token.name === "--font-mono"
+    );
+    for (const { name } of productNames) {
+      const reference = light.get(name)?.match(/^var\((--[\w-]+)\)$/)?.[1];
+      const target = reference ? catalog.get(reference as never) : undefined;
+      assert.ok(
+        target && (THEMED_GROUPS.includes(target.group) || target.group === "font"),
+        `${name} must point at a palette token`
+      );
     }
+  });
+
+  it("keeps colour and type out of the refresh scope", () => {
+    // The refresh scope changes component shapes and page layout only; a declaration here would
+    // give its pages a palette the rest of the app does not have.
+    assert.equal(tokens.has('[data-sdp-theme="refresh"]'), false);
   });
 });
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { Tab, TabList, Tabs } from "@solana/design-system/tabs";
-import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, Copy, Loader2, Play, Plus, Sparkles, X } from "lucide-react";
+import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type {
   ApiPlaygroundEndpointConfig,
@@ -9,11 +10,12 @@ import type {
   ApiPlaygroundFieldConfig,
   ApiPlaygroundMessage,
 } from "@/components/api-playground-shell";
+import { SNIPPET_LANGUAGES, type SnippetLanguage } from "@/components/api-playground-snippets";
 import { Button } from "@/components/ui/button";
 import { Callout } from "@/components/ui/callout";
+import { InfoHint } from "@/components/ui/info-hint";
 import { StatusText } from "@/components/ui/status-text";
 import { useTranslations } from "@/i18n/provider";
-import { HighlightedCode } from "@/lib/shiki-code";
 
 type RequestView = "form" | "raw" | "code";
 type ResponseView = "body" | "headers";
@@ -28,6 +30,13 @@ const RESPONSE_VIEWS = [
   { value: "body", labelKey: "Shared.SharedComponents.playgroundBody" },
   { value: "headers", labelKey: "Shared.SharedComponents.playgroundHeaders" },
 ] as const;
+
+// Language names are the languages' own, the same in every locale.
+const SNIPPET_LANGUAGE_NAMES: Record<SnippetLanguage, string> = {
+  curl: "cURL",
+  ts: "TypeScript",
+  py: "Python",
+};
 
 // The same indicator fix the header tabs carry: the design-system indicator reads its geometry
 // from these variables.
@@ -209,18 +218,10 @@ function RunShortcut() {
   );
 }
 
-// Code reads at 13px on 20px lines, the design's.
-function CodeBody({ content, language }: { content: string; language: "javascript" | "json" }) {
-  return (
-    <div
-      data-testid="api-playground-code"
-      className="min-h-0 overflow-x-auto font-mono text-meta leading-5 [&_.shiki]:!text-meta [&_.shiki]:!leading-5 [&_pre]:!leading-5"
-    >
-      <HighlightedCode content={content} language={language} />
-    </div>
-  );
-}
-
+/**
+ * Code as the design sets it: 13px on 20px lines, one ink, wrapped rather than scrolled
+ * sideways. A wrapped line hangs 2ch in from its own indent, so nesting still reads.
+ */
 function PlainCode({
   content,
   className = "text-primary",
@@ -229,8 +230,22 @@ function PlainCode({
   className?: string;
 }) {
   return (
-    <pre className={`overflow-x-auto font-mono text-meta leading-5 whitespace-pre ${className}`}>
-      {content}
+    <pre
+      className={`font-mono text-meta leading-5 whitespace-pre-wrap [overflow-wrap:anywhere] ${className}`}
+    >
+      {content.split("\n").map((line, index) => {
+        const indent = line.length - line.trimStart().length;
+        return (
+          <span
+            // biome-ignore lint/suspicious/noArrayIndexKey: a line's place is its identity.
+            key={index}
+            className="block"
+            style={{ paddingLeft: `${indent + 2}ch`, textIndent: "-2ch" }}
+          >
+            {line.trimStart() || "\u00a0"}
+          </span>
+        );
+      })}
     </pre>
   );
 }
@@ -306,46 +321,93 @@ function RequestForm({
   );
 }
 
-/** The Code view: the fetch snippet, with copy actions for it and for AI instructions. */
+/**
+ * The Code view's controls, at the end of the tab row as the design has them: the snippet's
+ * language and a copy of it.
+ */
+function SnippetControls({
+  language,
+  onLanguageChange,
+  snippet,
+  onCopy,
+  copied,
+}: {
+  language: SnippetLanguage;
+  onLanguageChange: (language: SnippetLanguage) => void;
+  snippet: string;
+  onCopy: (text: string, action: "code" | "ai") => void;
+  copied: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <span className="flex items-center gap-1">
+      <span className="relative inline-flex h-6 items-center gap-1 rounded-control px-2 text-body text-primary transition-colors hover:bg-fill-subtle has-[select:focus-visible]:outline-2 has-[select:focus-visible]:outline-primary">
+        {SNIPPET_LANGUAGE_NAMES[language]}
+        <ChevronDown aria-hidden="true" className="size-3.5 text-tertiary" />
+        <select
+          aria-label={t("Shared.SharedComponents.snippetLanguage")}
+          className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
+          value={language}
+          onChange={(event) => {
+            const next = SNIPPET_LANGUAGES.find((entry) => entry === event.currentTarget.value);
+            if (next) onLanguageChange(next);
+          }}
+        >
+          {SNIPPET_LANGUAGES.map((entry) => (
+            <option key={entry} value={entry}>
+              {SNIPPET_LANGUAGE_NAMES[entry]}
+            </option>
+          ))}
+        </select>
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => onCopy(snippet, "code")}
+        iconLeft={copied ? undefined : <Copy className="size-3.5" aria-hidden="true" />}
+      >
+        {copied ? t("Shared.SharedComponents.copied") : t("Shared.SharedComponents.copy")}
+      </Button>
+    </span>
+  );
+}
+
+/** The Code view: the call in the chosen language, then a prompt an assistant can write it from. */
 function CodeView({
-  codeSnippet,
+  snippet,
   aiInstructions,
   onCopy,
   copiedAction,
 }: {
-  codeSnippet: string;
+  snippet: string;
   aiInstructions: string;
   onCopy: (text: string, action: "code" | "ai") => void;
   copiedAction: "code" | "ai" | null;
 }) {
   const t = useTranslations();
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
+    <div>
+      <div data-testid="api-playground-code">
+        <PlainCode content={snippet} />
+      </div>
+      <div className="mt-6 flex items-center gap-1">
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onCopy(codeSnippet, "code")}
-          iconLeft={<Copy className="size-4" aria-hidden="true" />}
-        >
-          {copiedAction === "code"
-            ? t("Shared.SharedComponents.copied")
-            : t("Shared.SharedComponents.copyCode")}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
+          variant="ghost"
+          size="xs"
+          className="-ml-2"
           onClick={() => onCopy(aiInstructions, "ai")}
-          iconLeft={<Sparkles className="size-4" aria-hidden="true" />}
+          iconLeft={
+            copiedAction === "ai" ? undefined : <Sparkles className="size-3.5" aria-hidden="true" />
+          }
         >
           {copiedAction === "ai"
             ? t("Shared.SharedComponents.copied")
-            : t("Shared.SharedComponents.aiInstructions")}
+            : t("Shared.SharedComponents.copyAssistantPrompt")}
         </Button>
+        <InfoHint text={t("Shared.SharedComponents.assistantPromptHint")} />
       </div>
-      <CodeBody content={codeSnippet} language="javascript" />
     </div>
   );
 }
@@ -395,7 +457,11 @@ function ResponseHeaders({
   return <PlainCode content={entries.map(([name, value]) => `${name}: ${value}`).join("\n")} />;
 }
 
-/** The endpoint picker and Run, on one 60px line. */
+/**
+ * The endpoint picker and Run, on one 60px line. With no key in the project, Run becomes
+ * "Create an API key" for someone who may make one, as the design does: there is nothing to run
+ * a request with until then.
+ */
 function EndpointLine({
   endpoints,
   activeEndpoint,
@@ -403,9 +469,10 @@ function EndpointLine({
   execution,
   runDisabled,
   onRun,
+  createApiKeyHref,
 }: Pick<
   ApiPlaygroundRefreshLayoutProps,
-  "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun"
+  "endpoints" | "activeEndpoint" | "onEndpointChange" | "execution" | "onRun" | "createApiKeyHref"
 > & { runDisabled: boolean }) {
   const t = useTranslations();
   return (
@@ -434,25 +501,34 @@ function EndpointLine({
         </select>
       </div>
       {/* The design's Run sits a pixel inside the picker's rule, top and bottom. */}
-      <Button
-        type="button"
-        onClick={onRun}
-        disabled={runDisabled}
-        aria-keyshortcuts="Meta+Enter Control+Enter"
-        className="!h-[58px] !gap-0 self-center rounded-control !px-5"
-      >
-        <span className="flex items-center whitespace-nowrap">
-          <span className="flex items-center gap-1.5">
-            {execution.state === "running" ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Play className="size-4" aria-hidden="true" />
-            )}
-            {t("Shared.SharedComponents.runRequest")}
+      {createApiKeyHref ? (
+        <Button asChild className="!h-[58px] self-center rounded-control !px-5">
+          <Link href={createApiKeyHref} data-playground-create-key="">
+            <Plus className="size-4" aria-hidden="true" />
+            {t("Shared.SharedComponents.createAnApiKey")}
+          </Link>
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          onClick={onRun}
+          disabled={runDisabled}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
+          className="!h-[58px] !gap-0 self-center rounded-control !px-5"
+        >
+          <span className="flex items-center whitespace-nowrap">
+            <span className="flex items-center gap-1.5">
+              {execution.state === "running" ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Play className="size-4" aria-hidden="true" />
+              )}
+              {t("Shared.SharedComponents.runRequest")}
+            </span>
+            <RunShortcut />
           </span>
-          <RunShortcut />
-        </span>
-      </Button>
+        </Button>
+      )}
     </div>
   );
 }
@@ -470,7 +546,8 @@ export interface ApiPlaygroundRefreshLayoutProps {
   getFieldId: (fieldKey: string) => string;
   resolvedPath: string;
   requestBody: unknown | null;
-  codeSnippet: string;
+  /** The call in each language the Code view offers. */
+  snippets: Record<SnippetLanguage, string>;
   aiInstructions: string;
   exampleBody: string;
   execution: ApiPlaygroundExecution;
@@ -481,6 +558,8 @@ export interface ApiPlaygroundRefreshLayoutProps {
   onReset: () => void;
   onCopy: (text: string, action: "code" | "ai") => void;
   copiedAction: "code" | "ai" | null;
+  /** Where to make a key when the project has none; set only for someone who may make one. */
+  createApiKeyHref?: string;
 }
 
 /**
@@ -501,7 +580,7 @@ export function ApiPlaygroundRefreshLayout({
   getFieldId,
   resolvedPath,
   requestBody,
-  codeSnippet,
+  snippets,
   aiInstructions,
   exampleBody,
   execution,
@@ -511,11 +590,14 @@ export function ApiPlaygroundRefreshLayout({
   onReset,
   onCopy,
   copiedAction,
+  createApiKeyHref,
 }: ApiPlaygroundRefreshLayoutProps) {
   const t = useTranslations();
   const [view, setView] = useState<RequestView>("form");
   const [responseView, setResponseView] = useState<ResponseView>("body");
+  const [language, setLanguage] = useState<SnippetLanguage>("curl");
   const runDisabled = execution.state === "running" || requiresApiKey;
+  const createKeyHref = requiresApiKey ? createApiKeyHref : undefined;
   useRunShortcut(onRun, runDisabled);
   const hasRun = execution.state === "done" || execution.state === "error";
 
@@ -528,6 +610,7 @@ export function ApiPlaygroundRefreshLayout({
         execution={execution}
         runDisabled={runDisabled}
         onRun={onRun}
+        createApiKeyHref={createKeyHref}
       />
 
       <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-meta text-secondary">
@@ -548,7 +631,8 @@ export function ApiPlaygroundRefreshLayout({
           </>
         ) : null}
       </div>
-      {requiresApiKey ? (
+      {/* Someone who cannot make a key is told why Run waits; the others get the button. */}
+      {requiresApiKey && !createKeyHref ? (
         <p className="mt-2 text-meta text-tertiary">
           {t("Shared.SharedComponents.apiKeyRequired")}
         </p>
@@ -589,20 +673,31 @@ export function ApiPlaygroundRefreshLayout({
               {t("Shared.SharedComponents.reset")}
             </button>
           </div>
-          <Tabs
-            bordered={false}
-            value={view}
-            onValueChange={(value) => setView(value as RequestView)}
-            className="mt-6"
-          >
-            <TabList className={TAB_LIST_CLASS}>
-              {REQUEST_VIEWS.map((entry) => (
-                <Tab key={entry.value} value={entry.value}>
-                  {t(entry.labelKey)}
-                </Tab>
-              ))}
-            </TabList>
-          </Tabs>
+          <div className="mt-6 flex items-center justify-between gap-3">
+            <Tabs
+              bordered={false}
+              value={view}
+              onValueChange={(value) => setView(value as RequestView)}
+              className="shrink-0"
+            >
+              <TabList className={TAB_LIST_CLASS}>
+                {REQUEST_VIEWS.map((entry) => (
+                  <Tab key={entry.value} value={entry.value}>
+                    {t(entry.labelKey)}
+                  </Tab>
+                ))}
+              </TabList>
+            </Tabs>
+            {view === "code" ? (
+              <SnippetControls
+                language={language}
+                onLanguageChange={setLanguage}
+                snippet={snippets[language]}
+                onCopy={onCopy}
+                copied={copiedAction === "code"}
+              />
+            ) : null}
+          </div>
 
           <div className="mt-10">
             {view === "form" ? (
@@ -626,7 +721,7 @@ export function ApiPlaygroundRefreshLayout({
             ) : null}
             {view === "code" ? (
               <CodeView
-                codeSnippet={codeSnippet}
+                snippet={snippets[language]}
                 aiInstructions={aiInstructions}
                 onCopy={onCopy}
                 copiedAction={copiedAction}
@@ -666,7 +761,9 @@ export function ApiPlaygroundRefreshLayout({
           <div className="mt-4">
             {responseView === "body" ? (
               hasRun ? (
-                <CodeBody content={responseBody} language="json" />
+                <div data-testid="api-playground-code">
+                  <PlainCode content={responseBody} />
+                </div>
               ) : (
                 // The example reads as a placeholder: one quiet tone, no highlighting.
                 <div data-testid="api-playground-code">

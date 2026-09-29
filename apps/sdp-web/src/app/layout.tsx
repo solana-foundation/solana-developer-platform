@@ -10,9 +10,8 @@ import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 import Script from "next/script";
 
-// The refresh design's faces, from the design-tokens package so a Storybook loads the same
-// files. tokens.css reads the two variables inside [data-sdp-theme="refresh"]; the base design
-// keeps its stack, so loading them here changes nothing outside a refresh surface.
+// The app's faces, from the design-tokens package so a Storybook loads the same files.
+// tokens.css points --font-sans and --font-mono at the two variables on :root.
 const seasonSans = localFont({
   src: [
     {

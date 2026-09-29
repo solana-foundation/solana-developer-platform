@@ -21,6 +21,7 @@ import {
   VenetianMaskIcon,
   WalletIcon,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type { useTranslations } from "@/i18n/provider";
 import {
   DASHBOARD_INTEGRATIONS_SUBNAV_HREFS,
@@ -35,6 +36,8 @@ export type SubNavItem = {
   href: string;
   /** Optional so nav groups that have not been given icons keep rendering unchanged. */
   icon?: LucideIcon;
+  /** Artwork drawn in place of an icon and kept on the refresh sidebar (a pinned wallet's logo). */
+  leading?: ReactNode;
   disabled?: boolean;
 };
 
@@ -57,12 +60,14 @@ export type NavSection = {
 /**
  * Collapsible sidebar groups. Every group behaves identically: chevron
  * toggle, open state persisted per group, and open-by-default when the
- * current route lives under `pathPrefix`.
+ * current route lives under `pathPrefix`. Wallets lists the pinned wallets,
+ * which are there to be reached from anywhere, so it starts open everywhere.
  */
 export const DASHBOARD_SUBNAV_GROUPS = {
-  integrations: { pathPrefix: "/dashboard/integrations" },
-  payments: { pathPrefix: "/dashboard/payments" },
-  markets: { pathPrefix: "/dashboard/markets" },
+  wallets: { pathPrefix: "/dashboard/wallets", defaultOpen: true },
+  integrations: { pathPrefix: "/dashboard/integrations", defaultOpen: false },
+  payments: { pathPrefix: "/dashboard/payments", defaultOpen: false },
+  markets: { pathPrefix: "/dashboard/markets", defaultOpen: false },
 } as const;
 
 export type DashboardSubnavKey = keyof typeof DASHBOARD_SUBNAV_GROUPS;
@@ -249,6 +254,8 @@ export function getNavSections(
     pendingApprovalCount: number | null;
     policiesEnabled: boolean;
     privateChannelsEnabled: boolean;
+    /** Wallets pinned from the Wallets page, listed under Wallets in the order they were pinned. */
+    walletFavorites?: SubNavItem[];
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
@@ -269,6 +276,9 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.wallets"),
                 href: DASHBOARD_SIDE_NAV_HREFS.wallets,
                 icon: WalletIcon,
+                ...(options.walletFavorites && options.walletFavorites.length > 0
+                  ? { children: options.walletFavorites, subnavKey: "wallets" as const }
+                  : {}),
               },
             ]
           : []),
