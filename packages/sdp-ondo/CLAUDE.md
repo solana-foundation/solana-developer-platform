@@ -101,6 +101,13 @@ state, six-decimal scale and u64 bounds. A malformed account fails the whole
 read, never reports a partial balance. Rent detection checks the exact ATA.
 Quotes use Metis only, matching the API's `/build` execution path.
 
+These checks protect owner USDC/USDY amounts and movement accounting without
+changing signer authority: custody stays tenant-scoped and external owners sign
+the exact built message. Malformed responses fail closed, but plausible false
+RPC data can still misstate holdings or settlement. Jupiter/program compromise
+or issuer action can lose or freeze funds; an output floor limits slippage, not
+those risks. Missing transaction history is not independent proof of absence.
+
 Rent: deposits fund the USDY ATA from the owner (Jupiter's setup
 creates charge the taker), so a foreign `rentPayer` is refused; exits close
 nothing, so `rentRefundTo` is accepted and unused.
