@@ -1,7 +1,7 @@
 # Hastra PRIME engineering inventory
 
 Hastra is the Solana wrapper/operator layer; Figure supplies the underlying
-YLDS and Democratized Prime HELOC exposure. SDP fronts exactly one strategy:
+YLDS and Democratized Prime home equity pool exposure. SDP fronts exactly one strategy:
 PRIME funded with mainnet USDC through wYLDS. The provider is registered but
 remains deliberately unsurfaced until its production release review and live
 end-to-end checks are complete. SDP's default USDC exit is Hastra's at-par
@@ -12,6 +12,10 @@ This inventory follows Hastra's public Solana integration guide and the exact
 [`v0.0.6` source revision](https://github.com/provenance-io/hastra-sol-vault/tree/121e4cc600b976a97faa018359e00bda48113ec2).
 Where prose and program differ, the pinned program source is authoritative.
 Mutable operator and security-review claims were last checked 2026-09-22.
+Figure calls the underlying pool its home equity pool as of 2026-09-29.
+Hastra's fee article still says "HELOC+" and no public source lists the
+pool's loan types, so the catalogue names no collateral beyond home equity
+until Figure confirms the composition in writing.
 
 ## Pinned mainnet deployment
 
