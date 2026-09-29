@@ -16,7 +16,8 @@ price accrues Treasury yield. So:
 
 - **Deposit** = Jupiter-routed ExactIn swap USDC→USDY, signed by the owner.
 - **Position** = the owner's USDY token balance. Share mint == the instrument.
-- **Exit** = the reverse swap. Always open, no lock (`liquidityTerm: instant`).
+- **Exit** = the reverse swap (`liquidityTerm: instant`), subject to liquidity
+  and an unfrozen owner ATA. Auxiliary accounts need consolidation first.
 - **Exchange rate** = the live market price, which is why BOTH builders require
   an explicit slippage floor and both quote capabilities exist to derive one.
 
@@ -67,6 +68,9 @@ What this package adds on top of an admitted leg is exactly one instruction it
 builds itself: the `SetComputeUnitLimit` (`ONDO_SWAP_COMPUTE_UNIT_LIMIT`)
 prepended to every plan, because a Jupiter route routinely exceeds the default
 budget and this builder has no simulation seam to derive a tighter one.
+When the API composes a swap-funded deposit, `withComputeUnitLimit` replaces
+provider limits with one limit for the complete plan. Appending a second
+`SetComputeUnitLimit` makes the transaction invalid.
 
 ## The floor is proven, not encoded
 
