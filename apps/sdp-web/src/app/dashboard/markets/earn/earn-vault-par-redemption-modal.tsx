@@ -67,11 +67,15 @@ type FormStep = "details" | "review";
 /** Copy that names what the request redeems, chosen once per source. */
 const PAR_SOURCE_COPY: Record<
   EarnVaultParRedemptionSource,
-  Record<"detailsBody" | "operatorNotice" | "reviewNotice" | "title" | "unit", MessageKey>
+  Record<
+    "detailsBody" | "operatorNotice" | "reviewBody" | "reviewNotice" | "title" | "unit",
+    MessageKey
+  >
 > = {
   shares: {
     detailsBody: "DashboardEarn.parRedemption.detailsBody",
     operatorNotice: "DashboardEarn.parRedemption.operatorNotice",
+    reviewBody: "DashboardEarn.parRedemption.reviewBody",
     reviewNotice: "DashboardEarn.parRedemption.reviewNotice",
     title: "DashboardEarn.parRedemption.title",
     unit: "DashboardEarn.parRedemption.shareUnit",
@@ -79,6 +83,7 @@ const PAR_SOURCE_COPY: Record<
   intermediate: {
     detailsBody: "DashboardEarn.parRedemption.detailsBodyIntermediate",
     operatorNotice: "DashboardEarn.parRedemption.operatorNoticeIntermediate",
+    reviewBody: "DashboardEarn.parRedemption.reviewBodyIntermediate",
     reviewNotice: "DashboardEarn.parRedemption.reviewNoticeIntermediate",
     title: "DashboardEarn.parRedemption.titleIntermediate",
     unit: "DashboardEarn.parRedemption.intermediateUnit",
@@ -373,12 +378,14 @@ function ParRedemptionResult({
   environment,
   onClose,
   onSettled,
+  source,
   submitted,
   terms,
 }: {
   environment: SdpEnvironment;
   onClose: () => void;
   onSettled?: (request: EarnVaultWithdrawalRequestRecord) => void;
+  source: EarnVaultParRedemptionSource;
   submitted: EarnVaultWithdrawalRequestRecord;
   terms: EarnVaultParRedemptionTerms;
 }) {
@@ -413,7 +420,7 @@ function ParRedemptionResult({
       ) : null}
       {!presentation.terminal ? (
         <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
-          <p>{t("DashboardEarn.parRedemption.operatorNotice")}</p>
+          <p>{t(PAR_SOURCE_COPY[source].operatorNotice)}</p>
           <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
         </div>
       ) : null}
@@ -566,7 +573,7 @@ function ParRedemptionReview({
     compareUnsignedDecimals(preview.assets, HASTRA_OPERATOR_BATCH_MINIMUM_USDC) === -1;
   return (
     <>
-      <p className="mt-1 text-sm text-secondary">{t("DashboardEarn.parRedemption.reviewBody")}</p>
+      <p className="mt-1 text-sm text-secondary">{t(PAR_SOURCE_COPY[source].reviewBody)}</p>
       {loading ? (
         <div className="mt-5 flex items-center gap-2 text-sm text-secondary" role="status">
           <Loader2Icon aria-hidden="true" className="size-4 animate-spin" />
@@ -782,6 +789,7 @@ export function EarnVaultParRedemptionModal({
               environment={environment}
               onClose={onClose}
               onSettled={onSettled}
+              source={source}
               submitted={outcome.withdrawalRequest}
               terms={terms}
             />

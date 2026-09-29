@@ -246,8 +246,15 @@ describe("EarnVaultParRedemptionModal", () => {
       expect(mocks.fetchPreview).toHaveBeenCalledWith(held, expect.any(AbortSignal))
     );
     expect(await screen.findByText(/the wYLDS then stays in your wallet/)).toBeTruthy();
+    expect(
+      screen.getByText("Review the expected par settlement before anything moves.")
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
     await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledWith(held, IDEMPOTENCY_KEY));
+
+    expect(await screen.findByText("Awaiting operator")).toBeTruthy();
+    expect(screen.getByText(/delegates the wYLDS to Hastra's redeem authority/)).toBeTruthy();
+    expect(screen.queryByText(/burns PRIME into wYLDS/)).toBeNull();
   });
 
   it("allows a pending par request to be cancelled before operator settlement", async () => {

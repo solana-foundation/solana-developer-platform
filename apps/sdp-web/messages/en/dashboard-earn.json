@@ -939,6 +939,7 @@
       "batchMinimumNotice": "Hastra currently documents a $2,000 operator/CCTP batching minimum. This is an off-chain policy, not an on-chain program check.",
       "belowBatchMinimum": "This is below Hastra's documented $2,000 operator batch minimum and may remain pending indefinitely.",
       "reviewBody": "Review the on-chain conversion and expected par settlement before anything moves.",
+      "reviewBodyIntermediate": "Review the expected par settlement before anything moves.",
       "previewLoading": "Updating the par-redemption quote…",
       "previewError": "We couldn't check the par-redemption quote. Try again.",
       "previewBlocked": "This redemption isn't available:",
