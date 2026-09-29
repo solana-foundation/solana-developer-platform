@@ -78,6 +78,7 @@ export const designTokens: readonly DesignToken[] = [
   token("--surface", "surface", "App shell background.", "bg-surface"),
   token("--surface-sunken", "surface", "Inset wells and inputs on the shell.", "bg-surface-sunken"),
   token("--surface-raised", "surface", "Content card and popovers.", "bg-surface-raised"),
+  token("--surface-tile", "surface", "Tiles and grouped lists on the page.", "bg-surface-tile"),
 
   token("--emph-xh", "text", "Headings, values, primary text.", "text-primary"),
   token("--emph-m", "text", "Secondary text and icons.", "text-secondary"),
@@ -120,6 +121,11 @@ export const designTokens: readonly DesignToken[] = [
   token("--paper", "refresh-surface", "Refresh: the page ground."),
   token("--paper-side", "refresh-surface", "Refresh: the sidebar ground, a step off the page."),
   token("--paper-card", "refresh-surface", "Refresh: cards, popovers and wells on the page."),
+  token(
+    "--paper-tile",
+    "refresh-surface",
+    "Refresh: tiles and grouped lists, the sidebar paper in light and a step above the card in dark."
+  ),
   token(
     "--chip",
     "refresh-surface",

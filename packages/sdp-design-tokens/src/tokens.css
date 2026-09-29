@@ -24,6 +24,7 @@
   --surface: #e9e7de;
   --surface-sunken: #f0ede6;
   --surface-raised: #fcfcfa;
+  --surface-tile: #e9e7de;
 
   --emph-xh: #1c1c1d;
   --emph-m: rgba(28, 28, 29, 0.72);
@@ -68,6 +69,7 @@
   --surface: #1c1c1d;
   --surface-sunken: color-mix(in oklab, #1c1c1d 94%, #fcfcfa);
   --surface-raised: color-mix(in oklab, #1c1c1d 87%, #fcfcfa);
+  --surface-tile: color-mix(in oklab, #1c1c1d 82%, #fcfcfa);
 
   --emph-xh: #fcfcfa;
   --emph-m: rgba(252, 252, 250, 0.84);
@@ -117,6 +119,9 @@
   --paper: oklch(98.56% 0.0017 67.8);
   --paper-side: oklch(96.41% 0.0041 91.45);
   --paper-card: oklch(100% 0 0);
+  /* Tiles and grouped lists set on the page (a record's state band, a provider list): the
+     sidebar's paper in light, a step above the card in dark. */
+  --paper-tile: oklch(96.41% 0.0041 91.45);
 
   --ink: oklch(17.03% 0.0083 285.49);
   --ink-secondary: oklch(40.73% 0.0167 294.82);
@@ -164,6 +169,7 @@
   --paper: oklch(13.54% 0.0047 285.76);
   --paper-side: oklch(11.56% 0.0032 285.88);
   --paper-card: oklch(16.52% 0.0062 285.7);
+  --paper-tile: oklch(18.86% 0.008 285.6);
 
   --ink: oklch(98.56% 0.0017 67.8);
   --ink-secondary: oklch(76.48% 0.0202 298.96);
@@ -201,6 +207,7 @@
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);
+  --surface-tile: var(--paper-tile);
 
   --emph-xh: var(--ink);
   --emph-m: var(--ink-secondary);

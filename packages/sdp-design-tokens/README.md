@@ -21,8 +21,8 @@ read the same files without Tailwind.
    `--emph-*`, `--t4`/`--t8`/`--t12`, `--border-*`, the status hues, and the base font stacks
    `--font-sans` and `--font-mono`.
 2. **Refresh palette.** The 2026 Payments design, light and dark, taken verbatim from the
-   design's own stylesheet: the three papers (`--paper` for the page, `--paper-side` for the
-   sidebar, `--paper-card`), an ink scale (`--ink*`), washes and rules as ink at an alpha,
+   design's own stylesheet: the papers (`--paper` for the page, `--paper-side` for the
+   sidebar, `--paper-card`, and `--paper-tile` for tiles and grouped lists), an ink scale (`--ink*`), washes and rules as ink at an alpha,
    the status hues (`--positive`, `--progress`, `--attention`, `--critical`), the segmented
    chip, and the brand faces (`--font-brand-sans`, `--font-brand-mono`). It sits next to the
    base palette so the two can be documented side by side.

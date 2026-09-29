@@ -26,6 +26,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
+  --color-surface-tile: var(--surface-tile);
 
   --color-fill-subtle: var(--t4);
   --color-fill: var(--t8);

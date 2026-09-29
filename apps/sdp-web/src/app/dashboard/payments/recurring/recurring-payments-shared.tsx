@@ -8,30 +8,10 @@ import {
   type PaymentsDashboardWallet,
   WELL_KNOWN_TOKEN_BY_MINT,
 } from "@sdp/types";
-import { CopyIcon, ExternalLinkIcon } from "lucide-react";
-import type { ReactNode } from "react";
-import { toast } from "sonner";
 import { z } from "zod";
-import { Badge, type BadgeVariant } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { useTranslations } from "@/i18n/provider";
-import { explorerAddressUrl, explorerTxUrl } from "@/lib/explorer";
-import { useSolanaCluster } from "@/lib/use-solana-cluster";
-import { formatTimestamp, shortenAddress } from "../payments-overview.utils";
+import { shortenAddress } from "../payments-overview.utils";
 import { ONCHAIN_AMOUNT_PATTERN } from "../ramps/schema";
-
-export const STATUS_VARIANTS = {
-  pending_activation: "warning",
-  activating: "warning",
-  active: "success",
-  updating: "warning",
-  canceling: "warning",
-  resuming: "warning",
-  paused: "info",
-  canceled: "danger",
-  expired: "danger",
-} as const satisfies Record<PaymentRecurringPaymentStatus, BadgeVariant>;
 
 export const STATUS_TRANSLATION_KEYS = {
   pending_activation: "DashboardPayments.recurring.pendingActivation",
@@ -52,16 +32,7 @@ export interface RecurringPaymentCounterpartyView {
   displayName: string;
 }
 
-export function RecurringPaymentStatusBadge({ status }: { status: PaymentRecurringPaymentStatus }) {
-  const t = useTranslations();
-  return <Badge variant={STATUS_VARIANTS[status]}>{t(STATUS_TRANSLATION_KEYS[status])}</Badge>;
-}
-
 export type Translate = (key: MessageKey, values?: TranslationValues) => string;
-
-export function formatOptionalTimestamp(value: string | null | undefined, t: Translate): string {
-  return value ? formatTimestamp(value, t) : t("DashboardPayments.recurring.notSet");
-}
 
 export function formatPeriodHours(periodHours: number, t: Translate): string {
   if (periodHours === 24) {
@@ -141,93 +112,6 @@ export function resolveTokenLabel(token: string, wallets: RecurringPaymentWallet
   }
 
   return token.length <= 12 ? token : shortenAddress(token);
-}
-
-export function DetailRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex min-h-12 items-center justify-between gap-4 py-3">
-      <span className="shrink-0 text-sm text-secondary">{label}</span>
-      <span className="min-w-0 break-all text-right text-sm font-medium text-primary">
-        {children}
-      </span>
-    </div>
-  );
-}
-
-export function CopyableValue({
-  value,
-  label,
-  empty,
-}: {
-  value: string | null;
-  label?: string;
-  empty?: string;
-}) {
-  const t = useTranslations();
-  if (!value) {
-    return (
-      <span className="text-tertiary">
-        {empty === undefined ? t("DashboardPayments.recurring.notSet") : empty}
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex max-w-full items-center justify-end gap-2">
-      <span
-        className="min-w-0 truncate font-mono text-xs text-primary"
-        title={label === undefined ? value : label}
-      >
-        {label === undefined ? value : label}
-      </span>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={t("DashboardPayments.recurring.copyValue")}
-        onClick={() => {
-          void navigator.clipboard.writeText(value);
-          toast.success(t("DashboardPayments.recurring.copied"));
-        }}
-      >
-        <CopyIcon />
-      </Button>
-    </span>
-  );
-}
-
-export function ExplorerValue({ value, kind }: { value: string | null; kind: "tx" | "address" }) {
-  const t = useTranslations();
-  const cluster = useSolanaCluster();
-  if (!value) {
-    return <span className="text-tertiary">{t("DashboardPayments.recurring.notSet")}</span>;
-  }
-
-  return (
-    <span className="inline-flex max-w-full items-center gap-1.5">
-      <CopyableValue value={value} label={shortenAddress(value)} />
-      <Button
-        asChild
-        variant="ghost"
-        size="icon-xs"
-        aria-label={
-          kind === "address"
-            ? t("DashboardPayments.recurring.openAccount")
-            : t("DashboardPayments.recurring.openSignature")
-        }
-      >
-        <a
-          href={
-            kind === "address" ? explorerAddressUrl(value, cluster) : explorerTxUrl(value, cluster)
-          }
-          target="_blank"
-          rel="noreferrer"
-        >
-          <ExternalLinkIcon />
-        </a>
-      </Button>
-    </span>
-  );
 }
 
 export function walletLabel(
