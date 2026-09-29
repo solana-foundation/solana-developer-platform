@@ -15,6 +15,7 @@ import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-select
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
+import { loadQuickStartStatus } from "@/lib/quick-start-server.redesign";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
 
 async function loadProjects(): Promise<Project[] | null> {
@@ -45,11 +46,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [loadedProjects, cookieStore, initialQuickStartStep] = await Promise.all([
-    loadProjects(),
-    cookies(),
-    loadQuickStartStep(),
-  ]);
+  // Each design has its own quick start; only the one on screen is read.
+  const [loadedProjects, cookieStore, initialQuickStartStatus, initialQuickStartStep] =
+    await Promise.all([
+      loadProjects(),
+      cookies(),
+      flags.newDesign ? loadQuickStartStatus() : null,
+      flags.newDesign ? null : loadQuickStartStep(),
+    ]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
@@ -61,6 +65,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       key={getDashboardCacheScopeKey(dashboardCacheScope)}
       scopeRefreshFallback={<DashboardScopeLoadingScreen />}
       dashboardAccess={dashboardAccess}
+      initialQuickStartStatus={initialQuickStartStatus}
       initialQuickStartStep={initialQuickStartStep}
       flags={flags}
       serverDashboardCacheScope={dashboardCacheScope}

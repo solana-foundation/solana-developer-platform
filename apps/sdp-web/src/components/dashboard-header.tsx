@@ -1328,24 +1328,32 @@ export function getDashboardPageConfig(
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
-    // Home names itself: the sidebar marks it active and the page opens on a
-    // balance. A 36px "Home" above that spent a slice of the viewport saying
-    // nothing, so the workspace renders an sr-only heading instead.
-    return {
-      title: t("Shared.dashboardShell.home"),
-      hideTitle: true,
-      contentWidthClass: "max-w-none",
-    };
+    // NEW DESIGN's Overview is built on the refresh design: a left title over the same 900px
+    // column as the Payments pages. The previous design's Home names itself: the sidebar marks
+    // it active and the page opens on a balance, so the workspace renders an sr-only heading.
+    return newDesign
+      ? {
+          title: t("Shared.dashboardShell.newDesign.home"),
+          titlePosition: "left",
+          contentWidthClass: REFRESH_PAGE_WIDTH,
+        }
+      : {
+          title: t("Shared.dashboardShell.home"),
+          hideTitle: true,
+          contentWidthClass: "max-w-none",
+        };
   }
   if (pathname === "/dashboard/tokens") {
-    // Reached from the home allocation card, so it carries a way back rather than
+    // Reached from the Overview's holdings, so it carries a way back rather than
     // relying on the sidebar, which does not list it.
     return {
       title: t("Shared.dashboardShell.holdings"),
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard",
-        label: t("Shared.dashboardShell.backToHome"),
+        label: newDesign
+          ? t("Shared.dashboardShell.newDesign.backToHome")
+          : t("Shared.dashboardShell.backToHome"),
       },
     };
   }
@@ -1459,5 +1467,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
   }
-  return { title: t("Shared.dashboardShell.home") };
+  return {
+    title: newDesign ? t("Shared.dashboardShell.newDesign.home") : t("Shared.dashboardShell.home"),
+  };
 }

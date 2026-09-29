@@ -273,7 +273,10 @@ export function getNavSections(
       title: t("Shared.dashboardShell.create"),
       items: [
         {
-          label: t("Shared.dashboardShell.home"),
+          label:
+            options.newDesign === false
+              ? t("Shared.dashboardShell.home")
+              : t("Shared.dashboardShell.newDesign.home"),
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },

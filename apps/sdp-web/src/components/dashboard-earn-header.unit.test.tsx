@@ -168,7 +168,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/integrations/private-channels/events", "Shared.dashboardShell.privateChannels"],
     ["/dashboard/settings", "Shared.dashboardShell.settings"],
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
-    ["/dashboard/unknown", "Shared.dashboardShell.home"],
+    ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
     expect(getDashboardPageConfig(pathname, t, false, true, true, true, true).title).toBe(title);
   });

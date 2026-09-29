@@ -71,7 +71,17 @@ const identityTranslate = ((key: string) => key) as Parameters<typeof getDashboa
 
 /** What the settled shell puts on its centred content column, per dashboard-shell.tsx. */
 function settledContentWidthClassFor(pathname: string): string {
-  const config = getDashboardPageConfig(pathname, identityTranslate, false, false);
+  // The same previous design the shell above is rendered in.
+  const config = getDashboardPageConfig(
+    pathname,
+    identityTranslate,
+    false,
+    false,
+    undefined,
+    undefined,
+    undefined,
+    false
+  );
   return config.contentWidthClass ?? "max-w-5xl";
 }
 
