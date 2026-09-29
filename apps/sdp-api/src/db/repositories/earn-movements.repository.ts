@@ -355,8 +355,9 @@ export interface EarnMovementsRepository {
    * discrepancies it never looked at), each with whether any of its movements
    * is still unsettled, the ids of its open queued withdrawal requests, and,
    * per intermediate mint, how much its operator redemptions left in the
-   * wallet (`retained`: cancelled) or delegated there (`in_flight`: landed and
-   * still open), in decimal token units. Read-only input to share
+   * wallet (`retained`: cancelled), delegated there (`in_flight`: landed and
+   * still open) or may hold there (`unresolved`: not yet landed, or closed
+   * unidentified), in decimal token units. Read-only input to share
    * reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
@@ -370,7 +371,12 @@ export interface EarnMovementsRepository {
       EarnPositionRow & {
         has_unsettled_movements: boolean;
         open_withdrawal_request_ids: string[];
-        redemption_intermediates: Array<{ mint: string; retained: string; in_flight: string }>;
+        redemption_intermediates: Array<{
+          mint: string;
+          retained: string;
+          in_flight: string;
+          unresolved: string;
+        }>;
       }
     >
   >;
@@ -1400,8 +1406,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // by id so the service can name them beside a claim they may explain.
       // A cancelled operator redemption never recreates the shares it burned:
       // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
-      // open one's delegated intermediate still sits in the wallet. Both
-      // amounts are returned so the service can split one balance by them.
+      // open one's delegated intermediate still sits in the wallet. The
+      // amounts come back per status class so the service can tell which
+      // balance is provably whose.
       const result = await db
         .prepare(
           `SELECT *,
@@ -1425,7 +1432,8 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     SELECT json_agg(json_build_object(
                              'mint', intermediate.intermediate_mint,
                              'retained', intermediate.retained,
-                             'in_flight', intermediate.in_flight
+                             'in_flight', intermediate.in_flight,
+                             'unresolved', intermediate.unresolved
                            ) ORDER BY intermediate.intermediate_mint)
                     FROM (
                       SELECT redemption.intermediate_mint,
@@ -1433,18 +1441,26 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                                FILTER (WHERE redemption.status = 'cancelled'), 0)::text
                                AS retained,
                              COALESCE(SUM(redemption.intermediate_amount::numeric)
-                               FILTER (WHERE redemption.status <> 'cancelled'), 0)::text
-                               AS in_flight
+                               FILTER (WHERE redemption.status IN (
+                                 'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
+                               )), 0)::text
+                               AS in_flight,
+                             -- May or may not hold its intermediate: a
+                             -- 'creating' request can land before the request
+                             -- row advances, and a 'closed_or_unknown' one
+                             -- was either burned or cancelled.
+                             COALESCE(SUM(redemption.intermediate_amount::numeric)
+                               FILTER (WHERE redemption.status IN (
+                                 'creating', 'closed_or_unknown'
+                               )), 0)::text
+                               AS unresolved
                       FROM earn_vault_withdrawal_requests redemption
                       WHERE redemption.position_id = earn_positions.id
                         AND redemption.mechanism = 'operator_redemption'
                         AND redemption.intermediate_mint IS NOT NULL
-                        -- A 'creating' request has not landed and a
-                        -- 'closed_or_unknown' one may have burned its
-                        -- intermediate, so neither provably holds any.
                         AND redemption.status IN (
-                          'cancelled', 'pending', 'fulfillable',
-                          'expired_cancelable', 'cancelling'
+                          'cancelled', 'creating', 'pending', 'fulfillable',
+                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
                         )
                       GROUP BY redemption.intermediate_mint
                     ) intermediate
@@ -1458,7 +1474,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           EarnPositionRow & {
             has_unsettled_movements: boolean;
             open_withdrawal_request_ids: string[];
-            redemption_intermediates: Array<{ mint: string; retained: string; in_flight: string }>;
+            redemption_intermediates: Array<{
+              mint: string;
+              retained: string;
+              in_flight: string;
+              unresolved: string;
+            }>;
           }
         >();
       return result.results ?? [];

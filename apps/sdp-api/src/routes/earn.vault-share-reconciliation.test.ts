@@ -452,6 +452,7 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
             vaultAddress: claim.position.vault_address,
             shareMint: SHARE_MINT_EMPTY,
             label: claim.position.label,
+            ambiguousBacking: false,
             withdrawalRequestIds: [requestId],
           },
         ]);
@@ -556,6 +557,7 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         expect.objectContaining({
           positionId: unrelated.position.id,
           shareMint: SHARE_MINT_RECORDED,
+          ambiguousBacking: false,
         }),
       ]);
       // The intermediate is not a catalogued share mint, so it is never an
@@ -572,7 +574,11 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       const body = (await response.json()) as ReportBody;
 
       expect(body.data.unbackedPositions).toEqual([
-        expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
+        expect.objectContaining({
+          positionId: claim.position.id,
+          shareMint: SHARE_MINT_EMPTY,
+          ambiguousBacking: false,
+        }),
       ]);
     });
 
@@ -587,18 +593,23 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       const body = (await response.json()) as ReportBody;
 
       expect(body.data.unbackedPositions).toEqual([
-        expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
+        expect.objectContaining({
+          positionId: claim.position.id,
+          shareMint: SHARE_MINT_EMPTY,
+          ambiguousBacking: false,
+        }),
       ]);
     });
 
-    // Each claim below retained 1.01 of the same intermediate mint.
+    // Each claim below retained 1.01 of the same intermediate mint. A shared
+    // balance cannot be attributed, so only one covering both backs them.
     it.each([
-      { held: "1010000", unbacked: 1 },
-      { held: "1500000", unbacked: 0 },
-      { held: "2020000", unbacked: 0 },
+      { held: "1010000", ambiguous: 2 },
+      { held: "1500000", ambiguous: 2 },
+      { held: "2020000", ambiguous: 0 },
     ])(
-      "splits one intermediate balance across claims by what each retained ($held atoms held)",
-      async ({ held, unbacked }) => {
+      "backs claims sharing an intermediate only when it covers them all ($held atoms held)",
+      async ({ held, ambiguous }) => {
         const first = await claimAfterOperatorRedemption("cancelled");
         const second = await claimAfterOperatorRedemption("cancelled");
         getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, held)]);
@@ -607,9 +618,10 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         expect(response.status).toBe(200);
         const body = (await response.json()) as ReportBody;
 
-        expect(body.data.unbackedPositions).toHaveLength(unbacked);
+        expect(body.data.unbackedPositions).toHaveLength(ambiguous);
         for (const position of body.data.unbackedPositions) {
           expect([first.position.id, second.position.id]).toContain(position.positionId);
+          expect(position.ambiguousBacking).toBe(true);
         }
       }
     );
@@ -624,41 +636,56 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       const body = (await response.json()) as ReportBody;
 
       expect(body.data.unbackedPositions).toEqual([
-        expect.objectContaining({ positionId: cancelled.position.id }),
+        expect.objectContaining({ positionId: cancelled.position.id, ambiguousBacking: false }),
       ]);
       expect(body.data.queuedWithdrawalPositions).toEqual([
         expect.objectContaining({
           positionId: open.position.id,
           withdrawalRequestIds: [open.requestId],
+          ambiguousBacking: false,
         }),
       ]);
     });
 
-    // Not landed yet, or closed without an identified outcome: neither
-    // provably put its intermediate in the wallet.
+    // Not landed yet, or closed without an identified outcome: either may or
+    // may not hold its intermediate, so the balance cannot be attributed.
     it.each(["creating", "closed_or_unknown"] as const)(
-      "reserves nothing for a %s redemption",
+      "flags backing a %s redemption leaves undecided as ambiguous",
       async (status) => {
-        const unproven = await claimAfterOperatorRedemption(status);
-        await claimAfterOperatorRedemption("cancelled");
+        const unresolved = await claimAfterOperatorRedemption(status);
+        const cancelled = await claimAfterOperatorRedemption("cancelled");
         getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
 
         const response = await getReconciliation();
         expect(response.status).toBe(200);
         const body = (await response.json()) as ReportBody;
 
-        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.unbackedPositions).toEqual([
+          expect.objectContaining({ positionId: cancelled.position.id, ambiguousBacking: true }),
+        ]);
         expect(body.data.queuedWithdrawalPositions).toEqual([
           expect.objectContaining({
-            positionId: unproven.position.id,
-            withdrawalRequestIds: [unproven.requestId],
+            positionId: unresolved.position.id,
+            withdrawalRequestIds: [unresolved.requestId],
           }),
         ]);
       }
     );
 
-    it("keeps a share-backed claim's retained intermediate from backing another claim", async () => {
-      // A partial cancellation: the claim still holds shares and the wYLDS.
+    it("backs a cancelled claim once its balance covers every unresolved amount", async () => {
+      await claimAfterOperatorRedemption("creating");
+      await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([]);
+    });
+
+    it("flags a claim sharing its intermediate with a share-backed claim as ambiguous", async () => {
+      // A partial cancellation: that claim still holds shares and the wYLDS.
       const partial = await createPosition({ shareMint: SHARE_MINT_RECORDED, provider: "hastra" });
       await finalizeMovement(partial.movement.id);
       await seedCustodyWithdrawalRequest({
@@ -677,20 +704,22 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       const body = (await response.json()) as ReportBody;
 
       expect(body.data.unbackedPositions).toEqual([
-        expect.objectContaining({ positionId: cancelled.position.id }),
+        expect.objectContaining({ positionId: cancelled.position.id, ambiguousBacking: true }),
       ]);
     });
 
-    it("backs nothing with an intermediate amount the mint's scale cannot express", async () => {
-      const claim = await claimAfterOperatorRedemption("cancelled", "1.0000001");
-      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+    it("flags backing it cannot compute from an unreadable amount as ambiguous", async () => {
+      // 1.0000001 has more places than the mint's six.
+      await claimAfterOperatorRedemption("pending", "1.0000001");
+      const cancelled = await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
 
       const response = await getReconciliation();
       expect(response.status).toBe(200);
       const body = (await response.json()) as ReportBody;
 
       expect(body.data.unbackedPositions).toEqual([
-        expect.objectContaining({ positionId: claim.position.id }),
+        expect.objectContaining({ positionId: cancelled.position.id, ambiguousBacking: true }),
       ]);
     });
   });
