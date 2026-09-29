@@ -1,21 +1,25 @@
 # Hastra PRIME engineering inventory
 
-Hastra is the Solana wrapper/operator layer; Figure supplies the underlying
-YLDS and Democratized Prime home equity pool exposure. SDP fronts exactly one strategy:
-PRIME funded with mainnet USDC through wYLDS. The provider is registered but
-remains deliberately unsurfaced until its production release review and live
-end-to-end checks are complete. SDP's default USDC exit is Hastra's at-par
-operator redemption. The market-liquidity exit through Jupiter is retained as
-an explicit deployment opt-in, not a fallback SDP selects for the caller.
+Hastra is the Solana wrapper/operator layer; Figure supplies the underlying YLDS
+and the Democratized Prime home equity lending behind it. SDP fronts exactly one
+strategy: PRIME funded with mainnet USDC through wYLDS. The provider is
+registered but remains deliberately unsurfaced until its production release
+review and live end-to-end checks are complete. SDP's default USDC exit is
+Hastra's at-par operator redemption. The market-liquidity exit through Jupiter
+is retained as an explicit deployment opt-in, not a fallback SDP selects for the
+caller.
 
 This inventory follows Hastra's public Solana integration guide and the exact
 [`v0.0.6` source revision](https://github.com/provenance-io/hastra-sol-vault/tree/121e4cc600b976a97faa018359e00bda48113ec2).
 Where prose and program differ, the pinned program source is authoritative.
 Mutable operator and security-review claims were last checked 2026-09-22.
-Figure calls the underlying pool its home equity pool as of 2026-09-29.
-Hastra's fee article still says "HELOC+" and no public source lists the
-pool's loan types, so the catalogue names no collateral beyond home equity
-until Figure confirms the composition in writing.
+The pool's naming was last checked 2026-09-29. Figure's Democratized Prime
+pools page (published 2026-04-01) lists it as "YLDS HELOC", Hastra's PRIME
+explainer describes HELOC lending, and Hastra's fee article prices PRIME off a
+"HELOC+" rate; all three are under Primary references. The catalogue says
+"home equity", which is true of all three and adds no loan type beyond what
+they state. It names specific collateral only once Figure confirms the pool's
+composition in writing.
 
 ## Pinned mainnet deployment
 
@@ -186,4 +190,6 @@ not evidence of STRIDE completion.
 - [Hastra Solana programmatic integration guide](https://help.hastra.io/integration-guides/hastra-sol-programmatic-integration-guide)
 - [`hastra-sol-vault` v0.0.6 source](https://github.com/provenance-io/hastra-sol-vault/tree/121e4cc600b976a97faa018359e00bda48113ec2)
 - [Hastra explanation of the PRIME rate and annual 0.50% fee](https://help.hastra.io/537c06bd5c2e82d398e0014be2ff02b2)
+- [Hastra: What is PRIME (Staked wYLDS)?](https://help.hastra.io/prime/what-is-prime-%28staked-wylds%29)
+- [Figure: Democratized Prime pools](https://www.figure.com/blog/democratized-prime-pools/)
 - [STRIDE framework](https://stride.asymmetric.re/) and its [aggregate first findings](https://stride.asymmetric.re/first-findings)

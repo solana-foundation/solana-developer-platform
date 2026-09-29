@@ -170,8 +170,9 @@ export const EARN_KNOWN_CURATOR_LABELS: Readonly<Record<string, string>> = {
   ondo: "Ondo",
   // Hastra operates the PRIME wrapper and vault programs over Figure's assets.
   hastra: "Hastra",
-  // Hastra PRIME's underlying source, which the deposit flow shows as its backing.
-  "figure-democratized-prime-home-equity": "Figure home equity pool",
+  // Hastra PRIME's backing in the deposit flow. A product name, like every
+  // label here, so it is not translated.
+  "figure-democratized-prime-home-equity": "Figure Democratized Prime",
   aave_v3: "Aave V3",
 };
 

@@ -17,10 +17,11 @@ import { readHastraPrimeMetrics } from "./prime-metrics";
 /**
  * Catalogue half of Hastra PRIME.
  *
- * PRIME is a non-rebasing share token for Figure's Democratized Prime home
- * equity pool. The executable route is USDC -> wYLDS through Hastra `vault-mint`,
- * then wYLDS -> PRIME through `vault-stake`; `@sdp/hastra` owns those
- * instructions while this SDK-free client owns the one admitted strategy.
+ * PRIME is a non-rebasing share token over Figure's Democratized Prime home
+ * equity lending (Figure lists the pool as "YLDS HELOC"; the inventory explains
+ * the broader name). The executable route is USDC -> wYLDS through Hastra
+ * `vault-mint`, then wYLDS -> PRIME through `vault-stake`; `@sdp/hastra` owns
+ * those instructions while this SDK-free client owns the one admitted strategy.
  *
  * The identity is deliberately a single pinned deployment, not a program
  * account census. Hastra's programs can create more vaults, but an arbitrary
