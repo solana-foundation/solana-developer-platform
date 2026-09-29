@@ -24,6 +24,7 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
+  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -842,7 +843,8 @@ type SandboxTransferSimulationInput =
       };
     }
   | {
-      provider: "bvnk";
+      /** BVNK's sandbox, and demo mode's stand-in checkouts for the widget providers. */
+      provider: Exclude<RampProviderId, "lightspark" | "mural">;
       payload: {
         transferId: string;
       };

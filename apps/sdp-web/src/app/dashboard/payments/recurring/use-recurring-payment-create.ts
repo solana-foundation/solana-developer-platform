@@ -15,6 +15,8 @@ import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
 import type { BadgeVariant } from "@/components/ui/badge";
 import type { ComboboxOption } from "@/components/ui/combobox";
 import { useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { isSolBalance, resolveTokenByMint, resolveTotalBalance } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import {
@@ -164,12 +166,13 @@ export function useRecurringPaymentCreate({
   const [destinationAccountDialogOpen, setDestinationAccountDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const demo = usePaymentsDemo();
   const [fields, setFields] = useState<RecurringPaymentCreateFields>({
     counterpartyId: "",
     counterpartyAccountId: "",
     sourceCustodyWalletId: "",
     token: "",
-    amount: "",
+    amount: demo ? DEMO_PREFILL_AMOUNTS.schedule : "",
     schedulePreset: "24",
     customPeriodHours: "",
     firstCollectionAt: "",

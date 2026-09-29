@@ -210,9 +210,10 @@ function MobileNavButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
- * The refresh title block. On a phone it is the design's three rows: the navigation button
- * (with any utilities at the far right), the title 8px under it, then the page's action 12px
- * under that. From md the button goes and the action and utilities sit on the title's row.
+ * The refresh title block. On a phone it is the design's three rows: the navigation button, the
+ * title 8px under it, then the page's action 12px under that. From md the button goes and the
+ * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
+ * of the phone's navigation row, and from md on the title's row, before the action.
  */
 export function StackedDashboardTopBar({
   navigation,
@@ -235,7 +236,7 @@ export function StackedDashboardTopBar({
 }) {
   return (
     <div
-      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_auto]"
+      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_auto] md:gap-x-0"
       data-dashboard-stacked-topbar
     >
       <div className="col-start-1 row-start-1 flex items-center md:hidden">{navigation}</div>
@@ -261,11 +262,18 @@ export function StackedDashboardTopBar({
       {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
           section is the `page` group and the state carries the attribute. */}
       {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-2 md:row-start-1 md:mt-0 md:ml-1">
+        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3">
           {action}
         </div>
       ) : null}
-      <div className="col-start-3 row-start-1 flex items-center justify-end">{trailingContent}</div>
+      {trailingContent ? (
+        // On a phone it shares the navigation button's row; from md it sits on the title's row
+        // before the action. The md columns have no gap, only margins, so a missing or hidden
+        // action leaves no empty gap at the right edge.
+        <div className="col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3">
+          {trailingContent}
+        </div>
+      ) : null}
     </div>
   );
 }

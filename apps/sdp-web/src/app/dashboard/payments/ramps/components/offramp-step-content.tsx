@@ -7,10 +7,12 @@ import { useMemo } from "react";
 import { Combobox } from "@/components/ui/combobox";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OfframpWizard } from "../hooks/use-offramp-wizard";
 import { walletComboboxOptions } from "../wallet-options";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
+import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
@@ -75,6 +77,7 @@ function OfframpManualQuoteStep({
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every offramp stage in one component while each branch stays simple.
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
+  const demo = usePaymentsDemo();
   const {
     currentStepId,
     enabledRampProviders,
@@ -259,6 +262,27 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
 
   if (currentStepId === "COMPLETE" && quote && transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  // A provider's own page or widget can't open on sample data; the demo stands in for it.
+  if (
+    currentStepId === "COMPLETE" &&
+    demo &&
+    quote &&
+    quote.deliveryMode !== "manual_instructions"
+  ) {
+    return (
+      <div className="space-y-6">
+        <DemoProviderCheckout
+          direction="offramp"
+          provider={quote.provider}
+          transfer={transferStatus}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="offramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
   }
 
   if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {

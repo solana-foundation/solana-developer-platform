@@ -2,9 +2,19 @@
   "DashboardPayments": {
     "demo": {
       "label": "Demo",
-      "on": "Demo data",
-      "turnOn": "Fill Payments with demo data to look around. Changes are off while it's on.",
-      "turnOff": "Turn off demo data"
+      "turnOn": "Try Payments with sample data. Nothing you do in demo mode is sent anywhere; it stays in this browser until you reload.",
+      "turnOff": "Turn off demo mode",
+      "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
+      "notice": {
+        "state": "Demo mode",
+        "body": "Sample data for presentation. Every action is simulated."
+      },
+      "checkout": {
+        "title": "{provider} checkout",
+        "onrampBody": "In demo mode, {provider}'s checkout doesn't open. Use Simulate deposit below to see the deposit arrive.",
+        "offrampBody": "In demo mode, {provider}'s page doesn't open. Send the funds with the button below to finish the payout.",
+        "settling": "Payment received. {provider} is delivering the funds to the wallet."
+      }
     },
     "signingUnavailable": "Signing is disabled for this wallet.",
     "restricted": "Restricted",
@@ -171,6 +181,9 @@
       "transferStatus": "Status: {status}",
       "submittingOnchainTransfer": "Submitting on-chain transfer.",
       "simulatingQuoteFunding": "Simulating quote funding.",
+      "simulateDeposit": "Simulate deposit",
+      "simulatingDeposit": "Simulating deposit",
+      "depositSimulated": "Deposit simulated",
       "quoteFundingSimulated": "Quote funding simulated.",
       "quoteSimulationFailed": "Quote simulation failed.",
       "sandboxSimulationFailed": "Sandbox simulation failed.",

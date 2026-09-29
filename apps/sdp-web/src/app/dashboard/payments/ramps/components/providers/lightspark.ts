@@ -1,11 +1,7 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { Loader2Icon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type {
-  LightsparkOnboardingPanelStatus,
-  OnboardingCopy,
-  SimulateActionLabels,
-} from "./index";
+import type { LightsparkOnboardingPanelStatus, OnboardingCopy } from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -26,13 +22,5 @@ export function getLightsparkProvisioningDetail(t: Translate): Record<RampDirect
   return {
     onramp: t("DashboardPayments.lightspark.onrampProvisioningDetail"),
     offramp: t("DashboardPayments.lightspark.offrampProvisioningDetail"),
-  };
-}
-
-export function getLightsparkSimulateLabels(t: Translate): SimulateActionLabels {
-  return {
-    idle: t("DashboardPayments.lightspark.simulateQuote"),
-    busy: t("DashboardPayments.lightspark.simulating"),
-    done: t("DashboardPayments.lightspark.quoteSimulated"),
   };
 }

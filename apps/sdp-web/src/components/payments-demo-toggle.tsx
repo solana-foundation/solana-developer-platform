@@ -1,75 +1,85 @@
 "use client";
 
-import { XIcon } from "lucide-react";
-import { useSyncExternalStore } from "react";
-import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { useSWRConfig } from "swr";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
-import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
-
-const DEMO_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
-// Project ids are URL-safe; anything else is not written into a cookie.
-const COOKIE_SAFE_VALUE = /^[\w-]+$/;
-
-function subscribeToNothing() {
-  return () => {};
-}
-
-function readDemoProjectId(): string | null {
-  const entry = document.cookie
-    .split("; ")
-    .find((part) => part.startsWith(`${PAYMENTS_DEMO_COOKIE_NAME}=`));
-  return entry ? entry.slice(PAYMENTS_DEMO_COOKIE_NAME.length + 1) : null;
-}
+import { setPaymentsDemoAction } from "@/lib/payments-demo/demo-mode-action";
+import {
+  isPaymentsDemoOn,
+  type PaymentsDemoState,
+  paymentsDemoProjectId,
+} from "@/lib/payments-demo/payments-demo-context";
+import { cn } from "@/lib/utils";
 
 /**
- * The Payments header's demo switch. Off, it offers demo data on a sandbox project; on, it names
- * the state and turns it off (shown on any project, so a demo can never get stuck). Switching
- * reloads the page, so no cached real or demo data outlives the change.
+ * The Payments header's demo mode switch, on every Payments screen. It can be turned on on a
+ * sandbox project, and off on any project, so a demo can never get stuck. Switching redraws the
+ * page in place, no reload: every cached read is dropped and fetched again, the server parts are
+ * drawn again, and the shell remounts the page (see dashboard-shell.tsx), so no real or demo
+ * data, and nothing done in the demo, outlives the change.
  */
-export function PaymentsDemoToggle() {
+export function PaymentsDemoToggle(state: PaymentsDemoState) {
   const t = useTranslations();
+  const router = useRouter();
+  const { mutate } = useSWRConfig();
   const { selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
-  const demoProjectId = useSyncExternalStore(subscribeToNothing, readDemoProjectId, () => null);
-  if (!selectedProjectId || !COOKIE_SAFE_VALUE.test(selectedProjectId)) {
+  const [pending, startTransition] = useTransition();
+  const [target, setTarget] = useState<boolean | null>(null);
+  if (!paymentsDemoProjectId(state, selectedProjectId)) {
     return null;
   }
-  const on = demoProjectId === selectedProjectId;
-  if (!on && sdpEnvironment !== "sandbox") {
-    return null;
-  }
+  const on = isPaymentsDemoOn(state, selectedProjectId);
+  // The switch shows where it is going until the page has been drawn in the new mode.
+  const checked = pending && target !== null ? target : on;
+  const productionOnly = !on && sdpEnvironment === "production";
 
-  const toggle = () => {
-    // biome-ignore lint/suspicious/noDocumentCookie: The server reads the demo choice on the next request.
-    document.cookie = on
-      ? `${PAYMENTS_DEMO_COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax; Secure`
-      : `${PAYMENTS_DEMO_COOKIE_NAME}=${selectedProjectId}; Path=/; Max-Age=${DEMO_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax; Secure`;
-    window.location.reload();
+  const change = (next: boolean) => {
+    setTarget(next);
+    startTransition(async () => {
+      try {
+        if (await setPaymentsDemoAction(next, selectedProjectId)) {
+          await mutate(() => true, undefined, { revalidate: true });
+          router.refresh();
+        }
+      } catch {
+        // The switch goes back to where it was.
+      }
+    });
   };
 
-  if (on) {
-    return (
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={t("DashboardPayments.demo.turnOff")}
-        title={t("DashboardPayments.demo.turnOff")}
-        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-info-bg px-3 text-meta font-medium whitespace-nowrap text-info transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none"
-      >
-        {t("DashboardPayments.demo.on")}
-        <XIcon aria-hidden="true" className="size-3.5" />
-      </button>
-    );
-  }
+  // One control, its label inside the track: the knob sits at the start when off and slides
+  // to the end when on, the word taking the space it leaves.
   return (
-    <Button
+    <button
       type="button"
-      variant="ghost"
-      size="sm"
-      onClick={toggle}
-      title={t("DashboardPayments.demo.turnOn")}
+      role="switch"
+      aria-checked={checked}
+      title={t(
+        productionOnly
+          ? "DashboardPayments.demo.sandboxOnly"
+          : on
+            ? "DashboardPayments.demo.turnOff"
+            : "DashboardPayments.demo.turnOn"
+      )}
+      disabled={pending || productionOnly}
+      onClick={() => change(!checked)}
+      className={cn(
+        "relative inline-flex h-8 w-21 shrink-0 items-center rounded-full text-meta font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
+        checked
+          ? "bg-info-bg pr-8 pl-3 text-info"
+          : "bg-fill-subtle pr-3 pl-8 text-secondary hover:text-primary"
+      )}
     >
-      {t("DashboardPayments.demo.label")}
-    </Button>
+      <span
+        aria-hidden="true"
+        className={cn(
+          "absolute top-1 left-1 size-6 rounded-full transition-transform motion-reduce:transition-none",
+          checked ? "translate-x-13 bg-info" : "translate-x-0 bg-border-strong"
+        )}
+      />
+      <span className="w-full text-center">{t("DashboardPayments.demo.label")}</span>
+    </button>
   );
 }

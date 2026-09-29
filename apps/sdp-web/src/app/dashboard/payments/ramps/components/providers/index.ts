@@ -2,17 +2,9 @@ import type { RampProviderId } from "@sdp/types";
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import type { LucideIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import { getBvnkOnboardingCopy, getBvnkProvisioningDetail, getBvnkSimulateLabels } from "./bvnk";
-import {
-  getLightsparkOnboardingCopy,
-  getLightsparkProvisioningDetail,
-  getLightsparkSimulateLabels,
-} from "./lightspark";
-import {
-  getMuralOnboardingCopy,
-  getMuralProvisioningDetail,
-  getMuralSimulateLabels,
-} from "./mural";
+import { getBvnkOnboardingCopy, getBvnkProvisioningDetail } from "./bvnk";
+import { getLightsparkOnboardingCopy, getLightsparkProvisioningDetail } from "./lightspark";
+import { getMuralOnboardingCopy, getMuralProvisioningDetail } from "./mural";
 
 export interface OnboardingCopy {
   title: string;
@@ -120,12 +112,6 @@ export function isOnboardingPanelStatus(
   }
 }
 
-export interface SimulateActionLabels {
-  idle: string;
-  busy: string;
-  done: string;
-}
-
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 /**
@@ -158,23 +144,6 @@ export function onboardingCopy(
   }
   const exhaustive: never = onboarding;
   throw new Error(`No onboarding copy for ramp provider: ${String(exhaustive)}`);
-}
-
-/** Sandbox simulate-action labels for providers that support the simulate flow; null otherwise (caller hides the action). */
-export function simulateActionLabels(
-  provider: RampProviderId,
-  t: Translate
-): SimulateActionLabels | null {
-  switch (provider) {
-    case "bvnk":
-      return getBvnkSimulateLabels(t);
-    case "lightspark":
-      return getLightsparkSimulateLabels(t);
-    case "mural":
-      return getMuralSimulateLabels(t);
-    default:
-      return null;
-  }
 }
 
 /** One-line "what we're setting up under the hood" — varies by provider and direction. */

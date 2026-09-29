@@ -602,7 +602,6 @@ describe("Requests", () => {
       initialPaymentRequests: PaymentRequest[];
       total: number;
       initialError: string | undefined;
-      wallets: PaymentsDashboardWallet[];
       counterparties: Counterparty[];
     }>(await PaymentRequestsPage({ searchParams: Promise.resolve({}) }));
     expect(props.initialError).toBeUndefined();
@@ -611,7 +610,9 @@ describe("Requests", () => {
     expect(new Set(props.initialPaymentRequests.map((request) => request.status))).toEqual(
       new Set(["awaiting_payment", "paid", "expired", "canceled"])
     );
-    const walletIds = props.wallets.map((wallet) => wallet.walletId);
+    const walletIds = demoData<{ wallets: PaymentsDashboardWallet[] }>("/v1/wallets").wallets.map(
+      (wallet) => wallet.walletId
+    );
     const contactIds = props.counterparties.map((contact) => contact.id);
     for (const request of props.initialPaymentRequests) {
       expect(walletIds).toContain(request.walletId);
@@ -658,7 +659,6 @@ describe("Schedules", () => {
         wallet: PaymentsDashboardWallet | null;
         counterpartyAccounts: CounterpartyAccount[];
         counterpartyLabel: string;
-        amountLabel: string;
         collectionAttempts: PaymentSubscriptionCollectionAttempt[];
         collectionAttemptsTotal: number;
         collectionAttemptsError: string | undefined;
@@ -673,7 +673,7 @@ describe("Schedules", () => {
       expect(props.counterpartyAccounts.map((account) => account.id)).toEqual([
         props.recurringPayment.counterpartyAccountId,
       ]);
-      expect(props.amountLabel).toContain("USDC");
+      expect(WELL_KNOWN_TOKEN_BY_MINT.get(props.recurringPayment.token)?.symbol).toBe("USDC");
       expect(props.collectionAttemptsError).toBeUndefined();
       expect(props.collectionAttemptsTotal).toBe(props.collectionAttempts.length);
       if (status === "pending_activation") {

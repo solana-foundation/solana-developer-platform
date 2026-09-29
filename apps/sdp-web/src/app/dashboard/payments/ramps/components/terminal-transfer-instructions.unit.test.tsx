@@ -150,6 +150,7 @@ function onrampWizard(
     transferStatusLoading: false,
     quoteSimulationLoading: false,
     quoteSimulationSucceeded: false,
+    simulateAvailable: false,
     simulateCurrentQuote: asyncNoop,
     showCompleteScreen:
       transferStatus?.status === "completed" ||
