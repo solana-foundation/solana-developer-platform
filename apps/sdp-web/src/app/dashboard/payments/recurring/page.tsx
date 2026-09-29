@@ -106,4 +106,4 @@ async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProp
   );
 }
 
-export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage);
+export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage, "activity");

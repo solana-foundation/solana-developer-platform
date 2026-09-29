@@ -39,4 +39,4 @@ async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   );
 }
 
-export default withLegacyDesign(RedesignTransactionsPage, TransactionsPage);
+export default withLegacyDesign(RedesignTransactionsPage, TransactionsPage, "activity");

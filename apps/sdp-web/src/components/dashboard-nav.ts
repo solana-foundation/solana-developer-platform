@@ -138,7 +138,7 @@ export function getPaymentsActions(
       icon: FileTextIcon,
     },
     {
-      label: newDesign
+      label: isDesignModuleOn(design, "activity")
         ? t("Shared.dashboardShell.newDesign.recurring")
         : t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,

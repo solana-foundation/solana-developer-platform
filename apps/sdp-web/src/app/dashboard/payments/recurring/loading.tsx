@@ -9,6 +9,7 @@ export function PreviousRecurringPaymentsLoading() {
 export default function RecurringPaymentsLoading() {
   return (
     <DesignSwitch
+      designModule="activity"
       current={<RedesignRecurringPaymentsLoading />}
       legacy={<PreviousRecurringPaymentsLoading />}
     />
