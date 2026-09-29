@@ -4,6 +4,7 @@ import {
   getCryptoRailAssetLabel,
   isMuralSandboxPayinCurrency,
   type PaymentOnrampQuoteRequest,
+  type PaymentRampQuote,
   type PaymentTransferSummary,
 } from "@sdp/types";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
@@ -18,6 +19,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { onrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { getRampTransferState } from "../ramp-transfer-state";
@@ -72,8 +74,32 @@ function getOnrampRequirementsStep(t: Translate): RampWizardStep<OnrampStepId> {
   };
 }
 
+/**
+ * Whether the provider's sandbox can simulate this quote's pay-in: Lightspark's always, BVNK's
+ * once its funding account is ready, Mural's in the currencies its sandbox pays in.
+ */
+function canSimulateQuote(quote: PaymentRampQuote, muralCurrency: boolean): boolean {
+  switch (quote.provider) {
+    case "lightspark":
+      return true;
+    case "bvnk":
+      return (
+        quote.deliveryMode === "manual_instructions" &&
+        quote.paymentInstructions.some(
+          (instruction) =>
+            instruction.kind === "fiat_funding" && instruction.onboardingStatus === "ready"
+        )
+      );
+    case "mural":
+      return muralCurrency;
+    default:
+      return false;
+  }
+}
+
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
+  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteSimulationLoading, setQuoteSimulationLoading] = useState(false);
@@ -161,16 +187,26 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     bvnkSettlementReached ||
     (transferStatus !== undefined && transferStatus.status === "completed");
 
+  // A sandbox deposit can be marked paid: through the provider's own simulation for the
+  // providers that have one, and in demo mode for any provider, the demo standing in for
+  // checkouts that would open elsewhere. It is offered while the deposit waits for its money,
+  // and shows as done until the deposit finishes.
+  const transferOpen =
+    transferStatus !== undefined && !getRampTransferState(transferStatus.status).terminal;
+  const simulateAvailable =
+    wizard.quote !== null &&
+    wizard.quoteTransferId !== null &&
+    transferOpen &&
+    (transferStatus.status === "awaiting_payment" || quoteSimulationSucceeded) &&
+    (demo ||
+      canSimulateQuote(
+        wizard.quote,
+        isMuralSandboxPayinCurrency(wizard.selectedRampPair.fiatCurrency)
+      ));
+
   const simulateCurrentQuote = async () => {
     const quote = wizard.quote;
-    if (
-      quote?.provider !== "lightspark" &&
-      quote?.provider !== "bvnk" &&
-      quote?.provider !== "mural"
-    ) {
-      return;
-    }
-    if (!wizard.selectedWallet || wizard.quoteTransferId === null) {
+    if (!simulateAvailable || !quote || !wizard.selectedWallet || wizard.quoteTransferId === null) {
       return;
     }
 
@@ -211,7 +247,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
       } else {
         await simulateSandboxTransfer(
           {
-            provider: "bvnk",
+            provider: quote.provider,
             payload: { transferId: wizard.quoteTransferId },
           },
           t
@@ -243,6 +279,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     transferStatusLoading,
     quoteSimulationLoading,
     quoteSimulationSucceeded,
+    simulateAvailable,
     simulateCurrentQuote,
     showCompleteScreen,
   };

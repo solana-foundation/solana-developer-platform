@@ -24,6 +24,7 @@ import type {
   RampEventProvider,
   RampFiatCurrency,
   RampProviderEstimateResult,
+  RampProviderId,
   PaymentTransferEnvelope as TransferEnvelope,
   PaymentTransferSummary as TransferRecord,
   PaymentWalletPolicy as WalletPolicy,
@@ -842,7 +843,8 @@ type SandboxTransferSimulationInput =
       };
     }
   | {
-      provider: "bvnk";
+      /** BVNK's sandbox, and demo mode's stand-in checkouts for the widget providers. */
+      provider: Exclude<RampProviderId, "lightspark" | "mural">;
       payload: {
         transferId: string;
       };
@@ -853,6 +855,14 @@ type SandboxTransferSimulationInput =
         counterpartyId: string;
         amount: number;
         fiatCurrency: MuralSandboxPayinCurrency;
+      };
+    }
+  | {
+      /** Demo mode only: BVNK approves the contact's identity check (Simulate verification). */
+      provider: "bvnk";
+      payload: {
+        counterpartyId: string;
+        verification: "approved";
       };
     };
 

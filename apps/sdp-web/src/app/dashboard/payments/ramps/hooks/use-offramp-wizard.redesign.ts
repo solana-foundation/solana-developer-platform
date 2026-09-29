@@ -22,6 +22,7 @@ import {
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { offrampPairs } from "@/lib/ramps";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import { submitOfframpDeposit } from "../offramp-deposit";
@@ -85,6 +86,7 @@ function getOfframpRequirementsStep(t: Translate): RampWizardStep<OfframpStepId>
 
 export function useOfframpWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
+  const demo = usePaymentsDemo();
   const t = useTranslations();
   const locale = useLocale();
   const [quoteExpired, setQuoteExpired] = useState(false);
@@ -212,15 +214,18 @@ export function useOfframpWizard(props: UseRampWizardProps) {
           }
         : null;
     }
+    // Demo mode stands in for MoneyGram's widget too, so its deposit is sent the same way.
+    const reportsDeposit =
+      quote?.deliveryMode === "hosted" || (demo && quote?.deliveryMode === "session_widget");
     if (
-      quote?.deliveryMode === "hosted" &&
+      reportsDeposit &&
       transferStatus?.status === "awaiting_payment" &&
       transferStatus.cryptoDeposit
     ) {
       return transferStatus.cryptoDeposit;
     }
     return null;
-  }, [wizard.quote, wizard.fields.amount, transferStatus]);
+  }, [demo, wizard.quote, wizard.fields.amount, transferStatus]);
 
   const offrampCryptoToken = getCryptoRailAssetLabel(wizard.selectedRampPair.assetRail);
   // The transfers API requires the mint address, not the token symbol.

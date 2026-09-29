@@ -12,6 +12,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
+import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
 import { getSdpAuth, listSdpProjects } from "@/lib/sdp-api";
@@ -68,7 +69,15 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       shouldRepairInitialProjectCookie={projectSelection.shouldRepairCookie}
     >
       <NetworkDebugProvider>
-        <DashboardShell flags={flags}>{children}</DashboardShell>
+        <DashboardShell
+          flags={flags}
+          paymentsDemo={{
+            demoProjectId: cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value ?? null,
+            cookieProjectId,
+          }}
+        >
+          {children}
+        </DashboardShell>
       </NetworkDebugProvider>
     </DashboardWorkspaceProvider>
   );

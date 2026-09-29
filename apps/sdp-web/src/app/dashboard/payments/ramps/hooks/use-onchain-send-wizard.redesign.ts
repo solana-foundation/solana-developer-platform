@@ -18,6 +18,8 @@ import { fetchCounterpartyAccounts } from "@/app/dashboard/payments/payments-wor
 import { sendTransferUnderKey } from "@/app/dashboard/payments/transfer-idempotency";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { DEMO_PREFILL_AMOUNTS } from "@/lib/payments-demo/demo-prefill";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { useZodForm } from "@/lib/use-zod-form";
 import type { WizardSummaryDetail } from "../../wizard-summary-list";
 import {
@@ -241,11 +243,12 @@ export function useOnchainSendWizard({
   const locale = useLocale();
   const steps = getOnchainSendSteps(t);
   const [stepIndex, setStepIndex] = useState(0);
+  const demo = usePaymentsDemo();
   const { values: fields, setField } = useZodForm(onchainSendSchema, {
     accountId: "",
     walletId: "",
     asset: "",
-    amount: "",
+    amount: demo ? DEMO_PREFILL_AMOUNTS.send : "",
     memo: "",
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);

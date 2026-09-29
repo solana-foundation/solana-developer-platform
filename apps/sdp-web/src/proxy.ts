@@ -2,6 +2,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { AUTH_ENTRY_PATH } from "@/lib/auth-entry";
+import { isDemoSessionCookie } from "@/lib/payments-demo/demo-cookie";
 import {
   PROJECT_COOKIE_NAME,
   WORKSPACE_SCOPE_COOKIE_NAME,
@@ -61,6 +62,21 @@ export function rejectCrossSiteWrite(req: NextRequest): NextResponse | null {
   return NextResponse.json({ error: { message: "Cross-origin request refused" } }, { status: 403 });
 }
 
+/**
+ * The demo session's cookies to forget on this request: all of them on a full page load (a
+ * refresh, a new tab, the demo switched on or off), none on the app's own navigations and
+ * fetches. Demo changes live for one page load, as a browser tab's memory would.
+ */
+export function demoSessionCookiesToDrop(req: NextRequest): string[] {
+  if (req.headers.get("sec-fetch-dest") !== "document") {
+    return [];
+  }
+  return req.cookies
+    .getAll()
+    .map((cookie) => cookie.name)
+    .filter(isDemoSessionCookie);
+}
+
 function getUnauthenticatedUrl(req: NextRequest): string {
   const authEntryUrl = new URL(AUTH_ENTRY_PATH, req.url);
   authEntryUrl.searchParams.set("redirect_url", `${req.nextUrl.pathname}${req.nextUrl.search}`);
@@ -105,12 +121,23 @@ export const proxy = clerkMiddleware(async (auth, req) => {
 
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-sdp-pathname", req.nextUrl.pathname);
+  const droppedDemoCookies = demoSessionCookiesToDrop(req);
+  if (droppedDemoCookies.length > 0) {
+    // Filter the raw header, so every other cookie reaches the page byte for byte.
+    const kept = (req.headers.get("cookie") ?? "")
+      .split(";")
+      .filter((pair) => !isDemoSessionCookie(pair.split("=", 1)[0]?.trim() ?? ""));
+    requestHeaders.set("cookie", kept.join(";").trim());
+  }
 
   const response = NextResponse.next({
     request: {
       headers: requestHeaders,
     },
   });
+  for (const name of droppedDemoCookies) {
+    response.cookies.set(name, "", { path: "/", maxAge: 0 });
+  }
   return response;
 });
 

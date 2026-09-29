@@ -17,6 +17,16 @@ import type { RailProps } from "./ramp-action-page.redesign";
 import { getRampTransferState } from "./ramp-transfer-state";
 import { preStepSummaryDetails } from "./wizard-summary";
 
+/**
+ * Whether the footer's primary button simulates the deposit's pay-in: on the provider step of a
+ * sandbox (or demo) deposit still waiting for its money, when no verification is due first.
+ */
+function simulatesDeposit(wizard: OnrampWizard, verificationUrl: string | undefined): boolean {
+  return (
+    wizard.currentStepId === "PROVIDER" && verificationUrl === undefined && wizard.simulateAvailable
+  );
+}
+
 function onrampPrimaryLabel(
   wizard: OnrampWizard,
   verificationPending: boolean,
@@ -24,10 +34,20 @@ function onrampPrimaryLabel(
   t: ReturnType<typeof useTranslations>
 ): string {
   switch (true) {
+    case simulatesDeposit(wizard, verificationUrl):
+      return wizard.quoteSimulationSucceeded
+        ? t("DashboardPayments.ramps.depositSimulated")
+        : wizard.quoteSimulationLoading
+          ? t("DashboardPayments.ramps.simulatingDeposit")
+          : t("DashboardPayments.ramps.simulateDeposit");
     case wizard.hostedQuoteLoading:
       return t("DashboardPayments.processing");
     case verificationPending:
       return t("DashboardPayments.verificationPending");
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return wizard.verificationSimulating
+        ? t("DashboardPayments.demo.verification.simulating")
+        : t("DashboardPayments.demo.verification.simulate");
     case verificationUrl !== undefined:
       return t("DashboardPayments.completeVerification");
     case wizard.currentStepId === "REQUIREMENTS" && wizard.pendingAgreements !== null:
@@ -46,8 +66,12 @@ function onrampPrimaryAction(
   verificationUrl: string | undefined
 ): () => void {
   switch (true) {
+    case verificationUrl !== undefined && wizard.verificationSimulationAvailable:
+      return () => void wizard.simulateVerification();
     case verificationUrl !== undefined:
       return () => openExternalRampUrl(verificationUrl);
+    case simulatesDeposit(wizard, verificationUrl):
+      return () => void wizard.simulateCurrentQuote();
     case wizard.isLastStep:
       return wizard.finish;
     default:
@@ -117,12 +141,17 @@ function onrampFrameState(
       wizard.transferStatus?.status === "completed"
         ? t("DashboardPayments.ramps.depositComplete")
         : undefined,
-    primaryDisabled:
-      wizard.hostedQuoteLoading ||
-      verificationPending ||
-      !wizard.canProceed ||
-      (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
-    hidePrimary: wizard.currentStepId === "PROVIDER" && !verificationUrl,
+    primaryDisabled: simulatesDeposit(wizard, verificationUrl)
+      ? wizard.quoteSimulationLoading || wizard.quoteSimulationSucceeded
+      : wizard.hostedQuoteLoading ||
+        verificationPending ||
+        wizard.verificationSimulating ||
+        !wizard.canProceed ||
+        (wizard.currentStepId === "DEPOSIT" && wizard.walletsLoading),
+    hidePrimary:
+      wizard.currentStepId === "PROVIDER" &&
+      !verificationUrl &&
+      !simulatesDeposit(wizard, verificationUrl),
     hostedStage: wizard.onTransactionStage && wizard.quote?.deliveryMode === "hosted",
     showInlineStatus: wizard.onTransactionStage && Boolean(wizard.quote),
   };
@@ -200,7 +229,12 @@ export function OnrampRail({
       hideSecondary={wizard.onTransactionStage}
       footerActions={
         wizard.quoteTransferId !== null && wizard.onTransactionStage ? (
-          <Button asChild type="button">
+          // Second to the simulation while that is on offer.
+          <Button
+            asChild
+            type="button"
+            variant={simulatesDeposit(wizard, frame.verificationUrl) ? "outline" : "default"}
+          >
             <Link
               href={`/dashboard/payments/transactions?module=payments&search=${encodeURIComponent(wizard.quoteTransferId)}`}
             >
