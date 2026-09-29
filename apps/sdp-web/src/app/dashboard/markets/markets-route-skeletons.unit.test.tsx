@@ -57,11 +57,22 @@ const SKELETONS = [
 ] as const;
 
 describe("Markets route skeletons", () => {
-  it.each(SKELETONS)("%s renders with no props, data or context", (_name, Skeleton) => {
-    const html = renderToStaticMarkup(<Skeleton />);
+  it.each(SKELETONS)(
+    "%s renders its pulse blocks with no props, data or context",
+    (_name, Skeleton) => {
+      const html = renderToStaticMarkup(<Skeleton />);
 
-    expect(html.length).toBeGreaterThan(0);
-  });
+      // The contract every skeleton shares: the workspace panel announces the
+      // loading state, and real pulse blocks render behind the reduced-motion
+      // guard. An empty div or bare decoration must not pass as a skeleton.
+      expect(html).toContain('aria-busy="true"');
+      const pulses = [...html.matchAll(/class="([^"]*animate-pulse[^"]*)"/g)];
+      expect(pulses.length).toBeGreaterThan(0);
+      for (const [, className] of pulses) {
+        expect(className).toContain("motion-reduce:animate-none");
+      }
+    }
+  );
 
   // A placeholder is decoration. Copy inside one gets read out and then
   // replaced a moment later, which is worse than silence.
