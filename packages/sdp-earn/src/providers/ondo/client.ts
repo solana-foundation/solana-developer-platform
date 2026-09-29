@@ -101,6 +101,9 @@ export async function readOndoUsdyMint(
       `Ondo USDY mint account is ${data.length} bytes, not the ${SPL_MINT_ACCOUNT_SIZE} of an SPL mint`
     );
   }
+  if (data[45] !== 1) {
+    throw internalError(`Ondo USDY mint ${deployment.usdyMint} is not initialized`);
+  }
   const decimals = data[SPL_MINT_DECIMALS_OFFSET];
   if (decimals !== ONDO_USDY_DECIMALS) {
     throw internalError(

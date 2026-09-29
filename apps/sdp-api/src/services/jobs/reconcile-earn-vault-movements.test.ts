@@ -16,7 +16,9 @@ const logEvent = vi.hoisted(() => vi.fn());
 
 vi.mock("@sdp/rpc/solana", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@sdp/rpc/solana")>()),
-  createRpc: () => ({ getBlockHeight: () => ({ send: getBlockHeight }) }),
+  createRpc: () => ({
+    getBlockHeight: (config: unknown) => ({ send: () => getBlockHeight(config) }),
+  }),
   getSignatureStatuses,
   getTransaction,
 }));
@@ -869,11 +871,87 @@ describe("reconcileEarnVaultMovements", () => {
     expect(broadcastVaultTransaction).not.toHaveBeenCalled();
   });
 
-  it("fails a missing signature after its recorded blockhash expires", async () => {
+  describe.each(["requested", "submitted"] as const)("ambiguous %s broadcast recovery", (state) => {
+    async function ambiguousMovement() {
+      const seeded = await seedMovement("100");
+      if (state === "submitted")
+        await createPostgresEarnMovementsRepository(getDb(env)).advanceVaultMovement({
+          movementId: seeded.movement.id,
+          organizationId: ORG,
+          toStatus: "submitted",
+        });
+      getSignatureStatuses.mockResolvedValue([null]);
+      getBlockHeight.mockResolvedValue(101n);
+      return seeded;
+    }
+
+    it("recovers finalized history before expiring an unknown signature", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({ slot: 1n, err: null });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+        amount_settled: "1",
+      });
+      expect(getTransaction).toHaveBeenCalledWith(
+        expect.anything(),
+        seeded.movement.signature,
+        "finalized"
+      );
+      expect(getBlockHeight).toHaveBeenCalledWith({ commitment: "finalized" });
+      expect(broadcastVaultTransaction).not.toHaveBeenCalled();
+    });
+
+    it("records an actual finalized transaction error without claiming settlement", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockResolvedValue({ slot: 1n, err: "InsufficientFundsForFee" });
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "failed",
+        amount_settled: null,
+      });
+    });
+
+    it("leaves the movement recoverable when historical evidence cannot be read", async () => {
+      const seeded = await ambiguousMovement();
+      getTransaction.mockRejectedValue(new Error("history unavailable"));
+      await expect(reconcileEarnVaultMovements(env)).rejects.toThrow();
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: state,
+        failure_reason: null,
+      });
+    });
+
+    it("waits for another observation and accepts a late finality response", async () => {
+      const seeded = await ambiguousMovement();
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "submitted",
+        failure_reason: null,
+        unknown_signature_observed_at: expect.any(String),
+      });
+      getSignatureStatuses.mockResolvedValue([
+        { slot: 1n, err: null, confirmations: null, confirmationStatus: "finalized" },
+      ]);
+      await reconcileEarnVaultMovements(env);
+      await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+        status: "finalized",
+        failure_reason: null,
+      });
+    });
+  });
+
+  it("expires an unknown intent only after finalized history and a later observation", async () => {
     const seeded = await seedMovement("100");
     getSignatureStatuses.mockResolvedValue([null]);
     getBlockHeight.mockResolvedValue(101n);
 
+    await reconcileEarnVaultMovements(env);
+    await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({
+      status: "submitted",
+      failure_reason: null,
+    });
     await reconcileEarnVaultMovements(env);
 
     await expect(ledgerRow(seeded.movement.id)).resolves.toMatchObject({

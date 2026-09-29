@@ -86,10 +86,18 @@ rounded, at the pair's 6-decimal scale (`canonicalAmount`).
 ## Positions are read in base units, and the valuation may be absent
 
 Balances sum the exact raw `amount` integer strings from
-`getTokenAccountsByOwner` — never `uiAmount` (lossy above 2^53). The valuation
+validated, distinct USDY accounts returned by `getTokenAccountsByOwner`, never
+`uiAmount` (lossy above 2^53). The valuation
 comes from the EXIT quote (what the market would actually pay), and may fail
 independently of the balance read: a quote outage makes the VALUE unknown, not
-the HOLDING. Rent: deposits fund the USDY ATA from the owner (Jupiter's setup
+the HOLDING. `withdrawableShares` includes only the unfrozen owner ATA that
+Jupiter can actually spend; frozen and non-associated accounts remain in
+`shares`. Reads verify the SPL program, token owner, mint, initialized/frozen
+state, six-decimal scale and u64 bounds. A malformed account fails the whole
+read, never reports a partial balance. Rent detection checks the exact ATA.
+Quotes use Metis only, matching the API's `/build` execution path.
+
+Rent: deposits fund the USDY ATA from the owner (Jupiter's setup
 creates charge the taker), so a foreign `rentPayer` is refused; exits close
 nothing, so `rentRefundTo` is accepted and unused.
 

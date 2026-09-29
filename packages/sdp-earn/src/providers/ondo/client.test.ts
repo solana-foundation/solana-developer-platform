@@ -225,6 +225,16 @@ describe("OndoEarnClient.listStrategies", () => {
     );
   });
 
+  it("refuses an uninitialized mint", async () => {
+    const data = Buffer.from(mintAccountData(ONDO_USDY_DECIMALS), "base64");
+    data[45] = 0;
+    stubRpc({ data: data.toString("base64") });
+    await assert.rejects(
+      client._listUsdyStrategy("https://rpc.test", "mainnet-beta", MAINNET),
+      SdpEarnError
+    );
+  });
+
   it("fails the pass when the mint's decimals drift from what SDP expects", async () => {
     stubRpc({ data: mintAccountData(9) });
     await assert.rejects(
