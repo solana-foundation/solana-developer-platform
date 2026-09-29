@@ -4,24 +4,26 @@ import type { ThemeScope } from "@/components/theme-scope";
 // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
 const PRIVACY_SETUP_ROUTE = /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/;
 
-// The Payments pages redesigned so far: Contacts (the list, a new contact, one contact's page).
-const PAYMENTS_REFRESH_ROUTE = /^\/dashboard\/payments\/counterparty(?:\/[^/]+)?\/?$/;
+// The Payments pages redesigned so far: Contacts (the list, a new contact, one contact's page),
+// Pay and Deposit.
+const PAYMENTS_REFRESH_ROUTE =
+  /^\/dashboard\/payments\/(?:counterparty(?:\/[^/]+)?|pay|deposit)\/?$/;
 
 /**
  * Whether a Payments route is one NEW DESIGN has redesigned so far. The rest of Payments keeps
  * the previous design, flag or no flag.
  *
  * @param pathname - The dashboard route.
- * @returns True for Contacts.
+ * @returns True for Contacts, Pay and Deposit.
  */
 export function isRedesignedPaymentsPath(pathname: string): boolean {
   return PAYMENTS_REFRESH_ROUTE.test(pathname);
 }
 
 /**
- * The design-token theme scope a dashboard route renders in. Payments' Contacts and the Privacy
- * connect form are built on the 2026 refresh design; every other route keeps the base design.
- * With NEW DESIGN off, every route keeps the base design.
+ * The design-token theme scope a dashboard route renders in. Payments' Contacts, Pay and Deposit
+ * and the Privacy connect form are built on the 2026 refresh design; every other route keeps the
+ * base design. With NEW DESIGN off, every route keeps the base design.
  *
  * @param pathname - The dashboard route.
  * @param newDesign - Whether the NEW DESIGN flag is on.
