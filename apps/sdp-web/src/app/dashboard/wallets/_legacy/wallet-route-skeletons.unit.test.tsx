@@ -1,31 +1,31 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import CustodyDetailLoading from "../custody/[walletId]/loading";
-import CustodyAuditDetailLoading from "../custody/[walletId]/policy/audit/[policyEvaluationId]/loading";
-import CustodyAuditLoading from "../custody/[walletId]/policy/audit/loading";
-import CustodyPolicyLoading from "../custody/[walletId]/policy/loading";
-import CustodyLoading from "../custody/loading";
-import CustodySetupLoading from "../custody/setup/loading";
-import CustodySwitchLoading from "../custody/switch/loading";
-import WalletDetailLoading from "./[walletId]/loading";
-import WalletAuditDetailLoading from "./[walletId]/policy/audit/[policyEvaluationId]/loading";
-import WalletAuditLoading from "./[walletId]/policy/audit/loading";
-import WalletPolicyLoading from "./[walletId]/policy/loading";
-import WalletsLoading from "./loading";
-import WalletSetupLoading from "./setup/loading";
-import WalletSwitchLoading from "./switch/loading";
+import CustodyDetailLoading from "@/app/dashboard/custody/[walletId]/loading";
+import CustodyAuditDetailLoading from "@/app/dashboard/custody/[walletId]/policy/audit/[policyEvaluationId]/loading";
+import CustodyAuditLoading from "@/app/dashboard/custody/[walletId]/policy/audit/loading";
+import CustodyPolicyLoading from "@/app/dashboard/custody/[walletId]/policy/loading";
+import CustodyLoading from "@/app/dashboard/custody/loading";
+import CustodySetupLoading from "@/app/dashboard/custody/setup/loading";
+import CustodySwitchLoading from "@/app/dashboard/custody/switch/loading";
 import {
   WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
   WalletPolicyAuditListSkeleton,
   WalletPolicySkeleton,
   WalletsOnboardingSkeleton,
-} from "./wallet-route-skeletons";
+} from "@/app/dashboard/wallets/_legacy/wallet-route-skeletons";
+import WalletDetailLoading from "@/app/dashboard/wallets/[walletId]/loading";
+import WalletAuditDetailLoading from "@/app/dashboard/wallets/[walletId]/policy/audit/[policyEvaluationId]/loading";
+import WalletAuditLoading from "@/app/dashboard/wallets/[walletId]/policy/audit/loading";
+import WalletPolicyLoading from "@/app/dashboard/wallets/[walletId]/policy/loading";
+import WalletsLoading from "@/app/dashboard/wallets/loading";
+import WalletSetupLoading from "@/app/dashboard/wallets/setup/loading";
+import WalletSwitchLoading from "@/app/dashboard/wallets/switch/loading";
 
-// NEW DESIGN on.
+// NEW DESIGN off: the previous design.
 vi.mock("@/components/new-design", () => ({
-  DesignSwitch: ({ current }: { current: unknown }) => current,
-  useNewDesign: () => true,
+  DesignSwitch: ({ legacy }: { legacy: unknown }) => legacy,
+  useNewDesign: () => false,
 }));
 
 const routeLoaders = [
@@ -58,18 +58,17 @@ describe("wallet and custody route loading states", () => {
   it("keeps every wallet-detail section in place while data loads", () => {
     const html = renderToStaticMarkup(<WalletDetailSkeleton />);
 
-    expect(html).toContain('data-skeleton-section="wallet-state"');
-    expect(html).toContain('data-skeleton-section="wallet-balance"');
-    expect(html).toContain('data-skeleton-section="wallet-tokens"');
+    expect(html).toContain('data-skeleton-section="wallet-controls"');
+    expect(html).toContain('data-skeleton-section="wallet-balances"');
     expect(html).toContain('data-skeleton-section="wallet-activity"');
   });
 
-  it("reserves the two-column wallet card grid while the overview loads", () => {
+  it("reserves the responsive wallet search toolbar while the overview loads", () => {
     const html = renderToStaticMarkup(<WalletsLoading />);
 
-    expect(html).toContain('data-wallet-grid-skeleton="true"');
-    expect(html).toContain("sm:grid-cols-2");
-    expect(html).toContain("bg-surface-tile");
+    expect(html).toContain('data-wallet-search-skeleton="true"');
+    expect(html).toContain("flex-col gap-3 sm:flex-row");
+    expect(html).toContain("sm:max-w-md");
   });
 
   it("keeps the policy editor form, summary rail, and footer in place", () => {

@@ -2,24 +2,23 @@ import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary, CustodyWalletSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { WalletsWorkspace } from "@/app/dashboard/custody/_legacy/wallets-workspace";
 import {
   isKnownCustodyProvider,
   type KnownCustodyProvider,
 } from "@/app/dashboard/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/playground-api-data";
-import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons";
-import { withLegacyDesign } from "@/flags/new-design";
+import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/_legacy/wallet-route-skeletons";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
 import { WORKSPACE_LOADING_PATH } from "@/lib/workspace-loading";
-import type { OnboardingStatusResponse } from "../onboarding-status";
-import LegacyCustodyPage from "./_legacy/page";
-import { WalletsWorkspace } from "./wallets-workspace";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
@@ -61,7 +60,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
-async function CurrentCustodyPage() {
+export default async function CustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -95,10 +94,18 @@ async function CurrentCustodyPage() {
     if (!projectClient) {
       throw new Error("Selected project required");
     }
-    const [configsResult, walletsResult, apiKeysResult] = await Promise.all([
+    const [configsResult, walletsResult, apiKeysResult, providerAccessResult] = await Promise.all([
       trace.step("fetch_custody_configs", () => settle(getCustodyConfigs(projectClient.request))),
       trace.step("fetch_custody_wallets", () => settle(getCustodyWallets(projectClient.request))),
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
+      trace.step("fetch_provider_access", () =>
+        onboarding.organization
+          ? settle(fetchProviderAvailability(projectClient.request, onboarding.organization.id))
+          : Promise.resolve({
+              ok: false as const,
+              error: new Error("Organization is not linked"),
+            })
+      ),
     ]);
 
     const connectedProviders: KnownCustodyProvider[] = configsResult.ok
@@ -119,11 +126,15 @@ async function CurrentCustodyPage() {
         ? walletsResult.error.message
         : t("DashboardCustody.unableToLoadWallets");
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
+    const enabledProviders = providerAccessResult.ok
+      ? providerAccessResult.value.enabledCustodyProviders
+      : connectedProviders;
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
+      enabledProviderCount: enabledProviders.length,
       walletCount: walletsResult.ok ? walletsResult.value.length : 0,
       apiKeyCount: apiKeys.length,
     });
@@ -134,6 +145,7 @@ async function CurrentCustodyPage() {
           apiBaseUrl={resolvePlaygroundApiBaseUrl()}
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
+          enabledProviders={enabledProviders}
           configsError={configsError}
           wallets={walletsResult.ok ? walletsResult.value : []}
           walletsError={walletsError}
@@ -148,5 +160,3 @@ async function CurrentCustodyPage() {
     throw error;
   }
 }
-
-export default withLegacyDesign(CurrentCustodyPage, LegacyCustodyPage);

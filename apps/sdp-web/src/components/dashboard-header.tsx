@@ -1230,6 +1230,91 @@ function getLegacyDesignPageConfig(
   });
 }
 
+/** The Wallets routes as the previous design (NEW DESIGN off) configures them. */
+function getLegacyWalletRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  const walletPolicyRouteMatch = pathname.match(
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
+  );
+  if (walletPolicyRouteMatch) {
+    const [, section, walletId] = walletPolicyRouteMatch;
+    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.walletControls"),
+      backHref: isPolicyEvaluationDetail
+        ? `/dashboard/${section}/${walletId}/policy/audit`
+        : `/dashboard/${section}/${walletId}`,
+      backLabel: isPolicyEvaluationDetail
+        ? t("Shared.dashboardShell.backToPolicyHistory")
+        : t("Shared.dashboardShell.backToWallet"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+
+  const isWalletDetail =
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+  if (!isWalletDetail) return null;
+
+  return {
+    title: t("Shared.dashboardShell.wallets"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/wallets",
+      label: t("Shared.dashboardShell.backToWallets"),
+    },
+  };
+}
+
+function getLegacyWalletSectionPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
+    return {
+      title: t("Shared.dashboardShell.wallets"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+    return {
+      title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (
+    pathname === "/dashboard/wallets/connections" ||
+    pathname === "/dashboard/custody/connections"
+  ) {
+    return {
+      title: t("Shared.dashboardShell.connections"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
+    return {
+      title: t("Shared.dashboardShell.activateProvider"),
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  return null;
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1264,14 +1349,13 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
+  const walletSectionPageConfig = newDesign
+    ? getWalletSectionPageConfig(pathname, t)
+    : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = getWalletRoutePageConfig(
-    pathname,
-    t,
-    policiesEnabled,
-    paymentsEnabled
-  );
+  const walletRoutePageConfig = newDesign
+    ? getWalletRoutePageConfig(pathname, t, policiesEnabled, paymentsEnabled)
+    : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
     return {

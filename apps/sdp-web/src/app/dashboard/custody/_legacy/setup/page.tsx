@@ -1,17 +1,18 @@
 import { auth } from "@clerk/nextjs/server";
 import type { CustodyConfigSummary } from "@sdp/types";
 import { redirect } from "next/navigation";
+import { WalletSetupFlow } from "@/app/dashboard/custody/_legacy/setup/wallet-setup-flow";
+import { fetchConnectionPickerOptions } from "@/app/dashboard/custody/connections/connections.data";
+import {
+  isKnownCustodyProvider,
+  type KnownCustodyProvider,
+} from "@/app/dashboard/custody/provider-catalog";
+import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
 import { privyByok } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { fetchProviderAvailability } from "@/lib/provider-availability";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createRequestScopedSdpApiClients, type SdpApiClient } from "@/lib/sdp-api";
-import type { OnboardingStatusResponse } from "../../onboarding-status";
-import LegacyCustodySetupPage from "../_legacy/setup/page";
-import { fetchConnectionPickerOptions } from "../connections/connections.data";
-import { isKnownCustodyProvider, type KnownCustodyProvider } from "../provider-catalog";
-import { WalletSetupFlow } from "./wallet-setup-flow";
 
 type SettledResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
@@ -60,7 +61,7 @@ async function getConnectedCustodyProviders(
     .filter(isKnownCustodyProvider);
 }
 
-async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) {
+export default async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -132,5 +133,3 @@ async function CurrentCustodySetupPage({ searchParams }: CustodySetupPageProps) 
     />
   );
 }
-
-export default withLegacyDesign(CurrentCustodySetupPage, LegacyCustodySetupPage);
