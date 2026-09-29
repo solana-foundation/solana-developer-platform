@@ -437,9 +437,10 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
           "unsettled movement are excluded: the ledger already explains that disagreement. " +
-          "So is a position whose wallet still holds the intermediate token its cancelled " +
-          "operator redemption left in place of its shares. Positions with an open queued " +
-          "withdrawal request are listed in `queuedWithdrawalPositions` instead.",
+          "So is a position still backed by the intermediate token its cancelled operator " +
+          "redemption left in place of its shares; one intermediate balance is split across " +
+          "positions by the recorded amounts. Positions with an open queued withdrawal " +
+          "request are listed in `queuedWithdrawalPositions` instead.",
       }),
     queuedWithdrawalPositions: z
       .array(

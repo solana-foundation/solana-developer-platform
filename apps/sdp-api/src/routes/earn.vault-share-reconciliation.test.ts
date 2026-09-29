@@ -243,6 +243,7 @@ async function seedCustodyWithdrawalRequest(params: {
   mechanism: "solver_queue" | "operator_redemption";
   status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed";
   createdAt?: string;
+  intermediateAmount?: string;
 }): Promise<string> {
   const requestId = generateEarnVaultWithdrawalRequestId();
   const solverQueue = params.mechanism === "solver_queue";
@@ -276,7 +277,7 @@ async function seedCustodyWithdrawalRequest(params: {
       solverQueue ? 1700000060 : null,
       solverQueue ? 1700000120 : null,
       solverQueue ? null : OPERATOR_INTERMEDIATE_MINT,
-      solverQueue ? null : "1.01",
+      solverQueue ? null : (params.intermediateAmount ?? "1.01"),
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
       params.status === "cancelled" ? new Date().toISOString() : null,
@@ -526,15 +527,19 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
   describe("after an operator redemption", () => {
     // Cancellation revokes Hastra's delegate but never mints the burned PRIME
     // back, so a wallet can hold the intermediate and none of the shares.
-    async function claimAfterOperatorRedemption(status: "cancelled" | "failed") {
+    async function claimAfterOperatorRedemption(
+      status: "cancelled" | "failed" | "pending",
+      intermediateAmount?: string
+    ) {
       const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "hastra" });
       await finalizeMovement(claim.movement.id);
-      await seedCustodyWithdrawalRequest({
+      const requestId = await seedCustodyWithdrawalRequest({
         position: claim.position,
         mechanism: "operator_redemption",
         status,
+        intermediateAmount,
       });
-      return claim;
+      return { ...claim, requestId };
     }
 
     it("lets a cancelled redemption's retained intermediate back only its own claim", async () => {
@@ -583,6 +588,86 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
 
       expect(body.data.unbackedPositions).toEqual([
         expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
+      ]);
+    });
+
+    // Each claim below retained 1.01 of the same intermediate mint.
+    it.each([
+      { held: "1010000", unbacked: 1 },
+      { held: "1500000", unbacked: 0 },
+      { held: "2020000", unbacked: 0 },
+    ])(
+      "splits one intermediate balance across claims by what each retained ($held atoms held)",
+      async ({ held, unbacked }) => {
+        const first = await claimAfterOperatorRedemption("cancelled");
+        const second = await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, held)]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toHaveLength(unbacked);
+        for (const position of body.data.unbackedPositions) {
+          expect([first.position.id, second.position.id]).toContain(position.positionId);
+        }
+      }
+    );
+
+    it("never lets an open redemption's delegated intermediate back another claim", async () => {
+      const open = await claimAfterOperatorRedemption("pending");
+      const cancelled = await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({ positionId: cancelled.position.id }),
+      ]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([
+        expect.objectContaining({
+          positionId: open.position.id,
+          withdrawalRequestIds: [open.requestId],
+        }),
+      ]);
+    });
+
+    it("keeps a share-backed claim's retained intermediate from backing another claim", async () => {
+      // A partial cancellation: the claim still holds shares and the wYLDS.
+      const partial = await createPosition({ shareMint: SHARE_MINT_RECORDED, provider: "hastra" });
+      await finalizeMovement(partial.movement.id);
+      await seedCustodyWithdrawalRequest({
+        position: partial.position,
+        mechanism: "operator_redemption",
+        status: "cancelled",
+      });
+      const cancelled = await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([
+        balance(SHARE_MINT_RECORDED, "250"),
+        balance(OPERATOR_INTERMEDIATE_MINT, "1010000"),
+      ]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({ positionId: cancelled.position.id }),
+      ]);
+    });
+
+    it("backs nothing with an intermediate amount the mint's scale cannot express", async () => {
+      const claim = await claimAfterOperatorRedemption("cancelled", "1.0000001");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([
+        expect.objectContaining({ positionId: claim.position.id }),
       ]);
     });
   });

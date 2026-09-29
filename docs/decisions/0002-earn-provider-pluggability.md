@@ -1202,8 +1202,8 @@ names the same state: a zero-share claim with an open request is listed under
 `queuedWithdrawalPositions` with its request ids rather than reported as
 unbacked or dropped, because a request explains only the shares it covers.
 A cancelled Hastra redemption is terminal, but it leaves the owner the wYLDS
-it delegated rather than recreating PRIME, so a wallet balance of that
-intermediate still backs the claim there.
+it delegated rather than recreating PRIME, so that wYLDS still backs the
+claim there, split across claims by the amounts the ledger recorded.
 
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 

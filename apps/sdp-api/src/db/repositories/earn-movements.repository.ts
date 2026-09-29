@@ -353,9 +353,10 @@ export interface EarnMovementsRepository {
    * The COMPLETE set of claims `listVaultPositions` would serve (same
    * visibility predicate, unpaged — a reconciliation over a page would clear
    * discrepancies it never looked at), each with whether any of its movements
-   * is still unsettled, the ids of its open queued withdrawal requests, and
-   * the intermediate mints its cancelled operator redemptions left in the
-   * wallet. Read-only input to share reconciliation (PRO-1741);
+   * is still unsettled, the ids of its open queued withdrawal requests, and,
+   * per intermediate mint, how much its operator redemptions left in the
+   * wallet (`retained`: cancelled) or delegated there (`in_flight`: open), in
+   * decimal token units. Read-only input to share reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
    */
@@ -368,7 +369,7 @@ export interface EarnMovementsRepository {
       EarnPositionRow & {
         has_unsettled_movements: boolean;
         open_withdrawal_request_ids: string[];
-        retained_intermediate_mints: string[];
+        redemption_intermediates: Array<{ mint: string; retained: string; in_flight: string }>;
       }
     >
   >;
@@ -1397,8 +1398,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // requests (the same predicate closeVaultPositionIfEmpty uses) come back
       // by id so the service can name them beside a claim they may explain.
       // A cancelled operator redemption never recreates the shares it burned:
-      // the owner keeps the intermediate it delegated (Hastra wYLDS), so its
-      // mint is returned for the service to accept as backing.
+      // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
+      // open one's delegated intermediate still sits in the wallet. Both
+      // amounts are returned so the service can split one balance by them.
       const result = await db
         .prepare(
           `SELECT *,
@@ -1418,14 +1420,31 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                         )),
                     ARRAY[]::text[]
                   ) AS open_withdrawal_request_ids,
-                  ARRAY(
-                    SELECT DISTINCT retained.intermediate_mint
-                    FROM earn_vault_withdrawal_requests retained
-                    WHERE retained.position_id = earn_positions.id
-                      AND retained.mechanism = 'operator_redemption'
-                      AND retained.status = 'cancelled'
-                      AND retained.intermediate_mint IS NOT NULL
-                  ) AS retained_intermediate_mints
+                  COALESCE((
+                    SELECT json_agg(json_build_object(
+                             'mint', intermediate.intermediate_mint,
+                             'retained', intermediate.retained,
+                             'in_flight', intermediate.in_flight
+                           ) ORDER BY intermediate.intermediate_mint)
+                    FROM (
+                      SELECT redemption.intermediate_mint,
+                             COALESCE(SUM(redemption.intermediate_amount::numeric)
+                               FILTER (WHERE redemption.status = 'cancelled'), 0)::text
+                               AS retained,
+                             COALESCE(SUM(redemption.intermediate_amount::numeric)
+                               FILTER (WHERE redemption.status <> 'cancelled'), 0)::text
+                               AS in_flight
+                      FROM earn_vault_withdrawal_requests redemption
+                      WHERE redemption.position_id = earn_positions.id
+                        AND redemption.mechanism = 'operator_redemption'
+                        AND redemption.intermediate_mint IS NOT NULL
+                        AND redemption.status IN (
+                          'cancelled', 'creating', 'pending', 'fulfillable',
+                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                        )
+                      GROUP BY redemption.intermediate_mint
+                    ) intermediate
+                  ), '[]'::json) AS redemption_intermediates
              FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
              ORDER BY created_at DESC, id DESC`
@@ -1435,7 +1454,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
           EarnPositionRow & {
             has_unsettled_movements: boolean;
             open_withdrawal_request_ids: string[];
-            retained_intermediate_mints: string[];
+            redemption_intermediates: Array<{ mint: string; retained: string; in_flight: string }>;
           }
         >();
       return result.results ?? [];

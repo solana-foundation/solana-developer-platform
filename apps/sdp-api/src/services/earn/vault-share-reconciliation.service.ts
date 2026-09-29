@@ -1,4 +1,6 @@
+import { parseDecimalAmount } from "@sdp/solana/amount";
 import { mapSettledWithConcurrency } from "@/lib/concurrency";
+import { getLogger } from "@/runtime/logger";
 import type { VaultDeadline } from "@/services/earn/vault-deadline";
 
 /**
@@ -39,12 +41,19 @@ export interface ReconcilableVaultClaim {
   label: string;
   has_unsettled_movements: boolean;
   open_withdrawal_request_ids: readonly string[];
-  /**
-   * Intermediate mints (Hastra wYLDS) that a CANCELLED operator redemption on
-   * this claim left in the wallet. Cancellation does not recreate the burned
-   * shares, so a held balance of one of these still backs the claim.
-   */
-  retained_intermediate_mints: readonly string[];
+  redemption_intermediates: readonly ReconcilableRedemptionIntermediate[];
+}
+
+/**
+ * What one claim's operator redemptions account for in the wallet for one
+ * intermediate mint (Hastra wYLDS), in decimal token units. `retained` is what
+ * cancelled requests left: cancellation never recreates the burned shares, so
+ * it still backs the claim. `in_flight` is what open requests delegated.
+ */
+export interface ReconcilableRedemptionIntermediate {
+  mint: string;
+  retained: string;
+  in_flight: string;
 }
 
 export interface ReconcilableShareMintedStrategy {
@@ -112,6 +121,86 @@ export interface VaultShareReconciliationReport {
 
 /** Same bound the positions hydration fan-out uses for per-owner reads. */
 const BALANCE_READ_CONCURRENCY = 8;
+
+type VaultShareBalances = Awaited<ReturnType<VaultShareBalanceReader>>;
+
+const atomsOf = (amount: string): bigint => (/^\d+$/.test(amount) ? BigInt(amount) : 0n);
+
+/**
+ * Takes up to `amount` (a ledger decimal) of `mint` out of the wallet's
+ * unallocated balance and returns the atoms taken. A figure the mint's scale
+ * cannot express takes everything left and backs nothing, so a bad record can
+ * never make any claim look backed.
+ */
+function takeIntermediate(
+  unallocated: Map<string, bigint>,
+  decimals: number | undefined,
+  mint: string,
+  amount: string
+): bigint {
+  const available = unallocated.get(mint) ?? 0n;
+  if (available === 0n || decimals === undefined) return 0n;
+  let wanted: bigint;
+  try {
+    wanted = parseDecimalAmount(amount, decimals);
+  } catch (error) {
+    getLogger().warn(
+      { mint, amount, decimals, error },
+      "share reconciliation could not read a redemption's intermediate amount"
+    );
+    unallocated.set(mint, 0n);
+    return 0n;
+  }
+  const taken = wanted < available ? wanted : available;
+  unallocated.set(mint, available - taken);
+  return taken;
+}
+
+/**
+ * One wallet's judgeable claims that hold none of their shares and are not
+ * backed by an intermediate a cancelled operator redemption left, in claim
+ * order. One intermediate balance is split by the recorded amounts, so it
+ * never backs two claims for more than it holds.
+ */
+function claimsWithoutBacking(
+  claims: readonly ReconcilableVaultClaim[],
+  balances: VaultShareBalances
+): ReconcilableVaultClaim[] {
+  const balancesByMint = new Map(balances.map((balance) => [balance.mint, balance]));
+  const unallocated = new Map(balances.map((balance) => [balance.mint, atomsOf(balance.amount)]));
+  const take = (mint: string, amount: string): bigint =>
+    takeIntermediate(unallocated, balancesByMint.get(mint)?.decimals, mint, amount);
+
+  const judged: ReconcilableVaultClaim[] = [];
+  for (const claim of claims) {
+    // A claim without a share mint cannot be judged against balances, and an
+    // in-flight movement already explains a chain/record disagreement — the
+    // sweep settles it within about a minute either way.
+    const needsBacking =
+      claim.share_mint !== null &&
+      !claim.has_unsettled_movements &&
+      !balancesByMint.has(claim.share_mint);
+    // An open redemption's delegated intermediate belongs to that request,
+    // and a claim that needs no backing keeps what it retained.
+    for (const intermediate of claim.redemption_intermediates) {
+      take(intermediate.mint, intermediate.in_flight);
+      if (!needsBacking) take(intermediate.mint, intermediate.retained);
+    }
+    if (needsBacking) judged.push(claim);
+  }
+
+  const unbacked: ReconcilableVaultClaim[] = [];
+  for (const claim of judged) {
+    // A cancelled redemption left its intermediate in place of the shares, so
+    // any of what it retained that is still unallocated backs the claim.
+    let backed = false;
+    for (const intermediate of claim.redemption_intermediates) {
+      if (take(intermediate.mint, intermediate.retained) > 0n) backed = true;
+    }
+    if (!backed) unbacked.push(claim);
+  }
+  return unbacked;
+}
 
 /**
  * All catalogue rows claiming one share mint, with the attribution the report
@@ -204,7 +293,6 @@ export async function reconcileVaultShareHoldings(input: {
       return;
     }
 
-    const balancesByMint = new Map(outcome.value.map((balance) => [balance.mint, balance]));
     const recordedShareMints = new Set(
       walletClaims.map((claim) => claim.share_mint).filter((mint) => mint !== null)
     );
@@ -227,14 +315,7 @@ export async function reconcileVaultShareHoldings(input: {
       });
     }
 
-    for (const claim of walletClaims) {
-      // A claim without a share mint cannot be judged against balances, and an
-      // in-flight movement already explains a chain/record disagreement — the
-      // sweep settles it within about a minute either way.
-      if (!claim.share_mint || claim.has_unsettled_movements) continue;
-      if (balancesByMint.has(claim.share_mint)) continue;
-      // A cancelled redemption left its intermediate in place of the shares.
-      if (claim.retained_intermediate_mints.some((mint) => balancesByMint.has(mint))) continue;
+    for (const claim of claimsWithoutBacking(walletClaims, outcome.value)) {
       const finding: UnbackedVaultPosition = {
         positionId: claim.id,
         custodyWalletId: wallet.id,
