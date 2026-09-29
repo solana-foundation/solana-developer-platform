@@ -105,17 +105,20 @@ function createSdpApiRequest(
     // upstream request still receives the full path.
     const loggedPath = path.split("?", 1)[0];
 
-    // Payments demo mode answers from fixtures (and refuses writes) before anything goes out.
-    const demoResponse = await paymentsDemoResponse(method, path, projectId);
+    const send = () =>
+      fetch(url, {
+        ...options,
+        headers,
+        cache: "no-store",
+      });
+
+    // Payments demo mode answers payment reads and writes itself; nothing about them goes out.
+    const demoResponse = await paymentsDemoResponse(method, path, projectId, options.body, send);
     if (demoResponse) {
       return demoResponse;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers,
-      cache: "no-store",
-    });
+    const response = await send();
 
     console.info(
       JSON.stringify({

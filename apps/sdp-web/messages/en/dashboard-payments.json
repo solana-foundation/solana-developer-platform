@@ -2,9 +2,19 @@
   "DashboardPayments": {
     "demo": {
       "label": "Demo",
-      "on": "Demo data",
-      "turnOn": "Fill Payments with demo data to look around. Changes are off while it's on.",
-      "turnOff": "Turn off demo data"
+      "turnOn": "Try Payments with sample data. Nothing you do in demo mode is sent anywhere; it stays in this browser until you reload.",
+      "turnOff": "Turn off demo mode",
+      "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
+      "notice": {
+        "state": "Demo mode",
+        "body": "Sample data for presentation. Every action is simulated."
+      },
+      "checkout": {
+        "title": "{provider} checkout",
+        "onrampBody": "In demo mode, {provider}'s checkout doesn't open. Use Simulate deposit below to see the deposit arrive.",
+        "offrampBody": "In demo mode, {provider}'s page doesn't open. Send the funds with the button below to finish the payout.",
+        "settling": "Payment received. {provider} is delivering the funds to the wallet."
+      }
     },
     "signingUnavailable": "Signing is disabled for this wallet.",
     "restricted": "Restricted",
@@ -171,6 +181,9 @@
       "transferStatus": "Status: {status}",
       "submittingOnchainTransfer": "Submitting on-chain transfer.",
       "simulatingQuoteFunding": "Simulating quote funding.",
+      "simulateDeposit": "Simulate deposit",
+      "simulatingDeposit": "Simulating deposit",
+      "depositSimulated": "Deposit simulated",
       "quoteFundingSimulated": "Quote funding simulated.",
       "quoteSimulationFailed": "Quote simulation failed.",
       "sandboxSimulationFailed": "Sandbox simulation failed.",
@@ -1132,7 +1145,39 @@
       "staysActive": "The schedule stays active",
       "failedRunDetail": "Retried automatically; you can also retry it from the schedule page",
       "emptyTitle": "You haven't created a schedule yet",
-      "emptyDescription": "A schedule sends the same payment on a repeating date. Payroll is the usual reason."
+      "emptyDescription": "A schedule sends the same payment on a repeating date. Payroll is the usual reason.",
+      "whatThisWillDo": "What this will do",
+      "runHistory": "Run history",
+      "from": "From",
+      "nothingScheduled": "Nothing scheduled",
+      "scheduleId": "Schedule ID",
+      "saveChanges": "Save changes",
+      "activateSchedule": "Activate schedule",
+      "retryNow": "Retry now",
+      "resumeSchedule": "Resume schedule",
+      "collecting": "Collecting",
+      "keepIt": "Keep it",
+      "notAttempted": "Not attempted",
+      "none": "None",
+      "open": "Open",
+      "lastRunFailed": "Last run failed",
+      "stateActiveBody": "{schedule}, next on {date}.",
+      "stateActiveNoNextBody": "{schedule}. The next run has not been set yet.",
+      "statePendingBody": "Created and not started. Activating it schedules the first run, and nothing moves before that.",
+      "stateFailedBody": "The schedule is still active. The run that failed is in the history below with its reason, and it can be retried while it is due.",
+      "statePausedBody": "Nothing runs while it is paused, and it cannot be changed from here.",
+      "stateCanceledBody": "This schedule will not run again unless it is resumed. Its past runs keep their record.",
+      "stateCanceledBeforeRunBody": "This schedule will not run again. It was canceled before its first run.",
+      "stateExpiredBody": "It reached its stop date and will not run again. Create a new one to continue.",
+      "stateWorkingBody": "Waiting on the network. Nothing else changes until it answers.",
+      "cancelConfirmHead": "This schedule will not run again.",
+      "cancelConfirmActiveBody": "The runs it has already made keep their record, and nothing about them changes. It can be resumed later from this page.",
+      "cancelConfirmPendingBody": "It has not run yet, so nothing else changes. A schedule canceled before its first run has to be created again.",
+      "expiredFoot": "An expired schedule cannot be restarted. Create a new one to keep paying them.",
+      "noRunsTitle": "No runs yet",
+      "noRunsPendingBody": "Nothing has been attempted. The first run is scheduled the moment the schedule is activated.",
+      "noRunsBody": "Nothing has been attempted yet. Each run appears here with its outcome.",
+      "runHistoryUnavailable": "The run history could not be read: {error}"
     },
     "transactions": {
       "searchPlaceholder": "Search ID, signature, address, reference, or counterparty (3+ characters)",

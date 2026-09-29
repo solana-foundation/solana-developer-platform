@@ -199,13 +199,15 @@ function AddressCard({
             <p className="min-w-0 font-mono text-field break-all text-primary">
               {wallet.publicKey}
             </p>
-            {/* Wrapped, not classed: the design-system button sets its own display. */}
-            <span className="hidden sm:contents">
+            {/* Wrapped, not classed: the design-system button sets its own display. The wrapper
+                is one address line tall (24px) and centres the button in it, so the icon sits
+                on the first line's middle whatever height the button draws at. */}
+            <span className="hidden h-6 shrink-0 items-center sm:flex">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="mt-0.5 text-tertiary hover:text-primary"
+                className="text-tertiary hover:text-primary"
                 aria-label={t("DashboardPayments.ramps.copyAddress")}
                 onClick={onCopy}
               >

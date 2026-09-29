@@ -31,11 +31,11 @@ export type DesignTokenGroup =
   | "status"
   | "destructive"
   | "font"
-  | "refresh-surface"
-  | "refresh-ink"
-  | "refresh-wash"
-  | "refresh-rule"
-  | "refresh-status"
+  | "paper"
+  | "ink"
+  | "wash"
+  | "rule"
+  | "hue"
   | "type"
   | "page-title"
   | "radius"
@@ -52,19 +52,18 @@ export interface DesignToken {
   readonly utility?: string;
 }
 
-/** Groups whose tokens have a separate dark-mode value under `:root.dark`. */
+/**
+ * Groups whose tokens have a separate dark-mode value under `:root.dark`: the palette and the
+ * destructive hue. The product names (surface, text, fill, border, status, and the two base
+ * faces) point at the palette, so they follow it into dark mode without a value of their own.
+ */
 export const THEMED_GROUPS: readonly DesignTokenGroup[] = [
-  "surface",
-  "text",
-  "fill",
-  "border",
-  "status",
   "destructive",
-  "refresh-surface",
-  "refresh-ink",
-  "refresh-wash",
-  "refresh-rule",
-  "refresh-status",
+  "paper",
+  "ink",
+  "wash",
+  "rule",
+  "hue",
 ];
 
 const token = (
@@ -75,9 +74,10 @@ const token = (
 ): DesignToken => (utility ? { name, group, description, utility } : { name, group, description });
 
 export const designTokens: readonly DesignToken[] = [
-  token("--surface", "surface", "App shell background.", "bg-surface"),
-  token("--surface-sunken", "surface", "Inset wells and inputs on the shell.", "bg-surface-sunken"),
-  token("--surface-raised", "surface", "Content card and popovers.", "bg-surface-raised"),
+  token("--surface", "surface", "Shell and sidebar ground.", "bg-surface"),
+  token("--surface-sunken", "surface", "Cards and wells on the page.", "bg-surface-sunken"),
+  token("--surface-raised", "surface", "The page ground.", "bg-surface-raised"),
+  token("--surface-tile", "surface", "Tiles and grouped lists on the page.", "bg-surface-tile"),
 
   token("--emph-xh", "text", "Headings, values, primary text.", "text-primary"),
   token("--emph-m", "text", "Secondary text and icons.", "text-secondary"),
@@ -114,50 +114,45 @@ export const designTokens: readonly DesignToken[] = [
 
   token("--font-sans", "font", "Body face; the font-sans utility and the design system read it."),
   token("--font-mono", "font", "Code and address face; the font-mono utility reads it."),
-  token("--font-brand-sans", "font", "Refresh: Season Sans, loaded from src/assets/fonts."),
-  token("--font-brand-mono", "font", "Refresh: Geist Mono, loaded from src/assets/fonts."),
+  token("--font-brand-sans", "font", "Season Sans, loaded from src/assets/fonts."),
+  token("--font-brand-mono", "font", "Geist Mono, loaded from src/assets/fonts."),
 
-  token("--paper", "refresh-surface", "Refresh: the page ground."),
-  token("--paper-side", "refresh-surface", "Refresh: the sidebar ground, a step off the page."),
-  token("--paper-card", "refresh-surface", "Refresh: cards, popovers and wells on the page."),
+  token("--paper", "paper", "The page ground."),
+  token("--paper-side", "paper", "The sidebar ground, a step off the page."),
+  token("--paper-card", "paper", "Cards, popovers and wells on the page."),
   token(
-    "--chip",
-    "refresh-surface",
-    "Refresh: the raised segment of a segmented control.",
-    "bg-chip"
+    "--paper-tile",
+    "paper",
+    "Tiles and grouped lists: the sidebar paper in light, a step above the card in dark."
   ),
-  token(
-    "--chip-ring",
-    "refresh-surface",
-    "Refresh: the hairline ring around a chip.",
-    "shadow-chip"
-  ),
+  token("--chip", "paper", "The raised segment of a segmented control.", "bg-chip"),
+  token("--chip-ring", "paper", "The hairline ring around a chip.", "shadow-chip"),
 
-  token("--ink", "refresh-ink", "Refresh: headings and values."),
-  token("--ink-secondary", "refresh-ink", "Refresh: labels and secondary lines."),
-  token("--ink-tertiary", "refresh-ink", "Refresh: hints, placeholders, timestamps, table heads."),
-  token("--ink-disabled", "refresh-ink", "Refresh: disabled text."),
+  token("--ink", "ink", "Headings and values."),
+  token("--ink-secondary", "ink", "Labels and secondary lines."),
+  token("--ink-tertiary", "ink", "Hints, placeholders, timestamps, table heads."),
+  token("--ink-disabled", "ink", "Disabled text."),
 
-  token("--wash", "refresh-wash", "Refresh: action tiles, footer band, tinted cards."),
-  token("--wash-strong", "refresh-wash", "Refresh: hover on a wash."),
-  token("--wash-strongest", "refresh-wash", "Refresh: pressed on a wash."),
+  token("--wash", "wash", "Action tiles, footer band, tinted cards."),
+  token("--wash-strong", "wash", "Hover on a wash."),
+  token("--wash-strongest", "wash", "Pressed on a wash."),
 
-  token("--rule-faint", "refresh-rule", "Refresh: dividers between list rows."),
-  token("--rule", "refresh-rule", "Refresh: field underline, section and table-head rule."),
-  token("--rule-strong", "refresh-rule", "Refresh: outlined buttons, provider cards, radios."),
+  token("--rule-faint", "rule", "Dividers between list rows."),
+  token("--rule", "rule", "Field underline, section and table-head rule."),
+  token("--rule-strong", "rule", "Outlined buttons, provider cards, radios."),
 
-  token("--positive", "refresh-status", "Refresh: finalized, paid, completed."),
-  token("--positive-wash", "refresh-status", "Refresh: positive callout fill."),
-  token("--positive-rule", "refresh-status", "Refresh: positive callout border."),
-  token("--progress", "refresh-status", "Refresh: processing, settling, sent."),
-  token("--progress-wash", "refresh-status", "Refresh: in-progress callout fill."),
-  token("--progress-rule", "refresh-status", "Refresh: in-progress callout border."),
-  token("--attention", "refresh-status", "Refresh: pending, awaiting, needs approval."),
-  token("--attention-wash", "refresh-status", "Refresh: attention callout fill."),
-  token("--attention-rule", "refresh-status", "Refresh: attention callout border."),
-  token("--critical", "refresh-status", "Refresh: failed, cannot be undone."),
-  token("--critical-wash", "refresh-status", "Refresh: critical callout fill."),
-  token("--critical-rule", "refresh-status", "Refresh: critical callout border."),
+  token("--positive", "hue", "Finalized, paid, completed."),
+  token("--positive-wash", "hue", "Positive callout fill."),
+  token("--positive-rule", "hue", "Positive callout border."),
+  token("--progress", "hue", "Processing, settling, sent."),
+  token("--progress-wash", "hue", "In-progress callout fill."),
+  token("--progress-rule", "hue", "In-progress callout border."),
+  token("--attention", "hue", "Pending, awaiting, needs approval."),
+  token("--attention-wash", "hue", "Attention callout fill."),
+  token("--attention-rule", "hue", "Attention callout border."),
+  token("--critical", "hue", "Failed, cannot be undone."),
+  token("--critical-wash", "hue", "Critical callout fill."),
+  token("--critical-rule", "hue", "Critical callout border."),
 
   token("--font-size-amount", "type", "Hero figure: balances, amount to send.", "text-amount"),
   token("--line-height-amount", "type", "Line height for text-amount."),

@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import type { CustodyWalletPurpose } from "@sdp/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
@@ -15,15 +16,19 @@ import {
 } from "@/app/dashboard/custody/provider-display-status";
 import { PrivyCredentialForm } from "@/app/dashboard/custody/setup/privy-credential-form";
 import { useWalletInventoryRefresh } from "@/app/dashboard/custody/use-wallet-inventory-refresh";
-import { WalletProviderChoices } from "@/app/dashboard/custody/wallet-provider-choices";
+import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
-import { WizardStepProgress } from "@/components/ui/wizard-step-progress";
+import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
+import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
+import { useSolanaCluster } from "@/lib/use-solana-cluster";
+import { cn } from "@/lib/utils";
 
 type SetupStep = "provider" | "details";
 
@@ -31,9 +36,18 @@ const SETUP_STEPS = ["provider", "details"] as const satisfies readonly SetupSte
 const PROVIDER_FORM_ID = "wallet-provider-form";
 const DETAILS_FORM_ID = "wallet-details-form";
 
+/** The purposes the create endpoint accepts, in the order the picker lists them. */
+const WALLET_PURPOSES = [
+  { value: "root", labelKey: "DashboardCustody.rootWallet" },
+  { value: "transfer", labelKey: "DashboardCustody.transfers" },
+  { value: "mint_authority", labelKey: "DashboardCustody.mintAuthority" },
+  { value: "freeze_authority", labelKey: "DashboardCustody.freezeAuthority" },
+  { value: "fee_payer", labelKey: "DashboardCustody.feePayer" },
+] as const satisfies readonly { value: CustodyWalletPurpose; labelKey: MessageKey }[];
+
 // Keep Enter available to controls that own it (newlines, option selection,
-// navigation, and action buttons). The already-selected provider card opts in
-// because selecting it again is a no-op and the next useful action is Continue.
+// navigation, and action buttons). A provider radio is not one of them: Enter
+// on the step is Continue, as it is from anywhere else in the form.
 function ignoresEnterToSubmit(target: HTMLElement): boolean {
   if (target.closest('[data-wallet-enter-advance="true"]')) {
     return false;
@@ -105,6 +119,27 @@ function defaultConnectionId(connections: CustodyConnectionListItem[]): string {
 }
 
 /**
+ * Where a provider goes on the first step. Anything usable is a choice in the list; a general
+ * provider this deployment has no credentials for stays in the list, disabled, as not ready; a
+ * manual provider the organization has not been given sits under "Not set up yet", with a way to
+ * set it up.
+ */
+function providerPlacement(provider: CustodyProviderAvailability): "choice" | "setup" {
+  if (provider.isSelectable) return "choice";
+  return provider.entry.availability === "manual" ? "setup" : "choice";
+}
+
+/** A field label with its info hint, as the design sets every question. */
+function FieldLabel({ htmlFor, label, hint }: { htmlFor?: string; label: string; hint: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      <InfoHint text={hint} />
+    </div>
+  );
+}
+
+/**
  * Picks the connection a new wallet is created in.
  *
  * Unusable connections stay on the list, disabled and annotated, rather than
@@ -130,7 +165,10 @@ function WalletConnectionField({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="wallet-connection">{t("DashboardCustody.walletSetupConnection")}</Label>
+      <FieldLabel
+        label={t("DashboardCustody.walletSetupConnection")}
+        hint={t("DashboardCustody.walletSetupConnectionHint")}
+      />
       <Select
         name="connectionId"
         ariaLabel={t("DashboardCustody.walletSetupConnection")}
@@ -150,89 +188,365 @@ function WalletConnectionField({
           );
         })}
       </Select>
-      <p className="text-sm leading-6 text-tertiary">
-        {t("DashboardCustody.walletSetupConnectionHint")}
-      </p>
     </div>
   );
 }
 
-/** Read-only row for context the wizard states but does not let the user change. */
-function WalletFixedField({ label, value }: { label: string; value: string }) {
+/** Step 1: the usable providers as one radio list, then the ones still to be set up. */
+function ProviderStep({
+  availability,
+  selectedProvider,
+  onSelect,
+  onSubmit,
+  t,
+}: {
+  availability: CustodyProviderAvailability[];
+  selectedProvider: KnownCustodyProvider | null;
+  onSelect: (provider: KnownCustodyProvider) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  // Connected providers lead, then the ones ready to install, then the ones that are not ready;
+  // the catalog's order holds within each.
+  const choiceRank = (provider: CustodyProviderAvailability) =>
+    provider.status === "active" ? 0 : provider.isSelectable ? 1 : 2;
+  const choices = availability
+    .filter((provider) => providerPlacement(provider) === "choice")
+    .sort((a, b) => choiceRank(a) - choiceRank(b));
+  const toSetUp = availability.filter((provider) => providerPlacement(provider) === "setup");
+
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <div className="flex h-12 items-center rounded-2xl border border-border-default bg-fill-subtle px-4 text-sm font-medium text-primary">
-        {value}
-      </div>
-    </div>
+    <form id={PROVIDER_FORM_ID} onSubmit={onSubmit}>
+      {choices.length > 0 ? (
+        <fieldset>
+          <legend className="sr-only">{t("DashboardCustody.walletSetupProviderTitle")}</legend>
+          <div
+            className="overflow-hidden rounded-card border border-border-default bg-surface-tile"
+            data-wallet-provider-list
+          >
+            {choices.map((provider, index) => {
+              const selectable = provider.isSelectable;
+              const selected = selectedProvider === provider.entry.id;
+              return (
+                <label
+                  key={provider.entry.id}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3",
+                    index > 0 && "border-t border-border-subtle",
+                    selectable ? "cursor-pointer" : "cursor-not-allowed"
+                  )}
+                  data-wallet-provider={provider.entry.id}
+                >
+                  <input
+                    type="radio"
+                    name="provider"
+                    value={provider.entry.id}
+                    checked={selected}
+                    disabled={!selectable}
+                    onChange={() => onSelect(provider.entry.id)}
+                    className="peer sr-only"
+                    aria-describedby={`wallet-provider-${provider.entry.id}-description`}
+                  />
+                  <span className={cn("inline-flex", !selectable && "opacity-50")}>
+                    <WalletProviderMark provider={provider.entry.id} size="row" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={cn(
+                        "block text-nav leading-4.5",
+                        selectable ? "text-primary" : "text-tertiary"
+                      )}
+                    >
+                      {provider.entry.label}
+                    </span>
+                    <span
+                      id={`wallet-provider-${provider.entry.id}-description`}
+                      className={cn(
+                        "block text-body leading-4.5",
+                        selectable ? "text-secondary" : "text-tertiary"
+                      )}
+                    >
+                      {t(provider.entry.descriptionKey)}
+                    </span>
+                  </span>
+                  {selectable ? null : (
+                    <span className="shrink-0 text-body text-tertiary">
+                      {t("DashboardCustody.walletSetupProviderNotReady")}
+                    </span>
+                  )}
+                  {/* The visible radio: a ring, filled to a thick ink ring when chosen. */}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 rounded-full border border-border-strong transition-[border-width] motion-reduce:transition-none",
+                      "peer-checked:border-[5px] peer-checked:border-primary",
+                      "peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-primary",
+                      !selectable && "opacity-50"
+                    )}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      ) : (
+        <p role="status" className="text-body text-secondary">
+          {t("DashboardCustody.walletCreationAvailable")}
+        </p>
+      )}
+
+      {toSetUp.length > 0 ? (
+        <section className="mt-12" data-wallet-provider-setup-list>
+          <h3 className="mb-3 text-subheading font-medium text-primary">
+            {t("DashboardCustody.walletSetupNotSetUpTitle")}
+          </h3>
+          <ul>
+            {toSetUp.map((provider, index) => (
+              <li
+                key={provider.entry.id}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3",
+                  index > 0 && "border-t border-border-subtle"
+                )}
+              >
+                <WalletProviderMark provider={provider.entry.id} size="row" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-nav leading-4.5 text-primary">
+                    {provider.entry.label}
+                  </span>
+                  <span className="block text-body leading-4.5 text-secondary">
+                    {t(provider.entry.descriptionKey)}
+                  </span>
+                </span>
+                <Button asChild variant="outline" size="sm">
+                  <Link
+                    href={`/dashboard/integrations/${provider.entry.id}`}
+                    aria-label={t("DashboardCustody.walletSetupSetUpProvider", {
+                      provider: provider.entry.label,
+                    })}
+                  >
+                    {t("DashboardCustody.walletSetupSetUp")}
+                  </Link>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </form>
   );
 }
 
-/** Step 2 of the wizard for a provider that is already installed. */
-function WalletDetailsFields({
-  canProvisionWallet,
+/** Step 2 for a provider that can take a wallet now: the questions, then what it is created in. */
+function DetailsStep({
   connectionOptions,
   errorMessage,
+  notice,
   isConnected,
+  onChangeProvider,
+  onSubmit,
   onWalletLabelChange,
   providerEntry,
   showConnectionPicker,
   t,
   walletLabel,
 }: {
-  canProvisionWallet: boolean;
   connectionOptions: CustodyConnectionListItem[];
   errorMessage: string | null;
+  /** Why the wallet cannot be created here, when it cannot: not a failure, so not an alert. */
+  notice: string | null;
   isConnected: boolean;
+  onChangeProvider: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onWalletLabelChange: (value: string) => void;
   providerEntry: { id: KnownCustodyProvider; label: string } | null;
   showConnectionPicker: boolean;
   t: ReturnType<typeof useTranslations>;
   walletLabel: string;
 }) {
+  const { projects, selectedProjectId, sdpEnvironment } = useDashboardWorkspace();
+  const cluster = useSolanaCluster();
+  const projectName =
+    projects.find((project) => project.id === selectedProjectId)?.name ??
+    t("DashboardCustody.projectValue");
+  const environment = `${t(
+    sdpEnvironment === "production" ? "DashboardCustody.production" : "DashboardCustody.sandbox"
+  )} · ${cluster === "mainnet-beta" ? "mainnet" : cluster}`;
+
   return (
-    <>
+    <form id={DETAILS_FORM_ID} onSubmit={onSubmit}>
       <input type="hidden" name="provider" value={providerEntry?.id ?? ""} />
-      <div className="space-y-2">
-        <Label htmlFor="wallet-label">{t("DashboardCustody.walletLabel")}</Label>
-        <Input
-          id="wallet-label"
-          name={isConnected ? "label" : "walletLabel"}
-          value={walletLabel}
-          onChange={(event) => onWalletLabelChange(event.currentTarget.value)}
-          placeholder={t("DashboardCustody.walletLabelPlaceholder")}
-          className="h-12 rounded-2xl border-border-default bg-surface-raised px-4 shadow-none"
-          required
-        />
+      <div className="space-y-6">
+        <div className="space-y-2">
+          <FieldLabel
+            htmlFor="wallet-label"
+            label={t("DashboardCustody.walletLabel")}
+            hint={t("DashboardCustody.walletLabelHint")}
+          />
+          <Input
+            id="wallet-label"
+            name={isConnected ? "label" : "walletLabel"}
+            size="xl"
+            value={walletLabel}
+            onChange={(event) => onWalletLabelChange(event.currentTarget.value)}
+            placeholder={t("DashboardCustody.walletLabelPlaceholder")}
+            maxLength={100}
+            required
+          />
+        </div>
+        <div className="space-y-2">
+          <FieldLabel
+            label={t("DashboardCustody.purpose")}
+            hint={
+              isConnected
+                ? t("DashboardCustody.walletPurposeHint")
+                : t("DashboardCustody.walletPurposeFirstWalletHint")
+            }
+          />
+          {/* The first wallet on a provider is created with the provider and is always its root
+              wallet, so there is nothing to choose until the provider is connected. */}
+          <Select
+            name={isConnected ? "purpose" : undefined}
+            ariaLabel={t("DashboardCustody.purpose")}
+            defaultValue="root"
+            disabled={!isConnected}
+            size="xl"
+          >
+            {WALLET_PURPOSES.map((purpose) => (
+              <SelectItem key={purpose.value} value={purpose.value}>
+                {t(purpose.labelKey)}
+              </SelectItem>
+            ))}
+          </Select>
+        </div>
+        {showConnectionPicker ? (
+          <WalletConnectionField connections={connectionOptions} t={t} />
+        ) : null}
       </div>
-      {showConnectionPicker ? (
-        <WalletConnectionField connections={connectionOptions} t={t} />
-      ) : null}
-      <WalletFixedField
-        label={t("DashboardCustody.project")}
-        value={t("DashboardCustody.projectValue")}
-      />
-      <WalletFixedField
-        label={t("DashboardCustody.environment")}
-        value={t("DashboardCustody.sandbox")}
-      />
-      {canProvisionWallet ? null : (
-        <div className="rounded-2xl border border-border-default bg-fill-subtle px-4 py-3 text-sm leading-6 text-tertiary">
-          {providerEntry
-            ? t("DashboardCustody.connectedProviderDescription", { provider: providerEntry.label })
-            : t("DashboardCustody.chooseEnabledProvider")}
-        </div>
-      )}
+
+      <section className="mt-8" aria-labelledby="wallet-created-with">
+        <h3 id="wallet-created-with" className="text-nav font-medium text-primary">
+          {t("DashboardCustody.walletSetupCreatedWith")}
+        </h3>
+        <dl className="mt-2">
+          <div className="flex h-12 items-center justify-between gap-4 border-b border-border-subtle">
+            <dt className="text-body text-secondary">
+              {t("DashboardCustody.walletSetupProvider")}
+            </dt>
+            <dd className="flex items-center gap-4 text-body text-primary">
+              {providerEntry?.label}
+              <button
+                type="button"
+                onClick={onChangeProvider}
+                className="text-tertiary underline-offset-4 transition-colors hover:text-primary hover:underline"
+              >
+                {t("DashboardCustody.walletSetupChangeProvider")}
+              </button>
+            </dd>
+          </div>
+          <div className="flex h-12 items-center justify-between gap-4 border-b border-border-subtle">
+            <dt className="flex items-center gap-1.5 text-body text-secondary">
+              {t("DashboardCustody.project")}
+              <InfoHint text={t("DashboardCustody.walletSetupProjectHint")} />
+            </dt>
+            <dd className="min-w-0 truncate text-body text-primary">{projectName}</dd>
+          </div>
+          <div className="flex h-12 items-center justify-between gap-4">
+            <dt className="flex items-center gap-1.5 text-body text-secondary">
+              {t("DashboardCustody.environment")}
+              <InfoHint text={t("DashboardCustody.walletSetupEnvironmentHint")} />
+            </dt>
+            <dd className="text-body text-primary">{environment}</dd>
+          </div>
+        </dl>
+      </section>
+
+      {notice ? <p className="mt-6 text-body text-secondary">{notice}</p> : null}
       {errorMessage ? (
-        <div
-          role="alert"
-          className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error"
-        >
+        <p role="alert" className="mt-6 text-body text-error">
           {errorMessage}
-        </div>
+        </p>
       ) : null}
-    </>
+    </form>
+  );
+}
+
+/**
+ * The footer band. Step 1: Cancel and Continue. Step 2: Back, what confirming does, Cancel and
+ * Create. A primary action that cannot run yet is outlined, as the design draws it. The Privy
+ * credential form carries its own submit, and a submission in an unknown state locks the way out.
+ */
+function SetupFooter({
+  step,
+  providerLabel,
+  canCreate,
+  isPending,
+  ownsSubmit,
+  recoveryLocked,
+  onBack,
+  onCancel,
+  t,
+}: {
+  step: SetupStep;
+  providerLabel: string | null;
+  canCreate: boolean;
+  isPending: boolean;
+  ownsSubmit: boolean;
+  recoveryLocked: boolean;
+  onBack: () => void;
+  onCancel: () => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  if (step === "provider") {
+    return (
+      <div className="flex items-center justify-end gap-4">
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          {t("DashboardCustody.cancel")}
+        </Button>
+        <Button
+          type="submit"
+          form={PROVIDER_FORM_ID}
+          variant={providerLabel ? "default" : "outline"}
+          disabled={!providerLabel}
+        >
+          {t("DashboardCustody.continue")}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      {recoveryLocked ? null : (
+        <Button type="button" variant="outline" onClick={onBack} disabled={isPending}>
+          {t("DashboardCustody.back")}
+        </Button>
+      )}
+      {ownsSubmit && providerLabel ? (
+        <p className="min-w-0 flex-1 text-body text-secondary">
+          {t("DashboardCustody.walletSetupConfirmHint", { provider: providerLabel })}
+        </p>
+      ) : null}
+      <div className="ml-auto flex items-center gap-4">
+        {recoveryLocked ? null : (
+          <Button type="button" variant="ghost" onClick={onCancel} disabled={isPending}>
+            {t("DashboardCustody.cancel")}
+          </Button>
+        )}
+        {ownsSubmit ? (
+          <Button
+            type="submit"
+            form={DETAILS_FORM_ID}
+            variant={canCreate ? "default" : "outline"}
+            disabled={!canCreate}
+          >
+            {isPending
+              ? t("DashboardCustody.createWalletPending")
+              : t("DashboardCustody.createWallet")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -271,7 +585,7 @@ export function WalletSetupFlow({
   const t = useTranslations();
   const router = useRouter();
   const refreshWalletInventory = useWalletInventoryRefresh();
-  const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
+  const { selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
     () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
@@ -308,7 +622,7 @@ export function WalletSetupFlow({
   // connections into step 2, so the list is narrowed here rather than trusted
   // as delivered. The picker earns its place only when the provider is already
   // installed and something is actually selectable: a legacy Config-backed
-  // provider has no connections and keeps the original two-field form.
+  // provider has no connections and keeps the original form.
   const connectionOptions = useMemo(
     () => connections.filter((connection) => connection.provider === selectedProvider),
     [connections, selectedProvider]
@@ -328,27 +642,21 @@ export function WalletSetupFlow({
   // submission + connection check) instead of the legacy initialize path,
   // which the API refuses once stored-credential setup is enforced.
   const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
+  const canCreate = canProvisionWallet && walletLabel.trim().length > 0 && !isPending;
 
-  const continueFromProvider = () => {
-    if (!selectedProviderEntry) {
-      return;
-    }
-    setSelectedProvider(selectedProviderEntry.id);
-    setCurrentStep("details");
-  };
+  const leaveFlow = () => router.push("/dashboard/wallets");
 
-  const goBack = () => {
+  const goToProviderStep = () => {
     setErrorMessage(null);
-    if (currentStep === "details") {
-      setCurrentStep("provider");
-      return;
-    }
-    router.push("/dashboard/wallets");
+    setCurrentStep("provider");
   };
 
   const handleProviderSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    continueFromProvider();
+    if (!selectedProviderEntry) {
+      return;
+    }
+    setCurrentStep("details");
   };
 
   const handleCreateWallet = (form: HTMLFormElement) => {
@@ -376,7 +684,7 @@ export function WalletSetupFlow({
         }
 
         if (selectedProjectId) {
-          completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
+          invalidateQuickStartStatus();
         }
         refreshWalletInventory();
         router.refresh();
@@ -432,121 +740,88 @@ export function WalletSetupFlow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const heading =
-    currentStep === "provider"
-      ? t("DashboardCustody.chooseProvider")
-      : isByokDetails
-        ? t("DashboardCustody.byokProviderDetails")
-        : t("DashboardCustody.walletDetails");
-  const canContinue = Boolean(selectedProviderEntry);
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
+  const steps = [
+    {
+      label: t("DashboardCustody.walletSetupProviderStep"),
+      title: t("DashboardCustody.walletSetupProviderTitle"),
+    },
+    {
+      label: t("DashboardCustody.walletSetupDetailsStep"),
+      title: isByokDetails
+        ? t("DashboardCustody.byokProviderDetails")
+        : t("DashboardCustody.walletDetails"),
+    },
+  ];
 
-  const formContent = (
-    <WalletDetailsFields
-      canProvisionWallet={canProvisionWallet}
-      connectionOptions={connectionOptions}
-      errorMessage={errorMessage}
-      isConnected={isConnected}
-      onWalletLabelChange={setWalletLabel}
-      providerEntry={selectedProviderEntry}
-      showConnectionPicker={showConnectionPicker}
+  const footer = (
+    <SetupFooter
+      step={currentStep}
+      providerLabel={selectedProviderEntry?.label ?? null}
+      canCreate={canCreate}
+      isPending={isPending}
+      ownsSubmit={!isByokDetails}
+      recoveryLocked={byokRecoveryLocked}
+      onBack={goToProviderStep}
+      onCancel={leaveFlow}
       t={t}
-      walletLabel={walletLabel}
     />
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-wallet-setup-flow="true">
-      <div className="shrink-0 px-4 pt-8 pb-6 md:px-6">
-        <div className="mx-auto w-full max-w-3xl">
-          <WizardStepProgress
-            data-wallet-setup-stepper="true"
-            currentStep={stepIndex}
-            progressLabel={t("DashboardCustody.stepOf", {
-              current: stepIndex + 1,
-              total: SETUP_STEPS.length,
-            })}
-            steps={SETUP_STEPS}
+    <div className="h-full min-h-0" data-wallet-setup-flow="true">
+      <WizardFrame
+        steps={steps}
+        currentStep={stepIndex}
+        progressLabel={t("DashboardCustody.stepOf", {
+          current: stepIndex + 1,
+          total: SETUP_STEPS.length,
+        })}
+        description={
+          currentStep === "provider" ? t("DashboardCustody.walletSetupProviderDescription") : null
+        }
+        footer={footer}
+      >
+        {currentStep === "provider" ? (
+          <ProviderStep
+            availability={availability}
+            selectedProvider={selectedProvider}
+            onSelect={(provider) => {
+              setSelectedProvider(provider);
+              setErrorMessage(null);
+            }}
+            onSubmit={handleProviderSubmit}
+            t={t}
           />
-        </div>
-      </div>
-
-      <div
-        className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6"
-        data-wallet-setup-scroll-region="true"
-      >
-        <div className="mx-auto w-full max-w-3xl pb-8">
-          <div className="space-y-6">
-            <h2 className="text-2xl font-medium tracking-tight text-primary">{heading}</h2>
-
-            {currentStep === "provider" ? (
-              <form id={PROVIDER_FORM_ID} onSubmit={handleProviderSubmit}>
-                <WalletProviderChoices
-                  availability={availability}
-                  onSelect={(provider) => {
-                    setSelectedProvider(provider);
-                    setErrorMessage(null);
-                  }}
-                  selectedProvider={selectedProvider}
-                />
-              </form>
-            ) : isByokDetails ? (
-              <PrivyCredentialForm
-                formId={DETAILS_FORM_ID}
-                onRecoveryLockChange={setByokRecoveryLocked}
-              />
-            ) : (
-              <form id={DETAILS_FORM_ID} onSubmit={handleDetailsSubmit} className="grid gap-4">
-                {formContent}
-              </form>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <footer
-        className="shrink-0 border-t border-border-default px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] md:px-6"
-        data-wallet-setup-actions="true"
-      >
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3">
-          {byokRecoveryLocked ? (
-            <span />
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={goBack}
-              disabled={isPending}
-              iconLeft={currentStep === "details" ? <ArrowLeft className="size-4" /> : undefined}
-            >
-              {currentStep === "provider"
-                ? t("DashboardCustody.cancel")
-                : t("DashboardCustody.back")}
-            </Button>
-          )}
-
-          {currentStep === "provider" ? (
-            <Button
-              type="submit"
-              form={PROVIDER_FORM_ID}
-              disabled={!canContinue}
-              iconRight={<ArrowRight className="size-4" />}
-            >
-              {t("DashboardCustody.next")}
-            </Button>
-          ) : isByokDetails ? null : (
-            <Button
-              type="submit"
-              form={DETAILS_FORM_ID}
-              disabled={!canProvisionWallet || isPending}
-            >
-              {isPending
-                ? t("DashboardCustody.createWalletPending")
-                : t("DashboardCustody.createWallet")}
-            </Button>
-          )}
-        </div>
-      </footer>
+        ) : isByokDetails ? (
+          <PrivyCredentialForm
+            formId={DETAILS_FORM_ID}
+            onRecoveryLockChange={setByokRecoveryLocked}
+          />
+        ) : (
+          <DetailsStep
+            connectionOptions={connectionOptions}
+            errorMessage={errorMessage}
+            notice={
+              canProvisionWallet
+                ? null
+                : selectedProviderEntry
+                  ? t("DashboardCustody.connectedProviderDescription", {
+                      provider: selectedProviderEntry.label,
+                    })
+                  : t("DashboardCustody.chooseEnabledProvider")
+            }
+            isConnected={isConnected}
+            onChangeProvider={goToProviderStep}
+            onSubmit={handleDetailsSubmit}
+            onWalletLabelChange={setWalletLabel}
+            providerEntry={selectedProviderEntry}
+            showConnectionPicker={showConnectionPicker}
+            t={t}
+            walletLabel={walletLabel}
+          />
+        )}
+      </WizardFrame>
     </div>
   );
 }

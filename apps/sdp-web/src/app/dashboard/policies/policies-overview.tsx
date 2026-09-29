@@ -10,10 +10,8 @@ import {
   ChevronDownIcon,
   EllipsisIcon,
   KeyRoundIcon,
-  SearchIcon,
   ShieldCheckIcon,
   WalletIcon,
-  XIcon,
 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
@@ -31,9 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { PaginatedFooter } from "@/components/ui/paginated-footer";
+import { SearchInput } from "@/components/ui/search-input";
 import { Select, SelectItem } from "@/components/ui/select";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import {
@@ -555,26 +553,17 @@ export function PoliciesOverviewSurface({
       <DashboardWorkspaceCard>
         <div className="border-b border-border-default px-4 py-3">
           <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(160px,1fr)_170px_auto]">
-            <Input
+            <SearchInput
               value={searchValue}
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder={t("DashboardPolicies.searchPlaceholder")}
-              aria-label={t("DashboardPolicies.searchPlaceholder")}
-              iconLeft={<SearchIcon />}
-              action={
-                searchValue ? (
-                  <button
-                    type="button"
-                    aria-label={t("DashboardPolicies.clearSearch")}
-                    onClick={() => onSearchChange("")}
-                    className="rounded text-tertiary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default"
-                  >
-                    <XIcon className="size-5" />
-                  </button>
-                ) : undefined
-              }
+              clear={{
+                label: t("DashboardPolicies.clearSearch"),
+                onClear: () => onSearchChange(""),
+              }}
             />
             <Select
+              textSize="body"
               value={state.status || "all"}
               onValueChange={(value) =>
                 onStateChange({

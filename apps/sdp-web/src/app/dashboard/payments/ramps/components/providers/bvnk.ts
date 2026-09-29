@@ -1,7 +1,7 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type { BvnkOnboardingPanelStatus, OnboardingCopy, SimulateActionLabels } from "./index";
+import type { BvnkOnboardingPanelStatus, OnboardingCopy } from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -58,13 +58,5 @@ export function getBvnkProvisioningDetail(t: Translate): Record<RampDirection, s
   return {
     onramp: t("DashboardPayments.bvnk.onrampProvisioningDetail"),
     offramp: t("DashboardPayments.bvnk.offrampProvisioningDetail"),
-  };
-}
-
-export function getBvnkSimulateLabels(t: Translate): SimulateActionLabels {
-  return {
-    idle: t("DashboardPayments.bvnk.simulateDeposit"),
-    busy: t("DashboardPayments.bvnk.simulating"),
-    done: t("DashboardPayments.bvnk.depositSimulated"),
   };
 }

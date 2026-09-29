@@ -31,6 +31,11 @@ interface UiSelectProps {
   onValueChange?: (value: string | null) => void;
   placeholder?: string;
   size?: SelectSize;
+  /**
+   * The value's text: a form field's (16px on a refresh surface), or `body` (14px) for a
+   * list toolbar's pickers, which sit beside the 14px Filter button and search field.
+   */
+  textSize?: "field" | "body";
   disabled?: boolean;
   className?: string;
   /** Persistent leading icon on the trigger only (not repeated on each option). */
@@ -75,6 +80,7 @@ function Select({
   onValueChange,
   placeholder,
   size = "lg",
+  textSize = "field",
   disabled,
   className,
   iconLeft,
@@ -115,7 +121,10 @@ function Select({
           </span>
         )}
         <BaseSelect.Value
-          className="relative min-w-0 flex-1 truncate text-sm text-primary refresh:text-field"
+          className={cn(
+            "relative min-w-0 flex-1 truncate text-primary",
+            textSize === "body" ? "text-body" : "text-sm refresh:text-field"
+          )}
           placeholder={<span className="text-[var(--input-placeholder-color)]">{placeholder}</span>}
         />
         {trailing && (

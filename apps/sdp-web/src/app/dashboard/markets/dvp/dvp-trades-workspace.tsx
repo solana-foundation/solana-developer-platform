@@ -355,6 +355,7 @@ function TradesToolbar({
             // itself an option, so an empty value from the trigger is ignored.
             onValueChange={(next) => next && onStatusChange(next as StatusFilter)}
             value={status}
+            textSize="body"
           >
             {items.map((item) => (
               <SelectItem key={item.value} value={item.value}>

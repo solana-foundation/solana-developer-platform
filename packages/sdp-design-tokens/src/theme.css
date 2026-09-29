@@ -7,13 +7,14 @@
     @import "@sdp/design-tokens/tokens.css";
     @import "@sdp/design-tokens/theme.css";
 
-  `inline` makes every utility reference the token directly (color: var(--emph-xh)), which is
-  what lets [data-sdp-theme="refresh"] re-theme a subtree by re-pointing the tokens.
+  `inline` makes every utility reference the token directly (color: var(--emph-xh)), so a
+  utility always paints with the palette tokens.css points that name at.
 */
 
-/* `refresh:` styles an element only inside a refresh surface, for the structural changes a
-   token swap cannot express (underline fields, a borderless track). Zero-specificity :where,
-   so it overrides the base utility by source order, exactly like `dark:`. */
+/* `refresh:` styles an element only inside a refresh surface, for the design's structural
+   changes (underline fields, a borderless track, the sidebar's rows). Colour and type come from
+   the tokens everywhere. Zero-specificity :where, so it overrides the base utility by source
+   order, exactly like `dark:`. */
 @custom-variant refresh (&:where([data-sdp-theme="refresh"], [data-sdp-theme="refresh"] *));
 
 @theme inline {
@@ -26,6 +27,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
+  --color-surface-tile: var(--surface-tile);
 
   --color-fill-subtle: var(--t4);
   --color-fill: var(--t8);

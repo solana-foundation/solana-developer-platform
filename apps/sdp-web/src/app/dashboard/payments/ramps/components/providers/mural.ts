@@ -1,7 +1,7 @@
 import type { RampDirection } from "@sdp/types/ramp-requirements";
 import { FileSignatureIcon, Loader2Icon, ShieldCheckIcon, XCircleIcon } from "lucide-react";
 import type { MessageKey, TranslationValues } from "@/i18n/messages";
-import type { MuralOnboardingPanelStatus, OnboardingCopy, SimulateActionLabels } from "./index";
+import type { MuralOnboardingPanelStatus, OnboardingCopy } from "./index";
 
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
@@ -52,13 +52,5 @@ export function getMuralProvisioningDetail(t: Translate): Record<RampDirection, 
   return {
     onramp: t("DashboardPayments.mural.onrampProvisioningDetail"),
     offramp: t("DashboardPayments.mural.offrampProvisioningDetail"),
-  };
-}
-
-export function getMuralSimulateLabels(t: Translate): SimulateActionLabels {
-  return {
-    idle: t("DashboardPayments.mural.simulateDeposit"),
-    busy: t("DashboardPayments.mural.simulating"),
-    done: t("DashboardPayments.mural.depositSimulated"),
   };
 }

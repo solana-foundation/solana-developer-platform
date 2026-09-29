@@ -4,7 +4,9 @@ import { SignInButton, useAuth } from "@clerk/nextjs";
 import { ChevronDownIcon, ChevronLeftIcon, LockIcon, PanelLeftIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
+import { isKnownCustodyProvider } from "@/app/dashboard/custody/provider-catalog";
+import { WalletProviderMark } from "@/app/dashboard/custody/wallet-provider-mark";
 import { DashboardBottomNav } from "@/components/dashboard-bottom-nav";
 import {
   DashboardHeaderAction,
@@ -12,7 +14,10 @@ import {
   getDashboardPageConfig,
   HeaderBackAction,
 } from "@/components/dashboard-header";
-import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import {
+  DASHBOARD_HEADER_TABS_TRAILING_ID,
+  DashboardHeaderTabs,
+} from "@/components/dashboard-header-tabs";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
@@ -23,6 +28,7 @@ import {
   getNavSections,
   type NavItem,
   type NavSection,
+  type SubNavItem,
   withSubnavOpen,
   withSubnavToggled,
 } from "@/components/dashboard-nav";
@@ -34,11 +40,13 @@ import {
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
+import { PaymentsDemoNotice } from "@/components/payments-demo-notice";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
-import { themeScopeAttributes } from "@/components/theme-scope";
+import { type ThemeScope, themeScopeAttributes } from "@/components/theme-scope";
 import { ThemeScopeProvider } from "@/components/theme-scope-provider";
+import { useWalletFavorites } from "@/components/use-wallet-favorites";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { DashboardFlags } from "@/flags/dashboard";
@@ -49,8 +57,19 @@ import {
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
+import {
+  isPaymentsDemoOn,
+  PaymentsDemoProvider,
+  type PaymentsDemoState,
+} from "@/lib/payments-demo/payments-demo-context";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
+import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
+
+// The sidebar is the refresh design's on every route, whatever the page beside it is built on:
+// its container carries the scope, and its menus re-stamp it through the provider when they
+// portal out.
+const SIDEBAR_THEME_SCOPE: ThemeScope = "refresh";
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
@@ -67,6 +86,20 @@ const childNavItemBase =
 const childNavItemActive = `${navItemActive} refresh:font-medium`;
 const childNavItemInactive =
   "text-secondary hover:bg-fill-strong hover:text-primary refresh:hover:bg-fill";
+
+/** A sub-item's artwork: its own leading mark (kept on the refresh sidebar), else its icon. */
+function SubNavItemLeading({ item }: { item: SubNavItem }) {
+  if (item.leading) {
+    return (
+      <span aria-hidden="true" className="inline-flex shrink-0">
+        {item.leading}
+      </span>
+    );
+  }
+  return item.icon ? (
+    <item.icon aria-hidden="true" className="size-4 shrink-0 refresh:hidden" />
+  ) : null;
+}
 
 function SidebarGroup({
   title,
@@ -221,13 +254,8 @@ function SidebarGroup({
                           <span
                             className={cn(childNavItemBase, "cursor-not-allowed text-tertiary")}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                             <LockIcon className="ml-auto h-3 w-3" />
                           </span>
                         ) : (
@@ -239,13 +267,8 @@ function SidebarGroup({
                               childActive ? childNavItemActive : childNavItemInactive
                             )}
                           >
-                            {child.icon ? (
-                              <child.icon
-                                aria-hidden="true"
-                                className="size-4 shrink-0 refresh:hidden"
-                              />
-                            ) : null}
-                            {child.label}
+                            <SubNavItemLeading item={child} />
+                            <span className="min-w-0 truncate">{child.label}</span>
                           </Link>
                         )}
                       </div>
@@ -388,13 +411,17 @@ function usesWorkspaceViewport(pathname: string): boolean {
   );
 }
 
+const DEMO_OFF: PaymentsDemoState = { demoProjectId: null, cookieProjectId: null };
+
 /* biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing shell orchestration */ /* react-doctor-disable-next-line no-high-complexity-react-function -- this change only supplies Private Channels route configuration */
 export function DashboardShell({
   children,
   flags,
+  paymentsDemo = DEMO_OFF,
 }: {
   children: ReactNode;
   flags: DashboardFlags;
+  paymentsDemo?: PaymentsDemoState;
 }) {
   const {
     assetProfiles: assetProfilesEnabled,
@@ -413,6 +440,8 @@ export function DashboardShell({
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
+  const demoMode = isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+  const paymentsDemoOn = isPaymentsPath(pathname) && demoMode;
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -424,7 +453,8 @@ export function DashboardShell({
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
-      initial[key as DashboardSubnavKey] = pathname.startsWith(group.pathPrefix);
+      initial[key as DashboardSubnavKey] =
+        group.defaultOpen || pathname.startsWith(group.pathPrefix);
     }
     return initial;
   });
@@ -435,8 +465,8 @@ export function DashboardShell({
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname);
   const isRefresh = themeScope === "refresh";
-  // The design's sidebar is 272px (17rem) including its rule; the base shell keeps its 296.
-  const sidebarExpandedWidth = isRefresh ? 272 : 296;
+  // The design's sidebar is 272px (17rem) including its rule.
+  const sidebarExpandedWidth = 272;
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
     pathname,
@@ -447,6 +477,19 @@ export function DashboardShell({
     paymentsEnabled,
     policiesEnabled
   );
+  const { favorites: walletFavorites } = useWalletFavorites();
+  const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
+    label: favorite.name,
+    href: `/dashboard/wallets/${encodeURIComponent(favorite.walletId)}`,
+    leading: (
+      <WalletProviderMark
+        provider={
+          favorite.provider && isKnownCustodyProvider(favorite.provider) ? favorite.provider : null
+        }
+        size="nav"
+      />
+    ),
+  }));
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
     custodyEnabled,
@@ -459,18 +502,21 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    walletFavorites: walletFavoriteItems,
   });
-  const pageTitle =
+  const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
-      ? pageTitleOverride.title
-      : pageConfig.title;
+      ? pageTitleOverride
+      : null;
+  const pageTitle = activeTitleOverride?.title ?? pageConfig.title;
   const contentWidthClass = pageConfig.contentWidthClass ?? "max-w-5xl";
   const headerTabs = pageConfig.headerTabs;
   const routeTabs = pageConfig.routeTabs;
   const hasHeaderTabs = Boolean(headerTabs || routeTabs);
   // A refresh action page sets its way back over a left title, in the page's column, as the
   // design does; the base shell keeps it in the title row beside a centred title.
-  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction) && !hasHeaderTabs;
+  // A refresh page sets its way back over its title, tabs or not (a wallet's page has both).
+  const stacksBackAboveTitle = isRefresh && Boolean(pageConfig.backAction);
   const backAction = pageConfig.backAction ? (
     <HeaderBackAction
       href={pageConfig.backAction.href}
@@ -488,9 +534,23 @@ export function DashboardShell({
   // The dashboard's own URL store rather than useSearchParams: list filters update the query
   // shallowly, and an export has to follow them.
   const { searchParams: urlSearchParams } = useDashboardUrlState();
-  const headerAction = pageConfig.headerAction ? (
-    <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
-  ) : null;
+  const routeAction =
+    pageConfig.headerAction &&
+    (!pageConfig.headerAction.capability ||
+      dashboardAccess.capabilities[pageConfig.headerAction.capability]) ? (
+      <DashboardHeaderAction action={pageConfig.headerAction} search={urlSearchParams.toString()} />
+    ) : null;
+  // A page's own actions (a wallet's star) sit before the route's action, in the same slot.
+  const pageActions = activeTitleOverride?.actions;
+  const headerAction =
+    pageActions && routeAction ? (
+      <span className="flex items-center gap-2">
+        {pageActions}
+        {routeAction}
+      </span>
+    ) : (
+      (pageActions ?? routeAction)
+    );
   // Refresh pages put the title, the tabs and the content in one column with one gutter, so all
   // three share a left edge, and drop the full-bleed rule under the tabs. The column is the
   // design's 900px page column, or the flow's 660px when the page's content box is wider than
@@ -556,6 +616,19 @@ export function DashboardShell({
     setOpenSubnavs(next);
     persistSubnav(key, true);
   };
+
+  // Pinning a wallet promises it is in the sidebar under Wallets, so the group opens even if it
+  // was folded. The write sits outside the updater, which React may replay.
+  useEffect(
+    () =>
+      subscribeWalletFavoriteAdded(() => {
+        if (subnavHydratedRef.current) {
+          window.localStorage.setItem(dashboardSubnavStorageKey("wallets"), "true");
+        }
+        setOpenSubnavs((current) => withSubnavOpen(current, "wallets"));
+      }),
+    []
+  );
 
   useEffect(() => {
     if (previousPathnameRef.current !== pathname) {
@@ -634,280 +707,315 @@ export function DashboardShell({
   }
 
   return (
-    // On a refresh route the whole screen carries the scope, sidebar included, so the shell
-    // renders in the design's papers and face. Other routes keep the base shell.
+    // On a refresh route the whole screen carries the scope, so its page renders in the design's
+    // component treatments and layout. Other routes keep the base page; the sidebar carries the
+    // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
-        shouldLockShellViewport ? "h-screen overflow-hidden" : "",
+        // clip, not hidden: a hidden box can still be scrolled by the browser (focusing a
+        // control below the fold), which shifts the locked page up and leaves a gap under it.
+        shouldLockShellViewport ? "h-screen overflow-clip" : "",
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
         <DashboardPageTitleContext.Provider value={setPageTitleOverride}>
-          <SentryUserContext />
-          <NetworkDebugPanel />
-          <div
-            className={[
-              "mx-auto grid min-h-screen w-full max-w-none gap-0",
-              shouldLockViewportScroll ? "h-full" : "",
-              "md:grid-cols-[auto_1fr]",
-            ].join(" ")}
-          >
-            <aside
-              style={{
-                width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
-              }}
-              className="relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between refresh:border-r refresh:border-border-default"
+          <PaymentsDemoProvider value={paymentsDemoOn}>
+            {paymentsDemoOn ? <PaymentsDemoNotice /> : null}
+            <SentryUserContext />
+            <NetworkDebugPanel />
+            <div
+              className={[
+                "mx-auto grid min-h-screen w-full max-w-none gap-0",
+                shouldLockViewportScroll ? "h-full" : "",
+                "md:grid-cols-[auto_1fr]",
+              ].join(" ")}
             >
-              <DashboardSidebarContent
-                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                navSections={navSections}
-                pathname={pathname}
-                onNavigate={undefined}
-                onClose={() => setSidebarOpen(false)}
-                isCollapsed={!isSidebarOpen}
-                variant="desktop"
-                showQuickStart={!isWorkspaceSwitching}
-                onOrganizationSwitchingChange={setOrganizationSwitching}
-                openSubnavs={openSubnavs}
-                onSubnavToggle={toggleSubnav}
-                onSubnavOpen={openSubnav}
-              />
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(!isSidebarOpen)}
-                aria-label={
-                  isSidebarOpen
-                    ? t("Shared.dashboardShell.collapseSidebar")
-                    : t("Shared.dashboardShell.expandSidebar")
-                }
-                className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
+              <aside
+                {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
+                style={{
+                  width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
+                }}
+                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
               >
-                <ChevronLeftIcon
-                  className={cn(
-                    "size-3.5 transition-transform motion-reduce:transition-none",
-                    !isSidebarOpen && "rotate-180"
-                  )}
-                />
-              </button>
-            </aside>
-
-            {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
-            duplicate of every destination would otherwise sit behind the overlay. A refresh
-            route has no bar at all: the design's phone reaches the navigation through the
-            menu button over the title. */}
-            {isRefresh || isMobileSidebarOpen || isMoreSheetOpen ? null : (
-              <DashboardBottomNav
-                pathname={pathname}
-                custodyEnabled={custodyEnabled}
-                issuanceEnabled={issuanceEnabled}
-                paymentsEnabled={paymentsEnabled}
-                onOpenMore={() => setMoreSheetOpen(true)}
-              />
-            )}
-
-            {isMoreSheetOpen ? (
-              <DashboardMoreSheet
-                pathname={pathname}
-                canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
-                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                dvpEnabled={dvpEnabled}
-                earnEnabled={earnEnabled}
-                heliusRingsEnabled={heliusRingsEnabled}
-                marketsEnabled={marketsEnabled}
-                policiesEnabled={policiesEnabled}
-                onClose={() => setMoreSheetOpen(false)}
-              />
-            ) : null}
-
-            {isMobileSidebarOpen ? (
-              <div className="fixed inset-0 z-50 flex md:hidden">
-                <button
-                  type="button"
-                  aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
-                  className="absolute inset-0 bg-primary/30"
-                  onClick={() => setMobileSidebarOpen(false)}
-                />
-                <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg refresh:shadow-none">
+                <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
                   <DashboardSidebarContent
                     canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                     navSections={navSections}
                     pathname={pathname}
-                    onNavigate={() => setMobileSidebarOpen(false)}
-                    onClose={() => setMobileSidebarOpen(false)}
-                    isCollapsed={false}
-                    variant="mobile"
+                    onNavigate={undefined}
+                    onClose={() => setSidebarOpen(false)}
+                    isCollapsed={!isSidebarOpen}
+                    variant="desktop"
                     showQuickStart={!isWorkspaceSwitching}
                     onOrganizationSwitchingChange={setOrganizationSwitching}
                     openSubnavs={openSubnavs}
                     onSubnavToggle={toggleSubnav}
                     onSubnavOpen={openSubnav}
                   />
-                </div>
-              </div>
-            ) : null}
+                </ThemeScopeProvider>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(!isSidebarOpen)}
+                  aria-label={
+                    isSidebarOpen
+                      ? t("Shared.dashboardShell.collapseSidebar")
+                      : t("Shared.dashboardShell.expandSidebar")
+                  }
+                  className="absolute top-1/2 right-0 z-20 flex size-6 -translate-y-1/2 translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border-default bg-surface-raised text-secondary shadow-sm transition-colors before:absolute before:-inset-1.5 before:content-[''] hover:border-border-strong hover:text-primary"
+                >
+                  <ChevronLeftIcon
+                    className={cn(
+                      "size-3.5 transition-transform motion-reduce:transition-none",
+                      !isSidebarOpen && "rotate-180"
+                    )}
+                  />
+                </button>
+              </aside>
 
-            {/* The refresh page is flat: no card, no radius; the sidebar's rule separates it. The
-              `page` group lets the header react to the content (an empty state hiding the
+              {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
+            duplicate of every destination would otherwise sit behind the overlay. A refresh
+            route has no bar at all: the design's phone reaches the navigation through the
+            menu button over the title. */}
+              {isRefresh || isMobileSidebarOpen || isMoreSheetOpen ? null : (
+                <DashboardBottomNav
+                  pathname={pathname}
+                  custodyEnabled={custodyEnabled}
+                  issuanceEnabled={issuanceEnabled}
+                  paymentsEnabled={paymentsEnabled}
+                  onOpenMore={() => setMoreSheetOpen(true)}
+                />
+              )}
+
+              {isMoreSheetOpen ? (
+                <DashboardMoreSheet
+                  pathname={pathname}
+                  canReadApprovals={dashboardAccess.capabilities.canReadApprovals}
+                  canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                  dvpEnabled={dvpEnabled}
+                  earnEnabled={earnEnabled}
+                  heliusRingsEnabled={heliusRingsEnabled}
+                  marketsEnabled={marketsEnabled}
+                  policiesEnabled={policiesEnabled}
+                  onClose={() => setMoreSheetOpen(false)}
+                />
+              ) : null}
+
+              {isMobileSidebarOpen ? (
+                <div className="fixed inset-0 z-50 flex md:hidden">
+                  <button
+                    type="button"
+                    aria-label={t("Shared.dashboardShell.closeNavigationOverlay")}
+                    className="absolute inset-0 bg-primary/30"
+                    onClick={() => setMobileSidebarOpen(false)}
+                  />
+                  <div
+                    {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
+                    className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]"
+                  >
+                    <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
+                      <DashboardSidebarContent
+                        canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                        navSections={navSections}
+                        pathname={pathname}
+                        onNavigate={() => setMobileSidebarOpen(false)}
+                        onClose={() => setMobileSidebarOpen(false)}
+                        isCollapsed={false}
+                        variant="mobile"
+                        showQuickStart={!isWorkspaceSwitching}
+                        onOrganizationSwitchingChange={setOrganizationSwitching}
+                        openSubnavs={openSubnavs}
+                        onSubnavToggle={toggleSubnav}
+                        onSubnavOpen={openSubnav}
+                      />
+                    </ThemeScopeProvider>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* The page is flat on every route: no card, no radius; the sidebar's rule separates it.
+              The `page` group lets the header react to the content (an empty state hiding the
               header's action). On a refresh route it is also the work area's size container:
               the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
-            <section
-              className={cn(
-                "group/page relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
-                isRefresh && "@container",
-                // The locked layout clears the phone's bottom bar; a refresh route has none, so it
-                // keeps only the home indicator's inset.
-                shouldLockViewportScroll
-                  ? [
-                      "flex min-h-0 flex-col overflow-hidden md:pb-0",
-                      isRefresh
-                        ? "pb-[env(safe-area-inset-bottom)]"
-                        : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
-                    ]
-                  : isRefresh
-                    ? "py-0"
-                    : "px-3 py-5 md:p-6"
-              )}
-            >
-              <div
-                className={[
-                  "min-w-0 w-full",
+              <section
+                className={cn(
+                  "group/page relative min-w-0 bg-surface-raised",
+                  isRefresh && "@container",
+                  // The locked layout clears the phone's bottom bar; a refresh route has none, so it
+                  // keeps only the home indicator's inset.
                   shouldLockViewportScroll
-                    ? "flex min-h-0 flex-1 flex-col"
-                    : pageConfig.hideTitleOnMobile
-                      ? "space-y-4 sm:space-y-6"
-                      : "space-y-6",
-                ].join(" ")}
+                    ? [
+                        "flex min-h-0 flex-col overflow-clip md:pb-0",
+                        isRefresh
+                          ? "pb-[env(safe-area-inset-bottom)]"
+                          : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
+                      ]
+                    : isRefresh
+                      ? "py-0"
+                      : "px-3 py-5 md:p-6"
+                )}
               >
-                {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
+                <div
+                  className={[
+                    "min-w-0 w-full",
+                    shouldLockViewportScroll
+                      ? "flex min-h-0 flex-1 flex-col"
+                      : pageConfig.hideTitleOnMobile
+                        ? "space-y-4 sm:space-y-6"
+                        : "space-y-6",
+                  ].join(" ")}
+                >
+                  {/* Refresh: the gutter sits outside the centred column, so the title's left edge is
                   the content's at every width; 32px above the title and 24px from the title to
                   the tabs are the design's. */}
-                <div className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-6 md:pt-8"])}>
                   <div
-                    className={cn(
-                      "space-y-4",
-                      alignsHeaderWithContent && ["mx-auto w-full space-y-6", pageColumnClass]
-                    )}
+                    className={cn("shrink-0", isRefresh && [refreshGutterClass, "pt-6 md:pt-8"])}
                   >
                     <div
                       className={cn(
-                        shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
-                        !isRefresh &&
-                          (shouldLockViewportScroll
-                            ? "px-3 pt-5 md:px-6 md:pt-6"
-                            : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6")
+                        "space-y-4",
+                        alignsHeaderWithContent && ["mx-auto w-full space-y-6", pageColumnClass]
                       )}
                     >
-                      <DashboardTopBar
-                        isMobileSidebarOpen={isMobileSidebarOpen}
-                        setMobileSidebarOpen={setMobileSidebarOpen}
-                        titleVisibility={
-                          pageConfig.hideTitle
-                            ? "screen-reader-only"
-                            : pageConfig.hideTitleOnMobile
-                              ? "desktop-only"
-                              : "visible"
-                        }
-                        title={pageTitle}
-                        titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}
-                        topBarLeadingContent={topBarLeadingContent}
-                        hasHeaderTabs={hasHeaderTabs}
-                        action={headerAction}
-                        above={stacksBackAboveTitle ? backAction : undefined}
-                        layout={isRefresh ? "refresh" : "base"}
-                        utilities={isPaymentsPath(pathname) ? <PaymentsDemoToggle /> : undefined}
-                      />
-                    </div>
-
-                    {headerTabs ? (
                       <div
                         className={cn(
-                          !alignsHeaderWithContent && "border-b border-border-default",
-                          !shouldLockViewportScroll && !alignsHeaderWithContent && "-mx-3 md:-mx-6"
+                          shouldRenderTopBarBorder && "border-b border-border-default pb-5 md:pb-6",
+                          !isRefresh &&
+                            (shouldLockViewportScroll
+                              ? "px-3 pt-5 md:px-6 md:pt-6"
+                              : shouldRenderTopBarBorder && "-mx-3 px-3 md:-mx-6 md:px-6")
                         )}
                       >
+                        <DashboardTopBar
+                          isMobileSidebarOpen={isMobileSidebarOpen}
+                          setMobileSidebarOpen={setMobileSidebarOpen}
+                          titleVisibility={
+                            pageConfig.hideTitle
+                              ? "screen-reader-only"
+                              : pageConfig.hideTitleOnMobile
+                                ? "desktop-only"
+                                : "visible"
+                          }
+                          title={pageTitle}
+                          titlePosition={stacksBackAboveTitle ? "left" : pageConfig.titlePosition}
+                          topBarLeadingContent={topBarLeadingContent}
+                          hasHeaderTabs={hasHeaderTabs}
+                          action={headerAction}
+                          above={stacksBackAboveTitle ? backAction : undefined}
+                          mark={activeTitleOverride?.mark}
+                          layout={isRefresh ? "refresh" : "base"}
+                          utilities={
+                            isPaymentsPath(pathname) ? (
+                              <PaymentsDemoToggle {...paymentsDemo} />
+                            ) : undefined
+                          }
+                        />
+                      </div>
+
+                      {headerTabs ? (
                         <div
                           className={cn(
-                            "flex items-end",
-                            alignsHeaderWithContent
-                              ? "sdp-quiet-scroll min-w-0 overflow-x-auto"
-                              : "px-3 md:px-6"
+                            !alignsHeaderWithContent && "border-b border-border-default",
+                            !shouldLockViewportScroll &&
+                              !alignsHeaderWithContent &&
+                              "-mx-3 md:-mx-6"
                           )}
                         >
-                          <DashboardHeaderTabs {...headerTabs} />
+                          <div
+                            className={cn(
+                              "flex items-end gap-4",
+                              !alignsHeaderWithContent && "px-3 md:px-6"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "flex min-w-0 items-end",
+                                alignsHeaderWithContent && "sdp-quiet-scroll overflow-x-auto"
+                              )}
+                            >
+                              <DashboardHeaderTabs {...headerTabs} />
+                            </div>
+                            {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
+                            <div
+                              id={DASHBOARD_HEADER_TABS_TRAILING_ID}
+                              className="ml-auto flex shrink-0 items-center gap-4 self-center empty:hidden"
+                            />
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
 
-                    {routeTabs ? (
-                      <div
-                        className={cn(
-                          "border-b border-border-default",
-                          !shouldLockViewportScroll && "-mx-3 md:-mx-6"
-                        )}
-                      >
-                        <div className="flex items-end px-3 md:px-6">
-                          <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                      {routeTabs ? (
+                        <div
+                          className={cn(
+                            "border-b border-border-default",
+                            !shouldLockViewportScroll && "-mx-3 md:-mx-6"
+                          )}
+                        >
+                          <div className="flex items-end px-3 md:px-6">
+                            <DashboardRouteTabs {...routeTabs} pathname={pathname} />
+                          </div>
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-                {/* On a refresh page the content column takes the same gutter as the header, in a
+                  {/* On a refresh page the content column takes the same gutter as the header, in a
                   wrapper so the column's box stays exactly the header's. In the locked layout
                   the wrapper carries on the flex column, so the content box still fills it. */}
-                <div
-                  className={cn(
-                    "min-w-0 w-full",
-                    shouldLockViewportScroll && "flex min-h-0 flex-1 flex-col",
-                    contentTakesGutter && refreshGutterClass
-                  )}
-                >
                   <div
-                    data-dashboard-page-content={isWorkspaceSwitching ? undefined : ""}
-                    className={[
-                      "mx-auto min-w-0 w-full",
-                      contentWidthClass,
-                      // Clears the fixed mobile bottom bar so the last row of any page is
-                      // still reachable; the bar is md:hidden, so the padding is too. A refresh
-                      // route has no bar.
-                      !shouldLockViewportScroll && !isRefresh ? "pb-20 md:pb-0" : "",
-                      // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
-                      // footer inside it would then pin to this box instead of the viewport.
-                      shouldClipHorizontalOverflow && !shouldLockViewportScroll
-                        ? "overflow-x-clip"
-                        : "",
-                      // A refresh page clips only vertically: its scroll panel reaches past the
-                      // column to the work area's edges.
-                      shouldLockViewportScroll
-                        ? isRefresh
-                          ? "min-h-0 flex-1 overflow-x-visible overflow-y-clip"
-                          : "min-h-0 flex-1 overflow-hidden"
-                        : "",
-                    ].join(" ")}
-                  >
-                    {isWorkspaceSwitching ? (
-                      <div
-                        className="h-full min-h-0"
-                        data-dashboard-navigation-pending={loadingRoute}
-                        role="status"
-                        aria-live="polite"
-                      >
-                        <span className="sr-only">
-                          {t("Shared.dashboardShell.loadingDashboard")}
-                        </span>
-                        <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
-                      </div>
-                    ) : (
-                      children
+                    className={cn(
+                      "min-w-0 w-full",
+                      shouldLockViewportScroll && "flex min-h-0 flex-1 flex-col",
+                      contentTakesGutter && refreshGutterClass
                     )}
+                  >
+                    <div
+                      data-dashboard-page-content={isWorkspaceSwitching ? undefined : ""}
+                      className={[
+                        "mx-auto min-w-0 w-full",
+                        contentWidthClass,
+                        // Clears the fixed mobile bottom bar so the last row of any page is
+                        // still reachable; the bar is md:hidden, so the padding is too. A refresh
+                        // route has no bar.
+                        !shouldLockViewportScroll && !isRefresh ? "pb-20 md:pb-0" : "",
+                        // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
+                        // footer inside it would then pin to this box instead of the viewport.
+                        shouldClipHorizontalOverflow && !shouldLockViewportScroll
+                          ? "overflow-x-clip"
+                          : "",
+                        // A refresh page clips only vertically: its scroll panel reaches past the
+                        // column to the work area's edges.
+                        shouldLockViewportScroll
+                          ? isRefresh
+                            ? "min-h-0 flex-1 overflow-x-visible overflow-y-clip"
+                            : "min-h-0 flex-1 overflow-hidden"
+                          : "",
+                      ].join(" ")}
+                    >
+                      {isWorkspaceSwitching ? (
+                        <div
+                          className="h-full min-h-0"
+                          data-dashboard-navigation-pending={loadingRoute}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <span className="sr-only">
+                            {t("Shared.dashboardShell.loadingDashboard")}
+                          </span>
+                          <PageLoadingComponent assetProfilesEnabled={assetProfilesEnabled} />
+                        </div>
+                      ) : (
+                        // Switching demo mode remounts the page, so nothing a form or flow
+                        // held in one mode carries into the other.
+                        <Fragment key={demoMode ? "demo" : "live"}>{children}</Fragment>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </section>
-          </div>
+              </section>
+            </div>
+          </PaymentsDemoProvider>
         </DashboardPageTitleContext.Provider>
       </ThemeScopeProvider>
     </main>

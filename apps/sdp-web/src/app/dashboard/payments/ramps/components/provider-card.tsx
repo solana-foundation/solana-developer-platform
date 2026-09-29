@@ -270,9 +270,11 @@ export function ProviderQuoteCard({
   const t = useTranslations();
   const disabled = unavailableReason !== undefined;
   return (
+    // Relative, so the hidden radio is placed (and scrolled into view on focus) inside the
+    // card, not by the page, which would shift the whole locked page up.
     <label
       className={cn(
-        "flex w-full cursor-pointer flex-col justify-between gap-6 rounded-card border p-5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary",
+        "relative flex w-full cursor-pointer flex-col justify-between gap-6 rounded-card border p-5 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary",
         active ? "border-primary" : "border-border-strong hover:bg-fill-subtle",
         disabled && "cursor-not-allowed hover:bg-transparent"
       )}
