@@ -931,9 +931,11 @@ transaction signed by the organization custody wallet or external owner.
   `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
   and `unbackedPositions` (a visible claim whose wallet holds none of its
   shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it; so is one with an open
-  queued withdrawal request, whose shares were escrowed or burned ahead of the
-  payout, until that request is terminal). A duplicated share mint
+  explains that disagreement and the sweep settles it). A zero-share claim
+  with an open queued withdrawal request goes to `queuedWithdrawalPositions`
+  with its request ids instead: the request escrowed or burned only the shares
+  it covers, and no per-claim share total exists to prove it covers them all,
+  so the claim is listed, not judged unbacked or hidden. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.

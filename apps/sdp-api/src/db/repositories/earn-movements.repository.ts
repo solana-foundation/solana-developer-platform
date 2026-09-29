@@ -353,8 +353,8 @@ export interface EarnMovementsRepository {
    * The COMPLETE set of claims `listVaultPositions` would serve (same
    * visibility predicate, unpaged — a reconciliation over a page would clear
    * discrepancies it never looked at), each with whether any of its movements
-   * is still unsettled and whether a queued withdrawal request on it is still
-   * open. Read-only input to share reconciliation (PRO-1741);
+   * is still unsettled and the ids of its open queued withdrawal requests.
+   * Read-only input to share reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
    */
@@ -364,7 +364,7 @@ export interface EarnMovementsRepository {
     custodyWalletIds: readonly string[];
   }): Promise<
     Array<
-      EarnPositionRow & { has_unsettled_movements: boolean; has_open_withdrawal_requests: boolean }
+      EarnPositionRow & { has_unsettled_movements: boolean; open_withdrawal_request_ids: string[] }
     >
   >;
   /** External-wallet vault claims, exact-project scoped, newest first. */
@@ -1388,9 +1388,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // (finalized|failed are the only terminal statuses). A claim with an
       // in-flight movement is excluded from zero-share reporting by the
       // service: the ledger already explains why chain and record disagree,
-      // and the every-minute sweep will settle it either way. An open queued
-      // request explains it too (the shares are escrowed or burned ahead of
-      // the payout), with the same predicate closeVaultPositionIfEmpty uses.
+      // and the every-minute sweep will settle it either way. Open queued
+      // requests (the same predicate closeVaultPositionIfEmpty uses) come back
+      // by id so the service can name them beside a claim they may explain.
       const result = await db
         .prepare(
           `SELECT *,
@@ -1400,15 +1400,16 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                     WHERE unsettled.position_id = earn_positions.id
                       AND unsettled.status IN ('requested', 'submitted', 'confirmed')
                   ) AS has_unsettled_movements,
-                  EXISTS (
-                    SELECT 1
-                    FROM earn_vault_withdrawal_requests queued
-                    WHERE queued.position_id = earn_positions.id
-                      AND queued.status IN (
-                        'creating', 'pending', 'fulfillable',
-                        'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                      )
-                  ) AS has_open_withdrawal_requests
+                  COALESCE(
+                    (SELECT array_agg(queued.id ORDER BY queued.created_at, queued.id)
+                       FROM earn_vault_withdrawal_requests queued
+                      WHERE queued.position_id = earn_positions.id
+                        AND queued.status IN (
+                          'creating', 'pending', 'fulfillable',
+                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                        )),
+                    ARRAY[]::text[]
+                  ) AS open_withdrawal_request_ids
              FROM earn_positions
              WHERE ${CUSTODY_VAULT_CLAIM_VISIBILITY_SQL}
              ORDER BY created_at DESC, id DESC`
@@ -1417,7 +1418,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
         .all<
           EarnPositionRow & {
             has_unsettled_movements: boolean;
-            has_open_withdrawal_requests: boolean;
+            open_withdrawal_request_ids: string[];
           }
         >();
       return result.results ?? [];
