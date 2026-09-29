@@ -8,8 +8,8 @@ const PLAYGROUND_TAB_PATHS = new Set([
   "/dashboard/integrations/private-channels/overview",
 ]);
 
-// The previous design (NEW DESIGN off) also serves Counterparty's and Requests' playgrounds as
-// tabs on their own routes; the new design folds them into the Payments playground.
+// The previous design also serves Counterparty's and Requests' playgrounds as tabs on their own
+// routes; the new design folds them into the Payments playground.
 const LEGACY_DESIGN_PLAYGROUND_TAB_PATHS = new Set([
   "/dashboard/payments/counterparty",
   "/dashboard/payments/requests",
@@ -33,6 +33,7 @@ export function shouldClearDashboardTabAfterPathnameChange({
   previousPathname: string;
   pathname: string;
   tab: string | null;
+  /** Whether the destination page renders in the new design (isNewDesignPage). */
   newDesign?: boolean;
 }): boolean {
   if (normalizePathname(previousPathname) === normalizePathname(pathname) || !tab) {

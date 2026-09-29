@@ -51,4 +51,4 @@ async function PaymentRequestsPage() {
   });
 }
 
-export default withLegacyDesign(RedesignPaymentRequestsPage, PaymentRequestsPage);
+export default withLegacyDesign(RedesignPaymentRequestsPage, PaymentRequestsPage, "activity");

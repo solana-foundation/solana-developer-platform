@@ -9,6 +9,7 @@ export function PreviousPaymentRequestsLoading() {
 export default function PaymentRequestsLoading() {
   return (
     <DesignSwitch
+      designModule="activity"
       current={<RedesignPaymentRequestsLoading />}
       legacy={<PreviousPaymentRequestsLoading />}
     />

@@ -178,4 +178,8 @@ async function RecurringPaymentDetailRoute({
   );
 }
 
-export default withLegacyDesign(RedesignRecurringPaymentDetailRoute, RecurringPaymentDetailRoute);
+export default withLegacyDesign(
+  RedesignRecurringPaymentDetailRoute,
+  RecurringPaymentDetailRoute,
+  "activity"
+);

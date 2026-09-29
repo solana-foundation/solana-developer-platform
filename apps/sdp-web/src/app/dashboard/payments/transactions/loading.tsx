@@ -9,6 +9,7 @@ export function PreviousTransactionsLoading() {
 export default function TransactionsLoading() {
   return (
     <DesignSwitch
+      designModule="activity"
       current={<RedesignTransactionsLoading />}
       legacy={<PreviousTransactionsLoading />}
     />

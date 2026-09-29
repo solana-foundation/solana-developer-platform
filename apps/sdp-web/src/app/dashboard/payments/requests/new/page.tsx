@@ -57,4 +57,8 @@ function LegacyPaymentRequestCreatePage(): never {
   redirect(PAYMENT_REQUESTS_HREF);
 }
 
-export default withLegacyDesign(PaymentRequestCreatePage, LegacyPaymentRequestCreatePage);
+export default withLegacyDesign(
+  PaymentRequestCreatePage,
+  LegacyPaymentRequestCreatePage,
+  "activity"
+);

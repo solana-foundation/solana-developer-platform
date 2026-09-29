@@ -49,4 +49,4 @@ async function CounterpartyPage() {
   });
 }
 
-export default withLegacyDesign(RedesignCounterpartyPage, CounterpartyPage);
+export default withLegacyDesign(RedesignCounterpartyPage, CounterpartyPage, "contacts");

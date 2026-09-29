@@ -70,4 +70,8 @@ function LegacyPaymentRequestDetailRoute(): never {
   redirect(PAYMENT_REQUESTS_HREF);
 }
 
-export default withLegacyDesign(PaymentRequestDetailRoute, LegacyPaymentRequestDetailRoute);
+export default withLegacyDesign(
+  PaymentRequestDetailRoute,
+  LegacyPaymentRequestDetailRoute,
+  "activity"
+);

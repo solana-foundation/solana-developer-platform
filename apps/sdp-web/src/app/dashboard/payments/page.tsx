@@ -108,4 +108,4 @@ async function PaymentsPage() {
   );
 }
 
-export default withLegacyDesign(RedesignPaymentsPage, PaymentsPage);
+export default withLegacyDesign(RedesignPaymentsPage, PaymentsPage, "activity");

@@ -7,5 +7,11 @@ export function PreviousPayLoading() {
 }
 
 export default function PayLoading() {
-  return <DesignSwitch current={<RedesignPayLoading />} legacy={<PreviousPayLoading />} />;
+  return (
+    <DesignSwitch
+      designModule="payDeposit"
+      current={<RedesignPayLoading />}
+      legacy={<PreviousPayLoading />}
+    />
+  );
 }
