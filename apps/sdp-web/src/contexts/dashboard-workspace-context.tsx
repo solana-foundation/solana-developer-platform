@@ -35,7 +35,7 @@ export interface DashboardPlaygroundApiKeyOption {
 }
 
 type DashboardWorkspaceContextValue = {
-  initialQuickStartStep: import("@/lib/dashboard-quick-start").QuickStartStep | null;
+  initialQuickStartStatus: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   dashboardCacheScope: DashboardCacheScope;
@@ -61,7 +61,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 );
 
 type DashboardWorkspaceProviderProps = {
-  initialQuickStartStep?: import("@/lib/dashboard-quick-start").QuickStartStep | null;
+  initialQuickStartStatus?: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
   children: ReactNode;
   scopeRefreshFallback: ReactNode;
   dashboardAccess: DashboardAccess;
@@ -74,7 +74,7 @@ type DashboardWorkspaceProviderProps = {
 };
 
 export function DashboardWorkspaceProvider({
-  initialQuickStartStep = null,
+  initialQuickStartStatus = null,
   children,
   scopeRefreshFallback,
   dashboardAccess,
@@ -240,7 +240,7 @@ export function DashboardWorkspaceProvider({
 
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
-      initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
+      initialQuickStartStatus: dashboardScopeIsFresh ? initialQuickStartStatus : null,
       dashboardAccess,
       flags,
       dashboardCacheScope: liveDashboardCacheScope,
@@ -261,7 +261,7 @@ export function DashboardWorkspaceProvider({
       toggleSidebar,
     }),
     [
-      initialQuickStartStep,
+      initialQuickStartStatus,
       dashboardScopeIsFresh,
       dashboardAccess,
       flags,

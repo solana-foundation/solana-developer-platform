@@ -1110,17 +1110,16 @@ export function getDashboardPageConfig(
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
-    // Home names itself: the sidebar marks it active and the page opens on a
-    // balance. A 36px "Home" above that spent a slice of the viewport saying
-    // nothing, so the workspace renders an sr-only heading instead.
+    // The Overview is built on the refresh design: a left title over the same 900px column
+    // as the Payments pages.
     return {
       title: t("Shared.dashboardShell.home"),
-      hideTitle: true,
-      contentWidthClass: "max-w-none",
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
     };
   }
   if (pathname === "/dashboard/tokens") {
-    // Reached from the home allocation card, so it carries a way back rather than
+    // Reached from the Overview's holdings, so it carries a way back rather than
     // relying on the sidebar, which does not list it.
     return {
       title: t("Shared.dashboardShell.holdings"),

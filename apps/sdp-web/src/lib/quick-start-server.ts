@@ -1,11 +1,23 @@
-import type { CustodyWalletsResponse, ListApiKeysResponse } from "@sdp/types";
+import type { ListApiKeysResponse } from "@sdp/types";
 import { cache } from "react";
 import type { OnboardingStatusResponse } from "@/app/dashboard/onboarding-status";
-import type { QuickStartStep } from "./dashboard-quick-start";
+import type { QuickStartStatus } from "./dashboard-quick-start";
 import { PROJECT_HEADER_NAME } from "./project-cookie";
 import { createOrgSdpApiClient, listSdpProjects } from "./sdp-api";
 
-export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null> => {
+function latestTimestamp(values: readonly (string | null)[]): string | null {
+  let latest: string | null = null;
+  for (const value of values) {
+    if (value && (latest === null || Date.parse(value) > Date.parse(latest))) latest = value;
+  }
+  return latest;
+}
+
+/**
+ * The setup signals the quick start is built from, or null when the viewer cannot manage setup
+ * or the status is unknown. Unknown is not new: a status failure must not flash a guide.
+ */
+export const loadQuickStartStatus = cache(async (): Promise<QuickStartStatus | null> => {
   try {
     const client = await createOrgSdpApiClient();
     const signal = AbortSignal.timeout(10_000);
@@ -13,22 +25,10 @@ export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null>
       signal,
     });
     if (!status.linked || !status.setup?.canManage) return null;
-    if (status.setup.status === "complete" || status.setup.custodyProvider) return "done";
 
-    // The default sandbox is not the only place an organization can have a wallet.
+    // A first call can come from a key in any project, not only the default sandbox.
     const projects = await listSdpProjects();
     if (projects.length === 0) return null;
-    const wallets = await Promise.allSettled(
-      projects.map((project) =>
-        client.fetch<CustodyWalletsResponse>(
-          "/v1/wallets?includeAllProviders=true&includeBalances=false&view=summary",
-          { headers: { [PROJECT_HEADER_NAME]: project.id }, signal }
-        )
-      )
-    );
-    if (wallets.some((result) => result.status === "fulfilled" && result.value.wallets.length > 0))
-      return "done";
-    if (wallets.some((result) => result.status === "rejected")) return null;
     const keys = await Promise.allSettled(
       projects.map((project) =>
         client.fetch<ListApiKeysResponse>("/v1/api-keys", {
@@ -37,13 +37,18 @@ export const loadQuickStartStep = cache(async (): Promise<QuickStartStep | null>
         })
       )
     );
-    // Key creation is already complete, even without a wallet binding or browser history.
-    if (keys.some((result) => result.status === "fulfilled" && result.value.apiKeys.length > 0))
-      return "wallet";
-    if (keys.some((result) => result.status === "rejected")) return null;
-    return "api-key";
+    const apiKeys = keys.flatMap((result) =>
+      result.status === "fulfilled" ? result.value.apiKeys : []
+    );
+    if (apiKeys.length === 0 && keys.some((result) => result.status === "rejected")) return null;
+
+    return {
+      rpcProvider: status.setup.rpcProvider,
+      custodyProvider: status.setup.custodyProvider,
+      apiKeyCount: apiKeys.length,
+      lastCallAt: latestTimestamp(apiKeys.map((key) => key.lastUsedAt)),
+    };
   } catch {
-    // Unknown is not new: don't flash an onboarding modal on a status failure.
     return null;
   }
 });

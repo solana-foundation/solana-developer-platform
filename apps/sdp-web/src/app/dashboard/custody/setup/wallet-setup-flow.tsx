@@ -26,7 +26,7 @@ import { WizardFrame } from "@/components/wizard-frame";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
-import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
+import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 
@@ -585,7 +585,7 @@ export function WalletSetupFlow({
   const t = useTranslations();
   const router = useRouter();
   const refreshWalletInventory = useWalletInventoryRefresh();
-  const { dashboardCacheScope, selectedProjectId } = useDashboardWorkspace();
+  const { selectedProjectId } = useDashboardWorkspace();
   const [isPending, startTransition] = useTransition();
   const availability = useMemo(
     () => resolveCustodyProviderAvailability({ connectedProviders, enabledProviders }),
@@ -684,7 +684,7 @@ export function WalletSetupFlow({
         }
 
         if (selectedProjectId) {
-          completeQuickStartStep(quickStartKey(dashboardCacheScope), "wallet");
+          invalidateQuickStartStatus();
         }
         refreshWalletInventory();
         router.refresh();
