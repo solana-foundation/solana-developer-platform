@@ -48,7 +48,9 @@ export interface ReconcilableVaultClaim {
  * What one claim's operator redemptions account for in the wallet for one
  * intermediate mint (Hastra wYLDS), in decimal token units. `retained` is what
  * cancelled requests left: cancellation never recreates the burned shares, so
- * it still backs the claim. `in_flight` is what open requests delegated.
+ * it still backs the claim. `in_flight` is what landed, still-open requests
+ * delegated; a request not yet landed or with an unidentified close counts
+ * toward neither, since it provably holds nothing in the wallet.
  */
 export interface ReconcilableRedemptionIntermediate {
   mint: string;

@@ -938,10 +938,12 @@ transaction signed by the organization custody wallet or external owner.
   so the claim is listed, not judged unbacked or hidden. A CANCELLED operator
   redemption never recreates the shares it burned, so the intermediate it
   left (Hastra wYLDS) backs that claim and keeps it out of both lists, split
-  by amount (`redemption_intermediates`): open requests' delegated amounts
-  and whatever a claim needing no backing retained are set aside first, then
-  a claim is backed while any of its own retained amount is unallocated. A
-  failed request burned nothing and backs nothing. A duplicated share mint
+  by amount (`redemption_intermediates`): landed open requests' delegated
+  amounts and whatever a claim needing no backing retained are set aside
+  first, then a claim is backed while any of its own retained amount is
+  unallocated. A failed, `creating` or `closed_or_unknown` request provably
+  holds nothing in the wallet, so it neither reserves nor backs. A duplicated
+  share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.

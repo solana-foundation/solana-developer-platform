@@ -528,7 +528,7 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
     // Cancellation revokes Hastra's delegate but never mints the burned PRIME
     // back, so a wallet can hold the intermediate and none of the shares.
     async function claimAfterOperatorRedemption(
-      status: "cancelled" | "failed" | "pending",
+      status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed",
       intermediateAmount?: string
     ) {
       const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "hastra" });
@@ -633,6 +633,29 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
         }),
       ]);
     });
+
+    // Not landed yet, or closed without an identified outcome: neither
+    // provably put its intermediate in the wallet.
+    it.each(["creating", "closed_or_unknown"] as const)(
+      "reserves nothing for a %s redemption",
+      async (status) => {
+        const unproven = await claimAfterOperatorRedemption(status);
+        await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual([
+          expect.objectContaining({
+            positionId: unproven.position.id,
+            withdrawalRequestIds: [unproven.requestId],
+          }),
+        ]);
+      }
+    );
 
     it("keeps a share-backed claim's retained intermediate from backing another claim", async () => {
       // A partial cancellation: the claim still holds shares and the wYLDS.

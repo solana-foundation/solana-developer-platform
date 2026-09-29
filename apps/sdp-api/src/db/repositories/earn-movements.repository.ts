@@ -355,8 +355,9 @@ export interface EarnMovementsRepository {
    * discrepancies it never looked at), each with whether any of its movements
    * is still unsettled, the ids of its open queued withdrawal requests, and,
    * per intermediate mint, how much its operator redemptions left in the
-   * wallet (`retained`: cancelled) or delegated there (`in_flight`: open), in
-   * decimal token units. Read-only input to share reconciliation (PRO-1741);
+   * wallet (`retained`: cancelled) or delegated there (`in_flight`: landed and
+   * still open), in decimal token units. Read-only input to share
+   * reconciliation (PRO-1741);
    * empty wallet scope answers empty rather than throwing, because "this key
    * sees no wallets" is a legitimate reconciliation answer.
    */
@@ -1438,9 +1439,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                       WHERE redemption.position_id = earn_positions.id
                         AND redemption.mechanism = 'operator_redemption'
                         AND redemption.intermediate_mint IS NOT NULL
+                        -- A 'creating' request has not landed and a
+                        -- 'closed_or_unknown' one may have burned its
+                        -- intermediate, so neither provably holds any.
                         AND redemption.status IN (
-                          'cancelled', 'creating', 'pending', 'fulfillable',
-                          'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                          'cancelled', 'pending', 'fulfillable',
+                          'expired_cancelable', 'cancelling'
                         )
                       GROUP BY redemption.intermediate_mint
                     ) intermediate
