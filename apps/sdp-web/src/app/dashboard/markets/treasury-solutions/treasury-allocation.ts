@@ -1,4 +1,9 @@
-import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
+import {
+  decimalScale,
+  formatDecimalAmount,
+  isDecimalString,
+  parseDecimalAmount,
+} from "@sdp/solana/amount";
 import {
   type EarnVaultPositionIntermediate,
   isEarnVaultHoldingEmpty,
@@ -130,10 +135,10 @@ export interface TreasuryAllocation {
   /** Set exactly when `deployedValue` is absent. */
   deployedAbsence: DeployedAbsence | undefined;
   /**
-   * Mints open positions hold as a par intermediate. That value is already in
-   * `deployedValue`, so no cash line may count the same balance again.
+   * Each custody row's cash line, keyed by wallet id: its address's share of
+   * `availableCash`, undefined when that wallet's balances are unavailable.
    */
-  parIntermediateMints: ReadonlySet<string>;
+  cashByWalletId: ReadonlyMap<string, string | undefined>;
   /** Each custody row's deployment line, keyed by wallet id. */
   deploymentByWalletId: ReadonlyMap<string, WalletDeploymentDisplay>;
   /**
@@ -198,34 +203,89 @@ function walletsByPublicKey(
   return distinct;
 }
 
-const NO_MINTS: ReadonlySet<string> = new Set();
+/** `left - right` floored at zero, or undefined when either side is malformed. */
+function subtractFloored(left: string, right: string): string | undefined {
+  if (!isDecimalString(left) || !isDecimalString(right)) return undefined;
+  const scale = Math.max(decimalScale(left), decimalScale(right));
+  const difference = parseDecimalAmount(left, scale) - parseDecimalAmount(right, scale);
+  return formatDecimalAmount(difference > 0n ? difference : 0n, scale);
+}
 
-function availableStableCash(
-  wallets: readonly TreasuryAllocationWallet[] | undefined,
-  deployedMints: ReadonlySet<string> = NO_MINTS
+/**
+ * What one wallet's open positions hold as a par intermediate, summed per
+ * mint. Undefined marks a malformed amount.
+ */
+function parIntermediateAmounts(
+  open: readonly TreasuryAllocationPosition[]
+): Map<string, string | undefined> {
+  const byMint = new Map<string, string | undefined>();
+  for (const { parIntermediate } of open) {
+    if (parIntermediate === undefined) continue;
+    const prior = byMint.has(parIntermediate.mint) ? byMint.get(parIntermediate.mint) : "0";
+    byMint.set(
+      parIntermediate.mint,
+      prior === undefined ? undefined : sumDecimalStrings([prior, parIntermediate.amount])
+    );
+  }
+  return byMint;
+}
+
+/**
+ * One wallet's USD-stable cash. A par intermediate its OWN open positions hold
+ * is already deployed value, so that amount comes off this wallet's balance of
+ * the mint and nowhere else: the same mint in another wallet is still cash.
+ * A balance short of the recorded amount (the two reads landed at different
+ * moments) floors at zero rather than overstating cash.
+ */
+function walletStableCash(
+  wallet: TreasuryAllocationWallet,
+  parIntermediates: ReadonlyMap<string, string | undefined>
 ): string | undefined {
-  if (wallets === undefined) return undefined;
+  if (wallet.balances === undefined) return undefined;
+  const unmatched = new Map(parIntermediates);
   const amounts: string[] = [];
-  for (const wallet of walletsByPublicKey(wallets).values()) {
-    // One wallet whose balances could not be read makes the TOTAL unknowable.
-    if (wallet.balances === undefined) return undefined;
-    for (const balance of wallet.balances) {
-      if (!deployedMints.has(balance.mint) && isUsdStableBalance(balance)) {
-        amounts.push(balance.uiAmount);
-      }
+  for (const balance of wallet.balances) {
+    if (!isUsdStableBalance(balance)) continue;
+    if (!unmatched.has(balance.mint)) {
+      amounts.push(balance.uiAmount);
+      continue;
     }
+    const held = unmatched.get(balance.mint);
+    const free = held === undefined ? undefined : subtractFloored(balance.uiAmount, held);
+    const rest = held === undefined ? undefined : subtractFloored(held, balance.uiAmount);
+    // Without both amounts this wallet's cash is unknowable, not whole.
+    if (free === undefined || rest === undefined) return undefined;
+    amounts.push(free);
+    unmatched.set(balance.mint, rest);
   }
   // No stable balances is a real zero; `sumDecimalStrings` reserves undefined
   // for a malformed amount, which is an unavailable read, not an empty one.
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
-/** One wallet's available USD-stable cash, using the same classification as the portfolio total. */
-export function availableTreasuryCashForWallet(
-  wallet: TreasuryAllocationWallet,
-  deployedMints: ReadonlySet<string> = NO_MINTS
+/** Each distinct on-chain wallet's cash line, keyed by address. */
+function stableCashByPublicKey(
+  wallets: readonly TreasuryAllocationWallet[],
+  positions: readonly TreasuryAllocationPosition[] | undefined
+): Map<string, string | undefined> {
+  const openByPublicKey = openPositionsByPublicKey(wallets, positions ?? []);
+  const cash = new Map<string, string | undefined>();
+  for (const [publicKey, wallet] of walletsByPublicKey(wallets)) {
+    const open = openByPublicKey.get(publicKey) ?? [];
+    cash.set(publicKey, walletStableCash(wallet, parIntermediateAmounts(open)));
+  }
+  return cash;
+}
+
+function availableStableCash(
+  cashByPublicKey: ReadonlyMap<string, string | undefined> | undefined
 ): string | undefined {
-  return availableStableCash([wallet], deployedMints);
+  if (cashByPublicKey === undefined) return undefined;
+  const amounts = [...cashByPublicKey.values()];
+  const readable = amounts.filter((amount): amount is string => amount !== undefined);
+  // One wallet whose balances could not be read makes the TOTAL unknowable.
+  if (readable.length !== amounts.length) return undefined;
+  return readable.length === 0 ? "0" : sumDecimalStrings(readable);
 }
 
 interface TreasuryRateStrategy {
@@ -432,12 +492,9 @@ export function summarizeTreasuryAllocation({
   shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocation {
-  const parIntermediateMints = new Set(
-    (positions ?? [])
-      .filter(isOpenVaultPosition)
-      .flatMap((position) => (position.parIntermediate ? [position.parIntermediate.mint] : []))
-  );
-  const availableCash = availableStableCash(wallets, parIntermediateMints);
+  const cashByPublicKey =
+    wallets === undefined ? undefined : stableCashByPublicKey(wallets, positions);
+  const availableCash = availableStableCash(cashByPublicKey);
   const { deploymentByWalletId, someWalletUnreadable, unrecordedShareMints } =
     resolveWalletCoverage({ positions, shareMints, wallets });
 
@@ -457,8 +514,10 @@ export function summarizeTreasuryAllocation({
           certified || readFailed
           ? "unreadable"
           : "unreconciled",
+    cashByWalletId: new Map(
+      (wallets ?? []).map((wallet) => [wallet.id, cashByPublicKey?.get(wallet.publicKey)])
+    ),
     deploymentByWalletId,
-    parIntermediateMints,
     unrecordedShareMints,
   };
 }

@@ -113,7 +113,6 @@ import {
 } from "./kamino-allocations-format";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
-  availableTreasuryCashForWallet,
   estimatedTreasuryApy,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
@@ -614,10 +613,7 @@ function TreasuryWalletsCard({
                       <TreasuryInfoTip label={t("DashboardMarkets.treasury.summaryCashCaption")} />
                     </dt>
                     <dd className="text-sm text-primary tabular-nums">
-                      {formatUsd(
-                        availableTreasuryCashForWallet(wallet, allocation.parIntermediateMints),
-                        locale
-                      )}
+                      {formatUsd(allocation.cashByWalletId.get(wallet.id), locale)}
                     </dd>
                   </div>
                   {deployment.kind === "none" ? null : (

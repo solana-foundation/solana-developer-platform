@@ -1,7 +1,6 @@
 import { SOL_MINT, type WellKnownTokenSymbol, wellKnownMint } from "@sdp/types";
 import { describe, expect, it } from "vitest";
 import {
-  availableTreasuryCashForWallet,
   estimatedTreasuryApy,
   heldVaultShareMints,
   isOpenVaultPosition,
@@ -287,14 +286,17 @@ describe("summarizeTreasuryAllocation figures", () => {
 
 describe("Treasury presentation figures", () => {
   it("uses the portfolio cash classification for a single wallet", () => {
-    expect(
-      availableTreasuryCashForWallet(
+    const summary = summarize({
+      wallets: [
         wallet([
           { mint: USDC_MINT, uiAmount: "25.5" },
           { mint: SOL_MINT, uiAmount: "100" },
-        ])
-      )
-    ).toBe("25.5");
+        ]),
+      ],
+      positions: [],
+    });
+
+    expect(summary.cashByWalletId.get("wallet-a")).toBe("25.5");
   });
 
   it("weights estimated APY by each open position value", () => {
@@ -344,18 +346,89 @@ describe("a par intermediate left by a cancelled request", () => {
   });
 
   it("counts it as deployed and never again as cash, even at a $1 price", () => {
-    const priced = wallet([
-      { mint: USDC_MINT, uiAmount: "50" },
-      { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
-    ]);
     const summary = summarize({
-      wallets: [priced],
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "50" },
+          { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+        ]),
+      ],
       positions: [residual, openPosition({ tokenValue: "100" })],
     });
 
     expect(summary.deployedValue).toBe("2100");
     expect(summary.availableCash).toBe("50");
-    expect(availableTreasuryCashForWallet(priced, summary.parIntermediateMints)).toBe("50");
+    expect(summary.cashByWalletId.get("wallet-a")).toBe("50");
+  });
+
+  it("nets it out of the owning wallet only, never another wallet's same mint", () => {
+    const summary = summarize({
+      wallets: [
+        wallet([
+          { mint: USDC_MINT, uiAmount: "50" },
+          { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+        ]),
+        wallet([{ mint: WYLDS_MINT, uiAmount: "500", usdPrice: 1 }], "wallet-b"),
+      ],
+      positions: [residual],
+    });
+
+    expect(summary.deployedValue).toBe("2000");
+    expect(summary.availableCash).toBe("550");
+    expect(summary.cashByWalletId.get("wallet-a")).toBe("50");
+    expect(summary.cashByWalletId.get("wallet-b")).toBe("500");
+  });
+
+  it("nets only the recorded amount, and never below zero", () => {
+    const summary = summarize({
+      wallets: [
+        wallet([{ mint: WYLDS_MINT, uiAmount: "2500.5", usdPrice: 1 }]),
+        wallet([{ mint: WYLDS_MINT, uiAmount: "1500", usdPrice: 1 }], "wallet-b"),
+      ],
+      positions: [residual, { ...residual, custodyWalletId: "wallet-b" }],
+    });
+
+    expect(summary.cashByWalletId.get("wallet-a")).toBe("500.5");
+    expect(summary.cashByWalletId.get("wallet-b")).toBe("0");
+    expect(summary.availableCash).toBe("500.5");
+  });
+
+  it("nets once per address when several custody rows describe the wallet", () => {
+    const balances: TreasuryAllocationBalance[] = [
+      { mint: USDC_MINT, uiAmount: "50" },
+      { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+    ];
+    const summary = summarize({
+      wallets: [
+        wallet(balances, "wallet-org", "pk-shared"),
+        wallet(balances, "wallet-project", "pk-shared"),
+      ],
+      positions: [{ ...residual, custodyWalletId: "wallet-org" }],
+    });
+
+    expect(summary.availableCash).toBe("50");
+    expect(summary.cashByWalletId.get("wallet-org")).toBe("50");
+    expect(summary.cashByWalletId.get("wallet-project")).toBe("50");
+  });
+
+  it("makes the owning wallet's cash unavailable when the recorded amount is malformed", () => {
+    const summary = summarize({
+      wallets: [
+        wallet([{ mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 }]),
+        wallet([{ mint: USDC_MINT, uiAmount: "10" }], "wallet-b"),
+      ],
+      positions: [
+        openPosition({
+          shares: "0",
+          tokenValue: "0",
+          parIntermediate: { mint: WYLDS_MINT, amount: "2,000", tokenValue: "2000" },
+        }),
+      ],
+    });
+
+    expect(summary.cashByWalletId.get("wallet-a")).toBeUndefined();
+    expect(summary.cashByWalletId.get("wallet-b")).toBe("10");
+    expect(summary.availableCash).toBeUndefined();
   });
 
   it("makes estimated APY unavailable rather than stating a rate for it", () => {
