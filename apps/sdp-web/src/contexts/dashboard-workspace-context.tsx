@@ -206,11 +206,12 @@ export function DashboardWorkspaceProvider({
         previousPathname,
         pathname,
         tab,
+        newDesign: flags.newDesign,
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [pathname, replaceSearchParams]);
+  }, [flags.newDesign, pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");

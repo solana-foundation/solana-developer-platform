@@ -6,6 +6,7 @@ import {
   heliusRings,
   issuance,
   markets,
+  newDesign,
   payments,
   policies,
   privateChannels,
@@ -19,6 +20,8 @@ export type DashboardFlags = {
   heliusRings: boolean;
   issuance: boolean;
   markets: boolean;
+  /** NEW DESIGN; absent (older fixtures) means off. */
+  newDesign?: boolean;
   payments: boolean;
   policies: boolean;
   privateChannels: boolean;
@@ -43,6 +46,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRingsEnabled,
     issuanceEnabled,
     marketsEnabled,
+    newDesignEnabled,
     paymentsEnabled,
     policiesEnabled,
     privateChannelsEnabled,
@@ -54,6 +58,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRings(),
     issuance(),
     markets(),
+    newDesign(),
     payments(),
     policies(),
     privateChannels(),
@@ -67,6 +72,7 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
+    newDesign: newDesignEnabled,
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,

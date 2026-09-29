@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import { headers } from "next/headers";
 import { AppToaster } from "@/components/app-toaster";
 import { ClerkClientProvider } from "@/components/clerk-client-provider";
@@ -8,6 +9,34 @@ import { getI18nRequest, getTranslations } from "@/i18n/server";
 import { shouldLoadClerkForPath } from "@/lib/auth-entry";
 import "./globals.css";
 import Script from "next/script";
+
+// The refresh design's faces, from the design-tokens package so a Storybook loads the same
+// files. tokens.css reads the two variables inside [data-sdp-theme="refresh"]; the base design
+// keeps its stack, so loading them here changes nothing outside a refresh surface.
+const seasonSans = localFont({
+  src: [
+    {
+      path: "../../../../packages/sdp-design-tokens/src/assets/fonts/SeasonSans-Regular.woff2",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../../../../packages/sdp-design-tokens/src/assets/fonts/SeasonSans-Medium.woff2",
+      weight: "500",
+      style: "normal",
+    },
+  ],
+  variable: "--font-season-sans",
+  display: "swap",
+});
+
+const geistMono = localFont({
+  src: "../../../../packages/sdp-design-tokens/src/assets/fonts/GeistMono-Variable-latin.woff2",
+  weight: "100 900",
+  style: "normal",
+  variable: "--font-geist-mono",
+  display: "swap",
+});
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getTranslations();
@@ -54,7 +83,11 @@ export default async function RootLayout({
   );
 
   return (
-    <html lang={locale} suppressHydrationWarning>
+    <html
+      lang={locale}
+      className={`${seasonSans.variable} ${geistMono.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {process.env.NODE_ENV === "development" && (
           // react-grab lets developers select page context for coding agents

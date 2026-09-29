@@ -1,43 +1,8 @@
-/* SDP primitives and semantic aliases layered over @solana/design-system. */
+/* App-specific theme wiring over @sdp/design-tokens: Clerk's native variables, the
+   @solana/design-system retheme, and native-control fixes. Tokens themselves live in
+   packages/sdp-design-tokens. */
 
 :root {
-  --surface: #e9e7de;
-  --surface-sunken: #f0ede6;
-  --surface-raised: #fcfcfa;
-
-  --emph-xh: #1c1c1d;
-  --emph-m: rgba(28, 28, 29, 0.72);
-  --emph-l: rgba(28, 28, 29, 0.56);
-  --emph-xl: rgba(28, 28, 29, 0.44);
-  --on-primary: #fcfcfa;
-
-  --t4: rgba(28, 28, 29, 0.04);
-  --t8: rgba(28, 28, 29, 0.08);
-  --t12: rgba(28, 28, 29, 0.12);
-
-  --border-xl: rgba(28, 28, 29, 0.08);
-  --border-l: rgba(28, 28, 29, 0.12);
-  --border-m: rgba(28, 28, 29, 0.2);
-
-  --green-tx: #007a4e;
-  --green-bg: rgba(0, 160, 102, 0.08);
-  --green-brd: rgba(0, 160, 102, 0.2);
-  --amber-tx: #854d0e;
-  --amber-bg: rgba(234, 179, 8, 0.08);
-  --amber-brd: rgba(234, 179, 8, 0.2);
-  --red-tx: #b91c1c;
-  --red-bg: rgba(220, 38, 38, 0.08);
-  --red-brd: rgba(220, 38, 38, 0.2);
-  --blue-tx: #1d4ed8;
-  --blue-bg: rgba(37, 99, 235, 0.08);
-  --blue-brd: rgba(37, 99, 235, 0.2);
-
-  --crimson: #c71f37;
-  --crimson-strong: #9e2b38;
-  --crimson-strongest: #8a1f2a;
-  --crimson-bg: rgba(199, 31, 55, 0.08);
-  --crimson-brd: rgba(199, 31, 55, 0.2);
-
   /* Clerk supports these native CSS variables, so its first paint follows the
      pre-hydration .dark class without a theme-dependent React render. */
   --clerk-color-primary: #1c1c1d;
@@ -60,62 +25,13 @@
   --sdp-clerk-provider-icon-filter: none;
 }
 
-@theme inline {
-  --color-primary: var(--emph-xh);
-  --color-secondary: var(--emph-m);
-  --color-tertiary: var(--emph-l);
-  --color-muted: var(--emph-xl);
-  --color-on-primary: var(--on-primary);
+/* Point design-system runtime tokens at SDP's product palette. Re-declared on the refresh
+   scope so var() re-resolves there: a custom property computed at :root would otherwise
+   carry the base palette into a refresh subtree. */
+:root,
+[data-sdp-theme="refresh"] {
+  --sdp-shell-bg: var(--surface);
 
-  --color-surface: var(--surface);
-  --color-surface-raised: var(--surface-raised);
-  --color-surface-sunken: var(--surface-sunken);
-
-  --color-fill-subtle: var(--t4);
-  --color-fill: var(--t8);
-  --color-fill-strong: var(--t12);
-  /* --fill, composited by hand so it is opaque. The tinted fills above are ink at 4/8/12%
-     alpha, so whatever sits behind an element painted in one of them shows through it.
-     Overlays that have to *occlude* what is behind them — a mark covering the edge of a
-     band, say — take this instead: sRGB is the space the browser composites in, so over a
-     raised card it is pixel-identical to --color-fill, and the only thing it changes is
-     what it lets through. Only correct on --surface-raised; it names its ground. */
-  --color-fill-opaque: color-mix(in srgb, var(--surface-raised) 92%, var(--emph-xh));
-
-  --color-border-subtle: var(--border-xl);
-  --color-border-default: var(--border-l);
-  --color-border-strong: var(--border-m);
-
-  --color-success: var(--green-tx);
-  --color-success-bg: var(--green-bg);
-  --color-success-border: var(--green-brd);
-  --color-warning: var(--amber-tx);
-  --color-warning-bg: var(--amber-bg);
-  --color-warning-border: var(--amber-brd);
-  --color-error: var(--red-tx);
-  --color-error-bg: var(--red-bg);
-  --color-error-border: var(--red-brd);
-  --color-info: var(--blue-tx);
-  --color-info-bg: var(--blue-bg);
-  --color-info-border: var(--blue-brd);
-
-  --color-destructive: var(--crimson);
-  --color-destructive-strong: var(--crimson-strong);
-  --color-destructive-strongest: var(--crimson-strongest);
-  --color-destructive-bg: var(--crimson-bg);
-  --color-destructive-border: var(--crimson-brd);
-
-  --shadow-ring:
-    0 0 0 1px rgb(0 0 0 / 5%), 0 1px 2px 0 rgb(0 0 0 / 8%), 0 16px 40px 0 rgb(0 0 0 / 12%);
-
-  /* Project-wide default for transition/transition-colors/transition-all
-     utilities that don't set an explicit duration-* (Tailwind's built-in
-     default is 150ms). DS components with hardcoded durations are unaffected. */
-  --default-transition-duration: 250ms;
-}
-
-/* Point design-system runtime tokens at SDP's product palette. */
-:root {
   --gray-1400: var(--emph-xh);
   --gray-1300: var(--emph-xh);
 
@@ -146,49 +62,125 @@
   --badge-info-dot: var(--blue-tx);
 }
 
+/* Refresh scope: the design-system component tokens the 2026 Payments design changes. The
+   package derives its text and component tokens from its gray ramp at :root, so each one the
+   design touches is re-stated here to resolve against the scope's palette. */
+[data-sdp-theme="refresh"] {
+  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
+     which the browser matches to the Medium face, so every plain run came out heavy. The design's
+     body text is the Regular face, drawn antialiased. */
+  --font-weight-regular-base: 400;
+  font-weight: var(--font-weight-regular);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --text-extra-high: var(--emph-xh);
+  --text-high: var(--emph-m);
+  --text-medium: var(--emph-m);
+  --text-low: var(--emph-l);
+  --text-extra-low: var(--emph-xl);
+  --border-light: var(--border-l);
+
+  --button-primary-bg: var(--emph-xh);
+  --button-primary-bg-hover: var(--emph-xh);
+  --button-secondary-bg: var(--t8);
+  --button-secondary-bg-hover: var(--t12);
+  --button-secondary-text: var(--emph-xh);
+  --button-radius-xl: var(--corner-control);
+  --button-radius-lg: var(--corner-control);
+  --button-radius-md: var(--corner-control);
+  --button-radius-sm: var(--corner-control-inner);
+  /* The design's 40px control carries a 14px label. */
+  --text-button-lg: var(--font-size-body);
+
+  /* Underline fields: no box, no fill, no ring; the bottom rule darkens on hover and focus.
+     The field components draw only the bottom edge (refresh: variants in components/ui). The
+     design has one form field height, 36px, so the xl field a wizard asks for is that. */
+  --input-height-xl: 36px;
+  --input-radius-xl: 0px;
+  --input-radius-lg: 0px;
+  --input-radius-md: 0px;
+  --input-padding-x-xl: 2px;
+  --input-padding-x-lg: 2px;
+  --input-padding-x-md: 2px;
+  --input-text-size-xl: var(--font-size-field);
+  --input-text-size-lg: var(--font-size-field);
+  --input-label-size-xl: var(--font-size-meta);
+  --input-label-size-lg: var(--font-size-meta);
+  --input-label-size-md: var(--font-size-meta);
+  --input-border-width: 1px;
+  --input-border-idle: var(--border-l);
+  --input-border-hover: var(--border-m);
+  --input-border-focus: var(--emph-xh);
+  --input-bg-idle: transparent;
+  --input-bg-hover: transparent;
+  --input-focus-ring: transparent;
+  --input-placeholder-color: var(--emph-l);
+
+  /* Tabs sit on the text: no inset, so the indicator is exactly the label's width. The row is
+     the design's 36px (14px label, 11px above and below). */
+  --tab-padding-x-sm: 0px;
+  --tab-padding-x-md: 0px;
+  --tab-padding-y-md: 11px;
+  --tab-text-idle: var(--emph-m);
+  --tab-text-hover: var(--emph-xh);
+  --tab-text-active: var(--emph-xh);
+  --tab-indicator-color: var(--emph-xh);
+
+  /* Tables sit on the page: a 30px header over a rule, 44px rows with faint rules between. */
+  --table-header-height: 30px;
+  --table-header-padding-y: 5px;
+  --table-header-bg: transparent;
+  --table-header-bg-solid: var(--surface-raised);
+  --table-header-text: var(--emph-l);
+  --table-row-bg-hover: var(--t4);
+  --table-row-bg-hover-solid: var(--surface-raised);
+  --table-border: var(--border-xl);
+  --table-radius: 0px;
+  --table-cell-padding-x-edge: 12px;
+
+  --select-popup-radius: var(--corner-card);
+  /* The design's list rows round at the control corner, 6px. */
+  --select-item-radius: var(--corner-control);
+  --select-item-highlight-bg: var(--t4);
+  --tooltip-radius: var(--corner-control);
+}
+
+/* The design-system field label is medium weight with no class hook; refresh labels are
+   regular. Scoped to labels that head a design-system input. */
+[data-sdp-theme="refresh"] div:has(+ .group\/input) > label {
+  font-weight: 400;
+}
+
+/* A refresh table's edge cells take 12px, so a hovered row's tint has an inset; the table's
+   wrapper reaches the same 12px past the column (`refresh:-mx-3`), so its text still lines up
+   with the title. A table inside a card stays inside it, on the card's 16px inset. */
+[data-sdp-theme="refresh"] [data-slot="card"] {
+  --table-cell-padding-x-edge: 16px;
+}
+
+/* The refresh sidebar scrolls without a track eating its width: a thin bar, invisible until the
+   pointer is over the list. Standard properties only, which Chrome 121+, Firefox and Safari 18.2+
+   honour; older engines keep their default bar. */
+[data-sdp-theme="refresh"] .sdp-quiet-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+[data-sdp-theme="refresh"] .sdp-quiet-scroll:hover {
+  scrollbar-color: var(--t12) transparent;
+}
+
+/* Base UI 1.8 marks the active tab `data-active`; the design-system tab still styles
+   `data-selected`, so without this the active tab keeps the idle ink and weight and only the
+   underline tells it apart. The design sets it in full ink, medium. */
+[data-sdp-theme="refresh"] [role="tab"][data-active] {
+  color: var(--tab-text-active);
+  font-weight: var(--tab-weight-active);
+}
+
 :root.dark {
   color-scheme: dark;
-
-  --surface: #1c1c1d;
-  --surface-sunken: color-mix(in oklab, #1c1c1d 94%, #fcfcfa);
-  --surface-raised: color-mix(in oklab, #1c1c1d 87%, #fcfcfa);
-
-  --emph-xh: #fcfcfa;
-  --emph-m: rgba(252, 252, 250, 0.84);
-  --emph-l: rgba(252, 252, 250, 0.72);
-  --emph-xl: rgba(252, 252, 250, 0.6);
-  --on-primary: #1c1c1d;
-
-  --t4: rgba(252, 252, 250, 0.04);
-  --t8: rgba(252, 252, 250, 0.08);
-  --t12: rgba(252, 252, 250, 0.12);
-
-  --border-xl: rgba(252, 252, 250, 0.08);
-  --border-l: rgba(252, 252, 250, 0.12);
-  --border-m: rgba(252, 252, 250, 0.2);
-
-  /* Dark status palette from @solana/design-system (text/border contrast-verified).
-     The *-bg fills are lifted from the DS default (L~0.21) to L~0.27 (amber a touch
-     higher at 0.28) so the tinted panels sit just above the page surface and read
-     calmer against the bright text. */
-  --green-tx: oklch(0.78 0.1 155);
-  --green-bg: oklch(0.27 0.04 155);
-  --green-brd: oklch(0.42 0.08 155);
-  --amber-tx: oklch(0.8 0.11 85);
-  --amber-bg: oklch(0.28 0.045 85);
-  --amber-brd: oklch(0.46 0.09 85);
-  --red-tx: oklch(0.8 0.12 25);
-  --red-bg: oklch(0.27 0.05 25);
-  --red-brd: oklch(0.45 0.1 25);
-  --blue-tx: oklch(0.79 0.1 250);
-  --blue-bg: oklch(0.27 0.045 250);
-  --blue-brd: oklch(0.43 0.08 250);
-
-  --crimson: oklch(0.72 0.16 25);
-  --crimson-strong: oklch(0.68 0.16 25);
-  --crimson-strongest: oklch(0.64 0.16 25);
-  --crimson-bg: oklch(0.21 0.04 25);
-  --crimson-brd: oklch(0.45 0.1 25);
 
   --clerk-color-primary: #fcfcfa;
   --clerk-color-primary-foreground: #1c1c1d;

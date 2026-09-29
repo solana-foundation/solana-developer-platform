@@ -3,6 +3,7 @@
 import { Loader2, Search, XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 type SearchInputProps = Omit<ComponentProps<typeof Input>, "iconLeft" | "iconRight" | "action"> & {
   /** Shows a spinner while a debounced or server-answered search is in flight. */
@@ -11,11 +12,19 @@ type SearchInputProps = Omit<ComponentProps<typeof Input>, "iconLeft" | "iconRig
   clear?: { label: string; onClear: () => void };
 };
 
+// The design-system field reads its text size from these, so the toolbar size holds in every
+// theme scope, whichever size the field is drawn at. Part of the new design (NEW DESIGN flag);
+// the previous design keeps the field's own size.
+const TOOLBAR_TEXT_CLASS =
+  "new-design:[--input-text-size-lg:var(--font-size-body)] new-design:[--input-text-size-xl:var(--font-size-body)]";
+
 /**
  * The one search field every workspace toolbar shares: the DS filled field with
  * a leading search icon, an optional pending spinner for server-driven lists,
  * and an optional clear affordance (X button + Escape). The aria-label falls
- * back to the placeholder so a bare usage stays labelled.
+ * back to the placeholder so a bare usage stays labelled. Its text is the
+ * toolbar's 14px, matching the Filter button and the rows picker beside it,
+ * not a form field's 16px.
  */
 export function SearchInput({
   pending = false,
@@ -24,6 +33,7 @@ export function SearchInput({
   onKeyDown,
   placeholder,
   "aria-label": ariaLabel,
+  className,
   ...props
 }: SearchInputProps) {
   const hasValue = typeof value === "string" && value.length > 0;
@@ -57,6 +67,7 @@ export function SearchInput({
         ) : undefined
       }
       {...props}
+      className={cn(TOOLBAR_TEXT_CLASS, className)}
     />
   );
 }
