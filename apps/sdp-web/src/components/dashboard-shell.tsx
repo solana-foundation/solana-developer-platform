@@ -50,6 +50,7 @@ import {
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { isNewDesignPage } from "@/lib/design-modules";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
@@ -446,9 +447,11 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignEnabled);
+  // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, flags);
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignPage);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
-  const themeScope = themeScopeForPath(pathname, newDesignEnabled);
+  const themeScope = themeScopeForPath(pathname, newDesignPage);
   const isRefresh = themeScope === "refresh";
   // The design's sidebar is 272px (17rem) including its rule; the base shell keeps its 296.
   const sidebarExpandedWidth = isRefresh ? 272 : 296;
@@ -461,7 +464,8 @@ export function DashboardShell({
     custodyEnabled,
     paymentsEnabled,
     policiesEnabled,
-    newDesignEnabled
+    newDesignEnabled,
+    flags.newDesignModules
   );
   const navSections = getNavSections(t, {
     canReadApprovals: dashboardAccess.capabilities.canReadApprovals,
@@ -476,6 +480,7 @@ export function DashboardShell({
     policiesEnabled,
     privateChannelsEnabled,
     newDesign: newDesignEnabled,
+    newDesignModules: flags.newDesignModules,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname

@@ -19,4 +19,4 @@ async function PaymentsDepositPage() {
   return <PaymentsActionPage mode="receive" wallets={[]} walletsError={null} {...actionPageData} />;
 }
 
-export default withLegacyDesign(RedesignPaymentsDepositPage, PaymentsDepositPage);
+export default withLegacyDesign(RedesignPaymentsDepositPage, PaymentsDepositPage, "payDeposit");

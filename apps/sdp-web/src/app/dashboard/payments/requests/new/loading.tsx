@@ -9,6 +9,10 @@ function CurrentPaymentRequestCreateLoading() {
 // The previous design sends this route to the list, so it loads as the list does.
 export default function PaymentRequestCreateLoading() {
   return (
-    <DesignSwitch current={<CurrentPaymentRequestCreateLoading />} legacy={<LegacyListLoading />} />
+    <DesignSwitch
+      designModule="activity"
+      current={<CurrentPaymentRequestCreateLoading />}
+      legacy={<LegacyListLoading />}
+    />
   );
 }
