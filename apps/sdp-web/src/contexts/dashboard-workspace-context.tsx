@@ -36,6 +36,8 @@ export interface DashboardPlaygroundApiKeyOption {
 
 type DashboardWorkspaceContextValue = {
   initialQuickStartStatus: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
+  /** The previous design's quick start (NEW DESIGN off). */
+  initialQuickStartStep: import("@/lib/_legacy/dashboard-quick-start").QuickStartStep | null;
   dashboardAccess: DashboardAccess;
   flags: DashboardFlags;
   dashboardCacheScope: DashboardCacheScope;
@@ -62,6 +64,7 @@ const DashboardWorkspaceContext = createContext<DashboardWorkspaceContextValue |
 
 type DashboardWorkspaceProviderProps = {
   initialQuickStartStatus?: import("@/lib/dashboard-quick-start").QuickStartStatus | null;
+  initialQuickStartStep?: import("@/lib/_legacy/dashboard-quick-start").QuickStartStep | null;
   children: ReactNode;
   scopeRefreshFallback: ReactNode;
   dashboardAccess: DashboardAccess;
@@ -75,6 +78,7 @@ type DashboardWorkspaceProviderProps = {
 
 export function DashboardWorkspaceProvider({
   initialQuickStartStatus = null,
+  initialQuickStartStep = null,
   children,
   scopeRefreshFallback,
   dashboardAccess,
@@ -206,11 +210,12 @@ export function DashboardWorkspaceProvider({
         previousPathname,
         pathname,
         tab,
+        newDesign: flags.newDesign,
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [pathname, replaceSearchParams]);
+  }, [flags.newDesign, pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");
@@ -241,6 +246,7 @@ export function DashboardWorkspaceProvider({
   const value = useMemo<DashboardWorkspaceContextValue>(
     () => ({
       initialQuickStartStatus: dashboardScopeIsFresh ? initialQuickStartStatus : null,
+      initialQuickStartStep: dashboardScopeIsFresh ? initialQuickStartStep : null,
       dashboardAccess,
       flags,
       dashboardCacheScope: liveDashboardCacheScope,
@@ -262,6 +268,7 @@ export function DashboardWorkspaceProvider({
     }),
     [
       initialQuickStartStatus,
+      initialQuickStartStep,
       dashboardScopeIsFresh,
       dashboardAccess,
       flags,

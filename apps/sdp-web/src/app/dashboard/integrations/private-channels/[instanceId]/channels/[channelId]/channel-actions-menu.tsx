@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { useNewDesign } from "@/components/new-design";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -26,10 +27,14 @@ import {
   PRIVATE_CHANNELS_INTEGRATION_PATH,
   privateChannelsInstancePath,
 } from "../../../private-channels-routes";
+import {
+  DeleteConfirmationDialog as LegacyDeleteConfirmationDialog,
+  PrivateChannelsConnectForm as LegacyPrivateChannelsConnectForm,
+} from "../../../setup/_legacy/private-channels-connect-form";
 import { deletePrivateChannelAction, disconnectPrivateChannelAction } from "../../../setup/actions";
 import {
-  DeleteConfirmationDialog,
-  PrivateChannelsConnectForm,
+  DeleteConfirmationDialog as CurrentDeleteConfirmationDialog,
+  PrivateChannelsConnectForm as CurrentPrivateChannelsConnectForm,
 } from "../../../setup/private-channels-connect-form";
 
 export function ChannelActionsMenu({
@@ -44,6 +49,14 @@ export function ChannelActionsMenu({
   enrollDisabledReason: string | null;
 }) {
   const t = useTranslations();
+  // NEW DESIGN picks the connect form; the previous design's is its _legacy copy.
+  const newDesign = useNewDesign();
+  const PrivateChannelsConnectForm = newDesign
+    ? CurrentPrivateChannelsConnectForm
+    : LegacyPrivateChannelsConnectForm;
+  const DeleteConfirmationDialog = newDesign
+    ? CurrentDeleteConfirmationDialog
+    : LegacyDeleteConfirmationDialog;
   const router = useRouter();
   const [manageOpen, setManageOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);

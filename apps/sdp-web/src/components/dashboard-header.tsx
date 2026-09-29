@@ -1,5 +1,6 @@
 "use client";
 
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -20,6 +21,7 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { Button } from "@/components/ui/button";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -623,7 +625,7 @@ function getCounterpartyRoutePageConfig(
     // A refresh flow: the way back over the title in the form's column; the footer band spans
     // the page.
     return {
-      title: t("Shared.dashboardShell.newCounterparty"),
+      title: t("Shared.dashboardShell.newDesign.newCounterparty"),
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
       backAction: {
@@ -1066,7 +1068,7 @@ function getRefreshPaymentsPageConfig(
   }
   if (pathname === "/dashboard/payments/recurring") {
     return {
-      title: t("Shared.dashboardShell.recurringPayments"),
+      title: t("Shared.dashboardShell.newDesign.recurringPayments"),
       titlePosition: "left",
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
@@ -1098,6 +1100,221 @@ function getRefreshPaymentsPageConfig(
   return null;
 }
 
+/**
+ * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
+ * and the Privacy connect form. Returns null for every other route, and for the new design's own
+ * routes, which send the previous design back to their list.
+ */
+function getLegacyDesignPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>,
+  privateChannelsEnabled: boolean
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: "/dashboard/integrations/private-channels",
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  const privateChannelsSetup = pathname.match(
+    /^\/dashboard\/integrations\/private-channels\/([^/]+)\/setup$/
+  );
+  if (privateChannelsSetup) {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: privateChannelsInstancePath(privateChannelsSetup[1]),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname !== "/dashboard/payments" && !pathname.startsWith("/dashboard/payments/")) {
+    return null;
+  }
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.counterparty"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.newCounterparty"),
+      backHref: "/dashboard/payments/counterparty",
+      backLabel: t("Shared.dashboardShell.backToCounterparty"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: t("Shared.dashboardShell.manageCounterparty"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.backToCounterparty"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments") {
+    return {
+      title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (
+    pathname === PAYMENT_TRANSACTIONS_HREF ||
+    pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)
+  ) {
+    return {
+      title: t("Shared.dashboardShell.transactions"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPayments.transactions.all") },
+          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+            id: module,
+            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
+          })),
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === PAYMENT_REQUESTS_HREF || pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
+    return {
+      title: t("Shared.dashboardShell.requests"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: t("Shared.dashboardShell.recurringPayments"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.recurringPayment"),
+      backHref: "/dashboard/payments/recurring",
+      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/recurring/")) {
+    return {
+      title: t("Shared.dashboardShell.recurringPayment"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.backToRecurringPayments"),
+      },
+    };
+  }
+  const action = getPaymentsActions(t, privateChannelsEnabled, false).find((item) =>
+    pathname.startsWith(item.href)
+  );
+  const title = action
+    ? action.label
+    : pathname.endsWith("/receive")
+      ? t("Shared.dashboardShell.receive")
+      : t("Shared.dashboardShell.send");
+  return actionPageConfig({
+    title,
+    backHref: "/dashboard/payments",
+    backLabel: t("Shared.dashboardShell.backToPayments"),
+    contentWidthClass: "max-w-none",
+  });
+}
+
+/** The Wallets routes as the previous design (NEW DESIGN off) configures them. */
+function getLegacyWalletRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  const walletPolicyRouteMatch = pathname.match(
+    /^\/dashboard\/(wallets|custody)\/([^/]+)\/policy(?:\/|$)/
+  );
+  if (walletPolicyRouteMatch) {
+    const [, section, walletId] = walletPolicyRouteMatch;
+    const isPolicyEvaluationDetail = /\/policy\/audit\/[^/]+$/.test(pathname);
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.walletControls"),
+      backHref: isPolicyEvaluationDetail
+        ? `/dashboard/${section}/${walletId}/policy/audit`
+        : `/dashboard/${section}/${walletId}`,
+      backLabel: isPolicyEvaluationDetail
+        ? t("Shared.dashboardShell.backToPolicyHistory")
+        : t("Shared.dashboardShell.backToWallet"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+
+  const isWalletDetail =
+    (pathname.startsWith("/dashboard/wallets/") && pathname !== "/dashboard/wallets/setup") ||
+    (pathname.startsWith("/dashboard/custody/") && pathname !== "/dashboard/custody/setup");
+  if (!isWalletDetail) return null;
+
+  return {
+    title: t("Shared.dashboardShell.wallets"),
+    contentWidthClass: "max-w-none",
+    backAction: {
+      href: "/dashboard/wallets",
+      label: t("Shared.dashboardShell.backToWallets"),
+    },
+  };
+}
+
+function getLegacyWalletSectionPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/wallets" || pathname === "/dashboard/custody") {
+    return {
+      title: t("Shared.dashboardShell.wallets"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/wallets/setup" || pathname === "/dashboard/custody/setup") {
+    return {
+      title: t("Shared.dashboardShell.createWallet"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (
+    pathname === "/dashboard/wallets/connections" ||
+    pathname === "/dashboard/custody/connections"
+  ) {
+    return {
+      title: t("Shared.dashboardShell.connections"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/wallets/switch" || pathname === "/dashboard/custody/switch") {
+    return {
+      title: t("Shared.dashboardShell.activateProvider"),
+      contentWidthClass: "max-w-3xl",
+      backAction: {
+        href: "/dashboard/wallets",
+        label: t("Shared.dashboardShell.backToWallets"),
+      },
+    };
+  }
+  return null;
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1105,18 +1322,26 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
   paymentsEnabled = true,
-  policiesEnabled = true
+  policiesEnabled = true,
+  newDesign = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
-    // The Overview is built on the refresh design: a left title over the same 900px column
-    // as the Payments pages.
-    return {
-      title: t("Shared.dashboardShell.home"),
-      titlePosition: "left",
-      contentWidthClass: REFRESH_PAGE_WIDTH,
-    };
+    // NEW DESIGN's Overview is built on the refresh design: a left title over the same 900px
+    // column as the Payments pages. The previous design's Home names itself: the sidebar marks
+    // it active and the page opens on a balance, so the workspace renders an sr-only heading.
+    return newDesign
+      ? {
+          title: t("Shared.dashboardShell.newDesign.home"),
+          titlePosition: "left",
+          contentWidthClass: REFRESH_PAGE_WIDTH,
+        }
+      : {
+          title: t("Shared.dashboardShell.home"),
+          hideTitle: true,
+          contentWidthClass: "max-w-none",
+        };
   }
   if (pathname === "/dashboard/tokens") {
     // Reached from the Overview's holdings, so it carries a way back rather than
@@ -1126,18 +1351,19 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard",
-        label: t("Shared.dashboardShell.backToHome"),
+        label: newDesign
+          ? t("Shared.dashboardShell.newDesign.backToHome")
+          : t("Shared.dashboardShell.backToHome"),
       },
     };
   }
-  const walletSectionPageConfig = getWalletSectionPageConfig(pathname, t);
+  const walletSectionPageConfig = newDesign
+    ? getWalletSectionPageConfig(pathname, t)
+    : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = getWalletRoutePageConfig(
-    pathname,
-    t,
-    policiesEnabled,
-    paymentsEnabled
-  );
+  const walletRoutePageConfig = newDesign
+    ? getWalletRoutePageConfig(pathname, t, policiesEnabled, paymentsEnabled)
+    : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
   if (pathname === "/dashboard/policies") {
     return {
@@ -1157,6 +1383,12 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
+  const legacyDesignConfig = newDesign
+    ? null
+    : getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled);
+  if (legacyDesignConfig) {
+    return legacyDesignConfig;
+  }
   const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
   if (refreshPaymentsConfig) {
     return refreshPaymentsConfig;
@@ -1176,17 +1408,17 @@ export function getDashboardPageConfig(
       headerWidthClass: "max-w-flow",
       backAction: {
         href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
       },
     };
   }
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
-      title: t("Shared.dashboardShell.recurringPayment"),
+      title: t("Shared.dashboardShell.newDesign.recurringPayment"),
       contentWidthClass: REFRESH_PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
       },
     };
   }
@@ -1235,5 +1467,7 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
   }
-  return { title: t("Shared.dashboardShell.home") };
+  return {
+    title: newDesign ? t("Shared.dashboardShell.newDesign.home") : t("Shared.dashboardShell.home"),
+  };
 }

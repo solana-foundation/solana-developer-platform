@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import {
@@ -9,13 +10,14 @@ import {
   paymentRequestHref,
   paymentsPlaygroundHref,
 } from "@/lib/payments-routes";
+import LegacyPaymentRequestsPage from "../_legacy/requests/page";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchPaymentRequestDirectory } from "./payment-requests-page.data";
 import { PaymentRequestsWorkspace } from "./payment-requests-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestsPage({
+async function PaymentRequestsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -65,3 +67,5 @@ export default async function PaymentRequestsPage({
     );
   });
 }
+
+export default withLegacyDesign(PaymentRequestsPage, LegacyPaymentRequestsPage);

@@ -12,15 +12,20 @@ const WALLETS_ROUTE =
 
 /**
  * The design-token theme scope a dashboard route's page renders in. The Overview, Payments, the
- * Wallets list, its create flow and a wallet's page, and the Privacy connect form are built on the 2026 refresh
- * design's components and page layout; every other route keeps the base components and layout.
- * The palette, faces and sidebar are the same on every route (tokens.css, and the sidebar
- * carries the scope itself).
+ * Wallets list, its create flow and a wallet's page, and the Privacy connect form are built on
+ * the 2026 refresh design's components and page layout; every other route keeps the base
+ * components and layout. On NEW DESIGN the palette, faces and sidebar are the same on every
+ * route (sdp-theme.css, and the sidebar carries the scope itself). With NEW DESIGN off, every
+ * route keeps the base design.
  *
  * @param pathname - The dashboard route.
+ * @param newDesign - Whether the NEW DESIGN flag is on.
  * @returns The scope, or null for the base design.
  */
-export function themeScopeForPath(pathname: string): ThemeScope | null {
+export function themeScopeForPath(pathname: string, newDesign = true): ThemeScope | null {
+  if (!newDesign) {
+    return null;
+  }
   if (pathname === "/dashboard" || pathname === "/dashboard/") {
     return "refresh";
   }

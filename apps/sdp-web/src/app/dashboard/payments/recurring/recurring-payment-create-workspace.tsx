@@ -274,7 +274,7 @@ function AmountFields({ form }: StepProps) {
         <FieldHint tone="error">
           {nonSolBalanceCount > 0
             ? t("DashboardPayments.recurring.unresolvedTokenBalances")
-            : t("DashboardPayments.recurring.nativeSolUnsupported")}
+            : t("DashboardPayments.newDesign.recurring.nativeSolUnsupported")}
         </FieldHint>
       ) : null}
     </div>
@@ -354,7 +354,7 @@ function WhenStep({ form }: StepProps) {
           />
           {fields.firstCollectionAt && !firstCollectionAtIsValid(fields.firstCollectionAt) ? (
             <FieldHint tone="error">
-              {t("DashboardPayments.recurring.invalidFirstPayment")}
+              {t("DashboardPayments.newDesign.recurring.invalidFirstPayment")}
             </FieldHint>
           ) : (
             <FieldHint tone="neutral">
@@ -438,7 +438,7 @@ function ReviewStep({ form }: StepProps) {
         />
       </dl>
       <p className="mt-6 text-body text-secondary">
-        {t("DashboardPayments.recurring.pendingRecordDescription")}
+        {t("DashboardPayments.newDesign.recurring.pendingRecordDescription")}
       </p>
     </div>
   );

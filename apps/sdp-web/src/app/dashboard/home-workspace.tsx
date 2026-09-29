@@ -119,15 +119,17 @@ function FirstWalletPrompt({ canCreateWallet }: { canCreateWallet: boolean }) {
   const locale = useLocale();
   return (
     <section className="min-w-0" data-overview-section="balance">
-      <h2 className="text-body text-secondary">{t("Shared.homeWorkspace.totalBalance")}</h2>
+      <h2 className="text-body text-secondary">
+        {t("Shared.homeWorkspace.newDesign.totalBalance")}
+      </h2>
       <p className="mt-1 text-amount font-medium text-primary tabular-nums">
         {formatCurrencyAmount(0, locale)}
       </p>
       <h3 className="mt-8 text-subheading font-medium text-primary">
-        {t("Shared.homeWorkspace.firstRunTitle")}
+        {t("Shared.homeWorkspace.newDesign.firstRunTitle")}
       </h3>
       <p className="mt-2 max-w-sm text-body text-secondary">
-        {t("Shared.homeWorkspace.firstRunBody")}
+        {t("Shared.homeWorkspace.newDesign.firstRunBody")}
       </p>
       {canCreateWallet ? (
         <Button asChild variant="outline" className="mt-6 h-control-md">
@@ -204,7 +206,9 @@ function BalanceSummary({
 
   return (
     <section className="min-w-0" data-overview-section="balance">
-      <h2 className="text-body text-secondary">{t("Shared.homeWorkspace.totalBalance")}</h2>
+      <h2 className="text-body text-secondary">
+        {t("Shared.homeWorkspace.newDesign.totalBalance")}
+      </h2>
       {totalBalanceError ? (
         <>
           <p className="mt-1 text-amount font-medium text-primary">
@@ -625,7 +629,7 @@ export function HomeWorkspace({
             href: "/dashboard/wallets/setup",
             icon: WalletIcon,
             label: "Shared.homeWorkspace.quickActionWallets",
-            description: "Shared.homeWorkspace.quickActionWalletsBody",
+            description: "Shared.homeWorkspace.newDesign.quickActionWalletsBody",
           } as const,
         ]
       : []),
@@ -647,7 +651,7 @@ export function HomeWorkspace({
             href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.pay,
             icon: ReceiptIcon,
             label: "Shared.homeWorkspace.quickActionPayments",
-            description: "Shared.homeWorkspace.quickActionPaymentsBody",
+            description: "Shared.homeWorkspace.newDesign.quickActionPaymentsBody",
           } as const,
         ]
       : []),
@@ -658,7 +662,7 @@ export function HomeWorkspace({
             href: "/dashboard/api-keys/new",
             icon: KeyIcon,
             label: "Shared.homeWorkspace.quickActionApiKeys",
-            description: "Shared.homeWorkspace.quickActionApiKeysBody",
+            description: "Shared.homeWorkspace.newDesign.quickActionApiKeysBody",
           } as const,
         ]
       : []),

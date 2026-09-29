@@ -51,6 +51,12 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
     if (!project || cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value !== project) {
       return false;
     }
+    // Demo data is part of the new design; the previous design never serves it. Imported here,
+    // not at the top: the flags module reads auth through sdp-api, which imports this file.
+    const { newDesign } = await import("@/flags");
+    if (!(await newDesign())) {
+      return false;
+    }
     const pathname = headerStore.get("x-sdp-pathname");
     if (isPaymentsPath(pathname)) {
       return true;
@@ -160,7 +166,7 @@ export async function paymentsDemoResponse(
     }
     const fixture = demoWorldBody(world, path);
     if (fixture !== undefined) return Response.json(fixture);
-    const flow = demoFlowRead(parts.segments, parts.params, world);
+    const flow = demoFlowRead(parts.segments, parts.params, world, now);
     if (flow) return respond(flow);
     return DEMO_RESOURCES.has(resource) || path.includes("demo_") ? notInDemo() : null;
   }

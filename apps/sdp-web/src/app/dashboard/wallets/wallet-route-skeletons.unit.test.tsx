@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import CustodyDetailLoading from "../custody/[walletId]/loading";
 import CustodyAuditDetailLoading from "../custody/[walletId]/policy/audit/[policyEvaluationId]/loading";
 import CustodyAuditLoading from "../custody/[walletId]/policy/audit/loading";
@@ -21,6 +21,12 @@ import {
   WalletPolicySkeleton,
   WalletsOnboardingSkeleton,
 } from "./wallet-route-skeletons";
+
+// NEW DESIGN on.
+vi.mock("@/components/new-design", () => ({
+  DesignSwitch: ({ current }: { current: unknown }) => current,
+  useNewDesign: () => true,
+}));
 
 const routeLoaders = [
   ["wallets overview", WalletsLoading, "wallets-overview"],

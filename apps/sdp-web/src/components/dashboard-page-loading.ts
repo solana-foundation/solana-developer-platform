@@ -1,7 +1,8 @@
 "use client";
 
 import type { ComponentType } from "react";
-import DashboardLoading from "@/app/dashboard/(home)/loading";
+import LegacyDashboardLoading from "@/app/dashboard/_legacy/(home)/loading";
+import { CurrentDashboardLoading } from "@/app/dashboard/(home)/loading";
 import AllowlistLoading from "@/app/dashboard/allowlist/loading";
 import ApiKeyEditLoading from "@/app/dashboard/api-keys/[keyId]/edit/loading";
 import { ApiKeysListSkeleton } from "@/app/dashboard/api-keys/api-key-page-skeletons";
@@ -29,6 +30,19 @@ import {
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
 import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
+import LegacyCounterpartyDirectoryLoading from "@/app/dashboard/payments/_legacy/counterparty/loading";
+import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/payments/_legacy/payments-page-skeleton";
+import {
+  CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
+  PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton as LegacyPaymentsPayPageSkeleton,
+  PaymentsTransactionsPageSkeleton as LegacyPaymentsTransactionsPageSkeleton,
+  RecurringPaymentCreateSkeleton as LegacyRecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton as LegacyRecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
+} from "@/app/dashboard/payments/_legacy/payments-route-skeletons";
+import LegacyPaymentRequestsLoading from "@/app/dashboard/payments/_legacy/requests/loading";
 import CounterpartyDirectoryLoading from "@/app/dashboard/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
 import {
@@ -48,13 +62,18 @@ import PaymentRequestsLoading from "@/app/dashboard/payments/requests/loading";
 import { PoliciesOverviewSkeleton } from "@/app/dashboard/policies/policies-overview";
 import TokenHoldingsLoading from "@/app/dashboard/tokens/loading";
 import {
+  WalletDetailSkeleton as LegacyWalletDetailSkeleton,
+  WalletSetupSkeleton as LegacyWalletSetupSkeleton,
+  WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
+} from "@/app/dashboard/wallets/_legacy/wallet-route-skeletons";
+import {
+  CurrentWalletDetailSkeleton,
+  CurrentWalletSetupSkeleton,
+  CurrentWalletsOverviewSkeleton,
   WalletConnectionsListSkeleton,
-  WalletDetailSkeleton,
   WalletPolicyAuditDetailSkeleton,
   WalletPolicyAuditListSkeleton,
   WalletPolicySkeleton,
-  WalletSetupSkeleton,
-  WalletsOverviewSkeleton,
 } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import type { DashboardLoadingRoute } from "@/lib/dashboard-navigation-loading";
 
@@ -62,12 +81,46 @@ interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
+// The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
+// transaction's or a request's page, the new-request page) send the previous design to their
+// list, so they load as the list does.
+const LEGACY_DESIGN_PAGE_LOADING: Partial<
+  Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
+> = {
+  "payments-overview": LegacyPaymentsPageSkeleton,
+  "payments-transactions": LegacyPaymentsTransactionsPageSkeleton,
+  "payment-transaction-detail": LegacyPaymentsTransactionsPageSkeleton,
+  "payments-pay": LegacyPaymentsPayPageSkeleton,
+  "payments-deposit": LegacyPaymentsDepositPageSkeleton,
+  "payment-requests": LegacyPaymentRequestsLoading,
+  "payment-request-create": LegacyPaymentRequestsLoading,
+  "payment-request-detail": LegacyPaymentRequestsLoading,
+  "counterparty-directory": LegacyCounterpartyDirectoryLoading,
+  "counterparty-create": LegacyCounterpartyCreateSkeleton,
+  "counterparty-detail": LegacyCounterpartyDetailSkeleton,
+  "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
+  "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
+  "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
+  home: LegacyDashboardLoading,
+  "wallets-overview": LegacyWalletsOverviewSkeleton,
+  "wallet-setup": LegacyWalletSetupSkeleton,
+  "wallet-detail": LegacyWalletDetailSkeleton,
+};
+
 export function resolvePageLoadingComponent(
+  route: DashboardLoadingRoute,
+  newDesign = true
+): ComponentType<PageLoadingProps> {
+  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
+  return legacy ?? resolveCurrentPageLoadingComponent(route);
+}
+
+function resolveCurrentPageLoadingComponent(
   route: DashboardLoadingRoute
 ): ComponentType<PageLoadingProps> {
   switch (route) {
     case "home":
-      return DashboardLoading;
+      return CurrentDashboardLoading;
     case "integrations":
       return IntegrationsSkeleton;
     case "integration-detail":
@@ -77,13 +130,13 @@ export function resolvePageLoadingComponent(
     case "token-holdings":
       return TokenHoldingsLoading;
     case "wallets-overview":
-      return WalletsOverviewSkeleton;
+      return CurrentWalletsOverviewSkeleton;
     case "wallet-setup":
-      return WalletSetupSkeleton;
+      return CurrentWalletSetupSkeleton;
     case "wallet-connections":
       return WalletConnectionsListSkeleton;
     case "wallet-detail":
-      return WalletDetailSkeleton;
+      return CurrentWalletDetailSkeleton;
     case "wallet-policy":
       return WalletPolicySkeleton;
     case "wallet-policy-audit-list":

@@ -8,6 +8,7 @@ import { SelectExistingOrganizationPanel } from "@/components/select-existing-or
 import { DashboardWorkspaceProvider } from "@/contexts/dashboard-workspace-context";
 import { NetworkDebugProvider } from "@/contexts/network-debug-context";
 import { getDashboardFlags } from "@/flags/dashboard";
+import { loadQuickStartStep } from "@/lib/_legacy/quick-start-server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
@@ -45,11 +46,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  const [loadedProjects, cookieStore, initialQuickStartStatus] = await Promise.all([
-    loadProjects(),
-    cookies(),
-    loadQuickStartStatus(),
-  ]);
+  // Each design has its own quick start; only the one on screen is read.
+  const [loadedProjects, cookieStore, initialQuickStartStatus, initialQuickStartStep] =
+    await Promise.all([
+      loadProjects(),
+      cookies(),
+      flags.newDesign ? loadQuickStartStatus() : null,
+      flags.newDesign ? null : loadQuickStartStep(),
+    ]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;
   const projectSelection = resolveDashboardProjectSelection(projects, cookieProjectId, {
@@ -62,6 +66,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       scopeRefreshFallback={<DashboardScopeLoadingScreen />}
       dashboardAccess={dashboardAccess}
       initialQuickStartStatus={initialQuickStartStatus}
+      initialQuickStartStep={initialQuickStartStep}
       flags={flags}
       serverDashboardCacheScope={dashboardCacheScope}
       projects={projects}

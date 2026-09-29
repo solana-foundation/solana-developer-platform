@@ -1,4 +1,6 @@
+import { DesignSwitch } from "@/components/new-design";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
+import LegacyDashboardLoading from "../_legacy/(home)/loading";
 
 const BALANCE_ROW_IDS = ["overview-balance-1", "overview-balance-2", "overview-balance-3"];
 const TILE_IDS = ["overview-tile-1", "overview-tile-2", "overview-tile-3", "overview-tile-4"];
@@ -9,7 +11,7 @@ const CHART_IDS = ["overview-chart-1", "overview-chart-2", "overview-chart-3", "
  * network header over its four charts. The quick start and the approvals list stay out; they
  * appear only when there is something in them, and a placeholder would promise both.
  */
-export default function DashboardLoading() {
+export function CurrentDashboardLoading() {
   return (
     <div
       className="flex w-full min-w-0 flex-col gap-16"
@@ -59,4 +61,8 @@ export default function DashboardLoading() {
       </div>
     </div>
   );
+}
+
+export default function DashboardLoading() {
+  return <DesignSwitch current={<CurrentDashboardLoading />} legacy={<LegacyDashboardLoading />} />;
 }

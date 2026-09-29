@@ -67,7 +67,7 @@ export function SegmentedControl({
             <span
               className={cn(
                 "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-primary",
-                "whitespace-nowrap refresh:rounded-control-inner refresh:py-1 refresh:text-meta",
+                "refresh:whitespace-nowrap refresh:rounded-control-inner refresh:py-1 refresh:text-meta",
                 checked
                   ? selectedClassName
                   : cn(

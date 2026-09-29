@@ -1,0 +1,591 @@
+import {
+  type CustodyWalletAggregate,
+  type CustodyWalletTokenBalance,
+  PAYMENT_TRANSFER_STATUS_TONE,
+  type PaymentTransferStatus,
+  type PaymentTransferStatusTone,
+  SOL_DECIMALS,
+  SOL_MINT,
+  type PaymentTransferSummary as TransferRecord,
+  type PaymentsDashboardWallet as WalletRecord,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
+import { toTitleCase } from "@/app/dashboard/activity-format-utils";
+import type { BadgeVariant } from "@/components/ui/badge";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import type { PaymentsIssuedTokenSymbol } from "./payments-page.data";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
+
+function parseIntegerAmount(value: string): bigint | null {
+  if (!/^\d+$/.test(value)) {
+    return null;
+  }
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function formatUiAmountFromRaw(amount: bigint, decimals: number): string {
+  if (decimals <= 0) {
+    return amount.toString();
+  }
+
+  const scale = BigInt(10) ** BigInt(decimals);
+  const whole = amount / scale;
+  const fraction = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+function resolveFallbackUsdValue(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount">
+) {
+  const normalizedToken = balance.token.trim().toUpperCase();
+  if (
+    normalizedToken !== "USDC" &&
+    !WELL_KNOWN_TOKEN_BY_MINT.get(balance.mint.trim())?.isUsdStable
+  ) {
+    return null;
+  }
+
+  const uiAmount = Number(balance.uiAmount);
+  return Number.isFinite(uiAmount) ? uiAmount : null;
+}
+
+export function resolveUsdBalanceValue(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint" | "uiAmount" | "usdValue">
+): number | null {
+  if (typeof balance.usdValue === "number" && Number.isFinite(balance.usdValue)) {
+    return balance.usdValue;
+  }
+
+  return resolveFallbackUsdValue(balance);
+}
+
+export function isSolBalance(balance: Pick<CustodyWalletTokenBalance, "token" | "mint">): boolean {
+  return balance.token.trim().toUpperCase() === "SOL" || balance.mint.trim() === SOL_MINT;
+}
+
+export function shortenAddress(address: string): string {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
+/**
+ * Turns a transfer's `token` field into something displayable. The field holds a
+ * mint address, so rendering it directly puts a 44-character base58 string in a
+ * table cell. Every surface that shows a transfer token should go through here,
+ * otherwise the same transfer reads as "USDC" on one screen and
+ * "4zMMC9srt5…" on another.
+ */
+export function resolveTransferTokenLabel(
+  token: string | null | undefined,
+  /**
+   * Symbols the caller has already resolved, keyed by mint. Surfaces that load
+   * balances get this for free and can name tokens the catalogue has never
+   * heard of; surfaces without it fall back to the shortened mint.
+   */
+  symbolsByMint?: Readonly<Record<string, string>>
+): string | undefined {
+  const trimmed = token?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const resolvedSymbol = symbolsByMint?.[trimmed]?.trim();
+  if (resolvedSymbol && resolvedSymbol !== trimmed) {
+    return resolvedSymbol;
+  }
+
+  const knownSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(trimmed)?.symbol;
+  if (knownSymbol) {
+    return knownSymbol;
+  }
+
+  return trimmed.length > 10 ? shortenAddress(trimmed) : trimmed;
+}
+
+const TOKEN_AMOUNT_PATTERN = /^-?\d+(?:\.\d+)?$/;
+
+/**
+ * Formats a token amount for display with locale-appropriate grouping and
+ * decimal separators. Exact decimal strings keep every input digit; other
+ * numeric input falls back to standard number formatting.
+ *
+ * @param value - The amount as a number or exact decimal string.
+ * @param locale - Locale used for grouping and decimal separators.
+ * @returns The locale-formatted amount.
+ */
+export function formatTokenAmount(value: number | string, locale?: string): string {
+  const rawValue = String(value).trim();
+  const formatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 9 });
+  if (TOKEN_AMOUNT_PATTERN.test(rawValue)) {
+    const negative = rawValue.startsWith("-");
+    const [whole, fraction] = (negative ? rawValue.slice(1) : rawValue).split(".");
+    const sign = negative ? "-" : "";
+    const groupedWhole = `${sign}${formatter.format(BigInt(whole))}`;
+    if (fraction === undefined) {
+      return groupedWhole;
+    }
+    const decimalPart = formatter.formatToParts(1.1).find((part) => part.type === "decimal");
+    if (decimalPart === undefined) {
+      throw new Error(`Locale ${locale} produced no decimal separator`);
+    }
+    return `${groupedWhole}${decimalPart.value}${fraction}`;
+  }
+
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue) ? formatter.format(numericValue) : String(value);
+}
+
+export function formatLamportsAsSol(lamports: bigint, locale?: string): string {
+  return `${formatTokenAmount(formatUiAmountFromRaw(lamports, SOL_DECIMALS), locale)} SOL`;
+}
+
+/**
+ * Builds an amount-input placeholder that communicates an asset's precision.
+ *
+ * @param decimals - The asset's fractional digit count.
+ * @returns A zero amount padded to the asset's decimals, e.g. `0.000000` for 6.
+ */
+export function amountInputPlaceholder(decimals: number): string {
+  return decimals <= 0 ? "0" : `0.${"0".repeat(decimals)}`;
+}
+
+/**
+ * Checks that a stored URL is safe to render as a link target: parseable and
+ * http(s). `new URL` alone accepts `javascript:` and `data:` schemes, which
+ * must never reach an href.
+ *
+ * @param value - The candidate URL.
+ * @returns Whether the value parses as an http or https URL.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+export interface ResolvedTokenPresentation {
+  /** Issued-token id (`tok_…`) when the mint belongs to a token issued on SDP. */
+  tokenId: string | null;
+  tokenName: string;
+  /** Issuer-supplied metadata image, when the issued token declares one. */
+  metadataImageUrl: string | null;
+  mint: string;
+  /** Whether the mint is in the verified well-known registry. */
+  isWellKnown: boolean;
+}
+
+/**
+ * Resolves a mint to the token identity the dashboard should present: the
+ * well-known registry name when the mint is verified, the issued token's name,
+ * id, and metadata image when it was issued on SDP, and the caller's fallback
+ * name otherwise. Rendering stays with the caller.
+ *
+ * The literal "SOL" is accepted as the native alias: rows written by the
+ * native send path record it in place of the wrapped SOL mint, and only the
+ * API writes that value, so it can never be a self-reported symbol.
+ *
+ * @param mint - The mint address to resolve, or the native "SOL" alias.
+ * @param issuedTokensByMint - The org's issued tokens keyed by mint address.
+ * @param fallbackName - Name used when the mint is neither well known nor issued.
+ * @returns The resolved token identity.
+ */
+export function resolveTokenByMint(
+  mint: string,
+  issuedTokensByMint: Record<string, PaymentsIssuedTokenSymbol>,
+  fallbackName?: string
+): ResolvedTokenPresentation {
+  const trimmed = mint.trim();
+  const normalized = trimmed.toUpperCase() === "SOL" ? SOL_MINT : trimmed;
+  const wellKnown = WELL_KNOWN_TOKEN_BY_MINT.get(normalized);
+  const issued = issuedTokensByMint[normalized];
+  return {
+    tokenId: issued ? issued.id : null,
+    tokenName: wellKnown?.symbol ?? issued?.symbol ?? fallbackName ?? shortenAddress(normalized),
+    metadataImageUrl: issued ? issued.imageUrl : null,
+    mint: normalized,
+    isWellKnown: wellKnown !== undefined,
+  };
+}
+
+export function formatDisplayAmount(value?: string, token?: string, locale?: string): string {
+  if (!value) {
+    return token ? `- ${token}` : "-";
+  }
+
+  const numericValue = Number(value);
+  const formattedValue = Number.isFinite(numericValue)
+    ? new Intl.NumberFormat(locale, {
+        minimumFractionDigits: numericValue >= 100 ? 0 : 2,
+        maximumFractionDigits: 6,
+      }).format(numericValue)
+    : value;
+
+  return token ? `${formattedValue} ${token}` : formattedValue;
+}
+
+export function formatCurrencyAmount(value: number | string | null, locale?: string): string {
+  if (value === null) {
+    return "$0.00";
+  }
+
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "$0.00";
+  }
+
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numericValue);
+}
+
+export function formatTimestamp(value: string | undefined, t: Translate, locale?: string): string {
+  if (!value) {
+    return t("DashboardPayments.pending");
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return t("DashboardPayments.pending");
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+export function formatMinorCurrencyAmount(
+  amount: number | undefined,
+  currency: string,
+  decimals: number
+): string | null {
+  if (amount === undefined || !Number.isFinite(amount)) {
+    return null;
+  }
+
+  const value = amount / 10 ** decimals;
+  return `${value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals,
+  })} ${currency.toUpperCase()}`;
+}
+
+export function formatRampQuoteExpiry(expiresAt: string | undefined): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+export function formatRampQuoteTimeRemaining(
+  expiresAt: string | undefined,
+  nowMs = Date.now(),
+  t?: Translate
+): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (Number.isNaN(expiresAtMs)) {
+    return null;
+  }
+
+  const remainingSeconds = Math.max(0, Math.ceil((expiresAtMs - nowMs) / 1000));
+  if (remainingSeconds === 0) {
+    return t ? t("DashboardPayments.expired") : null;
+  }
+
+  const minutes = Math.floor(remainingSeconds / 60);
+  const seconds = remainingSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+const STATUS_MESSAGE_KEYS = {
+  pending: "DashboardPayments.transactions.pending",
+  processing: "DashboardPayments.transactions.processing",
+  confirmed: "DashboardPayments.transactions.confirmed",
+  finalized: "DashboardPayments.transactions.finalized",
+  failed: "DashboardPayments.transactions.failed",
+  awaiting_payment: "DashboardPayments.transactions.awaitingPayment",
+  settling: "DashboardPayments.transactions.settling",
+  completed: "DashboardPayments.transactions.completed",
+  canceled: "DashboardPayments.transactions.canceled",
+  expired: "DashboardPayments.transactions.expired",
+} as const satisfies Record<PaymentTransferStatus, MessageKey>;
+
+export function statusMessageKey(status: PaymentTransferStatus): MessageKey {
+  return STATUS_MESSAGE_KEYS[status];
+}
+
+const BADGE_VARIANT_BY_TONE = {
+  success: "success",
+  pending: "warning",
+  danger: "danger",
+  neutral: "default",
+} as const satisfies Record<PaymentTransferStatusTone, BadgeVariant>;
+
+export function statusVariant(status: PaymentTransferStatus): BadgeVariant {
+  return BADGE_VARIANT_BY_TONE[PAYMENT_TRANSFER_STATUS_TONE[status]];
+}
+
+export function formatDirection(direction: string | undefined, t: Translate): string {
+  if (!direction) {
+    return t("DashboardPayments.unknown");
+  }
+  return direction[0]?.toUpperCase() + direction.slice(1);
+}
+
+type TransactionCounterpartyFields = Pick<
+  TransferRecord,
+  "counterpartyId" | "type" | "direction" | "source" | "destination"
+>;
+
+function trimmed(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const result = value.trim();
+  return result === "" ? undefined : result;
+}
+
+export function resolveTransactionCounterpartyReference(
+  transfer: TransactionCounterpartyFields
+): string | undefined {
+  const counterpartyId = trimmed(transfer.counterpartyId);
+  if (counterpartyId !== undefined) return counterpartyId;
+
+  const source = trimmed(transfer.source);
+  const destination = trimmed(transfer.destination);
+  if (transfer.direction === "inbound" || transfer.type === "onramp") {
+    return source === undefined ? destination : source;
+  }
+  return destination === undefined ? source : destination;
+}
+
+export function resolveCounterparty(transfer: TransferRecord, t: Translate): string {
+  const reference = resolveTransactionCounterpartyReference(transfer);
+  return reference === undefined ? t("DashboardPayments.unavailable") : reference;
+}
+
+export function formatPaymentTransferType(type: string | undefined, t: Translate): string {
+  if (type === "onramp") {
+    return t("DashboardPayments.deposit");
+  }
+  if (type === "offramp") {
+    return t("DashboardPayments.pay");
+  }
+  return type ? toTitleCase(type) : t("DashboardPayments.transfer");
+}
+
+/** Source → destination amounts, Wise-style: what's sent vs. what's received. */
+export function resolveTransferFlow(transfer: TransferRecord): {
+  send: string | null;
+  receive: string | null;
+} {
+  const isInbound = transfer.type === "onramp" || transfer.direction === "inbound";
+  const transferTokenLabel = resolveTransferTokenLabel(transfer.token);
+  const cryptoLabel =
+    transfer.amount && transferTokenLabel
+      ? formatDisplayAmount(transfer.amount, transferTokenLabel)
+      : null;
+  const fiatLabel =
+    transfer.fiatAmount && transfer.fiatCurrency
+      ? `${transfer.fiatAmount} ${transfer.fiatCurrency.toUpperCase()}`
+      : null;
+  const moneygramPayoutLabel =
+    transfer.moneygram?.payoutAmount !== undefined && transfer.fiatCurrency
+      ? formatDisplayAmount(String(transfer.moneygram.payoutAmount), transfer.fiatCurrency)
+      : null;
+  const receiveLabel = fiatLabel ?? moneygramPayoutLabel;
+  return isInbound
+    ? { send: fiatLabel, receive: cryptoLabel }
+    : { send: cryptoLabel, receive: receiveLabel };
+}
+
+export function resolveTotalBalance(balances: CustodyWalletTokenBalance[]): number | null {
+  if (balances.length === 0) {
+    return null;
+  }
+
+  let hasNumericBalance = false;
+  const total = balances.reduce((sum, balance) => {
+    const usdValue = resolveUsdBalanceValue(balance);
+    if (usdValue === null) {
+      return sum;
+    }
+
+    hasNumericBalance = true;
+    return sum + usdValue;
+  }, 0);
+
+  return hasNumericBalance ? total : null;
+}
+
+export function aggregateBalancesFromWallets(wallets: WalletRecord[]): CustodyWalletTokenBalance[] {
+  const aggregate = new Map<
+    string,
+    { token: string; mint: string; amount: bigint; decimals: number; usdValue: number | null }
+  >();
+
+  for (const wallet of wallets) {
+    for (const balance of wallet.balances ?? []) {
+      const current = aggregate.get(balance.mint);
+      const numericValue = Number(balance.uiAmount);
+      const rawAmount = parseIntegerAmount(balance.amount);
+      const usdValue = resolveUsdBalanceValue(balance);
+      if (!Number.isFinite(numericValue) || rawAmount === null) {
+        continue;
+      }
+
+      if (!current) {
+        aggregate.set(balance.mint, {
+          token: balance.token,
+          mint: balance.mint,
+          amount: rawAmount,
+          decimals: balance.decimals,
+          usdValue,
+        });
+        continue;
+      }
+
+      current.amount += rawAmount;
+      if (usdValue !== null) {
+        current.usdValue = (current.usdValue ?? 0) + usdValue;
+      }
+    }
+  }
+
+  return [...aggregate.values()].map((entry) => ({
+    token: entry.token,
+    mint: entry.mint,
+    amount: entry.amount.toString(),
+    uiAmount: formatUiAmountFromRaw(entry.amount, entry.decimals),
+    decimals: entry.decimals,
+    ...(entry.usdValue !== null ? { usdValue: Number(entry.usdValue.toFixed(6)) } : {}),
+  }));
+}
+
+/**
+ * Native SOL is a balance row like any other: wallets hold it, the API prices
+ * it, and hiding it made the Available balance card disagree with the total on
+ * the home page. Only balances without a resolvable USD value are dropped.
+ */
+export function normalizeAggregateBalances(
+  balances: CustodyWalletTokenBalance[]
+): CustodyWalletTokenBalance[] {
+  return balances
+    .filter((balance) => resolveUsdBalanceValue(balance) !== null)
+    .sort((left, right) => {
+      const leftIsUsdc = left.token.trim().toUpperCase() === "USDC";
+      const rightIsUsdc = right.token.trim().toUpperCase() === "USDC";
+
+      if (leftIsUsdc && !rightIsUsdc) {
+        return -1;
+      }
+      if (!leftIsUsdc && rightIsUsdc) {
+        return 1;
+      }
+
+      return left.token.localeCompare(right.token);
+    });
+}
+
+export function resolveAggregateBalanceDisplayToken(
+  balance: Pick<CustodyWalletTokenBalance, "token" | "mint">,
+  issuedTokenSymbolsByMint: Record<string, string>
+): string {
+  const normalizedMint = balance.mint.trim();
+  const issuedTokenSymbol = issuedTokenSymbolsByMint[normalizedMint]?.trim();
+
+  if (issuedTokenSymbol) {
+    return issuedTokenSymbol.toUpperCase();
+  }
+
+  const wellKnownTokenSymbol = WELL_KNOWN_TOKEN_BY_MINT.get(normalizedMint)?.symbol;
+  if (wellKnownTokenSymbol) {
+    return wellKnownTokenSymbol;
+  }
+
+  const rawToken = balance.token.trim();
+  if (rawToken === normalizedMint) {
+    return normalizedMint;
+  }
+
+  const normalizedToken = rawToken.toUpperCase();
+  if (normalizedToken) {
+    return normalizedToken;
+  }
+
+  return normalizedMint;
+}
+
+export function selectTopAggregateBalanceRows(
+  balances: CustodyWalletTokenBalance[],
+  issuedTokenSymbolsByMint: Record<string, string>,
+  limit = 3
+): CustodyWalletTokenBalance[] {
+  if (balances.length <= limit) {
+    return balances;
+  }
+
+  const sorted = [...balances].sort((left, right) => {
+    const leftIsUsdc =
+      resolveAggregateBalanceDisplayToken(left, issuedTokenSymbolsByMint) === "USDC";
+    const rightIsUsdc =
+      resolveAggregateBalanceDisplayToken(right, issuedTokenSymbolsByMint) === "USDC";
+
+    if (leftIsUsdc && !rightIsUsdc) {
+      return -1;
+    }
+    if (!leftIsUsdc && rightIsUsdc) {
+      return 1;
+    }
+
+    const leftUsdValue = resolveUsdBalanceValue(left) ?? 0;
+    const rightUsdValue = resolveUsdBalanceValue(right) ?? 0;
+    if (leftUsdValue !== rightUsdValue) {
+      return rightUsdValue - leftUsdValue;
+    }
+
+    return resolveAggregateBalanceDisplayToken(left, issuedTokenSymbolsByMint).localeCompare(
+      resolveAggregateBalanceDisplayToken(right, issuedTokenSymbolsByMint)
+    );
+  });
+
+  return sorted.slice(0, limit);
+}
+
+export function resolveAggregateBalanceRows(
+  aggregate: CustodyWalletAggregate | null,
+  wallets: WalletRecord[]
+): CustodyWalletTokenBalance[] {
+  if (aggregate?.balances) {
+    return normalizeAggregateBalances(aggregate.balances);
+  }
+
+  return normalizeAggregateBalances(aggregateBalancesFromWallets(wallets));
+}

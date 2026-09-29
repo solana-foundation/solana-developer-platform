@@ -127,15 +127,15 @@ describe("dashboard route headers", () => {
     ["/dashboard/issuance", "Shared.dashboardShell.issuance"],
     ["/dashboard/issuance/create", "Shared.dashboardShell.newAsset"],
     ["/dashboard/payments/counterparty", "Shared.dashboardShell.contactList"],
-    ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newCounterparty"],
+    ["/dashboard/payments/counterparty/create", "Shared.dashboardShell.newDesign.newCounterparty"],
     ["/dashboard/payments/counterparty/cp_1", "Shared.dashboardShell.contact"],
     ["/dashboard/payments", "Shared.dashboardShell.payments"],
     ["/dashboard/payments/transactions", "Shared.dashboardShell.transactions"],
     ["/dashboard/payments/requests", "Shared.dashboardShell.requests"],
     ["/dashboard/payments/requests/new", "DashboardPayments.requests.newRequest"],
-    ["/dashboard/payments/recurring", "Shared.dashboardShell.recurringPayments"],
+    ["/dashboard/payments/recurring", "Shared.dashboardShell.newDesign.recurringPayments"],
     ["/dashboard/payments/recurring/create", "DashboardPayments.recurring.newSchedule"],
-    ["/dashboard/payments/recurring/rp_1", "Shared.dashboardShell.recurringPayment"],
+    ["/dashboard/payments/recurring/rp_1", "Shared.dashboardShell.newDesign.recurringPayment"],
     ["/dashboard/payments/pay", "Shared.dashboardShell.pay"],
     ["/dashboard/payments/receive", "Shared.dashboardShell.receive"],
     ["/dashboard/integrations", "Shared.dashboardShell.integrations"],
@@ -168,7 +168,7 @@ describe("dashboard route headers", () => {
     ["/dashboard/integrations/private-channels/events", "Shared.dashboardShell.privateChannels"],
     ["/dashboard/settings", "Shared.dashboardShell.settings"],
     ["/dashboard/allowlist", "Shared.dashboardShell.allowlist"],
-    ["/dashboard/unknown", "Shared.dashboardShell.home"],
+    ["/dashboard/unknown", "Shared.dashboardShell.newDesign.home"],
   ])("maps %s to its route-specific title", (pathname, title) => {
     expect(getDashboardPageConfig(pathname, t, false, true, true, true, true).title).toBe(title);
   });

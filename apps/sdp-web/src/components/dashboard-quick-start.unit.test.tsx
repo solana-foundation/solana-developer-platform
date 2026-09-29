@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./use-quick-start", () => ({ useQuickStart: () => mocks.state }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
 vi.mock("@/contexts/dashboard-workspace-context", () => ({
-  useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment }),
+  useDashboardWorkspace: () => ({ sdpEnvironment: mocks.environment, flags: { newDesign: true } }),
 }));
 
 const { DashboardQuickStart } = await import("./dashboard-quick-start");

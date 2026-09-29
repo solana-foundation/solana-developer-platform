@@ -856,6 +856,14 @@ type SandboxTransferSimulationInput =
         amount: number;
         fiatCurrency: MuralSandboxPayinCurrency;
       };
+    }
+  | {
+      /** Demo mode only: BVNK approves the contact's identity check (Simulate verification). */
+      provider: "bvnk";
+      payload: {
+        counterpartyId: string;
+        verification: "approved";
+      };
     };
 
 export async function simulateSandboxTransfer(input: SandboxTransferSimulationInput, t: Translate) {

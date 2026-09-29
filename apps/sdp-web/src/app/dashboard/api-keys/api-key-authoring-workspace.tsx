@@ -44,6 +44,7 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
+import { completeQuickStartStep, quickStartKey } from "@/lib/_legacy/dashboard-quick-start";
 import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start";
 import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
@@ -1215,7 +1216,7 @@ export function ApiKeyAuthoringWorkspace({
 }: ApiKeyAuthoringWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
+  const { sdpEnvironment, selectedProjectId, dashboardCacheScope, flags } = useDashboardWorkspace();
   const [currentStep, setCurrentStep] = useState<ApiKeyAuthoringStep>("details");
   const [draft, setDraft] = useState(() => draftFromInitialKey(initialKey));
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
@@ -1278,7 +1279,11 @@ export function ApiKeyAuthoringWorkspace({
       }
       toast.success(result.message, { position: "bottom-right" });
       if (mode === "create" && selectedProjectId) {
-        invalidateQuickStartStatus();
+        if (flags.newDesign) {
+          invalidateQuickStartStatus();
+        } else {
+          completeQuickStartStep(quickStartKey(dashboardCacheScope), "api-key");
+        }
       }
       router.push(API_KEYS_PATH);
       router.refresh();

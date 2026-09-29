@@ -2,8 +2,15 @@ import {
   DashboardWorkspaceCard,
   DashboardWorkspaceOverviewPanel,
 } from "@/components/dashboard-workspace-panel";
+import { DesignSwitch } from "@/components/new-design";
 import { SkeletonBlock } from "@/components/ui/skeleton-block";
 import { cn } from "@/lib/utils";
+import {
+  WalletDetailSkeleton as LegacyWalletDetailSkeleton,
+  WalletSetupSkeleton as LegacyWalletSetupSkeleton,
+  WalletsOnboardingSkeleton as LegacyWalletsOnboardingSkeleton,
+  WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
+} from "./_legacy/wallet-route-skeletons";
 
 const THREE_ITEMS = ["one", "two", "three"] as const;
 const FOUR_ITEMS = ["one", "two", "three", "four"] as const;
@@ -73,7 +80,7 @@ function WalletCardSkeleton() {
   );
 }
 
-export function WalletsOverviewSkeleton() {
+export function CurrentWalletsOverviewSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel className="space-y-6">
       <LoadingRegion layout="wallets-overview">
@@ -87,7 +94,7 @@ export function WalletsOverviewSkeleton() {
   );
 }
 
-export function WalletsOnboardingSkeleton() {
+export function CurrentWalletsOnboardingSkeleton() {
   return (
     <LoadingRegion layout="wallets-onboarding">
       <section className="rounded-[24px] border border-border-subtle bg-surface-raised">
@@ -108,7 +115,7 @@ export function WalletsOnboardingSkeleton() {
  * The create flow in the refresh wizard's geometry: the step header and bar, the question, the
  * provider list in its frame, and the footer band.
  */
-export function WalletSetupSkeleton() {
+export function CurrentWalletSetupSkeleton() {
   return (
     <LoadingRegion layout="wallet-setup" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden px-4 pt-9 md:px-6">
@@ -193,7 +200,7 @@ function RecordTableSkeleton({ section }: { section: string }) {
  * A wallet's page while it loads, in its Overview's geometry: the state band, the balance over
  * its record rows, then the Tokens and Recent activity tables, 64px apart.
  */
-export function WalletDetailSkeleton() {
+export function CurrentWalletDetailSkeleton() {
   return (
     <DashboardWorkspaceOverviewPanel>
       <LoadingRegion layout="wallet-detail" className="flex flex-col gap-8 md:gap-16">
@@ -436,5 +443,42 @@ export function WalletConnectionsListSkeleton() {
         </DashboardWorkspaceCard>
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+// The Wallets list, setup and wallet page were redesigned for NEW DESIGN; the previous design keeps
+// its own skeletons for them (the policy, audit and connection pages are the same in both). These
+// pick by the flag for route loading files; the shell's loading map picks with the flag it has.
+
+export function WalletsOverviewSkeleton() {
+  return (
+    <DesignSwitch
+      current={<CurrentWalletsOverviewSkeleton />}
+      legacy={<LegacyWalletsOverviewSkeleton />}
+    />
+  );
+}
+
+export function WalletsOnboardingSkeleton() {
+  return (
+    <DesignSwitch
+      current={<CurrentWalletsOnboardingSkeleton />}
+      legacy={<LegacyWalletsOnboardingSkeleton />}
+    />
+  );
+}
+
+export function WalletSetupSkeleton() {
+  return (
+    <DesignSwitch current={<CurrentWalletSetupSkeleton />} legacy={<LegacyWalletSetupSkeleton />} />
+  );
+}
+
+export function WalletDetailSkeleton() {
+  return (
+    <DesignSwitch
+      current={<CurrentWalletDetailSkeleton />}
+      legacy={<LegacyWalletDetailSkeleton />}
+    />
   );
 }

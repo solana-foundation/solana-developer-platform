@@ -110,7 +110,8 @@ export function withSubnavToggled(
 
 export function getPaymentsActions(
   t: ReturnType<typeof useTranslations>,
-  _privateChannelsEnabled: boolean
+  _privateChannelsEnabled: boolean,
+  newDesign = true
 ): SubNavItem[] {
   return [
     {
@@ -119,7 +120,9 @@ export function getPaymentsActions(
       icon: ReceiptTextIcon,
     },
     {
-      label: t("Shared.dashboardShell.contacts"),
+      label: newDesign
+        ? t("Shared.dashboardShell.contacts")
+        : t("Shared.dashboardShell.counterparty"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
       icon: UsersIcon,
     },
@@ -139,7 +142,9 @@ export function getPaymentsActions(
       icon: FileTextIcon,
     },
     {
-      label: t("Shared.dashboardShell.recurring"),
+      label: newDesign
+        ? t("Shared.dashboardShell.newDesign.recurring")
+        : t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },
@@ -256,6 +261,8 @@ export function getNavSections(
     privateChannelsEnabled: boolean;
     /** Wallets pinned from the Wallets page, listed under Wallets in the order they were pinned. */
     walletFavorites?: SubNavItem[];
+    /** NEW DESIGN; the previous design's labels when off. */
+    newDesign?: boolean;
   }
 ): NavSection[] {
   const marketsActions = getMarketsActions(t, options.earnEnabled, options.dvpEnabled);
@@ -266,7 +273,10 @@ export function getNavSections(
       title: t("Shared.dashboardShell.create"),
       items: [
         {
-          label: t("Shared.dashboardShell.home"),
+          label:
+            options.newDesign === false
+              ? t("Shared.dashboardShell.home")
+              : t("Shared.dashboardShell.newDesign.home"),
           href: DASHBOARD_SIDE_NAV_HREFS.home,
           icon: LayoutDashboardIcon,
         },
@@ -302,7 +312,11 @@ export function getNavSections(
                 label: t("Shared.dashboardShell.payments"),
                 href: DASHBOARD_SIDE_NAV_HREFS.payments,
                 icon: ArrowLeftRightIcon,
-                children: getPaymentsActions(t, options.privateChannelsEnabled),
+                children: getPaymentsActions(
+                  t,
+                  options.privateChannelsEnabled,
+                  options.newDesign ?? true
+                ),
                 subnavKey: "payments" as const,
               },
             ]

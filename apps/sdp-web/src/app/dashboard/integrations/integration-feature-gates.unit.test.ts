@@ -10,6 +10,7 @@ const ALL_DISABLED = {
   payments: false,
   policies: false,
   privateChannels: false,
+  newDesign: true,
 };
 
 describe("integration feature gates", () => {

@@ -11,6 +11,8 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { DashboardQuickStart as LegacyDashboardQuickStart } from "@/components/_legacy/dashboard-quick-start";
+import { useNewDesign } from "@/components/new-design";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -356,7 +358,7 @@ function OverviewQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
     >
       <div className="flex min-h-16 items-center gap-3 py-2 pr-3 pl-5">
         <h2 id="overview-quick-start-title" className="text-nav font-medium text-primary">
-          {t("Shared.quickStart.title")}
+          {t("Shared.quickStart.newDesign.title")}
         </h2>
         <span className="hidden sm:flex">
           <ProgressBars steps={steps} />
@@ -556,7 +558,7 @@ function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
   const settled = countSettledQuickStartSteps(steps);
   let description: string;
   if (sdpEnvironment !== "sandbox") {
-    description = t("Shared.quickStart.settingsSandbox");
+    description = t("Shared.quickStart.newDesign.settingsSandbox");
   } else if (!eligible) {
     description = t("Shared.quickStart.settingsUnavailable");
   } else if (complete) {
@@ -571,11 +573,11 @@ function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
         <CardTitle>
           <h2>{t("Shared.quickStart.settingsTitle")}</h2>
         </CardTitle>
-        <CardDescription>{t("Shared.quickStart.settingsDescription")}</CardDescription>
+        <CardDescription>{t("Shared.quickStart.newDesign.settingsDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-medium">{t("Shared.quickStart.title")}</h3>
+          <h3 className="text-sm font-medium">{t("Shared.quickStart.newDesign.title")}</h3>
           <p className="text-sm text-secondary">{description}</p>
         </div>
         {canOpen ? (
@@ -596,6 +598,24 @@ function SettingsQuickStart({ quickStart }: { quickStart: ReturnType<typeof useQ
   );
 }
 
+function CurrentDashboardQuickStart({
+  collapsed,
+  variant,
+}: {
+  collapsed: boolean;
+  variant: "sidebar" | "overview" | "settings";
+}) {
+  const quickStart = useQuickStart();
+  if (variant === "settings") return <SettingsQuickStart quickStart={quickStart} />;
+  if (!quickStart.visible) return null;
+  if (variant === "overview") return <OverviewQuickStart quickStart={quickStart} />;
+  return <SidebarQuickStart quickStart={quickStart} collapsedRail={collapsed} />;
+}
+
+/**
+ * The quick start in the sidebar, on the Overview and in Settings. NEW DESIGN's is built on live
+ * signals; the previous design keeps its own (there is no Overview in it).
+ */
 export function DashboardQuickStart({
   collapsed = false,
   variant = "sidebar",
@@ -604,9 +624,8 @@ export function DashboardQuickStart({
   collapsed?: boolean;
   variant?: "sidebar" | "overview" | "settings";
 }) {
-  const quickStart = useQuickStart();
-  if (variant === "settings") return <SettingsQuickStart quickStart={quickStart} />;
-  if (!quickStart.visible) return null;
-  if (variant === "overview") return <OverviewQuickStart quickStart={quickStart} />;
-  return <SidebarQuickStart quickStart={quickStart} collapsedRail={collapsed} />;
+  const newDesign = useNewDesign();
+  if (newDesign) return <CurrentDashboardQuickStart collapsed={collapsed} variant={variant} />;
+  if (variant === "overview") return null;
+  return <LegacyDashboardQuickStart collapsed={collapsed} variant={variant} />;
 }

@@ -1,0 +1,151 @@
+"use client";
+
+import type { Counterparty } from "@sdp/types";
+import { motion } from "motion/react";
+import { type ReactNode, useState } from "react";
+import { CancelTransactionDialog } from "@/app/dashboard/payments/ramps/components/cancel-transaction-dialog";
+import { Button } from "@/components/ui/button";
+import { WizardFrame } from "@/components/wizard-frame";
+import { useTranslations } from "@/i18n/provider";
+import { CounterpartyCreateDialog } from "../../counterparty/counterparty-create-dialog";
+
+interface RampWizardShellProps {
+  steps: readonly { label: string; title: string }[];
+  stepIndex: number;
+  primaryDisabled: boolean;
+  primaryLabel: string;
+  /** Overrides the default Cancel/Previous secondary label. */
+  secondaryLabel?: string;
+  walletsError: string | null;
+  onPrimary: () => void;
+  onSecondary: () => void;
+  counterpartyDialog: {
+    open: boolean;
+    setOpen: (open: boolean) => void;
+    onCreated: (created: Counterparty) => void;
+  } | null;
+  children: ReactNode;
+  /** Rendered top-right, next to the step title (e.g. the "Powered by" badge). */
+  header?: ReactNode;
+  summary?: ReactNode;
+  /** Replaces the "View summary" button text (e.g. the provider-branded chip). */
+  summaryTrigger?: ReactNode;
+  footerActions?: ReactNode;
+  hidePrimary?: boolean;
+  /** Confirm before running the secondary action — used once a transaction is live. */
+  confirmSecondary?: boolean;
+  secondaryDisabled?: boolean;
+  hideSecondary?: boolean;
+  completionTitle?: string;
+}
+
+export function RampWizardShell({
+  steps,
+  stepIndex,
+  primaryDisabled,
+  primaryLabel,
+  secondaryLabel,
+  walletsError,
+  onPrimary,
+  onSecondary,
+  counterpartyDialog,
+  children,
+  header,
+  summary,
+  summaryTrigger,
+  footerActions,
+  hidePrimary,
+  confirmSecondary,
+  secondaryDisabled,
+  hideSecondary,
+  completionTitle,
+}: RampWizardShellProps) {
+  const t = useTranslations();
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const cancelConfirmationAvailable =
+    confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
+  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  const isLastStep = stepIndex === steps.length - 1;
+  return (
+    <>
+      <WizardFrame
+        steps={steps}
+        currentStep={stepIndex}
+        currentStepTitle={completionTitle}
+        progressLabel={t("DashboardPayments.counterparty.stepProgress", {
+          current: stepIndex + 1,
+          total: steps.length,
+        })}
+        header={header}
+        summary={isLastStep ? undefined : summary}
+        summaryTrigger={isLastStep ? undefined : summaryTrigger}
+        footer={
+          showFooter ? (
+            <div className="flex items-center justify-between gap-3">
+              {hideSecondary ? (
+                <div />
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={secondaryDisabled}
+                  onClick={confirmSecondary ? () => setCancelConfirmOpen(true) : onSecondary}
+                >
+                  {secondaryLabel ??
+                    (stepIndex === 0
+                      ? t("DashboardPayments.counterparty.cancel")
+                      : t("DashboardPayments.previous"))}
+                </Button>
+              )}
+              <div className="ml-auto flex items-center gap-3">
+                {footerActions}
+                {hidePrimary ? null : (
+                  <Button type="button" disabled={primaryDisabled} onClick={onPrimary}>
+                    {primaryLabel}
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : undefined
+        }
+      >
+        <div className="space-y-6">
+          {walletsError ? (
+            <div className="rounded-lg border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+              {walletsError}
+            </div>
+          ) : null}
+
+          <motion.div
+            key={stepIndex}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="space-y-6"
+          >
+            {children}
+          </motion.div>
+        </div>
+      </WizardFrame>
+
+      {counterpartyDialog === null ? null : (
+        <CounterpartyCreateDialog
+          open={counterpartyDialog.open}
+          onClose={() => counterpartyDialog.setOpen(false)}
+          onCreated={counterpartyDialog.onCreated}
+        />
+      )}
+
+      <CancelTransactionDialog
+        open={cancelConfirmOpen && cancelConfirmationAvailable}
+        onKeepGoing={() => setCancelConfirmOpen(false)}
+        onCancel={() => {
+          setCancelConfirmOpen(false);
+          if (cancelConfirmationAvailable) {
+            onSecondary();
+          }
+        }}
+      />
+    </>
+  );
+}

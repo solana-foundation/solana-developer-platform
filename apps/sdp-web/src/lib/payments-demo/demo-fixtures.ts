@@ -794,6 +794,8 @@ export interface DemoWorld {
   attempts: PaymentSubscriptionCollectionAttempt[];
   /** `provider:counterpartyId` for each contact that accepted a ramp provider's agreements. */
   consents: string[];
+  /** When a ramp provider approved a contact's identity check, by `provider:counterpartyId`. */
+  verifications: Record<string, number>;
 }
 
 interface Clock {
@@ -1210,6 +1212,7 @@ export function buildWorld(now: Date): DemoWorld {
     schedules: newestFirst(scheduleOutputs.map((output) => output.schedule)),
     attempts: scheduleOutputs.flatMap((output) => output.attempts),
     consents: [],
+    verifications: {},
   };
 }
 

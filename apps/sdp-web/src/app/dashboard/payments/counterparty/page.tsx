@@ -1,8 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { paymentsPlaygroundHref } from "@/lib/payments-routes";
+import LegacyCounterpartyPage from "../_legacy/counterparty/page";
 import {
   fetchCounterpartyDirectory,
   fetchProjectCounterpartyAccounts,
@@ -11,7 +13,7 @@ import { CounterpartyWorkspace } from "./counterparty-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function CounterpartyPage({
+async function CounterpartyPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -58,3 +60,5 @@ export default async function CounterpartyPage({
     );
   });
 }
+
+export default withLegacyDesign(CounterpartyPage, LegacyCounterpartyPage);

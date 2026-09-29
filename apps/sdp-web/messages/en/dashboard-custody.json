@@ -193,7 +193,7 @@
     "chooseProvider": "Choose provider",
     "walletDetails": "Wallet details",
     "walletLabel": "Wallet label",
-    "walletLabelPlaceholder": "Settlement wallet",
+    "walletLabelPlaceholder": "Treasury",
     "project": "Project",
     "projectValue": "Current project",
     "environmentValue": "Current environment",
@@ -1063,6 +1063,9 @@
     "walletSetupChangeProvider": "Change",
     "walletSetupProjectHint": "The wallet belongs to this project. Switch projects from the sidebar to create it in another.",
     "walletSetupEnvironmentHint": "Sandbox wallets sign on devnet; production wallets sign on mainnet.",
-    "walletSetupConfirmHint": "{provider} creates the keys when you confirm."
+    "walletSetupConfirmHint": "{provider} creates the keys when you confirm.",
+    "newDesign": {
+      "walletLabelPlaceholder": "Settlement wallet"
+    }
   }
 }

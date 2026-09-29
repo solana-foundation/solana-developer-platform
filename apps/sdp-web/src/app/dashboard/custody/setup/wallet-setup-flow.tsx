@@ -389,7 +389,7 @@ function DetailsStep({
             size="xl"
             value={walletLabel}
             onChange={(event) => onWalletLabelChange(event.currentTarget.value)}
-            placeholder={t("DashboardCustody.walletLabelPlaceholder")}
+            placeholder={t("DashboardCustody.newDesign.walletLabelPlaceholder")}
             maxLength={100}
             required
           />

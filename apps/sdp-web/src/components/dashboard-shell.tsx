@@ -39,6 +39,7 @@ import {
 } from "@/components/dashboard-page-title-context";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
+import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { PaymentsDemoNotice } from "@/components/payments-demo-notice";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
@@ -66,10 +67,12 @@ import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
 import { subscribeWalletFavoriteAdded } from "@/lib/wallet-favorites";
 
-// The sidebar is the refresh design's on every route, whatever the page beside it is built on:
-// its container carries the scope, and its menus re-stamp it through the provider when they
-// portal out.
-const SIDEBAR_THEME_SCOPE: ThemeScope = "refresh";
+// On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
+// is built on: its container carries the scope, and its menus re-stamp it through the provider
+// when they portal out. The previous design's sidebar takes the page's scope.
+function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): ThemeScope | null {
+  return newDesign ? "refresh" : pageScope;
+}
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
@@ -431,6 +434,7 @@ export function DashboardShell({
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
+    newDesign: newDesignEnabled,
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
@@ -440,7 +444,8 @@ export function DashboardShell({
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  const demoMode = isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+  // Demo data is part of the new design; the previous design never shows it.
+  const demoMode = newDesignEnabled && isPaymentsDemoOn(paymentsDemo, selectedProjectId);
   const paymentsDemoOn = isPaymentsPath(pathname) && demoMode;
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
@@ -461,12 +466,13 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignEnabled);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
-  const themeScope = themeScopeForPath(pathname);
+  const themeScope = themeScopeForPath(pathname, newDesignEnabled);
   const isRefresh = themeScope === "refresh";
-  // The design's sidebar is 272px (17rem) including its rule.
-  const sidebarExpandedWidth = 272;
+  // The design's sidebar is 272px (17rem) including its rule; the previous design's is 296.
+  const sidebarExpandedWidth = newDesignEnabled ? 272 : 296;
+  const sidebarScope = sidebarThemeScope(newDesignEnabled, themeScope);
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
     pathname,
@@ -475,7 +481,8 @@ export function DashboardShell({
     privateChannelsEnabled,
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled
+    policiesEnabled,
+    newDesignEnabled
   );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
@@ -502,7 +509,9 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
-    walletFavorites: walletFavoriteItems,
+    // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
+    walletFavorites: newDesignEnabled ? walletFavoriteItems : undefined,
+    newDesign: newDesignEnabled,
   });
   const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -712,6 +721,7 @@ export function DashboardShell({
     // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
+      data-sdp-new-design={newDesignEnabled ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
@@ -734,13 +744,16 @@ export function DashboardShell({
               ].join(" ")}
             >
               <aside
-                {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
+                {...themeScopeAttributes(sidebarScope)}
                 style={{
                   width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
                 }}
-                className="relative z-10 hidden border-r border-border-default bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between"
+                className={cn(
+                  "relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between",
+                  newDesignEnabled && "border-r border-border-default"
+                )}
               >
-                <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
+                <ThemeScopeProvider scope={sidebarScope}>
                   <DashboardSidebarContent
                     canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                     navSections={navSections}
@@ -786,6 +799,7 @@ export function DashboardShell({
                   issuanceEnabled={issuanceEnabled}
                   paymentsEnabled={paymentsEnabled}
                   onOpenMore={() => setMoreSheetOpen(true)}
+                  newDesign={newDesignEnabled}
                 />
               )}
 
@@ -812,10 +826,13 @@ export function DashboardShell({
                     onClick={() => setMobileSidebarOpen(false)}
                   />
                   <div
-                    {...themeScopeAttributes(SIDEBAR_THEME_SCOPE)}
-                    className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]"
+                    {...themeScopeAttributes(sidebarScope)}
+                    className={cn(
+                      "relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]",
+                      !newDesignEnabled && "shadow-lg"
+                    )}
                   >
-                    <ThemeScopeProvider scope={SIDEBAR_THEME_SCOPE}>
+                    <ThemeScopeProvider scope={sidebarScope}>
                       <DashboardSidebarContent
                         canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
                         navSections={navSections}
@@ -835,19 +852,24 @@ export function DashboardShell({
                 </div>
               ) : null}
 
-              {/* The page is flat on every route: no card, no radius; the sidebar's rule separates it.
+              {/* On NEW DESIGN the page is flat on every route: no card, no radius; the sidebar's rule
+              separates it. The previous design keeps the rounded card beside the sidebar.
               The `page` group lets the header react to the content (an empty state hiding the
               header's action). On a refresh route it is also the work area's size container:
               the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
               <section
                 className={cn(
-                  "group/page relative min-w-0 bg-surface-raised",
+                  "group/page relative min-w-0",
+                  newDesignEnabled
+                    ? "bg-surface-raised"
+                    : "rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
                   isRefresh && "@container",
                   // The locked layout clears the phone's bottom bar; a refresh route has none, so it
                   // keeps only the home indicator's inset.
                   shouldLockViewportScroll
                     ? [
-                        "flex min-h-0 flex-col overflow-clip md:pb-0",
+                        "flex min-h-0 flex-col md:pb-0",
+                        newDesignEnabled ? "overflow-clip" : "overflow-hidden",
                         isRefresh
                           ? "pb-[env(safe-area-inset-bottom)]"
                           : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
@@ -907,9 +929,16 @@ export function DashboardShell({
                           mark={activeTitleOverride?.mark}
                           layout={isRefresh ? "refresh" : "base"}
                           utilities={
-                            isPaymentsPath(pathname) ? (
-                              <PaymentsDemoToggle {...paymentsDemo} />
-                            ) : undefined
+                            // The previous design keeps the language switch in the header; the
+                            // new one moves it to the account menu and gives Payments its demo
+                            // switch.
+                            newDesignEnabled ? (
+                              isPaymentsPath(pathname) ? (
+                                <PaymentsDemoToggle {...paymentsDemo} />
+                              ) : undefined
+                            ) : (
+                              <LanguagePicker variant="topbar" />
+                            )
                           }
                         />
                       </div>
@@ -982,7 +1011,9 @@ export function DashboardShell({
                         // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
                         // footer inside it would then pin to this box instead of the viewport.
                         shouldClipHorizontalOverflow && !shouldLockViewportScroll
-                          ? "overflow-x-clip"
+                          ? newDesignEnabled
+                            ? "overflow-x-clip"
+                            : "overflow-x-hidden"
                           : "",
                         // A refresh page clips only vertically: its scroll panel reaches past the
                         // column to the work area's edges.

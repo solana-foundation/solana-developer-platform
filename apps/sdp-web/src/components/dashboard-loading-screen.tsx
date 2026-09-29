@@ -25,7 +25,7 @@ export function DashboardLoadingScreen({
   const t = useTranslations();
   const path = pathname.split(/[?#]/)[0];
   const route = resolveDashboardLoadingRoute(path) ?? "home";
-  const PageLoading = resolvePageLoadingComponent(route);
+  const PageLoading = resolvePageLoadingComponent(route, flags?.newDesign ?? false);
   const config = getDashboardPageConfig(
     path,
     t,
@@ -33,7 +33,8 @@ export function DashboardLoadingScreen({
     flags?.privateChannels ?? false,
     flags?.custody,
     flags?.payments,
-    flags?.policies
+    flags?.policies,
+    flags?.newDesign ?? false
   );
 
   return (
@@ -41,6 +42,7 @@ export function DashboardLoadingScreen({
       {...props}
       contentWidthClass={config.contentWidthClass ?? "max-w-5xl"}
       hideTitle={config.hideTitle}
+      newDesign={flags?.newDesign ?? false}
     >
       <PageLoading assetProfilesEnabled={flags?.assetProfiles} />
     </FullscreenLoadingIndicator>

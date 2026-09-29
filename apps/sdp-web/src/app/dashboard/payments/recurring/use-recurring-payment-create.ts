@@ -420,7 +420,7 @@ export function useRecurringPaymentCreate({
 
     setSubmitting(true);
     setFormError(null);
-    const toastId = toast.loading(t("DashboardPayments.recurring.creatingPayment"), {
+    const toastId = toast.loading(t("DashboardPayments.newDesign.recurring.creatingPayment"), {
       position: "bottom-right",
     });
     try {
@@ -439,7 +439,7 @@ export function useRecurringPaymentCreate({
         undefined,
         t
       );
-      toast.success(t("DashboardPayments.recurring.paymentCreated"), {
+      toast.success(t("DashboardPayments.newDesign.recurring.paymentCreated"), {
         id: toastId,
         description: t("DashboardPayments.recurring.pendingActivationDescription"),
         position: "bottom-right",
@@ -447,9 +447,11 @@ export function useRecurringPaymentCreate({
       router.push(`/dashboard/payments/recurring/${encodeURIComponent(recurringPayment.id)}`);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToCreate");
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.newDesign.recurring.unableToCreate");
       setFormError(message);
-      toast.error(t("DashboardPayments.recurring.paymentNotCreated"), {
+      toast.error(t("DashboardPayments.newDesign.recurring.paymentNotCreated"), {
         id: toastId,
         description: message,
         position: "bottom-right",

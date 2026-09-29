@@ -1,14 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
 import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsWallets } from "../../payments-page.data";
 import { PaymentRequestCreateWorkspace } from "../payment-request-create-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestCreatePage() {
+async function PaymentRequestCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -49,3 +51,10 @@ export default async function PaymentRequestCreatePage() {
     }
   );
 }
+
+/** The previous design creates a request from the Requests list. */
+function LegacyPaymentRequestCreatePage(): never {
+  redirect(PAYMENT_REQUESTS_HREF);
+}
+
+export default withLegacyDesign(PaymentRequestCreatePage, LegacyPaymentRequestCreatePage);
