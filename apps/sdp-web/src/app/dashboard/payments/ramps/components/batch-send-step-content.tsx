@@ -22,7 +22,7 @@ import { explorerTxUrl } from "@/lib/explorer";
 import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { bulkCsvTemplate, parseBulkCsv, validateBulkRows } from "../bulk-import";
-import type { BatchSendWizard } from "../hooks/use-batch-send-wizard";
+import type { BatchEligibleRecipient, BatchSendWizard } from "../hooks/use-batch-send-wizard";
 import { MAX_BATCH_RECIPIENTS } from "../schema";
 import { walletComboboxOptions } from "../wallet-options";
 import { AmountBalanceReadout } from "./amount-balance-readout";
@@ -259,42 +259,19 @@ function RecipientAmountInput({
   );
 }
 
-function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
+/** The wallet the batch pays from, with its balance of the chosen token and why it may not sign. */
+function BatchSourceWalletField({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
   const {
     liveWallets,
     walletsLoading,
     walletId,
     selectWallet,
-    asset,
     displayAsset,
-    setAsset,
-    externalId,
-    setExternalId,
-    assetOptions,
     selectedAssetBalance,
-    availableAmount,
-    totalAmount,
     exceedsBalance,
-    exceedsMaxRecipients,
-    pageRecipients,
-    recipientsLoading,
-    recipientTotal,
-    page,
-    pageCount,
-    setPage,
-    search,
-    setSearchQuery,
-    recipients,
-    entries,
-    toggleRecipient,
-    setRecipientAmount,
-    bulkImport,
     sourceWalletHint,
   } = wizard;
-
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [rowsSource, setRowsSource] = useState<RowsSource>("csv");
   const walletOptions = useMemo(
     () =>
       walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
@@ -302,39 +279,46 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       }),
     [liveWallets, t]
   );
-  const selectedEntries = Object.values(entries);
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <Combobox
-          label={t("DashboardPayments.batchSend.from")}
-          value={walletId || null}
-          onChange={selectWallet}
-          options={walletOptions}
-          placeholder={t("DashboardPayments.batchSend.selectSourceWallet")}
-          searchPlaceholder={t("DashboardPayments.batchSend.searchWallets")}
-          isLoading={walletsLoading}
-          trailing={
-            selectedAssetBalance && displayAsset !== null ? (
-              <motion.span
-                className="inline-flex"
-                animate={exceedsBalance ? { x: [0, -2, 2, -2, 2, 0] } : { x: 0 }}
-                transition={{ duration: 0.4 }}
-              >
-                <AmountBalanceReadout
-                  available={selectedAssetBalance.uiAmount}
-                  assetLabel={displayAsset}
-                  exceeds={exceedsBalance}
-                />
-              </motion.span>
-            ) : null
-          }
-        />
-        <p hidden={!sourceWalletHint} className="text-meta text-warning">
-          {sourceWalletHint}
-        </p>
-      </div>
+    <div className="space-y-2">
+      <Combobox
+        label={t("DashboardPayments.batchSend.from")}
+        value={walletId || null}
+        onChange={selectWallet}
+        options={walletOptions}
+        placeholder={t("DashboardPayments.batchSend.selectSourceWallet")}
+        searchPlaceholder={t("DashboardPayments.batchSend.searchWallets")}
+        isLoading={walletsLoading}
+        trailing={
+          selectedAssetBalance && displayAsset !== null ? (
+            <motion.span
+              className="inline-flex"
+              animate={exceedsBalance ? { x: [0, -2, 2, -2, 2, 0] } : { x: 0 }}
+              transition={{ duration: 0.4 }}
+            >
+              <AmountBalanceReadout
+                available={selectedAssetBalance.uiAmount}
+                assetLabel={displayAsset}
+                exceeds={exceedsBalance}
+              />
+            </motion.span>
+          ) : null
+        }
+      />
+      <p hidden={!sourceWalletHint} className="text-meta text-warning">
+        {sourceWalletHint}
+      </p>
+    </div>
+  );
+}
+
+/** The one token the whole batch pays in, and a note when the wallet holds none. */
+function BatchTokenField({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const { walletId, asset, setAsset, assetOptions } = wizard;
+  return (
+    <>
       <Combobox
         label={t("DashboardPayments.payForm.token")}
         value={asset || null}
@@ -347,6 +331,246 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
       {walletId && assetOptions.length === 0 ? (
         <p className="text-meta text-error">{t("DashboardPayments.batchSend.noAssets")}</p>
       ) : null}
+    </>
+  );
+}
+
+/** The CSV way to fill the batch: the drop target, then the imported rows with their amounts. */
+function CsvRecipientRows({ wizard, onPaste }: { wizard: BatchSendWizard; onPaste: () => void }) {
+  const t = useTranslations();
+  const { entries, displayAsset, bulkImport, setRecipientAmount, toggleRecipient } = wizard;
+  const selectedEntries = Object.values(entries);
+
+  return (
+    <>
+      <CsvDropzone onImport={bulkImport} onPaste={onPaste} />
+      {selectedEntries.length > 0 ? (
+        <div className="divide-y divide-border-subtle">
+          {selectedEntries.map(({ recipient, amount }) => (
+            <div key={recipient.counterpartyAccountId} className="flex items-center gap-3 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-body text-primary">{recipient.name}</span>
+                <span className="block truncate text-meta text-tertiary">
+                  {recipient.label ? `${recipient.label} · ` : ""}
+                  {shortenAddress(recipient.address)}
+                </span>
+              </span>
+              <RecipientAmountInput
+                value={amount}
+                onChange={(value) => setRecipientAmount(recipient, value)}
+                onEmpty={() => toggleRecipient(recipient)}
+              />
+              <span className="text-sm text-tertiary">{displayAsset}</span>
+              <button
+                type="button"
+                onClick={() => toggleRecipient(recipient)}
+                aria-label={t("DashboardPayments.batchSend.removeRecipient", {
+                  name: recipient.name,
+                })}
+                className="shrink-0 text-tertiary transition-colors hover:text-primary"
+              >
+                <XIcon className="size-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/** Placeholder rows while a page of contacts loads. */
+function ContactsPickerSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 6 }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
+        <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+            <SkeletonBlock className="h-4 w-32" />
+            <SkeletonBlock className="h-3 w-44" />
+          </div>
+          <SkeletonBlock className="size-4 shrink-0 rounded" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** One contact on the picker page: add it with the plus, then give it an amount. */
+function ContactsPickerRow({
+  account,
+  wizard,
+}: {
+  account: BatchEligibleRecipient;
+  wizard: BatchSendWizard;
+}) {
+  const t = useTranslations();
+  const { entries, displayAsset, toggleRecipient, setRecipientAmount } = wizard;
+  const entry = entries[account.counterpartyAccountId];
+  const isSelected = Boolean(entry);
+  const hasLabel = account.label !== null && account.label.trim().length > 0;
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 px-3 py-2.5 transition-colors",
+        isSelected ? "bg-fill-subtle" : "hover:bg-fill-subtle"
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => toggleRecipient(account)}
+        className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
+      >
+        <span className="truncate text-sm font-medium text-primary">{account.name}</span>
+        <span className="truncate text-xs text-tertiary">
+          {hasLabel ? `${account.label} · ` : ""}
+          {shortenAddress(account.address)}
+        </span>
+      </button>
+      {isSelected ? (
+        <motion.div
+          initial={{ opacity: 0, x: 8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.15 }}
+          className="flex shrink-0 items-center gap-1.5"
+        >
+          <RecipientAmountInput
+            value={entry.amount}
+            onChange={(value) => setRecipientAmount(account, value)}
+            onEmpty={() => toggleRecipient(account)}
+          />
+          <span className="text-sm text-tertiary">{displayAsset}</span>
+        </motion.div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => toggleRecipient(account)}
+          aria-label={t("DashboardPayments.batchSend.addRecipient", {
+            name: account.name,
+          })}
+          className="shrink-0 text-tertiary transition-colors hover:text-primary"
+        >
+          <PlusIcon className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The contacts way to fill the batch: search, page through, and pick who to pay. */
+function ContactsPicker({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const {
+    search,
+    setSearchQuery,
+    page,
+    pageCount,
+    setPage,
+    recipientsLoading,
+    pageRecipients,
+    recipientTotal,
+  } = wizard;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        <div className="flex-1">
+          <SearchInput
+            value={search}
+            onChange={(event) => setSearchQuery(event.currentTarget.value)}
+            placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
+          />
+        </div>
+        <ArrowPagination
+          page={page}
+          pageCount={pageCount}
+          onPageChange={setPage}
+          summary={t("DashboardPayments.batchSend.paginationSummary", { page, pageCount })}
+          className="shrink-0 gap-2"
+        />
+      </div>
+
+      <motion.div
+        key={page}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.15 }}
+        className="divide-y divide-border-subtle"
+      >
+        {recipientsLoading ? (
+          <ContactsPickerSkeleton />
+        ) : pageRecipients.length === 0 ? (
+          <p className="py-6 text-center text-sm text-tertiary">
+            {recipientTotal === 0
+              ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
+              : t("DashboardPayments.batchSend.noMatches")}
+          </p>
+        ) : (
+          pageRecipients.map((account) => (
+            <ContactsPickerRow
+              key={account.counterpartyAccountId}
+              account={account}
+              wizard={wizard}
+            />
+          ))
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
+/** The batch's count and total against the wallet's balance, once there are rows to count. */
+function BatchTotals({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const {
+    recipients,
+    displayAsset,
+    totalAmount,
+    availableAmount,
+    exceedsBalance,
+    exceedsMaxRecipients,
+  } = wizard;
+  if (recipients.length === 0 || displayAsset === null) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center justify-between px-1 text-sm">
+      <span
+        className={
+          exceedsBalance || exceedsMaxRecipients ? "font-medium text-error" : "text-tertiary"
+        }
+      >
+        {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients, t)}
+      </span>
+      <span className={cn("font-medium", exceedsBalance ? "text-error" : "text-primary")}>
+        {t("DashboardPayments.batchSend.totalAmount", {
+          total: formatTokenAmount(totalAmount),
+          asset: displayAsset,
+        })}
+        {availableAmount !== null
+          ? t("DashboardPayments.batchSend.totalOfAmount", {
+              available: formatTokenAmount(availableAmount),
+              asset: displayAsset,
+            })
+          : ""}
+      </span>
+    </div>
+  );
+}
+
+function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
+  const t = useTranslations();
+  const { externalId, setExternalId, bulkImport } = wizard;
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [rowsSource, setRowsSource] = useState<RowsSource>("csv");
+
+  return (
+    <div className="space-y-6">
+      <BatchSourceWalletField wizard={wizard} />
+      <BatchTokenField wizard={wizard} />
       <div className="flex flex-col gap-2">
         <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
         <Input
@@ -372,174 +596,15 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
           className="w-fit"
         />
         {rowsSource === "csv" ? (
-          <>
-            <CsvDropzone onImport={bulkImport} onPaste={() => setBulkOpen(true)} />
-            {selectedEntries.length > 0 ? (
-              <div className="divide-y divide-border-subtle">
-                {selectedEntries.map(({ recipient, amount }) => (
-                  <div
-                    key={recipient.counterpartyAccountId}
-                    className="flex items-center gap-3 py-2.5"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-body text-primary">
-                        {recipient.name}
-                      </span>
-                      <span className="block truncate text-meta text-tertiary">
-                        {recipient.label ? `${recipient.label} · ` : ""}
-                        {shortenAddress(recipient.address)}
-                      </span>
-                    </span>
-                    <RecipientAmountInput
-                      value={amount}
-                      onChange={(value) => setRecipientAmount(recipient, value)}
-                      onEmpty={() => toggleRecipient(recipient)}
-                    />
-                    <span className="text-sm text-tertiary">{displayAsset}</span>
-                    <button
-                      type="button"
-                      onClick={() => toggleRecipient(recipient)}
-                      aria-label={t("DashboardPayments.batchSend.removeRecipient", {
-                        name: recipient.name,
-                      })}
-                      className="shrink-0 text-tertiary transition-colors hover:text-primary"
-                    >
-                      <XIcon className="size-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </>
+          <CsvRecipientRows wizard={wizard} onPaste={() => setBulkOpen(true)} />
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <SearchInput
-                  value={search}
-                  onChange={(event) => setSearchQuery(event.currentTarget.value)}
-                  placeholder={t("DashboardPayments.batchSend.searchCounterparty")}
-                />
-              </div>
-              <ArrowPagination
-                page={page}
-                pageCount={pageCount}
-                onPageChange={setPage}
-                summary={t("DashboardPayments.batchSend.paginationSummary", { page, pageCount })}
-                className="shrink-0 gap-2"
-              />
-            </div>
-
-            <motion.div
-              key={page}
-              initial={{ opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.15 }}
-              className="divide-y divide-border-subtle"
-            >
-              {recipientsLoading ? (
-                Array.from({ length: 6 }, (_, i) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
-                    <div className="flex min-w-0 flex-1 flex-col gap-2.5">
-                      <SkeletonBlock className="h-4 w-32" />
-                      <SkeletonBlock className="h-3 w-44" />
-                    </div>
-                    <SkeletonBlock className="size-4 shrink-0 rounded" />
-                  </div>
-                ))
-              ) : pageRecipients.length === 0 ? (
-                <p className="py-6 text-center text-sm text-tertiary">
-                  {recipientTotal === 0
-                    ? t("DashboardPayments.batchSend.noCounterpartiesWithSolanaAddress")
-                    : t("DashboardPayments.batchSend.noMatches")}
-                </p>
-              ) : (
-                pageRecipients.map((account) => {
-                  const entry = entries[account.counterpartyAccountId];
-                  const isSelected = Boolean(entry);
-                  const hasLabel = account.label !== null && account.label.trim().length > 0;
-                  return (
-                    <div
-                      key={account.counterpartyAccountId}
-                      className={cn(
-                        "flex items-center gap-3 px-3 py-2.5 transition-colors",
-                        isSelected ? "bg-fill-subtle" : "hover:bg-fill-subtle"
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleRecipient(account)}
-                        className="flex min-w-0 flex-1 flex-col gap-0.5 text-left"
-                      >
-                        <span className="truncate text-sm font-medium text-primary">
-                          {account.name}
-                        </span>
-                        <span className="truncate text-xs text-tertiary">
-                          {hasLabel ? `${account.label} · ` : ""}
-                          {shortenAddress(account.address)}
-                        </span>
-                      </button>
-                      {isSelected ? (
-                        <motion.div
-                          initial={{ opacity: 0, x: 8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="flex shrink-0 items-center gap-1.5"
-                        >
-                          <RecipientAmountInput
-                            value={entry.amount}
-                            onChange={(value) => setRecipientAmount(account, value)}
-                            onEmpty={() => toggleRecipient(account)}
-                          />
-                          <span className="text-sm text-tertiary">{displayAsset}</span>
-                        </motion.div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleRecipient(account)}
-                          aria-label={t("DashboardPayments.batchSend.addRecipient", {
-                            name: account.name,
-                          })}
-                          className="shrink-0 text-tertiary transition-colors hover:text-primary"
-                        >
-                          <PlusIcon className="size-4" />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </motion.div>
-          </div>
+          <ContactsPicker wizard={wizard} />
         )}
       </div>
 
       <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImport={bulkImport} />
 
-      {recipients.length > 0 && displayAsset !== null ? (
-        <div className="flex items-center justify-between px-1 text-sm">
-          <span
-            className={
-              exceedsBalance || exceedsMaxRecipients ? "font-medium text-error" : "text-tertiary"
-            }
-          >
-            {recipientsStatusLabel(recipients.length, exceedsBalance, exceedsMaxRecipients, t)}
-          </span>
-          <span className={cn("font-medium", exceedsBalance ? "text-error" : "text-primary")}>
-            {t("DashboardPayments.batchSend.totalAmount", {
-              total: formatTokenAmount(totalAmount),
-              asset: displayAsset,
-            })}
-            {availableAmount !== null
-              ? t("DashboardPayments.batchSend.totalOfAmount", {
-                  available: formatTokenAmount(availableAmount),
-                  asset: displayAsset,
-                })
-              : ""}
-          </span>
-        </div>
-      ) : null}
+      <BatchTotals wizard={wizard} />
     </div>
   );
 }

@@ -20,7 +20,7 @@ import {
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
-import { localeDisplayName, useSelectLocale } from "@/components/language-picker";
+import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
 import {
   DropdownMenu,
   DropdownMenuContent,

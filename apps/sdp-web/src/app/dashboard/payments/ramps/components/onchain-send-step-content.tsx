@@ -40,6 +40,8 @@ export interface PrivateSendStatus {
 
 export type OnchainSendContactControls = ContactControls;
 
+type Translate = ReturnType<typeof useTranslations>;
+
 interface StepProps {
   wizard: OnchainSendWizard;
   counterpartyName: string;
@@ -136,6 +138,70 @@ function PrivateSendOption({ status }: { status: PrivateSendStatus | null }) {
   );
 }
 
+/**
+ * What the destination picker says while nothing is picked: pick a contact first, the contact
+ * has no Solana address yet, or pick one of its addresses.
+ */
+function destinationPlaceholder(
+  hasContact: boolean,
+  optionCount: number,
+  accountsLoading: boolean,
+  t: Translate
+): string {
+  if (!hasContact) {
+    return t("DashboardPayments.payForm.selectContactFirst");
+  }
+  return optionCount === 0 && !accountsLoading
+    ? t("DashboardPayments.payForm.noDestinations")
+    : t("DashboardPayments.payForm.selectDestination");
+}
+
+/**
+ * The links under the destination: add a Solana address (gone while its form is open) and pay
+ * by bank instead. The row is left out when neither would show.
+ */
+function DestinationActions({
+  hasContact,
+  addingAddress,
+  onAddAddress,
+  onPayByBank,
+}: {
+  hasContact: boolean;
+  addingAddress: boolean;
+  onAddAddress: () => void;
+  onPayByBank?: () => void;
+}) {
+  const t = useTranslations();
+  if (addingAddress && !onPayByBank) {
+    return null;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      {addingAddress ? null : (
+        <button
+          type="button"
+          disabled={!hasContact}
+          onClick={onAddAddress}
+          className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="size-4" aria-hidden="true" />
+          {t("DashboardPayments.payForm.addSolanaAddress")}
+        </button>
+      )}
+      {onPayByBank ? (
+        <button
+          type="button"
+          onClick={onPayByBank}
+          className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary"
+        >
+          <LandmarkIcon className="size-4" aria-hidden="true" />
+          {t("DashboardPayments.payForm.payByBank")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** The contact and the account to pay, with the ways to add an address or pay by bank instead. */
 function DestinationFields({
   wizard,
@@ -177,13 +243,12 @@ function DestinationFields({
           value={fields.accountId === "" ? null : fields.accountId}
           onChange={(id) => setField("accountId", id)}
           options={destinationOptions}
-          placeholder={
-            !hasContact
-              ? t("DashboardPayments.payForm.selectContactFirst")
-              : destinationOptions.length === 0 && !accountsLoading
-                ? t("DashboardPayments.payForm.noDestinations")
-                : t("DashboardPayments.payForm.selectDestination")
-          }
+          placeholder={destinationPlaceholder(
+            hasContact,
+            destinationOptions.length,
+            accountsLoading,
+            t
+          )}
           searchPlaceholder={t("DashboardPayments.ramps.searchAccounts")}
           isLoading={hasContact && accountsLoading}
           disabled={!hasContact || destinationOptions.length === 0}
@@ -198,31 +263,12 @@ function DestinationFields({
             onCancel={() => setAddAccountOpen(false)}
           />
         ) : null}
-        {addingAddress && !payByBank ? null : (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            {addingAddress ? null : (
-              <button
-                type="button"
-                disabled={!hasContact}
-                onClick={() => setAddAccountOpen(true)}
-                className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <PlusIcon className="size-4" aria-hidden="true" />
-                {t("DashboardPayments.payForm.addSolanaAddress")}
-              </button>
-            )}
-            {payByBank ? (
-              <button
-                type="button"
-                onClick={payByBank}
-                className="inline-flex items-center gap-2 text-body font-medium text-secondary transition-colors hover:text-primary"
-              >
-                <LandmarkIcon className="size-4" aria-hidden="true" />
-                {t("DashboardPayments.payForm.payByBank")}
-              </button>
-            ) : null}
-          </div>
-        )}
+        <DestinationActions
+          hasContact={hasContact}
+          addingAddress={addingAddress}
+          onAddAddress={() => setAddAccountOpen(true)}
+          onPayByBank={payByBank}
+        />
       </div>
     </>
   );

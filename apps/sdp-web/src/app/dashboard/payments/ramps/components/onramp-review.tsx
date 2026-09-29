@@ -1,6 +1,6 @@
 "use client";
 
-import { CUSTODY_PROVIDER_CATALOG_BY_ID } from "@sdp/types";
+import { CUSTODY_PROVIDER_CATALOG_BY_ID, type PaymentRampEstimate } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Callout } from "@/components/ui/callout";
@@ -33,6 +33,122 @@ function useSecondsTick(active: boolean) {
   return now;
 }
 
+/** The chosen provider's estimate, or null while none is chosen or it gave no figures. */
+function useChosenProviderEstimate(wizard: OnrampWizard): PaymentRampEstimate | null {
+  const { fields, selectedRampPair } = wizard;
+  const { estimatesByProvider } = useRampEstimate({
+    direction: "onramp",
+    selectedPair: selectedRampPair,
+    amount: fields.amount,
+    enabled: fields.provider !== null,
+  });
+  const estimate = fields.provider === null ? undefined : estimatesByProvider.get(fields.provider);
+  return estimate?.status === "ok" ? estimate.estimate : null;
+}
+
+/** Who the deposit comes from, with the kind of contact beside the name. */
+function CounterpartyRow({ counterparty }: { counterparty: OnrampWizard["selectedCounterparty"] }) {
+  const t = useTranslations();
+  return (
+    <ReviewRow
+      label={t("DashboardPayments.ramps.reviewFrom")}
+      value={counterparty?.displayName ?? "—"}
+      aside={
+        counterparty ? t(`DashboardPayments.counterparty.${counterparty.entityType}`) : undefined
+      }
+    />
+  );
+}
+
+/**
+ * The provider's figures: its fee and that fee's share of the amount, what the wallet receives,
+ * and the rate. Without an estimate the fee is a dash and the amount waits for the quote.
+ */
+function EstimateRows({
+  estimate,
+  amount,
+  fiat,
+  asset,
+}: {
+  estimate: PaymentRampEstimate | null;
+  amount: string;
+  fiat: string;
+  asset: string;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const numericAmount = Number(amount);
+  // Built once per locale: a formatter is slow to construct and the review re-renders each tick.
+  const percentFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 }),
+    [locale]
+  );
+  const feeShare =
+    estimate && Number.isFinite(numericAmount) && numericAmount > 0
+      ? percentFormat.format(Number(estimate.fees.total) / numericAmount)
+      : null;
+
+  return (
+    <>
+      <ReviewRow
+        label={t("DashboardPayments.ramps.providerFee")}
+        value={
+          estimate
+            ? `${formatDecimalAmount(estimate.fees.total, locale)} ${estimate.fees.currency}`
+            : "—"
+        }
+        aside={feeShare ? t("DashboardPayments.ramps.feeShare", { share: feeShare }) : undefined}
+      />
+      <ReviewRow
+        label={t("DashboardPayments.ramps.walletReceives")}
+        value={
+          estimate
+            ? `${formatDecimalAmount(estimate.cryptoAmount, locale)} ${asset}`
+            : t("DashboardPayments.ramps.rateKnownAtQuote")
+        }
+      />
+      {estimate ? (
+        <ReviewRow
+          label={t("DashboardPayments.manualInstructions.exchangeRate")}
+          value={`1 ${fiat} = ${estimate.exchangeRate} ${asset}`}
+          aside={t("DashboardPayments.ramps.estimateConfirmedNext")}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** The wallet the deposit lands in, with its custody provider beside the name. */
+function WalletRow({ wallet }: { wallet: OnrampWizard["selectedWallet"] }) {
+  const t = useTranslations();
+  const walletProvider = wallet?.provider
+    ? CUSTODY_PROVIDER_CATALOG_BY_ID[wallet.provider].label
+    : undefined;
+  return (
+    <ReviewRow
+      label={t("DashboardPayments.ramps.into")}
+      value={wallet?.label ?? "—"}
+      aside={walletProvider}
+    />
+  );
+}
+
+/** How long the estimate holds; nothing when the provider's estimate carries no expiry. */
+function EstimateExpiryRow({ expiresAt, now }: { expiresAt: string | undefined; now: number }) {
+  const t = useTranslations();
+  const remaining = expiresAt ? formatRampQuoteTimeRemaining(expiresAt, now, t) : null;
+  if (!remaining) {
+    return null;
+  }
+  return (
+    <ReviewRow
+      label={t("DashboardPayments.ramps.estimateHoldsFor")}
+      value={remaining}
+      aside={t("DashboardPayments.ramps.thenItExpires")}
+    />
+  );
+}
+
 /**
  * Deposit's review, read from the chosen provider's estimate. The real quote (and the transfer
  * it records) is only created on the next step, so the page says the figures are an estimate
@@ -42,31 +158,10 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
   const t = useTranslations();
   const locale = useLocale();
   const { fields, selectedRampPair, selectedCounterparty, selectedWallet } = wizard;
-  const { estimatesByProvider } = useRampEstimate({
-    direction: "onramp",
-    selectedPair: selectedRampPair,
-    amount: fields.amount,
-    enabled: fields.provider !== null,
-  });
-  const estimate = fields.provider === null ? undefined : estimatesByProvider.get(fields.provider);
-  const ok = estimate?.status === "ok" ? estimate.estimate : null;
+  const ok = useChosenProviderEstimate(wizard);
   const now = useSecondsTick(ok?.expiresAt !== undefined);
   const fiat = selectedRampPair.fiatCurrency.toUpperCase();
   const asset = getCryptoRailAssetLabel(selectedRampPair.assetRail);
-  const amount = Number(fields.amount);
-  // Built once per locale: a formatter is slow to construct and the review re-renders each tick.
-  const percentFormat = useMemo(
-    () => new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 2 }),
-    [locale]
-  );
-  const feeShare =
-    ok && Number.isFinite(amount) && amount > 0
-      ? percentFormat.format(Number(ok.fees.total) / amount)
-      : null;
-  const walletProvider = selectedWallet?.provider
-    ? CUSTODY_PROVIDER_CATALOG_BY_ID[selectedWallet.provider].label
-    : undefined;
-  const remaining = ok?.expiresAt ? formatRampQuoteTimeRemaining(ok.expiresAt, now, t) : null;
 
   return (
     <div className="space-y-8">
@@ -75,15 +170,7 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
           {t("DashboardPayments.ramps.preflight")}
         </h3>
         <dl className="divide-y divide-border-subtle">
-          <ReviewRow
-            label={t("DashboardPayments.ramps.reviewFrom")}
-            value={selectedCounterparty?.displayName ?? "—"}
-            aside={
-              selectedCounterparty
-                ? t(`DashboardPayments.counterparty.${selectedCounterparty.entityType}`)
-                : undefined
-            }
-          />
+          <CounterpartyRow counterparty={selectedCounterparty} />
           <ReviewRow
             label={t("DashboardPayments.ramps.provider")}
             value={fields.provider ? getRampProviderLabel(fields.provider) : "—"}
@@ -92,40 +179,9 @@ export function OnrampReview({ wizard }: { wizard: OnrampWizard }) {
             label={t("DashboardPayments.ramps.youPay")}
             value={`${formatDecimalAmount(fields.amount, locale)} ${fiat}`}
           />
-          <ReviewRow
-            label={t("DashboardPayments.ramps.providerFee")}
-            value={ok ? `${formatDecimalAmount(ok.fees.total, locale)} ${ok.fees.currency}` : "—"}
-            aside={
-              feeShare ? t("DashboardPayments.ramps.feeShare", { share: feeShare }) : undefined
-            }
-          />
-          <ReviewRow
-            label={t("DashboardPayments.ramps.walletReceives")}
-            value={
-              ok
-                ? `${formatDecimalAmount(ok.cryptoAmount, locale)} ${asset}`
-                : t("DashboardPayments.ramps.rateKnownAtQuote")
-            }
-          />
-          {ok ? (
-            <ReviewRow
-              label={t("DashboardPayments.manualInstructions.exchangeRate")}
-              value={`1 ${fiat} = ${ok.exchangeRate} ${asset}`}
-              aside={t("DashboardPayments.ramps.estimateConfirmedNext")}
-            />
-          ) : null}
-          <ReviewRow
-            label={t("DashboardPayments.ramps.into")}
-            value={selectedWallet?.label ?? "—"}
-            aside={walletProvider}
-          />
-          {remaining ? (
-            <ReviewRow
-              label={t("DashboardPayments.ramps.estimateHoldsFor")}
-              value={remaining}
-              aside={t("DashboardPayments.ramps.thenItExpires")}
-            />
-          ) : null}
+          <EstimateRows estimate={ok} amount={fields.amount} fiat={fiat} asset={asset} />
+          <WalletRow wallet={selectedWallet} />
+          <EstimateExpiryRow expiresAt={ok?.expiresAt} now={now} />
         </dl>
       </section>
       <Callout variant="danger" title={t("DashboardPayments.ramps.cannotBeUndone")}>

@@ -18,11 +18,16 @@ import { getHighRiskProviders, runComplianceCheck } from "../payments-workspace.
 import { defaultBasics } from "./counterparty-create-defaults";
 import { type BasicsClean, type BasicsData, basicsSchema } from "./counterparty-create-schemas";
 
-/** An address the screening flagged, or could not screen, waiting on the person's call. */
+/**
+ * An address waiting on the person's call: one the screening flagged or could not screen
+ * (`flagged`: add it anyway?), or one whose save failed after the contact was created
+ * (`failed`: try again?).
+ */
 export interface FlaggedAddress {
   counterparty: Counterparty;
   address: string;
   message: string;
+  reason: "flagged" | "failed";
 }
 
 interface CounterpartyCreateContextValue {
@@ -33,7 +38,7 @@ interface CounterpartyCreateContextValue {
   submitting: boolean;
   submitError: string | null;
 
-  /** Set while the form waits on "Add anyway" or "Skip the address". */
+  /** Set while the form waits on "Add anyway" / "Try again" or "Skip the address". */
   flaggedAddress: FlaggedAddress | null;
   attachFlaggedAddress: () => Promise<void>;
   skipFlaggedAddress: () => void;
@@ -82,10 +87,11 @@ export function CounterpartyCreateProvider({
     [onCreated, router]
   );
 
-  // The contact already exists when this runs, so a failure is told rather than blocking: the
-  // address can be added from the contact's page.
+  // Saves the address on the contact just created. A failure keeps the form open on it (the
+  // contact exists, so submitting again would make a second one): the person can try again or
+  // go on without the address. Returns whether it was saved.
   const attachAddress = useCallback(
-    async (created: Counterparty, address: string) => {
+    async (created: Counterparty, address: string): Promise<boolean> => {
       const result = await dashboardFetch<{ data: CounterpartyAccountResponse }>(
         `/api/dashboard/counterparty/${encodeURIComponent(created.id)}/accounts`,
         {
@@ -93,15 +99,17 @@ export function CounterpartyCreateProvider({
           body: { accountKind: "crypto_wallet", details: { network: "solana", address } },
         }
       );
-      if (!result.ok) {
-        toast.error(
-          t("DashboardPayments.counterparty.addressNotAttached", {
-            name: created.displayName,
-            error: result.error,
-          }),
-          { position: "bottom-right" }
-        );
-      }
+      if (result.ok) return true;
+      setFlaggedAddress({
+        counterparty: created,
+        address,
+        reason: "failed",
+        message: t("DashboardPayments.counterparty.addressNotAttached", {
+          name: created.displayName,
+          error: result.error,
+        }),
+      });
+      return false;
     },
     [t]
   );
@@ -165,11 +173,10 @@ export function CounterpartyCreateProvider({
       }
       const warning = await screen(address);
       if (warning !== null) {
-        setFlaggedAddress({ counterparty: created, address, message: warning });
+        setFlaggedAddress({ counterparty: created, address, message: warning, reason: "flagged" });
         return;
       }
-      await attachAddress(created, address);
-      complete(created);
+      if (await attachAddress(created, address)) complete(created);
     } catch (err) {
       setSubmitError(
         err instanceof Error ? err.message : t("DashboardPayments.counterparty.somethingWentWrong")
@@ -183,10 +190,11 @@ export function CounterpartyCreateProvider({
     if (!flaggedAddress) return;
     setSubmitting(true);
     try {
-      await attachAddress(flaggedAddress.counterparty, flaggedAddress.address);
-      complete(flaggedAddress.counterparty);
+      if (await attachAddress(flaggedAddress.counterparty, flaggedAddress.address)) {
+        setFlaggedAddress(null);
+        complete(flaggedAddress.counterparty);
+      }
     } finally {
-      setFlaggedAddress(null);
       setSubmitting(false);
     }
   }, [flaggedAddress, attachAddress, complete]);

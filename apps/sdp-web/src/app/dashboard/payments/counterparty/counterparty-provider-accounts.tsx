@@ -41,6 +41,16 @@ const FUNDING_WALLET_STATUS_LABEL_KEY = {
   provisioned_funding_wallet: "DashboardPayments.counterparty.providerAccountWalletActive",
 } as const satisfies Record<BvnkFundingWalletStatus, string>;
 
+/** The table's columns, left to right, as the message keys of their headers. */
+const PROVIDER_ACCOUNT_COLUMN_KEYS = [
+  "DashboardPayments.counterparty.detail.provider",
+  "DashboardPayments.counterparty.detail.corridor",
+  "DashboardPayments.counterparty.detail.rail",
+  "DashboardPayments.counterparty.detail.bank",
+  "DashboardPayments.counterparty.detail.account",
+  "DashboardPayments.counterparty.detail.status",
+] as const;
+
 function isBvnkFundingWalletStatus(value: string): value is BvnkFundingWalletStatus {
   return BVNK_FUNDING_WALLET_STATUSES.some((status) => status === value);
 }
@@ -116,64 +126,68 @@ function FundingWalletBalance({ account }: { account: CounterpartyProviderAccoun
   );
 }
 
-/** The corridor, rail, bank and account cells of one provider-account row, by its kind. */
-function ProviderAccountCells({ account }: { account: CounterpartyProviderAccount }) {
+/** A funding wallet's cells: its currency, no rail or bank, and its balance in the account column. */
+function FundingWalletCells({ account }: { account: CounterpartyProviderAccount }) {
   const t = useTranslations();
-  if (account.kind === "funding_wallet") {
-    return (
-      <>
-        <TableCell className="text-body text-secondary">
-          {account.fiatCurrency === null ? (
-            <Missing />
-          ) : (
-            t("DashboardPayments.counterparty.providerAccountFundingWallet", {
-              currency: account.fiatCurrency,
-            })
-          )}
-        </TableCell>
-        <TableCell className="text-body">
+  return (
+    <>
+      <TableCell className="text-body text-secondary">
+        {account.fiatCurrency === null ? (
           <Missing />
-        </TableCell>
-        <TableCell className="text-body">
+        ) : (
+          t("DashboardPayments.counterparty.providerAccountFundingWallet", {
+            currency: account.fiatCurrency,
+          })
+        )}
+      </TableCell>
+      <TableCell className="text-body">
+        <Missing />
+      </TableCell>
+      <TableCell className="text-body">
+        <Missing />
+      </TableCell>
+      <TableCell className="text-body text-secondary">
+        <FundingWalletBalance account={account} />
+      </TableCell>
+    </>
+  );
+}
+
+/** A payout account's cells: its corridor, rail, bank and the last four of its account number. */
+function PayoutAccountCells({ account }: { account: CounterpartyProviderAccount }) {
+  const rail =
+    account.paymentRail === null ? account.paymentRails?.join(", ") : account.paymentRail;
+  return (
+    <>
+      <TableCell className="truncate text-body text-secondary">
+        {account.fiatCurrency === null ? (
           <Missing />
-        </TableCell>
-        <TableCell className="text-body text-secondary">
-          <FundingWalletBalance account={account} />
-        </TableCell>
-      </>
-    );
-  }
-  if (account.kind === "payout_account") {
-    const rail =
-      account.paymentRail === null ? account.paymentRails?.join(", ") : account.paymentRail;
-    return (
-      <>
-        <TableCell className="truncate text-body text-secondary">
-          {account.fiatCurrency === null ? (
-            <Missing />
-          ) : account.destinationCountry === null ? (
-            account.fiatCurrency
-          ) : (
-            `${account.fiatCurrency} → ${account.destinationCountry}`
-          )}
-        </TableCell>
-        <TableCell className="truncate text-body text-secondary">
-          {rail === undefined ? <Missing /> : rail}
-        </TableCell>
-        <TableCell className="truncate text-body text-secondary">
-          {account.bankName === undefined ? <Missing /> : account.bankName}
-        </TableCell>
-        <TableCell className="text-body whitespace-nowrap text-secondary tabular-nums">
-          {account.accountNumberLast4 === undefined ? (
-            <Missing />
-          ) : (
-            `···· ${account.accountNumberLast4}`
-          )}
-        </TableCell>
-      </>
-    );
-  }
-  // The provider's customer record for this contact: where it is registered, and its id.
+        ) : account.destinationCountry === null ? (
+          account.fiatCurrency
+        ) : (
+          `${account.fiatCurrency} → ${account.destinationCountry}`
+        )}
+      </TableCell>
+      <TableCell className="truncate text-body text-secondary">
+        {rail === undefined ? <Missing /> : rail}
+      </TableCell>
+      <TableCell className="truncate text-body text-secondary">
+        {account.bankName === undefined ? <Missing /> : account.bankName}
+      </TableCell>
+      <TableCell className="text-body whitespace-nowrap text-secondary tabular-nums">
+        {account.accountNumberLast4 === undefined ? (
+          <Missing />
+        ) : (
+          `···· ${account.accountNumberLast4}`
+        )}
+      </TableCell>
+    </>
+  );
+}
+
+/** The provider's customer record for this contact: where it is registered, and its id. */
+function CustomerLinkCells({ account }: { account: CounterpartyProviderAccount }) {
+  const t = useTranslations();
   const link = account.customerLink;
   return (
     <>
@@ -207,6 +221,17 @@ function ProviderAccountCells({ account }: { account: CounterpartyProviderAccoun
       </TableCell>
     </>
   );
+}
+
+/** The corridor, rail, bank and account cells of one provider-account row, by its kind. */
+function ProviderAccountCells({ account }: { account: CounterpartyProviderAccount }) {
+  if (account.kind === "funding_wallet") {
+    return <FundingWalletCells account={account} />;
+  }
+  if (account.kind === "payout_account") {
+    return <PayoutAccountCells account={account} />;
+  }
+  return <CustomerLinkCells account={account} />;
 }
 
 /** The provider agreements a contact is asked to accept, with where each one stands. */
@@ -318,12 +343,9 @@ export function CounterpartyProviderAccounts({
         <Table className="min-w-[720px] table-fixed rounded-none border-0">
           <TableHeader>
             <TableRow>
-              <TableHead>{t("DashboardPayments.counterparty.detail.provider")}</TableHead>
-              <TableHead>{t("DashboardPayments.counterparty.detail.corridor")}</TableHead>
-              <TableHead>{t("DashboardPayments.counterparty.detail.rail")}</TableHead>
-              <TableHead>{t("DashboardPayments.counterparty.detail.bank")}</TableHead>
-              <TableHead>{t("DashboardPayments.counterparty.detail.account")}</TableHead>
-              <TableHead>{t("DashboardPayments.counterparty.detail.status")}</TableHead>
+              {PROVIDER_ACCOUNT_COLUMN_KEYS.map((key) => (
+                <TableHead key={key}>{t(key)}</TableHead>
+              ))}
             </TableRow>
           </TableHeader>
           <TableBody>

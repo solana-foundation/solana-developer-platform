@@ -35,12 +35,18 @@ export function splitPastedRows(text: string): BulkImportRow[] {
     });
 }
 
+/**
+ * Checks each row of an import: an account, a token, a positive amount, and each account once.
+ * A batch pays an account one amount, so a second row for the same account is an error rather
+ * than a silent overwrite of the first.
+ */
 export function validateBulkRows(rows: BulkImportRow[]): {
   valid: BulkImportRow[];
   errors: BulkRowError[];
 } {
   const valid: BulkImportRow[] = [];
   const errors: BulkRowError[] = [];
+  const firstRowByAccount = new Map<string, number>();
 
   rows.forEach((row, index) => {
     if (isEmptyBulkRow(row)) {
@@ -60,6 +66,12 @@ export function validateBulkRows(rows: BulkImportRow[]): {
       errors.push({ row: line, message: "Amount must be a positive number" });
       return;
     }
+    const firstRow = firstRowByAccount.get(row.accountId);
+    if (firstRow !== undefined) {
+      errors.push({ row: line, message: `${row.accountId} is already on row ${firstRow}` });
+      return;
+    }
+    firstRowByAccount.set(row.accountId, line);
     valid.push(row);
   });
 

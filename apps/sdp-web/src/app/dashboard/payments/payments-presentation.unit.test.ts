@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activityKind,
+  formatDecimalAmount,
   formatElapsedShort,
   formatSignedAmount,
   PAYMENT_STATUS_TONE,
@@ -102,5 +103,19 @@ describe("summarizeBatch", () => {
       values: { count: 8 },
     });
     expect(summarizeBatch({ status: "archived", recipientCount: 4 }).tone).toBe("neutral");
+  });
+});
+
+describe("formatDecimalAmount", () => {
+  it("keeps every digit of the amount, however small or large", () => {
+    expect(formatDecimalAmount("0.0000001", "en")).toBe("0.0000001");
+    expect(formatDecimalAmount("0.000000000001", "en")).toBe("0.000000000001");
+    expect(formatDecimalAmount("123456789.123456789", "en")).toBe("123,456,789.123456789");
+  });
+
+  it("pads to two decimals and passes text that is not a number through", () => {
+    expect(formatDecimalAmount("12000", "en")).toBe("12,000.00");
+    expect(formatDecimalAmount("12.5", "en")).toBe("12.50");
+    expect(formatDecimalAmount("abc", "en")).toBe("abc");
   });
 });

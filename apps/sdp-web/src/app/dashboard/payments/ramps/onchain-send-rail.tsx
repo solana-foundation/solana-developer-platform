@@ -7,7 +7,8 @@ import {
   OnchainSendStepContent,
   type PrivateSendStatus,
 } from "./components/onchain-send-step-content";
-import { hasFundedWallet, PayEmptyState, payEmptyReason } from "./components/pay-empty-state";
+import { PayEmptyState } from "./components/pay-empty-state";
+import { hasFundedWallet, payEmptyReason } from "./components/pay-readiness";
 import { RampWizardShell } from "./components/ramp-wizard-shell";
 import {
   getOnchainSendSteps,

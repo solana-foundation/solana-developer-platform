@@ -30,7 +30,7 @@ import { NewSolanaAddressForm } from "../counterparty/new-solana-address-form";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
 import { fetchCounterpartyAccounts } from "../payments-workspace.data";
-import { deriveTokenOptions } from "./payment-requests-page.data";
+import { deriveTokenOptions, type PaymentRequestTokenOption } from "./payment-requests-page.data";
 
 const EXPIRY_OPTIONS = [
   { id: "none", hours: null, labelKey: "DashboardPayments.requests.noExpiry" },
@@ -91,8 +91,8 @@ async function copyToClipboard(text: string): Promise<boolean> {
 function fillSentence(template: string, parts: Record<string, ReactNode>): ReactNode[] {
   return template.split(/\{(\w+)\}/).map((segment, index) =>
     index % 2 === 1 ? (
-      // biome-ignore lint/suspicious/noArrayIndexKey: the template's slots are fixed and ordered.
-      <span key={index}>{parts[segment]}</span>
+      // Each slot is named once in the sentence, so its name keys it.
+      <span key={segment}>{parts[segment]}</span>
     ) : (
       segment
     )
@@ -145,6 +145,203 @@ function ReadsAs({
   );
 }
 
+/** A wallet as the form names it: its label, else its shortened address. */
+function walletDisplayName(wallet: PaymentsDashboardWallet | null): string | null {
+  return wallet ? (wallet.label ?? shortenAddress(wallet.publicKey)) : null;
+}
+
+/** The amount as the sentence reads it ("25.00 USDC"), once it is valid and a token is set. */
+function readsAsAmount(
+  amount: string,
+  token: PaymentRequestTokenOption | null,
+  locale: string
+): string | null {
+  return isValidAmount(amount) && token
+    ? `${formatDecimalAmount(amount.trim(), locale)} ${token.symbol}`
+    : null;
+}
+
+/** The page when the project has no wallet: nowhere to be paid into, and the way to Wallets. */
+function NoWalletState() {
+  const t = useTranslations();
+  return (
+    <WizardFrame steps={EMPTY_STEP} currentStep={0} progressLabel="" hideProgress>
+      <ListEmptyState
+        message={t("DashboardPayments.requests.noWalletTitle")}
+        description={t("DashboardPayments.requests.noWalletDescription")}
+        action={
+          <Button asChild variant="outline">
+            <Link href="/dashboard/wallets">{t("DashboardPayments.requests.openWallets")}</Link>
+          </Button>
+        }
+      />
+    </WizardFrame>
+  );
+}
+
+/** The footer: cancel back to the list, and create once the request has what it needs. */
+function CreateFooter({
+  canCreate,
+  submitting,
+  onCreate,
+}: {
+  canCreate: boolean;
+  submitting: boolean;
+  onCreate: () => void;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  return (
+    // The design's footer buttons take a 16px inset; a create that cannot run yet is an
+    // outline on the control wash with its label in the tertiary ink, at full opacity.
+    <div className="flex items-center justify-end gap-4 [--button-padding-x-lg:1rem]">
+      <Button type="button" variant="ghost" onClick={() => router.push(PAYMENT_REQUESTS_HREF)}>
+        {t("DashboardPayments.requests.cancel")}
+      </Button>
+      <Button
+        type="button"
+        variant={canCreate ? "default" : "outline"}
+        disabled={!canCreate}
+        className={cn(!canCreate && "opacity-100 text-tertiary refresh:bg-fill")}
+        onClick={onCreate}
+      >
+        {submitting
+          ? t("DashboardPayments.requests.creating")
+          : t("DashboardPayments.requests.createAndCopyLink")}
+      </Button>
+    </div>
+  );
+}
+
+/** The amount asked, with a note under it while it is not one the API would take. */
+function AmountField({ amount, onChange }: { amount: string; onChange: (next: string) => void }) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="payment-request-amount">{t("DashboardPayments.requests.amount")}</Label>
+      <Input
+        id="payment-request-amount"
+        size="xl"
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder="0.00"
+        className="tabular-nums"
+        value={amount}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+      {amount.trim() && !isValidAmount(amount) ? (
+        <p className="text-meta text-error">{t("DashboardPayments.requests.invalidAmount")}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Who is expected to pay: anyone with the link, or one of the active contacts. A contact with no
+ * Solana address on file is said so, with a way to add one in place.
+ */
+function FromField({
+  contacts,
+  contact,
+  onPick,
+}: {
+  contacts: Counterparty[];
+  contact: Counterparty | null;
+  onPick: (next: string) => void;
+}) {
+  const t = useTranslations();
+  const [addingAddress, setAddingAddress] = useState(false);
+  const {
+    data: contactAccounts,
+    isLoading: accountsLoading,
+    mutate: mutateAccounts,
+  } = useSWR(
+    contact
+      ? paymentsQueryKeys.paymentRequestCounterpartyAccounts({ counterpartyId: contact.id })
+      : null,
+    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
+    { revalidateOnFocus: false }
+  );
+  const contactHasNoAddress =
+    contact !== null &&
+    !accountsLoading &&
+    contactAccounts !== undefined &&
+    !hasCryptoAddress(contactAccounts);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Combobox
+        label={t("DashboardPayments.requests.from")}
+        value={contact ? contact.id : ANYONE}
+        onChange={(next) => {
+          onPick(next);
+          setAddingAddress(false);
+        }}
+        options={[
+          { value: ANYONE, label: t("DashboardPayments.requests.anyoneWithLink") },
+          ...contacts.map((option) => ({ value: option.id, label: option.displayName })),
+        ]}
+        searchable={contacts.length > FROM_SEARCH_THRESHOLD}
+        searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
+      />
+      {contact && contactHasNoAddress && !addingAddress ? (
+        <FieldHint>
+          {t("DashboardPayments.requests.noAddressOnFile", { contact: contact.displayName })}{" "}
+          <button
+            type="button"
+            onClick={() => setAddingAddress(true)}
+            className="inline-flex min-h-6 items-center rounded-sm text-primary underline underline-offset-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            {t("DashboardPayments.requests.addAnAddress")}
+          </button>
+        </FieldHint>
+      ) : null}
+      {contact && addingAddress ? (
+        // Opens under From, as the design does, in place of the hint that offered it.
+        <NewSolanaAddressForm
+          key={contact.id}
+          className="mt-2.5"
+          counterpartyId={contact.id}
+          idPrefix="request-add"
+          onAdded={() => {
+            setAddingAddress(false);
+            void mutateAccounts();
+          }}
+          onCancel={() => setAddingAddress(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** When the link stops working, with the instant that comes to read from the browser clock. */
+function ExpiryField({ expiry, onChange }: { expiry: string; onChange: (next: string) => void }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const expiresAt = resolveExpiryDate(expiry);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Combobox
+        label={t("DashboardPayments.requests.linkExpires")}
+        value={expiry}
+        onChange={onChange}
+        options={EXPIRY_OPTIONS.map((option) => ({
+          value: option.id,
+          label: t(option.labelKey),
+        }))}
+        searchable={false}
+      />
+      <FieldHint>
+        {expiresAt
+          ? t("DashboardPayments.requests.linkStopsWorking", {
+              date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
+            })
+          : t("DashboardPayments.requests.linkStaysLive")}
+      </FieldHint>
+    </div>
+  );
+}
+
 interface PaymentRequestCreateWorkspaceProps {
   wallets: PaymentsDashboardWallet[];
   /** Why the wallets could not be read, when they could not. */
@@ -161,6 +358,24 @@ interface PaymentRequestCreateWorkspaceProps {
  * naming a contact records who is expected to pay; it does not stop anyone else paying the link.
  */
 export function PaymentRequestCreateWorkspace({
+  wallets,
+  walletsError,
+  counterparties,
+}: PaymentRequestCreateWorkspaceProps) {
+  if (!walletsError && wallets.length === 0) {
+    return <NoWalletState />;
+  }
+  return (
+    <PaymentRequestCreateForm
+      wallets={wallets}
+      walletsError={walletsError}
+      counterparties={counterparties}
+    />
+  );
+}
+
+/** The new request's form and its create, once there is a wallet to be paid into. */
+function PaymentRequestCreateForm({
   wallets,
   walletsError,
   counterparties,
@@ -183,7 +398,6 @@ export function PaymentRequestCreateWorkspace({
   const [pickedWallet, setPickedWallet] = useState("");
   const [pickedFrom, setPickedFrom] = useState(ANYONE);
   const [expiry, setExpiry] = useState<string>("none");
-  const [addingAddress, setAddingAddress] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // A pick that is no longer on offer (another cluster's mint, another project's wallet) falls
@@ -194,27 +408,7 @@ export function PaymentRequestCreateWorkspace({
   const wallet = wallets.find((option) => option.walletId === pickedWallet) ?? null;
   const contact = contacts.find((option) => option.id === pickedFrom) ?? null;
 
-  const {
-    data: contactAccounts,
-    isLoading: accountsLoading,
-    mutate: mutateAccounts,
-  } = useSWR(
-    contact
-      ? paymentsQueryKeys.paymentRequestCounterpartyAccounts({ counterpartyId: contact.id })
-      : null,
-    ([, id]: readonly [string, string]) => fetchCounterpartyAccounts(id, t),
-    { revalidateOnFocus: false }
-  );
-  const contactHasNoAddress =
-    contact !== null &&
-    !accountsLoading &&
-    contactAccounts !== undefined &&
-    !hasCryptoAddress(contactAccounts);
-
-  const amountValid = isValidAmount(amount);
-  const canCreate = amountValid && token !== null && wallet !== null && !submitting;
-  const expiresAt = resolveExpiryDate(expiry);
-  const walletName = wallet ? (wallet.label ?? shortenAddress(wallet.publicKey)) : null;
+  const canCreate = isValidAmount(amount) && token !== null && wallet !== null && !submitting;
 
   async function create() {
     if (!canCreate || token === null || wallet === null) {
@@ -252,22 +446,6 @@ export function PaymentRequestCreateWorkspace({
     router.push(created?.id ? paymentRequestHref(created.id) : PAYMENT_REQUESTS_HREF);
   }
 
-  if (!walletsError && wallets.length === 0) {
-    return (
-      <WizardFrame steps={EMPTY_STEP} currentStep={0} progressLabel="" hideProgress>
-        <ListEmptyState
-          message={t("DashboardPayments.requests.noWalletTitle")}
-          description={t("DashboardPayments.requests.noWalletDescription")}
-          action={
-            <Button asChild variant="outline">
-              <Link href="/dashboard/wallets">{t("DashboardPayments.requests.openWallets")}</Link>
-            </Button>
-          }
-        />
-      </WizardFrame>
-    );
-  }
-
   return (
     <WizardFrame
       steps={EMPTY_STEP}
@@ -275,24 +453,11 @@ export function PaymentRequestCreateWorkspace({
       progressLabel=""
       hideProgress
       footer={
-        // The design's footer buttons take a 16px inset; a create that cannot run yet is an
-        // outline on the control wash with its label in the tertiary ink, at full opacity.
-        <div className="flex items-center justify-end gap-4 [--button-padding-x-lg:1rem]">
-          <Button type="button" variant="ghost" onClick={() => router.push(PAYMENT_REQUESTS_HREF)}>
-            {t("DashboardPayments.requests.cancel")}
-          </Button>
-          <Button
-            type="button"
-            variant={canCreate ? "default" : "outline"}
-            disabled={!canCreate}
-            className={cn(!canCreate && "opacity-100 text-tertiary refresh:bg-fill")}
-            onClick={() => void create()}
-          >
-            {submitting
-              ? t("DashboardPayments.requests.creating")
-              : t("DashboardPayments.requests.createAndCopyLink")}
-          </Button>
-        </div>
+        <CreateFooter
+          canCreate={canCreate}
+          submitting={submitting}
+          onCreate={() => void create()}
+        />
       }
     >
       {/* The design sets a single-page form 3px nearer the title than the frame's stepped
@@ -310,24 +475,7 @@ export function PaymentRequestCreateWorkspace({
           </p>
         ) : null}
         <div className="grid gap-6 sm:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="payment-request-amount">{t("DashboardPayments.requests.amount")}</Label>
-            <Input
-              id="payment-request-amount"
-              size="xl"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder="0.00"
-              className="tabular-nums"
-              value={amount}
-              onChange={(event) => setAmount(event.currentTarget.value)}
-            />
-            {amount.trim() && !amountValid ? (
-              <p className="text-meta text-error">
-                {t("DashboardPayments.requests.invalidAmount")}
-              </p>
-            ) : null}
-          </div>
+          <AmountField amount={amount} onChange={setAmount} />
           <Combobox
             label={t("DashboardPayments.requests.token")}
             value={token ? token.mintAddress : null}
@@ -361,77 +509,14 @@ export function PaymentRequestCreateWorkspace({
           disabled={wallets.length === 0}
         />
 
-        <div className="flex flex-col gap-1.5">
-          <Combobox
-            label={t("DashboardPayments.requests.from")}
-            value={contact ? contact.id : ANYONE}
-            onChange={(next) => {
-              setPickedFrom(next);
-              setAddingAddress(false);
-            }}
-            options={[
-              { value: ANYONE, label: t("DashboardPayments.requests.anyoneWithLink") },
-              ...contacts.map((option) => ({ value: option.id, label: option.displayName })),
-            ]}
-            searchable={contacts.length > FROM_SEARCH_THRESHOLD}
-            searchPlaceholder={t("DashboardPayments.payForm.searchContacts")}
-          />
-          {contact && contactHasNoAddress && !addingAddress ? (
-            <FieldHint>
-              {t("DashboardPayments.requests.noAddressOnFile", { contact: contact.displayName })}{" "}
-              <button
-                type="button"
-                onClick={() => setAddingAddress(true)}
-                className="inline-flex min-h-6 items-center rounded-sm text-primary underline underline-offset-4 outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              >
-                {t("DashboardPayments.requests.addAnAddress")}
-              </button>
-            </FieldHint>
-          ) : null}
-          {contact && addingAddress ? (
-            // Opens under From, as the design does, in place of the hint that offered it.
-            <NewSolanaAddressForm
-              key={contact.id}
-              className="mt-2.5"
-              counterpartyId={contact.id}
-              idPrefix="request-add"
-              onAdded={() => {
-                setAddingAddress(false);
-                void mutateAccounts();
-              }}
-              onCancel={() => setAddingAddress(false)}
-            />
-          ) : null}
-        </div>
+        <FromField contacts={contacts} contact={contact} onPick={setPickedFrom} />
 
-        <div className="flex flex-col gap-1.5">
-          <Combobox
-            label={t("DashboardPayments.requests.linkExpires")}
-            value={expiry}
-            onChange={setExpiry}
-            options={EXPIRY_OPTIONS.map((option) => ({
-              value: option.id,
-              label: t(option.labelKey),
-            }))}
-            searchable={false}
-          />
-          <FieldHint>
-            {expiresAt
-              ? t("DashboardPayments.requests.linkStopsWorking", {
-                  date: formatDateTime(expiresAt.toISOString(), locale) ?? "",
-                })
-              : t("DashboardPayments.requests.linkStaysLive")}
-          </FieldHint>
-        </div>
+        <ExpiryField expiry={expiry} onChange={setExpiry} />
 
         <ReadsAs
           from={contact ? contact.displayName : null}
-          amount={
-            amountValid && token
-              ? `${formatDecimalAmount(amount.trim(), locale)} ${token.symbol}`
-              : null
-          }
-          wallet={walletName}
+          amount={readsAsAmount(amount, token, locale)}
+          wallet={walletDisplayName(wallet)}
         />
       </form>
     </WizardFrame>

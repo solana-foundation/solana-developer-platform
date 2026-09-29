@@ -131,6 +131,41 @@ export function firstCollectionAtIsValid(value: string): boolean {
   return Number.isFinite(timestamp) && timestamp > Date.now();
 }
 
+/** The contact's account the schedule pays to, from the one chosen and the ones on offer. */
+function resolveDestinationAccountId(
+  cryptoAccounts: readonly CounterpartyAccount[],
+  chosenAccountId: string
+): string {
+  if (cryptoAccounts.some((account) => account.id === chosenAccountId)) {
+    return chosenAccountId;
+  }
+  return chosenAccountId === "" && cryptoAccounts.length === 1 ? cryptoAccounts[0].id : "";
+}
+
+/** The token the schedule sends, from the one chosen and what the chosen wallet holds. */
+function resolveSourceToken(
+  sourceCustodyWalletId: string,
+  assetOptions: readonly ComboboxOption[],
+  chosenToken: string
+): string {
+  if (!sourceCustodyWalletId) {
+    return "";
+  }
+  return assetOptions.some((asset) => asset.value === chosenToken)
+    ? chosenToken
+    : (assetOptions[0]?.value ?? "");
+}
+
+/** What the token picker says while it is empty: pick a wallet first, none held, or pick one. */
+function assetPlaceholder(hasWallet: boolean, assetCount: number, t: Translate): string {
+  if (!hasWallet) {
+    return t("DashboardPayments.recurring.selectWalletFirst");
+  }
+  return assetCount === 0
+    ? t("DashboardPayments.recurring.noTokenBalances")
+    : t("DashboardPayments.recurring.selectAsset");
+}
+
 /**
  * New schedule's state: the fields, what they resolve to, and the actions on them. The
  * destination account and the token are resolved from the fields during render rather than
@@ -212,14 +247,13 @@ export function useRecurringPaymentCreate({
       ),
     [accounts]
   );
-  // The chosen account while the contact still has it; else the contact's only one; else none.
-  const resolvedAccountId = cryptoAccounts.some(
-    (account) => account.id === fields.counterpartyAccountId
-  )
-    ? fields.counterpartyAccountId
-    : cryptoAccounts.length === 1
-      ? cryptoAccounts[0].id
-      : "";
+  // The chosen account while the contact still has it. With nothing chosen, the contact's only
+  // account stands in; a chosen account that went away empties the field instead, so the
+  // schedule never moves to another address without the person picking it.
+  const resolvedAccountId = resolveDestinationAccountId(
+    cryptoAccounts,
+    fields.counterpartyAccountId
+  );
 
   const foundCounterparty = liveCounterparties.data.find(
     (counterparty) => counterparty.id === fields.counterpartyId
@@ -261,11 +295,11 @@ export function useRecurringPaymentCreate({
 
   // The chosen token while the wallet still holds it; else the wallet's first; none without a
   // wallet.
-  const resolvedToken = fields.sourceCustodyWalletId
-    ? assetOptions.some((asset) => asset.value === fields.token)
-      ? fields.token
-      : (assetOptions[0]?.value ?? "")
-    : "";
+  const resolvedToken = resolveSourceToken(
+    fields.sourceCustodyWalletId,
+    assetOptions,
+    fields.token
+  );
   const foundAsset = assetOptions.find((asset) => asset.value === resolvedToken);
   const selectedAsset = foundAsset === undefined ? null : foundAsset;
   const selectedAssetBalance = useMemo<WalletBalance | null>(
@@ -285,11 +319,11 @@ export function useRecurringPaymentCreate({
     compareDecimalAmounts(fields.amount, selectedAssetBalance.uiAmount) > 0;
   const periodHours = parsePeriodHours(fields.schedulePreset, fields.customPeriodHours);
   const currentStep = steps[stepIndex];
-  const assetSelectPlaceholder = fields.sourceCustodyWalletId
-    ? assetOptions.length === 0
-      ? t("DashboardPayments.recurring.noTokenBalances")
-      : t("DashboardPayments.recurring.selectAsset")
-    : t("DashboardPayments.recurring.selectWalletFirst");
+  const assetSelectPlaceholder = assetPlaceholder(
+    Boolean(fields.sourceCustodyWalletId),
+    assetOptions.length,
+    t
+  );
 
   const setField = <TKey extends keyof RecurringPaymentCreateFields>(
     key: TKey,

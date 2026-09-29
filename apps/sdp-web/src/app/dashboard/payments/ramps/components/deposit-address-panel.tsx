@@ -48,6 +48,13 @@ const RECENT_DEPOSIT_COUNT = 5;
 // How often the recent deposits re-read while the page is open; the "watching" line is true
 // because of this poll, not because of a push channel.
 const DEPOSIT_POLL_MS = 15_000;
+/** The recent-deposits table's columns, left to right, as the message keys of their headers. */
+const RECENT_DEPOSIT_COLUMN_KEYS = [
+  "DashboardPayments.status",
+  "DashboardPayments.commandCenter.amount",
+  "DashboardPayments.transactions.contact",
+  "DashboardPayments.createdLabel",
+] as const;
 
 function walletProviderLabel(wallet: PaymentsDashboardWallet): string | null {
   return wallet.provider ? CUSTODY_PROVIDER_CATALOG_BY_ID[wallet.provider].label : null;
@@ -325,10 +332,9 @@ function RecentDeposits({
         </colgroup>
         <TableHeader>
           <TableRow>
-            <TableHead>{t("DashboardPayments.status")}</TableHead>
-            <TableHead>{t("DashboardPayments.commandCenter.amount")}</TableHead>
-            <TableHead>{t("DashboardPayments.transactions.contact")}</TableHead>
-            <TableHead>{t("DashboardPayments.createdLabel")}</TableHead>
+            {RECENT_DEPOSIT_COLUMN_KEYS.map((key) => (
+              <TableHead key={key}>{t(key)}</TableHead>
+            ))}
           </TableRow>
         </TableHeader>
         <TableBody>

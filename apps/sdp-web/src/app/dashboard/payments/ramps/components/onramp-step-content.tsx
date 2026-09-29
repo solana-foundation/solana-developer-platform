@@ -36,6 +36,8 @@ interface StepContentProps {
 
 type OnrampQuote = NonNullable<OnrampWizard["quote"]>;
 type ManualInstructionsQuoteRecord = Extract<OnrampQuote, { deliveryMode: "manual_instructions" }>;
+type HostedQuoteRecord = Extract<OnrampQuote, { deliveryMode: "hosted" }>;
+type MoneygramQuoteRecord = Extract<OnrampQuote, { provider: "moneygram" }>;
 
 /** The details step: the contact, then the amount, wallet, currency pair and provider. */
 function DepositStep({ wizard, contact }: StepContentProps) {
@@ -216,27 +218,103 @@ function ManualInstructionsStep({
   );
 }
 
+/** MoneyGram's widget, once the wallet it pays into and the transfer the quote records are known. */
+function MoneygramStep({ wizard, quote }: { wizard: OnrampWizard; quote: MoneygramQuoteRecord }) {
+  const { fields, selectedWallet, selectedRampPair, refreshQuote, quoteTransferId } = wizard;
+  if (!selectedWallet || quoteTransferId === null) {
+    return <RampQuoteSkeleton />;
+  }
+  return (
+    <MoneygramRampWidget
+      direction="onramp"
+      quote={quote}
+      transferId={quoteTransferId}
+      sourceWalletId={selectedWallet.id}
+      sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+      sourceWalletAddress={selectedWallet.publicKey}
+      sourceTokenMint={null}
+      cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+      cryptoAmount={fields.amount.trim()}
+      fiatCurrency={selectedRampPair.fiatCurrency}
+      onSessionExpiring={refreshQuote}
+    />
+  );
+}
+
+/** A provider's hosted checkout: Coinbase's order summary above its frame, or MoonPay's frame. */
+function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
+  const t = useTranslations();
+  return (
+    <div className="space-y-6">
+      {quote.provider === "coinbase" ? (
+        <>
+          <CoinbaseQuoteSummary quote={quote} />
+          <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
+        </>
+      ) : (
+        <MoonpayRampFrame
+          title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
+          src={quote.hostedUrl}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The provider step once its quote exists: the outcome once the transfer is done, otherwise the
+ * quote's own surface (a hosted frame, a widget, bank instructions).
+ */
+function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote }) {
+  const { transferStatus } = wizard;
+
+  if (wizard.showCompleteScreen) {
+    if (transferStatus === undefined) {
+      return <RampQuoteSkeleton />;
+    }
+    return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  if (quote.provider === "stripe") {
+    return (
+      <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
+    );
+  }
+
+  if (quote.provider === "moneygram") {
+    return <MoneygramStep wizard={wizard} quote={quote} />;
+  }
+
+  if (quote.deliveryMode === "hosted") {
+    return <HostedQuoteStep quote={quote} />;
+  }
+
+  if (quote.deliveryMode === "manual_instructions") {
+    return <ManualInstructionsStep wizard={wizard} quote={quote} />;
+  }
+
+  return <RampQuoteSkeleton />;
+}
+
 /**
  * The provider step: the quote's own surface (a hosted frame, a widget, bank instructions),
  * the onboarding or error that stands in its way, or the outcome once the transfer is done.
  */
 function ProviderStep({ wizard }: { wizard: OnrampWizard }) {
-  const t = useTranslations();
   const {
-    fields,
-    selectedWallet,
-    selectedRampPair,
     onboarding,
     retryOnboarding,
     quote,
-    transferStatus,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
   } = wizard;
 
-  if (!quote && quoteCreationError) {
+  if (quote) {
+    return <QuoteStep wizard={wizard} quote={quote} />;
+  }
+
+  if (quoteCreationError) {
     return (
       <RampQuoteError
         error={quoteCreationError}
@@ -248,69 +326,12 @@ function ProviderStep({ wizard }: { wizard: OnrampWizard }) {
 
   if (
     onboarding &&
-    !quote &&
     hasOnboardingLifecycle(onboarding.provider) &&
     isOnboardingPanelStatus(onboarding)
   ) {
     return (
       <RampOnboardingPanel direction="onramp" onboarding={onboarding} onRetry={retryOnboarding} />
     );
-  }
-
-  if (quote && wizard.showCompleteScreen) {
-    if (transferStatus === undefined) {
-      return <RampQuoteSkeleton />;
-    }
-    return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
-  }
-
-  if (quote?.provider === "stripe") {
-    return (
-      <StripeOnrampFrame clientSecret={quote.clientSecret} publishableKey={quote.publishableKey} />
-    );
-  }
-
-  if (quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <MoneygramRampWidget
-        direction="onramp"
-        quote={quote}
-        transferId={wizard.quoteTransferId}
-        sourceWalletId={selectedWallet.id}
-        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-        sourceWalletAddress={selectedWallet.publicKey}
-        sourceTokenMint={null}
-        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-        cryptoAmount={fields.amount.trim()}
-        fiatCurrency={selectedRampPair.fiatCurrency}
-        onSessionExpiring={refreshQuote}
-      />
-    );
-  }
-
-  if (quote?.deliveryMode === "hosted") {
-    return (
-      <div className="space-y-6">
-        {quote.provider === "coinbase" ? (
-          <>
-            <CoinbaseQuoteSummary quote={quote} />
-            <CoinbaseRampFrame orderId={quote.id} src={quote.hostedUrl} />
-          </>
-        ) : (
-          <MoonpayRampFrame
-            title={t("DashboardPayments.ramps.providerDeposit", { provider: quote.provider })}
-            src={quote.hostedUrl}
-          />
-        )}
-      </div>
-    );
-  }
-
-  if (quote?.deliveryMode === "manual_instructions") {
-    return <ManualInstructionsStep wizard={wizard} quote={quote} />;
   }
 
   return <RampQuoteSkeleton />;

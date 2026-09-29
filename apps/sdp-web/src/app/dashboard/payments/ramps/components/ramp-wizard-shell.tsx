@@ -208,6 +208,130 @@ function wizardFooter({
   return <LegacyFooter secondary={legacySecondary} actions={footerActions} primary={primary} />;
 }
 
+/** The two actions the confirm dialog can stand in front of. */
+type ConfirmTarget = "secondary" | "cancel";
+
+/**
+ * The confirm-before-leaving dialog's state: which action it guards, whether it is open, and
+ * what its two buttons do. The dialog only shows while the action it guards may still run.
+ */
+function useLeaveConfirmation({
+  confirmSecondary,
+  hideSecondary,
+  secondaryDisabled,
+  confirmCancel,
+  onCancel,
+  onSecondary,
+}: {
+  confirmSecondary: boolean | undefined;
+  hideSecondary: boolean | undefined;
+  secondaryDisabled: boolean | undefined;
+  confirmCancel: boolean | undefined;
+  onCancel: (() => void) | undefined;
+  onSecondary: () => void;
+}) {
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  // What the confirm dialog runs: the secondary action, or the refresh footer's Cancel.
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget>("secondary");
+  const cancelConfirmationAvailable =
+    confirmTarget === "cancel"
+      ? confirmCancel === true && onCancel !== undefined
+      : confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
+  const askToConfirm = (target: ConfirmTarget) => () => {
+    setConfirmTarget(target);
+    setCancelConfirmOpen(true);
+  };
+  const keepGoing = () => {
+    setCancelConfirmOpen(false);
+    setConfirmTarget("secondary");
+  };
+  const confirmLeave = () => {
+    setCancelConfirmOpen(false);
+    if (!cancelConfirmationAvailable) return;
+    if (confirmTarget === "cancel") {
+      onCancel?.();
+    } else {
+      onSecondary();
+    }
+    setConfirmTarget("secondary");
+  };
+  return {
+    open: cancelConfirmOpen && cancelConfirmationAvailable,
+    askToConfirm,
+    keepGoing,
+    confirmLeave,
+  };
+}
+
+/**
+ * The footer the shell hands the frame, or none when the step hides both actions and has no
+ * extra ones. Actions that need a confirmation open the dialog instead of running.
+ */
+function shellFooter({
+  refresh,
+  stepIndex,
+  primaryLabel,
+  primaryDisabled,
+  onPrimary,
+  hidePrimary,
+  secondaryLabel,
+  secondaryDisabled,
+  hideSecondary,
+  confirmSecondary,
+  onSecondary,
+  onCancel,
+  cancelLabel,
+  confirmCancel,
+  askToConfirm,
+  footerHint,
+  footerActions,
+  t,
+}: {
+  refresh: boolean;
+  stepIndex: number;
+  primaryLabel: string;
+  primaryDisabled: boolean;
+  onPrimary: () => void;
+  hidePrimary: boolean | undefined;
+  secondaryLabel: string | undefined;
+  secondaryDisabled: boolean | undefined;
+  hideSecondary: boolean | undefined;
+  confirmSecondary: boolean | undefined;
+  onSecondary: () => void;
+  onCancel: (() => void) | undefined;
+  cancelLabel: string | undefined;
+  confirmCancel: boolean | undefined;
+  askToConfirm: (target: ConfirmTarget) => () => void;
+  footerHint: ReactNode;
+  footerActions: ReactNode;
+  t: ReturnType<typeof useTranslations>;
+}): ReactNode {
+  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  if (!showFooter) {
+    return undefined;
+  }
+  return wizardFooter({
+    refresh,
+    stepIndex,
+    primary: hidePrimary
+      ? null
+      : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary },
+    secondaryLabel,
+    secondaryDisabled,
+    hideSecondary,
+    onSecondaryClick: confirmSecondary ? askToConfirm("secondary") : onSecondary,
+    cancel: onCancel
+      ? {
+          label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
+          onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
+        }
+      : null,
+    footerHint,
+    footerActions,
+    t,
+  });
+}
+
 export function RampWizardShell({
   steps,
   stepIndex,
@@ -235,42 +359,35 @@ export function RampWizardShell({
 }: RampWizardShellProps) {
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
-  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  // What the confirm dialog runs: the secondary action, or the refresh footer's Cancel.
-  const [confirmTarget, setConfirmTarget] = useState<"secondary" | "cancel">("secondary");
-  const cancelConfirmationAvailable =
-    confirmTarget === "cancel"
-      ? confirmCancel === true && onCancel !== undefined
-      : confirmSecondary === true && hideSecondary !== true && secondaryDisabled !== true;
-  const showFooter = hideSecondary !== true || hidePrimary !== true || footerActions != null;
+  const confirmation = useLeaveConfirmation({
+    confirmSecondary,
+    hideSecondary,
+    secondaryDisabled,
+    confirmCancel,
+    onCancel,
+    onSecondary,
+  });
   const isLastStep = stepIndex === steps.length - 1;
-  const askToConfirm = (target: "secondary" | "cancel") => () => {
-    setConfirmTarget(target);
-    setCancelConfirmOpen(true);
-  };
-  const onSecondaryClick = confirmSecondary ? askToConfirm("secondary") : onSecondary;
-  const footer = showFooter
-    ? wizardFooter({
-        refresh,
-        stepIndex,
-        primary: hidePrimary
-          ? null
-          : { label: primaryLabel, disabled: primaryDisabled, onClick: onPrimary },
-        secondaryLabel,
-        secondaryDisabled,
-        hideSecondary,
-        onSecondaryClick,
-        cancel: onCancel
-          ? {
-              label: cancelLabel ?? t("DashboardPayments.counterparty.cancel"),
-              onClick: confirmCancel ? askToConfirm("cancel") : onCancel,
-            }
-          : null,
-        footerHint,
-        footerActions,
-        t,
-      })
-    : undefined;
+  const footer = shellFooter({
+    refresh,
+    stepIndex,
+    primaryLabel,
+    primaryDisabled,
+    onPrimary,
+    hidePrimary,
+    secondaryLabel,
+    secondaryDisabled,
+    hideSecondary,
+    confirmSecondary,
+    onSecondary,
+    onCancel,
+    cancelLabel,
+    confirmCancel,
+    askToConfirm: confirmation.askToConfirm,
+    footerHint,
+    footerActions,
+    t,
+  });
   return (
     <>
       <WizardFrame
@@ -314,21 +431,9 @@ export function RampWizardShell({
       )}
 
       <CancelTransactionDialog
-        open={cancelConfirmOpen && cancelConfirmationAvailable}
-        onKeepGoing={() => {
-          setCancelConfirmOpen(false);
-          setConfirmTarget("secondary");
-        }}
-        onCancel={() => {
-          setCancelConfirmOpen(false);
-          if (!cancelConfirmationAvailable) return;
-          if (confirmTarget === "cancel") {
-            onCancel?.();
-          } else {
-            onSecondary();
-          }
-          setConfirmTarget("secondary");
-        }}
+        open={confirmation.open}
+        onKeepGoing={confirmation.keepGoing}
+        onCancel={confirmation.confirmLeave}
       />
     </>
   );

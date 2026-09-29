@@ -137,23 +137,28 @@ function CounterpartyForm() {
   );
 }
 
-/** Asks whether to attach an address the screening flagged, or could not screen. */
+/**
+ * Asks what to do with the contact's address: attach one the screening flagged (or could not
+ * screen) anyway, or try again one whose save failed; either way it can be skipped.
+ */
 function FlaggedAddressDialog() {
   const t = useTranslations();
   const { flaggedAddress, submitting, attachFlaggedAddress, skipFlaggedAddress } =
     useCounterpartyCreate();
+  const failed = flaggedAddress?.reason === "failed";
+  const title = failed
+    ? t("DashboardPayments.counterparty.addressNotSavedTitle")
+    : t("DashboardPayments.counterparty.addAnywayTitle");
   return (
     <Modal
       isOpen={flaggedAddress !== null}
-      ariaLabel={t("DashboardPayments.counterparty.addAnywayTitle")}
+      ariaLabel={title}
       onClose={skipFlaggedAddress}
       size="sm"
     >
       <div className="space-y-5 p-6">
         <div className="space-y-1">
-          <h2 className="text-subheading font-medium text-primary">
-            {t("DashboardPayments.counterparty.addAnywayTitle")}
-          </h2>
+          <h2 className="text-subheading font-medium text-primary">{title}</h2>
           <p className="text-body text-secondary">{flaggedAddress?.message}</p>
         </div>
         <div className="flex items-center justify-end gap-2">
@@ -165,15 +170,21 @@ function FlaggedAddressDialog() {
           >
             {t("DashboardPayments.counterparty.skipAddress")}
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={submitting}
-            iconLeft={<ShieldAlertIcon />}
-            onClick={() => void attachFlaggedAddress()}
-          >
-            {t("DashboardPayments.counterparty.addAnyway")}
-          </Button>
+          {failed ? (
+            <Button type="button" disabled={submitting} onClick={() => void attachFlaggedAddress()}>
+              {t("DashboardPayments.counterparty.tryAgain")}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={submitting}
+              iconLeft={<ShieldAlertIcon />}
+              onClick={() => void attachFlaggedAddress()}
+            >
+              {t("DashboardPayments.counterparty.addAnyway")}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>

@@ -62,6 +62,7 @@ import {
   getRecurringPayment,
   listRecurringPayments,
 } from "@/app/dashboard/payments/recurring/recurring-payments.data";
+import PaymentRequestDetailRoute from "@/app/dashboard/payments/requests/[requestId]/page";
 import PaymentRequestsPage from "@/app/dashboard/payments/requests/page";
 import { fetchPaymentRequests } from "@/app/dashboard/payments/requests/payment-requests-page.data";
 import TransactionsPage from "@/app/dashboard/payments/transactions/page";
@@ -604,7 +605,6 @@ describe("Requests", () => {
       initialPaymentRequests: PaymentRequest[];
       total: number;
       initialError: string | undefined;
-      wallets: PaymentsDashboardWallet[];
       counterparties: Counterparty[];
     }>(await PaymentRequestsPage({ searchParams: Promise.resolve({}) }));
     expect(props.initialError).toBeUndefined();
@@ -613,14 +613,31 @@ describe("Requests", () => {
     expect(new Set(props.initialPaymentRequests.map((request) => request.status))).toEqual(
       new Set(["awaiting_payment", "paid", "expired", "canceled"])
     );
-    const walletIds = props.wallets.map((wallet) => wallet.walletId);
     const contactIds = props.counterparties.map((contact) => contact.id);
     for (const request of props.initialPaymentRequests) {
-      expect(walletIds).toContain(request.walletId);
       if (request.counterpartyId) expect(contactIds).toContain(request.counterpartyId);
       expect(request.lifecycle[0]?.status).toBe("awaiting_payment");
     }
     expect(isNewestFirst(props.initialPaymentRequests)).toBe(true);
+  });
+
+  it("opens each request's page on a demo wallet, naming its contact", async () => {
+    const { initialPaymentRequests } = propsOf<{ initialPaymentRequests: PaymentRequest[] }>(
+      await PaymentRequestsPage({ searchParams: Promise.resolve({}) })
+    );
+    for (const request of initialPaymentRequests) {
+      const detail = propsOf<{ children: unknown }>(
+        await PaymentRequestDetailRoute({ params: Promise.resolve({ requestId: request.id }) })
+      );
+      const props = propsOf<{
+        request: PaymentRequest | null;
+        contactName: string | null;
+        walletName: string | null;
+      }>(detail.children);
+      expect(props.request?.id).toBe(request.id);
+      expect(props.walletName).not.toBeNull();
+      expect(props.contactName === null).toBe(request.counterpartyId === null);
+    }
   });
 });
 

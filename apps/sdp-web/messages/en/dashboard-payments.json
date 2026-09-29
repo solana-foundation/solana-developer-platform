@@ -752,7 +752,9 @@
       "doNotAdd": "Do not add",
       "addressAdded": "Address added",
       "addressLabelPlaceholder": "Ops wallet",
-      "addressPlaceholder": "Solana address, 32 to 44 characters"
+      "addressPlaceholder": "Solana address, 32 to 44 characters",
+      "addressNotSavedTitle": "Address not saved",
+      "tryAgain": "Try again"
     },
     "playground": {
       "moonPay": "MoonPay",

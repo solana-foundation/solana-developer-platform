@@ -1667,7 +1667,8 @@ function counterpartiesBody(world: DemoWorld, params: URLSearchParams) {
 }
 
 function projectAccountsBody(world: DemoWorld, params: URLSearchParams) {
-  const ids = csv(params, "ids");
+  const idList = csv(params, "ids");
+  const ids = idList === null ? null : new Set(idList);
   const search = params.get("search");
   const summaries = newestFirst(Object.values(world.accounts))
     .map(
@@ -1683,7 +1684,7 @@ function projectAccountsBody(world: DemoWorld, params: URLSearchParams) {
     )
     .filter(
       (summary) =>
-        (ids === null || ids.includes(summary.counterpartyAccountId)) &&
+        (ids === null || ids.has(summary.counterpartyAccountId)) &&
         (search === null ||
           search.trim() === "" ||
           includesSearch([summary.name, summary.address, summary.label], search))

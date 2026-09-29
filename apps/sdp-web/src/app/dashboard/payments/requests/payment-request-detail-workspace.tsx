@@ -24,6 +24,75 @@ import {
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import { deriveTokenOptions } from "./payment-requests-page.data";
 
+type Translate = ReturnType<typeof useTranslations>;
+
+/** Why a request is in its state, in the design's words; an open one says until when. */
+function requestWhy(
+  status: PaymentRequest["status"],
+  expires: string | null,
+  t: Translate
+): string {
+  if (status === "paid") {
+    return t("DashboardPayments.requestDetail.why.paid");
+  }
+  if (status === "awaiting_payment") {
+    return expires
+      ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
+      : t("DashboardPayments.requestDetail.why.awaiting");
+  }
+  return status === "canceled"
+    ? t("DashboardPayments.requestDetail.why.canceled")
+    : t("DashboardPayments.requestDetail.why.expired");
+}
+
+/** The request's pay link on this origin, and the copy that puts it on the clipboard. */
+function RequestPaymentLink({ request, symbol }: { request: PaymentRequest; symbol: string }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  // The link is on this origin; read after mount so the server render does not guess it.
+  const [origin, setOrigin] = useState("");
+  useEffect(() => setOrigin(window.location.origin), []);
+  const payLink = `${origin}/pay/${request.publicToken}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(payLink);
+    } catch {
+      toast.error(t("DashboardPayments.record.copyFailed"));
+      return;
+    }
+    toast.success(t("DashboardPayments.requestDetail.linkCopied"), {
+      id: `request-link-${request.id}`,
+      description: t("DashboardPayments.requestDetail.linkCopiedDescription", {
+        amount: `${formatDecimalAmount(request.amount, locale)} ${symbol}`,
+      }),
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-border-default pt-4">
+      <span className="text-meta text-secondary">
+        {t("DashboardPayments.requestDetail.paymentLink")}
+      </span>
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-body text-primary">
+          {origin ? payLink : null}
+        </span>
+        <Button
+          type="button"
+          variant={request.status === "awaiting_payment" ? "default" : "outline"}
+          size="sm"
+          iconLeft={<CopyIcon />}
+          disabled={!origin}
+          onClick={() => void copyLink()}
+        >
+          {t("Shared.SharedComponents.copyLink")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 interface PaymentRequestDetailWorkspaceProps {
   request: PaymentRequest | null;
   /** The contact the request names, when it names one and the contact could be read. */
@@ -45,22 +114,7 @@ export function PaymentRequestDetailWorkspace({
   error,
 }: PaymentRequestDetailWorkspaceProps) {
   const t = useTranslations();
-  const locale = useLocale();
   const router = useRouter();
-  const { sdpEnvironment } = useDashboardWorkspace();
-  const tokenSymbolByMint = useMemo(
-    () =>
-      new Map(
-        deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]).map((token) => [
-          token.mintAddress,
-          token.symbol,
-        ])
-      ),
-    [sdpEnvironment]
-  );
-  // The link is on this origin; read after mount so the server render does not guess it.
-  const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
 
   if (!request) {
     return (
@@ -73,35 +127,37 @@ export function PaymentRequestDetailWorkspace({
       </DashboardWorkspaceOverviewPanel>
     );
   }
+  return (
+    <PaymentRequestRecord request={request} contactName={contactName} walletName={walletName} />
+  );
+}
+
+/** The record once the request could be read: the band, the amount and link, then the rows. */
+function PaymentRequestRecord({
+  request,
+  contactName,
+  walletName,
+}: {
+  request: PaymentRequest;
+  contactName: string | null;
+  walletName: string | null;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const { sdpEnvironment } = useDashboardWorkspace();
+  const tokenSymbolByMint = useMemo(
+    () =>
+      new Map(
+        deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]).map((token) => [
+          token.mintAddress,
+          token.symbol,
+        ])
+      ),
+    [sdpEnvironment]
+  );
 
   const symbol = tokenSymbolByMint.get(request.token) ?? shortenAddress(request.token);
-  const payLink = `${origin}/pay/${request.publicToken}`;
   const expires = request.expiresAt ? formatDateTime(request.expiresAt, locale) : null;
-  const why =
-    request.status === "paid"
-      ? t("DashboardPayments.requestDetail.why.paid")
-      : request.status === "awaiting_payment"
-        ? expires
-          ? t("DashboardPayments.requestDetail.why.awaitingUntil", { date: expires })
-          : t("DashboardPayments.requestDetail.why.awaiting")
-        : request.status === "canceled"
-          ? t("DashboardPayments.requestDetail.why.canceled")
-          : t("DashboardPayments.requestDetail.why.expired");
-
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(payLink);
-    } catch {
-      toast.error(t("DashboardPayments.record.copyFailed"));
-      return;
-    }
-    toast.success(t("DashboardPayments.requestDetail.linkCopied"), {
-      id: `request-link-${request?.id}`,
-      description: t("DashboardPayments.requestDetail.linkCopiedDescription", {
-        amount: `${formatDecimalAmount(request?.amount ?? "", locale)} ${symbol}`,
-      }),
-    });
-  }
 
   return (
     <DashboardWorkspaceOverviewPanel>
@@ -111,7 +167,7 @@ export function PaymentRequestDetailWorkspace({
         <RecordStateBand
           state={t(REQUEST_STATUS_TRANSLATION_KEYS[request.status])}
           tone={REQUEST_STATUS_TONE[request.status]}
-          why={why}
+          why={requestWhy(request.status, expires, t)}
           action={
             request.status === "paid" && request.fulfilledByTransferId ? (
               <Button asChild variant="outline" size="sm">
@@ -127,26 +183,7 @@ export function PaymentRequestDetailWorkspace({
           <RecordAmount label={t("DashboardPayments.requests.amountRequested")}>
             {formatDecimalAmount(request.amount, locale)} {symbol}
           </RecordAmount>
-          <div className="flex flex-col gap-2 border-t border-border-default pt-4">
-            <span className="text-meta text-secondary">
-              {t("DashboardPayments.requestDetail.paymentLink")}
-            </span>
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="min-w-0 flex-1 truncate font-mono text-body text-primary">
-                {origin ? payLink : null}
-              </span>
-              <Button
-                type="button"
-                variant={request.status === "awaiting_payment" ? "default" : "outline"}
-                size="sm"
-                iconLeft={<CopyIcon />}
-                disabled={!origin}
-                onClick={() => void copyLink()}
-              >
-                {t("Shared.SharedComponents.copyLink")}
-              </Button>
-            </div>
-          </div>
+          <RequestPaymentLink request={request} symbol={symbol} />
         </section>
 
         <div className="pt-2">

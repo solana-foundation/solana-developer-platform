@@ -7,7 +7,7 @@ import { useState } from "react";
 import { getDefaultClassNames } from "react-day-picker";
 import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { Calendar } from "@/components/ui/calendar";
-import { formatDateValue, parseDateValue, pickerLocale } from "@/components/ui/date-picker";
+import { formatDateValue, parseDateValue, pickerLocale } from "@/components/ui/date-value";
 import { Input } from "@/components/ui/input";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";

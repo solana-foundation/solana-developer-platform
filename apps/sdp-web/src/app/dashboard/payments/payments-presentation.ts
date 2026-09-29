@@ -66,22 +66,31 @@ export const ACTIVITY_KIND_MESSAGE_KEYS = {
   batch: "DashboardPayments.activityKind.batch",
 } as const satisfies Record<ActivityKind, MessageKey>;
 
+const DECIMAL_AMOUNT = /^-?\d+(\.\d+)?$/;
+
 /**
- * A decimal amount with grouping and at least two fraction digits ("12,000.00"), keeping up
- * to nine (the most an SPL token carries) so no nonzero amount rounds to "0.00". Non-numeric
- * input passes through.
+ * A decimal amount with grouping and at least two fraction digits ("12,000.00"), keeping every
+ * digit the value has: the string is formatted as written, not through a float, so no nonzero
+ * amount rounds to "0.00" and a large one keeps its last digits. Non-numeric input passes
+ * through.
  *
  * @param value - Decimal string.
  * @param locale - Formatting locale.
  * @returns The formatted amount.
  */
 export function formatDecimalAmount(value: string, locale?: string): string {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return value;
+  const trimmed = value.trim();
+  if (!DECIMAL_AMOUNT.test(trimmed)) {
+    const numeric = Number(trimmed);
+    return trimmed !== "" && Number.isFinite(numeric)
+      ? new Intl.NumberFormat(locale, { minimumFractionDigits: 2 }).format(numeric)
+      : value;
+  }
+  const fractionDigits = trimmed.split(".")[1]?.length ?? 0;
   return new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 9,
-  }).format(numeric);
+    maximumFractionDigits: Math.min(Math.max(2, fractionDigits), 100),
+  }).format(trimmed as `${number}`);
 }
 
 /**
