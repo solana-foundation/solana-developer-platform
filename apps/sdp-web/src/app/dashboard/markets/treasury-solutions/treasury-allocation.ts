@@ -135,8 +135,8 @@ export interface TreasuryAllocation {
   /** Set exactly when `deployedValue` is absent. */
   deployedAbsence: DeployedAbsence | undefined;
   /**
-   * Each custody row's cash line, keyed by wallet id: its address's share of
-   * `availableCash`, undefined when that wallet's balances are unavailable.
+   * Each custody row's cash line, keyed by wallet id and read from that row's
+   * own balances; undefined when they are unavailable.
    */
   cashByWalletId: ReadonlyMap<string, string | undefined>;
   /** Each custody row's deployment line, keyed by wallet id. */
@@ -263,29 +263,38 @@ function walletStableCash(
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
-/** Each distinct on-chain wallet's cash line, keyed by address. */
-function stableCashByPublicKey(
+/**
+ * Each custody row's cash line from its OWN balance read. Rows that share an
+ * address share its par intermediates but not a read: one can fail while the
+ * other lands.
+ */
+function cashByWallet(
   wallets: readonly TreasuryAllocationWallet[],
   positions: readonly TreasuryAllocationPosition[] | undefined
 ): Map<string, string | undefined> {
   const openByPublicKey = openPositionsByPublicKey(wallets, positions ?? []);
-  const cash = new Map<string, string | undefined>();
-  for (const [publicKey, wallet] of walletsByPublicKey(wallets)) {
-    const open = openByPublicKey.get(publicKey) ?? [];
-    cash.set(publicKey, walletStableCash(wallet, parIntermediateAmounts(open)));
-  }
-  return cash;
+  return new Map(
+    wallets.map((wallet) => [
+      wallet.id,
+      walletStableCash(wallet, parIntermediateAmounts(openByPublicKey.get(wallet.publicKey) ?? [])),
+    ])
+  );
 }
 
+/** Portfolio cash: one line per distinct address, so a wallet with several rows counts once. */
 function availableStableCash(
-  cashByPublicKey: ReadonlyMap<string, string | undefined> | undefined
+  wallets: readonly TreasuryAllocationWallet[] | undefined,
+  cashByWalletId: ReadonlyMap<string, string | undefined>
 ): string | undefined {
-  if (cashByPublicKey === undefined) return undefined;
-  const amounts = [...cashByPublicKey.values()];
-  const readable = amounts.filter((amount): amount is string => amount !== undefined);
-  // One wallet whose balances could not be read makes the TOTAL unknowable.
-  if (readable.length !== amounts.length) return undefined;
-  return readable.length === 0 ? "0" : sumDecimalStrings(readable);
+  if (wallets === undefined) return undefined;
+  const amounts: string[] = [];
+  for (const wallet of walletsByPublicKey(wallets).values()) {
+    const cash = cashByWalletId.get(wallet.id);
+    // One wallet whose balances could not be read makes the TOTAL unknowable.
+    if (cash === undefined) return undefined;
+    amounts.push(cash);
+  }
+  return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
 
 interface TreasuryRateStrategy {
@@ -492,9 +501,8 @@ export function summarizeTreasuryAllocation({
   shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocation {
-  const cashByPublicKey =
-    wallets === undefined ? undefined : stableCashByPublicKey(wallets, positions);
-  const availableCash = availableStableCash(cashByPublicKey);
+  const cashByWalletId = cashByWallet(wallets ?? [], positions);
+  const availableCash = availableStableCash(wallets, cashByWalletId);
   const { deploymentByWalletId, someWalletUnreadable, unrecordedShareMints } =
     resolveWalletCoverage({ positions, shareMints, wallets });
 
@@ -514,9 +522,7 @@ export function summarizeTreasuryAllocation({
           certified || readFailed
           ? "unreadable"
           : "unreconciled",
-    cashByWalletId: new Map(
-      (wallets ?? []).map((wallet) => [wallet.id, cashByPublicKey?.get(wallet.publicKey)])
-    ),
+    cashByWalletId,
     deploymentByWalletId,
     unrecordedShareMints,
   };

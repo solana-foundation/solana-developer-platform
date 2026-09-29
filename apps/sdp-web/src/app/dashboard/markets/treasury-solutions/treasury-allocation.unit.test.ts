@@ -411,6 +411,27 @@ describe("a par intermediate left by a cancelled request", () => {
     expect(summary.cashByWalletId.get("wallet-project")).toBe("50");
   });
 
+  it("gives each custody row the cash its own balance read supports", () => {
+    const summary = summarize({
+      wallets: [
+        wallet(undefined, "wallet-org", "pk-shared"),
+        wallet(
+          [
+            { mint: USDC_MINT, uiAmount: "50" },
+            { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+          ],
+          "wallet-project",
+          "pk-shared"
+        ),
+      ],
+      positions: [{ ...residual, custodyWalletId: "wallet-org" }],
+    });
+
+    expect(summary.cashByWalletId.get("wallet-org")).toBeUndefined();
+    expect(summary.cashByWalletId.get("wallet-project")).toBe("50");
+    expect(summary.availableCash).toBeUndefined();
+  });
+
   it("makes the owning wallet's cash unavailable when the recorded amount is malformed", () => {
     const summary = summarize({
       wallets: [
