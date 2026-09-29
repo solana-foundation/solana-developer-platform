@@ -641,7 +641,9 @@ export function DashboardShell({
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
-        shouldLockShellViewport ? "h-screen overflow-hidden" : "",
+        // clip, not hidden: a hidden box can still be scrolled by the browser (focusing a
+        // control below the fold), which shifts the locked page up and leaves a gap under it.
+        shouldLockShellViewport ? "h-screen overflow-clip" : "",
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
@@ -761,7 +763,7 @@ export function DashboardShell({
                 // keeps only the home indicator's inset.
                 shouldLockViewportScroll
                   ? [
-                      "flex min-h-0 flex-col overflow-hidden md:pb-0",
+                      "flex min-h-0 flex-col overflow-clip md:pb-0",
                       isRefresh
                         ? "pb-[env(safe-area-inset-bottom)]"
                         : "pb-[calc(4rem+env(safe-area-inset-bottom))]",

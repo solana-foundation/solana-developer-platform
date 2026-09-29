@@ -49,7 +49,10 @@ export function SegmentedControl({
         return (
           <label
             key={option.value}
-            className={cn("flex flex-1", disabled ? "cursor-not-allowed" : "cursor-pointer")}
+            className={cn(
+              "relative flex flex-1",
+              disabled ? "cursor-not-allowed" : "cursor-pointer"
+            )}
           >
             <input
               type="radio"

@@ -53,7 +53,7 @@ function ConsentRow({
 }) {
   return (
     <li>
-      <label className="group flex cursor-pointer items-start gap-3 py-1.5 text-left has-disabled:cursor-default">
+      <label className="group relative flex cursor-pointer items-start gap-3 py-1.5 text-left has-disabled:cursor-default">
         <input
           type="checkbox"
           className="peer sr-only"
