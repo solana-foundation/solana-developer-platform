@@ -142,7 +142,14 @@ assets, and a post-deadline owner-signed cancellation returns shares. Hastra's
 par request instead redeems PRIME to wYLDS and delegates that wYLDS; a Hastra
 administrator later burns it and pays USDC, while an owner cancellation may
 happen at any time and leaves the owner holding wYLDS rather than recreating
-PRIME. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+PRIME. That wYLDS stays part of the position: position reads carry it as
+`parIntermediate`, every close-out asks `isEarnVaultHoldingEmpty` (`@sdp/types`:
+shares AND intermediate zero, the same rule the dashboard's open filter uses),
+and `advanceRequest` reopens the holding on every cancellation, not only a
+solver queue's, so a stale zero-share snapshot cannot retire it. Values that
+sum a holding (earnings `currentValue`, the summary totals) add the
+intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
+shares' value. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
 signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history

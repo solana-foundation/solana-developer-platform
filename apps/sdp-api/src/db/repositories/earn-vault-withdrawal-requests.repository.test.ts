@@ -760,7 +760,7 @@ describe("Earn queued withdrawal repository", () => {
     expect(position?.updated_at).not.toBe("2026-09-18T00:00:00.000Z");
   });
 
-  it("retries operator cancellation, preserves shares, and embargoes terminal PDA reuse", async () => {
+  it("retries operator cancellation, reopens the holding, and embargoes terminal PDA reuse", async () => {
     const requestAddress = "ParRequestAddress11111111111111111111111";
     const created = await createRequest({
       mechanism: "operator_redemption",
@@ -833,11 +833,14 @@ describe("Earn queued withdrawal repository", () => {
       closingSignature: "par-cancel-signature-final",
       cancelledAt: "2026-09-18T01:00:00.000Z",
     });
+    // The cancelled request's intermediate stays in the wallet and is still
+    // this holding, so a stale zero-share close must not retire it.
     const position = await getDb(env)
-      .prepare("SELECT closed_at FROM earn_positions WHERE id = ?")
+      .prepare("SELECT closed_at, updated_at FROM earn_positions WHERE id = ?")
       .bind(POSITION)
-      .first<{ closed_at: string | null }>();
-    expect(position?.closed_at).toBe("2026-09-18T00:00:00.000Z");
+      .first<{ closed_at: string | null; updated_at: string }>();
+    expect(position?.closed_at).toBeNull();
+    expect(position?.updated_at).not.toBe("2026-09-18T00:00:00.000Z");
 
     const reuseTerms = {
       mechanism: "operator_redemption" as const,

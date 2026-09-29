@@ -1,8 +1,13 @@
 import { decimalScale, formatDecimalAmount, parseDecimalAmount } from "@sdp/solana/amount";
-import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import {
+  type EarnVaultPositionIntermediate,
+  isEarnVaultHoldingEmpty,
+  WELL_KNOWN_TOKEN_BY_MINT,
+} from "@sdp/types";
 import { compareUnsignedDecimals } from "../earn/earn-decimal";
 import { isIntlDecimalLiteral } from "../earn/earn-format";
 import { earnStrategyReferenceKey, sumDecimalStrings } from "../earn/earn-market-presentation";
+import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
 
 /**
  * Portfolio-level allocation for the Treasury overview (PRO-1723): available
@@ -53,6 +58,7 @@ export interface TreasuryAllocationPosition {
   shares?: string;
   tokenMint: string;
   tokenValue?: string;
+  parIntermediate?: Pick<EarnVaultPositionIntermediate, "mint" | "amount" | "tokenValue">;
 }
 
 /**
@@ -77,14 +83,19 @@ export interface VaultShareMintVocabulary {
 }
 
 /**
- * A position is open while it is not closed and its shares are not provably
- * zero. Shared with the Active-positions table so the summary and the rows
- * beneath it always describe the same set.
+ * A position is open while it is not closed and its holding is not provably
+ * empty: shares and any par intermediate both zero, by the rule the API's
+ * close-out uses. Shared with the Active-positions table so the summary and
+ * the rows beneath it always describe the same set.
  */
 export function isOpenVaultPosition(position: TreasuryAllocationPosition): boolean {
   return (
     position.closedAt === null &&
-    (position.shares === undefined || compareUnsignedDecimals(position.shares, "0") !== 0)
+    (position.shares === undefined ||
+      !isEarnVaultHoldingEmpty({
+        shares: position.shares,
+        parIntermediate: position.parIntermediate,
+      }))
   );
 }
 
@@ -118,6 +129,11 @@ export interface TreasuryAllocation {
   deployedValue: string | undefined;
   /** Set exactly when `deployedValue` is absent. */
   deployedAbsence: DeployedAbsence | undefined;
+  /**
+   * Mints open positions hold as a par intermediate. That value is already in
+   * `deployedValue`, so no cash line may count the same balance again.
+   */
+  parIntermediateMints: ReadonlySet<string>;
   /** Each custody row's deployment line, keyed by wallet id. */
   deploymentByWalletId: ReadonlyMap<string, WalletDeploymentDisplay>;
   /**
@@ -182,8 +198,11 @@ function walletsByPublicKey(
   return distinct;
 }
 
+const NO_MINTS: ReadonlySet<string> = new Set();
+
 function availableStableCash(
-  wallets: readonly TreasuryAllocationWallet[] | undefined
+  wallets: readonly TreasuryAllocationWallet[] | undefined,
+  deployedMints: ReadonlySet<string> = NO_MINTS
 ): string | undefined {
   if (wallets === undefined) return undefined;
   const amounts: string[] = [];
@@ -191,7 +210,9 @@ function availableStableCash(
     // One wallet whose balances could not be read makes the TOTAL unknowable.
     if (wallet.balances === undefined) return undefined;
     for (const balance of wallet.balances) {
-      if (isUsdStableBalance(balance)) amounts.push(balance.uiAmount);
+      if (!deployedMints.has(balance.mint) && isUsdStableBalance(balance)) {
+        amounts.push(balance.uiAmount);
+      }
     }
   }
   // No stable balances is a real zero; `sumDecimalStrings` reserves undefined
@@ -201,9 +222,10 @@ function availableStableCash(
 
 /** One wallet's available USD-stable cash, using the same classification as the portfolio total. */
 export function availableTreasuryCashForWallet(
-  wallet: TreasuryAllocationWallet
+  wallet: TreasuryAllocationWallet,
+  deployedMints: ReadonlySet<string> = NO_MINTS
 ): string | undefined {
-  return availableStableCash([wallet]);
+  return availableStableCash([wallet], deployedMints);
 }
 
 interface TreasuryRateStrategy {
@@ -231,6 +253,9 @@ export function estimatedTreasuryApy({
   if (positions === undefined || strategies === undefined) return undefined;
   const open = positions.filter(isOpenVaultPosition);
   if (open.length === 0) return undefined;
+  // A par intermediate earns no strategy rate this page can state, so it
+  // poisons the estimate the way a missing rate does.
+  if (open.some((position) => position.parIntermediate !== undefined)) return undefined;
 
   const strategyByReference = new Map(
     strategies.map((strategy) => [
@@ -279,9 +304,10 @@ function deployedVaultValue(
   if (positions === undefined) return undefined;
   const amounts: string[] = [];
   for (const position of positions.filter(isOpenVaultPosition)) {
-    if (position.tokenValue === undefined) return undefined;
+    const value = earnVaultHoldingValue(position);
+    if (value === undefined) return undefined;
     if (!WELL_KNOWN_TOKEN_BY_MINT.get(position.tokenMint)?.isUsdStable) return undefined;
-    amounts.push(position.tokenValue);
+    amounts.push(value);
   }
   return amounts.length === 0 ? "0" : sumDecimalStrings(amounts);
 }
@@ -406,7 +432,12 @@ export function summarizeTreasuryAllocation({
   shareMints: VaultShareMintVocabulary;
   wallets: readonly TreasuryAllocationWallet[] | undefined;
 }): TreasuryAllocation {
-  const availableCash = availableStableCash(wallets);
+  const parIntermediateMints = new Set(
+    (positions ?? [])
+      .filter(isOpenVaultPosition)
+      .flatMap((position) => (position.parIntermediate ? [position.parIntermediate.mint] : []))
+  );
+  const availableCash = availableStableCash(wallets, parIntermediateMints);
   const { deploymentByWalletId, someWalletUnreadable, unrecordedShareMints } =
     resolveWalletCoverage({ positions, shareMints, wallets });
 
@@ -427,6 +458,7 @@ export function summarizeTreasuryAllocation({
           ? "unreadable"
           : "unreconciled",
     deploymentByWalletId,
+    parIntermediateMints,
     unrecordedShareMints,
   };
 }

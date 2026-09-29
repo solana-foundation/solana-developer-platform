@@ -286,6 +286,39 @@ export interface EarnStrategy {
 }
 
 /**
+ * A par-redemption intermediate the owner holds outside any open request, such
+ * as Hastra wYLDS after a cancelled par request. It belongs to the position:
+ * the holding is not empty while it is non-zero.
+ */
+export interface EarnVaultPositionIntermediate {
+  mint: string;
+  amount: string;
+  /** "0" while the provider has frozen the account. */
+  withdrawableAmount: string;
+  /** Value in the position's deposit token (`tokenMint`). */
+  tokenValue: string;
+}
+
+const CANONICAL_ZERO_DECIMAL = /^0+(\.0+)?$/;
+
+/**
+ * Whether a live-read vault holding is empty. Every close-out and the
+ * dashboard's open-position filter use this one rule, so a position whose
+ * shares are gone but whose par intermediate remains is never retired or
+ * hidden. Anything but a canonical zero reads as non-empty.
+ */
+export function isEarnVaultHoldingEmpty(holding: {
+  shares: string;
+  parIntermediate?: Pick<EarnVaultPositionIntermediate, "amount">;
+}): boolean {
+  return (
+    CANONICAL_ZERO_DECIMAL.test(holding.shares) &&
+    (holding.parIntermediate === undefined ||
+      CANONICAL_ZERO_DECIMAL.test(holding.parIntermediate.amount))
+  );
+}
+
+/**
  * Non-custodial vault positions — the custody wallet owns the vault shares and
  * SDP reads their current value live from the provider on every list request.
  */
@@ -324,6 +357,8 @@ export interface EarnVaultPosition {
    * position.
    */
   tokenValue?: string;
+  /** Present only while the owner holds a par intermediate outside an open request. */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 export interface EarnVaultPositionsPage {
@@ -355,6 +390,8 @@ export interface EarnExternalWalletPosition {
    * read failed.
    */
   tokenValue?: string;
+  /** Present only while the owner holds a par intermediate outside an open request. */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 /** Keyset page for exactly one external wallet. */
@@ -371,8 +408,9 @@ export interface EarnExternalWalletTokenTotal {
   positionCount: number;
   unavailablePositionCount: number;
   /**
-   * Sum of the positions' `tokenValue` in `tokenMint`, a dollar figure at par. Absent when any
-   * contributing position is unavailable, so the total is never partial.
+   * Sum of the positions' `tokenValue` plus any par intermediate's value, in `tokenMint`, a
+   * dollar figure at par. Absent when any contributing position is unavailable, so the total
+   * is never partial.
    */
   tokenValue?: string;
 }
@@ -980,7 +1018,10 @@ export interface EarnExternalWalletTokenEarnings {
   positionCount: number;
   /** Positions whose live value could not hydrate. */
   unavailablePositionCount: number;
-  /** Live value across the token's positions; absent when any position is unavailable. */
+  /**
+   * Live value across the token's positions, including any par intermediate;
+   * absent when any position is unavailable.
+   */
   currentValue?: string;
   /** Sum of finalized SDP deposits, a pure ledger fact — always present. */
   totalDeposited: string;

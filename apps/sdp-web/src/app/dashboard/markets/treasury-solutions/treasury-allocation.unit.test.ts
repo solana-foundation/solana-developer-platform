@@ -4,6 +4,7 @@ import {
   availableTreasuryCashForWallet,
   estimatedTreasuryApy,
   heldVaultShareMints,
+  isOpenVaultPosition,
   summarizeTreasuryAllocation,
   type TreasuryAllocationBalance,
   type TreasuryAllocationPosition,
@@ -324,6 +325,44 @@ describe("Treasury presentation figures", () => {
           },
         ],
         strategies: [{ provider: "kamino", providerReference: "another-vault" }],
+      })
+    ).toBeUndefined();
+  });
+});
+
+describe("a par intermediate left by a cancelled request", () => {
+  const WYLDS_MINT = "wYLDS111111111111111111111111111111111111111";
+  const residual = openPosition({
+    shares: "0",
+    tokenValue: "0",
+    parIntermediate: { mint: WYLDS_MINT, amount: "2000", tokenValue: "2000" },
+  });
+
+  it("keeps a position with no shares open while its intermediate remains", () => {
+    expect(isOpenVaultPosition(residual)).toBe(true);
+    expect(isOpenVaultPosition(openPosition({ shares: "0", tokenValue: "0" }))).toBe(false);
+  });
+
+  it("counts it as deployed and never again as cash, even at a $1 price", () => {
+    const priced = wallet([
+      { mint: USDC_MINT, uiAmount: "50" },
+      { mint: WYLDS_MINT, uiAmount: "2000", usdPrice: 1 },
+    ]);
+    const summary = summarize({
+      wallets: [priced],
+      positions: [residual, openPosition({ tokenValue: "100" })],
+    });
+
+    expect(summary.deployedValue).toBe("2100");
+    expect(summary.availableCash).toBe("50");
+    expect(availableTreasuryCashForWallet(priced, summary.parIntermediateMints)).toBe("50");
+  });
+
+  it("makes estimated APY unavailable rather than stating a rate for it", () => {
+    expect(
+      estimatedTreasuryApy({
+        positions: [{ ...residual, provider: "hastra", providerReference: "prime" }],
+        strategies: [{ provider: "hastra", providerReference: "prime", currentApy: "0.07" }],
       })
     ).toBeUndefined();
   });

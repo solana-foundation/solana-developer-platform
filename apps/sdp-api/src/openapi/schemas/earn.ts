@@ -1104,6 +1104,24 @@ const earnExternalWalletPositionSchema = z
         "not a USD conversion; every Earn deposit token is a USD stablecoin, so at par this is a " +
         "dollar figure. Absent when hydration is unavailable.",
     }),
+    parIntermediate: z
+      .object({
+        mint: z.string().openapi({ example: "8fr7WGTVFszfyNWRMXj6fRjZZAnDwmXwEpCrtzmUkdih" }),
+        amount: earnLiveDecimalAmountSchema,
+        withdrawableAmount: earnLiveDecimalAmountSchema.openapi({
+          description: "Zero while the provider has frozen the token account.",
+        }),
+        tokenValue: earnLiveDecimalAmountSchema.openapi({
+          description: "Value in the position's deposit token (`tokenMint`).",
+        }),
+      })
+      .optional()
+      .openapi({
+        description:
+          "The par-redemption route's intermediate token the owner holds outside any open " +
+          "request, such as Hastra wYLDS after a cancelled par redemption. It belongs to this " +
+          "position and is not included in `tokenValue`. Present only while non-zero.",
+      }),
   })
   .openapi({ description: "One live vault position owned by a partner end-user wallet." });
 
@@ -1114,9 +1132,9 @@ const earnExternalWalletTokenTotalSchema = z.object({
   unavailablePositionCount: z.number().int().nonnegative(),
   tokenValue: earnLiveDecimalAmountSchema.optional().openapi({
     description:
-      "Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue`, " +
-      "a dollar figure at par. Absent when any contributing position is unavailable, so partial " +
-      "money is never presented as complete.",
+      "Exact live total in the deposit token (`tokenMint`): the sum of the positions' `tokenValue` " +
+      "plus any `parIntermediate.tokenValue`, a dollar figure at par. Absent when any " +
+      "contributing position is unavailable, so partial money is never presented as complete.",
   }),
 });
 
@@ -1204,8 +1222,9 @@ const earnExternalWalletTokenEarningsSchema = z
     }),
     currentValue: earnLiveDecimalAmountSchema.optional().openapi({
       description:
-        "Live value across the token's positions. Absent when any contributing position is " +
-        "unavailable, so partial money is never presented as complete.",
+        "Live value across the token's positions, including any par intermediate they hold. " +
+        "Absent when any contributing position is unavailable, so partial money is never " +
+        "presented as complete.",
     }),
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
       description: "Sum of finalized SDP deposits — a ledger fact, always present.",
