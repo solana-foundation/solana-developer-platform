@@ -22,4 +22,8 @@ async function CounterpartyCreateRoute() {
   );
 }
 
-export default withLegacyDesign(RedesignCounterpartyCreateRoute, CounterpartyCreateRoute);
+export default withLegacyDesign(
+  RedesignCounterpartyCreateRoute,
+  CounterpartyCreateRoute,
+  "contacts"
+);
