@@ -1,0 +1,213 @@
+import type { PaymentTransferSummary } from "@sdp/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getMessages, translate } from "@/i18n/messages";
+import {
+  fetchTransferById,
+  postMoneygramRampEvent,
+  type Translate,
+} from "../../payments-workspace.data";
+import { sendTransferUnderKey } from "../../transfer-idempotency";
+import { fundMoneygramDeposit, type MoneygramFundingContext } from "./moneygram-sign-transaction";
+
+const SOURCE_WALLET = "8mSiNWTeu59yy1pxsoNCyy7KNMnKvfgGu8Ej975LsufM";
+const DEPOSIT_WALLET = "8mSiNWTeu59yxhp2VPuWURbW4N1zF2oX96oVxdThMNS3";
+const USDC_MINT = "8mSiNWTeu59yy4EzchXDwb8j3XoQsVmVdp4QMjEo6wvX";
+
+vi.mock("../../payments-workspace.data", () => ({
+  fetchTransferById: vi.fn(),
+  postMoneygramRampEvent: vi.fn(),
+}));
+vi.mock("../../transfer-idempotency", () => ({ sendTransferUnderKey: vi.fn() }));
+
+const DEPOSIT = {
+  chain: "solana",
+  asset: "USDC",
+  address: SOURCE_WALLET,
+  amount: "250",
+  memo: "mg_widget_memo_1",
+};
+
+const RAMP: PaymentTransferSummary = {
+  id: "xfr_mg_test_1",
+  custodyWalletId: "cwlt_mg_1",
+  providerWalletId: "wal_mg_1",
+  status: "pending",
+  signature: null,
+  rampsMemo: {},
+  destination: DEPOSIT_WALLET,
+  amount: "25",
+  memo: "mg_memo_1",
+};
+
+const CRYPTO_LEG: PaymentTransferSummary = {
+  id: "xfr_mg_deposit_leg",
+  custodyWalletId: "cwlt_mg_1",
+  providerWalletId: "wal_mg_1",
+  status: "confirmed",
+  signature: "sig_mg_deposit_1",
+  rampsMemo: {},
+};
+
+function context(overrides: Partial<MoneygramFundingContext>): MoneygramFundingContext {
+  return {
+    cryptoAsset: "USDC",
+    sessionId: "mg_session_1",
+    transferId: "xfr_mg_test_1",
+    sourceWalletId: "cwlt_mg_1",
+    sourceTokenMint: USDC_MINT,
+    onSigned: vi.fn(),
+    t: ((key) => key) satisfies Translate,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.mocked(fetchTransferById).mockResolvedValue(RAMP);
+  vi.mocked(postMoneygramRampEvent).mockResolvedValue(undefined);
+  vi.mocked(sendTransferUnderKey).mockResolvedValue({
+    outcome: { kind: "submitted", transfer: CRYPTO_LEG },
+    fingerprint: "mg_fingerprint_1",
+  });
+});
+
+afterEach(() => {
+  vi.resetAllMocks();
+  vi.restoreAllMocks();
+});
+
+describe("fundMoneygramDeposit", () => {
+  it("funds the API deposit instruction instead of the widget payload and posts signed", async () => {
+    const ctx = context({});
+    vi.mocked(fetchTransferById).mockImplementation(async () => {
+      expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
+        { kind: "deposit_address", sessionId: ctx.sessionId },
+        ctx.t
+      );
+      return RAMP;
+    });
+    vi.mocked(sendTransferUnderKey).mockImplementation(async () => {
+      expect(fetchTransferById).toHaveBeenCalledExactlyOnceWith(
+        { transferId: "xfr_mg_test_1" },
+        ctx.t
+      );
+      expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
+        { kind: "deposit_address", sessionId: ctx.sessionId },
+        ctx.t
+      );
+      return {
+        outcome: { kind: "submitted", transfer: CRYPTO_LEG },
+        fingerprint: "mg_fingerprint_1",
+      };
+    });
+
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).resolves.toBe("sig_mg_deposit_1");
+
+    expect(sendTransferUnderKey).toHaveBeenCalledExactlyOnceWith(
+      {
+        sourceCustodyWalletId: "cwlt_mg_1",
+        destination: DEPOSIT_WALLET,
+        token: USDC_MINT,
+        amount: "25",
+        memo: "mg_memo_1",
+      },
+      ctx.t,
+      ctx.sessionId
+    );
+    expect(ctx.onSigned).toHaveBeenCalledExactlyOnceWith("xfr_mg_deposit_leg");
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(2);
+    expect(postMoneygramRampEvent).toHaveBeenNthCalledWith(
+      2,
+      { kind: "signed", sessionId: ctx.sessionId, cryptoTransferId: "xfr_mg_deposit_leg" },
+      ctx.t
+    );
+  });
+
+  it("reuses the session payment key after a lost signed-event response", async () => {
+    vi.mocked(postMoneygramRampEvent)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new TypeError("connection lost"));
+    const ctx = context({});
+
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow("connection lost");
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).resolves.toBe("sig_mg_deposit_1");
+
+    expect(sendTransferUnderKey).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(sendTransferUnderKey).mock.calls[0]).toEqual(
+      vi.mocked(sendTransferUnderKey).mock.calls[1]
+    );
+    expect(vi.mocked(sendTransferUnderKey).mock.calls[1][2]).toBe("mg_session_1");
+  });
+
+  it.each([
+    ["another chain", { ...DEPOSIT, chain: "ethereum" }],
+    ["another asset", { ...DEPOSIT, asset: "USDT" }],
+  ])("refuses a deposit for %s without sending anything", async (_label, deposit) => {
+    await expect(fundMoneygramDeposit(deposit, context({}))).rejects.toThrow(
+      "DashboardPayments.ramps.unsupportedMoneygramTransaction"
+    );
+    expect(sendTransferUnderKey).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses when the wallet holds none of the asset", async () => {
+    await expect(fundMoneygramDeposit(DEPOSIT, context({ sourceTokenMint: null }))).rejects.toThrow(
+      "DashboardPayments.ramps.sourceWalletNoUsdc"
+    );
+    expect(sendTransferUnderKey).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a payment held for approval sent nothing", async () => {
+    vi.mocked(sendTransferUnderKey).mockResolvedValue({
+      outcome: { kind: "approval_pending", approvalRequestId: "apr_mg_1" },
+      fingerprint: "mg_fingerprint_1",
+    });
+    const ctx = context({});
+
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
+      "DashboardPayments.ramps.transferHeldForApproval"
+    );
+    expect(ctx.onSigned).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a recorded transfer that carries no signature", async () => {
+    vi.mocked(sendTransferUnderKey).mockResolvedValue({
+      outcome: {
+        kind: "submitted",
+        transfer: { ...CRYPTO_LEG, status: "processing", signature: null },
+      },
+      fingerprint: "mg_fingerprint_1",
+    });
+    const ctx = context({});
+
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
+      "DashboardPayments.ramps.transferSignatureMissing"
+    );
+    expect(ctx.onSigned).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { name: "destination", transfer: { ...RAMP, destination: undefined } },
+    { name: "amount", transfer: { ...RAMP, amount: undefined } },
+  ])("refuses a transfer without a confirmed $name", async ({ transfer }) => {
+    vi.mocked(fetchTransferById).mockResolvedValue(transfer);
+    const messages = getMessages("en");
+    const ctx = context({ t: (key, values) => translate(messages, key, values) });
+
+    await expect(fundMoneygramDeposit(DEPOSIT, ctx)).rejects.toThrow(
+      translate(messages, "DashboardPayments.ramps.moneygramDepositUnconfirmed")
+    );
+    expect(sendTransferUnderKey).not.toHaveBeenCalled();
+    expect(ctx.onSigned).not.toHaveBeenCalled();
+    expect(postMoneygramRampEvent).toHaveBeenCalledExactlyOnceWith(
+      { kind: "deposit_address", sessionId: ctx.sessionId },
+      ctx.t
+    );
+    expect(fetchTransferById).toHaveBeenCalledExactlyOnceWith(
+      { transferId: "xfr_mg_test_1" },
+      ctx.t
+    );
+  });
+});

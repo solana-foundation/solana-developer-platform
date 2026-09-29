@@ -15,12 +15,16 @@ const WALLETS_ROUTE =
  * its create flow and a wallet's page, and the Privacy connect form are built on the 2026 refresh
  * design's components and page layout; every other route keeps the base components and layout.
  * The palette, faces and sidebar are the same on every route (tokens.css, and the sidebar
- * carries the scope itself).
+ * carries the scope itself). With NEW DESIGN off, every route keeps the base design.
  *
  * @param pathname - The dashboard route.
+ * @param newDesign - Whether the NEW DESIGN flag is on.
  * @returns The scope, or null for the base design.
  */
-export function themeScopeForPath(pathname: string): ThemeScope | null {
+export function themeScopeForPath(pathname: string, newDesign = true): ThemeScope | null {
+  if (!newDesign) {
+    return null;
+  }
   if (pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/")) {
     return "refresh";
   }

@@ -2,10 +2,12 @@ import { auth } from "@clerk/nextjs/server";
 import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import type { SdpApiClient } from "@/lib/sdp-api";
+import LegacyRecurringPaymentDetailRoute from "../../_legacy/recurring/[recurringPaymentId]/page";
 import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace";
@@ -71,7 +73,7 @@ async function fetchAllCounterpartyWalletAccounts(
   return accounts;
 }
 
-export default async function RecurringPaymentDetailRoute({
+async function RecurringPaymentDetailRoute({
   params,
 }: {
   params: Promise<{ recurringPaymentId: string }>;
@@ -167,3 +169,5 @@ export default async function RecurringPaymentDetailRoute({
     }
   );
 }
+
+export default withLegacyDesign(RecurringPaymentDetailRoute, LegacyRecurringPaymentDetailRoute);

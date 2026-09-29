@@ -1,7 +1,10 @@
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PublicPayLoading from "../pay/[token]/loading";
 import DashboardLoading from "./(home)/loading";
+import LegacyPaymentsLoading from "./payments/_legacy/loading";
+import LegacyTransactionsLoading from "./payments/_legacy/transactions/loading";
 import CounterpartyDetailLoading from "./payments/counterparty/[counterpartyId]/loading";
 import CounterpartyCreateLoading from "./payments/counterparty/create/loading";
 import CounterpartyLoading from "./payments/counterparty/loading";
@@ -25,6 +28,13 @@ import PaymentRequestCreateLoading from "./payments/requests/new/loading";
 import TransactionsLoading from "./payments/transactions/loading";
 
 const navigationMock = vi.hoisted(() => ({ tab: null as null | "playground" }));
+const designMock = vi.hoisted(() => ({ newDesign: true }));
+
+vi.mock("@/components/new-design", () => ({
+  useNewDesign: () => designMock.newDesign,
+  DesignSwitch: ({ current, legacy }: { current: ReactNode; legacy: ReactNode }) =>
+    designMock.newDesign ? current : legacy,
+}));
 
 vi.mock("next/navigation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/navigation")>();
@@ -243,5 +253,21 @@ describe("home and payments route loading states", () => {
     expect(markup.match(/bg-\[white\]/g)).toHaveLength(1);
     expect(markup).not.toContain("bg-white");
     expect(markup).not.toMatch(/\bbg-white\//);
+  });
+});
+
+describe("payments route loading with NEW DESIGN off", () => {
+  afterEach(() => {
+    designMock.newDesign = true;
+  });
+
+  it("draws the previous design's skeletons", () => {
+    designMock.newDesign = false;
+    expect(renderToStaticMarkup(<PaymentsLoading />)).toBe(
+      renderToStaticMarkup(<LegacyPaymentsLoading />)
+    );
+    expect(renderToStaticMarkup(<TransactionsLoading />)).toBe(
+      renderToStaticMarkup(<LegacyTransactionsLoading />)
+    );
   });
 });

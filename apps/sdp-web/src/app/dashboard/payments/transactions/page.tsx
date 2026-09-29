@@ -1,9 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { PAYMENT_TRANSACTION_OPEN_PARAM, transactionHref } from "@/lib/payments-routes";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
+import LegacyTransactionsPage from "../_legacy/transactions/page";
 import { fetchCounterparties } from "../counterparty/counterparty-page.data";
 import { fetchIssuedTokensByMint, fetchPaymentsWallets } from "../payments-page.data";
 import { fetchTransactionsPage } from "./transactions-page.data";
@@ -18,7 +20,7 @@ interface TransactionsPageProps {
 // API's maximum page size; a contact beyond it still filters by id from a deep link.
 const CONTACT_OPTION_LIMIT = 100;
 
-export default async function TransactionsPage({ searchParams }: TransactionsPageProps) {
+async function TransactionsPage({ searchParams }: TransactionsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) redirect(await getAuthEntryPath());
   if (!orgId) redirect("/dashboard");
@@ -61,3 +63,5 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
     />
   );
 }
+
+export default withLegacyDesign(TransactionsPage, LegacyTransactionsPage);

@@ -80,6 +80,9 @@ import { paymentsDemoBody } from "./demo-fixtures";
  * fetchers reach it through the real dashboard API routes, whose SDP API proxy is the fixtures.
  */
 
+// The pages render on the new design; the flag itself reads Vercel and the request.
+vi.mock("@/flags", () => ({ newDesign: async () => true }));
+
 const harness = vi.hoisted(() => {
   const state = {
     now: new Date("2026-09-25T12:00:00.000Z"),

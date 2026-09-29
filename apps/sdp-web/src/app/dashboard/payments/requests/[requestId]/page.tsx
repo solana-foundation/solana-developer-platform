@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { PAYMENT_REQUESTS_HREF } from "@/lib/payments-routes";
@@ -10,11 +11,7 @@ import { fetchPaymentRequestDetail } from "../payment-requests-page.data";
 
 export const dynamic = "force-dynamic";
 
-export default async function PaymentRequestDetailRoute({
-  params,
-}: {
-  params: Promise<{ requestId: string }>;
-}) {
+async function PaymentRequestDetailRoute({ params }: { params: Promise<{ requestId: string }> }) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -67,3 +64,10 @@ export default async function PaymentRequestDetailRoute({
     }
   );
 }
+
+/** The previous design has no request page and no link to one request: the list it is on. */
+function LegacyPaymentRequestDetailRoute(): never {
+  redirect(PAYMENT_REQUESTS_HREF);
+}
+
+export default withLegacyDesign(PaymentRequestDetailRoute, LegacyPaymentRequestDetailRoute);

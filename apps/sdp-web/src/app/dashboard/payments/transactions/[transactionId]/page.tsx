@@ -1,19 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
-import { PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import { PAYMENT_TRANSACTION_OPEN_PARAM, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
 import { fetchIssuedTokensByMint } from "../../payments-page.data";
 import { fetchTransactionDetail } from "../transaction-detail.data";
 import { TransactionDetailWorkspace } from "../transaction-detail-workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function TransactionDetailRoute({
-  params,
-}: {
-  params: Promise<{ transactionId: string }>;
-}) {
+async function TransactionDetailRoute({ params }: { params: Promise<{ transactionId: string }> }) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -53,3 +50,17 @@ export default async function TransactionDetailRoute({
     }
   );
 }
+
+/** The previous design has no transaction page: it opens the transaction over the list. */
+async function LegacyTransactionDetailRoute({
+  params,
+}: {
+  params: Promise<{ transactionId: string }>;
+}): Promise<never> {
+  const { transactionId } = await params;
+  redirect(
+    `${PAYMENT_TRANSACTIONS_HREF}?${new URLSearchParams({ [PAYMENT_TRANSACTION_OPEN_PARAM]: transactionId })}`
+  );
+}
+
+export default withLegacyDesign(TransactionDetailRoute, LegacyTransactionDetailRoute);

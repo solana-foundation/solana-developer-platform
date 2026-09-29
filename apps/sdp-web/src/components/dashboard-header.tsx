@@ -1,5 +1,6 @@
 "use client";
 
+import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
@@ -20,6 +21,7 @@ import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-ta
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
 import { Button } from "@/components/ui/button";
+import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
@@ -623,7 +625,7 @@ function getCounterpartyRoutePageConfig(
     // A refresh flow: the way back over the title in the form's column; the footer band spans
     // the page.
     return {
-      title: t("Shared.dashboardShell.newCounterparty"),
+      title: t("Shared.dashboardShell.newDesign.newCounterparty"),
       contentWidthClass: "max-w-none",
       headerWidthClass: "max-w-flow",
       backAction: {
@@ -1066,7 +1068,7 @@ function getRefreshPaymentsPageConfig(
   }
   if (pathname === "/dashboard/payments/recurring") {
     return {
-      title: t("Shared.dashboardShell.recurringPayments"),
+      title: t("Shared.dashboardShell.newDesign.recurringPayments"),
       titlePosition: "left",
       contentWidthClass: REFRESH_PAGE_WIDTH,
       headerAction: {
@@ -1098,6 +1100,136 @@ function getRefreshPaymentsPageConfig(
   return null;
 }
 
+/**
+ * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
+ * and the Privacy connect form. Returns null for every other route, and for the new design's own
+ * routes, which send the previous design back to their list.
+ */
+function getLegacyDesignPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>,
+  privateChannelsEnabled: boolean
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/integrations/private-channels/setup") {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: "/dashboard/integrations/private-channels",
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  const privateChannelsSetup = pathname.match(
+    /^\/dashboard\/integrations\/private-channels\/([^/]+)\/setup$/
+  );
+  if (privateChannelsSetup) {
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: privateChannelsInstancePath(privateChannelsSetup[1]),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname !== "/dashboard/payments" && !pathname.startsWith("/dashboard/payments/")) {
+    return null;
+  }
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.counterparty"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.newCounterparty"),
+      backHref: "/dashboard/payments/counterparty",
+      backLabel: t("Shared.dashboardShell.backToCounterparty"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: t("Shared.dashboardShell.manageCounterparty"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.backToCounterparty"),
+      },
+    };
+  }
+  if (pathname === "/dashboard/payments") {
+    return {
+      title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (
+    pathname === PAYMENT_TRANSACTIONS_HREF ||
+    pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)
+  ) {
+    return {
+      title: t("Shared.dashboardShell.transactions"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPayments.transactions.all") },
+          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+            id: module,
+            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
+          })),
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === PAYMENT_REQUESTS_HREF || pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
+    return {
+      title: t("Shared.dashboardShell.requests"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: t("Shared.dashboardShell.recurringPayments"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.recurringPayment"),
+      backHref: "/dashboard/payments/recurring",
+      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/recurring/")) {
+    return {
+      title: t("Shared.dashboardShell.recurringPayment"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.backToRecurringPayments"),
+      },
+    };
+  }
+  const action = getPaymentsActions(t, privateChannelsEnabled, false).find((item) =>
+    pathname.startsWith(item.href)
+  );
+  const title = action
+    ? action.label
+    : pathname.endsWith("/receive")
+      ? t("Shared.dashboardShell.receive")
+      : t("Shared.dashboardShell.send");
+  return actionPageConfig({
+    title,
+    backHref: "/dashboard/payments",
+    backLabel: t("Shared.dashboardShell.backToPayments"),
+    contentWidthClass: "max-w-none",
+  });
+}
+
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -1105,7 +1237,8 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
   paymentsEnabled = true,
-  policiesEnabled = true
+  policiesEnabled = true,
+  newDesign = true
 ): DashboardPageConfig {
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
@@ -1158,6 +1291,12 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
+  const legacyDesignConfig = newDesign
+    ? null
+    : getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled);
+  if (legacyDesignConfig) {
+    return legacyDesignConfig;
+  }
   const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
   if (refreshPaymentsConfig) {
     return refreshPaymentsConfig;
@@ -1177,17 +1316,17 @@ export function getDashboardPageConfig(
       headerWidthClass: "max-w-flow",
       backAction: {
         href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
       },
     };
   }
   if (pathname.startsWith("/dashboard/payments/recurring/")) {
     return {
-      title: t("Shared.dashboardShell.recurringPayment"),
+      title: t("Shared.dashboardShell.newDesign.recurringPayment"),
       contentWidthClass: REFRESH_PAGE_WIDTH,
       backAction: {
         href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
+        label: t("Shared.dashboardShell.newDesign.backToRecurringPayments"),
       },
     };
   }

@@ -1,0 +1,49 @@
+"use client";
+
+import type { CounterpartyAccount } from "@sdp/types";
+import { Modal } from "@/components/ui/modal";
+import { useTranslations } from "@/i18n/provider";
+import { CryptoAccountForm } from "./crypto-account-form";
+
+interface AddExternalAccountDialogProps {
+  isOpen: boolean;
+  counterpartyId: string;
+  onAdded: (account: CounterpartyAccount) => void;
+  onClose: () => void;
+}
+
+export function AddExternalAccountDialog({
+  isOpen,
+  counterpartyId,
+  onAdded,
+  onClose,
+}: AddExternalAccountDialogProps) {
+  const t = useTranslations();
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      ariaLabel={t("DashboardPayments.counterparty.addExternalAccount")}
+      onClose={onClose}
+      size="md"
+    >
+      <div className="space-y-5 p-6">
+        <div className="space-y-1">
+          <h2 className="text-lg font-medium tracking-tight text-primary">
+            {t("DashboardPayments.counterparty.addExternalAccount")}
+          </h2>
+          <p className="text-sm text-secondary">
+            {t("DashboardPayments.counterparty.addExternalAccountDescription")}
+          </p>
+        </div>
+        <CryptoAccountForm
+          counterpartyId={counterpartyId}
+          onAdded={(account) => {
+            onAdded(account);
+            onClose();
+          }}
+        />
+      </div>
+    </Modal>
+  );
+}

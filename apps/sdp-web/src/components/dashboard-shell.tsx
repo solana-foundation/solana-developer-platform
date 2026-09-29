@@ -39,6 +39,7 @@ import {
 } from "@/components/dashboard-page-title-context";
 import { DashboardQuickStart } from "@/components/dashboard-quick-start";
 import { DashboardRouteTabs } from "@/components/dashboard-route-tabs";
+import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { PaymentsDemoNotice } from "@/components/payments-demo-notice";
 import { PaymentsDemoToggle } from "@/components/payments-demo-toggle";
@@ -431,6 +432,7 @@ export function DashboardShell({
     heliusRings: heliusRingsEnabled,
     issuance: issuanceEnabled,
     markets: marketsEnabled,
+    newDesign: newDesignEnabled,
     payments: paymentsEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
@@ -440,7 +442,8 @@ export function DashboardShell({
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  const demoMode = isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+  // Demo data is part of the new design; the previous design never shows it.
+  const demoMode = newDesignEnabled && isPaymentsDemoOn(paymentsDemo, selectedProjectId);
   const paymentsDemoOn = isPaymentsPath(pathname) && demoMode;
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
@@ -461,9 +464,9 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute);
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignEnabled);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
-  const themeScope = themeScopeForPath(pathname);
+  const themeScope = themeScopeForPath(pathname, newDesignEnabled);
   const isRefresh = themeScope === "refresh";
   // The design's sidebar is 272px (17rem) including its rule.
   const sidebarExpandedWidth = 272;
@@ -475,7 +478,8 @@ export function DashboardShell({
     privateChannelsEnabled,
     custodyEnabled,
     paymentsEnabled,
-    policiesEnabled
+    policiesEnabled,
+    newDesignEnabled
   );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
@@ -503,6 +507,7 @@ export function DashboardShell({
     policiesEnabled,
     privateChannelsEnabled,
     walletFavorites: walletFavoriteItems,
+    newDesign: newDesignEnabled,
   });
   const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -712,6 +717,7 @@ export function DashboardShell({
     // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
+      data-sdp-new-design={newDesignEnabled ? "" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",
@@ -847,7 +853,8 @@ export function DashboardShell({
                   // keeps only the home indicator's inset.
                   shouldLockViewportScroll
                     ? [
-                        "flex min-h-0 flex-col overflow-clip md:pb-0",
+                        "flex min-h-0 flex-col md:pb-0",
+                        newDesignEnabled ? "overflow-clip" : "overflow-hidden",
                         isRefresh
                           ? "pb-[env(safe-area-inset-bottom)]"
                           : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
@@ -907,9 +914,16 @@ export function DashboardShell({
                           mark={activeTitleOverride?.mark}
                           layout={isRefresh ? "refresh" : "base"}
                           utilities={
-                            isPaymentsPath(pathname) ? (
-                              <PaymentsDemoToggle {...paymentsDemo} />
-                            ) : undefined
+                            // The previous design keeps the language switch in the header; the
+                            // new one moves it to the account menu and gives Payments its demo
+                            // switch.
+                            newDesignEnabled ? (
+                              isPaymentsPath(pathname) ? (
+                                <PaymentsDemoToggle {...paymentsDemo} />
+                              ) : undefined
+                            ) : (
+                              <LanguagePicker variant="topbar" />
+                            )
                           }
                         />
                       </div>
@@ -982,7 +996,9 @@ export function DashboardShell({
                         // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
                         // footer inside it would then pin to this box instead of the viewport.
                         shouldClipHorizontalOverflow && !shouldLockViewportScroll
-                          ? "overflow-x-clip"
+                          ? newDesignEnabled
+                            ? "overflow-x-clip"
+                            : "overflow-x-hidden"
                           : "",
                         // A refresh page clips only vertically: its scroll panel reaches past the
                         // column to the work area's edges.

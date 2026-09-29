@@ -20,8 +20,11 @@ const browser = vi.hoisted(() => {
       jar.delete(name);
     },
   };
-  return { jar, store, pathname: "/dashboard/payments" };
+  return { jar, store, pathname: "/dashboard/payments", newDesign: true };
 });
+
+// Demo mode is part of the new design; the flag itself reads Vercel and the request.
+vi.mock("@/flags", () => ({ newDesign: async () => browser.newDesign }));
 
 vi.mock("next/headers", () => ({
   // A fresh store object per request, as Next gives each request its own.
@@ -62,6 +65,7 @@ beforeEach(() => {
   browser.jar.clear();
   browser.jar.set("sdp-payments-demo", PROJECT);
   browser.pathname = "/dashboard/payments";
+  browser.newDesign = true;
   upstream.mockClear();
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -79,6 +83,11 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
     browser.jar.set("sdp-payments-demo", PROJECT);
     browser.pathname = "/dashboard/wallets";
+    expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+  });
+
+  it("stays out of the way with NEW DESIGN off, cookie or not", async () => {
+    browser.newDesign = false;
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
   });
 
@@ -484,9 +493,10 @@ describe("every ramp provider", () => {
     expect((await statusAfterSettling(transferId)).status).toBe("completed");
   });
 
-  it("asks for BVNK's agreements once, then runs the deposit", async () => {
+  it("runs BVNK's onboarding: agreements, a simulated identity check, review, then the deposit", async () => {
     const path =
       "/v1/counterparties/demo_cpty_jane/requirements?provider=bvnk&direction=onramp&assetRail=usdc.solana&fiatCurrency=EUR";
+    const status = async () => (await data<{ status: string }>(path)).status;
     const advance = (extra: Record<string, unknown>) =>
       call("POST", "/v1/counterparties/demo_cpty_jane/requirements", {
         provider: "bvnk",
@@ -495,12 +505,37 @@ describe("every ramp provider", () => {
         fiatCurrency: "EUR",
         ...extra,
       });
-    expect((await data<{ status: string }>(path)).status).toBe("counterparty_collect_agreement");
+    const simulateVerification = (counterpartyId = "demo_cpty_jane", provider = "bvnk") =>
+      call("POST", "/v1/payments/ramps/sandbox/simulate", {
+        provider,
+        payload: { counterpartyId, verification: "approved" },
+      });
+
+    expect(await status()).toBe("counterparty_collect_agreement");
     expect((await advance({ collectedData: {} })).body.data.status).toBe(
       "counterparty_collect_agreement"
     );
-    expect((await advance({ agreementConsent: true })).body.data.status).toBe("ready");
-    expect((await data<{ status: string }>(path)).status).toBe("ready");
+    expect((await simulateVerification()).status).toBe(409);
+    expect((await onrampQuote("bvnk", "usdc.solana", "EUR")).status).toBe(409);
+
+    const consented = await advance({ agreementConsent: true });
+    expect(consented.body.data).toMatchObject({
+      status: "customer_verification_required",
+      verificationUrl: expect.stringMatching(/^https:\/\//),
+    });
+    expect(await status()).toBe("customer_verification_required");
+
+    expect((await simulateVerification("demo_cpty_jane", "mural")).status).toBe(400);
+    expect((await simulateVerification()).status).toBe(200);
+    expect(await status()).toBe("customer_verifying");
+    expect((await simulateVerification()).status).toBe(409);
+    expect((await onrampQuote("bvnk", "usdc.solana", "EUR")).status).toBe(409);
+
+    vi.setSystemTime(new Date(Date.now() + 9_000));
+    expect(await status()).toBe("customer_funding_account_provisioning");
+    vi.setSystemTime(new Date(Date.now() + 5_000));
+    expect(await status()).toBe("ready");
+    expect((await advance({ collectedData: {} })).body.data.status).toBe("ready");
 
     const quoted = await onrampQuote("bvnk", "usdc.solana", "EUR");
     const { quote, transferId } = quoted.body.data;

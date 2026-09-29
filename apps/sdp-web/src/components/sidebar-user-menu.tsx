@@ -21,6 +21,7 @@ import Link from "next/link";
 import { useEffect, useRef } from "react";
 import { docsHref } from "@/components/dashboard-nav";
 import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
+import { useNewDesign } from "@/components/new-design";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +61,7 @@ export function SidebarUserMenu({
   menuSide: "right" | "top";
 }) {
   const t = useTranslations();
+  const newDesign = useNewDesign();
   const { user } = useUser();
   const { openUserProfile, signOut } = useClerk();
   const { theme } = useTheme();
@@ -128,7 +130,7 @@ export function SidebarUserMenu({
         ) : null}
         <NetworkDebugMenuItem />
         <ThemeMenuItem />
-        <LanguageMenuItem />
+        {newDesign ? <LanguageMenuItem /> : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem className="gap-2.5" onSelect={() => openUserProfile()}>
           <UserRoundIcon className="size-4 shrink-0 text-secondary" />

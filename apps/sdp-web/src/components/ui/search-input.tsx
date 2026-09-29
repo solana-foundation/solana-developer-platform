@@ -13,9 +13,10 @@ type SearchInputProps = Omit<ComponentProps<typeof Input>, "iconLeft" | "iconRig
 };
 
 // The design-system field reads its text size from these, so the toolbar size holds in every
-// theme scope, whichever size the field is drawn at.
+// theme scope, whichever size the field is drawn at. Part of the new design (NEW DESIGN flag);
+// the previous design keeps the field's own size.
 const TOOLBAR_TEXT_CLASS =
-  "[--input-text-size-lg:var(--font-size-body)] [--input-text-size-xl:var(--font-size-body)]";
+  "new-design:[--input-text-size-lg:var(--font-size-body)] new-design:[--input-text-size-xl:var(--font-size-body)]";
 
 /**
  * The one search field every workspace toolbar shares: the DS filled field with

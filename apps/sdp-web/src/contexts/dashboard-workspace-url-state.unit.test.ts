@@ -74,4 +74,19 @@ describe("dashboard workspace tab URL state", () => {
       })
     ).toBe(false);
   });
+
+  // The previous design still serves those two playgrounds as tabs on their own routes.
+  it.each(["/dashboard/payments/counterparty", "/dashboard/payments/requests"])(
+    "preserves the %s playground tab with NEW DESIGN off",
+    (pathname) => {
+      expect(
+        shouldClearDashboardTabAfterPathnameChange({
+          previousPathname: "/dashboard/payments",
+          pathname,
+          tab: "playground",
+          newDesign: false,
+        })
+      ).toBe(false);
+    }
+  );
 });

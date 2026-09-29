@@ -126,7 +126,7 @@ function CounterpartyForm() {
         <Input
           size="xl"
           id="externalId"
-          placeholder={t("DashboardPayments.counterparty.externalIdPlaceholder")}
+          placeholder={t("DashboardPayments.newDesign.counterparty.externalIdPlaceholder")}
           value={values.externalId}
           onChange={(event) => setField("externalId", event.target.value)}
         />
@@ -232,7 +232,7 @@ export function CounterpartyCreatePage({
     return (
       <div className="space-y-6">
         <h2 className="text-heading font-medium text-primary">
-          {t("Shared.dashboardShell.newCounterparty")}
+          {t("Shared.dashboardShell.newDesign.newCounterparty")}
         </h2>
         {content}
         {footer}

@@ -3,6 +3,8 @@
 import type { CounterpartyRequirements, RampDirection } from "@sdp/types/ramp-requirements";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
+import { getRampProviderLabel } from "@/lib/ramps";
 import { openExternalRampUrl } from "@/lib/trusted-ramp-destinations";
 import { isOnboardingPanelStatus, onboardingCopy, provisioningDetail } from "./providers";
 
@@ -16,14 +18,20 @@ export function RampOnboardingPanel({
   onRetry: () => void;
 }) {
   const t = useTranslations();
+  const demo = usePaymentsDemo();
   if (!isOnboardingPanelStatus(onboarding)) {
     throw new Error(`RampOnboardingPanel received non-onboarding status: ${onboarding.status}`);
   }
   const { provider, status } = onboarding;
   const copy = onboardingCopy(onboarding, t);
   const Icon = copy.icon;
-  const hostedAction =
-    status === "terms_of_service_required"
+  // The provider's own verification page can't open on sample data; the footer's Simulate
+  // verification stands in for it.
+  const demoVerification =
+    demo && provider === "bvnk" && status === "customer_verification_required";
+  const hostedAction = demoVerification
+    ? null
+    : status === "terms_of_service_required"
       ? { label: t("DashboardPayments.ramps.acceptTerms"), url: onboarding.termsOfServiceUrl }
       : status === "customer_verification_required"
         ? {
@@ -36,6 +44,13 @@ export function RampOnboardingPanel({
       <Icon className={`size-10 ${copy.iconClassName}`} />
       <p className="text-lg font-medium text-primary">{copy.title}</p>
       <p className="max-w-md text-sm leading-relaxed text-tertiary">{copy.description}</p>
+      {demoVerification ? (
+        <p className="max-w-md text-sm leading-relaxed text-secondary">
+          {t("DashboardPayments.demo.verification.body", {
+            provider: getRampProviderLabel(provider),
+          })}
+        </p>
+      ) : null}
       {hostedAction ? (
         <Button
           type="button"
