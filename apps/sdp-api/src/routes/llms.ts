@@ -20,7 +20,6 @@ const body = [
   "## Authentication",
   "- Use `Authorization: Bearer <api_key>`.",
   "- API keys are issued by SDP and commonly use `sk_test_...` or `sk_live_...` prefixes.",
-  "- Earn strategy reads, previews, withdrawal-route discovery, and instant unsigned external-wallet builds may be anonymous; queued action builds, submits, and tenant reads require an API key.",
   "- Session-only or internal routes are intentionally excluded from this resource.",
   "",
   "## Public endpoint families",
@@ -31,7 +30,10 @@ const body = [
   `- Issuance: ${DEFAULT_SDP_API_URL}/v1/issuance`,
   `- Payments: ${DEFAULT_SDP_API_URL}/v1/payments`,
   `- Compliance: ${DEFAULT_SDP_API_URL}/v1/compliance`,
-  `- Earn: ${DEFAULT_SDP_API_URL}/v1/earn`,
+  // PUBLICATION HOLD (PRO-2038): Earn is held out of every public surface —
+  // the public OpenAPI document carries no Earn operation (see openapi/spec.ts),
+  // so advertising a `/v1/earn` family here would point agents at a surface
+  // the contract omits. Flipping the hold is a PRO-1872 security sign-off.
   "",
   "## Versioning",
   "- The OpenAPI document is the source of truth for the current public contract.",

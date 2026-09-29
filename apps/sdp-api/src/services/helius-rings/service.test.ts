@@ -1197,13 +1197,14 @@ describe("HeliusRingsService", () => {
 
       // A deposit that lands late only adds notes, so it cannot duplicate the
       // stuck payment. Blocking it would freeze the wallet further than the
-      // hazard justifies.
-      await expect(
-        liveishService().prepareOperation(
-          operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" }),
-          actorContext
-        )
-      ).resolves.toBeDefined();
+      // hazard justifies. "Allowed" must mean allowed through to signing, not
+      // merely not thrown out: a guard that stalled every operation would
+      // also resolve.
+      const shield = await liveishService().prepareOperation(
+        operationInput({ clientNonce: "nonce-shield-ok-2", opType: "shield" }),
+        actorContext
+      );
+      expect(shield.state).toBe("indexing");
     });
 
     it("refuses a second shield while an earlier signed one is unaccounted for", async () => {
@@ -1298,12 +1299,13 @@ describe("HeliusRingsService", () => {
 
         expect(result.state).toBe("voided");
 
-        await expect(
-          liveishService().prepareOperation(
-            operationInput({ clientNonce: "nonce-void-ok-2", opType: "withdraw" }),
-            actorContext
-          )
-        ).resolves.toBeDefined();
+        // Released must mean the wallet signs again, not just that prepare
+        // stopped throwing: the fresh operation has to reach indexing.
+        const retried = await liveishService().prepareOperation(
+          operationInput({ clientNonce: "nonce-void-ok-2", opType: "withdraw" }),
+          actorContext
+        );
+        expect(retried.state).toBe("indexing");
       });
 
       it("refuses a signature that does not match the operation", async () => {
