@@ -5,7 +5,10 @@ import type {
   EarnVaultAsyncWithdrawalEvent,
   EarnVaultAsyncWithdrawalRoute,
 } from "./earn-vault-async-withdrawal";
-import { EarnVaultParRedemptionModal } from "./earn-vault-par-redemption-modal";
+import {
+  EarnVaultParRedemptionModal,
+  type EarnVaultParRedemptionSource,
+} from "./earn-vault-par-redemption-modal";
 import { EarnVaultQueuedWithdrawModal } from "./earn-vault-queued-withdraw-modal";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
@@ -19,6 +22,8 @@ interface EarnVaultAsyncWithdrawModalProps {
     withdrawal: EarnVaultWithdrawal,
     intent: { amount: string; projectBalance: boolean; submittedAt: number }
   ) => void;
+  /** A par route may redeem the position's held intermediate instead of shares. */
+  parSource?: EarnVaultParRedemptionSource;
   position: EarnVaultPosition;
   projectId: string | null;
   route: EarnVaultAsyncWithdrawalRoute;
@@ -33,6 +38,7 @@ export function EarnVaultAsyncWithdrawModal({
   onSettled,
   onMovementUpdated,
   onWithdrawn,
+  parSource,
   route,
   ...props
 }: EarnVaultAsyncWithdrawModalProps) {
@@ -61,6 +67,7 @@ export function EarnVaultAsyncWithdrawModal({
           {...props}
           onRequested={(request) => onRequested?.({ kind: "operator_redemption", request })}
           onSettled={(request) => onSettled?.({ kind: "operator_redemption", request })}
+          source={parSource}
           terms={route.terms}
         />
       );

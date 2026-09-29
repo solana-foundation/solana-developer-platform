@@ -374,16 +374,29 @@ describe("OpenAPI spec", () => {
     const requestPath = doc.paths?.["/v1/earn/external-wallet/withdrawal-request-transactions"];
 
     const buildRequest = getJsonSchema(requestPath?.post?.requestBody);
-    expect(buildRequest.anyOf).toHaveLength(2);
-    const operatorRequest = buildRequest.anyOf?.find((variant) =>
-      variant.properties?.mechanism?.enum?.includes("operatorRedemption")
-    );
+    expect(buildRequest.anyOf).toHaveLength(3);
+    const operatorRequests =
+      buildRequest.anyOf?.filter((variant) =>
+        variant.properties?.mechanism?.enum?.includes("operatorRedemption")
+      ) ?? [];
+    expect(operatorRequests).toHaveLength(2);
+    const operatorRequest = operatorRequests.find((variant) => variant.properties?.shares);
     expect(operatorRequest?.required).toEqual(
       expect.arrayContaining(["positionId", "shares", "mechanism"])
     );
-    expect(operatorRequest?.properties).not.toHaveProperty("strategyId");
-    expect(operatorRequest?.properties).not.toHaveProperty("discountBps");
-    expect(operatorRequest?.properties).not.toHaveProperty("deadlineSeconds");
+    // A par request over held intermediate names its amount instead of shares.
+    const intermediateRequest = operatorRequests.find(
+      (variant) => variant.properties?.intermediateAmount
+    );
+    expect(intermediateRequest?.required).toEqual(
+      expect.arrayContaining(["positionId", "intermediateAmount", "mechanism"])
+    );
+    expect(intermediateRequest?.properties).not.toHaveProperty("shares");
+    for (const variant of operatorRequests) {
+      expect(variant.properties).not.toHaveProperty("strategyId");
+      expect(variant.properties).not.toHaveProperty("discountBps");
+      expect(variant.properties).not.toHaveProperty("deadlineSeconds");
+    }
 
     const options = getJsonSchema(
       doc.paths?.["/v1/earn/external-wallet/withdrawal-options"]?.post?.responses?.["200"]
@@ -397,6 +410,7 @@ describe("OpenAPI spec", () => {
           "intermediateMint",
           "assetMint",
           "minimumShares",
+          "minimumIntermediateAmount",
           "cancelable",
           "operatorSettled",
         ]),

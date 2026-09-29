@@ -5,7 +5,6 @@ import { createIdempotencyKeyStore } from "@/lib/idempotency-key-store";
 export type EarnVaultAsyncWithdrawalIntent = {
   projectId: string | null;
   positionId: string;
-  shares: string;
   route:
     | {
         kind: "queue";
@@ -15,7 +14,11 @@ export type EarnVaultAsyncWithdrawalIntent = {
     | {
         kind: "operator_redemption";
       };
-};
+} & (
+  | { shares: string; intermediateAmount?: undefined }
+  /** A par request over the position's held intermediate. */
+  | { intermediateAmount: string; shares?: undefined }
+);
 
 /**
  * Durable per-tab keys for asynchronous custody exits. Keep the original
@@ -29,7 +32,18 @@ export const vaultAsyncWithdrawalIdempotencyKeyStore = createIdempotencyKeyStore
 export function vaultAsyncWithdrawalRequestFingerprint(
   input: EarnVaultAsyncWithdrawalIntent
 ): string {
-  const common = [input.projectId, input.positionId, input.shares, input.route.kind];
+  // A held-intermediate request carries its own marker, so it never shares a
+  // key with a shares request for the same number; shares keys are unchanged.
+  const common =
+    input.intermediateAmount === undefined
+      ? [input.projectId, input.positionId, input.shares, input.route.kind]
+      : [
+          input.projectId,
+          input.positionId,
+          input.intermediateAmount,
+          input.route.kind,
+          "intermediate",
+        ];
   return JSON.stringify(
     input.route.kind === "queue"
       ? [...common, input.route.discountBps, input.route.deadlineSeconds]

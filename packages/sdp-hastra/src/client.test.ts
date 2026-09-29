@@ -572,12 +572,25 @@ describe("Hastra par redemption", () => {
       intermediateMint: DEPLOYMENT.wYldsMint,
       assetMint: USDC,
       minimumShares: "0.000001",
+      minimumIntermediateAmount: "0.000001",
       shareDecimals: 6,
       assetDecimals: 6,
       cancelable: true,
       operatorSettled: true,
     });
     expect(HASTRA_PAR_MINIMUM_ASSETS).toBe("0.000001");
+  });
+
+  it("keeps the options readable for held wYLDS when the PRIME rate is unavailable", async () => {
+    const fixture = fixtureState();
+    const priceAccount = fixture.accounts.get(fixture.addresses.stakePriceConfig);
+    if (!priceAccount) throw new Error("fixture premise");
+    // StakePriceConfig: discriminator + four pubkeys, then the i128 price.
+    priceAccount.data.fill(0, 136, 152);
+    stubRpc(fixture.accounts);
+    await expect(
+      makeClient().getParRedemptionOptions(CTX, { providerReference: DEPLOYMENT.primeMint })
+    ).resolves.toMatchObject({ minimumShares: null, minimumIntermediateAmount: "0.000001" });
   });
 
   it("quotes par value without enforcing Hastra's off-chain batching threshold", async () => {
@@ -793,6 +806,158 @@ describe("Hastra par redemption", () => {
         code: "REQUEST_UNREADABLE",
       });
     }
+  });
+
+  describe("sourced from wYLDS the owner already holds", () => {
+    function heldWylds(amount: bigint, frozen = false) {
+      const fixture = fixtureState({ stakePaused: true, stale: true });
+      fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+        owner: TOKEN_PROGRAM,
+        data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, amount, frozen),
+      });
+      return fixture;
+    }
+    const input = {
+      providerReference: DEPLOYMENT.primeMint,
+      owner: OWNER,
+      intermediateAmount: "2000",
+    };
+
+    it("quotes par without the stake program's pause or price", async () => {
+      stubRpc(heldWylds(2_000_000_000n).accounts);
+      const quote = await makeClient().quoteParRedemption(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        intermediateAmount: "2000",
+      });
+      expect(quote).toMatchObject({
+        shares: "0",
+        intermediateAmount: "2000",
+        assets: "2000",
+        intermediateMint: DEPLOYMENT.wYldsMint,
+      });
+      expect(quote.blockingIssues).toEqual([]);
+
+      stubRpc(fixtureState({ mintPaused: true }).accounts);
+      const paused = await makeClient().quoteParRedemption(CTX, {
+        providerReference: DEPLOYMENT.primeMint,
+        intermediateAmount: "2000",
+      });
+      expect(paused.blockingIssues.map((issue) => issue.code)).toEqual(["HASTRA_MINT_PAUSED"]);
+    });
+
+    it("opens the one-per-owner request over the held wYLDS alone", async () => {
+      stubRpc(heldWylds(2_500_000_000n).accounts);
+      const plan = await makeClient().buildParRedemptionRequest(CTX, input);
+      const request = pda(DEPLOYMENT.vaultMintProgramAddress, "redemption_request", key(OWNER))[0];
+      expect(plan.requestAddress).toBe(request.toBase58());
+      expect(plan.expectedRequest).toEqual({
+        shares: "0",
+        intermediateMint: DEPLOYMENT.wYldsMint,
+        intermediateAmount: "2000",
+        assetMint: USDC,
+        assets: "2000",
+      });
+      expect(plan.accepted).toBeUndefined();
+      expect(plan.instructions.map((ix) => ix.programAddress)).toEqual([
+        "ComputeBudget111111111111111111111111111111",
+        ATA_PROGRAM,
+        ATA_PROGRAM,
+        DEPLOYMENT.vaultMintProgramAddress,
+      ]);
+      const requestIx = plan.instructions[3] as EarnVaultInstruction;
+      expect(Buffer.from(requestIx.data, "base64").subarray(0, 8)).toEqual(
+        disc("global", "request_redeem")
+      );
+      expect(instructionAmount(requestIx)).toBe(2_000_000_000n);
+      expect(requestIx.accounts[1]?.address).toBe(ata(OWNER, DEPLOYMENT.wYldsMint));
+    });
+
+    it("pre-funds the owner's request rent from a sponsor like the PRIME source", async () => {
+      stubRpc(heldWylds(2_000_000_000n).accounts);
+      const plan = await makeClient().buildParRedemptionRequest(CTX, {
+        ...input,
+        rentPayer: PAYER,
+      });
+      expect(plan.instructions[1]?.programAddress).toBe("11111111111111111111111111111111");
+      expect(plan.instructions[1]?.accounts).toEqual([
+        { address: PAYER, role: 3 },
+        { address: OWNER, role: 1 },
+      ]);
+      expect(plan.instructions.at(-1)?.accounts[0]).toEqual({ address: OWNER, role: 3 });
+    });
+
+    it("keeps the one-open-request rule and the reuse cooldown", async () => {
+      const open = heldWylds(2_000_000_000n);
+      const [request, bump] = pda(
+        DEPLOYMENT.vaultMintProgramAddress,
+        "redemption_request",
+        key(OWNER)
+      );
+      open.accounts.set(request.toBase58(), {
+        owner: DEPLOYMENT.vaultMintProgramAddress,
+        data: Buffer.concat([
+          disc("account", "RedemptionRequest"),
+          key(OWNER),
+          u64(1_000_000_000n),
+          key(DEPLOYMENT.wYldsMint),
+          Buffer.from([bump]),
+        ]),
+      });
+      stubRpc(open.accounts);
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toThrow(
+        /already has an open Hastra redemption request/
+      );
+
+      const closingBlockHeight = 1_000;
+      stubRpc(heldWylds(2_000_000_000n).accounts, {
+        latestSlot: 900,
+        closingBlockHeight,
+        currentBlockHeight: closingBlockHeight + HASTRA_REQUEST_REUSE_COOLDOWN_BLOCKS,
+      });
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toThrow(
+        /closed too recently/
+      );
+    });
+
+    it("refuses wYLDS the owner does not hold or cannot move", async () => {
+      stubRpc(heldWylds(1_999_999_999n).accounts);
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toThrow(
+        /does not hold the requested amount/
+      );
+      stubRpc(heldWylds(2_000_000_000n, true).accounts);
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toThrow(/frozen/);
+      stubRpc(fixtureState().accounts);
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toThrow(
+        /does not exist/
+      );
+    });
+
+    it("stops at vault-mint's own pause", async () => {
+      const fixture = fixtureState({ mintPaused: true });
+      fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+        owner: TOKEN_PROGRAM,
+        data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_000_000_000n),
+      });
+      stubRpc(fixture.accounts);
+      await expect(makeClient().buildParRedemptionRequest(CTX, input)).rejects.toMatchObject({
+        code: "REDEMPTION_REFUSED",
+      });
+    });
+
+    it("takes exactly one source", async () => {
+      stubRpc(heldWylds(2_000_000_000n).accounts);
+      await expect(
+        makeClient().buildParRedemptionRequest(CTX, {
+          ...input,
+          shares: "1",
+        } as unknown as typeof input)
+      ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+      await expect(
+        makeClient().quoteParRedemption(CTX, {
+          providerReference: DEPLOYMENT.primeMint,
+        } as unknown as { providerReference: string; intermediateAmount: string })
+      ).rejects.toMatchObject({ code: "INVALID_AMOUNT" });
+    });
   });
 
   it("reads and cancels an open request without applying pause or oracle gates", async () => {

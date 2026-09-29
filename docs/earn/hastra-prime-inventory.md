@@ -36,6 +36,7 @@ each quote/build.
 | Deposit | Atomic receipt of PRIME | One SDP-built transaction transfers USDC to the `vault-mint` deposit vault and mints the same raw amount of wYLDS; it then transfers that wYLDS to the PRIME stake vault and mints PRIME at the live Chainlink rate. There is no direct one-instruction USDC→PRIME method, but the composed route is one Solana transaction. |
 | Optional DEX exit | Atomic receipt of at least the caller's USDC floor | When `EARN_HASTRA_DEX_EXIT_ENABLED` is truthy and `JUPITER_SWAP_API_KEY` is configured, one transaction burns PRIME, transfers wYLDS from the stake vault to the owner, then executes an admitted Jupiter ExactIn wYLDS→USDC route. Any failed native or swap instruction rolls the whole transaction back. This route is disabled by default. |
 | Default par request | A request exists, **not** a USDC payout | One transaction burns PRIME for wYLDS and calls `vault-mint.request_redeem`. That call creates one owner-derived request PDA and delegates the requested wYLDS amount to Hastra's redeem authority. The wYLDS is not burned or escrowed at request time. |
+| Par request from held wYLDS | A request exists, **not** a USDC payout | For wYLDS the owner already holds outside any request (a cancelled request's, for one), one transaction calls only `vault-mint.request_redeem` over that amount: no PRIME redeem, so neither the stake program's pause nor its price can block it. It shares the PRIME source's open-request refusal, reuse cooldown, and sponsor prefund. SDP records `shares = '0'` and ledgers the fulfillment in wYLDS. |
 | Par completion | Operator-delivered USDC | A Hastra rewards administrator calls `complete_redeem(expected_amount)`. The program burns the delegated wYLDS, transfers the same raw amount of USDC from the separately funded redemption vault to the owner's USDC account, and closes the request PDA. |
 | Par cancellation | Request released; owner keeps wYLDS | The owner calls `cancel_redeem`. The program revokes its delegate when that delegate is still present, closes the request, and refunds its rent to the owner. Cancellation does not mint PRIME back. SDP keeps that wYLDS on the PRIME position: position reads report it as `parIntermediate`, and the holding does not close while it remains. If Hastra has frozen the wYLDS account while its delegate is present, SPL Token can reject that revocation until the account is thawed. |
 
@@ -146,7 +147,8 @@ still need written confirmation before SDP's production launch.
   in the fixed swap or delegation amount. Position reads report that residual
   as the position's `parIntermediate`: the canonical ATA balance minus any
   amount delegated to Hastra's redeem authority, which belongs to the open
-  request.
+  request. A par request redeems the residual directly (`intermediateAmount`
+  instead of `shares`).
 - Hastra can freeze wYLDS and PRIME token accounts. A frozen balance still
   belongs to the wallet but cannot be transferred or burned until thawed.
 - The price is `wYLDS per PRIME × price_scale`. Both stake directions floor

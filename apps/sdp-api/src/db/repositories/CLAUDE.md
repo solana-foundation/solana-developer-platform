@@ -43,8 +43,11 @@ Things that will bite:
   write.** Resolve or open the holding before writing the movement. The custodial
   holding for a program is minted when its provider wallet is linked.
 - **Amounts carry a `denomination`** (`usd`, the token mint, or the SHARE mint
-  on a vault withdrawal, whose exact intent-time quantity is shares). No read
-  may sum across rows without grouping by denomination.
+  on a vault withdrawal, whose exact intent-time quantity is shares). A par
+  fulfillment whose request burned no shares (it redeemed held intermediate)
+  is denominated in the intermediate mint; `fulfilledQueueQuantity` decides for
+  both the writer and the read projection. No read may sum across rows
+  without grouping by denomination.
 - **A vault withdrawal is one signed movement.** The movement owns the requested
   shares, actor, idempotency key, signature, signed bytes and blockhash window.
   It is recorded before broadcast and reconciled through the same outbox path

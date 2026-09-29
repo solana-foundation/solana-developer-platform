@@ -59,6 +59,7 @@ const terms: EarnVaultParRedemptionTerms = {
   intermediateMint: WYLDS_MINT,
   assetMint: USDC_MINT,
   minimumShares: "2000",
+  minimumIntermediateAmount: "0.000001",
   shareDecimals: 6,
   assetDecimals: 6,
   cancelable: true,
@@ -199,6 +200,54 @@ describe("EarnVaultParRedemptionModal", () => {
     );
     expect(onRequested).toHaveBeenCalledWith(request());
     expect(await screen.findByText("Awaiting operator")).toBeTruthy();
+  });
+
+  it("redeems a position's held wYLDS without asking for shares", async () => {
+    const residual: EarnVaultPosition = {
+      ...position,
+      shares: "0",
+      withdrawableShares: "0",
+      tokenValue: "0",
+      parIntermediate: {
+        mint: WYLDS_MINT,
+        amount: "2500",
+        withdrawableAmount: "2500",
+        tokenValue: "2500",
+      },
+    };
+    mocks.fetchPreview.mockResolvedValue({
+      kind: "ready",
+      value: { ...preview, shares: "0" },
+    });
+    mocks.createRequest.mockResolvedValue({
+      ok: true,
+      status: 201,
+      data: { kind: "submitted", withdrawalRequest: { ...request(), shares: "0" } },
+    });
+    renderModal({ position: residual, source: "intermediate" });
+
+    expect(screen.getByRole("heading", { name: "Redeem wYLDS from Hastra PRIME" })).toBeTruthy();
+    expect(screen.queryByText(/burns PRIME into wYLDS/)).toBeNull();
+    const amount = screen.getByLabelText("Amount") as HTMLInputElement;
+    fireEvent.change(amount, { target: { value: "2600" } });
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(
+      true
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Max" }));
+    expect(amount.value).toBe("2500");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    const held = {
+      positionId: position.id,
+      intermediateAmount: "2500",
+      mechanism: "operatorRedemption",
+    };
+    await waitFor(() =>
+      expect(mocks.fetchPreview).toHaveBeenCalledWith(held, expect.any(AbortSignal))
+    );
+    expect(await screen.findByText(/the wYLDS then stays in your wallet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Request par redemption" }));
+    await waitFor(() => expect(mocks.createRequest).toHaveBeenCalledWith(held, IDEMPOTENCY_KEY));
   });
 
   it("allows a pending par request to be cancelled before operator settlement", async () => {

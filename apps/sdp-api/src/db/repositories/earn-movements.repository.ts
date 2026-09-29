@@ -1036,6 +1036,31 @@ export function queuedFulfillmentMovementId(requestId: string): string {
   return `${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}${requestId}`;
 }
 
+/**
+ * What a fulfilled request's payout movement is denominated in, shared by the
+ * writer and the read-side projection: the shares the request consumed, or,
+ * for a par request that burned none because it redeemed intermediate the
+ * owner already held, the intermediate its operator burned. 0062 requires a
+ * non-zero amount either way.
+ */
+export function fulfilledQueueQuantity(request: {
+  mechanism: string;
+  shares: string;
+  share_mint: string;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
+}): { denomination: string; amount: string } {
+  if (
+    request.mechanism === "operator_redemption" &&
+    !/[1-9]/.test(request.shares) &&
+    request.intermediate_mint !== null &&
+    request.intermediate_amount !== null
+  ) {
+    return { denomination: request.intermediate_mint, amount: request.intermediate_amount };
+  }
+  return { denomination: request.share_mint, amount: request.shares };
+}
+
 function queuedRequestIdFromMovementId(movementId: string): string | null {
   return movementId.startsWith(QUEUED_FULFILLMENT_MOVEMENT_PREFIX)
     ? movementId.slice(QUEUED_FULFILLMENT_MOVEMENT_PREFIX.length)
@@ -1045,6 +1070,13 @@ function queuedRequestIdFromMovementId(movementId: string): string | null {
 function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRow {
   const requestId = String(row.id);
   const settledAt = String(row.fulfilled_at ?? row.updated_at);
+  const quantity = fulfilledQueueQuantity({
+    mechanism: String(row.mechanism),
+    shares: String(row.shares),
+    share_mint: String(row.share_mint),
+    intermediate_mint: row.intermediate_mint == null ? null : String(row.intermediate_mint),
+    intermediate_amount: row.intermediate_amount == null ? null : String(row.intermediate_amount),
+  });
   return {
     id: queuedFulfillmentMovementId(requestId),
     organization_id: String(row.organization_id),
@@ -1059,9 +1091,9 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     confirmed_at: settledAt,
     chain_finalized_at: null,
     settled_at: settledAt,
-    denomination: String(row.share_mint),
-    amount_requested: String(row.shares),
-    amount_settled: String(row.shares),
+    denomination: quantity.denomination,
+    amount_requested: quantity.amount,
+    amount_settled: quantity.amount,
     fee_amount: null,
     token_amount_settled: row.assets_paid == null ? null : String(row.assets_paid),
     min_shares_out: null,

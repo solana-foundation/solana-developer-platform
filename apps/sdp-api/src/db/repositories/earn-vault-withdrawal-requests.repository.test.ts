@@ -852,7 +852,10 @@ describe("Earn queued withdrawal repository", () => {
       maturityTimestamp: null,
       deadlineTimestamp: null,
     };
-    await expect(createRequest(reuseTerms)).rejects.toThrow(/reserving this provider nonce/i);
+    // The owner is told to wait out the reuse embargo, not about a nonce lease.
+    await expect(createRequest(reuseTerms)).rejects.toThrow(
+      "This wallet's previous redemption request closed moments ago. Try again in a few minutes."
+    );
     await getDb(env)
       .prepare(
         `UPDATE earn_vault_withdrawal_request_pda_leases
@@ -1066,6 +1069,71 @@ describe("Earn queued withdrawal repository", () => {
       finalizedWithdrawals: "9.8",
       finalizedWithdrawalCount: 1,
       unvaluedWithdrawalCount: 0,
+    });
+  });
+
+  it("ledgers a par request over held intermediate in the intermediate it burned", async () => {
+    // A solver queue still has to escrow shares.
+    await expect(createRequest({ shares: "0" })).rejects.toThrow();
+
+    const created = await createRequest({
+      mechanism: "operator_redemption",
+      requestAddress: "ParHeldIntermediateAddress11111111111111",
+      shares: "0",
+      intermediateMint: INTERMEDIATE_MINT,
+      intermediateAmount: "2000",
+      quotedAssets: "2000",
+      discountBps: null,
+      maturityTimestamp: null,
+      deadlineTimestamp: null,
+    });
+    expect(created.request).toMatchObject({ shares: "0", intermediate_amount: "2000" });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      creationTimestamp: "1800000000",
+    });
+    // 0062 refuses a zero movement amount inside this same transaction, so
+    // the request reaching `fulfilled` is itself the proof it ledgered.
+    const fulfilled = await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "par-held-fulfilled-signature",
+      assetsPaid: "2000",
+      fulfilledAt: "2026-09-29T01:00:00.000Z",
+    });
+    expect(fulfilled?.status).toBe("fulfilled");
+
+    const movementId = `earn_queue_fulfillment_${created.request.id}`;
+    const persisted = await getDb(env)
+      .prepare(
+        `SELECT denomination, amount_requested, amount_settled, token_amount_settled, status
+           FROM earn_movements WHERE id = ?`
+      )
+      .bind(movementId)
+      .first<Record<string, unknown>>();
+    expect(persisted).toMatchObject({
+      denomination: INTERMEDIATE_MINT,
+      amount_requested: "2000",
+      amount_settled: "2000",
+      token_amount_settled: "2000",
+      status: "finalized",
+    });
+
+    // The read-side projection, the fallback for an unpersisted payout,
+    // denominates it the same way.
+    await getDb(env).prepare("DELETE FROM earn_movements WHERE id = ?").bind(movementId).run();
+    await expect(
+      createPostgresEarnMovementsRepository(getDb(env)).getMovementById({
+        organizationId: ORG,
+        movementId,
+      })
+    ).resolves.toMatchObject({
+      denomination: INTERMEDIATE_MINT,
+      amount_requested: "2000",
+      token_amount_settled: "2000",
     });
   });
 

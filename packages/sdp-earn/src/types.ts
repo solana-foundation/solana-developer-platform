@@ -731,8 +731,13 @@ export interface EarnVaultParRedemptionOptions {
   intermediateMint: string;
   /** Token paid by the operator when the request completes. */
   assetMint: string;
-  /** Minimum request size, denominated in the position share mint. */
-  minimumShares: string;
+  /**
+   * Minimum share-sourced request, in the position share mint. Null while the
+   * provider's rate is unavailable, which also blocks a share-sourced request.
+   */
+  minimumShares: string | null;
+  /** Minimum request sourced from intermediate the owner already holds. */
+  minimumIntermediateAmount: string;
   shareDecimals: number;
   assetDecimals: number;
   /** Whether the owner can revoke an open request before completion. */
@@ -741,13 +746,22 @@ export interface EarnVaultParRedemptionOptions {
   operatorSettled: true;
 }
 
-export interface EarnVaultParRedemptionQuoteInput {
+/**
+ * What a par request redeems: position shares converted in the same
+ * transaction, or intermediate the owner already holds outside any request
+ * (a cancelled request's, for one).
+ */
+export type EarnVaultParRedemptionSource =
+  | { shares: string; intermediateAmount?: undefined }
+  | { intermediateAmount: string; shares?: undefined };
+
+export type EarnVaultParRedemptionQuoteInput = {
   providerReference: string;
-  shares: string;
-}
+} & EarnVaultParRedemptionSource;
 
 /** Informational preview for a par redemption request. */
 export interface EarnVaultParRedemptionQuote {
+  /** "0" for an intermediate-sourced request. */
   shares: string;
   shareDecimals: number;
   intermediateMint: string;
@@ -758,13 +772,14 @@ export interface EarnVaultParRedemptionQuote {
   blockingIssues: readonly EarnVaultDepositQuoteIssue[];
 }
 
-export interface EarnVaultParRedemptionRequestInput extends EarnVaultParRedemptionQuoteInput {
+export type EarnVaultParRedemptionRequestInput = EarnVaultParRedemptionQuoteInput & {
   owner: string;
   /** Same rent-payer contract as the other vault-direct builders. */
   rentPayer?: string;
-}
+};
 
 export interface EarnVaultParRedemptionExpectedRequest {
+  /** "0" for an intermediate-sourced request. */
   shares: string;
   intermediateMint: string;
   intermediateAmount: string;

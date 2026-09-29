@@ -636,7 +636,10 @@ export interface EarnVaultQueuedWithdrawalTerms {
 export interface EarnVaultParRedemptionTerms {
   intermediateMint: string;
   assetMint: string;
-  minimumShares: string;
+  /** Null while the provider's rate is unavailable, which blocks share-sourced requests. */
+  minimumShares: string | null;
+  /** Smallest request over intermediate the owner already holds. */
+  minimumIntermediateAmount: string;
   shareDecimals: number;
   assetDecimals: number;
   cancelable: boolean;
@@ -673,13 +676,24 @@ export interface EarnVaultQueuedWithdrawalTermsRequest {
   deadlineSeconds: number;
 }
 
-/** Request inputs for an operator-completed par redemption. */
-export interface EarnVaultParRedemptionTermsRequest {
-  positionId: string;
-  /** Decimal string in vault-share units. */
-  shares: string;
-  mechanism: "operatorRedemption";
-}
+/**
+ * Request inputs for an operator-completed par redemption: position shares
+ * (vault-share units), or intermediate the position already holds outside any
+ * request (`parIntermediate`, in that token's units). Never both.
+ */
+export type EarnVaultParRedemptionTermsRequest =
+  | {
+      positionId: string;
+      shares: string;
+      intermediateAmount?: undefined;
+      mechanism: "operatorRedemption";
+    }
+  | {
+      positionId: string;
+      intermediateAmount: string;
+      shares?: undefined;
+      mechanism: "operatorRedemption";
+    };
 
 /** Backwards-compatible queue input or the explicit par-redemption variant. */
 export type EarnVaultAsyncWithdrawalTermsRequest =
