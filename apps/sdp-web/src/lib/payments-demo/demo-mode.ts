@@ -9,6 +9,7 @@ import {
 } from "@sdp/types";
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
+import { designModuleForPath } from "../design-modules";
 import { PROJECT_COOKIE_NAME } from "../project-cookie";
 import { isPaymentsPath, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
 import { buildWorld, demoPathParts, demoWorldBody } from "./demo-fixtures";
@@ -51,21 +52,24 @@ const demoRequested = cache(async (projectId: string | null): Promise<boolean> =
     if (!project || cookieStore.get(PAYMENTS_DEMO_COOKIE_NAME)?.value !== project) {
       return false;
     }
-    // Demo data is part of the new design; the previous design never serves it. Imported here,
-    // not at the top: the flags module reads auth through sdp-api, which imports this file.
-    const { newDesign } = await import("@/flags");
-    if (!(await newDesign())) {
-      return false;
-    }
     const pathname = headerStore.get("x-sdp-pathname");
-    if (isPaymentsPath(pathname)) {
-      return true;
-    }
-    if (!pathname?.startsWith("/api/dashboard/")) {
+    const referer = pathname?.startsWith("/api/dashboard/") ? headerStore.get("referer") : null;
+    const page = isPaymentsPath(pathname) ? pathname : referer ? new URL(referer).pathname : null;
+    if (!page || !isPaymentsPath(page)) {
       return false;
     }
-    const referer = headerStore.get("referer");
-    return referer ? isPaymentsPath(new URL(referer).pathname) : false;
+    // Demo data is part of the new design and has a flag of its own: a page on the previous
+    // design never gets it. Imported here, not at the top: the flags module reads auth through
+    // sdp-api, which imports this file.
+    const [{ paymentsDemoMode }, { isNewDesignOn }] = await Promise.all([
+      import("@/flags"),
+      import("@/flags/new-design"),
+    ]);
+    const [demoModeOn, newDesignPage] = await Promise.all([
+      paymentsDemoMode(),
+      isNewDesignOn(designModuleForPath(page) ?? undefined),
+    ]);
+    return demoModeOn && newDesignPage;
   } catch {
     // Outside a request there are no cookies or headers to read, so no demo.
     return false;

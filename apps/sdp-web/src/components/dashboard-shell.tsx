@@ -426,9 +426,18 @@ export function DashboardShell({
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  // Demo data is part of the new design; the previous design never shows it.
-  const demoMode = newDesignEnabled && isPaymentsDemoOn(paymentsDemo, selectedProjectId);
-  const paymentsDemoOn = isPaymentsPath(pathname) && demoMode;
+  // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, flags);
+  // Demo data is part of the new design and has a flag of its own (payments-demo-mode; absent in
+  // older fixtures, it follows NEW DESIGN). A page on the previous design never shows it or its
+  // switch.
+  const demoAvailable =
+    isPaymentsPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
+  const demoMode =
+    newDesignEnabled &&
+    flags.paymentsDemoMode !== false &&
+    isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+  const paymentsDemoOn = demoAvailable && demoMode;
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -447,8 +456,6 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
-  const newDesignPage = isNewDesignPage(pathname, flags);
   const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignPage);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname, newDesignPage);
@@ -852,7 +859,7 @@ export function DashboardShell({
                             // new one moves it to the account menu and gives Payments its demo
                             // switch.
                             newDesignEnabled ? (
-                              isPaymentsPath(pathname) ? (
+                              demoAvailable ? (
                                 <PaymentsDemoToggle {...paymentsDemo} />
                               ) : undefined
                             ) : (
