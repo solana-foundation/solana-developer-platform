@@ -24,6 +24,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
 import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
+import { isRedesignedPaymentsPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -429,6 +430,9 @@ function playgroundHeaderTabs(t: ReturnType<typeof useTranslations>): DashboardH
   };
 }
 
+/** Width of the refresh Payments overview and list pages: the design's 900px column. */
+const REFRESH_PAGE_WIDTH = "max-w-page";
+
 function actionPageConfig(config: {
   title: string;
   backHref: string;
@@ -563,6 +567,44 @@ function getPrivateChannelsRoutePageConfig(
       label: t("Shared.dashboardShell.backToPrivateChannels"),
     },
   };
+}
+
+function getCounterpartyRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    // A refresh flow: the way back over the title in the form's column; the footer band spans
+    // the page.
+    return {
+      title: t("Shared.dashboardShell.newDesign.newCounterparty"),
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.contactList"),
+      },
+    };
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    // A detail page reads in the page column; at full width it would lose the shell's gutter.
+    // The page titles itself with the contact's name; "Contact" holds the place until it does.
+    const counterpartyId = pathname.split("/")[4] ?? "";
+    return {
+      title: t("Shared.dashboardShell.contact"),
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.contactList"),
+      },
+      headerAction: {
+        label: t("Shared.dashboardShell.pay"),
+        href: `/dashboard/payments/pay?counterpartyId=${encodeURIComponent(counterpartyId)}`,
+        variant: "primary",
+      },
+    };
+  }
+  return null;
 }
 
 function getMarketsRoutePageConfig(
@@ -862,6 +904,30 @@ function getWalletSectionPageConfig(
 }
 
 /**
+ * Header config for the Payments pages built on the refresh design so far: Contacts. Returns
+ * null for every other route.
+ */
+function getRefreshPaymentsPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.contactList"),
+      titlePosition: "left",
+      contentWidthClass: REFRESH_PAGE_WIDTH,
+      headerAction: {
+        label: t("DashboardPayments.counterparty.add"),
+        href: "/dashboard/payments/counterparty/create",
+        icon: "plus",
+        variant: "primary",
+      },
+    };
+  }
+  return null;
+}
+
+/**
  * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
  * and the Privacy connect form. Returns null for every other route, and for the new design's own
  * routes, which send the previous design back to their list.
@@ -975,7 +1041,7 @@ function getLegacyDesignPageConfig(
       },
     };
   }
-  const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+  const action = getPaymentsActions(t, privateChannelsEnabled, false).find((item) =>
     pathname.startsWith(item.href)
   );
   const title = action
@@ -1048,14 +1114,23 @@ export function getDashboardPageConfig(
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
   // Payments routes not redesigned yet keep the previous design's header under NEW DESIGN too.
-  // Payments keeps the previous design's header until its pages are redesigned.
   const previousDesign =
-    !newDesign || pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
+    !newDesign ||
+    ((pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/")) &&
+      !isRedesignedPaymentsPath(pathname));
   const legacyDesignConfig = previousDesign
     ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
     : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
+  }
+  const refreshPaymentsConfig = getRefreshPaymentsPageConfig(pathname, t);
+  if (refreshPaymentsConfig) {
+    return refreshPaymentsConfig;
+  }
+  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
+  if (counterpartyRouteConfig) {
+    return counterpartyRouteConfig;
   }
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
@@ -1064,6 +1139,26 @@ export function getDashboardPageConfig(
   const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
   if (privateChannelsConfig) {
     return privateChannelsConfig;
+  }
+  if (pathname.startsWith("/dashboard/payments/")) {
+    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+      pathname.startsWith(item.href)
+    );
+    const title = action
+      ? action.label
+      : pathname.endsWith("/receive")
+        ? t("Shared.dashboardShell.receive")
+        : t("Shared.dashboardShell.send");
+
+    return {
+      title,
+      contentWidthClass: "max-w-none",
+      headerWidthClass: "max-w-flow",
+      backAction: {
+        href: "/dashboard/payments",
+        label: t("Shared.dashboardShell.backToPayments"),
+      },
+    };
   }
   const integrationsConfig = getIntegrationsPageConfig(pathname, t);
   if (integrationsConfig) {

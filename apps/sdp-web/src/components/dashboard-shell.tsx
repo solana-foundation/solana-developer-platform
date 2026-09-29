@@ -460,6 +460,7 @@ export function DashboardShell({
     pendingApprovalCount,
     policiesEnabled,
     privateChannelsEnabled,
+    newDesign: newDesignEnabled,
   });
   const pageTitle =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname

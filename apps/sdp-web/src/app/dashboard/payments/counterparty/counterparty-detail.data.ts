@@ -16,6 +16,8 @@ export async function fetchCounterpartyDetail(
   counterparty: Counterparty | null;
   accounts: CounterpartyAccount[];
   transfers: PaymentTransferSummary[];
+  /** How many transfers the contact has in all; more than `transfers` when the page cut it. */
+  transfersTotal: number;
 }> {
   const encoded = encodeURIComponent(counterpartyId);
   const [counterpartyRes, accountsRes, transfersRes] = await Promise.all([
@@ -39,10 +41,15 @@ export async function fetchCounterpartyDetail(
   }
 
   let transfers: PaymentTransferSummary[] = [];
+  let transfersTotal = 0;
   if (transfersRes.ok) {
-    const json = (await transfersRes.json()) as { data?: PaymentTransferSummary[] };
+    const json = (await transfersRes.json()) as {
+      data?: PaymentTransferSummary[];
+      meta?: { total?: number };
+    };
     transfers = json.data ?? [];
+    transfersTotal = Math.max(json.meta?.total ?? 0, transfers.length);
   }
 
-  return { counterparty, accounts, transfers };
+  return { counterparty, accounts, transfers, transfersTotal };
 }

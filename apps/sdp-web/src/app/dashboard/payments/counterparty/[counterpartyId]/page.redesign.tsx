@@ -1,13 +1,9 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterpartyDetail } from "../counterparty-detail.data";
-import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace";
-import RedesignCounterpartyDetailRoute from "./page.redesign";
-
-export const dynamic = "force-dynamic";
+import { CounterpartyDetailWorkspace } from "../counterparty-detail-workspace.redesign";
 
 async function CounterpartyDetailRoute({
   params,
@@ -47,6 +43,7 @@ async function CounterpartyDetailRoute({
             counterparty={detail.counterparty}
             initialAccounts={detail.accounts}
             initialTransfers={detail.transfers}
+            transfersTotal={detail.transfersTotal}
           />
         </div>
       );
@@ -54,4 +51,4 @@ async function CounterpartyDetailRoute({
   );
 }
 
-export default withLegacyDesign(RedesignCounterpartyDetailRoute, CounterpartyDetailRoute);
+export default CounterpartyDetailRoute;
