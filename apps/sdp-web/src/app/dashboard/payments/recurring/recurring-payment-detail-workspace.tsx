@@ -87,13 +87,13 @@ interface Band {
 function actionSuccessLabel(action: RecurringPaymentAction, t: Translate): string {
   switch (action) {
     case "activate":
-      return t("DashboardPayments.recurring.paymentActivated");
+      return t("DashboardPayments.newDesign.recurring.paymentActivated");
     case "collect":
-      return t("DashboardPayments.recurring.collectionSubmitted");
+      return t("DashboardPayments.newDesign.recurring.collectionSubmitted");
     case "cancel":
-      return t("DashboardPayments.recurring.paymentCanceled");
+      return t("DashboardPayments.newDesign.recurring.paymentCanceled");
     case "resume":
-      return t("DashboardPayments.recurring.paymentResumed");
+      return t("DashboardPayments.newDesign.recurring.paymentResumed");
   }
 }
 
@@ -178,7 +178,7 @@ function footerActionLabel(
     case "cancel":
       return retrying
         ? t("DashboardPayments.recurring.retryCancellation")
-        : t("DashboardPayments.recurring.cancelPayment");
+        : t("DashboardPayments.newDesign.recurring.cancelPayment");
     case "resume":
       return retrying
         ? t("DashboardPayments.recurring.retryResume")
@@ -256,7 +256,7 @@ function walletBand({
     return {
       tone: "warn",
       state: t("DashboardPayments.recurring.sourceWalletUnresolved"),
-      body: t("DashboardPayments.recurring.sourceWalletUnresolvedDescription"),
+      body: t("DashboardPayments.newDesign.recurring.sourceWalletUnresolvedDescription"),
     };
   }
   if (signingDisabled) {
@@ -266,8 +266,8 @@ function walletBand({
       // Cancel stays open for a pending schedule, so its body promises activation only.
       body: t(
         status === "pending_activation"
-          ? "DashboardPayments.recurring.signingDisabledPendingBody"
-          : "DashboardPayments.recurring.signingDisabledBody",
+          ? "DashboardPayments.newDesign.recurring.signingDisabledPendingBody"
+          : "DashboardPayments.newDesign.recurring.signingDisabledBody",
         { wallet: sourceWalletLabel }
       ),
     };
@@ -564,7 +564,7 @@ function CancelConfirm({
         >
           {busy
             ? t("DashboardPayments.recurring.canceling")
-            : t("DashboardPayments.recurring.cancelPayment")}
+            : t("DashboardPayments.newDesign.recurring.cancelPayment")}
         </Button>
       </div>
     </fieldset>
@@ -717,7 +717,7 @@ export function RecurringPaymentDetailWorkspace({
 
     setPendingAction(action);
     setActionError(null);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingPayment"), {
+    const toastId = toast.loading(t("DashboardPayments.newDesign.recurring.updatingPayment"), {
       position: "bottom-right",
     });
     try {
@@ -726,7 +726,9 @@ export function RecurringPaymentDetailWorkspace({
       router.refresh();
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : t("DashboardPayments.recurring.actionFailed");
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.newDesign.recurring.actionFailed");
       setActionError({ action, message });
       toast.error(actionFailureTitle(action, t), {
         id: toastId,

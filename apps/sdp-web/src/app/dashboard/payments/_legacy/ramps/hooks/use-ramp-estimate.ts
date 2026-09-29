@@ -1,0 +1,70 @@
+"use client";
+
+import type { RampDirection, RampProviderEstimateResult } from "@sdp/types";
+import type { RampProviderId } from "@sdp/types/provider-access";
+import { useMemo } from "react";
+import useSWR from "swr";
+import { useTranslations } from "@/i18n/provider";
+import type { SelectedRampPair } from "@/lib/ramps";
+import { useDebounce } from "@/lib/use-debounce";
+import { paymentsQueryKeys } from "../../payments-query-key";
+import { fetchRampEstimates } from "../../payments-workspace.data";
+
+interface UseRampEstimateArgs {
+  direction: RampDirection;
+  selectedPair: SelectedRampPair;
+  amount: string;
+  enabled: boolean;
+}
+
+interface UseRampEstimateResult {
+  estimatesByProvider: Map<RampProviderId, RampProviderEstimateResult>;
+  loading: boolean;
+}
+
+export function useRampEstimate({
+  direction,
+  selectedPair,
+  amount,
+  enabled,
+}: UseRampEstimateArgs): UseRampEstimateResult {
+  const t = useTranslations();
+  const currentAmount = amount.trim();
+  const debouncedAmount = useDebounce(currentAmount, 300);
+  const hasAmount = enabled && currentAmount.length > 0 && /[1-9]/.test(currentAmount);
+  const isDebouncing = currentAmount !== debouncedAmount;
+
+  const { data, isValidating } = useSWR(
+    hasAmount && !isDebouncing
+      ? paymentsQueryKeys.rampEstimate({
+          direction,
+          fiatCurrency: selectedPair.fiatCurrency,
+          assetRail: selectedPair.assetRail,
+          amount: debouncedAmount,
+        })
+      : null,
+    () =>
+      fetchRampEstimates(
+        {
+          direction,
+          assetRail: selectedPair.assetRail,
+          fiatCurrency: selectedPair.fiatCurrency,
+          amount: debouncedAmount,
+        },
+        t
+      ),
+    { keepPreviousData: false }
+  );
+
+  const estimatesByProvider = useMemo(() => {
+    const map = new Map<RampProviderId, RampProviderEstimateResult>();
+    if (hasAmount && !isDebouncing && data) {
+      for (const result of data) {
+        map.set(result.provider, result);
+      }
+    }
+    return map;
+  }, [data, hasAmount, isDebouncing]);
+
+  return { estimatesByProvider, loading: hasAmount && (isDebouncing || isValidating) };
+}

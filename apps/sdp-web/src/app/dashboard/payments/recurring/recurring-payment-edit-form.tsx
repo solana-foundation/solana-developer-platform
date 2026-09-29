@@ -139,24 +139,24 @@ export function RecurringPaymentEditForm({
       return;
     }
     onSavingChange(true);
-    const toastId = toast.loading(t("DashboardPayments.recurring.updatingPayment"), {
+    const toastId = toast.loading(t("DashboardPayments.newDesign.recurring.updatingPayment"), {
       position: "bottom-right",
     });
     try {
       await updateRecurringPayment(recurringPayment.id, result.updates, undefined, t);
-      toast.success(t("DashboardPayments.recurring.paymentUpdated"), {
+      toast.success(t("DashboardPayments.newDesign.recurring.paymentUpdated"), {
         id: toastId,
         position: "bottom-right",
       });
       onClose();
       router.refresh();
     } catch (error) {
-      toast.error(t("DashboardPayments.recurring.paymentUpdateFailed"), {
+      toast.error(t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"), {
         id: toastId,
         description:
           error instanceof Error
             ? error.message
-            : t("DashboardPayments.recurring.paymentUpdateFailed"),
+            : t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"),
         position: "bottom-right",
       });
     } finally {

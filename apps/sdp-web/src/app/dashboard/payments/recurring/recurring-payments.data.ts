@@ -215,7 +215,7 @@ export async function listRecurringPayments(
   return readDashboardEnvelope<ListPaymentRecurringPaymentsResponse>(
     response,
     dashboardRecurringPaymentsListEnvelopeSchema,
-    t("DashboardPayments.recurring.unableToLoad"),
+    t("DashboardPayments.newDesign.recurring.unableToLoad"),
     t
   );
 }
@@ -236,7 +236,7 @@ export async function getRecurringPayment(
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
     dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.recurring.unableToLoad"),
+    t("DashboardPayments.newDesign.recurring.unableToLoad"),
     t
   );
   return data.recurringPayment;
@@ -256,7 +256,7 @@ export async function createRecurringPayment(
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
     dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.recurring.unableToCreate"),
+    t("DashboardPayments.newDesign.recurring.unableToCreate"),
     t
   );
   return data.recurringPayment;
@@ -280,7 +280,7 @@ export async function updateRecurringPayment(
   const data = await readDashboardEnvelope<PaymentRecurringPaymentResponse>(
     response,
     dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.recurring.paymentUpdateFailed"),
+    t("DashboardPayments.newDesign.recurring.paymentUpdateFailed"),
     t
   );
   return data.recurringPayment;
@@ -308,7 +308,7 @@ export async function runRecurringPaymentAction(
   >(
     response,
     dashboardRecurringPaymentEnvelopeSchema,
-    t("DashboardPayments.recurring.actionFailed"),
+    t("DashboardPayments.newDesign.recurring.actionFailed"),
     t
   );
   return data.recurringPayment;
@@ -341,7 +341,10 @@ export async function fetchRecurringPayments(
     return {
       ok: false,
       status: null,
-      error: error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToLoad"),
+      error:
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.newDesign.recurring.unableToLoad"),
     };
   }
 }
@@ -369,7 +372,10 @@ export async function fetchRecurringPaymentById(
     return {
       ok: false,
       status: null,
-      error: error instanceof Error ? error.message : t("DashboardPayments.recurring.unableToLoad"),
+      error:
+        error instanceof Error
+          ? error.message
+          : t("DashboardPayments.newDesign.recurring.unableToLoad"),
     };
   }
 }

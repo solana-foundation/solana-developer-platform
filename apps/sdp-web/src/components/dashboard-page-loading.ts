@@ -29,6 +29,19 @@ import {
   TreasurySolutionsSkeleton,
 } from "@/app/dashboard/markets/markets-route-skeletons";
 import { SettingsPageSkeleton } from "@/app/dashboard/operations-card-page-skeletons";
+import LegacyCounterpartyDirectoryLoading from "@/app/dashboard/payments/_legacy/counterparty/loading";
+import { PaymentsPageSkeleton as LegacyPaymentsPageSkeleton } from "@/app/dashboard/payments/_legacy/payments-page-skeleton";
+import {
+  CounterpartyCreateSkeleton as LegacyCounterpartyCreateSkeleton,
+  CounterpartyDetailSkeleton as LegacyCounterpartyDetailSkeleton,
+  PaymentsDepositPageSkeleton as LegacyPaymentsDepositPageSkeleton,
+  PaymentsPayPageSkeleton as LegacyPaymentsPayPageSkeleton,
+  PaymentsTransactionsPageSkeleton as LegacyPaymentsTransactionsPageSkeleton,
+  RecurringPaymentCreateSkeleton as LegacyRecurringPaymentCreateSkeleton,
+  RecurringPaymentDetailSkeleton as LegacyRecurringPaymentDetailSkeleton,
+  RecurringPaymentsPageSkeleton as LegacyRecurringPaymentsPageSkeleton,
+} from "@/app/dashboard/payments/_legacy/payments-route-skeletons";
+import LegacyPaymentRequestsLoading from "@/app/dashboard/payments/_legacy/requests/loading";
 import CounterpartyDirectoryLoading from "@/app/dashboard/payments/counterparty/loading";
 import { PaymentsPageSkeleton } from "@/app/dashboard/payments/payments-page-skeleton";
 import {
@@ -62,7 +75,37 @@ interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
+// The previous design's skeletons for the routes NEW DESIGN redesigns. Its own new routes (a
+// transaction's or a request's page, the new-request page) send the previous design to their
+// list, so they load as the list does.
+const LEGACY_DESIGN_PAGE_LOADING: Partial<
+  Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
+> = {
+  "payments-overview": LegacyPaymentsPageSkeleton,
+  "payments-transactions": LegacyPaymentsTransactionsPageSkeleton,
+  "payment-transaction-detail": LegacyPaymentsTransactionsPageSkeleton,
+  "payments-pay": LegacyPaymentsPayPageSkeleton,
+  "payments-deposit": LegacyPaymentsDepositPageSkeleton,
+  "payment-requests": LegacyPaymentRequestsLoading,
+  "payment-request-create": LegacyPaymentRequestsLoading,
+  "payment-request-detail": LegacyPaymentRequestsLoading,
+  "counterparty-directory": LegacyCounterpartyDirectoryLoading,
+  "counterparty-create": LegacyCounterpartyCreateSkeleton,
+  "counterparty-detail": LegacyCounterpartyDetailSkeleton,
+  "recurring-payments": LegacyRecurringPaymentsPageSkeleton,
+  "recurring-payment-create": LegacyRecurringPaymentCreateSkeleton,
+  "recurring-payment-detail": LegacyRecurringPaymentDetailSkeleton,
+};
+
 export function resolvePageLoadingComponent(
+  route: DashboardLoadingRoute,
+  newDesign = true
+): ComponentType<PageLoadingProps> {
+  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
+  return legacy ?? resolveCurrentPageLoadingComponent(route);
+}
+
+function resolveCurrentPageLoadingComponent(
   route: DashboardLoadingRoute
 ): ComponentType<PageLoadingProps> {
   switch (route) {

@@ -86,25 +86,25 @@ async function MoveMoneyActions() {
         href={PAYMENT_COMMAND_ACTION_DESTINATIONS.pay}
         icon={ReceiptTextIcon}
         label={t("DashboardPayments.pay")}
-        description={t("DashboardPayments.commandCenter.payDescription")}
+        description={t("DashboardPayments.newDesign.commandCenter.payDescription")}
       />
       <ActionTile
         href={PAYMENT_COMMAND_ACTION_DESTINATIONS.deposit}
         icon={ArrowDownIcon}
         label={t("DashboardPayments.deposit")}
-        description={t("DashboardPayments.commandCenter.depositDescription")}
+        description={t("DashboardPayments.newDesign.commandCenter.depositDescription")}
       />
       <ActionTile
         href={PAYMENT_COMMAND_ACTION_DESTINATIONS.request}
         icon={Link2Icon}
-        label={t("DashboardPayments.commandCenter.requestPayment")}
-        description={t("DashboardPayments.commandCenter.requestPaymentDescription")}
+        label={t("DashboardPayments.newDesign.commandCenter.requestPayment")}
+        description={t("DashboardPayments.newDesign.commandCenter.requestPaymentDescription")}
       />
       <ActionTile
         href={PAYMENT_COMMAND_ACTION_DESTINATIONS.schedule}
         icon={Repeat2Icon}
         label={t("DashboardPayments.commandCenter.schedule")}
-        description={t("DashboardPayments.commandCenter.scheduleDescription")}
+        description={t("DashboardPayments.newDesign.commandCenter.scheduleDescription")}
       />
     </section>
   );

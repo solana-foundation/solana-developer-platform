@@ -13,12 +13,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { supportedLocales } from "@/i18n/config";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 
-/** The landing page's language button; in the dashboard the choice lives in the account menu. */
-export function LanguagePicker() {
+/**
+ * The language button: the landing page's, and the previous design's dashboard header's. On the
+ * new design the dashboard's choice lives in the account menu.
+ */
+export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
   const locale = useLocale();
   const t = useTranslations();
   const selectLocale = useSelectLocale();
+  const isLanding = variant === "landing";
 
   return (
     <DropdownMenu modal={false}>
@@ -27,9 +32,17 @@ export function LanguagePicker() {
           type="button"
           title={t("Shared.dashboardShell.language")}
           aria-label={t("Shared.dashboardShell.language")}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-secondary outline-none transition-colors hover:bg-fill-subtle hover:text-primary focus-visible:ring-2 focus-visible:ring-border-strong"
+          className={cn(
+            "flex items-center justify-center outline-none transition-colors focus-visible:ring-2",
+            isLanding
+              ? "h-9 w-9 justify-center rounded-lg text-secondary hover:bg-fill-subtle hover:text-primary focus-visible:ring-border-strong"
+              : "h-8 w-8 rounded-lg text-text-medium hover:bg-border-light hover:text-text-extra-high focus-visible:ring-border-medium"
+          )}
         >
-          <LanguagesIcon className="h-4 w-4 shrink-0" strokeWidth={1.9} />
+          <LanguagesIcon
+            className={cn("shrink-0", isLanding ? "h-4 w-4" : "h-5 w-5")}
+            strokeWidth={1.9}
+          />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="bottom" sideOffset={8} className="w-64 p-2">

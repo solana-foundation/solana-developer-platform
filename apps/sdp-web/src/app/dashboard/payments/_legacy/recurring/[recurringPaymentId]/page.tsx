@@ -1,0 +1,177 @@
+import { auth } from "@clerk/nextjs/server";
+import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp/types";
+import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import {
+  fetchRecurringPaymentById,
+  fetchRecurringPaymentCollectionAttempts,
+} from "@/app/dashboard/payments/_legacy/recurring/recurring-payments.data";
+import { getTranslations } from "@/i18n/server";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import type { SdpApiClient } from "@/lib/sdp-api";
+import { fetchCounterparty } from "../../counterparty/counterparty-page.data";
+import { formatDisplayAmount, shortenAddress } from "../../payments-overview.utils";
+import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
+import { RecurringPaymentDetailWorkspace } from "../recurring-payment-detail-workspace";
+
+export const dynamic = "force-dynamic";
+
+const COUNTERPARTY_ACCOUNTS_PAGE_SIZE = 100;
+const counterpartyAccountSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  projectId: z.string(),
+  counterpartyId: z.string(),
+  accountKind: z.literal("crypto_wallet"),
+  label: z.string().nullable(),
+  details: z.object({ address: z.string() }).catchall(z.unknown()),
+  providerAccountData: z.record(z.string(), z.unknown()),
+  status: z.enum(["active", "archived"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const counterpartyAccountsEnvelopeSchema = z.object({
+  data: z.object({
+    accounts: z.array(counterpartyAccountSchema),
+    total: z.number(),
+    page: z.number(),
+    pageSize: z.number(),
+  }),
+});
+
+async function fetchAllCounterpartyWalletAccounts(
+  request: SdpApiClient["request"],
+  counterpartyId: string
+): Promise<CounterpartyAccount[]> {
+  const encodedCounterpartyId = encodeURIComponent(counterpartyId);
+  const accounts: CounterpartyAccount[] = [];
+  let page = 1;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (accounts.length < total) {
+    const response = await request(
+      `/v1/counterparties/${encodedCounterpartyId}/accounts?page=${page}&pageSize=${COUNTERPARTY_ACCOUNTS_PAGE_SIZE}&accountKind=crypto_wallet`
+    );
+    if (!response.ok) {
+      return [];
+    }
+
+    const data: ListCounterpartyAccountsResponse = counterpartyAccountsEnvelopeSchema.parse(
+      await response.json()
+    ).data;
+
+    accounts.push(...data.accounts);
+    total = data.total;
+    if (data.accounts.length < data.pageSize) {
+      break;
+    }
+    page += 1;
+  }
+
+  return accounts;
+}
+
+export default async function RecurringPaymentDetailRoute({
+  params,
+}: {
+  params: Promise<{ recurringPaymentId: string }>;
+}) {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+
+  const { recurringPaymentId } = await params;
+
+  return withDashboardPageTrace(
+    "dashboard.recurring-payments.detail.page",
+    async ({ trace, apiClient }) => {
+      const t = await getTranslations();
+      const [recurringPaymentResult, walletsResult, issuedTokenSymbolsResult] = await Promise.all([
+        trace.step("fetch_recurring_payment", () =>
+          fetchRecurringPaymentById(apiClient.request, recurringPaymentId, t)
+        ),
+        trace.step("fetch_wallets", () =>
+          fetchPaymentsWallets(apiClient.request, { includeBalances: true })
+        ),
+        trace.step("fetch_issued_token_symbols", () =>
+          fetchPaymentsIssuedTokenSymbols(apiClient.request)
+        ),
+      ]);
+      const issuedTokensByMint = Object.fromEntries(
+        (issuedTokenSymbolsResult.data ?? []).map((token) => [token.mintAddress, token])
+      );
+
+      trace.log({
+        ok: recurringPaymentResult.ok,
+        walletsOk: walletsResult.ok,
+      });
+
+      if (!recurringPaymentResult.ok) {
+        throw new Error(recurringPaymentResult.error);
+      }
+      const recurringPaymentResultData = recurringPaymentResult.data;
+      const sourceCustodyWalletId = recurringPaymentResultData.sourceCustodyWalletId;
+      if (sourceCustodyWalletId === null) {
+        throw new Error("Recurring payment source wallet is unresolved");
+      }
+      const recurringPayment = { ...recurringPaymentResultData, sourceCustodyWalletId };
+
+      const wallets = walletsResult.data ?? [];
+      const wallet =
+        wallets.find((entry) => entry.id === recurringPayment.sourceCustodyWalletId) ?? null;
+      const subscriptionId = recurringPayment.subscriptionId;
+      const [counterparty, counterpartyAccounts, collectionAttemptsResult] = await Promise.all([
+        trace.step("fetch_recurring_payment_counterparty", () =>
+          fetchCounterparty(apiClient.request, recurringPayment.counterpartyId)
+        ),
+        trace.step("fetch_recurring_payment_counterparty_accounts", () =>
+          fetchAllCounterpartyWalletAccounts(apiClient.request, recurringPayment.counterpartyId)
+        ),
+        subscriptionId
+          ? trace.step("fetch_recurring_payment_collection_attempts", () =>
+              fetchRecurringPaymentCollectionAttempts(apiClient.request, subscriptionId, t)
+            )
+          : Promise.resolve({
+              ok: true as const,
+              data: { collectionAttempts: [], total: 0 },
+            }),
+      ]);
+      const counterpartyLabel =
+        counterparty?.displayName ?? t("DashboardPayments.recurring.counterpartyUnavailable");
+      const knownToken = WELL_KNOWN_TOKEN_BY_MINT.get(recurringPayment.token);
+      const tokenLabel =
+        knownToken?.symbol ??
+        wallet?.balances?.find((entry) => entry.mint === recurringPayment.token)?.token ??
+        shortenAddress(recurringPayment.token);
+
+      return (
+        <RecurringPaymentDetailWorkspace
+          recurringPayment={recurringPayment}
+          wallet={wallet}
+          wallets={wallets}
+          issuedTokensByMint={issuedTokensByMint}
+          counterpartyAccounts={counterpartyAccounts.filter(
+            (account) => account.accountKind === "crypto_wallet" && account.status === "active"
+          )}
+          counterpartyLabel={counterpartyLabel}
+          amountLabel={formatDisplayAmount(recurringPayment.amount, tokenLabel)}
+          collectionAttempts={
+            collectionAttemptsResult.ok ? collectionAttemptsResult.data.collectionAttempts : []
+          }
+          collectionAttemptsTotal={
+            collectionAttemptsResult.ok ? collectionAttemptsResult.data.total : 0
+          }
+          collectionAttemptsError={
+            collectionAttemptsResult.ok ? undefined : collectionAttemptsResult.error
+          }
+        />
+      );
+    }
+  );
+}

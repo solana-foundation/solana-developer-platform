@@ -203,7 +203,7 @@ export function RecurringPaymentsWorkspace({
           role="alert"
           className="rounded-card border border-error-border bg-error-bg p-4 text-body text-error"
         >
-          <p className="font-medium">{t("DashboardPayments.recurring.unableToLoad")}</p>
+          <p className="font-medium">{t("DashboardPayments.newDesign.recurring.unableToLoad")}</p>
           <p className="mt-1">{initialError}</p>
         </div>
       </DashboardWorkspaceOverviewPanel>
@@ -269,14 +269,14 @@ export function RecurringPaymentsWorkspace({
             label: t("DashboardPayments.recurring.clearSearch"),
             onClear: () => setQuery(""),
           }}
-          placeholder={t("DashboardPayments.recurring.searchPayments")}
+          placeholder={t("DashboardPayments.newDesign.recurring.searchPayments")}
           className="min-w-0 flex-1 sm:w-56 sm:flex-none"
         />
       </ListToolbar>
       {lookupError ? <p className="text-meta text-warning">{lookupError}</p> : null}
       {visibleRecurringPayments.length === 0 ? (
         <p className="py-12 text-center text-body text-tertiary">
-          {t("DashboardPayments.recurring.noMatches")}
+          {t("DashboardPayments.newDesign.recurring.noMatches")}
         </p>
       ) : (
         <div className="overflow-x-auto refresh:-mx-3">
@@ -358,7 +358,7 @@ export function RecurringPaymentsWorkspace({
         pageCount={pageCount}
         onPageChange={(page) => applyListParams({ page })}
         disabled={isPending}
-        summary={t("DashboardPayments.recurring.range", {
+        summary={t("DashboardPayments.newDesign.recurring.range", {
           from: rangeStart,
           to: rangeEnd,
           total,

@@ -8,6 +8,9 @@ import { I18nProvider } from "@/i18n/provider";
 import { SidebarUserMenu } from "./sidebar-user-menu";
 
 const router = vi.hoisted(() => ({ refresh: vi.fn() }));
+const design = vi.hoisted(() => ({ newDesign: true }));
+
+vi.mock("@/components/new-design", () => ({ useNewDesign: () => design.newDesign }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@sentry/nextjs", () => ({ getFeedback: () => undefined }));
@@ -32,6 +35,7 @@ vi.mock("@/contexts/network-debug-context", () => ({
 afterEach(() => {
   cleanup();
   router.refresh.mockClear();
+  design.newDesign = true;
   document.documentElement.lang = "";
 });
 
@@ -57,5 +61,18 @@ describe("SidebarUserMenu", () => {
     // The preference cookie is Secure, which jsdom's http page does not keep.
     expect(document.documentElement.lang).toBe("fr");
     expect(router.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the language to the header with NEW DESIGN off", async () => {
+    design.newDesign = false;
+    const user = userEvent.setup();
+    render(
+      <I18nProvider locale="en" messages={getMessages("en")}>
+        <SidebarUserMenu collapsed={false} canManageOrgSettings menuSide="right" />
+      </I18nProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    expect(screen.queryByRole("menuitem", { name: /Language/ })).toBeNull();
   });
 });

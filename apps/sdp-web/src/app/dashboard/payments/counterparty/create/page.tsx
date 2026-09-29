@@ -1,10 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import LegacyCounterpartyCreateRoute from "../../_legacy/counterparty/create/page";
 import { CounterpartyCreateProvider } from "../counterparty-create-context";
 import { CounterpartyCreatePage } from "../counterparty-create-page";
 
-export default async function CounterpartyCreateRoute() {
+async function CounterpartyCreateRoute() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -19,3 +21,5 @@ export default async function CounterpartyCreateRoute() {
     </CounterpartyCreateProvider>
   );
 }
+
+export default withLegacyDesign(CounterpartyCreateRoute, LegacyCounterpartyCreateRoute);

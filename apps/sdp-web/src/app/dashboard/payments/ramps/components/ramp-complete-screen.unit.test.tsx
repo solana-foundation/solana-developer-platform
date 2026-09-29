@@ -104,6 +104,7 @@ function renderScreen(transfer: PaymentTransferSummary): string {
         payments: true,
         policies: false,
         privateChannels: false,
+        newDesign: true,
       }}
       serverDashboardCacheScope={{ orgId: "org-test", userId: "user-test" }}
       projects={[]}

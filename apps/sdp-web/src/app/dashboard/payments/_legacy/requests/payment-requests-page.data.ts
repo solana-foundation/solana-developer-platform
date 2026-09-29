@@ -1,0 +1,71 @@
+import {
+  type ListPaymentRequestsResponse,
+  type PaginatedResponse,
+  type PaymentRequest,
+  type SolanaCluster,
+  WELL_KNOWN_TOKENS,
+  type WellKnownToken,
+} from "@sdp/types";
+import type { SdpApiClient } from "@/lib/sdp-api";
+
+export const PAYMENT_REQUESTS_PAGE_SIZE = 100;
+
+export interface PaymentRequestTokenOption {
+  mintAddress: string;
+  symbol: string;
+}
+
+export type PaymentRequestsLocalErrorCode = "paymentRequestsLoadFailed";
+export type PaymentRequestsResult = PaginatedResponse<PaymentRequest> & {
+  localErrorCode?: PaymentRequestsLocalErrorCode;
+};
+
+/**
+ * Well-known tokens deployed on the given cluster. Payment requests are
+ * receives, so options are not gated by wallet balances — any requestable
+ * token qualifies.
+ *
+ * @param cluster - Solana cluster the dashboard is currently pointed at.
+ * @returns One `{ mintAddress, symbol }` option per well-known token that has
+ *   a mint on the cluster (e.g. USDT is skipped on devnet). Never throws.
+ */
+export function deriveTokenOptions(cluster: SolanaCluster): PaymentRequestTokenOption[] {
+  return Object.values(WELL_KNOWN_TOKENS).flatMap((token: WellKnownToken) => {
+    const mint = token.mints[cluster];
+    return mint ? [{ mintAddress: mint.address, symbol: token.symbol }] : [];
+  });
+}
+
+/**
+ * Fetches the first {@link PAYMENT_REQUESTS_PAGE_SIZE} payment requests for
+ * the authenticated project.
+ *
+ * @param request - Authenticated SDP API fetcher.
+ * @returns `{ ok: true, data, total }` on success; on any failure (non-2xx or
+ *   network error) `{ ok: false, data: [], total: 0, error }` — never throws.
+ */
+export async function fetchPaymentRequests(
+  request: SdpApiClient["request"],
+  options: { pageSize?: number; status?: PaymentRequest["status"] } = {}
+): Promise<PaymentRequestsResult> {
+  try {
+    const query = new URLSearchParams({
+      pageSize: String(options.pageSize ?? PAYMENT_REQUESTS_PAGE_SIZE),
+      ...(options.status ? { status: options.status } : {}),
+    });
+    const response = await request(`/v1/payments/requests?${query.toString()}`);
+    if (!response.ok) {
+      return { ok: false, data: [], total: 0, error: await response.text() };
+    }
+    const json = (await response.json()) as { data: ListPaymentRequestsResponse };
+    return { ok: true, data: json.data.paymentRequests, total: json.data.total };
+  } catch (error) {
+    return {
+      ok: false,
+      data: [],
+      total: 0,
+      error: error instanceof Error ? error.message : undefined,
+      localErrorCode: error instanceof Error ? undefined : "paymentRequestsLoadFailed",
+    };
+  }
+}

@@ -22,4 +22,11 @@ describe("themeScopeForPath", () => {
   ])("keeps %s in the base design", (pathname) => {
     expect(themeScopeForPath(pathname)).toBeNull();
   });
+
+  it.each(["/dashboard/payments", "/dashboard/integrations/private-channels/setup"])(
+    "keeps %s in the base design with NEW DESIGN off",
+    (pathname) => {
+      expect(themeScopeForPath(pathname, false)).toBeNull();
+    }
+  );
 });

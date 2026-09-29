@@ -1,12 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
+import LegacyPaymentsPayPage from "../_legacy/pay/page";
 import { PaymentsPayPageSkeleton } from "../payments-route-skeletons";
 import { loadPaymentsActionPageData } from "../ramps/payments-action-page.server";
 import { PaymentsActionPage } from "../ramps/ramp-action-page";
 
-export default async function PaymentsPayPage() {
+async function PaymentsPayPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -24,3 +26,5 @@ export default async function PaymentsPayPage() {
     </Suspense>
   );
 }
+
+export default withLegacyDesign(PaymentsPayPage, LegacyPaymentsPayPage);

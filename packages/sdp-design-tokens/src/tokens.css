@@ -62,7 +62,9 @@
   /* The base design's type. These are the names Tailwind's font-sans / font-mono utilities
      and @solana/design-system read, so re-pointing them re-fonts a whole subtree. */
   --font-sans: "Inter Variable", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
 }
 
 :root.dark {

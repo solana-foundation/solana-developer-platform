@@ -20,8 +20,11 @@ const browser = vi.hoisted(() => {
       jar.delete(name);
     },
   };
-  return { jar, store, pathname: "/dashboard/payments" };
+  return { jar, store, pathname: "/dashboard/payments", newDesign: true };
 });
+
+// Demo mode is part of the new design; the flag itself reads Vercel and the request.
+vi.mock("@/flags", () => ({ newDesign: async () => browser.newDesign }));
 
 vi.mock("next/headers", () => ({
   // A fresh store object per request, as Next gives each request its own.
@@ -62,6 +65,7 @@ beforeEach(() => {
   browser.jar.clear();
   browser.jar.set("sdp-payments-demo", PROJECT);
   browser.pathname = "/dashboard/payments";
+  browser.newDesign = true;
   upstream.mockClear();
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
@@ -79,6 +83,11 @@ describe("scope", () => {
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
     browser.jar.set("sdp-payments-demo", PROJECT);
     browser.pathname = "/dashboard/wallets";
+    expect((await call("GET", "/v1/counterparties")).status).toBeNull();
+  });
+
+  it("stays out of the way with NEW DESIGN off, cookie or not", async () => {
+    browser.newDesign = false;
     expect((await call("GET", "/v1/counterparties")).status).toBeNull();
   });
 
