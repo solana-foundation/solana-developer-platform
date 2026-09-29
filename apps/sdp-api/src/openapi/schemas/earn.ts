@@ -1223,13 +1223,20 @@ const earnExternalWalletTokenEarningsSchema = z
         "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
     }),
     earnedUnavailableReason: z
-      .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
+      .enum([
+        "live_value_unavailable",
+        "movements_pending",
+        "withdrawals_pending",
+        "withdrawals_not_valued",
+      ])
       .optional()
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a currently held position has a finalized withdrawal whose token payout was not " +
-          "observed at settlement, so `totalWithdrawn` is incomplete.",
+          "a currently held position has an open queued withdrawal request, whose shares leave " +
+          "the wallet before its payout (this can last days); or a currently held position has " +
+          "a finalized withdrawal whose token payout was not observed at settlement, so " +
+          "`totalWithdrawn` is incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

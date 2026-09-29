@@ -38,6 +38,7 @@ export interface ReconcilableVaultClaim {
   share_mint: string | null;
   label: string;
   has_unsettled_movements: boolean;
+  has_open_withdrawal_requests: boolean;
 }
 
 export interface ReconcilableShareMintedStrategy {
@@ -211,8 +212,16 @@ export async function reconcileVaultShareHoldings(input: {
     for (const claim of walletClaims) {
       // A claim without a share mint cannot be judged against balances, and an
       // in-flight movement already explains a chain/record disagreement — the
-      // sweep settles it within about a minute either way.
-      if (!claim.share_mint || claim.has_unsettled_movements) continue;
+      // sweep settles it within about a minute either way. An open queued
+      // request explains it for longer: its shares left the wallet before the
+      // payout, and the claim is judged again once the request is terminal.
+      if (
+        !claim.share_mint ||
+        claim.has_unsettled_movements ||
+        claim.has_open_withdrawal_requests
+      ) {
+        continue;
+      }
       if (balancesByMint.has(claim.share_mint)) continue;
       report.unbackedPositions.push({
         positionId: claim.id,

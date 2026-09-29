@@ -486,7 +486,7 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  *
  * `earned` is live current value, plus the observed token payouts of
  * finalized withdrawals, minus finalized SDP deposits (chain for the first,
- * ledger for the other two), and it is stated only when it is exact. Three
+ * ledger for the other two), and it is stated only when it is exact. Four
  * things make it unstatable, each reported by name and none of them ever
  * coerced to zero:
  *
@@ -494,6 +494,10 @@ export async function getEarnExternalWalletMovement(c: AppContext) {
  * - a movement is still settling, so the chain and the ledger describe
  *   different moments (`movements_pending` — detail polling performs a bounded
  *   live chain read and the scheduled reconciler remains the recovery path);
+ * - a queued withdrawal request is still open (`withdrawals_pending`): a Veda
+ *   solver queue escrows the shares and a Hastra par redemption burns them, so
+ *   live value falls short by the request before its payout is a ledger
+ *   fact, until the request reaches a terminal status;
  * - a finalized withdrawal has NO observed payout (`withdrawals_not_valued`):
  *   exits are ledgered in SHARES, and the deposit-token payout is observed
  *   from the landed transaction at settlement (`token_amount_settled`,
@@ -559,10 +563,15 @@ interface MutableTokenEarnings {
   earnedUnavailableReason?: EarnExternalWalletEarnedUnavailableReason;
 }
 
-/** Higher wins when several positions leave a token's earned unstatable. */
+/**
+ * Higher wins when several positions leave a token's earned unstatable. A
+ * settling movement outranks an open request: it clears within the
+ * reconciler's window, and the request's longer-lived reason then surfaces.
+ */
 const EARNED_UNAVAILABLE_PRIORITY: Record<EarnExternalWalletEarnedUnavailableReason, number> = {
-  live_value_unavailable: 3,
-  movements_pending: 2,
+  live_value_unavailable: 4,
+  movements_pending: 3,
+  withdrawals_pending: 2,
   withdrawals_not_valued: 1,
 };
 
@@ -652,6 +661,7 @@ function earnedUnavailableReason(
 ): EarnExternalWalletEarnedUnavailableReason | null {
   if (liveTokenValue === undefined) return "live_value_unavailable";
   if (totals && totals.unsettledMovementCount > 0) return "movements_pending";
+  if (totals && totals.openWithdrawalRequestCount > 0) return "withdrawals_pending";
   // A valued withdrawal is a ledger fact like a deposit; only an UNVALUED one
   // (no observed payout) leaves the figure inexact.
   if (totals && totals.unvaluedWithdrawalCount > 0) return "withdrawals_not_valued";
