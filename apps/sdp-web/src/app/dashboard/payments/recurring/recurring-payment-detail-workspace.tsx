@@ -53,7 +53,6 @@ import {
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { usePaymentsActionWallets } from "../ramps/hooks/use-payments-action-wallets";
 import { RecurringPaymentCollectionHistory } from "./recurring-payment-collection-history";
-import { recurringPaymentAssetOptions } from "./recurring-payment-create-workspace";
 import { getRecurringPaymentDetailState } from "./recurring-payment-detail-state";
 import {
   type RecurringPaymentAction,
@@ -80,6 +79,7 @@ import {
   type Translate,
   walletLabel,
 } from "./recurring-payments-shared";
+import { recurringPaymentAssetOptions } from "./use-recurring-payment-create";
 
 interface RecurringPaymentDetailWorkspaceProps {
   recurringPayment: PaymentRecurringPayment & { sourceCustodyWalletId: string };

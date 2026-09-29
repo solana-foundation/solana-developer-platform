@@ -1,7 +1,8 @@
 import type { UnifiedTransactionModule } from "@sdp/types";
+import { transactionHref } from "@/lib/payments-routes";
 
 export const TRANSACTION_MODULE_HREFS = {
-  payments: (id) => `/dashboard/payments/transactions?transaction=${encodeURIComponent(id)}`,
+  payments: transactionHref,
   earn: (id) => `/dashboard/markets/earn?transaction=${encodeURIComponent(id)}`,
   dvp: (id) => `/dashboard/markets/dvp/${encodeURIComponent(id)}`,
   private_channels: (id) =>

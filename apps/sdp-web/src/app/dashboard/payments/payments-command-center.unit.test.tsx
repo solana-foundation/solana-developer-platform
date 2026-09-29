@@ -5,8 +5,7 @@ import { resolveCommandCenterCounterparty } from "./payments-command-center.util
 import {
   PaymentsActivitySkeleton,
   PaymentsBalanceSkeleton,
-  PaymentsNetworkSkeleton,
-  PaymentsUpcomingSkeleton,
+  PaymentsSummarySkeleton,
 } from "./payments-command-center-skeletons";
 
 describe("payments command center", () => {
@@ -23,16 +22,15 @@ describe("payments command center", () => {
     const markup = renderToStaticMarkup(
       <>
         <PaymentsBalanceSkeleton />
+        <PaymentsSummarySkeleton />
         <PaymentsActivitySkeleton />
-        <PaymentsUpcomingSkeleton />
-        <PaymentsNetworkSkeleton />
       </>
     );
 
-    for (const region of ["balance", "activity", "upcoming", "network"]) {
+    for (const region of ["balance", "summary", "activity"]) {
       expect(markup).toContain(`data-payments-overview-skeleton="${region}"`);
     }
-    expect(markup.match(/aria-busy="true"/g)).toHaveLength(4);
+    expect(markup.match(/aria-busy="true"/g)).toHaveLength(3);
   });
 
   it("shows the sender rather than the project wallet for inbound and onramp activity", () => {

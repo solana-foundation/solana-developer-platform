@@ -66,12 +66,8 @@ export function BulkImportDialog({ open, onClose, onImport }: BulkImportDialogPr
       setErrors([t("DashboardPayments.batchSend.addAtLeastOneRecipient")]);
       return;
     }
-    const currencies = [...new Set(valid.map((row) => row.currency))];
-    if (currencies.length > 1) {
-      messages.push(
-        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
-      );
-    }
+    // One token per batch is checked on import, by mint, so a symbol and its mint address
+    // count as one.
     if (messages.length > 0) {
       setErrors(messages);
       return;

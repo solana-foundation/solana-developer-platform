@@ -3,6 +3,7 @@
 import { RAMPS_MEMO_LIMITS } from "@sdp/types";
 import { PlusIcon, XIcon } from "lucide-react";
 import { type ClipboardEvent, useState } from "react";
+import { InfoHint } from "@/components/ui/info-hint";
 import { useTranslations } from "@/i18n/provider";
 import {
   emptyMemoRow,
@@ -23,8 +24,10 @@ interface EditableMemoRow extends MemoRow {
   id: string;
 }
 
+// On a refresh surface the scope's input tokens drop the radius, fill and inset, and only the
+// bottom edge is drawn.
 const INPUT_CLASS =
-  "h-[var(--input-height-xl)] min-w-0 flex-1 rounded-[var(--input-radius-xl)] border border-border-default bg-[var(--input-bg-idle)] px-[var(--input-padding-x-xl)] text-base text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none";
+  "h-[var(--input-height-xl)] min-w-0 flex-1 rounded-[var(--input-radius-xl)] border border-border-default bg-[var(--input-bg-idle)] px-[var(--input-padding-x-xl)] text-base text-primary placeholder:text-tertiary hover:bg-[var(--input-bg-hover)] focus:border-[var(--input-border-focus)] focus:outline-none refresh:border-x-0 refresh:border-t-0";
 
 /**
  * Creates a memo row with stable render identity.
@@ -122,10 +125,16 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
   };
 
   return (
-    <div className="space-y-5">
-      <p className="text-sm text-tertiary">{t("DashboardPayments.ramps.memoDescription")}</p>
+    <div className="space-y-5 refresh:space-y-3">
+      <p className="text-sm text-tertiary refresh:hidden">
+        {t("DashboardPayments.ramps.memoDescription")}
+      </p>
+      <div className="hidden items-center gap-1.5 refresh:flex">
+        <span className="text-meta text-secondary">{t("DashboardPayments.ramps.memoStep")}</span>
+        <InfoHint text={t("DashboardPayments.ramps.memoDescription")} />
+      </div>
 
-      <div className="flex items-center gap-2 px-1 text-xs font-medium text-tertiary">
+      <div className="flex items-center gap-2 px-1 text-xs font-medium text-tertiary refresh:hidden">
         <span className="flex-1">{t("DashboardPayments.ramps.memoKey")}</span>
         <span className="flex-1">{t("DashboardPayments.ramps.memoValue")}</span>
         <span className="size-9" />
@@ -197,7 +206,7 @@ export function MemoStepContent({ rows, onChange }: MemoStepContentProps) {
       ) : null}
 
       {populatedRows.length > 0 ? (
-        <div className="space-y-3">
+        <div className="space-y-3 refresh:hidden">
           <div className="space-y-1">
             <p className="text-base font-medium text-primary">
               {t("DashboardPayments.ramps.memoJsonTitle")}

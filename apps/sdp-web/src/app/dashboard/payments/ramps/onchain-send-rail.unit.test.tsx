@@ -31,7 +31,7 @@ vi.mock("./hooks/use-onchain-send-wizard", async (importOriginal) => ({
 
 const reviewWizard = {
   summaryDetails: [],
-  stepIndex: 2,
+  stepIndex: 1,
   currentStepId: "REVIEW",
   isLastStep: true,
   canProceed: true,

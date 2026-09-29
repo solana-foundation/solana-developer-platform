@@ -9,7 +9,7 @@ import type {
 import { address } from "@solana/kit";
 import { CoinsIcon, DollarSignIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 import { paymentsQueryKeys } from "@/app/dashboard/payments/payments-query-key";
@@ -33,21 +33,18 @@ import { optionalDetail, summaryAmount } from "../wizard-summary";
 import { usePaymentsActionWallets } from "./use-payments-action-wallets";
 import type { RampWizardStep } from "./use-ramp-wizard";
 
-export const ONCHAIN_SEND_STEP_IDS = ["DESTINATION", "DETAILS", "REVIEW"] as const;
+// One details step (contact, destination, wallet, amount, memo) and a review that also shows the
+// outcome once sent.
+export const ONCHAIN_SEND_STEP_IDS = ["DETAILS", "REVIEW"] as const;
 export type OnchainSendStepId = (typeof ONCHAIN_SEND_STEP_IDS)[number];
 type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export function getOnchainSendSteps(t: Translate): readonly RampWizardStep<OnchainSendStepId>[] {
   return [
     {
-      id: "DESTINATION",
-      label: t("DashboardPayments.onchainSend.destination"),
-      title: t("DashboardPayments.onchainSend.destinationTitle"),
-    },
-    {
       id: "DETAILS",
       label: t("DashboardPayments.onchainSend.details"),
-      title: t("DashboardPayments.onchainSend.detailsTitle"),
+      title: t("DashboardPayments.whoAreYouPaying"),
     },
     {
       id: "REVIEW",
@@ -91,12 +88,14 @@ export function canProceedOnchainSend({
   readySubmission: CreateTransferInput | null;
 }): boolean {
   switch (stepId) {
-    case "DESTINATION":
-      return onchainDestinationSchema.safeParse(fields).success && destinationAddress !== null;
     case "DETAILS": {
       const hasMintForSelectedAsset = fields.walletId === "" || selectedMint !== null;
       return (
-        onchainDetailsSchema.safeParse(fields).success && !exceedsBalance && hasMintForSelectedAsset
+        onchainDestinationSchema.safeParse(fields).success &&
+        destinationAddress !== null &&
+        onchainDetailsSchema.safeParse(fields).success &&
+        !exceedsBalance &&
+        hasMintForSelectedAsset
       );
     }
     case "REVIEW":
@@ -251,6 +250,14 @@ export function useOnchainSendWizard({
   });
   const [addAccountOpen, setAddAccountOpen] = useState(false);
 
+  // A destination belongs to one contact; picking another contact clears it.
+  const accountCounterpartyRef = useRef(counterpartyId);
+  useEffect(() => {
+    if (accountCounterpartyRef.current === counterpartyId) return;
+    accountCounterpartyRef.current = counterpartyId;
+    setField("accountId", "");
+  }, [counterpartyId, setField]);
+
   const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
     wallets,
     walletsError
@@ -310,7 +317,7 @@ export function useOnchainSendWizard({
   );
   const canProceed =
     finished ||
-    ((currentStepId === "DESTINATION" || !signingUnavailable) &&
+    (!signingUnavailable &&
       canProceedOnchainSend({
         stepId: currentStepId,
         fields,

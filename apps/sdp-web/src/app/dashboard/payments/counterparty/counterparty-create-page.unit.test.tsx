@@ -2,9 +2,12 @@ import type { ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createdCounterparty: null as { id: string; displayName: string } | null,
+  flaggedAddress: null as { message: string } | null,
+  submitting: false,
   push: vi.fn(),
   submit: vi.fn(),
+  attachFlaggedAddress: vi.fn(),
+  skipFlaggedAddress: vi.fn(),
 }));
 
 vi.mock("@/i18n/provider", () => ({
@@ -18,31 +21,57 @@ vi.mock("next/navigation", () => ({
 vi.mock("./counterparty-create-context", () => ({
   CounterpartyCreateProvider: ({ children }: { children: ReactNode }) => children,
   useCounterpartyCreate: () => ({
+    basics: { values: {}, errors: {}, setField: vi.fn() },
     submit: mocks.submit,
-    submitting: false,
+    submitting: mocks.submitting,
     submitError: null,
-    createdCounterparty: mocks.createdCounterparty,
+    flaggedAddress: mocks.flaggedAddress,
+    attachFlaggedAddress: mocks.attachFlaggedAddress,
+    skipFlaggedAddress: mocks.skipFlaggedAddress,
   }),
 }));
 
 import { CounterpartyCreateDialog } from "./counterparty-create-dialog";
 import { CounterpartyCreatePage } from "./counterparty-create-page";
-import { CryptoAccountsPhase } from "./crypto-accounts-phase";
 
-type ActionElement = ReactElement<{ onClick: () => void }>;
+type ActionElement = ReactElement<{ onClick: () => void; disabled: boolean }>;
 type FooterElement = ReactElement<{ children: [ActionElement, ActionElement] }>;
+type ContentElement = ReactElement<{ children: [ReactElement, ReactElement] }>;
 
 function embeddedFooter(onCancel?: () => void): FooterElement {
   const page = CounterpartyCreatePage({ embedded: true, onCancel }) as ReactElement<{
-    children: [ReactElement, ReactElement, FooterElement];
+    children: [ReactElement, ContentElement, FooterElement];
   }>;
   return page.props.children[2];
 }
 
+function standalonePage() {
+  return CounterpartyCreatePage({}) as ReactElement<{
+    footer: FooterElement;
+    children: ContentElement;
+  }>;
+}
+
+/** The flagged-address dialog's rendered modal, from the page's content. */
+function flaggedDialog(content: ContentElement) {
+  const dialog = content.props.children[1] as ReactElement<Record<string, never>> & {
+    type: (props: Record<string, never>) => ReactElement<{
+      isOpen: boolean;
+      children: ReactElement<{
+        children: [ReactElement, ReactElement<{ children: ActionElement[] }>];
+      }>;
+    }>;
+  };
+  return dialog.type({});
+}
+
 beforeEach(() => {
-  mocks.createdCounterparty = null;
+  mocks.flaggedAddress = null;
+  mocks.submitting = false;
   mocks.push.mockReset();
   mocks.submit.mockReset();
+  mocks.attachFlaggedAddress.mockReset();
+  mocks.skipFlaggedAddress.mockReset();
 });
 
 describe("counterparty create flow", () => {
@@ -62,9 +91,7 @@ describe("counterparty create flow", () => {
   });
 
   it("returns the standalone page to the counterparty directory on cancel", () => {
-    const frame = CounterpartyCreatePage({}) as ReactElement<{ footer: FooterElement }>;
-
-    frame.props.footer.props.children[0].props.onClick();
+    standalonePage().props.footer.props.children[0].props.onClick();
 
     expect(mocks.push).toHaveBeenCalledWith("/dashboard/payments/counterparty");
   });
@@ -86,30 +113,25 @@ describe("counterparty create flow", () => {
     expect(page.props.onCancel).toBe(onClose);
   });
 
-  it("uses the standalone optional-account layout after page creation", () => {
-    mocks.createdCounterparty = { id: "cp_123", displayName: "Northstar Labs" };
+  it("keeps the flagged-address dialog closed until the screening flags one", () => {
+    const modal = flaggedDialog(standalonePage().props.children);
 
-    const phase = CounterpartyCreatePage({}) as ReactElement<{
-      embedded: boolean;
-      steps: readonly { label: string; title: string }[];
-    }>;
-
-    expect(phase.type).toBe(CryptoAccountsPhase);
-    expect(phase.props.embedded).toBe(false);
-    expect(phase.props.steps.map((step) => step.label)).toEqual([
-      "DashboardPayments.counterparty.basics",
-      "DashboardPayments.counterparty.cryptoWallet",
-    ]);
+    expect(modal.props.isOpen).toBe(false);
   });
 
-  it("preserves the embedded optional-account layout inside the dialog", () => {
-    mocks.createdCounterparty = { id: "cp_123", displayName: "Northstar Labs" };
+  it("holds the form and offers Add anyway or Skip while an address is flagged", () => {
+    mocks.flaggedAddress = { message: "flagged" };
+    const page = standalonePage();
 
-    const phase = CounterpartyCreatePage({ embedded: true, onCancel: vi.fn() }) as ReactElement<{
-      embedded: boolean;
-    }>;
+    // The contact already exists: a second submit would create it again.
+    expect(page.props.footer.props.children[1].props.disabled).toBe(true);
 
-    expect(phase.type).toBe(CryptoAccountsPhase);
-    expect(phase.props.embedded).toBe(true);
+    const modal = flaggedDialog(page.props.children);
+    expect(modal.props.isOpen).toBe(true);
+    const [skip, addAnyway] = modal.props.children.props.children[1].props.children;
+    skip.props.onClick();
+    addAnyway.props.onClick();
+    expect(mocks.skipFlaggedAddress).toHaveBeenCalledOnce();
+    expect(mocks.attachFlaggedAddress).toHaveBeenCalledOnce();
   });
 });

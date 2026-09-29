@@ -29,7 +29,7 @@ export default async function Home() {
             >
               {t("Home.docs")}
             </Link>
-            <LanguagePicker variant="landing" />
+            <LanguagePicker />
             <Link
               href="/sign-in"
               className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-sm font-semibold text-on-primary transition hover:opacity-90"

@@ -163,6 +163,11 @@ export function useRampWizard<TId extends string>(
     counterpartyId: initialCounterpartyId,
   });
 
+  // Deposit picks its contact on the details step, outside this hook; follow it here.
+  useEffect(() => {
+    setField("counterpartyId", initialCounterpartyId);
+  }, [initialCounterpartyId, setField]);
+
   const { mutate: mutateSwrCache } = useSWRConfig();
   const selectProvider = (provider: RampProviderId) => {
     void mutateSwrCache(paymentsQueryKeys.isCounterpartyRequirementsKey, undefined, {

@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 import { readApiErrorMessage } from "./api-error";
 import { resolveProjectFromList } from "./dashboard-project-selection";
+import { paymentsDemoResponse } from "./payments-demo/demo-mode";
 import { PROJECT_COOKIE_NAME, PROJECT_HEADER_NAME } from "./project-cookie";
 import {
   createTimedTrace,
@@ -103,6 +104,12 @@ function createSdpApiRequest(
     // (e.g. a playground request); the log keeps the route only while the
     // upstream request still receives the full path.
     const loggedPath = path.split("?", 1)[0];
+
+    // Payments demo mode answers from fixtures (and refuses writes) before anything goes out.
+    const demoResponse = await paymentsDemoResponse(method, path, projectId);
+    if (demoResponse) {
+      return demoResponse;
+    }
 
     const response = await fetch(url, {
       ...options,

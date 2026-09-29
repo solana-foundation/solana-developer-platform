@@ -9,11 +9,8 @@ import type { TransactionFilters } from "./transactions-query";
 import { TransactionsWorkspace } from "./transactions-workspace";
 
 const replace = vi.fn();
-const urlState = vi.hoisted(() => ({ tab: null as string | null }));
 
 vi.mock("@/lib/dashboard-url-state", () => ({
-  useDashboardTab: () => urlState.tab,
-  readDashboardTabFromUrl: () => urlState.tab,
   replaceDashboardSearchParams: (updates: Record<string, string | null>) => replace(updates),
 }));
 vi.mock("@/lib/dashboard-fetch", () => ({
@@ -24,6 +21,7 @@ vi.mock("@/lib/dashboard-fetch", () => ({
   }),
 }));
 vi.mock("@/lib/use-solana-cluster", () => ({ useSolanaCluster: () => "devnet" }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 function renderWorkspace(filters: TransactionFilters) {
   return render(
@@ -33,6 +31,8 @@ function renderWorkspace(filters: TransactionFilters) {
           initialFilters={filters}
           initialResult={{ transactions: [], nextCursor: null }}
           issuedTokensByMint={{}}
+          wallets={[{ id: "cwlt_1", label: "Treasury", publicKey: "Pub111" }]}
+          counterparties={[{ id: "cpty_42", name: "Acme Treasury" }]}
         />
       </I18nProvider>
     </SWRConfig>
@@ -41,22 +41,13 @@ function renderWorkspace(filters: TransactionFilters) {
 
 beforeEach(() => {
   replace.mockReset();
-  urlState.tab = null;
 });
 afterEach(cleanup);
 
 describe("TransactionsWorkspace", () => {
-  it("adopts the shared tab's module when the URL carries one the loaded filters lack", () => {
-    urlState.tab = "earn";
-
-    renderWorkspace({ cursors: [] });
-
-    expect(replace).toHaveBeenCalledWith(expect.objectContaining({ tab: "earn", kind: null }));
-  });
-
   it("commits a search only once it has three characters", () => {
     renderWorkspace({ cursors: [] });
-    const search = screen.getByLabelText("Search transactions");
+    const search = screen.getByRole("searchbox", { name: "Search transactions" });
 
     fireEvent.change(search, { target: { value: "xf" } });
     fireEvent.keyDown(search, { key: "Enter" });
@@ -71,28 +62,24 @@ describe("TransactionsWorkspace", () => {
     );
   });
 
-  it("shows the module's kinds inside a module tab", () => {
-    urlState.tab = "earn";
-    renderWorkspace({ module: "earn", cursors: [] });
-
-    expect(screen.getByLabelText("Transaction kind")).toBeDefined();
-  });
-
-  it("shows and dismisses a linked counterparty filter", () => {
+  it("names an active contact filter and clears it from its chip", () => {
     renderWorkspace({ counterpartyId: "cpty_42", cursors: [] });
 
-    expect(screen.getByText("cpty_42").closest("a")?.getAttribute("href")).toBe(
-      "/dashboard/payments/counterparty/cpty_42"
-    );
-    act(() => fireEvent.click(screen.getByLabelText("Clear counterparty filter")));
+    expect(screen.getByText("Acme Treasury")).toBeDefined();
+    act(() => fireEvent.click(screen.getByLabelText("Clear Contact filter")));
     expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ counterpartyId: null }));
   });
 
-  it("shows and dismisses a linked token filter", () => {
-    renderWorkspace({ token: "Mint111", cursors: [] });
+  it("clears the module and kind together from the type chip", () => {
+    renderWorkspace({ module: "earn", kind: "deposit", cursors: [] });
 
-    expect(screen.getByText("Mint111")).toBeDefined();
-    act(() => fireEvent.click(screen.getByLabelText("Clear token filter")));
-    expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ token: null }));
+    expect(screen.getByText("Earn · Deposit")).toBeDefined();
+    act(() => fireEvent.click(screen.getByLabelText("Clear Type filter")));
+    expect(replace).toHaveBeenLastCalledWith(expect.objectContaining({ module: null, kind: null }));
+  });
+
+  it("writes a new page size and restarts on the first page", () => {
+    renderWorkspace({ cursors: ["a"], cursor: "b" });
+    expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeDefined();
   });
 });

@@ -2,6 +2,7 @@
 
 import {
   type CounterpartyAccountSummary,
+  type CustodyWalletTokenBalance,
   isWellKnownTokenSymbol,
   type PaymentsDashboardWallet,
   type SolanaCluster,
@@ -47,11 +48,8 @@ export type BatchSendStepId = "RECIPIENTS" | "REVIEW";
 
 export function getBatchSendSteps(t: Translate): readonly RampWizardStep<BatchSendStepId>[] {
   return [
-    {
-      id: "RECIPIENTS",
-      label: t("DashboardPayments.batchSend.recipientsStep"),
-      title: t("DashboardPayments.batchSend.recipientsTitle"),
-    },
+    // The rows form speaks for itself; the step header already says "Details".
+    { id: "RECIPIENTS", label: t("DashboardPayments.onchainSend.details"), title: "" },
     {
       id: "REVIEW",
       label: t("DashboardPayments.batchSend.reviewStep"),
@@ -101,30 +99,14 @@ export interface UseBatchSendWizardProps {
   onExit: () => void;
 }
 
-export function useBatchSendWizard({
-  wallets,
-  walletsError,
-  issuedTokenSymbolsByMint,
-  cluster,
-  onExit,
-}: UseBatchSendWizardProps) {
-  const router = useRouter();
+/**
+ * One page of the contacts a batch can pay, filtered by the search box. A new search starts
+ * again from the first page.
+ */
+function useBatchRecipientPage() {
   const t = useTranslations();
-  const steps = getBatchSendSteps(t);
-  const [stepIndex, setStepIndex] = useState(0);
-  const [walletId, setWalletId] = useState("");
-  const [asset, setAsset] = useState("");
-  const [externalId, setExternalId] = useState("");
-  const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
-
-  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
-    wallets,
-    walletsError
-  );
 
   const trimmedSearch = search.trim();
   const { data: recipientPage, isLoading: recipientsLoading } = useSWR(
@@ -148,6 +130,153 @@ export function useBatchSendWizard({
     setSearch(next);
     setPage(1);
   };
+
+  return {
+    page,
+    setPage,
+    search,
+    setSearchQuery,
+    pageRecipients,
+    recipientsLoading,
+    recipientTotal,
+    pageCount,
+  };
+}
+
+/**
+ * The rows in the batch, keyed by counterparty account so a pick survives paging and
+ * searching, with the ways to add, remove, and price them.
+ */
+function useBatchRecipientEntries() {
+  const [entries, setEntries] = useState<Record<string, BatchRecipientEntry>>({});
+
+  // Typing an amount also adds the row to the batch, so the input can show on every row.
+  const setRecipientAmount = (recipient: BatchEligibleRecipient, amount: string) => {
+    setEntries((prev) => ({
+      ...prev,
+      [recipient.counterpartyAccountId]: { recipient, amount },
+    }));
+  };
+
+  const toggleRecipient = (recipient: BatchEligibleRecipient) => {
+    setEntries((prev) => {
+      const next = { ...prev };
+      if (next[recipient.counterpartyAccountId]) {
+        delete next[recipient.counterpartyAccountId];
+      } else {
+        next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+      }
+      return next;
+    });
+  };
+
+  const setManySelected = (recipientsToSet: BatchEligibleRecipient[], value: boolean) => {
+    setEntries((prev) => {
+      const next = { ...prev };
+      for (const recipient of recipientsToSet) {
+        if (value) {
+          if (!next[recipient.counterpartyAccountId]) {
+            next[recipient.counterpartyAccountId] = { recipient, amount: "" };
+          }
+        } else {
+          delete next[recipient.counterpartyAccountId];
+        }
+      }
+      return next;
+    });
+  };
+
+  return { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected };
+}
+
+/**
+ * What the source wallet holds of the chosen token (0 when it holds none, null before a
+ * wallet is picked), and whether the batch total is more than that.
+ */
+function batchBalanceCheck(
+  selectedWallet: PaymentsDashboardWallet | null,
+  selectedAssetBalance: CustodyWalletTokenBalance | null,
+  totalAmount: string
+): { availableAmount: number | null; exceedsBalance: boolean } {
+  const totalAmountValue = Number(totalAmount);
+  let availableAmount: number | null = null;
+  if (selectedWallet) {
+    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
+  }
+  const exceedsBalance =
+    totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;
+  return { availableAmount, exceedsBalance };
+}
+
+/**
+ * Whether the primary button may act. A finished batch always may; otherwise the wallet has
+ * to be able to sign, and on the rows step the rows have to be valid, affordable, and in a
+ * token the wallet holds.
+ */
+function batchCanProceed({
+  batchResult,
+  selectedWallet,
+  currentStepId,
+  recipientsValid,
+  exceedsBalance,
+  hasMint,
+}: {
+  batchResult: CreateTransferBatchResult | null;
+  selectedWallet: PaymentsDashboardWallet | null;
+  currentStepId: BatchSendStepId;
+  recipientsValid: boolean;
+  exceedsBalance: boolean;
+  hasMint: boolean;
+}): boolean {
+  return (
+    batchResult !== null ||
+    (selectedWallet?.isRuntimeExecutionAllowed === true &&
+      (currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true))
+  );
+}
+
+/** The fee estimate's failure as a sentence, or null while it has not failed. */
+function estimateErrorMessage(error: unknown, t: Translate): string | null {
+  if (!error) {
+    return null;
+  }
+  return error instanceof Error ? error.message : t("DashboardPayments.batchSend.estimateFailed");
+}
+
+export function useBatchSendWizard({
+  wallets,
+  walletsError,
+  issuedTokenSymbolsByMint,
+  cluster,
+  onExit,
+}: UseBatchSendWizardProps) {
+  const router = useRouter();
+  const t = useTranslations();
+  const steps = getBatchSendSteps(t);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [walletId, setWalletId] = useState("");
+  const [asset, setAsset] = useState("");
+  const [externalId, setExternalId] = useState("");
+  const { entries, setEntries, setRecipientAmount, toggleRecipient, setManySelected } =
+    useBatchRecipientEntries();
+  const [submitting, setSubmitting] = useState(false);
+  const [batchResult, setBatchResult] = useState<CreateTransferBatchResult | null>(null);
+
+  const { liveWallets, walletsLoading, liveWalletsError } = usePaymentsActionWallets(
+    wallets,
+    walletsError
+  );
+
+  const {
+    page,
+    setPage,
+    search,
+    setSearchQuery,
+    pageRecipients,
+    recipientsLoading,
+    recipientTotal,
+    pageCount,
+  } = useBatchRecipientPage();
 
   const selectedWallet = useMemo(
     () => liveWallets.find((wallet) => wallet.id === walletId) ?? null,
@@ -187,43 +316,28 @@ export function useBatchSendWizard({
     }
   };
 
-  // Typing an amount also adds the row to the batch, so the input can show on every row.
-  const setRecipientAmount = (recipient: BatchEligibleRecipient, amount: string) => {
-    setEntries((prev) => ({
-      ...prev,
-      [recipient.counterpartyAccountId]: { recipient, amount },
-    }));
-  };
-
-  const toggleRecipient = (recipient: BatchEligibleRecipient) => {
-    setEntries((prev) => {
-      const next = { ...prev };
-      if (next[recipient.counterpartyAccountId]) {
-        delete next[recipient.counterpartyAccountId];
-      } else {
-        next[recipient.counterpartyAccountId] = { recipient, amount: "" };
-      }
-      return next;
-    });
-  };
-
-  const setManySelected = (recipientsToSet: BatchEligibleRecipient[], value: boolean) => {
-    setEntries((prev) => {
-      const next = { ...prev };
-      for (const recipient of recipientsToSet) {
-        if (value) {
-          if (!next[recipient.counterpartyAccountId]) {
-            next[recipient.counterpartyAccountId] = { recipient, amount: "" };
-          }
-        } else {
-          delete next[recipient.counterpartyAccountId];
-        }
-      }
-      return next;
-    });
-  };
-
   const bulkImport = async (rows: BulkImportRow[]): Promise<{ unresolved: string[] }> => {
+    // One batch pays one token, and both importers (the paste dialog and the CSV drop) arrive
+    // here. Rows are compared by the mint they resolve to, so "USDC" and USDC's mint address
+    // name the same token; the check runs before any recipient is looked up.
+    const mints = new Set<string>();
+    for (const { currency } of rows) {
+      const rowMint = isWellKnownTokenSymbol(currency)
+        ? wellKnownMint(currency, cluster)
+        : currency;
+      if (!rowMint) {
+        throw new Error(t("DashboardPayments.batchSend.tokenUnavailableOnNetwork", { currency }));
+      }
+      mints.add(rowMint);
+    }
+    if (mints.size > 1) {
+      const currencies = [...new Set(rows.map((row) => row.currency))];
+      throw new Error(
+        t("DashboardPayments.batchSend.oneCurrencyRequired", { currencies: currencies.join(", ") })
+      );
+    }
+    const [mint] = mints;
+
     const ids = [...new Set(rows.map((row) => row.accountId))];
     const resolved = await fetchBatchRecipients({ ids }, t);
     const byId = new Map(
@@ -241,12 +355,6 @@ export function useBatchSendWizard({
     }
     if (unresolved.length > 0) {
       return { unresolved };
-    }
-
-    const { currency } = rows[0];
-    const mint = isWellKnownTokenSymbol(currency) ? wellKnownMint(currency, cluster) : currency;
-    if (!mint) {
-      throw new Error(t("DashboardPayments.batchSend.tokenUnavailableOnNetwork", { currency }));
     }
 
     const nextEntries = mint === asset ? { ...entries, ...additions } : additions;
@@ -278,13 +386,11 @@ export function useBatchSendWizard({
   );
 
   const totalAmount = useMemo(() => sumBatchAmounts(recipients.map((r) => r.amount)), [recipients]);
-  const totalAmountValue = Number(totalAmount);
-  let availableAmount: number | null = null;
-  if (selectedWallet) {
-    availableAmount = selectedAssetBalance ? Number(selectedAssetBalance.uiAmount) : 0;
-  }
-  const exceedsBalance =
-    totalAmountValue > 0 && availableAmount !== null && totalAmountValue > availableAmount;
+  const { availableAmount, exceedsBalance } = batchBalanceCheck(
+    selectedWallet,
+    selectedAssetBalance,
+    totalAmount
+  );
   const exceedsMaxRecipients = recipients.length > MAX_BATCH_RECIPIENTS;
   const hasMint = !walletId || selectedAssetBalance !== null;
   const trimmedExternalId = externalId.trim();
@@ -315,10 +421,14 @@ export function useBatchSendWizard({
 
   const currentStepId = steps[stepIndex].id;
   const isLastStep = stepIndex === steps.length - 1;
-  const canProceed =
-    batchResult !== null ||
-    (selectedWallet?.isRuntimeExecutionAllowed === true &&
-      (currentStepId === "RECIPIENTS" ? recipientsValid && !exceedsBalance && hasMint : true));
+  const canProceed = batchCanProceed({
+    batchResult,
+    selectedWallet,
+    currentStepId,
+    recipientsValid,
+    exceedsBalance,
+    hasMint,
+  });
 
   const { data: estimate, error: estimateError } = useSWR(
     currentStepId === "REVIEW" && canProceed && !batchResult
@@ -430,6 +540,14 @@ export function useBatchSendWizard({
     onExit();
   };
 
+  // Back from review to the rows; nothing has been sent yet.
+  const handleBack = () => {
+    if (submitting || batchResult) {
+      return;
+    }
+    setStepIndex((current) => Math.max(0, current - 1));
+  };
+
   return {
     stepIndex,
     currentStepId,
@@ -470,15 +588,12 @@ export function useBatchSendWizard({
     setRecipientAmount,
     bulkImport,
     estimate: estimate ?? null,
-    estimateError: estimateError
-      ? estimateError instanceof Error
-        ? estimateError.message
-        : t("DashboardPayments.batchSend.estimateFailed")
-      : null,
+    estimateError: estimateErrorMessage(estimateError, t),
     submitting,
     batchResult,
     handlePrimary,
     handleSecondary,
+    handleBack,
   };
 }
 

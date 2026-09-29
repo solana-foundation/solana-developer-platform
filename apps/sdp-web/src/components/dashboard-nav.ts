@@ -114,7 +114,7 @@ export function getPaymentsActions(
       icon: ReceiptTextIcon,
     },
     {
-      label: t("Shared.dashboardShell.counterparty"),
+      label: t("Shared.dashboardShell.contacts"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.counterparty,
       icon: UsersIcon,
     },

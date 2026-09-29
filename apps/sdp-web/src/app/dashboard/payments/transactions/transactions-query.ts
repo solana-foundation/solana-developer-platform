@@ -5,8 +5,19 @@ import {
 } from "@sdp/types";
 import { z } from "zod";
 
+/** Rows per page the list offers; 25 is the default and carries no URL param. */
+export const TRANSACTION_PAGE_SIZES = [10, 25, 50, 100] as const;
+export const DEFAULT_TRANSACTION_PAGE_SIZE = 25;
+
 const rawFiltersSchema = z.object({
+  module: z.string().optional().catch(undefined),
+  // Links written before the module moved out of the header tabs carry it in `tab`.
   tab: z.string().optional().catch(undefined),
+  pageSize: z.coerce
+    .number()
+    .refine((value) => TRANSACTION_PAGE_SIZES.some((size) => size === value))
+    .optional()
+    .catch(undefined),
   kind: z.string().trim().min(1).optional().catch(undefined),
   status: z.enum(UNIFIED_TRANSACTION_STATUSES).optional().catch(undefined),
   custodyWalletId: z.string().trim().max(128).min(1).optional().catch(undefined),
@@ -19,7 +30,10 @@ const rawFiltersSchema = z.object({
   cursors: z.string().optional().catch(undefined),
 });
 
-export type TransactionFilters = Omit<z.infer<typeof rawFiltersSchema>, "tab" | "cursors"> & {
+export type TransactionFilters = Omit<
+  z.infer<typeof rawFiltersSchema>,
+  "module" | "tab" | "cursors"
+> & {
   module?: UnifiedTransactionModule;
   cursors: string[];
 };
@@ -32,11 +46,9 @@ function scalar(value: string | string[] | undefined): string | undefined {
 }
 
 /**
- * Narrows a raw `?tab=` value to a transaction module. The shared header tabs
- * carry the module id in `tab`, so the workspace and this parser interpret the
- * param identically.
+ * Narrows a raw `?module=` (or legacy `?tab=`) value to a transaction module.
  *
- * @param value - The raw tab value, if any.
+ * @param value - The raw param value, if any.
  * @returns The matching module, or undefined for "all", an absent tab, or an unknown value.
  */
 export function parseTransactionModule(
@@ -49,9 +61,14 @@ export function parseTransactionFilters(searchParams: RawSearchParams): Transact
   const parsed = rawFiltersSchema.parse(
     Object.fromEntries(Object.entries(searchParams).map(([key, value]) => [key, scalar(value)]))
   );
-  const { tab, cursors: rawCursors, ...rest } = parsed;
+  const { module, tab, pageSize, cursors: rawCursors, ...rest } = parsed;
   const cursors = rawCursors === undefined || rawCursors === "" ? [] : rawCursors.split(",");
-  return { ...rest, module: parseTransactionModule(tab), cursors };
+  return {
+    ...rest,
+    ...(pageSize === undefined || pageSize === DEFAULT_TRANSACTION_PAGE_SIZE ? {} : { pageSize }),
+    module: parseTransactionModule(module ?? tab),
+    cursors,
+  };
 }
 
 const TRANSACTION_URL_PARAM_KEYS = [
@@ -78,7 +95,12 @@ export function toTransactionUrlUpdates(
   filters: TransactionFilters
 ): Record<string, string | null> {
   return {
-    tab: filters.module === undefined ? null : filters.module,
+    module: filters.module === undefined ? null : filters.module,
+    tab: null,
+    pageSize:
+      filters.pageSize === undefined || filters.pageSize === DEFAULT_TRANSACTION_PAGE_SIZE
+        ? null
+        : String(filters.pageSize),
     ...Object.fromEntries(
       TRANSACTION_URL_PARAM_KEYS.map((key) => [
         key,

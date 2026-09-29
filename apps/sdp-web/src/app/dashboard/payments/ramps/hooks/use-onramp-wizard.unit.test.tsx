@@ -190,9 +190,9 @@ type WizardRender = RenderHookResult<ReturnType<typeof useOnrampWizard>, unknown
 /**
  * Drives the real wizard from the deposit step to the transaction stage: pick
  * the BVNK provider, fund the deposit form, advance through the memo (which
- * POSTs the requirements advance and lands on the PROVIDER step), let the
- * readiness effect fire the quote POST, and wait for the transfer-status poll
- * to deliver the scenario transfer.
+ * POSTs the requirements advance and lands on the REVIEW step), continue past
+ * the review to the PROVIDER step, let the readiness effect fire the quote
+ * POST, and wait for the transfer-status poll to deliver the scenario transfer.
  */
 async function driveToTransferStatus(rendered: WizardRender) {
   await act(async () => {});
@@ -203,6 +203,12 @@ async function driveToTransferStatus(rendered: WizardRender) {
   await act(async () => {
     await rendered.result.current.handlePrimary();
   });
+  await act(async () => {
+    await rendered.result.current.handlePrimary();
+  });
+  // Nothing is quoted while the user reviews; the quote waits for the last step.
+  expect(rendered.result.current.currentStepId).toBe("REVIEW");
+  expect(rendered.result.current.quoteTransferId).toBeNull();
   await act(async () => {
     await rendered.result.current.handlePrimary();
   });

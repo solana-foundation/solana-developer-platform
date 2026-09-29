@@ -17,6 +17,8 @@ export const paymentsQueryKeys = {
   actionCounterparties: () => "payments-action-counterparties",
   actionWallets: () => "payments-action-wallets",
   walletAddressQr: (address: string) => ["payments-wallet-address-qr", address] as const,
+  walletDeposits: (custodyWalletId: string) =>
+    ["payments-wallet-deposits", custodyWalletId] as const,
   createTransfer: () => "payments-create-transfer",
   transactions: ({ query }: { query: string }) => ["payments-transactions", query] as const,
   onrampTransferStatus: ({ transferId }: { transferId: string }) =>
@@ -66,8 +68,6 @@ export const paymentsQueryKeys = {
     ["counterparty-accounts", counterpartyId] as const,
   counterpartyProviderAccounts: ({ counterpartyId }: { counterpartyId: string }) =>
     ["counterparty-provider-accounts", counterpartyId] as const,
-  counterpartyRecentTransfers: ({ counterpartyId }: { counterpartyId: string }) =>
-    ["counterparty-recent-transfers", counterpartyId] as const,
   batchRecipients: ({ page, search }: { page: number; search: string }) =>
     ["batch-recipients", page, search] as const,
   batchEstimate: ({ serializedRequest }: { serializedRequest: string }) =>

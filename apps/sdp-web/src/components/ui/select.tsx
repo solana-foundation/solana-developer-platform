@@ -3,6 +3,7 @@
 import { Select as BaseSelect } from "@base-ui/react/select";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Children, isValidElement, type ReactNode, useMemo } from "react";
+import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { cn } from "@/lib/utils";
 
 type SelectSize = "lg" | "xl";
@@ -81,6 +82,7 @@ function Select({
   children,
 }: UiSelectProps) {
   const items = useMemo(() => collectItemLabels(children), [children]);
+  const themeScopeAttributes = useThemeScopeAttributes();
 
   return (
     <BaseSelect.Root
@@ -103,7 +105,8 @@ function Select({
         <span
           className={cn(
             "pointer-events-none absolute inset-0 rounded-[inherit] bg-fill-subtle",
-            "group-[[data-popup-open]]/select:shadow-[0_0_0_2px_var(--input-focus-ring)]"
+            "group-[[data-popup-open]]/select:shadow-[0_0_0_2px_var(--input-focus-ring)]",
+            "refresh:border-b refresh:border-border-default refresh:bg-transparent refresh:group-hover/select:border-border-strong refresh:group-[[data-popup-open]]/select:border-primary"
           )}
         />
         {iconLeft && (
@@ -112,7 +115,7 @@ function Select({
           </span>
         )}
         <BaseSelect.Value
-          className="relative min-w-0 flex-1 truncate text-sm text-primary"
+          className="relative min-w-0 flex-1 truncate text-sm text-primary refresh:text-field"
           placeholder={<span className="text-[var(--input-placeholder-color)]">{placeholder}</span>}
         />
         {trailing && (
@@ -125,7 +128,12 @@ function Select({
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
-        <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
+        <BaseSelect.Positioner
+          {...themeScopeAttributes}
+          className="z-50"
+          sideOffset={4}
+          alignItemWithTrigger={false}
+        >
           <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1 shadow-lg outline-none">
             {children}
           </BaseSelect.Popup>

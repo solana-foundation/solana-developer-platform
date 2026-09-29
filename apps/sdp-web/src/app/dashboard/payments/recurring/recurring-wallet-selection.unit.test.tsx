@@ -126,7 +126,7 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
     first.unmount();
 
@@ -151,7 +151,7 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     await user.click(screen.getByRole("button", { name: "Actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Edit payment" }));
+    await user.click(screen.getByRole("menuitem", { name: "Edit schedule" }));
     await user.click(screen.getByRole("button", { name: "Funding wallet" }));
     expect(await screen.findByRole("button", { name: /Other Project/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Treasury/ })).toBeNull();
@@ -185,20 +185,24 @@ describe("Recurring Payment exact source selection", () => {
       { wrapper }
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Counterparty" }));
+    await user.click(screen.getByRole("button", { name: "Contact" }));
     await user.click(screen.getByRole("button", { name: /Receiver/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Destination account" }));
-    await user.click(screen.getByRole("button", { name: /Receiving wallet/ }));
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    // The contact's only Solana address is the destination; no field asks for it.
+    await user.click(screen.getByRole("button", { name: "Source wallet" }));
     await user.click(screen.getByRole("button", { name: /Treasury/ }));
     expect(screen.getByText(/Signing is disabled for this wallet\./)).toBeTruthy();
     await user.type(screen.getByRole("spinbutton", { name: "Amount" }), "1");
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(screen.getByRole("button", { name: "Create recurring payment" }));
+    const next = () => screen.getByRole("button", { name: "Continue" });
+    await waitFor(() => expect(next().hasAttribute("disabled")).toBe(false));
+    await user.click(next());
+    await user.click(next());
+    await user.click(screen.getByRole("button", { name: "Create the schedule" }));
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toMatchObject({ sourceCustodyWalletId: source.id, amount: "1" });
+    expect(writes[0]).toMatchObject({
+      sourceCustodyWalletId: source.id,
+      counterpartyAccountId: account.id,
+      amount: "1",
+    });
   });
 
   it.each(["current", "replacement"])(
@@ -237,14 +241,14 @@ describe("Recurring Payment exact source selection", () => {
       );
       const user = userEvent.setup();
       await user.click(screen.getByRole("button", { name: "Actions" }));
-      const edit = screen.getByRole("menuitem", { name: "Edit payment" });
+      const edit = screen.getByRole("menuitem", { name: "Edit schedule" });
       if (unavailableWallet === "current") {
         // Nothing about an active payment can be saved without its wallet's
         // signature, so the editor stays shut and the band carries the reason.
         expect(edit.getAttribute("aria-disabled")).toBe("true");
         expect(
           screen.getByText(
-            /You cannot collect, change, or cancel this payment until signing is enabled for Treasury/
+            /You cannot collect, change, or cancel this schedule until signing is enabled for Treasury/
           )
         ).toBeTruthy();
         expect(screen.queryByRole("button", { name: "Save" })).toBeNull();

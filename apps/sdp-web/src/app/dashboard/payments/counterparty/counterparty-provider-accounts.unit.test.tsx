@@ -1,5 +1,5 @@
 import { BVNK_FUNDING_WALLET_STATUS, type CounterpartyProviderAccount } from "@sdp/types";
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import type { Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { builtinEnvironments, type EnvironmentReturn } from "vitest/environments";
@@ -28,6 +28,13 @@ vi.mock("next/image", () => ({ default: () => null }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/dashboard/payments/counterparty/cpty_test",
+}));
+
+vi.mock("next/link", () => ({
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
 }));
 
 vi.mock("sonner", () => ({
@@ -95,7 +102,7 @@ const accountState = vi.hoisted(() => ({ accounts: [] as CounterpartyProviderAcc
 vi.mock("./use-counterparty-provider-accounts", () => ({
   useCounterpartyProviderAccounts: () => ({ data: accountState.accounts, error: undefined }),
 }));
-describe("counterparty provider wallet card", () => {
+describe("counterparty provider accounts table", () => {
   let environment: EnvironmentReturn;
   let root: Root;
   let container: HTMLDivElement;
@@ -139,11 +146,11 @@ describe("counterparty provider wallet card", () => {
         />
       )
     );
-    const toggle = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]')
-    ).find((button) => button.textContent?.includes("BVNK"));
-    if (toggle === undefined) throw new Error("Expected collapsed BVNK provider accordion");
-    return toggle;
+    const row = container.querySelector<HTMLTableRowElement>(
+      'tr[data-provider-account-kind="funding_wallet"]'
+    );
+    if (row === null) throw new Error("Expected a funding wallet row");
+    return row;
   }
   function walletAccount(overrides: Partial<CounterpartyProviderAccount>) {
     return providerAccount({
@@ -201,24 +208,19 @@ describe("counterparty provider wallet card", () => {
     overrides: Partial<CounterpartyProviderAccount>;
     text: string;
     copy: boolean;
-  }>)("renders $name in the expanded wallet row", async ({ overrides, text, copy }) => {
-    const toggle = await renderWallet(walletAccount(overrides));
-    expect(container.textContent).not.toContain("Test Wallet Agreement");
-    expect(container.querySelector("li")).toBeNull();
-    await act(async () => toggle.click());
-    const row = container.querySelector("li");
-    expect(row?.textContent).toContain(
+  }>)("renders $name in the wallet row", async ({ overrides, text, copy }) => {
+    const row = await renderWallet(walletAccount(overrides));
+    expect(row.textContent).toContain("BVNK");
+    expect(row.textContent).toContain(
       "DashboardPayments.counterparty.providerAccountFundingWallet USD"
     );
-    expect(row?.textContent).toContain(text);
-    const copyButton = row?.querySelector(
+    expect(row.textContent).toContain(text);
+    const copyButton = row.querySelector(
       'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.walletidlabel"]'
     );
     expect(Boolean(copyButton)).toBe(copy);
+    // The agreement the provider wants accepted is listed once, under the table.
+    expect(row.textContent).not.toContain("Test Wallet Agreement");
     expect(container.textContent?.split("Test Wallet Agreement")).toHaveLength(2);
-    expect(toggle.textContent).not.toContain("Test Wallet Agreement");
-    await act(async () => toggle.click());
-    expect(container.textContent).not.toContain("Test Wallet Agreement");
-    expect(container.querySelector("li")).toBeNull();
   });
 });

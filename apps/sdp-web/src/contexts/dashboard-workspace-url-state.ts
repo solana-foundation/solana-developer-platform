@@ -1,8 +1,6 @@
 const PLAYGROUND_TAB_PATHS = new Set([
   "/dashboard/issuance",
   "/dashboard/payments",
-  "/dashboard/payments/counterparty",
-  "/dashboard/payments/requests",
   // Private Channels serves its playground as a tab on the overview route, so
   // a cross-route jump and the legacy /api-playground redirect both land here
   // carrying tab=playground. Without this entry the tab is stripped on the

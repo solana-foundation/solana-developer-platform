@@ -10,7 +10,6 @@ import { getMessages } from "@/i18n/messages";
 import { I18nProvider } from "@/i18n/provider";
 import { useBatchSendWizard } from "./use-batch-send-wizard";
 import { useOfframpWizard } from "./use-offramp-wizard";
-import { useOnchainReceiveWizard } from "./use-onchain-receive-wizard";
 import { useOnchainSendWizard } from "./use-onchain-send-wizard";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
@@ -247,24 +246,4 @@ describe("wallet selection during payments", () => {
       expect(sent).toEqual([expect.objectContaining({ sourceCustodyWalletId: wallet.id })]);
     }
   );
-
-  it("keeps receiving available when signing is disabled", async () => {
-    const receivingWallet = { ...wallet, isRuntimeExecutionAllowed: false };
-    vi.stubGlobal("fetch", async () => Response.json({ data: { wallets: [receivingWallet] } }));
-    const { result } = renderHook(
-      () =>
-        useOnchainReceiveWizard({
-          wallets: [receivingWallet],
-          walletsError: null,
-          counterpartyId: "cpty_sender",
-          onExit: vi.fn(),
-        }),
-      { wrapper }
-    );
-    act(() => result.current.setWalletId(receivingWallet.id));
-    expect(result.current.canProceed).toBe(true);
-    act(() => result.current.handlePrimary());
-    expect(result.current.currentStepId).toBe("RECEIVE");
-    expect(result.current.selectedWallet?.id).toBe(receivingWallet.id);
-  });
 });

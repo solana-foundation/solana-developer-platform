@@ -35,12 +35,18 @@ export function splitPastedRows(text: string): BulkImportRow[] {
     });
 }
 
+/**
+ * Checks each row of an import: an account, a token, a positive amount, and each account once.
+ * A batch pays an account one amount, so a second row for the same account is an error rather
+ * than a silent overwrite of the first.
+ */
 export function validateBulkRows(rows: BulkImportRow[]): {
   valid: BulkImportRow[];
   errors: BulkRowError[];
 } {
   const valid: BulkImportRow[] = [];
   const errors: BulkRowError[] = [];
+  const firstRowByAccount = new Map<string, number>();
 
   rows.forEach((row, index) => {
     if (isEmptyBulkRow(row)) {
@@ -60,8 +66,40 @@ export function validateBulkRows(rows: BulkImportRow[]): {
       errors.push({ row: line, message: "Amount must be a positive number" });
       return;
     }
+    const firstRow = firstRowByAccount.get(row.accountId);
+    if (firstRow !== undefined) {
+      errors.push({ row: line, message: `${row.accountId} is already on row ${firstRow}` });
+      return;
+    }
+    firstRowByAccount.set(row.accountId, line);
     valid.push(row);
   });
 
   return { valid, errors };
+}
+
+/** The header row the batch CSV template starts with; `parseBulkCsv` skips it. */
+export const BULK_CSV_HEADER = ["counterparty_wallet_id", "currency_or_mint", "amount"] as const;
+
+/**
+ * The downloadable batch template: the header and one example row, in the same three columns
+ * a pasted import takes.
+ */
+export function bulkCsvTemplate(): string {
+  return `${BULK_CSV_HEADER.join(",")}\r\ncpa_example123,USDC,25.00\r\n`;
+}
+
+/**
+ * Rows from an uploaded batch CSV. Tolerates a byte-order mark, CRLF line endings, a header
+ * row (skipped when its first cell is the template's first column) and blank lines; each other
+ * line is read exactly as a pasted row.
+ *
+ * @param text - The file's text.
+ * @returns The rows, in file order.
+ */
+export function parseBulkCsv(text: string): BulkImportRow[] {
+  const lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
+  const firstCell = lines[0]?.split(",")[0]?.trim().toLowerCase();
+  const body = firstCell === BULK_CSV_HEADER[0] ? lines.slice(1) : lines;
+  return splitPastedRows(body.join("\n"));
 }

@@ -243,7 +243,7 @@ const MARK_GLYPH_LIFT = "-translate-y-px";
 // The access marks occlude rather than tint: `--fill` is 8% ink, so the slab band's cut
 // edge — which the first mark exists to hide — showed through the silhouette as a seam
 // straight down its middle. `--color-fill-opaque` is the same colour composited to be
-// opaque (see sdp-theme.css), so nothing behind a mark reaches it.
+// opaque (see @sdp/design-tokens theme.css), so nothing behind a mark reaches it.
 const MARK_FILL_OPAQUE = "fill-fill-opaque";
 
 // The popover title's role glyph: bare, no shield — the trigger already drew the

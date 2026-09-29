@@ -42,7 +42,7 @@ const setAddAccountOpen = vi.fn();
 const baseWizard = {
   summaryDetails: [],
   stepIndex: 0,
-  currentStepId: "DESTINATION",
+  currentStepId: "DETAILS",
   isLastStep: false,
   canProceed: false,
   readySubmission: null,
@@ -120,15 +120,10 @@ describe("OnchainSendStepContent", () => {
     const user = userEvent.setup();
     renderStep(baseWizard);
 
-    expect(screen.getByRole("button", { name: "Destination account" })).toHaveProperty(
-      "disabled",
-      true
-    );
-    expect(screen.getByRole("button", { name: /Add Solana address/ }).textContent).toContain(
-      "Ada Trading has no Solana address on file yet."
-    );
+    expect(screen.getByRole("button", { name: "Destination" })).toHaveProperty("disabled", true);
+    expect(screen.getByText("No Solana address on file")).toBeDefined();
 
-    await user.click(screen.getByRole("button", { name: /Add Solana address/ }));
+    await user.click(screen.getByRole("button", { name: "Add a Solana address" }));
 
     expect(setAddAccountOpen).toHaveBeenCalledWith(true);
   });
@@ -152,18 +147,15 @@ describe("OnchainSendStepContent", () => {
 
     expect(screen.getByRole("button", { name: "Source wallet" })).toHaveProperty("disabled", false);
     expect(screen.getByRole("spinbutton", { name: "Amount" })).toHaveProperty("value", "2");
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", false);
-    expect(screen.getByRole("textbox", { name: "Memo (optional)" })).toHaveProperty(
-      "value",
-      "Invoice 7"
-    );
-    expect(screen.queryByText("25.5 USDC")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("textbox", { name: "Memo" })).toHaveProperty("value", "Invoice 7");
+    expect(screen.queryByText("25.5 USDC available")).not.toBeNull();
   });
 
   it("hides balance and disables assets until a wallet is selected", () => {
     renderStep({ ...baseWizard, currentStepId: "DETAILS" });
 
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", true);
     expect(screen.queryByText(/USDC/)).toBeNull();
     expect(screen.queryByText("This wallet has no assets available to send.")).toBeNull();
   });
@@ -177,7 +169,7 @@ describe("OnchainSendStepContent", () => {
       fields: { ...baseWizard.fields, walletId: labeledWallet.id },
     });
 
-    expect(screen.getByRole("button", { name: "Asset" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Token" })).toHaveProperty("disabled", true);
     expect(screen.queryByText("This wallet has no assets available to send.")).not.toBeNull();
   });
 

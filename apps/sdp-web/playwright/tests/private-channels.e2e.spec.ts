@@ -55,7 +55,7 @@ test.describe
       await expect(page).toHaveURL(/\/dashboard\/integrations\/private-channels\/setup$/);
 
       await expect(
-        page.locator("main").getByText("Connect Private Channel", { exact: true })
+        page.locator("main").getByRole("heading", { name: "Privacy", exact: true })
       ).toBeVisible();
 
       const gatewayInput = page.locator("#gateway-url");
