@@ -238,7 +238,7 @@ export const newDesign = flag<boolean, DashboardFlagEntities>({
   identify: identifyDashboardEntities,
   defaultValue: flagDefault("SDP_FLAG_NEW_DESIGN", process.env.VERCEL_ENV !== "production"),
   description:
-    "NEW DESIGN: show the 2026 refresh of Payments and the Privacy connect form (new screens, palette, type and sidebar on those routes, the language switch in the account menu). Off serves the previous design everywhere.",
+    "NEW DESIGN: show the 2026 refresh's shell (palette, type and sidebar, the language switch in the account menu) and the Privacy connect form. Each redesigned area also has a new-design-* flag of its own, which counts only while this one is on. Off serves the previous design everywhere.",
   options: [
     { value: false, label: "Previous design" },
     { value: true, label: "New design" },

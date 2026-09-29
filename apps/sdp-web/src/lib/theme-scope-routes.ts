@@ -10,7 +10,7 @@ const PRIVACY_SETUP_ROUTE = /^\/dashboard\/integrations\/private-channels\/(?:[^
  * every route keeps the base design.
  *
  * @param pathname - The dashboard route.
- * @param newDesign - Whether the NEW DESIGN flag is on.
+ * @param newDesign - Whether the page renders in the new design (isNewDesignPage).
  * @returns The scope, or null for the base design.
  */
 export function themeScopeForPath(pathname: string, newDesign = true): ThemeScope | null {

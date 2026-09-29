@@ -1047,11 +1047,9 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  // Payments routes not redesigned yet keep the previous design's header under NEW DESIGN too.
-  // Payments keeps the previous design's header until its pages are redesigned.
-  const previousDesign =
-    !newDesign || pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/");
-  const legacyDesignConfig = previousDesign
+  // `newDesign` is this page's design (isNewDesignPage): a Payments page no design module has
+  // redesigned keeps the previous design's header under NEW DESIGN too.
+  const legacyDesignConfig = !newDesign
     ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
     : null;
   if (legacyDesignConfig) {
