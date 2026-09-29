@@ -38,7 +38,7 @@ export interface ReconcilableVaultClaim {
   share_mint: string | null;
   label: string;
   has_unsettled_movements: boolean;
-  has_open_withdrawal_requests: boolean;
+  open_withdrawal_request_ids: readonly string[];
   /**
    * Intermediate mints (Hastra wYLDS) that a CANCELLED operator redemption on
    * this claim left in the wallet. Cancellation does not recreate the burned
@@ -88,6 +88,16 @@ export interface UnbackedVaultPosition {
   label: string;
 }
 
+/**
+ * A zero-share claim with open queued withdrawal requests. The requests
+ * escrowed or burned shares ahead of the payout, but only the shares they
+ * cover, and the ledger holds no per-claim share total to check that
+ * against, so the claim is listed beside its requests rather than judged.
+ */
+export interface QueuedWithdrawalVaultPosition extends UnbackedVaultPosition {
+  withdrawalRequestIds: string[];
+}
+
 export interface UnreadableVaultWallet {
   custodyWalletId: string;
   walletAddress: string;
@@ -96,6 +106,7 @@ export interface UnreadableVaultWallet {
 export interface VaultShareReconciliationReport {
   unrecordedHoldings: UnrecordedVaultHolding[];
   unbackedPositions: UnbackedVaultPosition[];
+  queuedWithdrawalPositions: QueuedWithdrawalVaultPosition[];
   unreadableWallets: UnreadableVaultWallet[];
 }
 
@@ -171,6 +182,7 @@ export async function reconcileVaultShareHoldings(input: {
   const report: VaultShareReconciliationReport = {
     unrecordedHoldings: [],
     unbackedPositions: [],
+    queuedWithdrawalPositions: [],
     unreadableWallets: [],
   };
 
@@ -218,20 +230,12 @@ export async function reconcileVaultShareHoldings(input: {
     for (const claim of walletClaims) {
       // A claim without a share mint cannot be judged against balances, and an
       // in-flight movement already explains a chain/record disagreement — the
-      // sweep settles it within about a minute either way. An open queued
-      // request explains it for longer: its shares left the wallet before the
-      // payout, and the claim is judged again once the request is terminal.
-      if (
-        !claim.share_mint ||
-        claim.has_unsettled_movements ||
-        claim.has_open_withdrawal_requests
-      ) {
-        continue;
-      }
+      // sweep settles it within about a minute either way.
+      if (!claim.share_mint || claim.has_unsettled_movements) continue;
       if (balancesByMint.has(claim.share_mint)) continue;
       // A cancelled redemption left its intermediate in place of the shares.
       if (claim.retained_intermediate_mints.some((mint) => balancesByMint.has(mint))) continue;
-      report.unbackedPositions.push({
+      const finding: UnbackedVaultPosition = {
         positionId: claim.id,
         custodyWalletId: wallet.id,
         walletAddress: wallet.publicKey,
@@ -239,7 +243,15 @@ export async function reconcileVaultShareHoldings(input: {
         vaultAddress: claim.vault_address,
         shareMint: claim.share_mint,
         label: claim.label,
-      });
+      };
+      if (claim.open_withdrawal_request_ids.length > 0) {
+        report.queuedWithdrawalPositions.push({
+          ...finding,
+          withdrawalRequestIds: [...claim.open_withdrawal_request_ids],
+        });
+      } else {
+        report.unbackedPositions.push(finding);
+      }
     }
   });
 

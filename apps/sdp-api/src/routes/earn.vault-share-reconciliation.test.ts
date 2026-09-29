@@ -242,7 +242,9 @@ async function seedCustodyWithdrawalRequest(params: {
   };
   mechanism: "solver_queue" | "operator_redemption";
   status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed";
-}): Promise<void> {
+  createdAt?: string;
+}): Promise<string> {
+  const requestId = generateEarnVaultWithdrawalRequestId();
   const solverQueue = params.mechanism === "solver_queue";
   await getDb(env)
     .prepare(
@@ -252,12 +254,12 @@ async function seedCustodyWithdrawalRequest(params: {
          request_address, status, mechanism, shares, quoted_assets, share_decimals,
          asset_decimals, discount_bps, maturity_timestamp, deadline_timestamp,
          intermediate_mint, intermediate_amount, client_request_id,
-         idempotency_fingerprint, cancelled_at, failure_reason
+         idempotency_fingerprint, cancelled_at, failure_reason, created_at
        ) VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1', '1.01', 6, 6,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
-      generateEarnVaultWithdrawalRequestId(),
+      requestId,
       ORG,
       PROJECT_A,
       params.position.provider,
@@ -278,9 +280,11 @@ async function seedCustodyWithdrawalRequest(params: {
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
       params.status === "cancelled" ? new Date().toISOString() : null,
-      params.status === "failed" ? "request never landed" : null
+      params.status === "failed" ? "request never landed" : null,
+      params.createdAt ?? new Date().toISOString()
     )
     .run();
+  return requestId;
 }
 
 function balance(mint: string, amount: string, decimals = 6) {
@@ -299,6 +303,7 @@ interface ReportBody {
   data: {
     unrecordedHoldings: Array<Record<string, unknown>>;
     unbackedPositions: Array<Record<string, unknown>>;
+    queuedWithdrawalPositions: Array<Record<string, unknown>>;
     unreadableWallets: Array<Record<string, unknown>>;
   };
 }
@@ -419,23 +424,81 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
     { mechanism: "solver_queue", provider: "veda" },
     { mechanism: "operator_redemption", provider: "hastra" },
   ] as const)("with a $mechanism request", ({ mechanism, provider }) => {
-    // The request moved every share out of the wallet (escrowed or burned)
-    // before any payout: the claim is backed by the request, not unbacked.
+    // The request escrowed or burned shares ahead of the payout, but only the
+    // ones it covers: the claim is listed beside it, neither unbacked nor hidden.
     it.each(OPEN_WITHDRAWAL_REQUEST_STATUSES)(
-      "keeps the claim out of the zero-share report while it is %s",
+      "lists the empty claim with its request while it is %s",
       async (status) => {
         const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider });
         await finalizeMovement(claim.movement.id);
-        await seedCustodyWithdrawalRequest({ position: claim.position, mechanism, status });
+        const requestId = await seedCustodyWithdrawalRequest({
+          position: claim.position,
+          mechanism,
+          status,
+        });
 
         const response = await getReconciliation();
         expect(response.status).toBe(200);
         const body = (await response.json()) as ReportBody;
 
         expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual([
+          {
+            positionId: claim.position.id,
+            custodyWalletId: WALLET_A,
+            walletAddress: PUBLIC_KEY_A,
+            provider,
+            vaultAddress: claim.position.vault_address,
+            shareMint: SHARE_MINT_EMPTY,
+            label: claim.position.label,
+            withdrawalRequestIds: [requestId],
+          },
+        ]);
         expect(body.data.unreadableWallets).toEqual([]);
       }
     );
+  });
+
+  it("names every open request on an empty claim, oldest first", async () => {
+    const claim = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "veda" });
+    await finalizeMovement(claim.movement.id);
+    const second = await seedCustodyWithdrawalRequest({
+      position: claim.position,
+      mechanism: "solver_queue",
+      status: "fulfillable",
+      createdAt: "2026-09-29T11:00:00.000Z",
+    });
+    const first = await seedCustodyWithdrawalRequest({
+      position: claim.position,
+      mechanism: "solver_queue",
+      status: "pending",
+      createdAt: "2026-09-29T10:00:00.000Z",
+    });
+
+    const body = (await (await getReconciliation()).json()) as ReportBody;
+
+    expect(body.data.queuedWithdrawalPositions).toEqual([
+      expect.objectContaining({
+        positionId: claim.position.id,
+        withdrawalRequestIds: [first, second],
+      }),
+    ]);
+  });
+
+  it("lists nothing for a claim whose wallet still holds shares beside an open request", async () => {
+    const claim = await createPosition({ shareMint: SHARE_MINT_RECORDED, provider: "veda" });
+    await finalizeMovement(claim.movement.id);
+    await seedCustodyWithdrawalRequest({
+      position: claim.position,
+      mechanism: "solver_queue",
+      status: "pending",
+    });
+    getSplTokenBalances.mockResolvedValue([balance(SHARE_MINT_RECORDED, "250")]);
+
+    const body = (await (await getReconciliation()).json()) as ReportBody;
+
+    expect(body.data.unbackedPositions).toEqual([]);
+    expect(body.data.queuedWithdrawalPositions).toEqual([]);
   });
 
   it.each(["cancelled", "failed"] as const)(
@@ -456,6 +519,7 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       expect(body.data.unbackedPositions).toEqual([
         expect.objectContaining({ positionId: claim.position.id, shareMint: SHARE_MINT_EMPTY }),
       ]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([]);
     }
   );
 

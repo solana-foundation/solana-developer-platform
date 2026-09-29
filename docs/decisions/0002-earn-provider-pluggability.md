@@ -1198,10 +1198,12 @@ reason's "moment, not a state" bound: a request can stay open for days, and
 the movements feed shows nothing pending. They now answer
 `withdrawals_pending`. When both apply, `movements_pending` wins because it
 clears within the reconciler window. The custody share reconciliation report
-takes the same rule: an open request keeps a zero-share claim out of
-`unbackedPositions`. A cancelled Hastra redemption is terminal, but it leaves
-the owner the wYLDS it delegated rather than recreating PRIME, so a wallet
-balance of that intermediate still backs the claim there.
+names the same state: a zero-share claim with an open request is listed under
+`queuedWithdrawalPositions` with its request ids rather than reported as
+unbacked or dropped, because a request explains only the shares it covers.
+A cancelled Hastra redemption is terminal, but it leaves the owner the wYLDS
+it delegated rather than recreating PRIME, so a wallet balance of that
+intermediate still backs the claim there.
 
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 

@@ -436,9 +436,32 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
       .openapi({
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
-          "unsettled movement or an open queued withdrawal request are excluded: the ledger " +
-          "already explains that disagreement. So is a position whose wallet still holds the " +
-          "intermediate token a cancelled operator redemption left in place of its shares.",
+          "unsettled movement are excluded: the ledger already explains that disagreement. " +
+          "So is a position whose wallet still holds the intermediate token its cancelled " +
+          "operator redemption left in place of its shares. Positions with an open queued " +
+          "withdrawal request are listed in `queuedWithdrawalPositions` instead.",
+      }),
+    queuedWithdrawalPositions: z
+      .array(
+        z.object({
+          positionId: z.string().openapi({ example: "earn_position_example" }),
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+          provider: z.string().openapi({ example: "veda" }),
+          vaultAddress: z.string().nullable(),
+          shareMint: z.string().nullable(),
+          label: z.string(),
+          withdrawalRequestIds: z.array(z.string()).openapi({
+            example: ["earn_vault_withdrawal_request_example"],
+          }),
+        })
+      )
+      .openapi({
+        description:
+          "Recorded open positions whose wallet holds none of their shares while queued " +
+          "withdrawal requests are open. The requests escrowed or burned shares ahead of the " +
+          "payout, but only the shares they cover, so these positions are listed with their " +
+          "requests rather than judged.",
       }),
     unreadableWallets: z
       .array(
