@@ -34,6 +34,7 @@ import {
 } from "../payments-overview.utils";
 import type { PaymentsIssuedTokenSymbol } from "../payments-page.data";
 import { formatDateTime } from "../payments-presentation";
+import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
 import {
   RECURRING_LIST_DEFAULT_PAGE_SIZE,
   RECURRING_PAYMENT_STATUSES,
@@ -282,46 +283,62 @@ export function RecurringPaymentsWorkspace({
           <Table className="min-w-[760px] rounded-none border-0" data-recurring-payments-table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("DashboardPayments.status")}</TableHead>
-                <TableHead>{t("DashboardPayments.recurring.schedule")}</TableHead>
-                <TableHead>{t("DashboardPayments.recurring.repeats")}</TableHead>
-                <TableHead>{t("DashboardPayments.recurring.nextRun")}</TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.status")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.recurring.schedule")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.recurring.repeats")}
+                </TableHead>
+                <TableHead className={PAYMENTS_TABLE_HEAD}>
+                  {t("DashboardPayments.recurring.nextRun")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {visibleRecurringPayments.map((recurringPayment) => {
                 const href = scheduleHref(recurringPayment.id);
                 return (
+                  // Two-line rows, as the design's: 10px above and below, every cell on the
+                  // name's line.
                   <TableRow
                     key={recurringPayment.id}
-                    className="cursor-pointer"
+                    className="cursor-pointer [--table-cell-padding-y:10px] [&>td]:align-top"
                     onClick={() => router.push(href)}
                   >
-                    <TableCell className="text-body whitespace-nowrap">
-                      <StatusText tone={STATUS_TONES[recurringPayment.status]}>
+                    <TableCell className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap")}>
+                      <StatusText
+                        tone={STATUS_TONES[recurringPayment.status]}
+                        className={PAYMENTS_TABLE_CELL}
+                      >
                         {statusLabel(recurringPayment.status)}
                       </StatusText>
                     </TableCell>
-                    <TableCell className="max-w-96">
+                    <TableCell className={cn(PAYMENTS_TABLE_CELL, "max-w-96")}>
                       <Link
                         href={href}
-                        className="block truncate text-body text-primary focus-visible:underline focus-visible:outline-none"
+                        className="block truncate text-body leading-5 font-medium text-primary focus-visible:underline focus-visible:outline-none"
                         onClick={(event) => event.stopPropagation()}
                       >
                         {getScheduleTitle(recurringPayment)}
                       </Link>
-                      <span className="block truncate text-meta text-secondary">
+                      <span className="block truncate text-secondary">
                         {t("DashboardPayments.recurring.fromWallet", {
                           wallet: getWalletLabel(recurringPayment),
                         })}
                       </span>
                     </TableCell>
-                    <TableCell className="text-body whitespace-nowrap text-secondary">
+                    <TableCell
+                      className={cn(PAYMENTS_TABLE_CELL, "whitespace-nowrap text-secondary")}
+                    >
                       {formatPeriodHours(recurringPayment.periodHours, t)}
                     </TableCell>
                     <TableCell
                       className={cn(
-                        "text-body whitespace-nowrap",
+                        PAYMENTS_TABLE_CELL,
+                        "whitespace-nowrap tabular-nums",
                         recurringPayment.nextCollectionDueAt ? "text-primary" : "text-tertiary"
                       )}
                     >
