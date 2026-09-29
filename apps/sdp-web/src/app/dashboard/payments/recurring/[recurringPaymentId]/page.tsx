@@ -3,6 +3,7 @@ import type { CounterpartyAccount, ListCounterpartyAccountsResponse } from "@sdp
 import { WELL_KNOWN_TOKEN_BY_MINT } from "@sdp/types";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
@@ -15,6 +16,7 @@ import {
   fetchRecurringPaymentById,
   fetchRecurringPaymentCollectionAttempts,
 } from "../recurring-payments.data";
+import RedesignRecurringPaymentDetailRoute from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +75,7 @@ async function fetchAllCounterpartyWalletAccounts(
   return accounts;
 }
 
-export default async function RecurringPaymentDetailRoute({
+async function RecurringPaymentDetailRoute({
   params,
 }: {
   params: Promise<{ recurringPaymentId: string }>;
@@ -175,3 +177,5 @@ export default async function RecurringPaymentDetailRoute({
     }
   );
 }
+
+export default withLegacyDesign(RedesignRecurringPaymentDetailRoute, RecurringPaymentDetailRoute);

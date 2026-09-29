@@ -1,10 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparty } from "../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../payments-page.data";
+import RedesignRecurringPaymentsPage from "./page.redesign";
 import {
   fetchRecurringPayments,
   parseRecurringPaymentsListParams,
@@ -17,7 +19,7 @@ interface RecurringPaymentsPageProps {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }
 
-export default async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
+async function RecurringPaymentsPage({ searchParams }: RecurringPaymentsPageProps) {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -103,3 +105,5 @@ export default async function RecurringPaymentsPage({ searchParams }: RecurringP
     }
   );
 }
+
+export default withLegacyDesign(RedesignRecurringPaymentsPage, RecurringPaymentsPage);

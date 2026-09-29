@@ -137,7 +137,9 @@ export function getPaymentsActions(
       icon: FileTextIcon,
     },
     {
-      label: t("Shared.dashboardShell.recurring"),
+      label: newDesign
+        ? t("Shared.dashboardShell.newDesign.recurring")
+        : t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
       icon: RepeatIcon,
     },

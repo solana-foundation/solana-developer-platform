@@ -26,6 +26,7 @@
   "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:268:33:2-digit",
   "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:268:33:numeric",
   "src/app/dashboard/payments/counterparty/counterparty-workspace.tsx:268:33:short",
+  "src/app/dashboard/payments/payments-playground-config.redesign.ts:206:11:allow",
   "src/app/dashboard/payments/payments-playground-config.ts:205:11:allow",
   "src/app/dashboard/payments/payments-route-skeletons.tsx:509:13:amount",
   "src/app/dashboard/payments/payments-route-skeletons.tsx:509:13:frequency",

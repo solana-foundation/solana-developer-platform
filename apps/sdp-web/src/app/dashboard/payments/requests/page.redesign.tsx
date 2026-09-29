@@ -1,0 +1,67 @@
+import { auth } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
+import { getAuthEntryPath } from "@/lib/auth-entry";
+import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
+import {
+  PAYMENT_REQUEST_CREATE_PARAM,
+  PAYMENT_REQUEST_NEW_HREF,
+  PAYMENT_REQUEST_OPEN_PARAM,
+  paymentRequestHref,
+  paymentsPlaygroundHref,
+} from "@/lib/payments-routes";
+import { fetchCounterparties } from "../counterparty/counterparty-page.data";
+import { fetchPaymentRequestDirectory } from "./payment-requests-page.data";
+import { PaymentRequestsWorkspace } from "./payment-requests-workspace.redesign";
+
+async function PaymentRequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const { userId, orgId } = await auth();
+  if (!userId) {
+    redirect(await getAuthEntryPath());
+  }
+  if (!orgId) {
+    redirect("/dashboard");
+  }
+  const params = await searchParams;
+  if (params.tab === "playground") {
+    // Requests no longer has a playground tab; its endpoints moved into the Payments one.
+    redirect(paymentsPlaygroundHref("list-payment-requests"));
+  }
+  if (params[PAYMENT_REQUEST_CREATE_PARAM] === "1") {
+    // The new-request form was a dialog here; it is its own page now.
+    redirect(PAYMENT_REQUEST_NEW_HREF);
+  }
+  const openId = params[PAYMENT_REQUEST_OPEN_PARAM];
+  if (typeof openId === "string" && openId !== "") {
+    // One request opened in a dialog here; it has its own page now.
+    redirect(paymentRequestHref(openId));
+  }
+
+  return withDashboardPageTrace("dashboard.payment-requests.page", async ({ trace, apiClient }) => {
+    const [result, counterpartiesResult] = await Promise.all([
+      trace.step("fetch_payment_requests", () => fetchPaymentRequestDirectory(apiClient.request)),
+      // The API's largest page, so the From column names every contact a request is likely to
+      // carry (the default page of 10 left the rest as raw ids).
+      trace.step("fetch_counterparties", () =>
+        fetchCounterparties(apiClient.request, { page: 1, pageSize: 100 })
+      ),
+    ]);
+
+    trace.log({ ok: result.ok, count: result.data.length, total: result.total });
+
+    return (
+      <PaymentRequestsWorkspace
+        initialPaymentRequests={result.data}
+        total={result.total}
+        initialError={result.error}
+        initialLocalErrorCode={result.localErrorCode}
+        counterparties={counterpartiesResult.data}
+      />
+    );
+  });
+}
+
+export default PaymentRequestsPage;

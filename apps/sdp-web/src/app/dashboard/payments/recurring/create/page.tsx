@@ -1,14 +1,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { withDashboardPageTrace } from "@/lib/dashboard-page-trace";
 import { fetchCounterparties } from "../../counterparty/counterparty-page.data";
 import { fetchPaymentsIssuedTokenSymbols, fetchPaymentsWallets } from "../../payments-page.data";
 import { RecurringPaymentCreateWorkspace } from "../recurring-payment-create-workspace";
+import RedesignRecurringPaymentCreatePage from "./page.redesign";
 
 export const dynamic = "force-dynamic";
 
-export default async function RecurringPaymentCreatePage() {
+async function RecurringPaymentCreatePage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -68,3 +70,5 @@ export default async function RecurringPaymentCreatePage() {
     }
   );
 }
+
+export default withLegacyDesign(RedesignRecurringPaymentCreatePage, RecurringPaymentCreatePage);

@@ -1,0 +1,448 @@
+import { PAYMENT_TRANSFER_STATUSES } from "@sdp/types";
+import type {
+  ApiPlaygroundEndpointConfig,
+  ApiPlaygroundFieldConfig,
+  ApiPlaygroundFieldOption,
+} from "@/components/api-playground-shell";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+import { mergeOpenApiPlaygroundEndpoints } from "@/lib/api-playground-openapi-catalog";
+
+export interface PaymentsPlaygroundWalletView {
+  id: string;
+  label: string | null;
+  publicKey: string;
+  walletId: string;
+}
+
+export interface PaymentsPlaygroundTransferView {
+  id: string;
+  status: string;
+}
+
+interface BuildPaymentsPlaygroundConfigOptions {
+  transfers: PaymentsPlaygroundTransferView[];
+  wallets: PaymentsPlaygroundWalletView[];
+}
+
+const fiatCurrencyOptions: ApiPlaygroundFieldOption[] = [{ label: "USD", value: "USD" }];
+const exampleWalletAddressFallback = "1".repeat(32);
+const exampleMintAddress = ["USDCMint", "1".repeat(30)].join("");
+const policyDefaultActionOptions: ApiPlaygroundFieldOption[] = [
+  { label: "allow", value: "allow" },
+  { label: "deny", value: "deny" },
+  { label: "approval_required", value: "approval_required" },
+  { label: "review", value: "review" },
+];
+const examplePolicyRules = [
+  {
+    id: "deny-issuance",
+    kind: "operation_family",
+    family: "issuance",
+    action: "deny",
+  },
+];
+
+function buildProviderWalletOptions(
+  wallets: PaymentsPlaygroundWalletView[]
+): ApiPlaygroundFieldOption[] {
+  return wallets.map((wallet) => ({
+    value: wallet.walletId,
+    label: wallet.label?.trim() ? `${wallet.label} (${wallet.walletId})` : wallet.walletId,
+  }));
+}
+
+function buildCustodyWalletOptions(
+  wallets: PaymentsPlaygroundWalletView[]
+): ApiPlaygroundFieldOption[] {
+  return wallets.map((wallet) => ({
+    value: wallet.id,
+    label: wallet.label?.trim() ? `${wallet.label} (${wallet.id})` : wallet.id,
+  }));
+}
+
+function buildTransferOptions(
+  transfers: PaymentsPlaygroundTransferView[]
+): ApiPlaygroundFieldOption[] {
+  return transfers.map((transfer) => ({
+    value: transfer.id,
+    label: `${transfer.id} (${transfer.status})`,
+  }));
+}
+
+function buildRampProviderOptions(
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundFieldOption[] {
+  return [
+    { label: t("DashboardPayments.playground.moonPay"), value: "moonpay" },
+    { label: t("DashboardPayments.playground.lightspark"), value: "lightspark" },
+    { label: t("DashboardPayments.playground.bvnk"), value: "bvnk" },
+  ];
+}
+
+function buildSelectBackedField(
+  key: string,
+  label: string,
+  placeholder: string,
+  options: ApiPlaygroundFieldOption[],
+  required = true
+): ApiPlaygroundFieldConfig {
+  if (options.length === 0) {
+    return {
+      key,
+      label,
+      placeholder,
+      required,
+    };
+  }
+
+  return {
+    key,
+    label,
+    placeholder,
+    kind: "select",
+    options,
+    defaultValue: options[0]?.value ?? "",
+    required,
+  };
+}
+
+export function buildPaymentsPlaygroundEndpointConfigs(
+  { transfers, wallets }: BuildPaymentsPlaygroundConfigOptions,
+  t: (key: MessageKey, values?: TranslationValues) => string
+): ApiPlaygroundEndpointConfig[] {
+  const rampProviderOptions = buildRampProviderOptions(t);
+  const providerWalletOptions = buildProviderWalletOptions(wallets);
+  const custodyWalletOptions = buildCustodyWalletOptions(wallets);
+  const transferOptions = buildTransferOptions(transfers);
+  const walletIdField = buildSelectBackedField(
+    "walletId",
+    "{walletId}",
+    t("DashboardPayments.playground.walletIdPlaceholder"),
+    providerWalletOptions
+  );
+  const transferIdField = buildSelectBackedField(
+    "transferId",
+    "{transferId}",
+    t("DashboardPayments.playground.transferIdPlaceholder"),
+    transferOptions
+  );
+  const sourceCustodyWalletIdField = buildSelectBackedField(
+    "sourceCustodyWalletId",
+    "sourceCustodyWalletId",
+    t("DashboardPayments.playground.custodyWalletIdPlaceholder"),
+    custodyWalletOptions
+  );
+  const destinationCustodyWalletIdField = buildSelectBackedField(
+    "destinationCustodyWalletId",
+    "destinationCustodyWalletId",
+    t("DashboardPayments.playground.destinationWalletIdPlaceholder"),
+    custodyWalletOptions
+  );
+  const firstWallet = wallets[0];
+  const firstTransfer = transfers[0];
+  const exampleWalletId = firstWallet?.walletId ?? "wal_ops_123";
+  const exampleWalletAddress = firstWallet?.publicKey ?? exampleWalletAddressFallback;
+  const exampleTransferId = firstTransfer?.id ?? "xfr_live_123";
+
+  const curatedEndpoints: ApiPlaygroundEndpointConfig[] = [
+    {
+      id: "wallet-balances",
+      title: t("DashboardPayments.playground.getWalletBalances"),
+      method: "GET",
+      path: "/v1/payments/wallets/{walletId}/balances",
+      pathFields: [walletIdField],
+      bodyFields: [],
+      expectedResponse: {
+        data: {
+          walletId: exampleWalletId,
+          address: exampleWalletAddress,
+          balances: [
+            {
+              token: "USDC",
+              mint: exampleMintAddress,
+              amount: "100000000",
+              uiAmount: "100.00",
+              decimals: 6,
+            },
+          ],
+        },
+      },
+    },
+    {
+      id: "get-wallet-policy",
+      title: t("DashboardPayments.playground.getWalletPolicy"),
+      method: "GET",
+      path: "/v1/payments/wallets/{walletId}/policies",
+      pathFields: [walletIdField],
+      bodyFields: [],
+      expectedResponse: {
+        data: {
+          policy: {
+            walletId: exampleWalletId,
+            defaultAction: "allow",
+            rules: [
+              {
+                id: "allowlist-destinations",
+                kind: "destination",
+                allowlist: [exampleWalletAddress],
+                action: "allow",
+              },
+            ],
+            controlProfile: null,
+          },
+        },
+      },
+    },
+    {
+      id: "update-wallet-policy",
+      title: t("DashboardPayments.playground.updateWalletPolicy"),
+      method: "PUT",
+      path: "/v1/payments/wallets/{walletId}/policies",
+      pathFields: [walletIdField],
+      bodyFields: [
+        {
+          key: "defaultAction",
+          label: "defaultAction",
+          placeholder: "allow",
+          kind: "select",
+          options: policyDefaultActionOptions,
+          defaultValue: "allow",
+          required: true,
+        },
+        {
+          key: "rules",
+          label: "rules",
+          placeholder: t("DashboardPayments.playground.policyRulesPlaceholder"),
+          kind: "textarea",
+          valueType: "json",
+          defaultValue: JSON.stringify(examplePolicyRules, null, 2),
+          required: true,
+        },
+      ],
+      expectedResponse: {
+        data: {
+          policy: {
+            walletId: exampleWalletId,
+            defaultAction: "allow",
+            rules: examplePolicyRules,
+            controlProfile: null,
+          },
+        },
+      },
+    },
+    {
+      id: "execute-transfer",
+      title: t("DashboardPayments.playground.executeTransfer"),
+      method: "POST",
+      path: "/v1/payments/transfers",
+      pathFields: [],
+      bodyFields: [
+        sourceCustodyWalletIdField,
+        {
+          key: "destination",
+          label: "destination",
+          placeholder: t("DashboardPayments.playground.solanaAddressPlaceholder"),
+          required: true,
+        },
+        {
+          key: "token",
+          label: "token",
+          placeholder: t("DashboardPayments.playground.usdc"),
+          defaultValue: "USDC",
+          required: true,
+        },
+        {
+          key: "amount",
+          label: "amount",
+          placeholder: "100.00",
+          defaultValue: "100.00",
+          required: true,
+        },
+        {
+          key: "memo",
+          label: "memo",
+          placeholder: t("DashboardPayments.playground.optionalMemo"),
+        },
+      ],
+      expectedResponse: {
+        data: {
+          transfer: {
+            id: exampleTransferId,
+            status: "processing",
+            signature: "5P7B...",
+          },
+        },
+      },
+    },
+    {
+      id: "list-transfers",
+      title: t("DashboardPayments.playground.listTransfers"),
+      method: "GET",
+      path: "/v1/payments/transfers?status={status}&pageSize={pageSize}",
+      pathFields: [
+        {
+          key: "pageSize",
+          label: t("DashboardPayments.playground.resultsPerPage"),
+          defaultValue: "25",
+        },
+        {
+          key: "status",
+          label: t("DashboardPayments.playground.transferStatus"),
+          kind: "select",
+          placeholder: t("DashboardPayments.playground.anyStatus"),
+          options: PAYMENT_TRANSFER_STATUSES.map((status) => ({ label: status, value: status })),
+        },
+      ],
+      bodyFields: [],
+      expectedResponse: {
+        data:
+          transfers.length > 0
+            ? transfers.map((transfer) => ({
+                id: transfer.id,
+                status: transfer.status,
+              }))
+            : [
+                {
+                  id: exampleTransferId,
+                  status: "confirmed",
+                },
+              ],
+      },
+    },
+    {
+      id: "get-transfer",
+      title: t("DashboardPayments.playground.getTransfer"),
+      method: "GET",
+      path: "/v1/payments/transfers/{transferId}",
+      pathFields: [transferIdField],
+      bodyFields: [],
+      expectedResponse: {
+        data: {
+          transfer: {
+            id: exampleTransferId,
+            status: firstTransfer?.status ?? "confirmed",
+            signature: "5P7B...",
+          },
+        },
+      },
+    },
+    {
+      id: "create-onramp-quote",
+      title: t("DashboardPayments.playground.createOnrampQuote"),
+      method: "POST",
+      path: "/v1/payments/ramps/onramp/quote",
+      pathFields: [],
+      bodyFields: [
+        {
+          key: "provider",
+          label: "provider",
+          placeholder: t("DashboardPayments.playground.selectProvider"),
+          kind: "select",
+          options: rampProviderOptions,
+          defaultValue: "moonpay",
+          required: true,
+        },
+        {
+          key: "counterpartyId",
+          label: "counterpartyId",
+          placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
+          required: true,
+        },
+        destinationCustodyWalletIdField,
+        {
+          key: "assetRail",
+          label: "assetRail",
+          placeholder: t("DashboardPayments.playground.usdc"),
+          defaultValue: "usdc.solana",
+          required: true,
+        },
+        {
+          key: "fiatCurrency",
+          label: "fiatCurrency",
+          placeholder: t("DashboardPayments.playground.selectFiatCurrency"),
+          kind: "select",
+          options: fiatCurrencyOptions,
+          defaultValue: "USD",
+        },
+        {
+          key: "fiatAmount",
+          label: "fiatAmount",
+          placeholder: "250.00",
+          defaultValue: "250.00",
+          required: true,
+        },
+      ],
+      expectedResponse: {
+        data: {
+          quote: {
+            id: "ramp_quote_example",
+            provider: "moonpay",
+            status: "pending",
+            deliveryMode: "hosted",
+            hostedUrl: "https://buy.moonpay.com/session_123",
+          },
+        },
+      },
+    },
+    {
+      id: "create-offramp-quote",
+      title: t("DashboardPayments.playground.createOfframpQuote"),
+      method: "POST",
+      path: "/v1/payments/ramps/offramp/quote",
+      pathFields: [],
+      bodyFields: [
+        {
+          key: "provider",
+          label: "provider",
+          placeholder: t("DashboardPayments.playground.selectProvider"),
+          kind: "select",
+          options: rampProviderOptions,
+          defaultValue: "moonpay",
+          required: true,
+        },
+        {
+          key: "counterpartyId",
+          label: "counterpartyId",
+          placeholder: t("DashboardPayments.playground.counterpartyIdPlaceholder"),
+          required: true,
+        },
+        sourceCustodyWalletIdField,
+        {
+          key: "assetRail",
+          label: "assetRail",
+          placeholder: t("DashboardPayments.playground.usdc"),
+          defaultValue: "usdc.solana",
+          required: true,
+        },
+        {
+          key: "fiatCurrency",
+          label: "fiatCurrency",
+          placeholder: t("DashboardPayments.playground.selectFiatCurrency"),
+          kind: "select",
+          options: fiatCurrencyOptions,
+          defaultValue: "USD",
+        },
+        {
+          key: "cryptoAmount",
+          label: "cryptoAmount",
+          placeholder: "250.00",
+          defaultValue: "250.00",
+          required: true,
+        },
+      ],
+      expectedResponse: {
+        data: {
+          quote: {
+            id: "ramp_quote_example",
+            provider: "moonpay",
+            status: "pending",
+            deliveryMode: "hosted",
+            hostedUrl: "https://sell.moonpay.com/session_123",
+          },
+        },
+      },
+    },
+  ];
+
+  return mergeOpenApiPlaygroundEndpoints("payments", curatedEndpoints);
+}

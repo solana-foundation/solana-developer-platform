@@ -187,7 +187,26 @@
     "filter": "Filter",
     "filterBy": "Filter by…",
     "any": "Any",
+    "copyLink": "Copy link",
     "notSet": "Not set",
+    "clearFilter": "Clear {filter} filter",
+    "playgroundForm": "Form",
+    "playgroundRaw": "Raw",
+    "clearField": "Clear {field}",
+    "apiKeyLabel": "Signing key",
+    "apiKeyProduction": "production",
+    "apiKeySandbox": "sandbox",
+    "pasteApiKey": "Paste a key",
+    "noParameters": "This endpoint takes no parameters.",
+    "playgroundParameters": "Parameters",
+    "playgroundBody": "Body",
+    "playgroundHeaders": "Headers",
+    "headersAfterRun": "Run the request to see the headers it comes back with.",
+    "noResponseHeaders": "The response came back without headers to show.",
+    "playgroundKeyPlaceholder": "<your API key>",
+    "exampleResponse": "Example response",
+    "notRunYet": "Not run yet",
+    "running": "Running…",
     "openCalendarFor": "Open the calendar for {field}"
   },
   "dashboardShell": {
@@ -273,8 +292,13 @@
     "contactList": "Contact list",
     "contacts": "Contacts",
     "contact": "Contact",
+    "transaction": "Transaction",
     "newDesign": {
-      "newCounterparty": "New counterparty"
+      "recurring": "Scheduled",
+      "newCounterparty": "New counterparty",
+      "recurringPayments": "Schedules",
+      "recurringPayment": "Schedule",
+      "backToRecurringPayments": "Schedules"
     }
   },
   "validation": {

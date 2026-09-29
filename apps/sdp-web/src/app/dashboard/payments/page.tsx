@@ -7,11 +7,13 @@ import {
   dashboardWorkspacePlaygroundPanelClassName,
 } from "@/components/dashboard-workspace-panel";
 import { DashboardWorkspaceTabShell } from "@/components/dashboard-workspace-tab-shell";
+import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
 import { createTimedTrace } from "@/lib/request-tracing";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchActiveApiKeys, resolvePlaygroundApiBaseUrl } from "../playground-api-data";
+import RedesignPaymentsPage from "./page.redesign";
 import { PaymentsCommandCenter } from "./payments-command-center";
 import { fetchPaymentsWallets, fetchPaymentTransfers } from "./payments-page.data";
 import { PaymentsPlaygroundWorkspace } from "./payments-workspace";
@@ -68,7 +70,7 @@ async function PaymentsPlaygroundData({
   );
 }
 
-export default async function PaymentsPage() {
+async function PaymentsPage() {
   const { userId, orgId } = await auth();
   if (!userId) {
     redirect(await getAuthEntryPath());
@@ -105,3 +107,5 @@ export default async function PaymentsPage() {
     />
   );
 }
+
+export default withLegacyDesign(RedesignPaymentsPage, PaymentsPage);

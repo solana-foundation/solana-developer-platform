@@ -34,10 +34,22 @@ interface ListSkeletonColumn {
   cellSkeletonClassName: string;
 }
 
-type ListSkeletonVariant = "counterparty-directory";
+type ListSkeletonVariant =
+  | "payments-transactions"
+  | "counterparty-directory"
+  | "payment-requests"
+  | "recurring-payments";
 
 /** The refresh lists' columns, in order, so a loading list lines up with the settled one. */
 const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonColumn[]> = {
+  "payments-transactions": [
+    { id: "status", cellSkeletonClassName: "h-4 w-20" },
+    { id: "type", cellSkeletonClassName: "h-4 w-24" },
+    { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
+    { id: "contact", cellSkeletonClassName: "h-4 w-28" },
+    { id: "wallet", cellSkeletonClassName: "h-4 w-24" },
+    { id: "created", cellSkeletonClassName: "h-4 w-24" },
+  ],
   "counterparty-directory": [
     { id: "name", cellSkeletonClassName: "h-4 w-32" },
     { id: "type", cellSkeletonClassName: "h-4 w-16" },
@@ -49,6 +61,20 @@ const LIST_SKELETON_COLUMNS: Record<ListSkeletonVariant, readonly ListSkeletonCo
       headerClassName: "w-12",
       cellSkeletonClassName: "ml-auto size-8 rounded-control",
     },
+  ],
+  "payment-requests": [
+    { id: "status", cellSkeletonClassName: "h-4 w-20" },
+    { id: "amount", headerClassName: "text-right", cellSkeletonClassName: "ml-auto h-4 w-24" },
+    { id: "from", cellSkeletonClassName: "h-4 w-28" },
+    { id: "to", cellSkeletonClassName: "h-4 w-28" },
+    { id: "created", cellSkeletonClassName: "h-4 w-20" },
+    { id: "actions", headerClassName: "w-px", cellSkeletonClassName: "ml-auto h-4 w-16" },
+  ],
+  "recurring-payments": [
+    { id: "status", cellSkeletonClassName: "h-4 w-24" },
+    { id: "schedule", cellSkeletonClassName: "h-4 w-48" },
+    { id: "repeats", cellSkeletonClassName: "h-4 w-24" },
+    { id: "next-run", cellSkeletonClassName: "h-4 w-24" },
   ],
 };
 
@@ -216,6 +242,10 @@ function DetailRowsSkeleton({ count = 8 }: { count?: number }) {
   );
 }
 
+export function PaymentRequestsPageSkeleton() {
+  return <ListPageSkeleton layout="payment-requests" />;
+}
+
 export function CounterpartyDirectorySkeleton() {
   return <ListPageSkeleton layout="counterparty-directory" />;
 }
@@ -254,6 +284,40 @@ export function PaymentsDepositPageSkeleton() {
       </div>
       <DetailRowsSkeleton count={3} />
     </div>
+  );
+}
+
+/** New schedule's payment step: the step's question, contact, source wallet, amount beside token. */
+export function RecurringPaymentCreateSkeleton() {
+  return (
+    <FlowPageSkeleton layout="recurring-payment-create">
+      <SkeletonBlock className="h-6 w-56 max-w-full" />
+      <UnderlineFieldSkeleton value="w-40" />
+      <UnderlineFieldSkeleton value="w-56" />
+      <div className="grid grid-cols-2 gap-6">
+        <UnderlineFieldSkeleton value="w-24" />
+        <UnderlineFieldSkeleton value="w-16" />
+      </div>
+    </FlowPageSkeleton>
+  );
+}
+
+/** New request: amount and token side by side, the wallet, who pays, the expiry, the sentence. */
+export function PaymentRequestCreateSkeleton() {
+  return (
+    <FlowPageSkeleton layout="payment-request-create" stepper={false}>
+      <div className="grid gap-6 sm:grid-cols-2">
+        <UnderlineFieldSkeleton value="w-16" />
+        <UnderlineFieldSkeleton value="w-14" />
+      </div>
+      <UnderlineFieldSkeleton value="w-28" />
+      <UnderlineFieldSkeleton value="w-44" />
+      <UnderlineFieldSkeleton value="w-24" />
+      <div className="space-y-2 pt-2">
+        <SkeletonBlock className="h-3.5 w-16" />
+        <SkeletonBlock className="h-4 w-80 max-w-full" />
+      </div>
+    </FlowPageSkeleton>
   );
 }
 
@@ -343,13 +407,102 @@ export function CounterpartyDetailSkeleton() {
   );
 }
 
-// Transactions, Requests and Schedules keep the previous design's skeletons until they are
-// redesigned.
-export {
-  PaymentRequestsPageSkeleton,
-  PaymentsTransactionsPageSkeleton,
-  RecurringPaymentCreateSkeleton,
-  RecurringPaymentDetailSkeleton,
-  RecurringPaymentsPageSkeleton,
-  TransactionsResultsSkeleton,
-} from "./payments-route-skeletons";
+/**
+ * A record page (a transaction, a payment request) while it loads: the state band, the amount,
+ * and two columns of rows, in the page's 32px rhythm.
+ */
+export function RecordPageSkeleton({
+  layout,
+}: {
+  layout: "payment-transaction-detail" | "payment-request-detail";
+}) {
+  return (
+    <DashboardWorkspaceOverviewPanel data-loading-layout={layout} aria-busy="true">
+      <div className="flex flex-col gap-8">
+        <SkeletonBlock className="h-16 w-full rounded-[var(--corner-card)]" />
+        <div className="flex flex-col gap-2">
+          <SkeletonBlock className="h-4 w-16" />
+          <SkeletonBlock className="h-10 w-56" />
+        </div>
+        <div className="grid gap-x-12 @2xl:grid-cols-2" data-loading-detail-rows>
+          {RECORD_COLUMN_IDS.map((column) => (
+            <div key={column}>
+              {DETAIL_ROW_IDS.slice(0, 3).map((id) => (
+                <div
+                  key={id}
+                  className="flex h-10 items-center justify-between gap-4 border-b border-border-subtle last:border-b-0"
+                >
+                  <SkeletonBlock className="h-4 w-20" />
+                  <SkeletonBlock className="h-4 w-28" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function PaymentTransactionDetailSkeleton() {
+  return <RecordPageSkeleton layout="payment-transaction-detail" />;
+}
+
+export function PaymentRequestDetailSkeleton() {
+  return <RecordPageSkeleton layout="payment-request-detail" />;
+}
+
+export function RecurringPaymentsPageSkeleton() {
+  return <ListPageSkeleton layout="recurring-payments" />;
+}
+
+/**
+ * A schedule's page loading: the state band, the plan's rows in their label column, then the
+ * run history.
+ */
+export function RecurringPaymentDetailSkeleton() {
+  return (
+    <DashboardWorkspaceOverviewPanel
+      data-loading-layout="recurring-payment-detail"
+      aria-busy="true"
+    >
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-2 rounded-card bg-surface-tile px-4 py-3">
+          <SkeletonBlock className="h-5 w-24" />
+          <SkeletonBlock className="h-4 w-80 max-w-full" />
+        </div>
+        <section className="flex flex-col gap-4">
+          <SkeletonBlock className="h-6 w-40" />
+          <div data-loading-detail-rows>
+            {DETAIL_ROW_IDS.slice(0, 7).map((id) => (
+              <div
+                key={id}
+                className="flex h-11 items-center gap-3 border-b border-border-subtle last:border-b-0"
+              >
+                <SkeletonBlock className="h-4 w-20 shrink-0 md:me-13" />
+                <SkeletonBlock className="h-4 w-40" />
+              </div>
+            ))}
+          </div>
+        </section>
+        <ContactBlockSkeleton rows={3} />
+      </div>
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+export function TransactionsResultsSkeleton() {
+  return (
+    <section data-loading-transaction-results aria-busy="true">
+      <ListTableSkeleton variant="payments-transactions" />
+    </section>
+  );
+}
+
+export function PaymentsTransactionsPageSkeleton() {
+  return (
+    <ListPageSkeleton layout="payments-transactions">
+      <TransactionsResultsSkeleton />
+    </ListPageSkeleton>
+  );
+}
