@@ -1345,13 +1345,14 @@ retired path-addressed shapes (`positions/:ownerAddress`,
 
 - `GET /external-wallet/movements?ownerAddress=…` — **DB ledger list**, one
   owner's activity newest first in ledger vocabulary, keyset-paged, with
-  `direction`/`status` equality filters. Every movement carries two views of
-  the same quantity: `amount`/`denomination` is the on-chain quantity exactly
-  as recorded (token for a deposit, SHARES for a withdrawal), and
-  `tokenMint`/`tokenAmount` is the deposit-token view a feed renders in (the
-  position's token mint via `listPositionTokenMints`; the deposit amount, or a
-  withdrawal's `token_amount_settled` once finalized, null before that or when
-  the payout was never observed). Neither replaces the other.
+  `direction`/`status` equality filters. `amount`/`denomination` preserves the
+  requested quantity (token maximum for a Kamino deposit, SHARES for a
+  withdrawal). `tokenMint`/`tokenAmount` is the deposit-token view a feed
+  renders in, with the position's token mint via `listPositionTokenMints`.
+  For Kamino deposits and all withdrawals, `tokenAmount` is the observed
+  `token_amount_settled`, or null until valued. Other providers' deposits
+  retain their requested-amount fallback. A requested maximum must never be
+  presented as a receipt.
 - `GET /external-wallet/movements/:movementId` — the poll that makes the
   submit's record-before-broadcast answerable on this surface: a scoped,
   fail-soft read-through of the movement's exact Solana signature (the same
