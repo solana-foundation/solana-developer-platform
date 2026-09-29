@@ -476,7 +476,10 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
     const body = (await (await getReconciliation()).json()) as ReportBody;
 
     expect(body.data.queuedWithdrawalPositions).toEqual([
-      expect.objectContaining({ positionId: claim.position.id, withdrawalRequestIds: [first, second] }),
+      expect.objectContaining({
+        positionId: claim.position.id,
+        withdrawalRequestIds: [first, second],
+      }),
     ]);
   });
 
