@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Modal } from "@/components/ui/modal";
+import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { applyIdempotencyKeyOutcome } from "@/lib/idempotency-key-store";
 import { EarnAmountMaxButton } from "./earn-amount-max-button";
@@ -62,6 +63,36 @@ interface EarnVaultParRedemptionModalProps {
 }
 
 type FormStep = "details" | "review";
+
+/** Copy that names what the request redeems, chosen once per source. */
+const PAR_SOURCE_COPY: Record<
+  EarnVaultParRedemptionSource,
+  Record<"detailsBody" | "operatorNotice" | "reviewNotice" | "title" | "unit", MessageKey>
+> = {
+  shares: {
+    detailsBody: "DashboardEarn.parRedemption.detailsBody",
+    operatorNotice: "DashboardEarn.parRedemption.operatorNotice",
+    reviewNotice: "DashboardEarn.parRedemption.reviewNotice",
+    title: "DashboardEarn.parRedemption.title",
+    unit: "DashboardEarn.parRedemption.shareUnit",
+  },
+  intermediate: {
+    detailsBody: "DashboardEarn.parRedemption.detailsBodyIntermediate",
+    operatorNotice: "DashboardEarn.parRedemption.operatorNoticeIntermediate",
+    reviewNotice: "DashboardEarn.parRedemption.reviewNoticeIntermediate",
+    title: "DashboardEarn.parRedemption.titleIntermediate",
+    unit: "DashboardEarn.parRedemption.intermediateUnit",
+  },
+};
+
+function parMinimum(
+  terms: EarnVaultParRedemptionTerms,
+  source: EarnVaultParRedemptionSource
+): string | undefined {
+  return source === "intermediate"
+    ? terms.minimumIntermediateAmount
+    : (terms.minimumShares ?? undefined);
+}
 
 // Hastra documents this off-chain operator/CCTP batching threshold. It is an
 // advisory, not a program rule: v0.0.6 accepts a one-atom request, so the UI
@@ -446,25 +477,11 @@ function ParRedemptionDetails({
   const locale = useLocale();
   const validation = validateVaultWithdrawalAmount(amount);
   const amountInvalid = amount.trim() !== "" && validation.kind !== "valid";
-  const minimum =
-    source === "intermediate"
-      ? formatProviderAmount(
-          terms.minimumIntermediateAmount,
-          locale,
-          t("DashboardEarn.parRedemption.intermediateUnit")
-        )
-      : formatProviderAmount(
-          terms.minimumShares ?? undefined,
-          locale,
-          t("DashboardEarn.parRedemption.shareUnit")
-        );
+  const copy = PAR_SOURCE_COPY[source];
+  const minimum = formatProviderAmount(parMinimum(terms, source), locale, t(copy.unit));
   return (
     <>
-      <p className="mt-2 text-sm leading-5 text-secondary">
-        {source === "intermediate"
-          ? t("DashboardEarn.parRedemption.detailsBodyIntermediate")
-          : t("DashboardEarn.parRedemption.detailsBody")}
-      </p>
+      <p className="mt-2 text-sm leading-5 text-secondary">{t(copy.detailsBody)}</p>
       <div className="mt-5 grid gap-2">
         <Label htmlFor="earn-par-redemption-amount">
           {t("DashboardEarn.vaultWithdraw.amountLabel")}
@@ -513,11 +530,7 @@ function ParRedemptionDetails({
         ) : null}
       </div>
       <div className="mt-4 grid gap-2 text-xs leading-5 text-tertiary">
-        <p>
-          {source === "intermediate"
-            ? t("DashboardEarn.parRedemption.operatorNoticeIntermediate")
-            : t("DashboardEarn.parRedemption.operatorNotice")}
-        </p>
+        <p>{t(copy.operatorNotice)}</p>
         <p>{t("DashboardEarn.parRedemption.batchMinimumNotice")}</p>
       </div>
       <div className="mt-6">
@@ -597,9 +610,7 @@ function ParRedemptionReview({
         </p>
       ) : null}
       <p className="mt-4 text-xs leading-5 text-tertiary">
-        {source === "intermediate"
-          ? t("DashboardEarn.parRedemption.reviewNoticeIntermediate")
-          : t("DashboardEarn.parRedemption.reviewNotice")}
+        {t(PAR_SOURCE_COPY[source].reviewNotice)}
       </p>
       {error ? (
         <p
@@ -754,10 +765,7 @@ export function EarnVaultParRedemptionModal({
     setError,
   });
   const positionName = position.label || shortenMarketAddress(position.providerReference);
-  const modalLabel =
-    source === "intermediate"
-      ? t("DashboardEarn.parRedemption.titleIntermediate", { position: positionName })
-      : t("DashboardEarn.parRedemption.title", { position: positionName });
+  const modalLabel = t(PAR_SOURCE_COPY[source].title, { position: positionName });
 
   return (
     <Modal isOpen ariaLabel={modalLabel} closeDisabled={submitting} onClose={onClose} size="md">
