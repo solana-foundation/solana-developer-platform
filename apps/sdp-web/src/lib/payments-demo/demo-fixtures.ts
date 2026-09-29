@@ -36,13 +36,13 @@ import {
  * signatures are derived from fixed seeds, so they are stable across calls and renders.
  */
 
-const MINUTE_MS = 60_000;
-const HOUR_MS = 60 * MINUTE_MS;
+export const MINUTE_MS = 60_000;
+export const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-const ORGANIZATION_ID = "demo_org";
-const PROJECT_ID = "demo_prj";
-const CREATED_BY = "demo_user_ops";
+export const ORGANIZATION_ID = "demo_org";
+export const PROJECT_ID = "demo_prj";
+export const CREATED_BY = "demo_user_ops";
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_TRANSACTIONS_LIMIT = 50;
@@ -50,7 +50,7 @@ const TRANSACTIONS_CURSOR_PREFIX = "demo_cursor_";
 
 // ─── Tokens ──────────────────────────────────────────────────────────────────
 
-const DEMO_TOKENS = {
+export const DEMO_TOKENS = {
   USDC: {
     symbol: WELL_KNOWN_TOKENS.USDC.symbol,
     mint: WELL_KNOWN_TOKENS.USDC.mints.devnet.address,
@@ -71,16 +71,16 @@ const DEMO_TOKENS = {
   },
 } as const;
 
-type DemoTokenKey = keyof typeof DEMO_TOKENS;
+export type DemoTokenKey = keyof typeof DEMO_TOKENS;
 
-function toBaseUnits(uiAmount: string, decimals: number): bigint {
+export function toBaseUnits(uiAmount: string, decimals: number): bigint {
   const [whole = "0", fraction = ""] = uiAmount.split(".");
   const scaledFraction = fraction.padEnd(decimals, "0").slice(0, decimals);
   return BigInt(whole) * 10n ** BigInt(decimals) + BigInt(scaledFraction || "0");
 }
 
 /** A base-unit amount as a decimal string, keeping at least `minFractionDigits`. */
-function fromBaseUnits(amount: bigint, decimals: number, minFractionDigits = 0): string {
+export function fromBaseUnits(amount: bigint, decimals: number, minFractionDigits = 0): string {
   const scale = 10n ** BigInt(decimals);
   const whole = amount / scale;
   const trimmed = (amount % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
@@ -94,11 +94,11 @@ function sumAmounts(amounts: readonly string[], token: DemoTokenKey): string {
   return fromBaseUnits(total, decimals, 2);
 }
 
-function usdValueOf(uiAmount: string, usdPrice: number): number {
+export function usdValueOf(uiAmount: string, usdPrice: number): number {
   return Math.round(Number(uiAmount) * usdPrice * 100) / 100;
 }
 
-function tokenBalance(key: DemoTokenKey, uiAmount: string): CustodyWalletTokenBalance {
+export function tokenBalance(key: DemoTokenKey, uiAmount: string): CustodyWalletTokenBalance {
   const token = DEMO_TOKENS[key];
   const amount = toBaseUnits(uiAmount, token.decimals);
   const normalizedUiAmount = fromBaseUnits(amount, token.decimals);
@@ -113,7 +113,7 @@ function tokenBalance(key: DemoTokenKey, uiAmount: string): CustodyWalletTokenBa
   };
 }
 
-function symbolForMint(mint: string | null | undefined): string | undefined {
+export function symbolForMint(mint: string | null | undefined): string | undefined {
   return Object.values(DEMO_TOKENS).find((token) => token.mint === mint)?.symbol;
 }
 
@@ -166,8 +166,8 @@ function seededBase58(kind: "address" | "signature", seed: string): string {
   return encoded;
 }
 
-const demoAddress = (seed: string) => seededBase58("address", seed);
-const demoSignature = (seed: string) => seededBase58("signature", seed);
+export const demoAddress = (seed: string) => seededBase58("address", seed);
+export const demoSignature = (seed: string) => seededBase58("signature", seed);
 
 // ─── Specs ───────────────────────────────────────────────────────────────────
 
@@ -749,9 +749,9 @@ const REQUEST_SPECS: readonly RequestSpec[] = [
 
 // ─── The demo world ──────────────────────────────────────────────────────────
 
-type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
+export type DemoWallet = PaymentsDashboardWallet & { balances: CustodyWalletTokenBalance[] };
 
-type DemoTransfer = PaymentTransferSummary & {
+export type DemoTransfer = PaymentTransferSummary & {
   organizationId: string;
   projectId: string;
   type: PaymentTransferType;
@@ -762,25 +762,38 @@ type DemoTransfer = PaymentTransferSummary & {
   updatedAt: string;
 };
 
-interface DemoTransferRow {
+export interface DemoTransferRow {
   transfer: DemoTransfer;
   observed: boolean;
 }
 
-interface DemoBatch {
+export interface DemoBatch {
   batch: PaymentTransferBatch;
   recipients: PaymentTransferRecipient[];
 }
 
-interface DemoWorld {
-  wallets: Record<WalletKey, DemoWallet>;
-  contacts: Record<ContactKey, Counterparty>;
-  accounts: Record<ContactKey, CounterpartyAccount>;
+/** A payout account a provider holds for a contact. */
+export interface DemoProviderAccount {
+  counterpartyId: string;
+  account: CounterpartyProviderAccount;
+}
+
+/**
+ * The fixtures, then whatever the visitor did in demo mode on top: contacts and addresses are
+ * keyed by fixture key for the seeded ones and by id for the ones added since.
+ */
+export interface DemoWorld {
+  wallets: Record<string, DemoWallet>;
+  contacts: Record<string, Counterparty>;
+  accounts: Record<string, CounterpartyAccount>;
+  providerAccounts: DemoProviderAccount[];
   transfers: DemoTransferRow[];
   batches: DemoBatch[];
   requests: PaymentRequest[];
   schedules: PaymentRecurringPayment[];
   attempts: PaymentSubscriptionCollectionAttempt[];
+  /** `provider:counterpartyId` for each contact that accepted a ramp provider's agreements. */
+  consents: string[];
 }
 
 interface Clock {
@@ -1168,11 +1181,11 @@ function buildRequest(
   };
 }
 
-function newestFirst<T extends { createdAt: string }>(rows: T[]): T[] {
+export function newestFirst<T extends { createdAt: string }>(rows: T[]): T[] {
   return rows.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-function buildWorld(now: Date): DemoWorld {
+export function buildWorld(now: Date): DemoWorld {
   const clock = createClock(now);
   const base: WorldBase = {
     wallets: mapRecord(WALLET_SPECS, (spec: WalletSpec, key) => buildWallet(spec, key)),
@@ -1188,6 +1201,7 @@ function buildWorld(now: Date): DemoWorld {
   transfers.sort((left, right) => right.transfer.createdAt.localeCompare(left.transfer.createdAt));
   return {
     ...base,
+    providerAccounts: buildProviderAccounts(base),
     transfers,
     batches: BATCH_SPECS.map((spec) => buildBatch(spec, base, clock)).sort((left, right) =>
       right.batch.createdAt.localeCompare(left.batch.createdAt)
@@ -1195,6 +1209,7 @@ function buildWorld(now: Date): DemoWorld {
     requests: newestFirst(REQUEST_SPECS.map((spec) => buildRequest(spec, base, transfers, clock))),
     schedules: newestFirst(scheduleOutputs.map((output) => output.schedule)),
     attempts: scheduleOutputs.flatMap((output) => output.attempts),
+    consents: [],
   };
 }
 
@@ -1264,7 +1279,10 @@ function walletList(world: DemoWorld): DemoWallet[] {
   return Object.values(world.wallets);
 }
 
-function findWallet(world: DemoWorld, id: string | null): DemoWallet | undefined {
+export function findWallet(
+  world: DemoWorld,
+  id: string | null | undefined
+): DemoWallet | undefined {
   return walletList(world).find((wallet) => wallet.id === id || wallet.walletId === id);
 }
 
@@ -1634,23 +1652,78 @@ const PROVIDER_ACCOUNT_SPECS: Partial<
       accountNumberLast4: "8841",
     },
   ],
+  northwind: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "GBP",
+      destinationCountry: "GB",
+      paymentRail: "FPS",
+      bankName: "Barclays",
+      accountNumberLast4: "5307",
+    },
+  ],
+  lumen: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "WIRE",
+      bankName: "Silicon Valley Bank",
+      accountNumberLast4: "1188",
+    },
+  ],
+  orbit: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "EUR",
+      destinationCountry: "IE",
+      paymentRail: "SEPA",
+      bankName: "Bank of Ireland",
+      accountNumberLast4: "6620",
+    },
+  ],
+  kai: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+      bankName: "Wells Fargo",
+      accountNumberLast4: "4472",
+    },
+  ],
+  priya: [
+    {
+      provider: "lightspark",
+      fiatCurrency: "USD",
+      destinationCountry: "US",
+      paymentRail: "ACH",
+      bankName: "Bank of America",
+      accountNumberLast4: "9015",
+    },
+  ],
 };
 
+function buildProviderAccounts(base: WorldBase): DemoProviderAccount[] {
+  return (Object.keys(PROVIDER_ACCOUNT_SPECS) as ContactKey[]).flatMap((key) =>
+    (PROVIDER_ACCOUNT_SPECS[key] ?? []).map((spec, index) => ({
+      counterpartyId: base.contacts[key].id,
+      account: {
+        ...spec,
+        id: `demo_cppa_${key}_${index}`,
+        kind: "payout_account" as const,
+        status: "active" as const,
+        providerStatus: "VERIFIED",
+        createdAt: base.contacts[key].createdAt,
+      },
+    }))
+  );
+}
+
 function providerAccountsBody(world: DemoWorld, counterparty: Counterparty) {
-  const key = (Object.keys(world.contacts) as ContactKey[]).find(
-    (contactKey) => world.contacts[contactKey].id === counterparty.id
-  );
-  const specs = key === undefined ? undefined : PROVIDER_ACCOUNT_SPECS[key];
-  const accounts = (specs ?? []).map(
-    (spec, index): CounterpartyProviderAccount => ({
-      ...spec,
-      id: `demo_cppa_${key}_${index}`,
-      kind: "payout_account",
-      status: "active",
-      providerStatus: "VERIFIED",
-      createdAt: counterparty.createdAt,
-    })
-  );
+  const accounts = world.providerAccounts
+    .filter((entry) => entry.counterpartyId === counterparty.id)
+    .map((entry) => entry.account);
   return { data: { accounts } };
 }
 
@@ -1746,34 +1819,47 @@ function decodeSegment(segment: string): string {
   }
 }
 
-/**
- * The JSON body the SDP API would send for this GET (the full envelope, e.g. `{ data: … }`),
- * or undefined to let the request through to the real API.
- */
-export function paymentsDemoBody(pathWithQuery: string, now?: Date): unknown | undefined {
+/** A request path as the demo routes it: its `/v1` segments, decoded, and its query. */
+export function demoPathParts(
+  pathWithQuery: string
+): { segments: string[]; params: URLSearchParams } | undefined {
   let url: URL;
   try {
     url = new URL(pathWithQuery, "http://demo.local");
   } catch {
     return undefined;
   }
-  const [version, resource, ...rest] = url.pathname
+  const [version, ...segments] = url.pathname
     .split("/")
     .filter((segment) => segment.length > 0)
     .map(decodeSegment);
   if (version !== "v1") return undefined;
-  const params = url.searchParams;
+  return { segments, params: url.searchParams };
+}
+
+/**
+ * The JSON body the SDP API would send for this GET (the full envelope, e.g. `{ data: … }`),
+ * read from the fixtures alone, or undefined when they hold no answer.
+ */
+export function paymentsDemoBody(pathWithQuery: string, now?: Date): unknown | undefined {
+  return demoWorldBody(buildWorld(now ?? new Date()), pathWithQuery);
+}
+
+/** The same answer, read from a given world (the fixtures with the session's actions applied). */
+export function demoWorldBody(world: DemoWorld, pathWithQuery: string): unknown | undefined {
+  const parts = demoPathParts(pathWithQuery);
+  if (parts === undefined) return undefined;
+  const [resource, ...rest] = parts.segments;
+  const params = parts.params;
   switch (resource) {
     case "wallets":
-      return walletsRoute(rest, params, buildWorld(now ?? new Date()));
+      return walletsRoute(rest, params, world);
     case "payments":
-      return paymentsRoute(rest, params, buildWorld(now ?? new Date()));
+      return paymentsRoute(rest, params, world);
     case "transactions":
-      return rest.length === 0
-        ? transactionsBody(buildWorld(now ?? new Date()), params)
-        : undefined;
+      return rest.length === 0 ? transactionsBody(world, params) : undefined;
     case "counterparties":
-      return counterpartiesRoute(rest, params, buildWorld(now ?? new Date()));
+      return counterpartiesRoute(rest, params, world);
     case "issuance":
       return rest.length === 1 && rest[0] === "tokens" ? emptyIssuedTokensBody(params) : undefined;
     default:

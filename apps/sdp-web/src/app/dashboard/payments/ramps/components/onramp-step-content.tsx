@@ -1,24 +1,25 @@
 "use client";
 
-import { isMuralSandboxPayinCurrency, isTerminalRampTransferStatus } from "@sdp/types";
+import { isTerminalRampTransferStatus } from "@sdp/types";
 import { getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
-import { DollarSignIcon } from "lucide-react";
 import { useThemeScope } from "@/components/theme-scope";
 import { Callout } from "@/components/ui/callout";
 import { useTranslations } from "@/i18n/provider";
+import { usePaymentsDemo } from "@/lib/payments-demo/payments-demo-context";
 import { hasEnabledRampProvider } from "@/lib/provider-availability";
 import type { OnrampWizard } from "../hooks/use-onramp-wizard";
 import { BvnkAgreementConsent } from "./bvnk-agreement-consent";
 import { CoinbaseQuoteSummary } from "./coinbase/quote-summary";
 import { CoinbaseRampFrame } from "./coinbase/ramp-frame";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
+import { DemoProviderCheckout } from "./demo-provider-checkout";
 import { DepositTimeline } from "./deposit-timeline";
 import { ManualInstructionsQuote } from "./manual-instructions-quote";
 import { MemoStepContent } from "./memo-step-content";
 import { MoneygramRampWidget } from "./moneygram-ramp-widget";
 import { MoonpayRampFrame } from "./moonpay-ramp-frame";
 import { OnrampReview } from "./onramp-review";
-import { hasOnboardingLifecycle, isOnboardingPanelStatus, simulateActionLabels } from "./providers";
+import { hasOnboardingLifecycle, isOnboardingPanelStatus } from "./providers";
 import { RampCompleteScreen } from "./ramp-complete-screen";
 import { RampOnboardingPanel } from "./ramp-onboarding-panel";
 import { RampPairProviderSelector } from "./ramp-pair-provider-selector";
@@ -159,14 +160,7 @@ function ManualInstructionsStep({
 }) {
   const t = useTranslations();
   const refresh = useThemeScope() === "refresh";
-  const {
-    fields,
-    selectedRampPair,
-    transferStatus,
-    quoteSimulationLoading,
-    quoteSimulationSucceeded,
-    simulateCurrentQuote,
-  } = wizard;
+  const { fields, selectedRampPair, transferStatus } = wizard;
   // Terminal check precedes the missing-instructions guard: a dead transfer is not a quote defect.
   if (transferStatus !== undefined && isTerminalRampTransferStatus(transferStatus.status)) {
     return <RampStatusPanel direction="onramp" transfer={transferStatus} />;
@@ -180,21 +174,7 @@ function ManualInstructionsStep({
     );
   }
 
-  const labels =
-    quote.provider === "mural" && !isMuralSandboxPayinCurrency(selectedRampPair.fiatCurrency)
-      ? null
-      : simulateActionLabels(quote.provider, t);
-  const simulateAction = labels
-    ? {
-        loading: quoteSimulationLoading,
-        succeeded: quoteSimulationSucceeded,
-        onClick: () => void simulateCurrentQuote(),
-        icon: <DollarSignIcon />,
-        idleLabel: labels.idle,
-        busyLabel: labels.busy,
-        doneLabel: labels.done,
-      }
-    : undefined;
+  // The sandbox's Simulate deposit is the footer's primary action, not part of the instructions.
   const instructionsQuote = (
     <ManualInstructionsQuote
       amount={fields.amount.trim()}
@@ -202,7 +182,6 @@ function ManualInstructionsStep({
       fiatCurrency={selectedRampPair.fiatCurrency}
       cryptoToken={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
       instructions={quote.paymentInstructions}
-      action={simulateAction}
     />
   );
   return refresh ? (
@@ -266,6 +245,7 @@ function HostedQuoteStep({ quote }: { quote: HostedQuoteRecord }) {
  * quote's own surface (a hosted frame, a widget, bank instructions).
  */
 function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote }) {
+  const demo = usePaymentsDemo();
   const { transferStatus } = wizard;
 
   if (wizard.showCompleteScreen) {
@@ -273,6 +253,20 @@ function QuoteStep({ wizard, quote }: { wizard: OnrampWizard; quote: OnrampQuote
       return <RampQuoteSkeleton />;
     }
     return <RampCompleteScreen direction="onramp" quote={quote} transfer={transferStatus} />;
+  }
+
+  // A provider's own checkout can't open on sample data; the demo stands in for it.
+  if (demo && quote.deliveryMode !== "manual_instructions") {
+    return (
+      <div className="space-y-6">
+        {quote.provider === "coinbase" ? <CoinbaseQuoteSummary quote={quote} /> : null}
+        <DemoProviderCheckout
+          direction="onramp"
+          provider={quote.provider}
+          transfer={transferStatus}
+        />
+      </div>
+    );
   }
 
   if (quote.provider === "stripe") {
