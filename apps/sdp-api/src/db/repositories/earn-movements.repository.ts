@@ -1439,7 +1439,9 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // A cancelled operator redemption never recreates the shares it burned:
       // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
       // open one's delegated intermediate still sits in the wallet. The
-      // amounts come back per status class so the service can tell which
+      // retained balance excludes fulfilled held-intermediate redemptions;
+      // cancelling those requests returns existing backing, not new backing.
+      // Amounts come back per status class so the service can tell which
       // balance is provably whose. Requests are aggregated once per tenant
       // (the tenant/created index) and joined by position, because the
       // request table has no position index and the claim set is unpaged.
@@ -1460,8 +1462,15 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
            redemption_amounts AS (
              SELECT redemption.position_id,
                     redemption.intermediate_mint,
-                    COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status = 'cancelled'), 0)::text
+                    GREATEST(
+                      COALESCE(SUM(redemption.intermediate_amount::numeric)
+                        FILTER (WHERE redemption.status = 'cancelled'
+                          AND redemption.shares::numeric > 0), 0)
+                      - COALESCE(SUM(redemption.intermediate_amount::numeric)
+                        FILTER (WHERE redemption.status = 'fulfilled'
+                          AND redemption.shares::numeric = 0), 0),
+                      0
+                    )::text
                       AS retained,
                     COALESCE(SUM(redemption.intermediate_amount::numeric)
                       FILTER (WHERE redemption.status IN (
@@ -1482,7 +1491,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 AND redemption.mechanism = 'operator_redemption'
                 AND redemption.intermediate_mint IS NOT NULL
                 AND redemption.status IN (
-                  'cancelled', 'creating', 'pending', 'fulfillable',
+                  'cancelled', 'fulfilled', 'creating', 'pending', 'fulfillable',
                   'expired_cancelable', 'cancelling', 'closed_or_unknown'
                 )
               GROUP BY redemption.position_id, redemption.intermediate_mint
