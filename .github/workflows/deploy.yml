@@ -279,31 +279,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run apply-prod-migrations.yml --repo "${{ github.repository }}" --ref main -f image_sha="${{ github.sha }}"
 
-  web-prod-gate:
-    name: Gate sdp-web production on the API
-    needs: [changes, schema, deploy-api-prod]
-    if: always() && github.event_name == 'push' && needs.changes.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
+  release-web-prod:
+    name: Release sdp-web production
+    needs: [changes, deploy-api-prod]
+    if: >-
+      always() && github.event_name == 'push' && needs.changes.result == 'success' &&
+      (needs.changes.outputs.prod != 'true' || needs.deploy-api-prod.result == 'success')
     permissions:
       statuses: write
-    steps:
-      - name: Post the sdp-web production gate status
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PROD: ${{ needs.changes.outputs.prod }}
-          PENDING: ${{ needs.schema.outputs.pending }}
-          DEPLOY_RESULT: ${{ needs.deploy-api-prod.result }}
-        run: |
-          set -euo pipefail
-          if [ "${PROD}" != true ]; then
-            state=success description="No production API deploy in this merge"
-          elif [ "${DEPLOY_RESULT}" = success ]; then
-            state=success description="Production API deployed"
-          elif [ "${PENDING}" = true ]; then
-            state=pending description="Held until the pending migrations are approved"
-          else
-            state=failure description="Production API deploy did not succeed (${DEPLOY_RESULT})"
-          fi
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -f state="${state}" -f context="sdp-web production gate" -f description="${description}"
+    uses: ./.github/workflows/release-sdp-web-prod.yml
+    with:
+      sha: ${{ github.sha }}
