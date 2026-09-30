@@ -22,7 +22,7 @@ is linked.
 
 Things worth knowing before changing a movement path:
 
-- **One writer, and the shared matrix owns the transitions.** Legal source states
+- **The shared matrix owns initiated movement transitions.** Legal source states
   come from `EARN_MOVEMENT_TRANSITIONS` (`@sdp/types`), never from the caller, so
   terminal regression is unrepresentable rather than merely refused. A transition
   whose row is not in a legal source state returns NULL — the same answer a lost
@@ -151,7 +151,7 @@ sum a holding (earnings `currentValue`, the summary totals) add the
 intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
 shares' value. A par request redeems either shares or that held intermediate
 (`intermediateAmount`, exactly one of the two in every body schema). The
-intermediate source records `shares = '0'` (migration 0119 admits it for
+intermediate source records `shares = '0'` (migration 0120 admits it for
 operator redemptions only), its policy candidate names the intermediate mint
 as the asset, and its idempotency fingerprint adds `intermediateAmount` without
 changing a shares fingerprint by a byte. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
@@ -159,6 +159,13 @@ signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history
 and must never be labelled payouts.
+
+Fulfillment writes the request and its `earn_movements` payout atomically in
+`earn-vault-withdrawal-requests.repository.ts`. Migration 0119 identifies that
+payout by `withdrawal_request_id`; several requests may share one closing
+signature. Initiated movements keep their signature uniqueness. Caller keys
+still share the existing ledger constraint, so use distinct keys for direct
+and queued intents; ADR 0003 records the unresolved collision and rollout gate.
 
 The custody options/preview/create/list/detail/cancel routes are keyed. External
 wallet options and previews use the optional-auth contract: anonymous calls are
@@ -179,6 +186,14 @@ program's active log frame. A closed PDA without a matching finalized close
 event stays `closed_or_unknown`; missing signature history never proves that a
 live obligation failed. See ADR 0003 for the solver-queue state machine and
 `docs/earn/hastra-prime-inventory.md` for the operator-redemption differences.
+
+Only finalized action errors can fail an async action. Unknown requested or
+submitted actions rebroadcast their original signed bytes while their
+blockhash is valid; confirmed actions remain open when RPC history is absent.
+Provider observations cannot reopen eligibility while a cancel action remains
+active. Atomic failed-action recovery owns that transition. A rejected create
+may leave `closed_or_unknown` as failed only before provider existence is
+established by a nonce or creation timestamp.
 
 Open requests are a durable due queue, not a full-table poll.
 `next_check_at` is both the next useful provider read and a two-minute claim
@@ -943,7 +958,19 @@ transaction signed by the organization custody wallet or external owner.
   `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
   and `unbackedPositions` (a visible claim whose wallet holds none of its
   shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it). A duplicated share mint
+  explains that disagreement and the sweep settles it). A zero-share claim
+  with an open queued withdrawal request goes to `queuedWithdrawalPositions`
+  with its request ids instead: the request escrowed or burned only the shares
+  it covers, and no per-claim share total exists to prove it covers them all,
+  so the claim is listed, not judged unbacked or hidden. A CANCELLED operator
+  redemption never recreates the shares it burned, so the intermediate it
+  left (Hastra wYLDS) can back that claim and keep it out of both lists
+  (`redemption_intermediates`). Landed open requests own what they delegated;
+  what remains backs a sole retaining claim even if every `creating` or
+  `closed_or_unknown` request's amount is there too, and claims sharing the
+  mint only when it covers all of them. Anything short of certain is reported
+  with `ambiguousBacking: true`, never guessed; a failed request backs
+  nothing. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
@@ -1386,10 +1413,20 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   never coerced to zero; otherwise absent with a named
   `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
   `movements_pending` (a movement is still settling, so chain and ledger
-  describe different moments), or `withdrawals_not_valued` (a finalized
-  withdrawal on a held position has NO observed payout, so `totalWithdrawn`
-  is incomplete). Exits are still ledgered in SHARES (0070 pins `payout_token`
-  NULL for vault rows); the deposit-token payout is a SETTLE-TIME observation
+  describe different moments), `withdrawals_pending` (a held position has an
+  open queued withdrawal request: a Veda queue escrowed or a Hastra
+  redemption burned its shares before the payout, which can take days), or
+  `withdrawals_not_valued` (a finalized withdrawal on a held position has NO
+  observed payout, so `totalWithdrawn` is incomplete). The aggregate
+  (`aggregateExternalWalletMovements`) counts open requests separately from
+  unsettled movements on purpose: folded together they answered
+  `movements_pending` for days, breaking that reason's ~90 s window. A
+  settling movement outranks an open request, and a terminal request
+  withholds nothing. Known gap before Hastra is surfaced: a CANCELLED Hastra
+  redemption leaves the owner wYLDS that the PRIME position read never
+  values, so `earned` then understates by it. Exits are still ledgered in
+  SHARES (0070 pins `payout_token` NULL for vault rows); the deposit-token
+  payout is a SETTLE-TIME observation
   (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
   reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
   landed transaction (`getTransaction`, jsonParsed) and records the receiving

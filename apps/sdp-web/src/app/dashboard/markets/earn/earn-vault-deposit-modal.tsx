@@ -1320,7 +1320,7 @@ export function EarnVaultDepositModal({
     wallets: fundingWallets,
   });
   const selectedWalletBalance = walletFundingBalance(selectedWallet, fundingToken, fundingDecimals);
-  const backing = strategySourceLabel(strategy);
+  const backing = strategySourceLabel(strategy, t);
   const {
     amountError,
     amountValidation,

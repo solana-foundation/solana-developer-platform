@@ -5,12 +5,14 @@ next to the routes that consume it, which means they are easy to miss from
 here — this file exists to point at the ones that will break money movement if
 you don't know them.
 
-## Earn: one movement ledger, one writer
+## Earn: one movement ledger
 
 `earn_movements` is the single authoritative record of every Earn money
 movement — both directions, both execution models — and `earn_positions` is the
-single holdings table behind it (PRO-1705). `earn-movements.repository.ts` is
-the ONLY writer of either. The mechanism-split predecessors
+single holdings table behind it (PRO-1705). `earn-movements.repository.ts` owns
+initiated movements and holdings. `earn-vault-withdrawal-requests.repository.ts`
+also writes observed async payouts, atomically with request fulfillment.
+The mechanism-split predecessors
 (`earn_program_withdrawals`, `earn_vault_movements`, `earn_vault_positions`) no
 longer have writers, and their code is retired.
 
@@ -48,10 +50,20 @@ Things that will bite:
   is denominated in the intermediate mint; `fulfilledQueueQuantity` decides for
   both the writer and the read projection. No read may sum across rows
   without grouping by denomination.
-- **A vault withdrawal is one signed movement.** The movement owns the requested
+- **A direct vault withdrawal is one signed movement.** The movement owns the requested
   shares, actor, idempotency key, signature, signed bytes and blockhash window.
   It is recorded before broadcast and reconciled through the same outbox path
   as a vault deposit.
+- **An async payout is unique by durable request, not transaction signature.**
+  Migration 0119 adds `withdrawal_request_id` to observed payout rows; a solver
+  transaction may fulfill several requests. Initiated movements retain their
+  signature uniqueness. Apply the migration before deploying the writer and
+  retain it on rollback. Caller-key uniqueness is unchanged; the unresolved
+  direct/queued key collision is documented in ADR 0003's withdrawal audit.
+- **Provider reads cannot reopen an active cancellation.** Normal request
+  advancement to an eligible state excludes active cancel actions. Only atomic
+  action-failure recovery may reopen it. A failed create cannot discard a
+  request once its nonce or creation timestamp establishes provider existence.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 - **`getUnsettledVaultMovementStats` duplicates `claimUnsettledVaultMovements`'

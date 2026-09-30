@@ -1011,6 +1011,9 @@ export interface EarnExternalWalletMovementResponse {
  * - `live_value_unavailable`: the provider could not hydrate current value.
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
+ * - `withdrawals_pending`: a currently held position has an open queued
+ *   withdrawal request. Its shares leave the wallet (escrowed or burned)
+ *   before the payout becomes a ledger fact, which can take days.
  * - `withdrawals_not_valued`: a currently held position has a finalized
  *   withdrawal whose token payout was not observed at settlement (rows that
  *   predate the observation, or a settlement whose transaction read failed),
@@ -1024,6 +1027,7 @@ export interface EarnExternalWalletMovementResponse {
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
   | "movements_pending"
+  | "withdrawals_pending"
   | "withdrawals_not_valued";
 
 /** Earnings for one deposit token across an external wallet's positions. */

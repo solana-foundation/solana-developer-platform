@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { runWithTenantDatabaseIdentity } from "@/db/identity";
@@ -47,8 +48,8 @@ describe("Earn queued withdrawal repository", () => {
       "earn_vault_withdrawal_request_actions",
       "earn_vault_withdrawal_request_reservations",
       "earn_vault_withdrawal_request_pda_leases",
-      "earn_vault_withdrawal_requests",
       "earn_movements",
+      "earn_vault_withdrawal_requests",
       "earn_positions",
       "custody_wallets",
       "custody_configs",
@@ -1072,6 +1073,291 @@ describe("Earn queued withdrawal repository", () => {
     });
   });
 
+  it("records every payout in a batched solver transaction exactly once", async () => {
+    const first = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    const second = await createRequest({
+      positionId: EXTERNAL_POSITION,
+      custodyWalletId: null,
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    const fulfill = (withdrawalRequestId: string, assetsPaid: string) =>
+      repository.advanceRequest({
+        withdrawalRequestId,
+        organizationId: ORG,
+        toStatus: "fulfilled",
+        closingSignature: "batched-solver-signature",
+        assetsPaid,
+        fulfilledAt: "2026-09-29T01:00:00.000Z",
+      });
+    await fulfill(first.request.id, "9.9");
+    await fulfill(second.request.id, "9.8");
+    expect(await fulfill(first.request.id, "9.9")).toBeNull();
+    expect(await fulfill(second.request.id, "9.8")).toBeNull();
+    const totals = await createPostgresEarnMovementsRepository(
+      getDb(env)
+    ).aggregateExternalWalletMovements({
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      ownerAddress: EXTERNAL_OWNER,
+    });
+    expect(totals.get(EXTERNAL_POSITION)).toMatchObject({
+      finalizedWithdrawals: "19.7",
+      finalizedWithdrawalCount: 2,
+    });
+  });
+
+  it("retains signature uniqueness for transactions initiated by SDP", async () => {
+    const movements = createPostgresEarnMovementsRepository(getDb(env));
+    const input = {
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox" as const,
+      provider: "veda",
+      positionId: POSITION,
+      vaultAddress: VAULT,
+      custodyWalletId: WALLET,
+      shareMint: SHARE_MINT,
+      requestedShares: "1",
+      walletAddress: OWNER,
+      signature: "unique-initiated-signature",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12345",
+      requestId: "first-initiated-key",
+      idempotencyFingerprint: "initiated-fingerprint",
+    };
+    await movements.createSignedVaultWithdrawalIntent(input);
+    expect((await movements.createSignedVaultWithdrawalIntent(input)).replayed).toBe(true);
+    await expect(
+      movements.createSignedVaultWithdrawalIntent({
+        ...input,
+        requestId: "second-initiated-key",
+      })
+    ).rejects.toThrow(/idx_earn_movements_signature/);
+  });
+
+  it("backfills existing payouts and permits the previous writer during rollout", async () => {
+    const created = await createRequest();
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "fulfilled",
+      closingSignature: "pre-migration-solver-signature",
+      assetsPaid: "9.9",
+    });
+    const migration = readFileSync(
+      new URL("../migrations/postgres/0119_earn_queue_payout_identity.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = new Error("rollback migration fixture");
+    await expect(
+      getDb(env).transaction(async (tx) => {
+        await tx.execute("ALTER TABLE earn_movements DROP COLUMN withdrawal_request_id CASCADE");
+        await tx.execute(
+          "CREATE UNIQUE INDEX idx_earn_movements_signature ON earn_movements(signature) WHERE signature IS NOT NULL"
+        );
+        await tx.execute(migration);
+        expect(
+          await tx.queryOne(
+            "SELECT withdrawal_request_id, token_amount_settled FROM earn_movements WHERE id = ?",
+            [`earn_queue_fulfillment_${created.request.id}`]
+          )
+        ).toEqual({ withdrawal_request_id: created.request.id, token_amount_settled: "9.9" });
+        await tx.execute(
+          `INSERT INTO earn_movements
+           SELECT (jsonb_populate_record(NULL::earn_movements, to_jsonb(movement) ||
+             jsonb_build_object(
+               'id', 'legacy-payout', 'withdrawal_request_id', NULL,
+               'signature', 'legacy-solver-signature', 'request_id', 'legacy-request-key',
+               'provider_reference', 'legacy-provider-request'
+             ))).*
+             FROM earn_movements movement WHERE id = ?`,
+          [`earn_queue_fulfillment_${created.request.id}`]
+        );
+        expect(
+          await tx.queryOne(
+            "SELECT withdrawal_request_id FROM earn_movements WHERE id = 'legacy-payout'"
+          )
+        ).toEqual({ withdrawal_request_id: null });
+        throw rollback;
+      })
+    ).rejects.toBe(rollback);
+  });
+
+  it("keeps a paid request reconcilable if another movement already used its caller key", async () => {
+    const created = await createRequest();
+    await createPostgresEarnMovementsRepository(getDb(env)).createSignedVaultWithdrawalIntent({
+      organizationId: ORG,
+      projectId: PROJECT,
+      environment: "sandbox",
+      provider: "veda",
+      positionId: POSITION,
+      vaultAddress: VAULT,
+      custodyWalletId: WALLET,
+      shareMint: SHARE_MINT,
+      requestedShares: "1",
+      walletAddress: OWNER,
+      signature: "direct-withdrawal-key-collision",
+      signedTransaction: "AQ==",
+      lastValidBlockHeight: "12345",
+      requestId: created.request.client_request_id,
+      idempotencyFingerprint: "direct-withdrawal-fingerprint",
+    });
+    await expect(
+      repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "fulfilled",
+        closingSignature: "solver-key-collision",
+        assetsPaid: "9.9",
+      })
+    ).rejects.toThrow(/idx_earn_movements_vault_request/);
+    expect(
+      await repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).toMatchObject({ status: "creating", assets_paid: null });
+  });
+
+  it("does not fail or release a provider-proven request when its PDA later disappears", async () => {
+    const created = await createRequest();
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "pending",
+      nonce: "8",
+      creationTimestamp: "1700000000",
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "closed_or_unknown",
+    });
+    await expect(
+      repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "conflicting observation",
+      })
+    ).rejects.toThrow(/changed before action failure recovery/);
+    expect(
+      await repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "failed",
+        failureReason: "conflicting observation",
+      })
+    ).toBeNull();
+    expect(
+      await repository.getById({
+        organizationId: ORG,
+        environment: "sandbox",
+        withdrawalRequestId: created.request.id,
+      })
+    ).toMatchObject({ status: "closed_or_unknown", nonce: "8" });
+  });
+
+  it("can fail a finalized rejected create after an absent-PDA observation", async () => {
+    const created = await createRequest();
+    await repository.advanceAction({
+      actionId: created.action.id,
+      organizationId: ORG,
+      toStatus: "submitted",
+    });
+    await repository.advanceRequest({
+      withdrawalRequestId: created.request.id,
+      organizationId: ORG,
+      toStatus: "closed_or_unknown",
+    });
+    await expect(
+      repository.failActionAndRecoverRequest({
+        actionId: created.action.id,
+        organizationId: ORG,
+        failureReason: "finalized program rejection",
+      })
+    ).resolves.toMatchObject({
+      action: { status: "failed" },
+      request: { status: "failed" },
+    });
+  });
+
+  it.each(["solver_queue", "operator_redemption"] as const)(
+    "does not let a stale %s provider read reopen an in-flight cancellation",
+    async (mechanism) => {
+      const created = await createRequest(
+        mechanism === "solver_queue"
+          ? {}
+          : {
+              mechanism,
+              intermediateMint: INTERMEDIATE_MINT,
+              intermediateAmount: "10",
+              discountBps: null,
+              maturityTimestamp: null,
+              deadlineTimestamp: null,
+            }
+      );
+      const toStatus = mechanism === "solver_queue" ? "expired_cancelable" : "pending";
+      await repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus,
+      });
+      const cancel = {
+        actionId: "cancel-race",
+        organizationId: ORG,
+        projectId: PROJECT,
+        environment: "sandbox" as const,
+        withdrawalRequestId: created.request.id,
+        signature: "cancel-race-signature",
+        signedTransaction: "AQ==",
+        lastValidBlockHeight: "12345",
+        clientRequestId: "cancel-race-key",
+        idempotencyFingerprint: "cancel-race-fingerprint",
+      };
+      await repository.createSignedCancel(cancel);
+      expect(
+        await repository.advanceRequest({
+          withdrawalRequestId: created.request.id,
+          organizationId: ORG,
+          toStatus,
+        })
+      ).toBeNull();
+      await expect(
+        repository.createSignedCancel({
+          ...cancel,
+          actionId: "second-cancel-race",
+          signature: "second-cancel-race-signature",
+          clientRequestId: "second-cancel-race-key",
+        })
+      ).rejects.toThrow(/cancelling/);
+      await repository.advanceRequest({
+        withdrawalRequestId: created.request.id,
+        organizationId: ORG,
+        toStatus: "closed_or_unknown",
+      });
+      expect(
+        await repository.advanceRequest({
+          withdrawalRequestId: created.request.id,
+          organizationId: ORG,
+          toStatus,
+        })
+      ).toBeNull();
+      expect(
+        await repository.getById({
+          organizationId: ORG,
+          environment: "sandbox",
+          withdrawalRequestId: created.request.id,
+        })
+      ).toMatchObject({ status: "closed_or_unknown" });
+    }
+  );
+
   it("ledgers a par request over held intermediate in the intermediate it burned", async () => {
     // A solver queue still has to escrow shares.
     await expect(createRequest({ shares: "0" })).rejects.toThrow();
@@ -1109,12 +1395,13 @@ describe("Earn queued withdrawal repository", () => {
     const movementId = `earn_queue_fulfillment_${created.request.id}`;
     const persisted = await getDb(env)
       .prepare(
-        `SELECT denomination, amount_requested, amount_settled, token_amount_settled, status
+        `SELECT withdrawal_request_id, denomination, amount_requested, amount_settled, token_amount_settled, status
            FROM earn_movements WHERE id = ?`
       )
       .bind(movementId)
       .first<Record<string, unknown>>();
     expect(persisted).toMatchObject({
+      withdrawal_request_id: created.request.id,
       denomination: INTERMEDIATE_MINT,
       amount_requested: "2000",
       amount_settled: "2000",

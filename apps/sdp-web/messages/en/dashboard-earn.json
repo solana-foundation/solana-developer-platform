@@ -777,6 +777,7 @@
       "vaultSwapReviewBody": "Your {source} will be swapped to the vault's underlying {target} through Jupiter, then deposited in the same transaction.",
       "vaultStrategy": "Vault",
       "vaultBacking": "Backing",
+      "vaultBackingFigureHomeEquity": "Figure home equity pool",
       "vaultFrom": "From wallet",
       "vaultWalletUnavailable": "Signing unavailable",
       "vaultBalanceUnknown": "Balance unavailable right now — the network remains the authority.",

@@ -431,12 +431,51 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           vaultAddress: z.string().nullable(),
           shareMint: z.string().nullable(),
           label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
         })
       )
       .openapi({
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
-          "unsettled movement are excluded: the ledger already explains that disagreement.",
+          "unsettled movement are excluded: the ledger already explains that disagreement. " +
+          "So is a position provably backed by the intermediate token its cancelled operator " +
+          "redemption left in place of its shares; one whose backing the report cannot decide " +
+          "carries `ambiguousBacking`. Positions with an open queued withdrawal request are " +
+          "listed in `queuedWithdrawalPositions` instead.",
+      }),
+    queuedWithdrawalPositions: z
+      .array(
+        z.object({
+          positionId: z.string().openapi({ example: "earn_position_example" }),
+          custodyWalletId: z.string().openapi({ example: "cwlt_example" }),
+          walletAddress: z.string(),
+          provider: z.string().openapi({ example: "veda" }),
+          vaultAddress: z.string().nullable(),
+          shareMint: z.string().nullable(),
+          label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
+          withdrawalRequestIds: z.array(z.string()).openapi({
+            example: ["earn_vault_withdrawal_request_example"],
+          }),
+        })
+      )
+      .openapi({
+        description:
+          "Recorded open positions whose wallet holds none of their shares while queued " +
+          "withdrawal requests are open. The requests escrowed or burned shares ahead of the " +
+          "payout, but only the shares they cover, so these positions are listed with their " +
+          "requests rather than judged. A position provably backed by its cancelled operator " +
+          "redemption's intermediate token is omitted from both lists.",
       }),
     unreadableWallets: z
       .array(
@@ -1275,13 +1314,20 @@ const earnExternalWalletTokenEarningsSchema = z
         "acquired outside SDP inflate this figure (a documented property of non-custodial reads).",
     }),
     earnedUnavailableReason: z
-      .enum(["live_value_unavailable", "movements_pending", "withdrawals_not_valued"])
+      .enum([
+        "live_value_unavailable",
+        "movements_pending",
+        "withdrawals_pending",
+        "withdrawals_not_valued",
+      ])
       .optional()
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "or a currently held position has a finalized withdrawal whose token payout was not " +
-          "observed at settlement, so `totalWithdrawn` is incomplete.",
+          "a currently held position has an open queued withdrawal request, whose shares leave " +
+          "the wallet before its payout (this can last days); or a currently held position has " +
+          "a finalized withdrawal whose token payout was not observed at settlement, so " +
+          "`totalWithdrawn` is incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });
