@@ -494,6 +494,14 @@ const earnExternalWalletPositionRecordSchema: z.ZodType<EarnExternalWalletPositi
   unlockTimestamp: z.string().nullable().optional(),
   /** Provider-reported value in `tokenMint` (rate or exit quote), a dollar figure at par; never a share count. */
   tokenValue: z.string().optional(),
+  parIntermediate: z
+    .object({
+      mint: z.string(),
+      amount: z.string(),
+      withdrawableAmount: z.string(),
+      tokenValue: z.string(),
+    })
+    .optional(),
 });
 
 /**

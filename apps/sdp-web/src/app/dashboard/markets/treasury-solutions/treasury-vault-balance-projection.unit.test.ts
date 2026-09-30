@@ -97,6 +97,27 @@ describe("holdingInRead and projectionBaseline", () => {
     });
   });
 
+  it("values the whole holding, par intermediate included", () => {
+    const withIntermediate: VaultPositionsRead = {
+      startedAt: COMMITTED_AT + 1,
+      landedAt: COMMITTED_AT + 2,
+      positions: [
+        {
+          id: POSITION,
+          shares: "0",
+          tokenValue: "0",
+          parIntermediate: {
+            mint: "wYLDS111111111111111111111111111111111111111",
+            amount: "2000",
+            withdrawableAmount: "2000",
+            tokenValue: "2000",
+          },
+        },
+      ],
+    };
+    expect(holdingInRead(withIntermediate, POSITION)).toEqual({ value: "2000", shares: "0" });
+  });
+
   it("takes the baseline from the latest read that landed before the POST began", () => {
     const reads = [
       read({ startedAt: 100, landedAt: 200, shares: "100" }),

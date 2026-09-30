@@ -91,6 +91,7 @@ import {
 import {
   closeEmptyHydratedPositions,
   type HydratedVaultPositionValue,
+  hydratedHoldingTokenValue,
   hydrateVaultPositions,
 } from "./vault-position-hydration";
 
@@ -585,7 +586,7 @@ function summarizeExternalWalletEarnings(
   let unavailablePositionCount = 0;
 
   for (const holding of holdings) {
-    const value = live.get(holding.id)?.tokenValue;
+    const value = hydratedHoldingTokenValue(live.get(holding.id));
     if (value === undefined) unavailablePositionCount += 1;
     const totals = movementTotals.get(holding.id);
 
@@ -1286,6 +1287,7 @@ function toExternalWalletPositionWire(
     withdrawableShares: hydrated?.withdrawableShares,
     unlockTimestamp: hydrated?.unlockTimestamp,
     tokenValue: hydrated?.tokenValue,
+    parIntermediate: hydrated?.parIntermediate,
   };
 }
 
@@ -1333,7 +1335,7 @@ function summarizeExternalWalletPositions(
 
   for (const holding of holdings) {
     owners.add(holding.ownerAddress);
-    const value = live.get(holding.id)?.tokenValue;
+    const value = hydratedHoldingTokenValue(live.get(holding.id));
     if (value === undefined) unavailablePositionCount += 1;
 
     const strategyKey = JSON.stringify([holding.provider, holding.vaultAddress]);

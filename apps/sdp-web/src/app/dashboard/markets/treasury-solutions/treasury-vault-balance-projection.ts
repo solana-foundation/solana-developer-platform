@@ -5,6 +5,7 @@ import {
   parseDecimalAmount,
 } from "@sdp/solana/amount";
 import type { EarnVaultPosition } from "@sdp/types";
+import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
 
 /**
  * Optimistic vault balances for the Active positions table.
@@ -55,7 +56,7 @@ const COMMITTED_VAULT_MOVEMENT_STATUSES: ReadonlySet<string> = new Set(["confirm
 export interface VaultPositionsRead {
   startedAt: number;
   landedAt: number;
-  positions: readonly Pick<EarnVaultPosition, "id" | "shares" | "tokenValue">[];
+  positions: readonly Pick<EarnVaultPosition, "id" | "shares" | "tokenValue" | "parIntermediate">[];
 }
 
 /** What a read said about one position; an absent row is an exact zero holding. */
@@ -126,7 +127,7 @@ export function observeVaultMovementCommit<Movement extends ProjectedVaultMoveme
 export function holdingInRead(read: VaultPositionsRead, positionId: string): VaultHoldingSnapshot {
   const position = read.positions.find((candidate) => candidate.id === positionId);
   if (position === undefined) return { value: "0", shares: "0" };
-  return { value: position.tokenValue, shares: position.shares };
+  return { value: earnVaultHoldingValue(position), shares: position.shares };
 }
 
 /**

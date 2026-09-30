@@ -155,6 +155,9 @@ const mocks = vi.hoisted(() => ({
   positionsReadStartedAt: 1_000,
   positionsReadLandedAt: 1_000,
   livePositionShares: "119.5",
+  exitedPositionParIntermediate: undefined as
+    | { mint: string; amount: string; withdrawableAmount: string; tokenValue: string }
+    | undefined,
   positionsError: false,
   positionsEmpty: false,
   strategiesLoading: false,
@@ -496,6 +499,9 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
             feeSponsored: false,
             shares: "0",
             tokenValue: "0",
+            ...(mocks.exitedPositionParIntermediate
+              ? { parIntermediate: mocks.exitedPositionParIntermediate }
+              : {}),
           },
         ];
     return {
@@ -801,6 +807,7 @@ beforeEach(() => {
   mocks.positionsReadStartedAt = 1_000;
   mocks.positionsReadLandedAt = 1_000;
   mocks.livePositionShares = "119.5";
+  mocks.exitedPositionParIntermediate = undefined;
   mocks.positionsError = false;
   mocks.positionsEmpty = false;
   mocks.strategiesLoading = false;
@@ -921,6 +928,30 @@ describe("TreasurySolutionsWorkspace", () => {
     const legacyRow = screen.getByText("Legacy treasury program").closest("tr");
     if (!legacyRow) throw new Error("Expected existing legacy program row");
     expect(legacyRow.textContent).toContain("$900.50");
+  });
+
+  it("keeps a position its par intermediate still funds, without offering a share exit", () => {
+    mocks.exitedPositionParIntermediate = {
+      mint: "wYLDS111111111111111111111111111111111111111",
+      amount: "2000",
+      withdrawableAmount: "2000",
+      tokenValue: "2000",
+    };
+    renderWorkspace();
+
+    const residualRow = screen
+      .getAllByText("Exited provider vault")
+      .map((element) => element.closest("tr"))
+      .find((row) => row?.querySelector("[data-earn-vault-par-intermediate]"));
+    if (!residualRow) throw new Error("Expected the residual position row");
+    expect(residualRow.querySelector("[data-earn-vault-par-intermediate]")?.textContent).toBe(
+      "Includes 2,000 wYLDS"
+    );
+    expect(residualRow.querySelector("[data-earn-vault-balance-value]")?.textContent).toBe(
+      "$2,000.00"
+    );
+    expect(within(residualRow).queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(screen.getByLabelText("$2,130.50 in open vault positions")).toBeTruthy();
   });
 
   it("shows an automatically updating deposit status beside the affected position", async () => {

@@ -774,7 +774,7 @@ function decodeTokenAccount(
   label: string,
   expectedMint: string,
   expectedOwner: string
-): { amount: bigint; frozen: boolean } {
+): { amount: bigint; frozen: boolean; delegate: string | null; delegatedAmount: bigint } {
   assertOwned(account, TOKEN_PROGRAM_ID, label);
   if (
     account.data.length < 165 ||
@@ -787,7 +787,16 @@ function decodeTokenAccount(
   if (state !== 1 && state !== 2) {
     throw new SdpHastraError("PROGRAM_MISMATCH", `${label} is not an initialized SPL account.`);
   }
-  return { amount: readU64(account.data, 64, label), frozen: state === 2 };
+  const delegateTag = account.data.readUInt32LE(72);
+  if (delegateTag !== 0 && delegateTag !== 1) {
+    throw new SdpHastraError("PROGRAM_MISMATCH", `${label} has a malformed delegate.`);
+  }
+  return {
+    amount: readU64(account.data, 64, label),
+    frozen: state === 2,
+    delegate: delegateTag === 1 ? pubkeyAt(account.data, 76, label) : null,
+    delegatedAmount: readU64(account.data, 121, label),
+  };
 }
 
 function assertOwnerTokenUsable(
@@ -2044,21 +2053,38 @@ export class HastraVaultDirectClient
       if (references.length === 0) return [];
 
       const state = await loadHastraState(runtime, config);
-      const primeAccount = associatedTokenAddress(
-        owner,
-        new PublicKey(config.deployment.primeMint)
+      const [primeAccount, wyldsAccount] = await getMultipleAccounts(
+        runtime,
+        [
+          associatedTokenAddress(owner, new PublicKey(config.deployment.primeMint)).toBase58(),
+          associatedTokenAddress(owner, new PublicKey(config.deployment.wYldsMint)).toBase58(),
+        ],
+        "POSITION_UNREADABLE"
       );
-      const account = await getAccount(runtime, primeAccount.toBase58(), "POSITION_UNREADABLE");
-      const tokenAccount = account
+      const prime = primeAccount
         ? decodeTokenAccount(
-            account,
+            primeAccount,
             "Owner PRIME token account",
             config.deployment.primeMint,
             owner.toBase58()
           )
-        : { amount: 0n, frozen: false };
-      const atoms = tokenAccount.amount;
-      if (readAll && atoms === 0n) return [];
+        : null;
+      const wylds = wyldsAccount
+        ? decodeTokenAccount(
+            wyldsAccount,
+            "Owner wYLDS token account",
+            config.deployment.wYldsMint,
+            owner.toBase58()
+          )
+        : null;
+      const atoms = prime?.amount ?? 0n;
+      // wYLDS an open request has delegated to Hastra's redeem authority is
+      // that request's; only the rest is a residual holding (a cancelled
+      // request's wYLDS, for one).
+      const pledged =
+        wylds?.delegate === state.addresses.redeemVaultAuthority ? wylds.delegatedAmount : 0n;
+      const freeWylds = wylds && wylds.amount > pledged ? wylds.amount - pledged : 0n;
+      if (readAll && atoms === 0n && freeWylds === 0n) return [];
       const shares = formatAtoms(atoms);
       const parValue = formatAtoms(assetsForShares(atoms, state.stakePrice));
       return [
@@ -2069,10 +2095,21 @@ export class HastraVaultDirectClient
           shares,
           // Hastra exposes freeze administration on PRIME. Frozen tokens stay
           // the owner's holding but the token program will reject a burn.
-          withdrawableShares: tokenAccount.frozen ? "0" : shares,
+          withdrawableShares: prime?.frozen ? "0" : shares,
           tokenValue: parValue,
           tokenMint: config.depositMint,
           shareMint: config.deployment.primeMint,
+          ...(freeWylds > 0n
+            ? {
+                parIntermediate: {
+                  mint: config.deployment.wYldsMint,
+                  amount: formatAtoms(freeWylds),
+                  withdrawableAmount: wylds?.frozen ? "0" : formatAtoms(freeWylds),
+                  // vault-mint redeems wYLDS for USDC one atom for one atom.
+                  tokenValue: formatAtoms(freeWylds),
+                },
+              }
+            : {}),
         },
       ];
     });

@@ -830,6 +830,56 @@ describe("external-wallet earnings", () => {
     });
   });
 
+  it("counts a par intermediate left by a cancelled request as current value", async () => {
+    const position = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "finalized",
+      amount: "100",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        input.providerReferences.map((providerReference) => ({
+          providerReference,
+          owner: input.owner,
+          cluster: "devnet",
+          shares: "0",
+          withdrawableShares: "0",
+          tokenValue: "0",
+          tokenMint: USDC,
+          shareMint: SHARE,
+          parIntermediate: {
+            mint: USDT,
+            amount: "101",
+            withdrawableAmount: "101",
+            tokenValue: "101",
+          },
+        }))
+    );
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as { data: { earnings: { totalsByToken: Array<Record<string, unknown>> } } };
+    expect(body.data.earnings.totalsByToken).toEqual([
+      expect.objectContaining({
+        tokenMint: USDC,
+        currentValue: "101",
+        totalDeposited: "100",
+        earned: "1",
+      }),
+    ]);
+  });
+
   it("reports earned unavailable, never zero, when live value cannot hydrate", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,

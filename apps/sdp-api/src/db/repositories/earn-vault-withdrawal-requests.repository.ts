@@ -1377,10 +1377,11 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           // fulfillment via idx_earn_movements_signature.
           await recordFulfilledQueueMovement(tx, request);
         }
-        if (input.toStatus === "cancelled" && request.mechanism === "solver_queue") {
-          // A cancellation can restore a full wallet balance after hydration
-          // observed zero escrowed shares. Reopening/bumping the position in
-          // this transaction makes that stale close CAS fail.
+        if (input.toStatus === "cancelled") {
+          // A cancellation refills the wallet after hydration observed an
+          // empty holding: escrowed shares come back from a solver queue, and
+          // an operator redemption leaves its intermediate behind. Reopening
+          // and bumping the position here makes that stale close CAS fail.
           await tx
             .prepare(
               `UPDATE earn_positions
