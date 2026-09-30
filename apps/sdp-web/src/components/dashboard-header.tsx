@@ -1329,13 +1329,15 @@ export function getDashboardPageConfig(
 ): DashboardPageConfig {
   // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
   const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
+  // The Overview module also names the first page: Overview on it, Home off it.
+  const overviewNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "overview");
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
     // NEW DESIGN's Overview is built on the refresh design: a left title over the same 900px
     // column as the Payments pages. The previous design's Home names itself: the sidebar marks
     // it active and the page opens on a balance, so the workspace renders an sr-only heading.
-    return newDesign
+    return overviewNewDesign
       ? {
           title: t("Shared.dashboardShell.newDesign.home"),
           titlePosition: "left",
@@ -1355,7 +1357,7 @@ export function getDashboardPageConfig(
       contentWidthClass: "max-w-none",
       backAction: {
         href: "/dashboard",
-        label: newDesign
+        label: overviewNewDesign
           ? t("Shared.dashboardShell.newDesign.backToHome")
           : t("Shared.dashboardShell.backToHome"),
       },
@@ -1476,6 +1478,8 @@ export function getDashboardPageConfig(
     return { title: t("Shared.dashboardShell.allowlist") };
   }
   return {
-    title: newDesign ? t("Shared.dashboardShell.newDesign.home") : t("Shared.dashboardShell.home"),
+    title: overviewNewDesign
+      ? t("Shared.dashboardShell.newDesign.home")
+      : t("Shared.dashboardShell.home"),
   };
 }

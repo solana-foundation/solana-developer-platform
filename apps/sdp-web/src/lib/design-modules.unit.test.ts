@@ -13,6 +13,8 @@ describe("designModuleForPath", () => {
     ["/dashboard/payments/requests/new", "activity"],
     ["/dashboard/payments/recurring/rp_1", "activity"],
     ["/dashboard/payments-archive", null],
+    ["/dashboard", "overview"],
+    ["/dashboard/tokens", null],
     ["/dashboard/wallets", "wallets"],
     ["/dashboard/custody/wal_1", "wallets"],
     ["/dashboard/wallets/setup", "wallets"],
@@ -25,13 +27,14 @@ describe("designModuleForPath", () => {
 });
 
 describe("isNewDesignPage", () => {
-  it.each(["/dashboard", "/dashboard/issuance", "/dashboard/integrations/private-channels/setup"])(
-    "puts %s on NEW DESIGN alone",
-    (pathname) => {
-      expect(isNewDesignPage(pathname, { newDesign: true })).toBe(true);
-      expect(isNewDesignPage(pathname, { newDesign: false })).toBe(false);
-    }
-  );
+  it.each([
+    "/dashboard/tokens",
+    "/dashboard/issuance",
+    "/dashboard/integrations/private-channels/setup",
+  ])("puts %s on NEW DESIGN alone", (pathname) => {
+    expect(isNewDesignPage(pathname, { newDesign: true })).toBe(true);
+    expect(isNewDesignPage(pathname, { newDesign: false })).toBe(false);
+  });
 
   it("puts a module's page on its own flag, under NEW DESIGN", () => {
     const contacts = "/dashboard/payments/counterparty";
@@ -52,5 +55,6 @@ describe("isNewDesignPage", () => {
 
   it("keeps every page on the previous design outside the dashboard workspace", () => {
     expect(isNewDesignPage("/dashboard", undefined)).toBe(false);
+    expect(isNewDesignPage("/dashboard/issuance", undefined)).toBe(false);
   });
 });

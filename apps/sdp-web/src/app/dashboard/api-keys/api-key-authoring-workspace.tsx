@@ -46,6 +46,7 @@ import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useTranslations } from "@/i18n/provider";
 import { completeQuickStartStep, quickStartKey } from "@/lib/dashboard-quick-start";
 import { invalidateQuickStartStatus } from "@/lib/dashboard-quick-start.redesign";
+import { isDesignModuleOn } from "@/lib/design-modules";
 import { cn } from "@/lib/utils";
 import { saveApiKeyAuthoringAction } from "./actions";
 import {
@@ -1279,7 +1280,7 @@ export function ApiKeyAuthoringWorkspace({
       }
       toast.success(result.message, { position: "bottom-right" });
       if (mode === "create" && selectedProjectId) {
-        if (flags.newDesign) {
+        if (isDesignModuleOn(flags, "overview")) {
           invalidateQuickStartStatus();
         } else {
           completeQuickStartStep(quickStartKey(dashboardCacheScope), "api-key");

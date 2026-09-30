@@ -12,6 +12,7 @@ import { getAuthEntryPath } from "@/lib/auth-entry";
 import { resolveDashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { resolveDashboardProjectSelection } from "@/lib/dashboard-project-selection";
+import { isDesignModuleOn } from "@/lib/design-modules";
 import { PAYMENTS_DEMO_COOKIE_NAME } from "@/lib/payments-demo/demo-cookie";
 import { PROJECT_COOKIE_NAME } from "@/lib/project-cookie";
 import { loadQuickStartStep } from "@/lib/quick-start-server";
@@ -46,13 +47,15 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     userId,
   } satisfies DashboardCacheScope;
 
-  // Each design has its own quick start; only the one on screen is read.
+  // Each design has its own quick start, the new one part of the Overview module; only the one
+  // on screen is read.
+  const overviewNewDesign = isDesignModuleOn(flags, "overview");
   const [loadedProjects, cookieStore, initialQuickStartStatus, initialQuickStartStep] =
     await Promise.all([
       loadProjects(),
       cookies(),
-      flags.newDesign ? loadQuickStartStatus() : null,
-      flags.newDesign ? null : loadQuickStartStep(),
+      overviewNewDesign ? loadQuickStartStatus() : null,
+      overviewNewDesign ? null : loadQuickStartStep(),
     ]);
   const projects = loadedProjects ?? [];
   const cookieProjectId = cookieStore.get(PROJECT_COOKIE_NAME)?.value ?? null;

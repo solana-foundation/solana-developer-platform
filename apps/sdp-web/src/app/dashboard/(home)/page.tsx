@@ -96,4 +96,4 @@ async function DashboardPage() {
   }
 }
 
-export default withLegacyDesign(RedesignCurrentDashboardPage, DashboardPage);
+export default withLegacyDesign(RedesignCurrentDashboardPage, DashboardPage, "overview");

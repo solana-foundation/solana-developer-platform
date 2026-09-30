@@ -3,6 +3,7 @@ import {
   newDesign,
   newDesignActivity,
   newDesignContacts,
+  newDesignOverview,
   newDesignPayDeposit,
   newDesignWallets,
 } from "@/flags";
@@ -13,6 +14,7 @@ type ModuleFlag = () => Promise<boolean>;
 
 // Each design module's own flag (lib/design-modules.ts). It counts only while NEW DESIGN is on.
 const DESIGN_MODULE_FLAGS: Record<DesignModule, ModuleFlag> = {
+  overview: newDesignOverview,
   wallets: newDesignWallets,
   contacts: newDesignContacts,
   payDeposit: newDesignPayDeposit,

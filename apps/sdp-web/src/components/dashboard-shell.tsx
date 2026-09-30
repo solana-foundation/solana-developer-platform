@@ -811,7 +811,7 @@ export function DashboardShell({
                   issuanceEnabled={issuanceEnabled}
                   paymentsEnabled={paymentsEnabled}
                   onOpenMore={() => setMoreSheetOpen(true)}
-                  newDesign={newDesignEnabled}
+                  newDesign={isDesignModuleOn(flags, "overview")}
                 />
               )}
 

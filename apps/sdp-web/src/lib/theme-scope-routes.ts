@@ -19,9 +19,6 @@ export function themeScopeForPath(pathname: string, newDesign = true): ThemeScop
   if (!newDesign) {
     return null;
   }
-  if (pathname === "/dashboard" || pathname === "/dashboard/") {
-    return "refresh";
-  }
   return designModuleForPath(pathname) !== null || PRIVACY_SETUP_ROUTE.test(pathname)
     ? "refresh"
     : null;

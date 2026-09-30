@@ -173,6 +173,10 @@ export function PreviousDashboardLoading() {
 
 export default function DashboardLoading() {
   return (
-    <DesignSwitch current={<RedesignDashboardLoading />} legacy={<PreviousDashboardLoading />} />
+    <DesignSwitch
+      designModule="overview"
+      current={<RedesignDashboardLoading />}
+      legacy={<PreviousDashboardLoading />}
+    />
   );
 }

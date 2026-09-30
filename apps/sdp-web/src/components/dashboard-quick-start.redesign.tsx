@@ -613,8 +613,8 @@ function CurrentDashboardQuickStart({
 }
 
 /**
- * The quick start in the sidebar, on the Overview and in Settings. NEW DESIGN's is built on live
- * signals; the previous design keeps its own (there is no Overview in it).
+ * The quick start in the sidebar, on the Overview and in Settings. The Overview module's is built
+ * on live signals; the previous design keeps its own (there is no Overview in it).
  */
 export function DashboardQuickStart({
   collapsed = false,
@@ -624,7 +624,7 @@ export function DashboardQuickStart({
   collapsed?: boolean;
   variant?: "sidebar" | "overview" | "settings";
 }) {
-  const newDesign = useNewDesign();
+  const newDesign = useNewDesign("overview");
   if (newDesign) return <CurrentDashboardQuickStart collapsed={collapsed} variant={variant} />;
   if (variant === "overview") return null;
   return <LegacyDashboardQuickStart collapsed={collapsed} variant={variant} />;
