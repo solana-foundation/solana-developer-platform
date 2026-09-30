@@ -57,6 +57,7 @@ import {
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
+import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
@@ -444,9 +445,18 @@ export function DashboardShell({
   const pathname = usePathname();
   const { dashboardAccess, selectedProjectId, isSidebarOpen, setSidebarOpen, isProjectSwitching } =
     useDashboardWorkspace();
-  // Demo data is part of the new design; the previous design never shows it.
-  const demoMode = newDesignEnabled && isPaymentsDemoOn(paymentsDemo, selectedProjectId);
-  const paymentsDemoOn = isPaymentsPath(pathname) && demoMode;
+  // NEW DESIGN styles the shell; the page itself follows its design module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, flags);
+  // Demo data is part of the new design and has a flag of its own (payments-demo-mode; absent in
+  // older fixtures, it follows NEW DESIGN). A page on the previous design never shows it or its
+  // switch.
+  const demoAvailable =
+    isPaymentsPath(pathname) && newDesignPage && flags.paymentsDemoMode !== false;
+  const demoMode =
+    newDesignEnabled &&
+    flags.paymentsDemoMode !== false &&
+    isPaymentsDemoOn(paymentsDemo, selectedProjectId);
+  const paymentsDemoOn = demoAvailable && demoMode;
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMoreSheetOpen, setMoreSheetOpen] = useState(false);
   const [isOrganizationSwitching, setOrganizationSwitching] = useState(false);
@@ -466,9 +476,9 @@ export function DashboardShell({
   const subnavHydratedRef = useRef(false);
   const previousPathnameRef = useRef(pathname);
   const loadingRoute = resolveDashboardLoadingRoute(pathname) ?? "home";
-  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignEnabled);
+  const PageLoadingComponent = resolvePageLoadingComponent(loadingRoute, newDesignPage);
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
-  const themeScope = themeScopeForPath(pathname, newDesignEnabled);
+  const themeScope = themeScopeForPath(pathname, newDesignPage);
   const isRefresh = themeScope === "refresh";
   // The design's sidebar is 272px (17rem) including its rule; the previous design's is 296.
   const sidebarExpandedWidth = newDesignEnabled ? 272 : 296;
@@ -482,7 +492,8 @@ export function DashboardShell({
     custodyEnabled,
     paymentsEnabled,
     policiesEnabled,
-    newDesignEnabled
+    newDesignEnabled,
+    flags.newDesignModules
   );
   const { favorites: walletFavorites } = useWalletFavorites();
   const walletFavoriteItems: SubNavItem[] = walletFavorites.map((favorite) => ({
@@ -510,8 +521,9 @@ export function DashboardShell({
     policiesEnabled,
     privateChannelsEnabled,
     // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
-    walletFavorites: newDesignEnabled ? walletFavoriteItems : undefined,
+    walletFavorites: isDesignModuleOn(flags, "wallets") ? walletFavoriteItems : undefined,
     newDesign: newDesignEnabled,
+    newDesignModules: flags.newDesignModules,
   });
   const activeTitleOverride =
     pageTitleOverride !== null && pageTitleOverride.pathname === pathname
@@ -933,7 +945,7 @@ export function DashboardShell({
                             // new one moves it to the account menu and gives Payments its demo
                             // switch.
                             newDesignEnabled ? (
-                              isPaymentsPath(pathname) ? (
+                              demoAvailable ? (
                                 <PaymentsDemoToggle {...paymentsDemo} />
                               ) : undefined
                             ) : (

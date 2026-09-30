@@ -71,4 +71,8 @@ async function RecurringPaymentCreatePage() {
   );
 }
 
-export default withLegacyDesign(RedesignRecurringPaymentCreatePage, RecurringPaymentCreatePage);
+export default withLegacyDesign(
+  RedesignRecurringPaymentCreatePage,
+  RecurringPaymentCreatePage,
+  "activity"
+);

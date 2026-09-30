@@ -1,25 +1,18 @@
 import type { ThemeScope } from "@/components/theme-scope";
+import { designModuleForPath } from "@/lib/design-modules";
 
 // The Private Channels connect form, with or without an instance: /private-channels/setup and
 // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
 const PRIVACY_SETUP_ROUTE = /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/;
 
-// The Wallets list, its create flow and one wallet's page, under both the current and the legacy
-// custody prefix. A wallet's policy editor and audit pages keep the base design.
-// `connections` and `switch` are pages of their own, not wallets.
-const WALLETS_ROUTE =
-  /^\/dashboard\/(?:wallets|custody)(?:\/(?!connections\/?$|switch\/?$)[^/]+)?\/?$/;
-
 /**
- * The design-token theme scope a dashboard route's page renders in. The Overview, Payments, the
- * Wallets list, its create flow and a wallet's page, and the Privacy connect form are built on
- * the 2026 refresh design's components and page layout; every other route keeps the base
- * components and layout. On NEW DESIGN the palette, faces and sidebar are the same on every
- * route (sdp-theme.css, and the sidebar carries the scope itself). With NEW DESIGN off, every
- * route keeps the base design.
+ * The design-token theme scope a dashboard route renders in. Every design module's routes
+ * (lib/design-modules.ts) and the Privacy connect form are built on the 2026 refresh design;
+ * every other route keeps the base design. A page on the previous design (NEW DESIGN or its
+ * module's flag off) keeps the base design.
  *
  * @param pathname - The dashboard route.
- * @param newDesign - Whether the NEW DESIGN flag is on.
+ * @param newDesign - Whether the page renders in the new design (isNewDesignPage).
  * @returns The scope, or null for the base design.
  */
 export function themeScopeForPath(pathname: string, newDesign = true): ThemeScope | null {
@@ -29,8 +22,7 @@ export function themeScopeForPath(pathname: string, newDesign = true): ThemeScop
   if (pathname === "/dashboard" || pathname === "/dashboard/") {
     return "refresh";
   }
-  if (pathname === "/dashboard/payments" || pathname.startsWith("/dashboard/payments/")) {
-    return "refresh";
-  }
-  return PRIVACY_SETUP_ROUTE.test(pathname) || WALLETS_ROUTE.test(pathname) ? "refresh" : null;
+  return designModuleForPath(pathname) !== null || PRIVACY_SETUP_ROUTE.test(pathname)
+    ? "refresh"
+    : null;
 }

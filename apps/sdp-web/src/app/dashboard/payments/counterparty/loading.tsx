@@ -9,6 +9,7 @@ export function PreviousCounterpartyLoading() {
 export default function CounterpartyLoading() {
   return (
     <DesignSwitch
+      designModule="contacts"
       current={<RedesignCounterpartyLoading />}
       legacy={<PreviousCounterpartyLoading />}
     />

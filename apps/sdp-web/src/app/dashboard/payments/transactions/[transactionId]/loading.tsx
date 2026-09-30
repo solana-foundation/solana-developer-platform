@@ -9,6 +9,10 @@ function CurrentTransactionDetailLoading() {
 // The previous design sends this route to the list, so it loads as the list does.
 export default function TransactionDetailLoading() {
   return (
-    <DesignSwitch current={<CurrentTransactionDetailLoading />} legacy={<LegacyListLoading />} />
+    <DesignSwitch
+      designModule="activity"
+      current={<CurrentTransactionDetailLoading />}
+      legacy={<LegacyListLoading />}
+    />
   );
 }

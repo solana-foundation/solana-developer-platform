@@ -8,9 +8,12 @@ import {
   markets,
   newDesign,
   payments,
+  paymentsDemoMode,
   policies,
   privateChannels,
 } from "@/flags";
+import { getDesignModuleFlags } from "@/flags/new-design";
+import type { DesignModuleFlags } from "@/lib/design-modules";
 
 export type DashboardFlags = {
   assetProfiles: boolean;
@@ -22,7 +25,11 @@ export type DashboardFlags = {
   markets: boolean;
   /** NEW DESIGN; absent (older fixtures) means off. */
   newDesign?: boolean;
+  /** Each design module's own flag (lib/design-modules.ts); counts only with NEW DESIGN on. */
+  newDesignModules?: DesignModuleFlags;
   payments: boolean;
+  /** Payments' Demo switch; absent (older fixtures) follows NEW DESIGN. */
+  paymentsDemoMode?: boolean;
   policies: boolean;
   privateChannels: boolean;
 };
@@ -47,7 +54,9 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     issuanceEnabled,
     marketsEnabled,
     newDesignEnabled,
+    newDesignModules,
     paymentsEnabled,
+    paymentsDemoModeEnabled,
     policiesEnabled,
     privateChannelsEnabled,
   ] = await Promise.all([
@@ -59,7 +68,9 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     issuance(),
     markets(),
     newDesign(),
+    getDesignModuleFlags(),
     payments(),
+    paymentsDemoMode(),
     policies(),
     privateChannels(),
   ]);
@@ -73,7 +84,9 @@ export async function getDashboardFlags(): Promise<DashboardFlags> {
     issuance: issuanceEnabled,
     markets: marketsEnabled,
     newDesign: newDesignEnabled,
+    newDesignModules,
     payments: paymentsEnabled,
+    paymentsDemoMode: paymentsDemoModeEnabled,
     policies: policiesEnabled,
     privateChannels: privateChannelsEnabled,
   };

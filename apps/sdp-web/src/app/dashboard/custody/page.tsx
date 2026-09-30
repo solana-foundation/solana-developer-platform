@@ -163,4 +163,4 @@ async function CustodyPage() {
   }
 }
 
-export default withLegacyDesign(RedesignCurrentCustodyPage, CustodyPage);
+export default withLegacyDesign(RedesignCurrentCustodyPage, CustodyPage, "wallets");

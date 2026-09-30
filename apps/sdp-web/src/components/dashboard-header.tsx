@@ -25,6 +25,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { type DesignModuleFlags, isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -1214,7 +1215,7 @@ function getLegacyDesignPageConfig(
       },
     };
   }
-  const action = getPaymentsActions(t, privateChannelsEnabled, false).find((item) =>
+  const action = getPaymentsActions(t, privateChannelsEnabled, { newDesign: false }).find((item) =>
     pathname.startsWith(item.href)
   );
   const title = action
@@ -1323,8 +1324,11 @@ export function getDashboardPageConfig(
   custodyEnabled = true,
   paymentsEnabled = true,
   policiesEnabled = true,
-  newDesign = true
+  newDesign = true,
+  newDesignModules?: DesignModuleFlags
 ): DashboardPageConfig {
+  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
@@ -1357,11 +1361,13 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const walletSectionPageConfig = newDesign
+  // Every Wallets page's header follows the Wallets module, its policy and audit pages included.
+  const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
+  const walletSectionPageConfig = walletsNewDesign
     ? getWalletSectionPageConfig(pathname, t)
     : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = newDesign
+  const walletRoutePageConfig = walletsNewDesign
     ? getWalletRoutePageConfig(pathname, t, policiesEnabled, paymentsEnabled)
     : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;
@@ -1383,9 +1389,11 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  const legacyDesignConfig = newDesign
-    ? null
-    : getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled);
+  // A Payments page no design module has redesigned keeps the previous design's header under
+  // NEW DESIGN too.
+  const legacyDesignConfig = !newDesignPage
+    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
+    : null;
   if (legacyDesignConfig) {
     return legacyDesignConfig;
   }

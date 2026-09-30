@@ -63,4 +63,4 @@ async function LegacyTransactionDetailRoute({
   );
 }
 
-export default withLegacyDesign(TransactionDetailRoute, LegacyTransactionDetailRoute);
+export default withLegacyDesign(TransactionDetailRoute, LegacyTransactionDetailRoute, "activity");
