@@ -11,79 +11,79 @@
   "offramp": {
     "currencies": {
       "AED": {
-        "min": "0.0004",
-        "max": "5"
+        "min": "1.149288",
+        "max": "5000"
       },
       "BDT": {
-        "min": "0.05",
-        "max": "50"
+        "min": "4.242973",
+        "max": "4242.972575"
       },
       "BRL": {
-        "min": "11.725429",
+        "min": "12.177891",
         "max": "5000"
       },
       "BWP": {
-        "min": "11.190328",
-        "max": "708.716069"
+        "min": "11.394273",
+        "max": "721.637293"
       },
       "CAD": {
-        "min": "2.035101",
-        "max": "5000"
-      },
-      "COP": {
         "min": "1",
         "max": "5000"
       },
+      "COP": {
+        "min": "3.144136",
+        "max": "15720.680055"
+      },
       "DKK": {
-        "min": "3.578003",
+        "min": "1.59108",
         "max": "5000"
       },
       "EGP": {
-        "min": "0.01",
-        "max": "50"
+        "min": "2.004437",
+        "max": "10022.186979"
       },
       "EUR": {
-        "min": "23.297192",
+        "min": "22.843852",
         "max": "5000"
       },
       "GBP": {
-        "min": "1.954758",
+        "min": "1.385873",
         "max": "5000"
       },
       "GHS": {
-        "min": "0.005",
-        "max": "5"
+        "min": "4.481225",
+        "max": "4481.224943"
       },
       "GTQ": {
-        "min": "0.005",
-        "max": "5"
+        "min": "6.844543",
+        "max": "6844.542742"
       },
       "HKD": {
-        "min": "3.604524",
+        "min": "1.334346",
         "max": "5000"
       },
       "HTG": {
-        "min": "0.05",
-        "max": "50"
+        "min": "3.989546",
+        "max": "3989.545949"
       },
       "IDR": {
-        "min": "3.3936",
-        "max": "8285703.0892"
+        "min": "1.989212",
+        "max": "5000"
       },
       "INR": {
-        "min": "3.124805",
-        "max": "2116.830733"
+        "min": "2.180957",
+        "max": "2180.957133"
       },
       "JMD": {
-        "min": "0.05",
-        "max": "50"
+        "min": "3.356269",
+        "max": "3356.269236"
       },
       "KES": {
-        "min": "5.053822",
-        "max": "1944.767551"
+        "min": "4.0414",
+        "max": "2020.699888"
       },
       "MWK": {
-        "min": "1.312012",
+        "min": "1.353502",
         "max": "5000"
       },
       "MXN": {
@@ -91,23 +91,23 @@
         "max": "5000"
       },
       "MYR": {
-        "min": "3.49688",
+        "min": "2.566303",
         "max": "5000"
       },
       "NGN": {
-        "min": "0.18",
-        "max": "3000"
+        "min": "1.386514",
+        "max": "5000"
       },
       "PHP": {
-        "min": "1.810452",
-        "max": "804.712168"
+        "min": "1.671475",
+        "max": "835.737338"
       },
       "PKR": {
-        "min": "0.1",
-        "max": "100"
+        "min": "3.771292",
+        "max": "3771.292284"
       },
       "RWF": {
-        "min": "1.092824",
+        "min": "1.100911",
         "max": "5000"
       },
       "SGD": {
@@ -115,39 +115,39 @@
         "max": "5000"
       },
       "THB": {
-        "min": "4.940718",
+        "min": "3.120618",
         "max": "5000"
       },
       "TZS": {
         "min": "1",
-        "max": "3887.781591"
+        "max": "3988.504302"
       },
       "UGX": {
-        "min": "4.065523",
-        "max": "813.051482"
+        "min": "4.031291",
+        "max": "806.258161"
       },
       "USD": {
         "min": "1",
         "max": "5000"
       },
       "VND": {
-        "min": "0.000264",
-        "max": "527.66603"
+        "min": "1",
+        "max": "5000"
       },
       "XAF": {
-        "min": "1.035101",
-        "max": "2612.589704"
+        "min": "1",
+        "max": "2627.385313"
       },
       "XOF": {
         "min": "1",
-        "max": "2750.728549"
+        "max": "2774.799448"
       },
       "ZAR": {
-        "min": "12.936037",
+        "min": "12.764191",
         "max": "5000"
       },
       "ZMW": {
-        "min": "6.147426",
+        "min": "5.388812",
         "max": "5000"
       }
     },
@@ -503,7 +503,7 @@
               "maxLength": 34
             },
             "bankName": {
-              "required": true,
+              "required": false,
               "minLength": 1,
               "maxLength": 255
             },
@@ -568,11 +568,6 @@
               "minLength": 9,
               "maxLength": 18
             },
-            "bankName": {
-              "required": false,
-              "minLength": 1,
-              "maxLength": 255
-            },
             "ifsc": {
               "required": true,
               "pattern": "^[A-Z]{4}0[A-Z0-9]{6}$",
@@ -592,11 +587,6 @@
               "minLength": 9,
               "maxLength": 18
             },
-            "bankName": {
-              "required": false,
-              "minLength": 1,
-              "maxLength": 255
-            },
             "ifsc": {
               "required": true,
               "pattern": "^[A-Z]{4}0[A-Z0-9]{6}$",
@@ -610,11 +600,6 @@
             }
           },
           "UPI": {
-            "bankName": {
-              "required": false,
-              "minLength": 1,
-              "maxLength": 255
-            },
             "vpa": {
               "required": true,
               "pattern": "^[a-zA-Z0-9.\\-_]+@[a-zA-Z0-9]+$",
@@ -951,9 +936,38 @@
               "minLength": 1,
               "maxLength": 34
             },
-            "bankAccountType": {
+            "bankName": {
               "required": false,
-              "values": ["CHECKING", "SAVINGS"]
+              "minLength": 1,
+              "maxLength": 140
+            },
+            "fiToFiInformation": {
+              "required": false,
+              "maxLength": 210
+            },
+            "intermediaryBankName": {
+              "required": false,
+              "minLength": 1,
+              "maxLength": 140
+            },
+            "intermediaryRoutingNumber": {
+              "required": false,
+              "pattern": "^[0-9]{9}$",
+              "minLength": 9,
+              "maxLength": 9
+            },
+            "routingNumber": {
+              "required": true,
+              "pattern": "^[0-9]{9}$",
+              "minLength": 9,
+              "maxLength": 9
+            }
+          },
+          "ACH_SAME_DAY": {
+            "accountNumber": {
+              "required": true,
+              "minLength": 1,
+              "maxLength": 34
             },
             "bankName": {
               "required": false,
@@ -988,10 +1002,6 @@
               "minLength": 1,
               "maxLength": 34
             },
-            "bankAccountType": {
-              "required": false,
-              "values": ["CHECKING", "SAVINGS"]
-            },
             "bankName": {
               "required": false,
               "minLength": 1,
@@ -1025,10 +1035,6 @@
               "minLength": 1,
               "maxLength": 34
             },
-            "bankAccountType": {
-              "required": false,
-              "values": ["CHECKING", "SAVINGS"]
-            },
             "bankName": {
               "required": false,
               "minLength": 1,
@@ -1061,10 +1067,6 @@
               "required": true,
               "minLength": 1,
               "maxLength": 34
-            },
-            "bankAccountType": {
-              "required": false,
-              "values": ["CHECKING", "SAVINGS"]
             },
             "bankName": {
               "required": false,
