@@ -931,7 +931,11 @@ transaction signed by the organization custody wallet or external owner.
   `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
   and `unbackedPositions` (a visible claim whose wallet holds none of its
   shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it). A duplicated share mint
+  explains that disagreement and the sweep settles it). A zero-share claim
+  with an open queued withdrawal request goes to `queuedWithdrawalPositions`
+  with its request ids instead: the request escrowed or burned only the shares
+  it covers, and no per-claim share total exists to prove it covers them all,
+  so the claim is listed, not judged unbacked or hidden. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
@@ -1374,10 +1378,20 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   never coerced to zero; otherwise absent with a named
   `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
   `movements_pending` (a movement is still settling, so chain and ledger
-  describe different moments), or `withdrawals_not_valued` (a finalized
-  withdrawal on a held position has NO observed payout, so `totalWithdrawn`
-  is incomplete). Exits are still ledgered in SHARES (0070 pins `payout_token`
-  NULL for vault rows); the deposit-token payout is a SETTLE-TIME observation
+  describe different moments), `withdrawals_pending` (a held position has an
+  open queued withdrawal request: a Veda queue escrowed or a Hastra
+  redemption burned its shares before the payout, which can take days), or
+  `withdrawals_not_valued` (a finalized withdrawal on a held position has NO
+  observed payout, so `totalWithdrawn` is incomplete). The aggregate
+  (`aggregateExternalWalletMovements`) counts open requests separately from
+  unsettled movements on purpose: folded together they answered
+  `movements_pending` for days, breaking that reason's ~90 s window. A
+  settling movement outranks an open request, and a terminal request
+  withholds nothing. Known gap before Hastra is surfaced: a CANCELLED Hastra
+  redemption leaves the owner wYLDS that the PRIME position read never
+  values, so `earned` then understates by it. Exits are still ledgered in
+  SHARES (0070 pins `payout_token` NULL for vault rows); the deposit-token
+  payout is a SETTLE-TIME observation
   (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
   reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
   landed transaction (`getTransaction`, jsonParsed) and records the receiving

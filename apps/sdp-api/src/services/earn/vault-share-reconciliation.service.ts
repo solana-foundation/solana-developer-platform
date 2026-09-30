@@ -38,6 +38,7 @@ export interface ReconcilableVaultClaim {
   share_mint: string | null;
   label: string;
   has_unsettled_movements: boolean;
+  open_withdrawal_request_ids: readonly string[];
 }
 
 export interface ReconcilableShareMintedStrategy {
@@ -81,6 +82,16 @@ export interface UnbackedVaultPosition {
   label: string;
 }
 
+/**
+ * A zero-share claim with open queued withdrawal requests. The requests
+ * escrowed or burned shares ahead of the payout, but only the shares they
+ * cover, and the ledger holds no per-claim share total to check that
+ * against, so the claim is listed beside its requests rather than judged.
+ */
+export interface QueuedWithdrawalVaultPosition extends UnbackedVaultPosition {
+  withdrawalRequestIds: string[];
+}
+
 export interface UnreadableVaultWallet {
   custodyWalletId: string;
   walletAddress: string;
@@ -89,6 +100,7 @@ export interface UnreadableVaultWallet {
 export interface VaultShareReconciliationReport {
   unrecordedHoldings: UnrecordedVaultHolding[];
   unbackedPositions: UnbackedVaultPosition[];
+  queuedWithdrawalPositions: QueuedWithdrawalVaultPosition[];
   unreadableWallets: UnreadableVaultWallet[];
 }
 
@@ -164,6 +176,7 @@ export async function reconcileVaultShareHoldings(input: {
   const report: VaultShareReconciliationReport = {
     unrecordedHoldings: [],
     unbackedPositions: [],
+    queuedWithdrawalPositions: [],
     unreadableWallets: [],
   };
 
@@ -214,7 +227,7 @@ export async function reconcileVaultShareHoldings(input: {
       // sweep settles it within about a minute either way.
       if (!claim.share_mint || claim.has_unsettled_movements) continue;
       if (balancesByMint.has(claim.share_mint)) continue;
-      report.unbackedPositions.push({
+      const finding: UnbackedVaultPosition = {
         positionId: claim.id,
         custodyWalletId: wallet.id,
         walletAddress: wallet.publicKey,
@@ -222,7 +235,15 @@ export async function reconcileVaultShareHoldings(input: {
         vaultAddress: claim.vault_address,
         shareMint: claim.share_mint,
         label: claim.label,
-      });
+      };
+      if (claim.open_withdrawal_request_ids.length > 0) {
+        report.queuedWithdrawalPositions.push({
+          ...finding,
+          withdrawalRequestIds: [...claim.open_withdrawal_request_ids],
+        });
+      } else {
+        report.unbackedPositions.push(finding);
+      }
     }
   });
 
