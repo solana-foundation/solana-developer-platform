@@ -48,13 +48,17 @@ const mocks = vi.hoisted(() => ({
   accountExists: vi.fn(),
   minimumBalanceForRentExemption: vi.fn(),
   parseLifecycleEvents: vi.fn(),
+  clientOptions: vi.fn(),
 }));
 
 vi.mock("@vedatech/svm-sdk", () => ({
-  createVedaClient: () => ({
-    validateDeployment: mocks.validateDeployment,
-    vault: () => mocks.vault,
-  }),
+  createVedaClient: (options: unknown) => {
+    mocks.clientOptions(options);
+    return {
+      validateDeployment: mocks.validateDeployment,
+      vault: () => mocks.vault,
+    };
+  },
   parseLifecycleEvents: mocks.parseLifecycleEvents,
   VedaSdkError: class VedaSdkError extends Error {
     constructor(
@@ -835,6 +839,32 @@ describe("buildVedaQueuedWithdrawalRequestPlan", () => {
 });
 
 describe("queued withdrawal lifecycle reads", () => {
+  it("reads durable queue state at finality while keeping previews at confirmed", async () => {
+    primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
+    mocks.vault.getWithdrawalRequest.mockResolvedValue({
+      address: REQUEST,
+      status: "pending",
+      request: queuedRequestView(),
+    });
+    await readVedaQueuedWithdrawalRequest(runtime, config, { vault: VAULT, request: REQUEST });
+    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ commitment: "finalized" })
+    );
+    await readVedaQueuedWithdrawalRequests(runtime, config, { vault: VAULT, owner: OWNER });
+    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ commitment: "finalized" })
+    );
+    await previewVedaQueuedWithdrawal(runtime, config, {
+      vault: VAULT,
+      shares: "2.5",
+      discountBps: 50,
+      deadlineSeconds: 120,
+    });
+    expect(mocks.clientOptions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ commitment: "confirmed" })
+    );
+  });
+
   it("lists only the SDP-facing asset and converts every atomic/timestamp field", async () => {
     primeVault([{ mint: USDC_DEVNET, allowDeposits: true }]);
     mocks.vault.listOpenWithdrawalRequests.mockResolvedValue([
