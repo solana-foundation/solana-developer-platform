@@ -6,6 +6,7 @@ import {
   type EarnVaultPosition,
   type EarnVaultWithdrawal,
   earnProgramSolanaPayoutTokens,
+  isEarnVaultHoldingEmpty,
   isVaultDirectDepositEnabled,
   type SdpEnvironment,
   SOLANA_CLUSTER_LABELS,
@@ -93,6 +94,7 @@ import {
   earnVaultDepositAvailability,
   SURFACED_VAULT_DIRECT_EARN_PROVIDERS,
 } from "../earn/earn-surfacing";
+import { earnVaultHoldingValue } from "../earn/earn-vault-holding";
 import {
   earnVaultDepositUiState,
   earnVaultPositionStatusLabels,
@@ -111,7 +113,6 @@ import {
 } from "./kamino-allocations-format";
 import type { KaminoVaultAllocations } from "./kamino-allocations-schema";
 import {
-  availableTreasuryCashForWallet,
   estimatedTreasuryApy,
   isOpenVaultPosition,
   summarizeTreasuryAllocation,
@@ -612,7 +613,7 @@ function TreasuryWalletsCard({
                       <TreasuryInfoTip label={t("DashboardMarkets.treasury.summaryCashCaption")} />
                     </dt>
                     <dd className="text-sm text-primary tabular-nums">
-                      {formatUsd(availableTreasuryCashForWallet(wallet), locale)}
+                      {formatUsd(allocation.cashByWalletId.get(wallet.id), locale)}
                     </dd>
                   </div>
                   {deployment.kind === "none" ? null : (
@@ -659,7 +660,7 @@ function strategyPositionValue(
     (strategy.shareMint !== undefined && unrecordedShareMints.has(strategy.shareMint));
   if (unrecorded) return { count: active.length, unrecorded };
   if (active.length === 0) return { count: 0 };
-  const values = active.map((position) => position.tokenValue);
+  const values = active.map(earnVaultHoldingValue);
   if (values.some((value) => value === undefined)) return { count: active.length };
   return { count: active.length, value: sumDecimalStrings(values as string[]) };
 }
@@ -1180,28 +1181,11 @@ function ActiveVaultPositionsCard({
                           {asset.symbol}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-primary tabular-nums">
-                        <span
-                          className={
-                            balance.projected
-                              ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100"
-                              : undefined
-                          }
-                          data-earn-vault-balance={balance.projected ? "projected" : "live"}
-                          title={
-                            balance.projected
-                              ? t("DashboardMarkets.treasury.positionBalanceProjected")
-                              : undefined
-                          }
-                        >
-                          <span data-earn-vault-balance-value>{formattedBalance}</span>
-                          {balance.projected ? (
-                            <span className="sr-only">
-                              {`. ${t("DashboardMarkets.treasury.positionBalanceProjected")}`}
-                            </span>
-                          ) : null}
-                        </span>
-                      </TableCell>
+                      <TreasuryPositionBalanceCell
+                        formattedBalance={formattedBalance}
+                        parIntermediate={position.parIntermediate}
+                        projected={balance.projected}
+                      />
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||
                           shortenMarketAddress(wallet?.publicKey ?? position.custodyWalletId)}
@@ -1210,24 +1194,7 @@ function ActiveVaultPositionsCard({
                         <TreasuryPositionStatusBadge activity={activity} />
                       </TableCell>
                       <TableCell align="right">
-                        {/*
-                         * The exit route (PRO-1702). Deliberately NOT gated on
-                         * availability, surfacing, or environment — money out
-                         * beats money off (ADR 0002), so the verb stays live
-                         * wherever a position exists. A provider whose exit
-                         * SDP cannot build yet answers 501 with a clear error
-                         * inside the modal rather than a silently dead button.
-                         */}
-                        <Button
-                          data-earn-vault-withdraw-focus-fallback={position.id}
-                          iconLeft={<ArrowUpRightIcon />}
-                          onClick={() => onWithdraw(position)}
-                          size="sm"
-                          type="button"
-                          variant="secondary"
-                        >
-                          {t("DashboardMarkets.treasury.withdraw")}
-                        </Button>
+                        <TreasuryPositionActions onWithdraw={onWithdraw} position={position} />
                       </TableCell>
                     </TableRow>
                   );
@@ -1238,6 +1205,75 @@ function ActiveVaultPositionsCard({
         )}
       </Card>
     </section>
+  );
+}
+
+function TreasuryPositionBalanceCell({
+  formattedBalance,
+  parIntermediate,
+  projected,
+}: {
+  formattedBalance: string;
+  parIntermediate: EarnVaultPosition["parIntermediate"];
+  projected: boolean;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  return (
+    <TableCell className="text-sm text-primary tabular-nums">
+      <span
+        className={
+          projected ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100" : undefined
+        }
+        data-earn-vault-balance={projected ? "projected" : "live"}
+        title={projected ? t("DashboardMarkets.treasury.positionBalanceProjected") : undefined}
+      >
+        <span data-earn-vault-balance-value>{formattedBalance}</span>
+        {projected ? (
+          <span className="sr-only">
+            {`. ${t("DashboardMarkets.treasury.positionBalanceProjected")}`}
+          </span>
+        ) : null}
+      </span>
+      {parIntermediate ? (
+        <span className="mt-0.5 block text-xs text-tertiary" data-earn-vault-par-intermediate>
+          {t("DashboardEarn.parRedemption.positionIntermediate", {
+            amount: formatProviderAmount(parIntermediate.amount, locale),
+          })}
+        </span>
+      ) : null}
+    </TableCell>
+  );
+}
+
+function TreasuryPositionActions({
+  onWithdraw,
+  position,
+}: {
+  onWithdraw: (position: EarnVaultPosition) => void;
+  position: EarnVaultPosition;
+}) {
+  const t = useTranslations();
+  // The exit route (PRO-1702). Deliberately NOT gated on availability,
+  // surfacing, or environment: money out beats money off (ADR 0002), so the
+  // verb stays live wherever a position exists. A provider whose exit SDP
+  // cannot build yet answers 501 with a clear error inside the modal rather
+  // than a silently dead button. Unhydrated shares may still exist, so only a
+  // provable zero (a row kept open by its par intermediate) hides it.
+  const holdsShares =
+    position.shares === undefined || !isEarnVaultHoldingEmpty({ shares: position.shares });
+  if (!holdsShares) return null;
+  return (
+    <Button
+      data-earn-vault-withdraw-focus-fallback={position.id}
+      iconLeft={<ArrowUpRightIcon />}
+      onClick={() => onWithdraw(position)}
+      size="sm"
+      type="button"
+      variant="secondary"
+    >
+      {t("DashboardMarkets.treasury.withdraw")}
+    </Button>
   );
 }
 

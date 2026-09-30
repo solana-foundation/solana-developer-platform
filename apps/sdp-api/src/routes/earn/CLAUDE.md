@@ -142,7 +142,14 @@ assets, and a post-deadline owner-signed cancellation returns shares. Hastra's
 par request instead redeems PRIME to wYLDS and delegates that wYLDS; a Hastra
 administrator later burns it and pays USDC, while an owner cancellation may
 happen at any time and leaves the owner holding wYLDS rather than recreating
-PRIME. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+PRIME. That wYLDS stays part of the position: position reads carry it as
+`parIntermediate`, every close-out asks `isEarnVaultHoldingEmpty` (`@sdp/types`:
+shares AND intermediate zero, the same rule the dashboard's open filter uses),
+and `advanceRequest` reopens the holding on every cancellation, not only a
+solver queue's, so a stale zero-share snapshot cannot retire it. Values that
+sum a holding (earnings `currentValue`, the summary totals) add the
+intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
+shares' value. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
 signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history
@@ -927,7 +934,19 @@ transaction signed by the organization custody wallet or external owner.
   `unrecordedHoldings` (held shares of a catalogued vault with no visible claim)
   and `unbackedPositions` (a visible claim whose wallet holds none of its
   shares; a claim with an unsettled movement is excluded — the ledger already
-  explains that disagreement and the sweep settles it). A duplicated share mint
+  explains that disagreement and the sweep settles it). A zero-share claim
+  with an open queued withdrawal request goes to `queuedWithdrawalPositions`
+  with its request ids instead: the request escrowed or burned only the shares
+  it covers, and no per-claim share total exists to prove it covers them all,
+  so the claim is listed, not judged unbacked or hidden. A CANCELLED operator
+  redemption never recreates the shares it burned, so the intermediate it
+  left (Hastra wYLDS) can back that claim and keep it out of both lists
+  (`redemption_intermediates`). Landed open requests own what they delegated;
+  what remains backs a sole retaining claim even if every `creating` or
+  `closed_or_unknown` request's amount is there too, and claims sharing the
+  mint only when it covers all of them. Anything short of certain is reported
+  with `ambiguousBacking: true`, never guessed; a failed request backs
+  nothing. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
@@ -1373,11 +1392,20 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   never coerced to zero; otherwise absent with a named
   `earnedUnavailableReason`: `live_value_unavailable` (hydration failed),
   `movements_pending` (a movement is still settling, so chain and ledger
-  describe different moments), `deposits_not_valued` (a finalized deposit has no
-  observed receipt, leaving `totalDeposited` incomplete), or `withdrawals_not_valued` (a finalized
-  withdrawal on a held position has NO observed payout, so `totalWithdrawn`
-  is incomplete). Exits are still ledgered in SHARES (0070 pins `payout_token`
-  NULL for vault rows); the deposit-token payout is a SETTLE-TIME observation
+  describe different moments), `withdrawals_pending` (a held position has an
+  open queued withdrawal request: a Veda queue escrowed or a Hastra
+  redemption burned its shares before the payout, which can take days),
+  `deposits_not_valued` (a finalized deposit has no observed receipt, leaving
+  `totalDeposited` incomplete), or `withdrawals_not_valued` (a finalized
+  withdrawal on a held position has no observed payout, leaving
+  `totalWithdrawn` incomplete). These reasons are listed in priority order.
+  The aggregate (`aggregateExternalWalletMovements`) counts open requests
+  separately from unsettled movements: folded together they answered
+  `movements_pending` for days, breaking that reason's ~90 s window. A terminal
+  request withholds nothing; a cancelled Hastra request's retained wYLDS is
+  valued through `parIntermediate`. Exits are still ledgered in SHARES
+  (0070 pins `payout_token` NULL for vault rows); the deposit-token payout is
+  a SETTLE-TIME observation
   (`earn_movements.token_amount_settled`, migration 0103): when a withdrawal
   reaches `finalized`, `vault-movement-reconciliation.service.ts` fetches the
   landed transaction (`getTransaction`, jsonParsed) and records the receiving
@@ -1392,7 +1420,8 @@ retired path-addressed shapes (`positions/:ownerAddress`,
   deposit side now reads finalized Kamino CPI receipts (0119), because its
   instruction encodes a maximum rather than an exact debit. Unknown receipts
   leave `amount_settled` and `token_amount_settled` NULL; the bounded repair
-  sweep includes historical rows and retries at 15-minute intervals.
+  sweep includes historical rows, prioritizes rows with no recorded reconciliation
+  attempt, and retries at 15-minute intervals.
   The same settlement hook reads the holding live for that one vault and owner and
   stamps `closed_at` when shares are "0" (`closeVaultPositionIfEmpty`, fail-soft;
   a later deposit transition re-opens it), for external-wallet AND custody

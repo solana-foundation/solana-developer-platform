@@ -1186,6 +1186,26 @@ integration measured against the live API:
   external-wallet and custody rows alike. Before this nothing ever wrote
   `closed_at` at runtime, so an exited position stayed "held" forever.
 
+### Addendum to the addendum: 2026-09-29 open queued withdrawals are `withdrawals_pending`
+
+An open queued withdrawal request (any non-terminal status in
+`earn_vault_withdrawal_requests`) withholds `earned`: a Veda solver queue
+escrows the shares and a Hastra par redemption burns them, so live value is
+short by the request while its payout is not yet a ledger fact. Since the
+queued-withdrawal ledger shipped, the aggregate counted those rows as
+unsettled movements and answered `movements_pending`, which broke that
+reason's "moment, not a state" bound: a request can stay open for days, and
+the movements feed shows nothing pending. They now answer
+`withdrawals_pending`. When both apply, `movements_pending` wins because it
+clears within the reconciler window. The custody share reconciliation report
+names the same state: a zero-share claim with an open request is listed under
+`queuedWithdrawalPositions` with its request ids rather than reported as
+unbacked or dropped, because a request explains only the shares it covers.
+A cancelled Hastra redemption is terminal, but it leaves the owner the wYLDS
+it delegated rather than recreating PRIME, so that wYLDS still backs the
+claim there when the report can attribute it, and the claim carries
+`ambiguousBacking` when it cannot.
+
 ## Addendum — 2026-09-02 The partner pays: caller-provided fee payers on the external-wallet builds
 
 Supersedes the "Owner pays everything" accepted cost in the 2026-08-26

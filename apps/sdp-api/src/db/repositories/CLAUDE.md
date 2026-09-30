@@ -34,7 +34,9 @@ Things that will bite:
   while a finalized deposit has no observed amount. Exposure may conservatively
   count the requested maximum until then. Migration 0119 is additive: legacy
   projections remain in storage for rollback compatibility, but mapped reads
-  and earnings ignore them without `deposit_receipt_observed_at`.
+  and earnings ignore them without `deposit_receipt_observed_at`. Repair claims
+  prioritize rows with no recorded reconciliation attempt, then rotate retries
+  by oldest attempt with 15-minute spacing; missing receipts remain retryable.
 - **Kamino creation claims never authorize rent refunds.** The position's
   `share_ata_rent_funder` is cleared by new Kamino writes; historical claims are
   ignored by the builder. Other providers retain the legacy projection. Kamino

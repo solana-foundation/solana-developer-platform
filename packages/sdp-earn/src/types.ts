@@ -13,6 +13,7 @@ import type {
   EarnPortfolioYield,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
+  EarnVaultPositionIntermediate,
   SdpEnvironment,
   SolanaCluster,
 } from "@sdp/types";
@@ -914,6 +915,11 @@ export interface EarnVaultPositionSnapshot {
   tokenValue?: string;
   tokenMint: string;
   shareMint: string;
+  /**
+   * The par route's intermediate token held outside any open request. Omitted
+   * when the owner holds none or the provider has no par intermediate.
+   */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 /**

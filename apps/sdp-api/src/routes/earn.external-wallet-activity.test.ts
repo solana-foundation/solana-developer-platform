@@ -7,6 +7,7 @@ import {
   generateEarnMovementId,
   generateEarnPositionId,
 } from "@/db/repositories/earn-movements.repository";
+import { generateEarnVaultWithdrawalRequestId } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
 import app from "@/index";
 import { seedProjectApiKey } from "@/test/helpers/api-keys";
 import { env } from "@/test/helpers/env";
@@ -59,6 +60,15 @@ const OWNER_B = "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF";
 const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const SHARE = "So11111111111111111111111111111111111111112";
+const WYLDS = "BVfHastraWylds1111111111111111111111111111";
+const OPEN_WITHDRAWAL_REQUEST_STATUSES = [
+  "creating",
+  "pending",
+  "fulfillable",
+  "expired_cancelable",
+  "cancelling",
+  "closed_or_unknown",
+] as const;
 
 function cachedKey(): CachedApiKey {
   return {
@@ -247,6 +257,65 @@ async function seedMovement(input: {
     )
     .run();
   return movementId;
+}
+
+/**
+ * One external-wallet withdrawal request (0113/0116) with the terms its
+ * mechanism requires: a Veda solver-queue request carries a discount and queue
+ * clock, a Hastra operator redemption carries its intermediate wYLDS instead.
+ * Terminal `cancelled`/`failed` rows stamp the metadata 0113 ties to them.
+ */
+async function seedWithdrawalRequest(input: {
+  positionId: string;
+  ownerAddress: string;
+  vaultAddress: string;
+  provider: string;
+  mechanism: "solver_queue" | "operator_redemption";
+  status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed";
+  shares: string;
+  quotedAssets: string;
+}): Promise<string> {
+  const requestId = generateEarnVaultWithdrawalRequestId();
+  const solverQueue = input.mechanism === "solver_queue";
+  await getDb(env)
+    .prepare(
+      `INSERT INTO earn_vault_withdrawal_requests (
+         id, organization_id, project_id, environment, provider, position_id,
+         owner_address, vault_address, token_mint, share_mint, request_address,
+         status, mechanism, shares, quoted_assets, share_decimals, asset_decimals,
+         discount_bps, maturity_timestamp, deadline_timestamp,
+         intermediate_mint, intermediate_amount, client_request_id, idempotency_fingerprint,
+         cancelled_at, failure_reason
+       ) VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 6, 6, ?, ?, ?, ?, ?, ?, ?,
+                 ?, ?)`
+    )
+    .bind(
+      requestId,
+      ORG,
+      PROJECT,
+      input.provider,
+      input.positionId,
+      input.ownerAddress,
+      input.vaultAddress,
+      USDC,
+      SHARE,
+      `request_pda_${crypto.randomUUID()}`,
+      input.status,
+      input.mechanism,
+      input.shares,
+      input.quotedAssets,
+      solverQueue ? 25 : null,
+      solverQueue ? 1700000060 : null,
+      solverQueue ? 1700000120 : null,
+      solverQueue ? null : WYLDS,
+      solverQueue ? null : input.quotedAssets,
+      crypto.randomUUID(),
+      `fingerprint_${requestId}`,
+      input.status === "cancelled" ? "2026-08-29T00:00:00.000Z" : null,
+      input.status === "failed" ? "request never landed" : null
+    )
+    .run();
+  return requestId;
 }
 
 function get(path: string) {
@@ -833,6 +902,56 @@ describe("external-wallet earnings", () => {
     });
   });
 
+  it("counts a par intermediate left by a cancelled request as current value", async () => {
+    const position = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+    });
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "finalized",
+      amount: "100",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+    });
+    readVaultPositions.mockImplementation(
+      async (_ctx: unknown, input: { owner: string; providerReferences: string[] }) =>
+        input.providerReferences.map((providerReference) => ({
+          providerReference,
+          owner: input.owner,
+          cluster: "devnet",
+          shares: "0",
+          withdrawableShares: "0",
+          tokenValue: "0",
+          tokenMint: USDC,
+          shareMint: SHARE,
+          parIntermediate: {
+            mint: USDT,
+            amount: "101",
+            withdrawableAmount: "101",
+            tokenValue: "101",
+          },
+        }))
+    );
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as { data: { earnings: { totalsByToken: Array<Record<string, unknown>> } } };
+    expect(body.data.earnings.totalsByToken).toEqual([
+      expect.objectContaining({
+        tokenMint: USDC,
+        currentValue: "101",
+        totalDeposited: "100",
+        earned: "1",
+      }),
+    ]);
+  });
+
   it("reports earned unavailable, never zero, when live value cannot hydrate", async () => {
     const position = await seedPosition({
       ownerAddress: OWNER_A,
@@ -917,6 +1036,280 @@ describe("external-wallet earnings", () => {
     });
     expect(token).not.toHaveProperty("earned");
   });
+
+  describe.each([
+    { mechanism: "solver_queue", provider: "veda" },
+    { mechanism: "operator_redemption", provider: "hastra" },
+  ] as const)("with an open $mechanism request", ({ mechanism, provider }) => {
+    it.each(OPEN_WITHDRAWAL_REQUEST_STATUSES)("withholds earned while it is %s", async (status) => {
+      const position = await seedPosition({
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        tokenMint: USDC,
+        label: "USDC vault",
+        provider,
+      });
+      await seedMovement({
+        positionId: position,
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        direction: "deposit",
+        status: "finalized",
+        amount: "60",
+        denomination: USDC,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        provider,
+      });
+      await seedWithdrawalRequest({
+        positionId: position,
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        provider,
+        mechanism,
+        status,
+        shares: "40",
+        quotedAssets: "40.4",
+      });
+      // The request escrowed (Veda) or burned (Hastra) 40 of the shares, so the
+      // live read sees only what is left while the payout is still owed.
+      liveValue({ "vault-usdc": "20.2" });
+
+      const body = (await (
+        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      ).json()) as {
+        data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+      };
+      const token = body.data.earnings.totalsByToken[0];
+      expect(token).toMatchObject({
+        currentValue: "20.2",
+        totalDeposited: "60",
+        totalWithdrawn: "0",
+        earnedUnavailableReason: "withdrawals_pending",
+      });
+      expect(token).not.toHaveProperty("earned");
+    });
+  });
+
+  it("reports a settling movement over an open request in the same token", async () => {
+    const settling = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-settling",
+      tokenMint: USDC,
+      label: "Settling",
+    });
+    await seedMovement({
+      positionId: settling,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-settling",
+      direction: "deposit",
+      status: "submitted",
+      amount: "40",
+      denomination: USDC,
+      createdAt: "2026-08-28T00:00:00.000Z",
+    });
+    const queued = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-queued",
+      tokenMint: USDC,
+      label: "Queued",
+      provider: "veda",
+    });
+    await seedMovement({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-queued",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      provider: "veda",
+    });
+    await seedWithdrawalRequest({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc-queued",
+      provider: "veda",
+      mechanism: "solver_queue",
+      status: "pending",
+      shares: "40",
+      quotedAssets: "40.4",
+    });
+    liveValue({ "vault-usdc-settling": "40", "vault-usdc-queued": "20.2" });
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      positionCount: 2,
+      earnedUnavailableReason: "movements_pending",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
+  });
+
+  it("prioritizes a queued withdrawal over an unobserved Kamino deposit for the same token", async () => {
+    const deposit = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-kamino-unobserved",
+      tokenMint: USDC,
+      label: "Kamino vault",
+    });
+    await seedMovement({
+      positionId: deposit,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-kamino-unobserved",
+      direction: "deposit",
+      status: "finalized",
+      amount: "10",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      depositObserved: false,
+    });
+    const queued = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      tokenMint: USDC,
+      label: "Veda vault",
+      provider: "veda",
+    });
+    await seedMovement({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      provider: "veda",
+    });
+    await seedWithdrawalRequest({
+      positionId: queued,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-veda-queued",
+      provider: "veda",
+      mechanism: "solver_queue",
+      status: "pending",
+      shares: "40",
+      quotedAssets: "40.4",
+    });
+    liveValue({ "vault-kamino-unobserved": "10", "vault-veda-queued": "20" });
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      positionCount: 2,
+      earnedUnavailableReason: "withdrawals_pending",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
+  });
+
+  it("reports an open request over an unvalued withdrawal on the same position", async () => {
+    const position = await seedPosition({
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      tokenMint: USDC,
+      label: "USDC vault",
+      provider: "veda",
+    });
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "deposit",
+      status: "finalized",
+      amount: "60",
+      denomination: USDC,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      provider: "veda",
+    });
+    await seedMovement({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      direction: "withdrawal",
+      status: "finalized",
+      amount: "5",
+      denomination: SHARE,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      provider: "veda",
+    });
+    await seedWithdrawalRequest({
+      positionId: position,
+      ownerAddress: OWNER_A,
+      vaultAddress: "vault-usdc",
+      provider: "veda",
+      mechanism: "solver_queue",
+      status: "fulfillable",
+      shares: "40",
+      quotedAssets: "40.4",
+    });
+    liveValue({ "vault-usdc": "15" });
+
+    const body = (await (
+      await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+    ).json()) as {
+      data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+    };
+    expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+      earnedUnavailableReason: "withdrawals_pending",
+    });
+    expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earned");
+  });
+
+  it.each(["cancelled", "failed"] as const)(
+    "states earned again once a solver-queue request is %s",
+    async (status) => {
+      const position = await seedPosition({
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        tokenMint: USDC,
+        label: "USDC vault",
+        provider: "veda",
+      });
+      await seedMovement({
+        positionId: position,
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        direction: "deposit",
+        status: "finalized",
+        amount: "60",
+        denomination: USDC,
+        createdAt: "2026-08-27T00:00:00.000Z",
+        provider: "veda",
+      });
+      await seedWithdrawalRequest({
+        positionId: position,
+        ownerAddress: OWNER_A,
+        vaultAddress: "vault-usdc",
+        provider: "veda",
+        mechanism: "solver_queue",
+        status,
+        shares: "40",
+        quotedAssets: "40.4",
+      });
+      // Cancellation returned the escrowed shares; a failed request never
+      // took them. Either way the wallet holds the whole position again.
+      liveValue({ "vault-usdc": "61" });
+
+      const body = (await (
+        await get(`/v1/earn/external-wallet/earnings?ownerAddress=${OWNER_A}`)
+      ).json()) as {
+        data: { earnings: { totalsByToken: Array<Record<string, unknown>> } };
+      };
+      expect(body.data.earnings.totalsByToken[0]).toMatchObject({
+        currentValue: "61",
+        totalDeposited: "60",
+        earned: "1",
+      });
+      expect(body.data.earnings.totalsByToken[0]).not.toHaveProperty("earnedUnavailableReason");
+    }
+  );
 
   it("values a finalized withdrawal from its observed payout and keeps earned exact", async () => {
     const position = await seedPosition({

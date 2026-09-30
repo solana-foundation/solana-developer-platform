@@ -504,6 +504,11 @@ never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
 about whether the deposit landed.
 
+A position's value is its whole holding: `tokenValue` plus any
+`parIntermediate` (`earnVaultHoldingValue`), and a position stays open while
+either is non-zero (`isEarnVaultHoldingEmpty`, the API close-out's own rule),
+so a cancelled Hastra request's wYLDS never drops out of Treasury.
+
 Treasury's optimistic balance lives in the pure module
 `../treasury-solutions/treasury-vault-balance-projection.ts`. A committed
 deposit or atomic withdrawal is added to the latest hydrated positions read,

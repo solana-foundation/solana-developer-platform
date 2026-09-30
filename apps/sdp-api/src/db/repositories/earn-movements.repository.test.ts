@@ -305,6 +305,52 @@ describe("Unified earn movement ledger (postgres)", () => {
   });
 
   describe("vault deposits", () => {
+    it("claims untouched deposits before a larger retry backlog and spaces every retry", async () => {
+      const now = Date.now();
+      const retryBefore = new Date(now - 15 * 60_000).toISOString();
+      const retried: string[] = [];
+      const untouched: string[] = [];
+      for (let index = 0; index < 5; index++) {
+        const created = await ledger.createSignedVaultDepositIntent(intent());
+        const settledAt = new Date(now - (120 - index) * 60_000).toISOString();
+        await ledger.advanceVaultMovement({
+          movementId: created.movement.id,
+          organizationId: ORG,
+          toStatus: "finalized",
+          confirmedAt: settledAt,
+          settledAt,
+        });
+        if (index < 3) {
+          retried.push(created.movement.id);
+          await getDb(env)
+            .prepare("UPDATE earn_movements SET reconciliation_attempted_at = ? WHERE id = ?")
+            .bind(new Date(now - (60 - index) * 60_000).toISOString(), created.movement.id)
+            .run();
+        } else {
+          untouched.push(created.movement.id);
+          // New deposits settled after all of the old rows' unsuccessful attempts.
+          await getDb(env)
+            .prepare("UPDATE earn_movements SET settled_at = ? WHERE id = ?")
+            .bind(new Date(now - (5 - index) * 60_000).toISOString(), created.movement.id)
+            .run();
+        }
+      }
+
+      const claimIds = async (limit: number) =>
+        (await ledger.claimUnvaluedKaminoDeposits({ limit, retryBefore })).map((row) => row.id);
+      expect(new Set(await claimIds(2))).toEqual(new Set(untouched));
+      expect(new Set(await claimIds(2))).toEqual(new Set(retried.slice(0, 2)));
+      expect(await claimIds(2)).toEqual(retried.slice(2));
+      expect(await claimIds(2)).toEqual([]);
+      // Failed observations are delayed, never discarded or treated as valued.
+      expect(
+        await ledger.claimUnvaluedKaminoDeposits({
+          limit: 5,
+          retryBefore: new Date(Date.now() + 1_000).toISOString(),
+        })
+      ).toHaveLength(5);
+    });
+
     it("keeps a finalized Kamino amount unknown until a scoped receipt is recorded once", async () => {
       const created = await ledger.createSignedVaultDepositIntent(intent());
       const observedAt = new Date().toISOString();

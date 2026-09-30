@@ -8,11 +8,12 @@ import {
   type SolanaRpc,
   tokenBalanceDelta,
 } from "@sdp/rpc/solana";
-import { compareDecimalAmounts, formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
+import { formatDecimalAmount, isDecimalString } from "@sdp/solana/amount";
 import {
   EARN_PROVIDER_DEPOSIT_SETTLEMENT,
   EARN_TERMINAL_MOVEMENT_STATUSES,
   earnProviderDepositSettlement,
+  isEarnVaultHoldingEmpty,
   type SdpEnvironment,
   type SolanaCluster,
 } from "@sdp/types";
@@ -736,11 +737,7 @@ async function closePositionIfEmpty(
         candidate.tokenMint === position.token_mint &&
         candidate.shareMint === position.share_mint
     );
-    if (
-      !snapshot ||
-      !isDecimalString(snapshot.shares) ||
-      compareDecimalAmounts(snapshot.shares, "0") !== 0
-    ) {
+    if (!snapshot || !isDecimalString(snapshot.shares) || !isEarnVaultHoldingEmpty(snapshot)) {
       return;
     }
     // `position` was read before the payout observation and the finalize, so

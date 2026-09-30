@@ -286,6 +286,39 @@ export interface EarnStrategy {
 }
 
 /**
+ * A par-redemption intermediate the owner holds outside any open request, such
+ * as Hastra wYLDS after a cancelled par request. It belongs to the position:
+ * the holding is not empty while it is non-zero.
+ */
+export interface EarnVaultPositionIntermediate {
+  mint: string;
+  amount: string;
+  /** "0" while the provider has frozen the account. */
+  withdrawableAmount: string;
+  /** Value in the position's deposit token (`tokenMint`). */
+  tokenValue: string;
+}
+
+const CANONICAL_ZERO_DECIMAL = /^0+(\.0+)?$/;
+
+/**
+ * Whether a live-read vault holding is empty. Every close-out and the
+ * dashboard's open-position filter use this one rule, so a position whose
+ * shares are gone but whose par intermediate remains is never retired or
+ * hidden. Anything but a canonical zero reads as non-empty.
+ */
+export function isEarnVaultHoldingEmpty(holding: {
+  shares: string;
+  parIntermediate?: Pick<EarnVaultPositionIntermediate, "amount">;
+}): boolean {
+  return (
+    CANONICAL_ZERO_DECIMAL.test(holding.shares) &&
+    (holding.parIntermediate === undefined ||
+      CANONICAL_ZERO_DECIMAL.test(holding.parIntermediate.amount))
+  );
+}
+
+/**
  * Non-custodial vault positions — the custody wallet owns the vault shares and
  * SDP reads their current value live from the provider on every list request.
  */
@@ -324,6 +357,8 @@ export interface EarnVaultPosition {
    * position.
    */
   tokenValue?: string;
+  /** Present only while the owner holds a par intermediate outside an open request. */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 export interface EarnVaultPositionsPage {
@@ -355,6 +390,8 @@ export interface EarnExternalWalletPosition {
    * read failed.
    */
   tokenValue?: string;
+  /** Present only while the owner holds a par intermediate outside an open request. */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 /** Keyset page for exactly one external wallet. */
@@ -371,8 +408,9 @@ export interface EarnExternalWalletTokenTotal {
   positionCount: number;
   unavailablePositionCount: number;
   /**
-   * Sum of the positions' `tokenValue` in `tokenMint`, a dollar figure at par. Absent when any
-   * contributing position is unavailable, so the total is never partial.
+   * Sum of the positions' `tokenValue` plus any par intermediate's value, in `tokenMint`, a
+   * dollar figure at par. Absent when any contributing position is unavailable, so the total
+   * is never partial.
    */
   tokenValue?: string;
 }
@@ -959,6 +997,9 @@ export interface EarnExternalWalletMovementResponse {
  * - `live_value_unavailable`: the provider could not hydrate current value.
  * - `movements_pending`: a movement is still settling, so live value and the
  *   ledger describe different moments.
+ * - `withdrawals_pending`: a currently held position has an open queued
+ *   withdrawal request. Its shares leave the wallet (escrowed or burned)
+ *   before the payout becomes a ledger fact, which can take days.
  * - `deposits_not_valued`: a finalized deposit has no observed receipt, so
  *   totalDeposited excludes it and earned cannot be stated accurately.
  * - `withdrawals_not_valued`: a currently held position has a finalized
@@ -974,6 +1015,7 @@ export interface EarnExternalWalletMovementResponse {
 export type EarnExternalWalletEarnedUnavailableReason =
   | "live_value_unavailable"
   | "movements_pending"
+  | "withdrawals_pending"
   | "deposits_not_valued"
   | "withdrawals_not_valued";
 
@@ -983,7 +1025,10 @@ export interface EarnExternalWalletTokenEarnings {
   positionCount: number;
   /** Positions whose live value could not hydrate. */
   unavailablePositionCount: number;
-  /** Live value across the token's positions; absent when any position is unavailable. */
+  /**
+   * Live value across the token's positions, including any par intermediate;
+   * absent when any position is unavailable.
+   */
   currentValue?: string;
   /** Sum of observed finalized SDP deposits; excludes unvalued deposits. */
   totalDeposited: string;

@@ -102,7 +102,8 @@ recorded creation claim cannot prove who paid for its current instance:
 idempotent creates can race, and the owner can close and recreate an account
 outside SDP. `rentRefundTo` therefore cannot authorize an automatic refund.
 The empty account remains owner-controlled and its rent remains recoverable
-through an explicit owner-authorized close.
+through an explicit owner-authorized close outside SDP. The SDP reclaim action
+is tracked in [#2166](https://github.com/solana-foundation/solana-developer-platform/issues/2166).
 
 The SDK's unconditional full-exit `CloseAccount` is stripped and SDP appends no
 share-account close. Even a same-transaction creation can use lamports sent to

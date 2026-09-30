@@ -290,9 +290,6 @@ export class KaminoVaultDirectClient
             ...(input.rentPayer === undefined
               ? {}
               : { rentPayer: this.participant(input.rentPayer) }),
-            ...(input.rentRefundTo === undefined
-              ? {}
-              : { rentRefundTo: address(input.rentRefundTo) }),
             slot,
           },
           assertActive

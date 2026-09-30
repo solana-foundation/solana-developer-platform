@@ -41,9 +41,15 @@ import { cn } from "@/lib/utils";
 import { EmbeddedYieldPortfolioSkeleton } from "../markets-route-skeletons";
 import { truncateMiddle } from "../truncate-middle";
 import { isPositiveDecimal } from "./earn-decimal";
-import { earnStrategyLiquidityLabel, formatEpochSeconds, formatTokenValue } from "./earn-format";
+import {
+  earnStrategyLiquidityLabel,
+  formatEpochSeconds,
+  formatProviderAmount,
+  formatTokenValue,
+} from "./earn-format";
 import { earnMintAsset, earnStrategyReferenceKey } from "./earn-market-presentation";
 import { useEarnExternalWalletPositionSummary, useEarnStrategies } from "./earn-program-data";
+import { earnVaultHoldingValue } from "./earn-vault-holding";
 
 function PortfolioInfoTip({ label }: { label: string }) {
   return (
@@ -409,6 +415,7 @@ function StrategyWalletDetails({
         <div className="divide-y divide-border-subtle">
           {positions.map((position) => {
             const asset = earnMintAsset(position.tokenMint);
+            const holdingValue = earnVaultHoldingValue(position);
             const unlockTime = formatEpochSeconds(position.unlockTimestamp, locale);
             return (
               <article
@@ -448,10 +455,17 @@ function StrategyWalletDetails({
                     {t("DashboardMarkets.earnProgram.liveValue")}
                   </p>
                   <p className="mt-0.5 text-sm text-primary tabular-nums">
-                    {position.tokenValue === undefined
+                    {holdingValue === undefined
                       ? t("DashboardMarkets.earnProgram.valueUnavailable")
-                      : formatTokenValue(position.tokenValue, asset.mint, locale)}
+                      : formatTokenValue(holdingValue, asset.mint, locale)}
                   </p>
+                  {position.parIntermediate ? (
+                    <p className="mt-0.5 text-xs text-tertiary">
+                      {t("DashboardEarn.parRedemption.positionIntermediate", {
+                        amount: formatProviderAmount(position.parIntermediate.amount, locale),
+                      })}
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <p className="text-xs text-tertiary">

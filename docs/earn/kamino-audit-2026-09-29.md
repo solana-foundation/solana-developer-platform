@@ -150,6 +150,30 @@ passed. No dependency version changed afterward.
   Partial-acceptance accounting is established by deterministic receipt tests,
   not by a successful cap-mutation fork run.
 
+## Rent recovery follow-up and partner notice
+
+[Issue #2166](https://github.com/solana-foundation/solana-developer-platform/issues/2166)
+tracks an explicit owner-authorized reclaim action. There is no SDP reclaim
+endpoint in this release. The integration guide now states that Kamino rent
+stays in the share ATA and no longer promises automatic sponsor refunds.
+
+**Draft notice for rollout; not sent:**
+
+With this update, a full Kamino withdrawal leaves your empty share token account
+open. Its SOL rent reserve stays in that account, typically about 0.00204 SOL
+for a standard share account. This reserve is separate from your vault balance
+and earnings. SDP no longer automatically sends it to a recorded sponsor or
+the account owner, because a deposit build cannot prove who funded the current
+account.
+
+The account owner can authorize a separate close of the empty account through
+a wallet that supports it and select the refund recipient. SDP does not yet
+provide this action. Partners that sponsor deposits should coordinate recovery
+with the owner and should not budget for automatic refunds. Closing the account
+can incur a transaction fee, and depositing again will require account rent.
+Previously issued transactions retain their original instructions; this change
+applies to newly built transactions after rollout.
+
 ## Rollout, rollback and review gate
 
 Apply the additive migration and regenerated transaction view before starting
