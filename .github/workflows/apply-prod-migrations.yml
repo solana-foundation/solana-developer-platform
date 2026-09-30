@@ -127,3 +127,19 @@ jobs:
     with:
       image_sha: ${{ inputs.image_sha }}
       approved_schema: true
+
+  web-prod-gate:
+    name: Release sdp-web production
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark the sdp-web production gate passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_SHA: ${{ inputs.image_sha }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${IMAGE_SHA}" \
+            -f state=success -f context="sdp-web production gate" -f description="Production API deployed with approved migrations"
