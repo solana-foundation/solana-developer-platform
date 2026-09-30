@@ -415,6 +415,7 @@ function StrategyWalletDetails({
         <div className="divide-y divide-border-subtle">
           {positions.map((position) => {
             const asset = earnMintAsset(position.tokenMint);
+            const holdingValue = earnVaultHoldingValue(position);
             const unlockTime = formatEpochSeconds(position.unlockTimestamp, locale);
             return (
               <article
@@ -454,9 +455,9 @@ function StrategyWalletDetails({
                     {t("DashboardMarkets.earnProgram.liveValue")}
                   </p>
                   <p className="mt-0.5 text-sm text-primary tabular-nums">
-                    {earnVaultHoldingValue(position) === undefined
+                    {holdingValue === undefined
                       ? t("DashboardMarkets.earnProgram.valueUnavailable")
-                      : formatTokenValue(earnVaultHoldingValue(position), asset.mint, locale)}
+                      : formatTokenValue(holdingValue, asset.mint, locale)}
                   </p>
                   {position.parIntermediate ? (
                     <p className="mt-0.5 text-xs text-tertiary">
