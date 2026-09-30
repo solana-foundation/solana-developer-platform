@@ -64,11 +64,13 @@ Things that will bite:
   advancement to an eligible state excludes active cancel actions. Only atomic
   action-failure recovery may reopen it. A failed create cannot discard a
   request once its nonce or creation timestamp establishes provider existence.
-- **Retained par intermediate is net of completed redemptions.** Reconciliation
-  adds intermediate from cancelled share-sourced requests and subtracts fulfilled
-  zero-share requests for the same position and mint, floored at zero. Cancelling
-  a held-intermediate request adds no backing; it only releases the same tokens.
-  Open and unknown requests still reserve their amounts separately.
+- **Retained par intermediate excludes redeemed or reserved amounts.**
+  Reconciliation adds intermediate from cancelled share-sourced requests and
+  subtracts fulfilled or open zero-share requests for the same position and mint,
+  floored at zero. Cancelling a held-intermediate request adds no backing; it only
+  releases the same tokens.
+  Open and unknown requests reserve their amounts separately, never a second time
+  through retained backing.
 - **Ids are heterogeneous by design.** History keeps the ids the projection
   preserved, so nothing may parse an id for its kind — read `execution_model`.
 - **`getUnsettledVaultMovementStats` duplicates `claimUnsettledVaultMovements`'

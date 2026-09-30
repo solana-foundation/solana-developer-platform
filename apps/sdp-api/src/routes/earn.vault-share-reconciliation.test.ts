@@ -649,6 +649,43 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       expect(body.data.queuedWithdrawalPositions).toEqual([]);
     });
 
+    it.each(
+      (["pending", "creating", "closed_or_unknown"] as const).flatMap((status) =>
+        ["0.5", "1.01"].map((intermediateAmount) => ({ status, intermediateAmount }))
+      )
+    )(
+      "reserves $intermediateAmount held wYLDS once while its request is $status",
+      async ({ status, intermediateAmount }) => {
+        const retained = await claimAfterOperatorRedemption("cancelled");
+        const requestId = await seedCustodyWithdrawalRequest({
+          position: retained.position,
+          mechanism: "operator_redemption",
+          status,
+          shares: "0",
+          intermediateAmount,
+        });
+        await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual(
+          intermediateAmount === "1.01"
+            ? [
+                expect.objectContaining({
+                  positionId: retained.position.id,
+                  withdrawalRequestIds: [requestId],
+                  ambiguousBacking: false,
+                }),
+              ]
+            : []
+        );
+      }
+    );
+
     it.each([
       { status: "fulfilled", shares: "1" },
       { status: "failed", shares: "0" },
