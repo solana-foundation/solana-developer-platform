@@ -67,8 +67,10 @@ Things that will bite:
 - **Retained par intermediate excludes redeemed or reserved amounts.**
   Reconciliation adds intermediate from cancelled share-sourced requests and
   subtracts fulfilled or open zero-share requests for the same position and mint,
-  floored at zero. Cancelling a held-intermediate request adds no backing; it only
-  releases the same tokens.
+  in lifecycle order, flooring the balance at zero after each debit. An older
+  redemption cannot consume backing created by a later cancellation. Cancelling
+  held intermediate proves the balance is at least the released amount, even
+  without prior SDP history; repeated cancellations never add the same tokens.
   Open and unknown requests reserve their amounts separately, never a second time
   through retained backing.
 - **Ids are heterogeneous by design.** History keeps the ids the projection

@@ -48,9 +48,12 @@ export interface ReconcilableVaultClaim {
  * What one claim's operator redemptions account for in the wallet for one
  * intermediate mint (Hastra wYLDS), in decimal token units: `retained` by
  * cancelled share-sourced requests, less fulfilled or open held-intermediate
- * requests (cancelling held intermediate adds no new backing), `in_flight`
- * delegated by landed open requests, and `unresolved` for requests that may or
- * may not hold theirs (not yet landed, or closed with no identified outcome).
+ * requests (held-intermediate cancellations restore at least their released
+ * amount), `in_flight` delegated by landed open requests, and `unresolved` for
+ * requests that may or may not hold theirs (not yet landed, or closed with no
+ * identified outcome).
+ * Retained amounts follow lifecycle order, never go negative, and never count
+ * repeated held-intermediate cancellations as additional backing.
  */
 export interface ReconcilableRedemptionIntermediate {
   mint: string;
