@@ -71,23 +71,75 @@ vi.mock("./earn-catalogue-sync", async (importOriginal) => ({
   runEarnCatalogueSyncIfDue: vi.fn(async () => "synced" as const),
 }));
 
-vi.mock("./approved-wallet-operations", () => ({
-  APPROVED_WALLET_OPERATIONS_CRON: "* * * * *",
+// Every wrapper below is spread from its real module so the *_CRON constants and
+// monitor slugs the runner registers are the real exported values — redefining
+// them inline would make the schedule-value assertions below echo the mocks
+// instead of the real schedules. Only each wrapper's heavy job dependency (the
+// Solana/Redis/custody service it fronted) is stubbed out, keeping the module
+// graph light: loading those job modules for real fails to resolve
+// (@solana/mosaic-sdk ships a directory import Node ESM rejects) and poisons
+// the module graph for any test file sharing the pool.
+vi.mock("@/services/policy/approved-operation-replay", () => ({
+  recoverApprovedWalletOperations: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/reconcile-earn-vault-movements", () => ({
+  reconcileEarnVaultMovements: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/reconcile-dvp-trades", () => ({
+  reconcileDvpTrades: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/detect-orphaned-earn-split-swaps", () => ({
+  detectOrphanedEarnSplitSwaps: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/collect-recurring-payments", () => ({
+  collectDueRecurringPayments: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/track-pending-deposits", () => ({
+  trackPendingDeposits: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/track-pending-withdrawals", () => ({
+  trackPendingWithdrawals: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/reconcile-revoked-api-key-cache", () => ({
+  reconcileRevokedApiKeyCache: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/poll-rings-indexing", () => ({
+  pollRingsIndexing: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/retire-orphaned-secrets", () => ({
+  retireOrphanedSecrets: vi.fn(),
+}));
+
+vi.mock("@/services/jobs/cleanup-provider-credential-secrets", () => ({
+  cleanupRetiredProviderCredentialSecrets: vi.fn(),
+}));
+
+vi.mock("./approved-wallet-operations", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./approved-wallet-operations")>()),
   runApprovedWalletOperationRecovery: vi.fn(),
 }));
 
-vi.mock("./earn-vault-movements", () => ({
-  EARN_VAULT_MOVEMENTS_CRON: "* * * * *",
+vi.mock("./earn-vault-movements", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./earn-vault-movements")>()),
   runEarnVaultMovementsReconciliation: vi.fn(),
 }));
 
-vi.mock("./dvp-trades", () => ({
-  DVP_TRADES_CRON: "* * * * *",
+vi.mock("./dvp-trades", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./dvp-trades")>()),
   runDvpTradeReconciliation: vi.fn(),
 }));
 
-vi.mock("./earn-split-swaps", () => ({
-  EARN_SPLIT_SWAPS_CRON: "* * * * *",
+vi.mock("./earn-split-swaps", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./earn-split-swaps")>()),
   runEarnSplitSwapDetection: vi.fn(),
 }));
 
@@ -99,54 +151,42 @@ vi.mock("./pending-transfers", async (importOriginal) => {
   };
 });
 
-vi.mock("./recurring-payments", () => {
-  return {
-    RECURRING_PAYMENTS_COLLECTION_CRON: "*/5 * * * *",
-    runRecurringPaymentsCollection: vi.fn(),
-  };
-});
+vi.mock("./recurring-payments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./recurring-payments")>()),
+  runRecurringPaymentsCollection: vi.fn(),
+}));
 
-// The private-channels reconcilers pull in heavy Solana modules; mock the wrappers so
-// runner.ts loads without them (they're feature-flag gated, off in most tests).
-// Unmocked they fail to resolve (@solana/mosaic-sdk ships a directory import Node ESM
-// rejects), which also poisons the module graph for any test file sharing the pool.
-vi.mock("./pending-deposits", () => ({
-  PENDING_DEPOSITS_CRON: "* * * * *",
-  PENDING_DEPOSITS_MONITOR: "sdp-api-track-pending-deposits",
+vi.mock("./pending-deposits", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pending-deposits")>()),
   runPendingDepositsReconciliation: vi.fn(),
 }));
 
-vi.mock("./pending-withdrawals", () => ({
-  PENDING_WITHDRAWALS_CRON: "* * * * *",
-  PENDING_WITHDRAWALS_MONITOR: "sdp-api-track-pending-withdrawals",
+vi.mock("./pending-withdrawals", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./pending-withdrawals")>()),
   runPendingWithdrawalsReconciliation: vi.fn(),
 }));
 
-// Pulls the KV store set (and through it the Redis client); mocked so runner.ts
-// loads without them, same as the reconcilers above.
-vi.mock("./revoked-api-key-cache", () => ({
-  REVOKED_API_KEY_CACHE_CRON: "* * * * *",
+vi.mock("./revoked-api-key-cache", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./revoked-api-key-cache")>()),
   runRevokedApiKeyCacheReconciliation: vi.fn(),
 }));
 
 // The rings poll pulls the rings service and through it the Solana signer stack;
-// mocked like the other wrappers. Registered unconditionally (the job itself
-// early-returns unless the rings flag and the http adapter are set), so it is
-// part of every schedule count below.
-vi.mock("./rings-indexing", () => ({
-  RINGS_INDEXING_CRON: "* * * * *",
+// stubbed like the other job dependencies above. Registered unconditionally (the
+// job itself early-returns unless the rings flag and the http adapter are set),
+// so it is part of every schedule count below.
+vi.mock("./rings-indexing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./rings-indexing")>()),
   runRingsIndexingPoll: vi.fn(),
 }));
 
-// Pulls in the credential secret store (and through it the custody cipher); mocked for
-// the same reason as the wrappers above.
-vi.mock("./secret-retirements", () => ({
-  SECRET_RETIREMENTS_CRON: "*/5 * * * *",
+vi.mock("./secret-retirements", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./secret-retirements")>()),
   runSecretRetirements: vi.fn(),
 }));
 
-vi.mock("./provider-credential-secret-cleanup", () => ({
-  PROVIDER_CREDENTIAL_SECRET_CLEANUP_CRON: "*/5 * * * *",
+vi.mock("./provider-credential-secret-cleanup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./provider-credential-secret-cleanup")>()),
   runProviderCredentialSecretCleanup: vi.fn(),
 }));
 
