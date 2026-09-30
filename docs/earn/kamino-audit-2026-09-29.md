@@ -41,7 +41,7 @@ view ignore legacy guesses. `totalDeposited` contains only observed amounts;
 `earned` is withheld with `deposits_not_valued` while relevant deposits remain
 unvalued. Exposure admission can conservatively retain the requested maximum.
 
-Migration 0119 is additive. It adds provenance and a repair index without
+Migration 0120 is additive. It adds provenance and a repair index without
 rewriting old rows, allowing the previous revision to remain schema-compatible.
 Repair updates historical amounts only when finalized chain evidence exists.
 Tests exercise the actual migration with old rows, old-revision projections,

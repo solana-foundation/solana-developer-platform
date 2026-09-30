@@ -434,7 +434,7 @@ describe("Unified earn movement ledger (postgres)", () => {
         settledAt: observedAt,
       });
       const migration = readFileSync(
-        path.join(__dirname, "../migrations/postgres/0119_earn_kamino_deposit_receipts.sql"),
+        path.join(__dirname, "../migrations/postgres/0120_earn_kamino_deposit_receipts.sql"),
         "utf8"
       );
       await getDb(env).transaction(async (tx) => {

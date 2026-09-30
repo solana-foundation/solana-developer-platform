@@ -97,6 +97,13 @@ never treats the SDK preview in `expectedRequest` as settlement. Both
 capabilities are reported independently, and SDP never silently substitutes one
 for the other.
 
+Durable single-request and open-request reads use `finalized` commitment.
+Reconciliation preserves their nonce, quote, and timing as landed terms, so a
+confirmed fork must not establish those facts. Previews and transaction
+builders continue to use `confirmed` commitment. A missing finalized request
+is not proof of payout or cancellation; the API requires a matching finalized
+lifecycle event.
+
 ## Slippage protection is never invented
 
 `minSharesOut` is **required** on this client, unlike Kamino's, where it is

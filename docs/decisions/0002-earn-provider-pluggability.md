@@ -1353,7 +1353,7 @@ than its requested amount. Finalization now observes the deposit's token CPI
 transfers and minted shares, bound to the recorded signature, owner, vault,
 mints and cluster. A preceding swap's credit is excluded. Missing or unfamiliar
 receipts stay unknown and are retried, including historical deposits.
-Migration 0119 adds provenance without rewriting existing rows. Legacy amount
+Migration 0120 adds provenance without rewriting existing rows. Legacy amount
 projections are ignored by movement reads, earnings and transaction history
 until receipt repair replaces them. `earned` is withheld with
 `deposits_not_valued` while a held position has an unvalued deposit.

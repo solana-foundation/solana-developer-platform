@@ -421,7 +421,7 @@ const REQUEST_SOURCES: Record<
   readonly EarnVaultWithdrawalRequestStatus[]
 > = {
   creating: [],
-  pending: ["creating", "pending", "cancelling", "closed_or_unknown"],
+  pending: ["creating", "pending", "closed_or_unknown"],
   fulfillable: ["creating", "pending", "fulfillable", "closed_or_unknown"],
   // A synchronous cancel eligibility read may be the first observer after a
   // finalized request transaction. Permit it to close the short `creating`
@@ -431,7 +431,6 @@ const REQUEST_SOURCES: Record<
     "pending",
     "fulfillable",
     "expired_cancelable",
-    "cancelling",
     "closed_or_unknown",
   ],
   cancelling: ["expired_cancelable", "cancelling"],
@@ -459,7 +458,7 @@ const REQUEST_SOURCES: Record<
     "cancelling",
     "closed_or_unknown",
   ],
-  failed: ["creating"],
+  failed: ["creating", "closed_or_unknown"],
 };
 
 async function findRequestByClientRequestId(
@@ -595,9 +594,8 @@ async function promoteRequestAddressLease(
  * earn_movements row, in the same transaction that moved the request to
  * `fulfilled`. Mirrors the read-side projection field for field — including
  * `created_at` = settlement time — so the ledger row and the synthetic
- * fallback for pre-persistence history render identically. Replaying the same
- * fulfillment (same request, same closing signature) resolves to the same
- * primary key and inserts nothing.
+ * fallback for pre-persistence history render identically. The request owns
+ * payout uniqueness: a solver transaction can fulfill several requests.
  *
  * `token_amount_settled` guards zero payouts to NULL: the movement CHECK (and
  * 0103's semantics) treat zero as "payout not observed", never a stated fact.
@@ -625,7 +623,7 @@ async function recordFulfilledQueueMovement(
          denomination, amount_requested, amount_settled, token_amount_settled,
          custody_wallet_id, owner_address, vault_address, source_address, destination_address,
          provider_reference, signature,
-         request_id, idempotency_fingerprint, provider_data,
+         request_id, idempotency_fingerprint, provider_data, withdrawal_request_id,
          created_by, initiated_by_key_id,
          creates_share_account, share_ata_rent_funder, unknown_signature_observed_at,
          created_at, updated_at
@@ -636,7 +634,7 @@ async function recordFulfilledQueueMovement(
          ?, ?, ?, CASE WHEN ? ~ '[1-9]' THEN ? ELSE NULL END,
          ?, ?, ?, NULL, ?,
          ?, ?,
-         ?, ?, ?::jsonb,
+         ?, ?, ?::jsonb, ?,
          ?, ?,
          FALSE, NULL, NULL,
          ?, ?
@@ -674,6 +672,7 @@ async function recordFulfilledQueueMovement(
         requestAddress: request.request_address,
         nonce: request.nonce,
       }),
+      request.id,
       request.created_by,
       request.initiated_by_key_id,
       settledAt,
@@ -1231,6 +1230,7 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                     updated_at = sdp_iso_now()
               WHERE id = ? AND organization_id = ?
                 AND status = ANY (?::text[])
+                AND (? <> 'failed' OR (nonce IS NULL AND creation_timestamp IS NULL))
               RETURNING *`
           )
           .bind(
@@ -1245,7 +1245,10 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             input.lastIndexError ?? null,
             action.withdrawal_request_id,
             input.organizationId,
-            [...REQUEST_SOURCES[requestStatus]]
+            action.action === "cancel"
+              ? [...REQUEST_SOURCES[requestStatus], "cancelling"]
+              : [...REQUEST_SOURCES[requestStatus]],
+            requestStatus
           )
           .first<Record<string, unknown>>();
         if (!requestRow) {
@@ -1339,6 +1342,13 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
                   END,
                   updated_at = sdp_iso_now()
             WHERE id = ? AND organization_id = ? AND status = ANY (?::text[])
+              AND (? <> 'failed' OR (nonce IS NULL AND creation_timestamp IS NULL))
+              AND (? NOT IN ('pending', 'fulfillable', 'expired_cancelable') OR NOT EXISTS (
+                SELECT 1 FROM earn_vault_withdrawal_request_actions action
+                 WHERE action.withdrawal_request_id = earn_vault_withdrawal_requests.id
+                   AND action.action = 'cancel'
+                   AND action.status IN ('requested', 'submitted', 'confirmed')
+              ))
             RETURNING *`
           )
           .bind(
@@ -1363,7 +1373,9 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
             nextCheckAt,
             input.withdrawalRequestId,
             input.organizationId,
-            [...sources]
+            [...sources],
+            input.toStatus,
+            input.toStatus
           )
           .first<Record<string, unknown>>();
         if (!row) return null;
@@ -1373,8 +1385,8 @@ export function createPostgresEarnVaultWithdrawalRequestsRepository(
           // (earn_movements), not only in this table's projection: every
           // consumer — /v1/transactions first — reads earn_movements directly.
           // Keyed by the request id and carrying the closing signature, the
-          // insert replays as a no-op; the closing signature is unique per
-          // fulfillment via idx_earn_movements_signature.
+          // insert replays as a no-op. Several requests may share one
+          // closing transaction signature.
           await recordFulfilledQueueMovement(tx, request);
         }
         if (input.toStatus === "cancelled") {
