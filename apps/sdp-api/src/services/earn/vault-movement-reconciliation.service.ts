@@ -448,6 +448,9 @@ async function reconcileExpiredMovement(
   // A history outage throws and leaves the movement recoverable.
   const transaction = await getTransaction(chain.rpc, movement.signature as Signature, "finalized");
   if (transaction) {
+    if (!transaction.executionResultKnown) {
+      throw new Error(`Earn vault movement ${movement.id} has no historical execution result`);
+    }
     if (transaction.err !== null) {
       await failMovement(ledger, movement, describeVaultSimulationError(transaction.err).message);
       return "failed";

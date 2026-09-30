@@ -1038,8 +1038,9 @@ Pinned by the "sweep telemetry" describe in
 response can be lost after landing while the durable row still says `requested`.
 The sweep therefore uses finalized block height, checks finalized transaction
 history after a null signature status, and recovers a historical receipt through
-the normal settlement path. An unavailable history read leaves the row recoverable
-and fails the tick visibly.
+the normal settlement path only when its execution result is known. Missing
+execution metadata or an unavailable history read leaves the row recoverable and
+fails the tick visibly; neither establishes success, failure, or signature absence.
 
 When neither status nor history observes the transaction past its window, a
 `requested` row moves conservatively to `submitted` through the guarded writer.
