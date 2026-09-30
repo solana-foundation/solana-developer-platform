@@ -431,14 +431,22 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           vaultAddress: z.string().nullable(),
           shareMint: z.string().nullable(),
           label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
         })
       )
       .openapi({
         description:
           "Recorded open positions whose wallet holds none of their shares. Positions with an " +
           "unsettled movement are excluded: the ledger already explains that disagreement. " +
-          "Positions with an open queued withdrawal request are listed in " +
-          "`queuedWithdrawalPositions` instead.",
+          "So is a position provably backed by the intermediate token its cancelled operator " +
+          "redemption left in place of its shares; one whose backing the report cannot decide " +
+          "carries `ambiguousBacking`. Positions with an open queued withdrawal request are " +
+          "listed in `queuedWithdrawalPositions` instead.",
       }),
     queuedWithdrawalPositions: z
       .array(
@@ -450,6 +458,12 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           vaultAddress: z.string().nullable(),
           shareMint: z.string().nullable(),
           label: z.string(),
+          ambiguousBacking: z.boolean().openapi({
+            description:
+              "True when the wallet holds intermediate tokens this position's cancelled operator " +
+              "redemption may have left, but an unresolved request or another position's " +
+              "redemption could own them, so the report cannot tell whether they back it.",
+          }),
           withdrawalRequestIds: z.array(z.string()).openapi({
             example: ["earn_vault_withdrawal_request_example"],
           }),
@@ -460,7 +474,8 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           "Recorded open positions whose wallet holds none of their shares while queued " +
           "withdrawal requests are open. The requests escrowed or burned shares ahead of the " +
           "payout, but only the shares they cover, so these positions are listed with their " +
-          "requests rather than judged.",
+          "requests rather than judged. A position provably backed by its cancelled operator " +
+          "redemption's intermediate token is omitted from both lists.",
       }),
     unreadableWallets: z
       .array(

@@ -935,7 +935,15 @@ transaction signed by the organization custody wallet or external owner.
   with an open queued withdrawal request goes to `queuedWithdrawalPositions`
   with its request ids instead: the request escrowed or burned only the shares
   it covers, and no per-claim share total exists to prove it covers them all,
-  so the claim is listed, not judged unbacked or hidden. A duplicated share mint
+  so the claim is listed, not judged unbacked or hidden. A CANCELLED operator
+  redemption never recreates the shares it burned, so the intermediate it
+  left (Hastra wYLDS) can back that claim and keep it out of both lists
+  (`redemption_intermediates`). Landed open requests own what they delegated;
+  what remains backs a sole retaining claim even if every `creating` or
+  `closed_or_unknown` request's amount is there too, and claims sharing the
+  mint only when it covers all of them. Anything short of certain is reported
+  with `ambiguousBacking: true`, never guessed; a failed request backs
+  nothing. A duplicated share mint
   attributes to the active-then-newest row and sets `ambiguousAttribution` when
   the candidates disagree on the vault identity — `share_mint` carries no
   uniqueness rule, and a re-listed vault leaves its predecessor row behind.
