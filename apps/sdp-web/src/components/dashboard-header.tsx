@@ -25,7 +25,7 @@ import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import type { DashboardCapabilities } from "@/lib/dashboard-access";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
+import { type DesignModuleFlags, isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import {
   PAYMENT_REQUEST_NEW_HREF,
   PAYMENT_REQUESTS_HREF,
@@ -1353,11 +1353,13 @@ export function getDashboardPageConfig(
       },
     };
   }
-  const walletSectionPageConfig = newDesign
+  // Every Wallets page's header follows the Wallets module, its policy and audit pages included.
+  const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
+  const walletSectionPageConfig = walletsNewDesign
     ? getWalletSectionPageConfig(pathname, t)
     : getLegacyWalletSectionPageConfig(pathname, t);
   if (walletSectionPageConfig) return walletSectionPageConfig;
-  const walletRoutePageConfig = newDesign
+  const walletRoutePageConfig = walletsNewDesign
     ? getWalletRoutePageConfig(pathname, t, policiesEnabled, paymentsEnabled)
     : getLegacyWalletRoutePageConfig(pathname, t);
   if (walletRoutePageConfig) return walletRoutePageConfig;

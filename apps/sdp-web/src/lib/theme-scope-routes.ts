@@ -5,12 +5,6 @@ import { designModuleForPath } from "@/lib/design-modules";
 // /private-channels/<instanceId>/setup. The rest of Private Channels keeps the base design.
 const PRIVACY_SETUP_ROUTE = /^\/dashboard\/integrations\/private-channels\/(?:[^/]+\/)?setup\/?$/;
 
-// The Wallets list, its create flow and one wallet's page, under both the current and the legacy
-// custody prefix. A wallet's policy editor and audit pages keep the base design.
-// `connections` and `switch` are pages of their own, not wallets.
-const WALLETS_ROUTE =
-  /^\/dashboard\/(?:wallets|custody)(?:\/(?!connections\/?$|switch\/?$)[^/]+)?\/?$/;
-
 /**
  * The design-token theme scope a dashboard route renders in. Every design module's routes
  * (lib/design-modules.ts) and the Privacy connect form are built on the 2026 refresh design;
@@ -25,9 +19,7 @@ export function themeScopeForPath(pathname: string, newDesign = true): ThemeScop
   if (!newDesign) {
     return null;
   }
-  return designModuleForPath(pathname) !== null ||
-    PRIVACY_SETUP_ROUTE.test(pathname) ||
-    WALLETS_ROUTE.test(pathname)
+  return designModuleForPath(pathname) !== null || PRIVACY_SETUP_ROUTE.test(pathname)
     ? "refresh"
     : null;
 }

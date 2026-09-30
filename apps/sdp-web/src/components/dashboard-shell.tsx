@@ -57,7 +57,7 @@ import {
   resolveDashboardLoadingRoute,
 } from "@/lib/dashboard-navigation-loading";
 import { useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { isNewDesignPage } from "@/lib/design-modules";
+import { isDesignModuleOn, isNewDesignPage } from "@/lib/design-modules";
 import { isPaymentsPath } from "@/lib/payments-demo/demo-cookie";
 import {
   isPaymentsDemoOn,
@@ -521,7 +521,7 @@ export function DashboardShell({
     policiesEnabled,
     privateChannelsEnabled,
     // Pinned wallets are a NEW DESIGN feature; the previous design's sidebar lists none.
-    walletFavorites: newDesignEnabled ? walletFavoriteItems : undefined,
+    walletFavorites: isDesignModuleOn(flags, "wallets") ? walletFavoriteItems : undefined,
     newDesign: newDesignEnabled,
     newDesignModules: flags.newDesignModules,
   });

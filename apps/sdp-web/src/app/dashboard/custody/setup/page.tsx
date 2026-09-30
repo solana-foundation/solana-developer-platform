@@ -133,4 +133,4 @@ async function CustodySetupPage({ searchParams }: CustodySetupPageProps) {
   );
 }
 
-export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage);
+export default withLegacyDesign(RedesignCurrentCustodySetupPage, CustodySetupPage, "wallets");

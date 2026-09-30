@@ -87,6 +87,7 @@ vi.mock("@/flags", () => ({
   newDesignActivity: async () => true,
   newDesignContacts: async () => true,
   newDesignPayDeposit: async () => true,
+  newDesignWallets: async () => true,
   paymentsDemoMode: async () => true,
 }));
 

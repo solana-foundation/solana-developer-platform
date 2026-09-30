@@ -453,6 +453,7 @@ export function WalletConnectionsListSkeleton() {
 export function WalletsOverviewSkeleton() {
   return (
     <DesignSwitch
+      designModule="wallets"
       current={<CurrentWalletsOverviewSkeleton />}
       legacy={<LegacyWalletsOverviewSkeleton />}
     />
@@ -462,6 +463,7 @@ export function WalletsOverviewSkeleton() {
 export function WalletsOnboardingSkeleton() {
   return (
     <DesignSwitch
+      designModule="wallets"
       current={<CurrentWalletsOnboardingSkeleton />}
       legacy={<LegacyWalletsOnboardingSkeleton />}
     />
@@ -470,13 +472,18 @@ export function WalletsOnboardingSkeleton() {
 
 export function WalletSetupSkeleton() {
   return (
-    <DesignSwitch current={<CurrentWalletSetupSkeleton />} legacy={<LegacyWalletSetupSkeleton />} />
+    <DesignSwitch
+      designModule="wallets"
+      current={<CurrentWalletSetupSkeleton />}
+      legacy={<LegacyWalletSetupSkeleton />}
+    />
   );
 }
 
 export function WalletDetailSkeleton() {
   return (
     <DesignSwitch
+      designModule="wallets"
       current={<CurrentWalletDetailSkeleton />}
       legacy={<LegacyWalletDetailSkeleton />}
     />
