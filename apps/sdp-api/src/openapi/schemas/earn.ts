@@ -474,7 +474,8 @@ export const earnVaultShareReconciliationResponse = successResponseSchema(
           "Recorded open positions whose wallet holds none of their shares while queued " +
           "withdrawal requests are open. The requests escrowed or burned shares ahead of the " +
           "payout, but only the shares they cover, so these positions are listed with their " +
-          "requests rather than judged.",
+          "requests rather than judged. A position provably backed by its cancelled operator " +
+          "redemption's intermediate token is omitted from both lists.",
       }),
     unreadableWallets: z
       .array(

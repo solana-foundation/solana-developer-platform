@@ -566,6 +566,37 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       expect(body.data.unreadableWallets).toEqual([]);
     });
 
+    it("backs a sole retaining claim on any residue of its intermediate", async () => {
+      // Presence, like the share rule: one atom of the 1.01 it retained is enough.
+      await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([]);
+    });
+
+    it("omits a backed claim with an open request from both lists", async () => {
+      // It retained 1.01 from a cancelled redemption and has 1.01 more delegated.
+      const claim = await claimAfterOperatorRedemption("cancelled");
+      await seedCustodyWithdrawalRequest({
+        position: claim.position,
+        mechanism: "operator_redemption",
+        status: "pending",
+      });
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([]);
+    });
+
     it("reports a cancelled claim once the wallet holds neither its shares nor the intermediate", async () => {
       const claim = await claimAfterOperatorRedemption("cancelled");
 

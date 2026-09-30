@@ -161,8 +161,10 @@ function sumAtoms(mint: string, amounts: readonly string[], decimals: number): b
  * Whether each intermediate mint in one wallet backs the claims whose
  * cancelled operator redemptions left it. Landed open requests own what they
  * delegated. What remains backs a sole retaining claim outright, even if every
- * unresolved request's amount is there too; claims sharing the mint need it to
- * cover all of them. Anything short of certain is `ambiguous`, never a guess.
+ * unresolved request's amount is there too: presence, like the share rule, so
+ * one atom backs it and a mostly drained claim reads as backed. Claims sharing
+ * the mint need it to cover all of them. Anything short of certain is
+ * `ambiguous`, never a guess.
  */
 function intermediateBacking(
   claims: readonly ReconcilableVaultClaim[],
