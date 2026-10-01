@@ -10,10 +10,16 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
-// Waits that reload the page poll slowly. One page load fans out to a dozen API calls, and the
-// API admits 300 dashboard requests a minute per user; the suite runs in one job, so fast
-// reload polling in one test used to get a later test's writes refused with 429.
-const RELOAD_POLL = { timeout: 180_000, intervals: [5_000, 10_000] };
+// The API admits 300 dashboard requests a minute per user, and one page load costs about 20
+// (every server render and dashboard route also reads /v1/projects). The suite runs in one
+// job, so it never polls by reloading: an operation refreshes the page itself once it lands,
+// and a wait reloads once at most, when the in-place refresh did not show the change.
+async function eventually(page: Page, reopen: () => Promise<void>, check: () => Promise<void>) {
+  await check().catch(async () => {
+    await reopen();
+    await check();
+  });
+}
 
 async function withRetry(page: Page, ready: () => Promise<void>): Promise<void> {
   await ready().catch(async () => {
@@ -190,12 +196,14 @@ test.describe
       await expect(deployDialog.getByRole("heading", { name: "Deploy token" })).toBeVisible();
       await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
-      await expect
-        .poll(async () => {
-          await gotoToken(page, fixtures.tokens.pending.id);
-          return (await page.locator('[data-token-page="overview"]').textContent()) ?? "";
-        }, RELOAD_POLL)
-        .toContain("Live onchain");
+      await eventually(
+        page,
+        () => gotoToken(page, fixtures.tokens.pending.id),
+        () =>
+          expect(page.locator('[data-token-page="overview"]')).toContainText("Live onchain", {
+            timeout: 90_000,
+          })
+      );
       await expect(page.getByRole("button", { name: "Deploy token", exact: true })).toHaveCount(0);
     });
 
@@ -212,12 +220,11 @@ test.describe
       await confirmAction(page, "Mint now");
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
-      await expect
-        .poll(async () => {
-          await gotoToken(page, fixtures.tokens.open.id, "operations");
-          return (await recordValue(page, "Issued supply").textContent()) ?? "";
-        }, RELOAD_POLL)
-        .not.toBe(before);
+      await eventually(
+        page,
+        () => gotoToken(page, fixtures.tokens.open.id, "operations"),
+        () => expect(recordValue(page, "Issued supply")).not.toHaveText(before, { timeout: 90_000 })
+      );
       await expect(recordValue(page, "Issued supply")).toContainText("10");
     });
 
@@ -257,23 +264,24 @@ test.describe
         { method: "POST", pathIncludes: `/api/dashboard/issuance/tokens/${tokenId}/allowlist` },
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
-      await expect
-        .poll(async () => {
-          await gotoToken(page, tokenId, "compliance");
-          return page.getByRole("cell", { name: address }).count();
-        }, RELOAD_POLL)
-        .toBeGreaterThan(0);
+      await eventually(
+        page,
+        () => gotoToken(page, tokenId, "compliance"),
+        () =>
+          expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
+            timeout: 90_000,
+          })
+      );
 
       await waitForActionResponse(
         page,
         { method: "DELETE", pathIncludes: `/api/dashboard/issuance/tokens/${tokenId}/allowlist/` },
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
-      await expect
-        .poll(async () => {
-          await gotoToken(page, tokenId, "compliance");
-          return page.getByRole("cell", { name: address }).count();
-        }, RELOAD_POLL)
-        .toBe(0);
+      await eventually(
+        page,
+        () => gotoToken(page, tokenId, "compliance"),
+        () => expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 })
+      );
     });
   });
