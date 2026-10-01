@@ -320,6 +320,26 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
   });
 });
 
+describe("useOnrampWizard — sandbox funding simulation", () => {
+  it("simulates the quoted transfer by its transferId alone", async () => {
+    const rendered = renderHook(() => useOnrampWizard(PROPS), { wrapper });
+    await driveToTransferStatus(rendered);
+
+    await act(async () => {
+      await rendered.result.current.simulateCurrentQuote();
+    });
+
+    const simulateCalls = fetchMock.mock.calls.filter(
+      ([input]) => String(input) === "/api/dashboard/payments/ramps/sandbox/simulate"
+    );
+    expect(simulateCalls).toHaveLength(1);
+    expect(simulateCalls[0]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(simulateCalls[0]?.[1]?.body))).toEqual({ transferId: TRANSFER_ID });
+    expect(rendered.result.current.quoteSimulationSucceeded).toBe(true);
+    expect(mocks.toastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("useOnrampWizard — a first Mural onboarding", () => {
   it("moves past the memo step while the terms are still to accept", async () => {
     const termsRequired = {
