@@ -87,11 +87,17 @@ export async function fetchCounterpartyDirectory(
   );
   const failed = rest.find((result) => !result.ok);
   if (failed) return failed;
-  return {
-    ok: true,
-    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
-    total: first.total,
-  };
+  // The pages are offsets into a list ordered by creation time alone, so a contact created in
+  // the same instant as its neighbour can land on two pages; keep the first copy.
+  const seen = new Set<string>();
+  const data = [first, ...rest]
+    .flatMap((result) => result.data)
+    .filter((counterparty) => {
+      if (seen.has(counterparty.id)) return false;
+      seen.add(counterparty.id);
+      return true;
+    });
+  return { ok: true, data: data.slice(0, cap), total: first.total };
 }
 
 /**
