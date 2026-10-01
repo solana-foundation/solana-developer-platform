@@ -72,11 +72,49 @@ function OfframpManualQuoteStep({
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every offramp stage in one component while each branch stays simple.
-export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
+function OfframpWalletStep({ wizard }: { wizard: OfframpWizard }) {
+  const t = useTranslations();
+  const { liveWallets, walletsLoading, selectedWallet, fields, setField, sourceWalletHint } =
+    wizard;
+  const walletOptions = useMemo(
+    () =>
+      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
+        disableRestricted: true,
+      }),
+    [liveWallets, t]
+  );
+
+  return (
+    <div className="space-y-4">
+      <Combobox
+        label={t("DashboardPayments.ramps.sourceWallet")}
+        value={fields.walletId || null}
+        onChange={(walletId) => setField("walletId", walletId)}
+        options={walletOptions}
+        placeholder={t("DashboardPayments.ramps.selectSourceWallet")}
+        searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
+        icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
+        isLoading={walletsLoading}
+      />
+      <p hidden={!sourceWalletHint} className="text-sm text-warning">
+        {sourceWalletHint}
+      </p>
+      {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
+    </div>
+  );
+}
+
+function RequirementsBlocker({ message }: { message: string | null }) {
+  return message ? (
+    <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
+      {message}
+    </div>
+  ) : null;
+}
+
+function OfframpWithdrawStep({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
   const {
-    currentStepId,
     enabledRampProviders,
     rampProviderAccess,
     selectedCounterparty,
@@ -85,11 +123,48 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     selectedWallet,
     selectedRampPair,
     fields,
-    quote,
-    transferStatus,
     setField,
     selectProvider,
     handlePairChange,
+    requirementsBlocker,
+  } = wizard;
+
+  if (!hasEnabledRampProvider(rampProviderAccess)) {
+    return (
+      <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
+        {t("DashboardPayments.ramps.noPayoutProviders")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <RampPairProviderSelector
+        direction="offramp"
+        enabledRampProviders={enabledRampProviders}
+        rampProviderAccess={rampProviderAccess}
+        selectedCounterparty={selectedCounterparty}
+        wallets={liveWallets}
+        walletsLoading={walletsLoading}
+        selectedWallet={selectedWallet}
+        showWallet={false}
+        selectedPair={selectedRampPair}
+        selectedProvider={fields.provider}
+        amount={fields.amount}
+        onAmountChange={(value) => setField("amount", value)}
+        onAmountBlur={() => {}}
+        onWalletChange={(walletId) => setField("walletId", walletId)}
+        onPairChange={handlePairChange}
+        onProviderSelect={selectProvider}
+      />
+      <RequirementsBlocker message={requirementsBlocker} />
+    </div>
+  );
+}
+
+function OfframpRequirementsStep({ wizard }: { wizard: OfframpWizard }) {
+  const {
+    fields,
     requirementFields,
     selectedProviderAccountId,
     payoutAccounts,
@@ -97,158 +172,27 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
-    sourceTokenMint,
-    refreshQuote,
-    quoteCreationError,
-    quoteCreationRetrying,
-    retryQuoteCreation,
     onboarding,
     isAdvancing,
     retryOnboarding,
     pendingAgreements,
     acceptedAgreements,
     toggleAgreement,
-    memoRows,
-    setMemoRows,
-    sourceWalletHint,
   } = wizard;
 
-  const walletOptions = useMemo(
-    () =>
-      walletComboboxOptions(liveWallets, t("DashboardPayments.restricted"), {
-        disableRestricted: true,
-      }),
-    [liveWallets, t]
-  );
-  const destinationCountry =
-    collectedData.destinationCountry === undefined ? "" : collectedData.destinationCountry;
-  const paymentRails = collectedData.paymentRails === undefined ? "" : collectedData.paymentRails;
-  const requirementsKey = [
-    "offramp-requirements",
-    destinationCountry,
-    paymentRails,
-    selectedProviderAccountId,
-  ].join(":");
-
-  if (currentStepId === "WALLET") {
+  if (pendingAgreements !== null) {
     return (
-      <div className="space-y-4">
-        <Combobox
-          label={t("DashboardPayments.ramps.sourceWallet")}
-          value={fields.walletId || null}
-          onChange={(walletId) => setField("walletId", walletId)}
-          options={walletOptions}
-          placeholder={t("DashboardPayments.ramps.selectSourceWallet")}
-          searchPlaceholder={t("DashboardPayments.ramps.searchWallets")}
-          icon={<WalletIcon className="size-5 shrink-0 text-tertiary" />}
-          isLoading={walletsLoading}
-        />
-        <p hidden={!sourceWalletHint} className="text-sm text-warning">
-          {sourceWalletHint}
-        </p>
-        {selectedWallet ? <WalletAssetBreakdown wallet={selectedWallet} /> : null}
-      </div>
-    );
-  }
-
-  if (currentStepId === "WITHDRAW") {
-    if (!hasEnabledRampProvider(rampProviderAccess)) {
-      return (
-        <div className="rounded-2xl border border-border-default bg-fill-subtle px-5 py-5 text-sm text-tertiary">
-          {t("DashboardPayments.ramps.noPayoutProviders")}
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-4">
-        <RampPairProviderSelector
-          direction="offramp"
-          enabledRampProviders={enabledRampProviders}
-          rampProviderAccess={rampProviderAccess}
-          selectedCounterparty={selectedCounterparty}
-          wallets={liveWallets}
-          walletsLoading={walletsLoading}
-          selectedWallet={selectedWallet}
-          showWallet={false}
-          selectedPair={selectedRampPair}
-          selectedProvider={fields.provider}
-          amount={fields.amount}
-          onAmountChange={(value) => setField("amount", value)}
-          onAmountBlur={() => {}}
-          onWalletChange={(walletId) => setField("walletId", walletId)}
-          onPairChange={handlePairChange}
-          onProviderSelect={selectProvider}
-        />
-        {requirementsBlocker ? (
-          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {requirementsBlocker}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (currentStepId === "MEMO") {
-    return <MemoStepContent rows={memoRows} onChange={setMemoRows} />;
-  }
-
-  if (currentStepId === "REQUIREMENTS") {
-    // Native fieldset[disabled] freezes every nested input, combobox trigger and
-    // account-chooser button while the advance POST is in flight, so mid-flight
-    // edits can't desync the form from what the provider was sent. A corridor
-    // blocker renders above STILL-ENABLED fields: the country select is the only
-    // way out of a blocked corridor, so it must stay interactive.
-    return pendingAgreements !== null ? (
       <BvnkAgreementConsent
         agreements={pendingAgreements}
         acceptedAgreements={acceptedAgreements}
         onToggle={toggleAgreement}
         disabled={isAdvancing}
       />
-    ) : onboarding !== null &&
-      hasOnboardingLifecycle(onboarding.provider) &&
-      isOnboardingPanelStatus(onboarding) ? (
-      <RampOnboardingPanel direction="offramp" onboarding={onboarding} onRetry={retryOnboarding} />
-    ) : (
-      <div className="space-y-4">
-        {requirementsBlocker ? (
-          <div className="rounded-2xl border border-error-border bg-error-bg px-4 py-3 text-sm text-error">
-            {requirementsBlocker}
-          </div>
-        ) : null}
-        <fieldset disabled={isAdvancing} className="min-w-0">
-          <RequirementsFields
-            key={requirementsKey}
-            provider={fields.provider}
-            fields={requirementFields}
-            values={collectedData}
-            onChange={setCollectedField}
-            payoutAccountPicker={{
-              accounts: payoutAccounts,
-              selectedProviderAccountId,
-              onSelect: selectPayoutAccount,
-            }}
-          />
-        </fieldset>
-      </div>
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && !quote && quoteCreationError) {
-    return (
-      <RampQuoteError
-        error={quoteCreationError}
-        retrying={quoteCreationRetrying}
-        onRetry={() => void retryQuoteCreation()}
-      />
     );
   }
 
   if (
-    currentStepId === "COMPLETE" &&
-    onboarding &&
-    !quote &&
+    onboarding !== null &&
     hasOnboardingLifecycle(onboarding.provider) &&
     isOnboardingPanelStatus(onboarding)
   ) {
@@ -257,11 +201,123 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  if (currentStepId === "COMPLETE" && quote && transferStatus?.status === "completed") {
+  const requirementsKey = [
+    "offramp-requirements",
+    collectedData.destinationCountry ?? "",
+    collectedData.paymentRails ?? "",
+    selectedProviderAccountId,
+  ].join(":");
+
+  // Native fieldset[disabled] freezes every nested input, combobox trigger and
+  // account-chooser button while the advance POST is in flight, so mid-flight
+  // edits can't desync the form from what the provider was sent. A corridor
+  // blocker renders above STILL-ENABLED fields: the country select is the only
+  // way out of a blocked corridor, so it must stay interactive.
+  return (
+    <div className="space-y-4">
+      <RequirementsBlocker message={requirementsBlocker} />
+      <fieldset disabled={isAdvancing} className="min-w-0">
+        <RequirementsFields
+          key={requirementsKey}
+          provider={fields.provider}
+          fields={requirementFields}
+          values={collectedData}
+          onChange={setCollectedField}
+          payoutAccountPicker={{
+            accounts: payoutAccounts,
+            selectedProviderAccountId,
+            onSelect: selectPayoutAccount,
+          }}
+        />
+      </fieldset>
+    </div>
+  );
+}
+
+function OfframpMoneygramStep({
+  wizard,
+  quote,
+}: {
+  wizard: OfframpWizard;
+  quote: Extract<NonNullable<OfframpWizard["quote"]>, { provider: "moneygram" }>;
+}) {
+  const {
+    selectedWallet,
+    quoteTransferId,
+    sourceTokenMint,
+    selectedRampPair,
+    fields,
+    refreshQuote,
+    transferStatus,
+  } = wizard;
+  if (!selectedWallet || quoteTransferId === null) {
+    return <RampQuoteSkeleton />;
+  }
+  return (
+    <div className="space-y-6">
+      <MoneygramRampWidget
+        direction="offramp"
+        quote={quote}
+        transferId={quoteTransferId}
+        sourceWalletId={selectedWallet.id}
+        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+        sourceWalletAddress={selectedWallet.publicKey}
+        sourceTokenMint={sourceTokenMint}
+        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+        cryptoAmount={fields.amount.trim()}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        onSessionExpiring={refreshQuote}
+      />
+      <div className="border-t border-border-default pt-5">
+        <RampStatusPanel direction="offramp" transfer={transferStatus} />
+      </div>
+    </div>
+  );
+}
+
+function OfframpCompleteStep({ wizard }: { wizard: OfframpWizard }) {
+  const t = useTranslations();
+  const {
+    quote,
+    transferStatus,
+    quoteCreationError,
+    quoteCreationRetrying,
+    retryQuoteCreation,
+    onboarding,
+    retryOnboarding,
+  } = wizard;
+
+  if (!quote) {
+    if (quoteCreationError) {
+      return (
+        <RampQuoteError
+          error={quoteCreationError}
+          retrying={quoteCreationRetrying}
+          onRetry={() => void retryQuoteCreation()}
+        />
+      );
+    }
+    if (
+      onboarding &&
+      hasOnboardingLifecycle(onboarding.provider) &&
+      isOnboardingPanelStatus(onboarding)
+    ) {
+      return (
+        <RampOnboardingPanel
+          direction="offramp"
+          onboarding={onboarding}
+          onRetry={retryOnboarding}
+        />
+      );
+    }
+    return <RampQuoteSkeleton />;
+  }
+
+  if (transferStatus?.status === "completed") {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
 
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
+  if (quote.deliveryMode === "hosted") {
     return (
       <MoonpayRampFrame
         title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
@@ -270,35 +326,30 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     );
   }
 
-  if (currentStepId === "COMPLETE" && quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <div className="space-y-6">
-        <MoneygramRampWidget
-          direction="offramp"
-          quote={quote}
-          transferId={wizard.quoteTransferId}
-          sourceWalletId={selectedWallet.id}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-          sourceWalletAddress={selectedWallet.publicKey}
-          sourceTokenMint={sourceTokenMint}
-          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-          cryptoAmount={fields.amount.trim()}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          onSessionExpiring={refreshQuote}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
-    );
+  if (quote.provider === "moneygram") {
+    return <OfframpMoneygramStep wizard={wizard} quote={quote} />;
   }
 
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "manual_instructions") {
+  if (quote.deliveryMode === "manual_instructions") {
     return <OfframpManualQuoteStep wizard={wizard} quote={quote} t={t} />;
   }
 
   return <RampQuoteSkeleton />;
+}
+
+export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
+  switch (wizard.currentStepId) {
+    case "WALLET":
+      return <OfframpWalletStep wizard={wizard} />;
+    case "WITHDRAW":
+      return <OfframpWithdrawStep wizard={wizard} />;
+    case "MEMO":
+      return <MemoStepContent rows={wizard.memoRows} onChange={wizard.setMemoRows} />;
+    case "REQUIREMENTS":
+      return <OfframpRequirementsStep wizard={wizard} />;
+    case "COMPLETE":
+      return <OfframpCompleteStep wizard={wizard} />;
+    default:
+      return <RampQuoteSkeleton />;
+  }
 }
