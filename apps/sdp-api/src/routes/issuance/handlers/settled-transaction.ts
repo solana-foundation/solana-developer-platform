@@ -1,4 +1,5 @@
 import type { TokenTransaction } from "@sdp/types";
+import { AppError } from "@/lib/errors";
 import { getLogger } from "@/runtime/logger";
 import {
   type AuditAction,
@@ -30,6 +31,63 @@ export function parseSettledTransactionEvidence(
   return { signature: metadata.signature, slot: Number(slot) };
 }
 
+/** The settled signature already belongs to another transaction row. */
+export class DuplicateSettlementError extends AppError {
+  constructor(message: string, signature: string) {
+    super("CONFLICT", message, {
+      signature,
+      hint: "Retry the request. Send an Idempotency-Key to deduplicate intentionally.",
+    });
+    this.name = "DuplicateSettlementError";
+  }
+}
+
+const SIGNATURE_UNIQUE_CONSTRAINT = "issuance_transactions_signature_key";
+
+function isDuplicateSettlementSignatureError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const pg = error as { code?: unknown; constraint?: unknown };
+  return pg.code === "23505" && pg.constraint === SIGNATURE_UNIQUE_CONSTRAINT;
+}
+
+/**
+ * Two concurrent identical requests can build byte-identical transactions (same
+ * blockhash, deterministic instructions, same signer) and so share one
+ * signature and one on-chain effect. Whichever row settles first owns it; this
+ * row did not execute on its own, so it must not report success or stay
+ * pending. Settle it `failed` and answer with a retryable conflict.
+ */
+async function rejectDuplicateSettlement(
+  tokenService: TokenService,
+  transaction: TokenTransaction,
+  signature: string
+): Promise<never> {
+  const message = `An identical concurrent request already settled transaction ${signature}; this request had no separate on-chain effect`;
+  getLogger().warn(
+    {
+      event: "settled_issuance_transaction_duplicate_signature",
+      transactionId: transaction.id,
+      transactionType: transaction.type,
+      signature,
+    },
+    "Settled issuance operation shares its signature with another transaction row"
+  );
+  try {
+    await tokenService.updateTransaction(transaction.id, { status: "failed", error: message });
+  } catch (error) {
+    getLogger().error(
+      {
+        event: "settled_issuance_duplicate_failure_persistence_failed",
+        transactionId: transaction.id,
+        signature,
+        error: error instanceof Error ? error.message : "Unknown error",
+      },
+      "Duplicate-signature transaction row could not be settled as failed"
+    );
+  }
+  throw new DuplicateSettlementError(message, signature);
+}
+
 async function persistSettledTransactionWithDurability(
   tokenService: TokenService,
   transaction: TokenTransaction,
@@ -48,6 +106,9 @@ async function persistSettledTransactionWithDurability(
       durable: true,
     };
   } catch (error) {
+    if (isDuplicateSettlementSignatureError(error)) {
+      return rejectDuplicateSettlement(tokenService, transaction, evidence.signature);
+    }
     getLogger().error(
       {
         event: "settled_issuance_transaction_persistence_failed",
@@ -122,13 +183,23 @@ export async function persistSettledTransactionThenOutcome(options: {
   evidence: SettledTransactionEvidence;
   params?: Record<string, unknown>;
   persistOutcome: () => Promise<boolean>;
+  /** Closes the audit intent when the settlement turns out to be a duplicate. */
+  persistDuplicateOutcome?: (error: DuplicateSettlementError) => Promise<unknown>;
 }): Promise<TokenTransaction> {
-  const settled = await persistSettledTransactionWithDurability(
-    options.tokenService,
-    options.transaction,
-    options.evidence,
-    options.params
-  );
+  let settled: Awaited<ReturnType<typeof persistSettledTransactionWithDurability>>;
+  try {
+    settled = await persistSettledTransactionWithDurability(
+      options.tokenService,
+      options.transaction,
+      options.evidence,
+      options.params
+    );
+  } catch (error) {
+    if (error instanceof DuplicateSettlementError && options.persistDuplicateOutcome) {
+      await options.persistDuplicateOutcome(error);
+    }
+    throw error;
+  }
   const outcomePersisted = await options.persistOutcome();
   if (!settled.durable && !outcomePersisted) {
     throw new AuditPersistenceError({

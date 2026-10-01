@@ -481,6 +481,11 @@ async function runConfidentialOperation(
             ...planFields,
           },
         }),
+      persistDuplicateOutcome: (duplicate) =>
+        auditService.completeCritical(c, auditIntent, {
+          status: "failure",
+          metadata: { error: duplicate.message, signature: settlement.signature },
+        }),
     });
 
     return updatedTx;

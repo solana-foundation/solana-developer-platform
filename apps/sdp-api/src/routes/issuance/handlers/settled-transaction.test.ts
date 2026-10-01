@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuditService } from "@/services/audit.service";
 import type { TokenService } from "@/services/token.service";
 import {
+  DuplicateSettlementError,
   parseSettledTransactionEvidence,
   persistSettledTransactionThenOutcome,
   recoverSettledTransactionReplay,
@@ -187,6 +188,106 @@ describe("settled issuance transaction recovery", () => {
       })
     ).rejects.toMatchObject({
       name: "AuditPersistenceError",
+    });
+  });
+
+  describe("a signature already settled by another row", () => {
+    const duplicateSignatureError = Object.assign(
+      new Error(
+        'duplicate key value violates unique constraint "issuance_transactions_signature_key"'
+      ),
+      { code: "23505", constraint: "issuance_transactions_signature_key" }
+    );
+
+    it("settles the row failed, closes the audit as failure, and answers 409", async () => {
+      const updateTransaction = vi
+        .fn()
+        .mockRejectedValueOnce(duplicateSignatureError)
+        .mockResolvedValue({ ...pendingTransaction, status: "failed" });
+      const persistOutcome = vi.fn().mockResolvedValue(true);
+      const persistDuplicateOutcome = vi.fn().mockResolvedValue(true);
+
+      const settlement = persistSettledTransactionThenOutcome({
+        tokenService: { updateTransaction } as unknown as TokenService,
+        transaction: pendingTransaction,
+        evidence: { signature: "sig_shared", slot: 123 },
+        persistOutcome,
+        persistDuplicateOutcome,
+      });
+
+      await expect(settlement).rejects.toBeInstanceOf(DuplicateSettlementError);
+      await expect(settlement).rejects.toMatchObject({
+        code: "CONFLICT",
+        statusCode: 409,
+        details: { signature: "sig_shared" },
+      });
+      expect(updateTransaction).toHaveBeenCalledTimes(2);
+      expect(updateTransaction).toHaveBeenLastCalledWith(pendingTransaction.id, {
+        status: "failed",
+        error: expect.stringContaining("sig_shared"),
+      });
+      expect(persistOutcome).not.toHaveBeenCalled();
+      expect(persistDuplicateOutcome).toHaveBeenCalledWith(expect.any(DuplicateSettlementError));
+    });
+
+    it("still answers 409 when the failed status cannot be written", async () => {
+      await expect(
+        persistSettledTransactionThenOutcome({
+          tokenService: {
+            updateTransaction: vi
+              .fn()
+              .mockRejectedValueOnce(duplicateSignatureError)
+              .mockRejectedValue(new Error("database unavailable")),
+          } as unknown as TokenService,
+          transaction: pendingTransaction,
+          evidence: { signature: "sig_shared", slot: 123 },
+          persistOutcome: vi.fn().mockResolvedValue(true),
+        })
+      ).rejects.toBeInstanceOf(DuplicateSettlementError);
+    });
+
+    it("rejects a replay whose audited signature belongs to another row", async () => {
+      const updateTransaction = vi
+        .fn()
+        .mockRejectedValueOnce(duplicateSignatureError)
+        .mockResolvedValue({ ...pendingTransaction, status: "failed" });
+
+      await expect(
+        recoverSettledTransactionReplay({
+          auditService: {
+            findCriticalOutcome: vi.fn().mockResolvedValue({
+              status: "success",
+              metadata: { signature: "sig_shared", slot: "123" },
+            }),
+          } as unknown as AuditService,
+          tokenService: { updateTransaction } as unknown as TokenService,
+          transaction: pendingTransaction,
+          action: "burn",
+        })
+      ).rejects.toBeInstanceOf(DuplicateSettlementError);
+      expect(updateTransaction).toHaveBeenLastCalledWith(pendingTransaction.id, {
+        status: "failed",
+        error: expect.stringContaining("sig_shared"),
+      });
+    });
+
+    it("keeps other unique violations on the durable-evidence fallback", async () => {
+      const persistOutcome = vi.fn().mockResolvedValue(true);
+      const settled = await persistSettledTransactionThenOutcome({
+        tokenService: {
+          updateTransaction: vi
+            .fn()
+            .mockRejectedValue(
+              Object.assign(new Error("dup"), { code: "23505", constraint: "other" })
+            ),
+        } as unknown as TokenService,
+        transaction: pendingTransaction,
+        evidence: { signature: "sig_settled", slot: 123 },
+        persistOutcome,
+      });
+
+      expect(persistOutcome).toHaveBeenCalledOnce();
+      expect(settled.status).toBe("confirmed");
     });
   });
 });
