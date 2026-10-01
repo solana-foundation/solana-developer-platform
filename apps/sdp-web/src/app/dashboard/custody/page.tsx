@@ -10,7 +10,7 @@ import {
   fetchActiveApiKeys,
   resolvePlaygroundApiBaseUrl,
 } from "@/app/dashboard/playground-api-data";
-import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons.redesign";
+import { WalletsOverviewSkeleton } from "@/app/dashboard/wallets/wallet-route-skeletons";
 import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { getAuthEntryPath } from "@/lib/auth-entry";
@@ -62,6 +62,7 @@ async function getCustodyWallets(
   return json.data?.wallets ?? [];
 }
 
+// react-doctor-disable-next-line no-high-complexity-react-function -- main's page, unchanged; this change only moves its default export to the design switch
 async function CustodyPage() {
   const [t, { userId, orgId }] = await Promise.all([getTranslations(), auth()]);
   if (!userId) {
