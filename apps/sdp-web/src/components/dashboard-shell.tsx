@@ -37,7 +37,7 @@ import { LanguagePicker } from "@/components/language-picker";
 import { NetworkDebugPanel } from "@/components/network-debug-panel";
 import { SentryUserContext } from "@/components/sentry-user-context";
 import { SidebarUserMenu } from "@/components/sidebar-user-menu";
-import { themeScopeAttributes } from "@/components/theme-scope";
+import { type ThemeScope, themeScopeAttributes } from "@/components/theme-scope";
 import { ThemeScopeProvider } from "@/components/theme-scope-provider";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
@@ -51,6 +51,13 @@ import { useDashboardUrlState } from "@/lib/dashboard-url-state";
 import { isNewDesignPage } from "@/lib/design-modules";
 import { themeScopeForPath } from "@/lib/theme-scope-routes";
 import { cn } from "@/lib/utils";
+
+// On NEW DESIGN the sidebar is the refresh design's on every route, whatever the page beside it
+// is built on: its container carries the scope, and its menus re-stamp it through the provider
+// when they portal out. The previous design's sidebar takes the page's scope.
+function sidebarThemeScope(newDesign: boolean, pageScope: ThemeScope | null): ThemeScope | null {
+  return newDesign ? "refresh" : pageScope;
+}
 
 // The refresh sidebar is the design's: 40px rows touching, 6px corners, a 20px icon then 16px to
 // the 15px medium label, an ink wash for the active row and a lighter one on hover, no border.
@@ -438,8 +445,9 @@ export function DashboardShell({
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname, newDesignPage);
   const isRefresh = themeScope === "refresh";
-  // The design's sidebar is 272px (17rem) including its rule; the base shell keeps its 296.
-  const sidebarExpandedWidth = isRefresh ? 272 : 296;
+  // The design's sidebar is 272px (17rem) including its rule; the previous design's is 296.
+  const sidebarExpandedWidth = newDesignEnabled ? 272 : 296;
+  const sidebarScope = sidebarThemeScope(newDesignEnabled, themeScope);
   const sidebarCollapsedWidth = 64;
   const pageConfig = getDashboardPageConfig(
     pathname,
@@ -641,8 +649,9 @@ export function DashboardShell({
   }
 
   return (
-    // On a refresh route the whole screen carries the scope, sidebar included, so the shell
-    // renders in the design's papers and face. Other routes keep the base shell.
+    // On a refresh route the whole screen carries the scope, so its page renders in the design's
+    // component treatments and layout. Other routes keep the base page; the sidebar carries the
+    // scope itself on every route.
     <main
       {...themeScopeAttributes(themeScope)}
       data-sdp-new-design={newDesignEnabled ? "" : undefined}
@@ -666,25 +675,31 @@ export function DashboardShell({
             ].join(" ")}
           >
             <aside
+              {...themeScopeAttributes(sidebarScope)}
               style={{
                 width: isSidebarOpen ? sidebarExpandedWidth : sidebarCollapsedWidth,
               }}
-              className="relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between refresh:border-r refresh:border-border-default"
+              className={cn(
+                "relative z-10 hidden bg-[var(--sdp-shell-bg)] md:sticky md:top-0 md:flex md:h-screen md:flex-col md:justify-between",
+                newDesignEnabled && "border-r border-border-default"
+              )}
             >
-              <DashboardSidebarContent
-                canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                navSections={navSections}
-                pathname={pathname}
-                onNavigate={undefined}
-                onClose={() => setSidebarOpen(false)}
-                isCollapsed={!isSidebarOpen}
-                variant="desktop"
-                showQuickStart={!isWorkspaceSwitching}
-                onOrganizationSwitchingChange={setOrganizationSwitching}
-                openSubnavs={openSubnavs}
-                onSubnavToggle={toggleSubnav}
-                onSubnavOpen={openSubnav}
-              />
+              <ThemeScopeProvider scope={sidebarScope}>
+                <DashboardSidebarContent
+                  canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                  navSections={navSections}
+                  pathname={pathname}
+                  onNavigate={undefined}
+                  onClose={() => setSidebarOpen(false)}
+                  isCollapsed={!isSidebarOpen}
+                  variant="desktop"
+                  showQuickStart={!isWorkspaceSwitching}
+                  onOrganizationSwitchingChange={setOrganizationSwitching}
+                  openSubnavs={openSubnavs}
+                  onSubnavToggle={toggleSubnav}
+                  onSubnavOpen={openSubnav}
+                />
+              </ThemeScopeProvider>
               <button
                 type="button"
                 onClick={() => setSidebarOpen(!isSidebarOpen)}
@@ -740,32 +755,44 @@ export function DashboardShell({
                   className="absolute inset-0 bg-primary/30"
                   onClick={() => setMobileSidebarOpen(false)}
                 />
-                <div className="relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)] shadow-lg refresh:shadow-none">
-                  <DashboardSidebarContent
-                    canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
-                    navSections={navSections}
-                    pathname={pathname}
-                    onNavigate={() => setMobileSidebarOpen(false)}
-                    onClose={() => setMobileSidebarOpen(false)}
-                    isCollapsed={false}
-                    variant="mobile"
-                    showQuickStart={!isWorkspaceSwitching}
-                    onOrganizationSwitchingChange={setOrganizationSwitching}
-                    openSubnavs={openSubnavs}
-                    onSubnavToggle={toggleSubnav}
-                    onSubnavOpen={openSubnav}
-                  />
+                <div
+                  {...themeScopeAttributes(sidebarScope)}
+                  className={cn(
+                    "relative z-10 flex h-full w-72 max-w-[85vw] flex-col justify-between border-r border-border-default bg-[var(--sdp-shell-bg)]",
+                    !newDesignEnabled && "shadow-lg"
+                  )}
+                >
+                  <ThemeScopeProvider scope={sidebarScope}>
+                    <DashboardSidebarContent
+                      canManageOrgSettings={dashboardAccess.capabilities.canManageOrgSettings}
+                      navSections={navSections}
+                      pathname={pathname}
+                      onNavigate={() => setMobileSidebarOpen(false)}
+                      onClose={() => setMobileSidebarOpen(false)}
+                      isCollapsed={false}
+                      variant="mobile"
+                      showQuickStart={!isWorkspaceSwitching}
+                      onOrganizationSwitchingChange={setOrganizationSwitching}
+                      openSubnavs={openSubnavs}
+                      onSubnavToggle={toggleSubnav}
+                      onSubnavOpen={openSubnav}
+                    />
+                  </ThemeScopeProvider>
                 </div>
               </div>
             ) : null}
 
-            {/* The refresh page is flat: no card, no radius; the sidebar's rule separates it. The
-              `page` group lets the header react to the content (an empty state hiding the
+            {/* On NEW DESIGN the page is flat on every route: no card, no radius; the sidebar's rule
+              separates it. The previous design keeps the rounded card beside the sidebar.
+              The `page` group lets the header react to the content (an empty state hiding the
               header's action). On a refresh route it is also the work area's size container:
               the scroll panel reads its width (`100cqw`) to span it edge to edge. */}
             <section
               className={cn(
-                "group/page relative min-w-0 rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80 refresh:rounded-none refresh:border-0 refresh:bg-surface-raised",
+                "group/page relative min-w-0",
+                newDesignEnabled
+                  ? "bg-surface-raised"
+                  : "rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
                 isRefresh && "@container",
                 // The locked layout clears the phone's bottom bar; a refresh route has none, so it
                 // keeps only the home indicator's inset.

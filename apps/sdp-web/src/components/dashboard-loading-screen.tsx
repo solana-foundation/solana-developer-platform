@@ -45,6 +45,7 @@ export function DashboardLoadingScreen({
       {...props}
       contentWidthClass={config.contentWidthClass ?? "max-w-5xl"}
       hideTitle={config.hideTitle}
+      newDesign={flags?.newDesign ?? false}
     >
       <PageLoading assetProfilesEnabled={flags?.assetProfiles} />
     </FullscreenLoadingIndicator>
