@@ -11,8 +11,8 @@
        documented side by side.
     3. Refresh scope: [data-sdp-theme="refresh"] re-points the base names at the refresh values
        and switches the font. Everything inside a refresh surface, shared components included,
-       renders in the new design without per-component overrides. Payments and Privacy opt in
-       today; moving the attribute to <html> adopts it app-wide.
+       renders in the new design without per-component overrides. On <html> it adopts the
+       design app-wide. Nothing sets the attribute yet.
 
   Scale, radius and control tokens are theme-independent. theme.css maps all of this onto
   Tailwind utilities, and index.ts is the typed catalog a Storybook reads.
@@ -156,9 +156,9 @@
   --critical-wash: color-mix(in oklab, var(--critical) 8%, transparent);
   --critical-rule: color-mix(in oklab, var(--critical) 35%, transparent);
 
-  /* The design's faces. The app loads the files in src/assets/fonts with next/font and
-     exposes them as --font-season-sans and --font-geist-mono; without those, the installed
-     family name is tried before the system stack. */
+  /* The design's faces. An app loads the files in src/assets/fonts and exposes them as
+     --font-season-sans and --font-geist-mono; without those, the installed family name is
+     tried before the system stack. */
   --font-brand-sans:
     var(--font-season-sans, "Season Sans"), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-brand-mono:
@@ -205,7 +205,11 @@
 
 /* ── 3. Refresh scope ────────────────────────────────────────────────────── */
 
-[data-sdp-theme="refresh"] {
+/* The :root form is for the attribute on <html>, which also carries .dark: it matches the
+   (0,2,0) of :root.dark above, so this later block wins there too. The bare attribute alone
+   would lose to :root.dark and leave app-wide dark refresh on the base palette. */
+[data-sdp-theme="refresh"],
+:root[data-sdp-theme="refresh"] {
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);
