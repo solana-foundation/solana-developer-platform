@@ -14,7 +14,7 @@ type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" 
 // (every server render and dashboard route also reads /v1/projects). The suite runs in one
 // job, so it never polls by reloading: an operation refreshes the page itself once it lands,
 // and a wait reloads once at most, when the in-place refresh did not show the change.
-async function eventually(page: Page, reopen: () => Promise<void>, check: () => Promise<void>) {
+async function eventually(reopen: () => Promise<void>, check: () => Promise<void>) {
   await check().catch(async () => {
     await reopen();
     await check();
@@ -197,7 +197,6 @@ test.describe
       await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await eventually(
-        page,
         () => gotoToken(page, fixtures.tokens.pending.id),
         () =>
           expect(page.locator('[data-token-page="overview"]')).toContainText("Live onchain", {
@@ -221,7 +220,6 @@ test.describe
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
       await eventually(
-        page,
         () => gotoToken(page, fixtures.tokens.open.id, "operations"),
         () => expect(recordValue(page, "Issued supply")).not.toHaveText(before, { timeout: 90_000 })
       );
@@ -265,7 +263,6 @@ test.describe
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
       await eventually(
-        page,
         () => gotoToken(page, tokenId, "compliance"),
         () =>
           expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
@@ -279,7 +276,6 @@ test.describe
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
       await eventually(
-        page,
         () => gotoToken(page, tokenId, "compliance"),
         () => expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 })
       );
