@@ -110,9 +110,15 @@ describe("groupProviderAccounts", () => {
   });
 });
 
-const accountState = vi.hoisted(() => ({ accounts: [] as CounterpartyProviderAccount[] }));
+const accountState = vi.hoisted(() => ({
+  accounts: [] as CounterpartyProviderAccount[],
+  error: undefined as Error | undefined,
+}));
 vi.mock("./use-counterparty-provider-accounts", () => ({
-  useCounterpartyProviderAccounts: () => ({ data: accountState.accounts, error: undefined }),
+  useCounterpartyProviderAccounts: () => ({
+    data: accountState.accounts,
+    error: accountState.error,
+  }),
 }));
 describe("counterparty provider accounts table", () => {
   let environment: EnvironmentReturn;
@@ -125,6 +131,7 @@ describe("counterparty provider accounts table", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   });
   afterEach(async () => {
+    accountState.error = undefined;
     if (root !== undefined) await act(async () => root.unmount());
     container?.remove();
   });
@@ -280,6 +287,46 @@ describe("counterparty provider accounts table", () => {
     expect(
       container.querySelectorAll('tr[data-provider-account-kind="payout_account"]')
     ).toHaveLength(1);
+  });
+
+  it("keeps the loaded customer details when a later refresh fails, and says so", async () => {
+    // SWR keeps the last good read in `data` and sets `error` when a revalidation fails.
+    accountState.error = new Error("Provider read timed out");
+    await renderAccounts([walletAccount({ id: "cpa_wallet" })]);
+
+    const customerRow = container.querySelector('tr[data-provider-account-kind="customer_link"]');
+    expect(customerRow?.textContent).toContain("US");
+    expect(
+      customerRow?.querySelector(
+        'button[aria-label="DashboardCustody.copy dashboardpayments.counterparty.customeridlabel"]'
+      )
+    ).not.toBeNull();
+    expect(
+      container.querySelectorAll('tr[data-provider-account-kind="funding_wallet"]')
+    ).toHaveLength(1);
+    expect(container.textContent).toContain("Test Wallet Agreement");
+    expect(container.textContent).toContain(
+      "DashboardPayments.counterparty.detail.providerAccountsRefreshFailed"
+    );
+    expect(container.textContent).not.toContain(
+      "DashboardPayments.counterparty.detail.providerAccountsFailed"
+    );
+  });
+
+  it("reports a failed first read rather than an empty list", async () => {
+    accountState.error = new Error("Provider read timed out");
+    await renderAccounts([]);
+    const text = container.textContent ?? "";
+    expect(text).toContain("DashboardPayments.counterparty.detail.providerAccountsFailed");
+    expect(text).not.toContain("DashboardPayments.counterparty.detail.noProviderAccounts");
+  });
+
+  it("keeps the customer details when a funding wallet has no currency yet", async () => {
+    // The wallet row renders a dash for the missing currency; the customer row must survive it.
+    await renderAccounts([walletAccount({ id: "cpa_wallet", fiatCurrency: null })]);
+    const customerRow = container.querySelector('tr[data-provider-account-kind="customer_link"]');
+    expect(customerRow?.textContent).toContain("US");
+    expect(container.textContent).toContain("Test Wallet Agreement");
   });
 
   function payout(id: string, amount: string): PaymentTransferSummary {
