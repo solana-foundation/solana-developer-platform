@@ -10,8 +10,8 @@ import {
 /**
  * The wallet's latest `limit` activity rows (payments and issuance, newest first), read again
  * every 20s while the page is open. The default window is shared by the Overview's recent rows
- * and the Activity tab, so switching tabs reads the same cache; a wider window the Activity tab
- * asks for keeps showing the rows it already has while the older ones load.
+ * and the Activity tab, so switching tabs reads the same cache; each wider window the Activity
+ * tab asks for has a key of its own (see `useWalletActivityWindow`).
  */
 export function useWalletActivity(walletId: string, limit: number = WALLET_ACTIVITY_LIMIT) {
   const key =
@@ -19,8 +19,6 @@ export function useWalletActivity(walletId: string, limit: number = WALLET_ACTIV
       ? custodyQueryKeys.walletActivity({ walletId })
       : ([...custodyQueryKeys.walletActivity({ walletId }), limit] as const);
   return useSWR(key, () => fetchWalletActivity(walletId, { limit }), {
-    // Only a widened window holds the narrower one's rows; the default never carries rows over.
-    keepPreviousData: limit !== WALLET_ACTIVITY_LIMIT,
     refreshInterval: 20_000,
     refreshWhenHidden: false,
   });

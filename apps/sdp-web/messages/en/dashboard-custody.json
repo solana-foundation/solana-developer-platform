@@ -41,6 +41,8 @@
     "walletClearFilters": "Clear the search",
     "walletActivityLatestOnly": "Search and filters cover the latest {count} transactions loaded here. The full history is in Transactions.",
     "walletActivityLoadOlder": "Load older activity",
+    "walletActivityLoadOlderFailed": "Older activity didn't load. The latest {count} transactions are still shown.",
+    "walletActivityRetryLoadOlder": "Try loading older activity again",
     "walletActivityOpenTransactions": "Open Transactions",
     "walletPolicyStateNone": "No policy",
     "walletPolicyStateNoneBody": "Every operation this wallet is asked to sign goes through. A policy sets a cap, names the addresses that may receive, and says which operations wait for a person.",
