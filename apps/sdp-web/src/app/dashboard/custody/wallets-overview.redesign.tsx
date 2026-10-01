@@ -350,6 +350,10 @@ function WalletsToolbar({
   const router = useRouter();
   const { data, error, isValidating, mutate } = useWalletCardBalances();
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const refreshedAtFormat = useMemo(
+    () => new Intl.DateTimeFormat(locale, REFRESHED_AT_FORMAT),
+    [locale]
+  );
   const wasValidatingRef = useRef(false);
 
   // Stamped when a read finishes, or on arrival when the cards' read already finished before
@@ -385,7 +389,7 @@ function WalletsToolbar({
         </Button>
         {refreshedAt ? (
           <time dateTime={refreshedAt.toISOString()} data-wallets-refreshed-at>
-            {new Intl.DateTimeFormat(locale, REFRESHED_AT_FORMAT).format(refreshedAt)}
+            {refreshedAtFormat.format(refreshedAt)}
           </time>
         ) : null}
       </span>

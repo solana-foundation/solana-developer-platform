@@ -31,8 +31,8 @@ import { DisableControlsDialog } from "./policy/disable-controls-dialog";
 import { decisionLabel, shortIdentifier } from "./policy/policy-audit.shared";
 import { buildDisabledPolicyPayload } from "./policy/wallet-policy-authoring";
 import {
+  formatPolicyDate,
   type IssuedTokensByMint,
-  POLICY_DATE,
   policyRestricts,
   policyRulesView,
   symbolsByMint,
@@ -78,9 +78,7 @@ function PolicyBand({ walletId, policy }: { walletId: string; policy: PaymentWal
     );
   }
   if (profile.status === "active") {
-    const date = profile.activatedAt
-      ? new Intl.DateTimeFormat(locale, POLICY_DATE).format(new Date(profile.activatedAt))
-      : null;
+    const date = profile.activatedAt ? formatPolicyDate(profile.activatedAt, locale) : null;
     return (
       <StateBand
         tone="ok"
