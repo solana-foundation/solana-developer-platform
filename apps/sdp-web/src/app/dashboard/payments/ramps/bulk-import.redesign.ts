@@ -1,4 +1,7 @@
 import { isWellKnownTokenSymbol } from "@sdp/types";
+import type { MessageKey, TranslationValues } from "@/i18n/messages";
+
+type Translate = (key: MessageKey, values?: TranslationValues) => string;
 
 export interface BulkImportRow {
   accountId: string;
@@ -6,9 +9,33 @@ export interface BulkImportRow {
   amount: string;
 }
 
-export interface BulkRowError {
-  row: number;
-  message: string;
+/** A row the import rejects, by 1-based line, and why; `bulkRowErrorMessage` words it. */
+export type BulkRowError =
+  | { row: number; reason: "missingWalletId" | "missingCurrency" | "invalidAmount" }
+  | { row: number; reason: "duplicateWallet"; walletId: string; firstRow: number };
+
+/**
+ * The catalog wording of a rejected row's reason, without the row number the caller's
+ * `Row {row}: {message}` message adds.
+ */
+export function bulkRowErrorMessage(error: BulkRowError, t: Translate): string {
+  switch (error.reason) {
+    case "missingWalletId":
+      return t("DashboardPayments.batchSend.rowErrorMissingWalletId");
+    case "missingCurrency":
+      return t("DashboardPayments.batchSend.rowErrorMissingCurrency");
+    case "invalidAmount":
+      return t("DashboardPayments.batchSend.rowErrorInvalidAmount");
+    case "duplicateWallet":
+      return t("DashboardPayments.batchSend.rowErrorDuplicateWallet", {
+        walletId: error.walletId,
+        firstRow: error.firstRow,
+      });
+    default: {
+      const exhaustive: never = error;
+      return exhaustive;
+    }
+  }
 }
 
 export function emptyBulkRow(): BulkImportRow {
@@ -78,21 +105,21 @@ export function validateBulkRows(rows: BulkImportRow[]): {
     }
     const line = index + 1;
     if (row.accountId.length === 0) {
-      errors.push({ row: line, message: "Missing counterparty_wallet_id" });
+      errors.push({ row: line, reason: "missingWalletId" });
       return;
     }
     if (row.currency.length === 0) {
-      errors.push({ row: line, message: "Missing currency or mint address" });
+      errors.push({ row: line, reason: "missingCurrency" });
       return;
     }
     const amount = Number(row.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      errors.push({ row: line, message: "Amount must be a positive number" });
+      errors.push({ row: line, reason: "invalidAmount" });
       return;
     }
     const firstRow = firstRowByAccount.get(row.accountId);
     if (firstRow !== undefined) {
-      errors.push({ row: line, message: `${row.accountId} is already on row ${firstRow}` });
+      errors.push({ row: line, reason: "duplicateWallet", walletId: row.accountId, firstRow });
       return;
     }
     firstRowByAccount.set(row.accountId, line);
