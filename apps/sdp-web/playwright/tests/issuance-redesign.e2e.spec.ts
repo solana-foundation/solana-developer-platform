@@ -59,6 +59,19 @@ function recordValue(page: Page, label: string) {
     .locator("xpath=following-sibling::dd[1]");
 }
 
+/**
+ * Opens Compliance and waits for its access list to load: a loaded list shows its entries or
+ * says it has none, while one still loading shows neither, so a check that an entry is gone
+ * would otherwise pass against the empty loading state.
+ */
+async function openLoadedComplianceList(page: Page, tokenId: string): Promise<void> {
+  await gotoToken(page, tokenId, "compliance");
+  const tab = page.locator('[data-token-page="compliance"]');
+  await expect(
+    tab.getByText("Nothing is on the list yet").or(tab.locator("tbody tr").first())
+  ).toBeVisible({ timeout: 60_000 });
+}
+
 function operationButton(page: Page, operation: string) {
   return page.locator(`[data-token-operation="${operation}"]`).getByRole("button");
 }
@@ -263,7 +276,7 @@ test.describe
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
       await eventually(
-        () => gotoToken(page, tokenId, "compliance"),
+        () => openLoadedComplianceList(page, tokenId),
         () =>
           expect(page.getByRole("cell", { name: address }).first()).toBeVisible({
             timeout: 90_000,
@@ -276,7 +289,7 @@ test.describe
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
       await eventually(
-        () => gotoToken(page, tokenId, "compliance"),
+        () => openLoadedComplianceList(page, tokenId),
         () => expect(page.getByRole("cell", { name: address })).toHaveCount(0, { timeout: 90_000 })
       );
     });
