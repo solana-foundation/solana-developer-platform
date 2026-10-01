@@ -212,79 +212,144 @@ function PaymentRequestsSearch({
   );
 }
 
+/** A change to the list's URL; whatever is left out stays as it is. */
+interface ListParamsUpdate {
+  page?: number;
+  pageSize?: number;
+  status?: PaymentRequestStatus | null;
+  search?: string;
+}
+
+function setOrDeleteParam(params: URLSearchParams, key: string, value: string | null) {
+  if (value === null) {
+    params.delete(key);
+  } else {
+    params.set(key, value);
+  }
+}
+
 /**
- * The Requests list. The page, its size, the status filter and the search live in the URL and
- * load on the server (see loadPaymentRequestsList), so every page is one the server matched.
+ * The Requests list's URL after a change, leaving out whatever is at its default. Any change but
+ * the page goes back to the first page.
+ *
+ * @param query - The list's current query string.
+ * @param updates - What changes.
+ * @param currentSearch - The search the list shows now.
+ * @returns The new path, or `null` when only a search was given and it is the one shown.
  */
-export function PaymentRequestsWorkspace({
-  initialPaymentRequests,
-  initialError,
-  initialLocalErrorCode,
-  counterparties,
+function listHrefAfter(
+  query: string,
+  updates: ListParamsUpdate,
+  currentSearch: string | null
+): string | null {
+  const params = new URLSearchParams(query);
+  if (updates.page !== undefined) {
+    setOrDeleteParam(params, "page", updates.page === 1 ? null : String(updates.page));
+  }
+  if (updates.pageSize !== undefined) {
+    params.delete("page");
+    setOrDeleteParam(
+      params,
+      "pageSize",
+      updates.pageSize === PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE ? null : String(updates.pageSize)
+    );
+  }
+  if (updates.status !== undefined) {
+    params.delete("page");
+    setOrDeleteParam(params, "status", updates.status);
+  }
+  if (updates.search !== undefined) {
+    const search = updates.search.trim();
+    if (search === (currentSearch ?? "")) return null;
+    params.delete("page");
+    setOrDeleteParam(params, "search", search === "" ? null : search);
+  }
+  const next = params.toString();
+  return `${PAYMENT_REQUESTS_HREF}${next ? `?${next}` : ""}`;
+}
+
+/** The toolbar's filter menu, which filters the list by status. */
+function PaymentRequestsStatusFilter({
+  value,
+  onChange,
+}: {
+  value: PaymentRequestStatus | null;
+  onChange: (status: PaymentRequestStatus | null) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <FilterMenu
+      label={t("Shared.SharedComponents.filter")}
+      searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+      sections={[
+        {
+          id: "status",
+          label: t("DashboardPayments.status"),
+          value: value === null ? undefined : t(REQUEST_STATUS_TRANSLATION_KEYS[value]),
+          content: (
+            <FilterMenuOptions
+              value={value ?? undefined}
+              anyLabel={t("Shared.SharedComponents.any")}
+              options={REQUEST_STATUSES.map((status) => ({
+                value: status,
+                label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
+              }))}
+              onChange={(next) =>
+                onChange(REQUEST_STATUSES.find((status) => status === next) ?? null)
+              }
+            />
+          ),
+        },
+      ]}
+    />
+  );
+}
+
+/** The pager under the list, with which rows of how many it shows. */
+function PaymentRequestsPagination({
   total,
-  searchCapped,
   listState,
-}: PaymentRequestsWorkspaceProps) {
+  pending,
+  onPageChange,
+}: {
+  total: number;
+  listState: PaymentRequestsListState;
+  pending: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  const t = useTranslations();
+  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
+  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
+  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
+  return (
+    <ArrowPagination
+      page={listState.page}
+      pageCount={pageCount}
+      onPageChange={onPageChange}
+      disabled={pending}
+      summary={t("DashboardPayments.requests.range", {
+        from: rangeStart,
+        to: rangeEnd,
+        total,
+      })}
+    />
+  );
+}
+
+/** A row's payer, by contact name, and its amount, by token symbol on the current cluster. */
+function usePaymentRequestLabels(counterparties: readonly Counterparty[]) {
   const t = useTranslations();
   const locale = useLocale();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const tokens = useMemo(
-    () => deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]),
-    [sdpEnvironment]
-  );
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const rows = initialPaymentRequests;
-  const statusFilter = listState.status ?? undefined;
-
-  const applyListParams = (updates: {
-    page?: number;
-    pageSize?: number;
-    status?: PaymentRequestStatus | null;
-    search?: string;
-  }) => {
-    const params = new URLSearchParams(window.location.search);
-    if (updates.page !== undefined) {
-      if (updates.page === 1) {
-        params.delete("page");
-      } else {
-        params.set("page", String(updates.page));
-      }
-    }
-    if (updates.pageSize !== undefined) {
-      params.delete("page");
-      if (updates.pageSize === PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE) {
-        params.delete("pageSize");
-      } else {
-        params.set("pageSize", String(updates.pageSize));
-      }
-    }
-    if (updates.status !== undefined) {
-      params.delete("page");
-      if (updates.status === null) {
-        params.delete("status");
-      } else {
-        params.set("status", updates.status);
-      }
-    }
-    if (updates.search !== undefined) {
-      const search = updates.search.trim();
-      if (search === (listState.search ?? "")) return;
-      params.delete("page");
-      if (search === "") {
-        params.delete("search");
-      } else {
-        params.set("search", search);
-      }
-    }
-    const search = params.toString();
-    startTransition(() =>
-      router.replace(`${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`, { scroll: false })
-    );
-  };
   const tokenSymbolByMint = useMemo(
-    () => new Map(tokens.map((token) => [token.mintAddress, token.symbol])),
-    [tokens]
+    () =>
+      new Map(
+        deriveTokenOptions(CLUSTER_BY_SDP_ENVIRONMENT[sdpEnvironment]).map((token) => [
+          token.mintAddress,
+          token.symbol,
+        ])
+      ),
+    [sdpEnvironment]
   );
   const counterpartyNameById = useMemo(
     () =>
@@ -302,9 +367,34 @@ export function PaymentRequestsWorkspace({
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
-  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
-  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
+  return { fromLabel, amountLabel };
+}
+
+/**
+ * The Requests list. The page, its size, the status filter and the search live in the URL and
+ * load on the server (see loadPaymentRequestsList), so every page is one the server matched.
+ */
+export function PaymentRequestsWorkspace({
+  initialPaymentRequests,
+  initialError,
+  initialLocalErrorCode,
+  counterparties,
+  total,
+  searchCapped,
+  listState,
+}: PaymentRequestsWorkspaceProps) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const { fromLabel, amountLabel } = usePaymentRequestLabels(counterparties);
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const rows = initialPaymentRequests;
+
+  const applyListParams = (updates: ListParamsUpdate) => {
+    const href = listHrefAfter(window.location.search, updates, listState.search);
+    if (href === null) return;
+    startTransition(() => router.replace(href, { scroll: false }));
+  };
   const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (request: PaymentRequest) => {
@@ -335,34 +425,9 @@ export function PaymentRequestsWorkspace({
         <>
           <ListToolbar
             filters={
-              <FilterMenu
-                label={t("Shared.SharedComponents.filter")}
-                searchPlaceholder={t("Shared.SharedComponents.filterBy")}
-                sections={[
-                  {
-                    id: "status",
-                    label: t("DashboardPayments.status"),
-                    value:
-                      statusFilter === undefined
-                        ? undefined
-                        : t(REQUEST_STATUS_TRANSLATION_KEYS[statusFilter]),
-                    content: (
-                      <FilterMenuOptions
-                        value={statusFilter}
-                        anyLabel={t("Shared.SharedComponents.any")}
-                        options={REQUEST_STATUSES.map((status) => ({
-                          value: status,
-                          label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
-                        }))}
-                        onChange={(value) =>
-                          applyListParams({
-                            status: REQUEST_STATUSES.find((status) => status === value) ?? null,
-                          })
-                        }
-                      />
-                    ),
-                  },
-                ]}
+              <PaymentRequestsStatusFilter
+                value={listState.status}
+                onChange={(status) => applyListParams({ status })}
               />
             }
           >
@@ -396,16 +461,11 @@ export function PaymentRequestsWorkspace({
               onCopyLink={copyLink}
             />
           )}
-          <ArrowPagination
-            page={listState.page}
-            pageCount={pageCount}
+          <PaymentRequestsPagination
+            total={total}
+            listState={listState}
+            pending={isPending}
             onPageChange={(page) => applyListParams({ page })}
-            disabled={isPending}
-            summary={t("DashboardPayments.requests.range", {
-              from: rangeStart,
-              to: rangeEnd,
-              total,
-            })}
           />
         </>
       )}
