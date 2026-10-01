@@ -38,16 +38,25 @@ function pythonLiteral(value: unknown, depth = 0): string {
     .join(",\n")}\n${close}}`;
 }
 
+/**
+ * A shell word in single quotes, so a query string's `&` stays part of the URL. A single quote
+ * inside would end the string, so it is closed and reopened around an escaped one.
+ */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 function curlSnippet({ method, url, body }: SnippetRequest): string {
   const lines = [
-    `curl ${method === "GET" ? "" : `-X ${method} `}${url} \\`,
+    `curl ${method === "GET" ? "" : `-X ${method} `}${shellQuote(url)} \\`,
     `  -H "Authorization: Bearer $${API_KEY_VARIABLE}"`,
   ];
   if (body !== null) {
     lines[lines.length - 1] += " \\";
-    // A single quote inside the body would end the shell string, so it is closed and reopened.
-    const json = nestedJson(body, "  ").replace(/'/g, "'\\''");
-    lines.push('  -H "Content-Type: application/json" \\', `  -d '${json}'`);
+    lines.push(
+      '  -H "Content-Type: application/json" \\',
+      `  -d ${shellQuote(nestedJson(body, "  "))}`
+    );
   }
   return lines.join("\n");
 }
