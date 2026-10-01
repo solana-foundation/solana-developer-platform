@@ -1,55 +1,78 @@
 ---
-title: Tokenization Templates
-description: How to choose a token template, and the default controls each one applies.
+title: Token templates
+description: Choose a token template, and see the default controls that each one applies.
 ---
 
-The public issuance surface currently exposes three **Tokenization Templates**:
+A **token template** is a fixed composition of Token-2022 extensions for one class of asset. In the
+dashboard, the control is labeled **Template**.
+
+`GET /v1/issuance/templates` returns the templates your deployment offers.
+`GET /v1/issuance/templates/{templateId}` returns the current definition of one template. Treat the
+API as the source of truth for the list and the defaults.
+
+<Callout type="warn">
+This page gives general guidance. It is not legal advice. Regulatory treatment depends on the
+jurisdiction, and on how the instrument is structured. Confirm your classification before you
+deploy a token.
+</Callout>
+
+The three templates below cover the common institutional cases:
 
 | Template | Defaults | Notes |
 | --- | --- | --- |
 | `stablecoin` | 6 decimals, permanent delegate + pausable extensions, default account state initialized | Intended for fiat-backed token patterns with compliance controls. |
-| `tokenized-security` | 8 decimals, allowlist required, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
+| `tokenized-security` | 8 decimals, allowlist on by default and changeable, permanent delegate + pausable + scaled UI amount extensions, default account state frozen | Regulated asset flows with stronger defaults. |
 | `custom` | 9 decimals default (up to 18 max), extension set is fully configurable | Use when your requirements do not match the stablecoin or tokenized-security templates. |
 
-These defaults are sourced from the API implementation in `apps/sdp-api/src/services/issuance/templates/definitions.ts`.
+Each template also sets the token's **Token Access Control** mode. The mode is `allowlist`,
+`blocklist`, or `disabled`. SDP enforces it onchain, over who can hold or receive the token.
 
-Each template also sets the token's **Token Access Control** mode — `allowlist`, `blocklist`, or `disabled` — enforced on-chain over who may hold or receive the token. This is distinct from a wallet's own destination allowlist, which is a wallet-policy concern.
+Token Access Control is distinct from a wallet's own destination allowlist. The destination
+allowlist is a wallet-policy concern.
 
 ## Selecting a template
 
-Each template is a vetted, fixed composition of Token-2022 extensions for a specific class of
-asset, rather than an à-la-carte menu. The appropriate template is determined by the nature of
-the instrument being issued. The `custom` template applies to assets that do not fit the
-stablecoin or tokenized-security models.
+Each template is a vetted, fixed set of Token-2022 extensions for a specific class of asset. It is
+not a menu of individual options. Choose the template by the nature of the instrument you issue.
+The `custom` template covers an asset that fits neither the stablecoin nor the tokenized-security
+model.
 
 ### Stablecoin
 
-Intended for tokens pegged to a fiat currency and redeemable at par (1:1). The template applies
-the compliance controls typical of regulated fiat tokens: a **pausable** extension (transfers
-can be frozen in an emergency) and a **permanent delegate** (tokens can be seized or clawed back
-in response to a compliance event). A blocklist applies by default.
+Use this template for a token that is pegged to a fiat currency and redeemable at par (1:1). It
+applies the compliance controls that are typical of a regulated fiat token:
 
-Stablecoins cannot pay interest or yield to holders. This reflects payment-stablecoin frameworks
-such as the U.S. GENIUS Act and the EU's MiCA, which prohibit issuers from paying interest on the
-token itself. Interest- or yield-bearing products are issued as tokenized securities (typically
-funds) rather than stablecoins.
+- The **pausable** extension lets you pause transfers for every holder of the token at once. Use it
+  in an emergency. This is different from a freeze, which stops one holder's balance.
+- The **permanent delegate** lets you seize or claw back tokens in response to a compliance event.
+
+A stablecoin cannot pay interest or yield to its holders. This reflects the payment-stablecoin
+frameworks, such as the U.S. GENIUS Act and the EU's MiCA, which prohibit an issuer from paying
+interest on the token itself. Issue an interest-bearing or yield-bearing product as a tokenized
+security, which is usually a fund, rather than as a stablecoin.
 
 ### Tokenized security
 
-Intended for regulated instruments — equity, debt, or fund shares. The template applies the
-stablecoin controls together with stronger defaults: an **allowlist is required**, new accounts
-are **frozen by default** (holders must be approved before transacting), and the **scaled UI
-amount** extension is added for corporate actions such as splits or share-class rebasing.
-Interest- and yield-bearing instruments (for example debt or fund tokens) also fall under this
-template.
+Use this template for a regulated instrument, such as equity, debt, or fund shares. It applies the
+stablecoin controls together with stronger defaults:
+
+- An **allowlist** is on by default, and you can change that setting.
+- New accounts are **frozen by default**, so a holder must be approved before they can transact.
+- The **scaled UI amount** extension supports a corporate action, such as a split or a share-class
+  rebasing.
+
+An interest-bearing or yield-bearing instrument, such as a debt token or a fund token, also falls
+under this template.
 
 ### Custom
 
-Corresponds to the **Non-Security Digital Asset** classification in the issuance interface —
-assets that are neither fiat stablecoins nor regulated securities, such as commodities, real
-estate, or collectibles. The template exposes the full Token-2022 extension set (transfer fees,
-transfer hooks, non-transferable behaviour, interest, and others) and applies where the stablecoin
-and tokenized-security templates do not match the instrument.
+This template corresponds to the **Non-Security Digital Asset** classification in the issuance
+pages. Those assets are neither fiat stablecoins nor regulated securities. Commodities, real
+estate, and collectibles are examples.
+
+The template offers the full Token-2022 extension set, including transfer fees, transfer hooks,
+non-transferable behavior, and interest. Use it when the stablecoin and tokenized-security
+templates do not match the instrument.
 
 ### Summary
 
@@ -60,14 +83,14 @@ and tokenized-security templates do not match the instrument.
 | Any other asset, or one requiring extensions the other templates do not offer | `custom` (Non-Security Digital Asset) |
 
 <Callout type="warn">
-Token-2022 extensions are set when the mint is created and cannot be changed afterward. The
-template selection is therefore permanent for a given token; changing it requires issuing a new
-token.
+SDP sets the Token-2022 extensions when it creates the mint, and nobody can change them afterward.
+The template you select is therefore permanent for that token. To change it, issue a new token.
 </Callout>
-
-This page provides general guidance and is not legal advice; regulatory treatment depends on the
-jurisdiction and on how the instrument is structured.
 
 ## Amount format
 
-Mint, burn, seize, and force-burn request bodies accept `amount` as a **decimal string in UI units** — the human-readable token value (for example `"1"` or `"1.5"`). SDP converts to on-chain base units using the token's `decimals`. This differs from wallet balance responses, which return both raw `amount` and `uiAmount`.
+The mint, burn, seize, and force-burn request bodies take `amount` as a **decimal string in UI
+units**. That is the human-readable token value, for example `"1"` or `"1.5"`.
+
+SDP converts the value to onchain base units, using the token's `decimals`. Wallet balance
+responses differ: they return both a raw `amount` and a `uiAmount`.

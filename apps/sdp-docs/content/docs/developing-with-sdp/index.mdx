@@ -1,38 +1,46 @@
 ---
 title: Overview
-description: The interfaces, environments, and conventions you build against.
+description: Learn the two SDP interfaces, the two environments, and the response format every route uses.
 ---
 
-SDP exposes two interfaces that operate over the same backend and enforce the same permissions, policies, and audit trails:
+SDP gives you two interfaces: the dashboard and the REST API. Both run against the same backend,
+and both enforce the same permissions, policies, and audit records.
 
-- **Dashboard** — browser-based UI for setup, token management, and compliance operations. Sign in with email, Google, or GitHub.
-- **REST API:** programmatic access for backend integrations. Routes authenticate with an API key in the `Authorization` header.
+- **The dashboard** is a browser application for setup, token management, and compliance
+  operations. Sign in with an email address, a Google account, or a GitHub account.
+- **The REST API** is for backend integrations. Every route reads an API key from the
+  `Authorization` header.
 
-Everything the dashboard does is available through the API. Build against the API for automation and integrations; use the dashboard to set up your organization, inspect state, and perform one-off operations.
+The API covers everything the dashboard does. Build against the API for automation and
+integrations. Use the dashboard to set up your organization, inspect state, and run a single
+operation by hand.
 
 ## Environments
 
-Authenticated environments are a property of the **project**, not of individual requests. Every tenant resource and API key belongs to a project and inherits that project's environment.
+The environment belongs to the **project**, not to an individual request. Every tenant resource and
+every API key belongs to a project, and takes that project's environment.
 
-| Environment  | Network      | API key prefix |
-| ------------ | ------------ | -------------- |
-| `sandbox`    | devnet       | `sk_test_`     |
-| `production` | mainnet-beta | `sk_live_`     |
+| Environment  | Solana cluster | API key prefix |
+| ------------ | -------------- | -------------- |
+| `sandbox`    | devnet         | `sk_test_`     |
+| `production` | mainnet        | `sk_live_`     |
 
-Both environments expose the same route shapes. Develop and test authenticated integrations against a sandbox project, then switch to production by swapping your API key.
+Both environments have the same routes. Develop and test your integration against a sandbox
+project. To move to production, change the API key.
 
 ## Response conventions
 
-Every successful response wraps its payload in a `data` envelope with request metadata:
+Every successful response wraps its payload in a `data` envelope, next to the metadata of the
+request:
 
 ```json
 {
   "data": { ... },
-  "meta": { "requestId": "req_...", "timestamp": "2026-07-31T12:00:00.000Z" }
+  "meta": { "requestId": "req_...", "timestamp": "2027-07-31T12:00:00.000Z" }
 }
 ```
 
-Errors return a machine-readable `code` alongside a human-readable `message`:
+An error returns a `code` for your code to read, and a `message` for a person to read:
 
 ```json
 {
@@ -40,8 +48,10 @@ Errors return a machine-readable `code` alongside a human-readable `message`:
 }
 ```
 
-Include the `requestId` when reporting an issue — it links your request to our internal traces and audit records.
+Include the `requestId` when you report a problem. It links your request to the internal traces and
+audit records.
 
 ## Execution model
 
-SDP executes custody operations by building, signing, and submitting with the configured custody wallet.
+SDP runs a custody operation in three steps. SDP builds the transaction, signs it with the
+configured custody wallet, and submits it.

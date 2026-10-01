@@ -1,18 +1,19 @@
 ---
-title: Deploy a Token
-description: Deploy a created token to the Solana blockchain.
+title: Deploy a token
+description: Write a token draft to Solana and confirm the mint account it creates.
 steps:
   - Open the deploy action
   - Deploy the token
-  - Confirm deployment
+  - Confirm the deployment
 ---
 
-After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deployment creates the mint account on Solana and signs the deployment with the exact SDP Wallet selected for execution.
+After you [create a token](/docs/tokens/create-a-token), deploy it onchain. The deployment creates
+the mint account on Solana. The custody wallet you select signs that transaction.
 
 ## Prerequisites
 
-- A token in `pending` status
-- The exact SDP Wallet `id` returned by `GET /v1/wallets` (for example, `cwlt_*`)
+- A token draft with the status `pending`
+- The exact SDP wallet `id` that `GET /v1/wallets` returns, for example `cwlt_abc123`
 
 ## How it works
 
@@ -20,29 +21,36 @@ After [creating a token](/docs/tokens/create-a-token), deploy it onchain. Deploy
 
 <Step number={1} title="Open the deploy action">
 
-Locate the token you want to deploy. Deployment is irreversible — the mint account and its configured authorities are created onchain.
+Find the draft that you want to deploy. Deployment is irreversible. SDP creates the mint account
+and its configured authorities onchain, and you cannot undo that.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In the **Issuance** list, click the token with a `Pending` badge to open its detail page.
+1. Open the **Issuance** list.
+2. Select the token that carries a **Draft** badge.
 
-The **Deploy** button appears in the token header and in the fund management panel.
+The token detail page shows a **Deploy** control. The same control appears in the fund management
+panel.
 
-![Token detail page showing Not deployed status and Deploy button](/images/tokens/token-detail-pending.png)
+![Token detail page for a draft, showing the status Not deployed and the Deploy control](/images/tokens/token-detail-pending.png)
 
 </Tab>
 <Tab value="API">
 
-You need the `tokenId` returned when you created the token. If you don't have it, list your tokens:
+You need the `tokenId` that SDP returned when you created the token. If you do not have it, list
+your tokens:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens \
   -H "Authorization: Bearer sk_test_..."
 ```
 
-Note the token `id` (e.g., `tok_abc123`) — required for all deploy and post-deploy calls. Also list your wallets and use the wallet record's `id`, not its provider-specific `walletId` or public key:
+Note the token `id`, for example `tok_abc123`. Every deploy call and every later call needs it.
+
+List your wallets as well. Use the `id` of the wallet record. Do not use the provider-specific
+`walletId`. Do not use the public key.
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/wallets \
@@ -57,21 +65,30 @@ curl https://api.solana.com/v1/wallets \
 
 <Step number={2} title="Deploy the token">
 
-SDP signs and submits the deploy transaction using `signingCustodyWalletId`. If you supply it here, it overrides the pending draft's execution wallet; if you omit it, SDP uses the value stored on the draft. One of those values is required. An override changes the deployment signer and historical attribution, but it does not rewrite immutable authority values already captured in the token's configuration.
+SDP signs and submits the deploy transaction with the wallet in `signingCustodyWalletId`.
+
+If you supply that field here, it replaces the execution wallet stored on the draft. If you omit
+it, SDP uses the value stored on the draft. One of the two values is required.
+
+An override changes the deployment signer and the historical attribution. It does not rewrite the
+immutable authority values already captured in the configuration of the token.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Deploy**. A modal shows the signer wallet that will authorize the transaction. Review the wallet ID and public key, then click **Deploy now**.
+1. Select **Deploy**. A dialog shows the signer wallet that authorizes the transaction.
+2. Check the wallet ID and the public key in that dialog.
+3. Select **Deploy now**.
+4. Select **Deploy now** again in the confirmation prompt. That prompt asks you to confirm the
+   onchain submission.
 
-![Deploy token modal showing the signer wallet details](/images/tokens/token-deploy-modal.png)
+![Deploy dialog listing the signer wallet ID and public key that will authorize the deployment](/images/tokens/token-deploy-modal.png)
 
-A confirmation prompt asks you to confirm the on-chain submission. Click **Deploy now** to proceed.
+![Confirmation prompt asking you to confirm the onchain deploy submission](/images/tokens/token-deploy-confirm.png)
 
-![Deploy token confirmation dialog](/images/tokens/token-deploy-confirm.png)
-
-SDP submits the transaction to Solana and polls for confirmation. The page updates automatically when deployment completes.
+SDP submits the transaction to Solana and polls for confirmation. The page updates when the
+deployment completes.
 
 </Tab>
 <Tab value="API">
@@ -101,7 +118,8 @@ const { data } = await res.json();
 // data.token.mintAddress — the onchain mint address
 ```
 
-Always pass an `Idempotency-Key` — retrying with the same key after a network error prevents double-deployment.
+Always pass an `Idempotency-Key`. A retry with the same key after a network error prevents a second
+deployment.
 
 </Tab>
 </Tabs>
@@ -109,17 +127,20 @@ Always pass an `Idempotency-Key` — retrying with the same key after a network 
 
 </Step>
 
-<Step number={3} title="Confirm deployment">
+<Step number={3} title="Confirm the deployment">
 
-Once the transaction is confirmed, the token is active and ready for minting and transfers.
+When the network confirms the transaction, the token is active. You can then mint it and transfer
+it.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The token status badge changes from `Not deployed` to the onchain mint address. The detail page shows Mint and Burn actions in the Operations tab, and a confirmed deploy transaction in the Transactions table.
+The status badge changes from **Not deployed** to the onchain mint address. The detail page then
+shows the Mint and Burn actions in the Operations tab. The Transactions table shows the confirmed
+deploy transaction.
 
-![Deployed token detail page with mint address, Operations tab, and confirmed deploy transaction](/images/tokens/token-deployed.png)
+![Deployed token detail page with the mint address, the Operations tab, and a confirmed deploy transaction](/images/tokens/token-deployed.png)
 
 </Tab>
 <Tab value="API">
@@ -132,9 +153,12 @@ The deploy response includes the confirmed state:
 // data.token.signingCustodyWalletId — exact wallet used for deployment
 ```
 
-After deployment, `signingCustodyWalletId` is historical deployment attribution. Mint and admin actions resolve their current on-chain authority, while a standard burn uses its exact source wallet; none use the deployment wallet as a fallback.
+After the deployment, `signingCustodyWalletId` records historical deployment attribution only.
 
-Fetch the token at any time to verify:
+Mint and administrative actions resolve their current onchain authority. A standard burn uses its
+exact source wallet. No later action falls back to the deployment wallet.
+
+Fetch the token at any time to verify its state:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \

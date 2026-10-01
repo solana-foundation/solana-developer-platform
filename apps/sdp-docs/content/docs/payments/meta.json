@@ -3,11 +3,11 @@
   "pages": [
     "index",
     "concepts",
-    "---Send Payments---",
+    "---Send payments---",
     "send-basic-payment",
     "send-payment-with-memo",
     "send-payouts",
-    "---Accept Payments---",
+    "---Accept payments---",
     "accept-overview",
     "accept-verification",
     "accept-indexing",

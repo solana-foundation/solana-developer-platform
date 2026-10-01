@@ -1,5 +1,23 @@
 # sdp-docs — Design System & Page Guidelines
 
+## Writing style
+
+Prose on this site follows [`docs/contributing/documentation-style.md`](../../docs/contributing/documentation-style.md),
+an adaptation of Simplified Technical English. Read it before you write or edit a page.
+
+The short version: sentences of 20 words for instructions and 25 for explanations, active voice,
+present tense, one instruction per sentence, one approved term per concept, and no jargon or
+metaphor. The guide carries the approved-term list, the punctuation rules, and the rules for
+documenting a screen that a feature flag can hide.
+
+Two habits that the design system alone will not catch:
+
+- Before you write "select **X**", confirm the label exists in `apps/sdp-web/messages/en/*.json`.
+  That catalog is what the reader sees. Docs drift from it every release.
+- `pnpm --filter sdp-docs check:links` validates heading anchors as well as pages, so reworded
+  headings that break an inbound deep link fail there.
+
+
 ## Stack
 
 - **Next.js 16** (App Router) + **Fumadocs** (`fumadocs-core`, `fumadocs-ui`) for the docs framework

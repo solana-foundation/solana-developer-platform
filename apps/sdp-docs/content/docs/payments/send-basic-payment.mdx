@@ -1,23 +1,35 @@
 ---
 title: Basic payment
-description: Send a single token transfer with SDP.
+description: Send a single token transfer from a custody wallet to a Solana address.
 steps:
   - Set up the transfer
   - Execute the transfer
   - Verify the transfer
 ---
 
-SDP handles token transfers through its payments API. A basic payment moves tokens **from a custody wallet you control to any Solana wallet address**.
+SDP handles token transfers through its Payments API. A basic payment moves tokens from a custody
+wallet you control to any Solana wallet address.
 
-The `sourceCustodyWalletId` field is the exact SDP Wallet `id` (`cwlt_…`, from `GET /v1/wallets`), resolved server-side from the caller's custody-wallet list; `destination` is the recipient's on-chain **wallet (owner) address** — for SPL transfers, SDP derives the associated token account (ATA) from this address and creates it if needed, so pass the wallet pubkey, **not** a token-account address.
+`sourceCustodyWalletId` is the SDP wallet `id` (`cwlt_…`). `GET /v1/wallets` returns it. SDP
+resolves it on the server from the caller's list of custody wallets.
 
-Transfers are available through the Payments dashboard and the API.
+`destination` is the recipient's Solana wallet address, also called the owner address. For SPL
+token transfers, SDP derives the associated token account from this address. SDP creates that
+account if it does not exist.
+
+Pass the wallet address. Do not pass a token account address.
+
+You can send a transfer from the dashboard or from the API.
 
 ## Prerequisites
 
-- A deployed token with minted supply
-- A custody wallet to use as `sourceCustodyWalletId`, with a custody signer configured so SDP can sign and submit.
-- An API key with both `payments:write` and `wallets:read` permissions, where the key's `payments:write` scope includes the source wallet — `POST /v1/payments/transfers` is gated by that pair at the route layer, and the source wallet is then re-checked against the key's `payments:write` wallet scope.
+- A deployed token with minted supply.
+- A custody wallet to use as `sourceCustodyWalletId`. It needs a custody signer configured, so that
+  SDP can sign and submit the transaction.
+- An API key with both the `payments:write` and `wallets:read` permissions. The route layer for
+  `POST /v1/payments/transfers` checks for that pair. SDP then re-checks the source wallet against
+  the wallet scope of the key's `payments:write` permission, so that scope must include the source
+  wallet.
 
 ## How it works
 
@@ -25,33 +37,34 @@ Transfers are available through the Payments dashboard and the API.
 
 <Step number={1} title="Set up the transfer">
 
-Specify the source, destination, token, and amount.
+Specify the source, the destination, the token, and the amount.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Go to **Payments** in the sidebar. The overview shows your total SDP balance, recent transactions, and **Send** / **Receive** actions.
+Go to **Payments** in the sidebar. The overview shows your total SDP balance, your recent
+transactions, and the **Send** and **Receive** actions.
 
-![Payments overview showing balance, Send and Receive buttons, and recent transactions](/images/tokens/transfer-confirmed.png)
+![Payments overview showing the total balance, the Send and Receive actions, and the recent transactions list](/images/tokens/transfer-confirmed.png)
 
-Click **Send** and select **Wallet transfer** to send from an SDP wallet to a Solana address.
+Select **Send**, then select **Onchain transfer** to send from an SDP wallet to a Solana address.
 
-![Send page showing Wallet transfer and Off-ramp options](/images/tokens/transfer-send-options.png)
+![Send page showing the Onchain transfer and Pay with fiat options](/images/tokens/transfer-send-options.png)
 
-On the **Enter transfer details** form, select a source wallet from the dropdown.
+On the **What would you like to send?** step, select a source wallet from the dropdown.
 
-![Transfer details form with source wallet dropdown open](/images/tokens/transfer-form-source.png)
+![Transfer details step with the source wallet dropdown open](/images/tokens/transfer-form-source.png)
 
-Fill in:
+Enter the following values:
 
-- **Source** — a wallet you control in SDP
-- **Amount** — human-readable units (e.g., `0.5`)
-- **Asset** — select from your deployed tokens
-- **Destination address** — any valid Solana wallet address
-- **Memo** — optional note recorded onchain
+- **Source wallet.** A wallet you control in SDP.
+- **Amount.** Display units, for example `0.5`.
+- **Asset.** One of your deployed tokens.
+- **Destination.** Any valid Solana wallet address.
+- **Memo (optional).** A note that SDP records with the transfer.
 
-![Transfer details form with all fields filled in](/images/tokens/transfer-form-filled.png)
+![Transfer details step with every field filled in](/images/tokens/transfer-form-filled.png)
 
 </Tab>
 <Tab value="API">
@@ -68,7 +81,8 @@ const body = {
 };
 ```
 
-`token` is the mint address returned by the deploy step, not the SDP token ID. `destination` is the wallet pubkey — SDP derives the associated token account from it.
+`token` is the mint address that the deploy step returned. It is not the SDP token ID.
+`destination` is the wallet address, and SDP derives the associated token account from it.
 
 </Tab>
 </Tabs>
@@ -78,15 +92,15 @@ const body = {
 
 <Step number={2} title="Execute the transfer">
 
-Submit the transfer. SDP signs with the source custody wallet and submits the transaction.
+Submit the transfer. SDP signs it with the source custody wallet and submits the transaction.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Click **Review** to see the transfer summary, then **Confirm** to submit.
+Select **Review** to see the transfer summary. Then select **Send transfer** to submit it.
 
-The transfer status updates to `Confirmed` once the transaction is finalized.
+The status changes to `Confirmed` once the network confirms the transaction.
 
 </Tab>
 <Tab value="API">
@@ -159,17 +173,18 @@ HttpRequest request = HttpRequest.newBuilder()
 
 <Step number={3} title="Verify the transfer">
 
-Confirm the transfer completed and balances updated.
+Confirm that the transfer completed and that the balances changed.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-The transfer appears in **Payments** history with a `confirmed` status and an onchain transaction signature.
+The transfer appears in the **Payments** history with a `confirmed` status and an onchain
+transaction signature.
 
-![Payments overview showing confirmed inbound transaction](/images/tokens/transfer-confirmed.png)
+![Payments overview showing a confirmed inbound transaction in the history](/images/tokens/transfer-confirmed.png)
 
-Click the record to see full details including the Solana Explorer link.
+Select the record to see the full details, including the Solana Explorer link.
 
 </Tab>
 <Tab value="API">
@@ -179,10 +194,10 @@ Click the record to see full details including the Solana Explorer link.
 // data.transfer.signature — onchain tx signature
 ```
 
-Poll status for async confirmations:
+Poll the status for asynchronous confirmations:
 
 ```bash title="Terminal"
-curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
+curl https://api.solana.com/v1/payments/transfers/xfr_abc123 \
   -H "Authorization: Bearer sk_test_..."
 ```
 
@@ -196,16 +211,26 @@ curl https://api.solana.com/v1/payments/transfers/txn_abc123 \
 
 ## Deduplication
 
-Send one stable `Idempotency-Key` per logical payment and reuse it for network retries. An identical request for the same exact `sourceCustodyWalletId` returns the original transfer; reusing the key with a different payload or wallet returns `409`. A request without a key creates a new transfer intent.
+Send one stable `Idempotency-Key` for each logical payment, and reuse that key for network
+retries.
 
-Persist the returned `Transfer.id` as your local primary key. Once populated, the on-chain `signature` is also unique across SDP transfers and can deduplicate records across SDP and another chain indexer.
+An identical request for the same exact `sourceCustodyWalletId` returns the original transfer. If
+you reuse the key with a different payload, or with a different wallet, the API returns `409`. A
+request with no key creates a new transfer intent.
 
-See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern applied to batched outbound flows.
+Persist the returned `Transfer.id` as your local primary key. Once SDP sets the onchain
+`signature`, that value is also unique across SDP transfers. You can use it to deduplicate records
+across SDP and another chain indexer.
+
+See [Payouts and disbursements](/docs/payments/send-payouts#dedup-and-retries) for the same pattern
+applied to batched outbound flows.
 
 ## Related
 
-- [Payment with memo](/docs/payments/send-payment-with-memo) — using the `memo` field to carry order references
-- [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound flows
-- [Mint and Burn](/docs/tokens/mint-and-burn) — create or destroy token supply
-- [Allowlists](/docs/tokens/allowlists) — define approved destinations for allowlist-enabled issuance flows
-- [Freeze and Compliance](/docs/tokens/freeze-and-compliance) — halt transfers for compliance
+- [Payment with memo](/docs/payments/send-payment-with-memo). Use the `memo` field to carry an
+  order reference.
+- [Payouts and disbursements](/docs/payments/send-payouts). Batched outbound flows.
+- [Mint and burn](/docs/tokens/mint-and-burn). Create or destroy token supply.
+- [Allowlists](/docs/tokens/allowlists). Define the approved destinations for an
+  allowlist-enabled issuance flow.
+- [Freeze and compliance](/docs/tokens/freeze-and-compliance). Halt transfers for compliance.

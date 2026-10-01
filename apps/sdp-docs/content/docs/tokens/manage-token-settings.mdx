@@ -1,51 +1,78 @@
 ---
-title: Manage Token Settings
-description: Update token authorities and operational settings after deployment.
+title: Manage token settings
+description: Review a deployed token, then rotate or clear one of its authorities.
 steps:
-  - View current settings
+  - View the current settings
   - Rotate an authority
-  - Revoke an authority
+  - Clear an authority
 ---
 
-After a token is deployed, you can rotate its authorities and adjust operational settings. Authority management is separate from compliance actions — for freeze, pause, and seize flows see [Freeze and Compliance](/docs/tokens/freeze-and-compliance).
+After you deploy a token, you can rotate its authorities and adjust its operational settings.
 
-For on-chain metadata edits, `PATCH /v1/issuance/tokens/{tokenId}` accepts optional `signingCustodyWalletId`. It selects the exact custody record controlling the current metadata authority for this request, not a new deployment wallet or authority. Omission requires exactly one matching in-scope record; multiple matches return `409`. Database-only edits need no signer. In the dashboard, one matching wallet is automatic; when there are several, choose one in the metadata confirmation or beside the Asset Profile Save button. Historical `data.token.signingCustodyWalletId` does not change.
+Authority management is not a compliance action. For freeze, pause, and seize, see
+[Freeze and compliance](/docs/tokens/freeze-and-compliance).
 
-To select that signer after an external authority rotation, request `GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and use `data.metadataAuthority`. For tokens with a mint this is read live from the chain, unlike the stored snapshot in `data.token.metadataAuthority`; tokens without a mint return their stored metadata authority or mint authority without RPC. RPC failure returns `502`, never the stored value as a fallback. The dashboard keeps metadata and allowlist lookup errors separate, and the update rechecks authority before signing. This read changes neither the stored token nor its deployment wallet.
+## Choosing the signer for a metadata edit
+
+`PATCH /v1/issuance/tokens/{tokenId}` accepts an optional `signingCustodyWalletId` for an onchain
+metadata edit.
+
+That field selects the exact custody record that controls the current metadata authority, for this
+request only. It does not set a new deployment wallet, and it does not set a new authority.
+
+If you omit the field, SDP requires exactly one matching in-scope record. Several matches return
+`409`. A database-only edit needs no signer.
+
+In the dashboard, SDP uses the one matching wallet automatically. When several wallets match,
+choose one in the metadata confirmation, or beside the Save control for the asset profile. The
+historical `data.token.signingCustodyWalletId` value does not change.
+
+To find that signer after someone rotated the authority outside SDP, request
+`GET /v1/issuance/tokens/{tokenId}?includeMetadataAuthority=true` and read `data.metadataAuthority`.
+
+For a token that has a mint, SDP reads that value live from the chain. The stored snapshot in
+`data.token.metadataAuthority` can therefore differ. A token without a mint returns its stored
+metadata authority, or its mint authority, with no RPC call.
+
+An RPC failure returns `502`. SDP never falls back to the stored value. The dashboard keeps
+metadata errors and allowlist lookup errors separate, and the update rechecks the authority before
+it signs. This read changes neither the stored token nor its deployment wallet.
 
 ## Prerequisites
 
-- A deployed token with status `active`
-- `tokens:admin` permission on the API key
+- A deployed token with the status `active`
+- The `tokens:admin` permission on the API key
 
 ## How it works
 
 <HowItWorks>
 
-<Step number={1} title="View current settings">
+<Step number={1} title="View the current settings">
 
-Review the token's current authorities and configuration before making changes.
+Review the authorities and the configuration of the token before you change anything.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-Open the token detail page. The **Overview** tab shows the token address, mint authority, current supply, and core metadata.
+Open the token detail page. The **Overview** tab shows the token address, the mint authority, the
+current supply, and the core metadata.
 
-![Token detail Overview tab showing token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
+![Overview tab showing the token address, mint authority, supply, template, and decimals](/images/tokens/token-settings-overview.png)
 
-The **Permissions** tab lists every authority and which wallet currently holds it.
+The **Permissions** tab lists every authority and the wallet that holds it.
 
-![Permissions tab showing Mint Authority, Freeze Authority, Metadata Authority, and Permanent Delegate Authority with Edit buttons](/images/tokens/token-settings-permissions.png)
+![Permissions tab listing the mint, freeze, metadata, and permanent delegate authorities with their current wallets](/images/tokens/token-settings-permissions.png)
 
-The **Extensions** tab shows the template and each operational flag — Token Access Control (allowlist) status, mintable, freezable, and default account state.
+The **Extensions** section shows the template and each operational flag. The flags include the
+Token Access Control status, mintable, freezable, and the default account state.
 
-![Extensions tab showing template, allowlist, mintable, freezable, and default account state settings](/images/tokens/token-settings-extensions.png)
+![Extensions section showing the template, allowlist, mintable, freezable, and default account state values](/images/tokens/token-settings-extensions.png)
 
 </Tab>
 <Tab value="API">
 
-Fetch the current token state:
+Fetch the current state of the token:
 
 ```bash title="Terminal"
 curl https://api.solana.com/v1/issuance/tokens/tok_abc123 \
@@ -67,17 +94,23 @@ const { data } = await res.json();
 
 <Step number={2} title="Rotate an authority">
 
-Transfer a token authority to a different wallet. Use this to move signing responsibilities or to hand off control to an external key holder.
+Move a token authority to a different wallet. Rotate an authority to move signing responsibility,
+or to hand control to an external key holder.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-On the token detail page, go to **Permissions**. Click **Edit** next to the authority you want to change. Select another controlled wallet or choose **Use custom address**, then click **Save authority**.
+1. Open the **Permissions** tab of the token detail page.
+2. Select **Edit** next to the authority you want to change.
+3. Select another controlled wallet, or select **Use custom address** and enter one.
+4. Select **Save authority**.
 
-![Mint Authority modal showing current authority wallet, new authority dropdown with controlled wallets, and Save authority button](/images/tokens/token-authority-edit.png)
+![Authority dialog showing the current authority wallet, the list of controlled wallets, and the Save authority control](/images/tokens/token-authority-edit.png)
 
-> Once an authority is rotated to an external wallet, SDP can no longer sign operations that require it. Rotate the authority back to a controlled wallet to resume using SDP's deploy, mint, and compliance actions.
+> After you rotate an authority to an external wallet, SDP can no longer sign the operations that
+> need it. Rotate the authority back to a controlled wallet to use the SDP deploy, mint, and
+> compliance actions again.
 
 </Tab>
 <Tab value="API">
@@ -97,7 +130,7 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
   }'
 ```
 
-`type` can be `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
+`type` accepts `mintAuthority`, `freezeAuthority`, or `permanentDelegate`.
 
 </Tab>
 </Tabs>
@@ -105,20 +138,27 @@ curl -X POST https://api.solana.com/v1/issuance/tokens/tok_abc123/authority \
 
 </Step>
 
-<Step number={3} title="Revoke an authority">
+<Step number={3} title="Clear an authority">
 
-Permanently remove an authority from the token. This action is irreversible — the token will no longer be mintable, freezable, or delegatable depending on which authority is revoked.
+Clearing an authority removes it from the token permanently. You cannot undo it. The token then
+stops being mintable, freezable, or delegatable, depending on which authority you clear.
 
 <StepPanel>
 <Tabs items={["UI", "API"]} groupId="how-it-works">
 <Tab value="UI">
 
-In **Settings → Authorities**, click **Revoke** next to the authority and confirm. A warning dialog explains the consequences before you proceed.
+1. Open the **Permissions** tab of the token detail page.
+2. Select **Edit** next to the authority you want to clear.
+3. Set the new authority to **None**.
+4. Select **Save authority**.
+5. Read the confirmation dialog. It explains what the change costs you, for example
+   "Set Mint Authority to None?".
+6. Select **Yes, set to None**.
 
 </Tab>
 <Tab value="API">
 
-Set `newAuthority` to `null` to revoke:
+Set `newAuthority` to `null` to clear the authority:
 
 ```typescript title="revoke-authority.ts"
 body: JSON.stringify({
@@ -129,7 +169,8 @@ body: JSON.stringify({
 }),
 ```
 
-After revoking the mint authority, no new tokens can ever be minted. Revocation is permanent and cannot be undone.
+After you clear the mint authority, nobody can ever mint this token again. The change is permanent
+and you cannot undo it.
 
 </Tab>
 </Tabs>

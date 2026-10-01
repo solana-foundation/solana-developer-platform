@@ -1,25 +1,33 @@
 ---
 title: Wallet policies
-description: Wallet controls, operation permissions, and policy audit visibility.
+description: Set the controls on a custody wallet, and read the record of every policy decision.
 ---
 
-A **wallet policy** constrains how a custody wallet can move funds and execute supported operations. SDP starts from default allow, then applies the active wallet control profile and any policy fields you configure. Policies are managed via `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies` and enforced before each wallet operation executes.
+A **wallet policy** limits how a custody wallet moves funds, and which supported operations it can
+run. SDP starts from default allow. It then applies the active wallet control profile, and any
+policy field you configure. SDP enforces the policy before each wallet operation runs.
 
-Use policies for treasury wallets, automated payout wallets, or any custody wallet where unbounded outbound flow would be a liability.
+Read and write a policy with `GET` and `PUT` on `/v1/payments/wallets/{walletId}/policies`. The
+`{walletId}` path segment takes the provider wallet ID, for example `privy_wallet_123`. It does not
+accept the SDP wallet ID, and it does not accept the wallet address. See
+[Which wallet identifier to use](/docs/wallet-operations#which-wallet-identifier-to-use).
+
+Use a policy on a treasury wallet, on an automated payout wallet, and on any custody wallet where
+an unbounded outbound flow would be a liability.
 
 ## Reading a wallet's policies
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+curl https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..."
 ```
 </Tab>
 <Tab value="TypeScript">
 ```typescript title="get-wallet-policies.ts"
 const response = await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  "https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies",
   { headers: { Authorization: "Bearer sk_test_..." } }
 );
 const { data } = await response.json();
@@ -32,13 +40,14 @@ const { data } = await response.json();
 </Tab>
 </Tabs>
 
-The payload is wrapped in the standard `data` / `meta` envelope, with the policy under a `policy` key:
+SDP wraps the payload in the standard `data` and `meta` envelope. The policy sits under a `policy`
+key:
 
 ```json title="response.json"
 {
   "data": {
     "policy": {
-      "walletId": "wal_abc123",
+      "walletId": "privy_wallet_123",
       "destinationAllowlist": ["7xKXz...9fGh", "5aBCd...2eFg"],
       "maxTransferAmount": "100.00",
       "maxDailyAmount": "1000.00",
@@ -94,23 +103,46 @@ The payload is wrapped in the standard `data` / `meta` envelope, with the policy
 }
 ```
 
-Amount fields are **UI-unit decimal strings** (`"100.00"` means 100 tokens, regardless of the mint's decimals — matching the transfer-request convention). The configured value is a **single threshold**, but enforcement is **per token**: `maxDailyAmount` sums each token's outbound transfers separately within the day window, so a wallet with `maxDailyAmount: "1000"` can send up to 1000 USDC *and* 1000 SOL in the same UTC day — there is no aggregate cap across mints. If you need different per-token thresholds (e.g., 10,000 USDC daily but 50 SOL daily), partition into separate wallets.
+Every amount field is a decimal string in display units. `"100.00"` means 100 tokens, whatever the
+mint's decimal count is. This is the same convention as a transfer request. See
+[Transfer limits](#transfer-limits) for how SDP enforces `maxTransferAmount` and `maxDailyAmount`.
 
 ## Default allow and active controls
 
-Wallet policy evaluation starts from default allow. If no wallet control profile exists, supported wallet operations continue to run unless another product-specific check rejects them. When you activate a control profile, SDP evaluates its rules first and returns the resulting `decision` as one of `allow`, `deny`, `approval_required`, `provider_approval_required`, `review`, or `not_evaluated`.
+Wallet policy evaluation starts from default allow. When the wallet has no control profile, a
+supported wallet operation runs unless another product check rejects it.
 
-The `controlProfile` object shows the active immutable revision. Treat `revisionId` and `revisionNumber` as audit references: a policy evaluation records which revision was active when the wallet operation was checked.
+When you activate a control profile, SDP evaluates its rules first. SDP then returns a `decision`
+with one of six values: `allow`, `deny`, `approval_required`, `provider_approval_required`,
+`review`, or `not_evaluated`.
+
+- `provider_approval_required` means the operation waits for an approval in the custody provider's
+  own policy system. SDP holds the operation, as it does for `approval_required`.
+- `not_evaluated` means SDP holds no policy decision for the operation. SDP rejects the operation.
+
+The `controlProfile` object shows the active revision, which SDP never changes in place. Treat
+`revisionId` and `revisionNumber` as audit references. A policy evaluation records which revision
+was active when SDP checked the wallet operation.
 
 ### Dashboard actions
 
-The dashboard authoring flow exposes three actions: **Allow**, **Deny**, and **Require approval**. Choose **Require approval** when an operator must decide whether an operation can continue; it holds the operation and creates an **Approval Request**.
+The authoring flow in the dashboard offers three actions: **Allow**, **Deny**, and **Require
+approval**.
 
-`review` remains a possible API evaluation result for legacy or safety paths, such as an unrecognized policy rule. It is visible in audit records, but it is not a dashboard authoring option or a separate human-review workflow. Do not use it to model operator approval; use `approval_required` instead.
+Choose **Require approval** when an operator must decide whether an operation can continue. SDP
+then holds the operation and creates an approval request.
+
+`review` is still a possible result of an API evaluation. It comes from a legacy path or a safety
+path, such as an unrecognized policy rule. It appears in audit records. It is not an authoring
+option in the dashboard, and it is not a separate human-review workflow. Do not use it to model
+operator approval. Use `approval_required` instead.
 
 ## Rule kinds
 
-A control profile revision is an ordered list of rules. Each rule either abstains or contributes a decision; the strictest matched decision wins and the revision's `defaultAction` applies when nothing matches. For every kind except `velocity`, `action` is the decision a match produces.
+A control profile revision holds an ordered list of rules. Each rule either matches the operation
+or does not match it. SDP takes the decisions of the rules that match and applies the strictest
+one. When no rule matches, SDP applies the revision's `defaultAction`. For every kind except
+`velocity`, `action` is the decision that a match produces.
 
 | Kind | Matches | Fields |
 | --- | --- | --- |
@@ -125,7 +157,7 @@ A control profile revision is an ordered list of rules. Each rule either abstain
 
 ### Velocity limits
 
-A `velocity` rule caps volume over a rolling window instead of per operation:
+A `velocity` rule caps volume over a rolling window, instead of capping one operation:
 
 ```json title="velocity-rule.json"
 {
@@ -140,33 +172,50 @@ A `velocity` rule caps volume over a rolling window instead of per operation:
 }
 ```
 
-- `scope` chooses whose history counts: `wallet` (default), `organization`, or `api_key`.
-- `window` is an ISO 8601 duration using days, hours and minutes (`PT1H`, `P1D`, `P1DT12H`). Weeks, months, years and seconds are rejected.
-- `max` is a UI-unit decimal string in the asset's units. Like `amount`, the rule must name at least one mint.
-- The window sums every decided, non-failed, non-canceled wallet operation for the scope and mint, optionally narrowed by `operationTypes`. Operations still awaiting their own policy decision do not count, so concurrent requests never block each other.
-- `action` is the decision **on breach** (default `deny`). Within the limit the rule abstains rather than allowing, so a velocity rule never overrides a stricter rule beside it. Set `action: "approval_required"` to route outliers into the approval flow instead of refusing them.
-- A `Dry-Run: true` request reports the velocity verdict against current history without recording anything.
+- `scope` chooses whose history counts: `wallet` (the default), `organization`, or `api_key`.
+- `window` is an ISO 8601 duration in days, hours, and minutes, such as `PT1H`, `P1D`, or
+  `P1DT12H`. SDP rejects weeks, months, years, and seconds.
+- `max` is a decimal string in the display units of the asset. As with the `amount` kind, the rule
+  must name at least one mint.
+- The window sums every wallet operation for that scope and mint that SDP has decided, that has not
+  failed, and that nobody canceled. `operationTypes` narrows that sum. An operation that still
+  waits for its own policy decision does not count, so two concurrent requests never block each
+  other.
+- `action` is the decision that SDP applies when the operation passes the limit. The default is
+  `deny`. Below the limit the rule produces no decision at all. It does not allow the operation, so
+  it never overrides a stricter rule beside it. Set `action: "approval_required"` to send an
+  outlier into the approval flow instead of refusing it.
+- A request with `Dry-Run: true` reports the velocity verdict against the current history, and
+  records nothing.
 
 ## Operation permissions
 
-Wallet policies can match operations at two levels:
+A wallet policy can match an operation at two levels:
 
-- **Operation family** rules apply to every evaluated operation in a broad product area.
-- **Operation type** rules match one exact operation identifier and take precedence when you need a narrower decision.
+- An **operation family** rule applies to every evaluated operation in a broad product area.
+- An **operation type** rule matches one exact operation identifier. It takes precedence when you
+  need a narrower decision.
 
-These are wallet-policy selectors, not API-key permissions. API-key permissions such as `payments:write` and `tokens:write` determine whether a caller may invoke an endpoint; operation permissions determine what the selected wallet may do after the request is authorized. The wallet policy is the baseline: an API key policy can narrow what a key may do, or route an operation into approval, but it can never expand past what the wallet policy allows. See [Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
+These are wallet policy selectors, not API key permissions. An API key permission such as
+`payments:write` or `tokens:write` decides whether a caller can call an endpoint. An operation
+permission decides what the selected wallet can do after SDP authorizes the request.
+
+The wallet policy is the baseline. An API key policy can narrow what a key can do, or send an
+operation for approval. It can never widen what the wallet policy allows. See
+[Manage API keys](/docs/developing-with-sdp/manage-api-keys) for caller permissions.
 
 ### Operation families
 
 | Family | Description | Current evaluated operations |
 | --- | --- | --- |
 | `payment` | Outbound single and batch payments. | Single and batch transfer execution |
-| `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | On-ramp and off-ramp quote creation |
+| `ramp` | Fiat-to-crypto and crypto-to-fiat ramp activity. | Onramp and offramp quote creation |
 | `issuance` | Token lifecycle actions signed by the wallet. | Mint, burn, seize, and authority-update execution |
-| `program` | On-chain program interactions signed by the wallet. | No current public operation type |
+| `program` | Onchain program interactions signed by the wallet. | No current public operation type |
 | `transfer` | Generic direct-transfer family reserved for operations outside the payment workflow. | No current public operation type |
 
-Family values with no current public operation type are valid policy values, but they do not match a public SDP flow until an operation is emitted in that family.
+A family with no current public operation type is still a valid policy value. It does not match a
+public SDP flow until SDP emits an operation in that family.
 
 ### Exact operation types
 
@@ -174,8 +223,8 @@ Family values with no current public operation type are valid policy values, but
 | --- | --- | --- |
 | `payment_transfer_execute` | `payment` | Executes one outbound payment transfer from the wallet. |
 | `payment_transfer_batch_execute` | `payment` | Executes an outbound batch and evaluates the aggregate amount before submission. |
-| `ramp_onramp_quote` | `ramp` | Creates an on-ramp quote that delivers crypto to the destination wallet. |
-| `ramp_offramp_quote` | `ramp` | Creates an off-ramp quote that draws crypto from the source wallet. |
+| `ramp_onramp_quote` | `ramp` | Creates an onramp quote that delivers crypto to the destination wallet. |
+| `ramp_offramp_quote` | `ramp` | Creates an offramp quote that draws crypto from the source wallet. |
 | `issuance_mint_execute` | `issuance` | Executes a token mint using the configured signing wallet. |
 | `issuance_burn_execute` | `issuance` | Executes a token burn using the configured signing wallet. |
 | `issuance_force_burn_execute` | `issuance` | Force-burns tokens from a holder account. |
@@ -185,55 +234,100 @@ Family values with no current public operation type are valid policy values, but
 | `issuance_unfreeze_execute` | `issuance` | Thaws a frozen holder token account using the freeze authority wallet. |
 | `issuance_pause_execute` | `issuance` | Pauses all token transfers using the pause authority wallet. |
 | `issuance_unpause_execute` | `issuance` | Resumes token transfers using the pause authority wallet. |
-| `issuance_metadata_update_execute` | `issuance` | Rewrites on-chain token metadata using the metadata authority wallet. |
+| `issuance_metadata_update_execute` | `issuance` | Rewrites onchain token metadata using the metadata authority wallet. |
 | `recurring_payment_create` | `payment` | Creates a recurring payment schedule. |
 | `recurring_payment_update` | `payment` | Updates a recurring payment schedule. |
 | `recurring_payment_collection` | `payment` | Collects a due recurring payment. |
 
-Operation-type matching is exact and case-sensitive. The API accepts only the supported identifiers above, so a rule cannot be activated for an operation SDP never emits.
+Operation-type matching is exact, and it is case-sensitive. The API accepts only the identifiers
+above, so you cannot activate a rule for an operation that SDP never emits.
 
 ## Policy evaluation and audit records
 
-Each supported action against the wallet is recorded as a **Wallet Operation** — the attempt, whatever the outcome — before evaluation runs, and its **Policy Evaluation** — the verdict, plus a point-in-time snapshot of the operation and the policy that decided it — is recorded once SDP decides what should happen. `audit.recentEvaluations` exposes the most recent decisions for the wallet so support and customer operators can review:
+SDP records each supported action against the wallet as a **wallet operation**, before evaluation
+runs. That record covers the attempt, whatever its outcome.
 
-- what operation was evaluated (`walletOperationId`, `operationFamily`, `operationType`)
-- what decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
-- whether an approval request was created (`approvalRequestId`)
-- when the operation was created, updated, and evaluated
+SDP records a **policy evaluation** once it decides what should happen. That record holds the
+verdict, plus a snapshot of the operation and of the policy that decided it, as both stood at that
+moment.
 
-Use these records to explain allow, deny, approval-required, and review outcomes. They are an operational audit summary, not the full raw provider payload.
+`audit.recentEvaluations` returns the most recent decisions for the wallet, so support staff and
+your own operators can review:
+
+- which operation SDP evaluated (`walletOperationId`, `operationFamily`, `operationType`)
+- which decision SDP made (`decision`, `reasonCode`, `reason`, `requiresApproval`)
+- whether SDP created an approval request (`approvalRequestId`)
+- when SDP created, updated, and evaluated the operation
+
+Use these records to explain an allow, deny, approval-required, or review outcome. They are an
+operational summary for an audit, not the full payload from the provider.
 
 ## Provider mapping status
 
-`providerMappingStatus` describes whether an SDP policy revision has also been mapped into a custody or ramp provider's native policy system. Current payment wallet controls are SDP-enforced first. A value of `not_applicable` means there is no provider-native mapping for that revision. `pending`, `partial`, or `failed` mean SDP still evaluates the operation, but you should not assume the same rule has been fully synced to the provider.
+`providerMappingStatus` tells you whether SDP has also mapped a policy revision into the native
+policy system of a custody provider or a ramp provider. SDP enforces the current payment wallet
+controls itself, first.
+
+A value of `not_applicable` means that revision has no provider-native mapping. A value of
+`pending`, `partial`, or `failed` means SDP still evaluates the operation. Do not assume that the
+provider holds the same rule in full.
 
 ## Destination allowlist
 
-This is a wallet-policy control on outbound destinations — distinct from a token's **Token Access Control** allowlist, which gates who may hold the token itself. It is a list of on-chain destination addresses (32-44 character base-58 Solana pubkeys). When set, `POST /v1/payments/transfers` rejects any destination not in the list.
+`destinationAllowlist` is a wallet policy control on outbound destinations. It is not the
+**Token Access Control** allowlist of a token, which controls who may hold the token itself.
 
-- Maximum entries: **500 addresses per wallet**.
-- Each entry is a single on-chain address — no patterns, ranges, or address books.
-- Empty allowlist (`[]`) means no destination restriction. To enable enforcement, populate at least one entry.
+The value is a list of onchain destination addresses. Each one is a base-58 Solana address of 32 to
+44 characters. When you set the list, `POST /v1/payments/transfers` rejects any destination that is
+not in it.
 
-The allowlist exists to bound risk on automated wallets (a hot wallet that should only ever pay a known set of counterparties) and to enforce treasury controls (only the corporate cold-storage address can drain the operating wallet).
+- A wallet holds at most **500 addresses**.
+- Each entry is one onchain address. There are no patterns, no ranges, and no address books.
+- An empty allowlist (`[]`) means no restriction on destinations. To enforce the list, add at least
+  one entry.
+
+`destinationAllowlist` and the `destination` rule kind are two separate controls, and you set them
+in two different places. `destinationAllowlist` is a field of the wallet policy itself. A
+`destination` rule is one entry in the `rules` array of a control profile revision, and it carries
+its own `allowlist` and `blocklist` fields. See [Rule kinds](#rule-kinds) for the rule form.
+
+Use the allowlist to limit an automated wallet, such as a hot wallet that should only ever pay a
+known set of counterparties. Use it for treasury control as well, such as an operating wallet that
+may send only to the corporate cold-storage address.
 
 ## Transfer limits
 
-A **transfer limit** always targets one **Policy Asset** — identified by mint, with native SOL under its well-known mint — never a blanket cap across assets. Two limits, both optional:
+A transfer limit always applies to one token, identified by its mint address. Native SOL uses its
+well-known mint address. A limit is never one cap across several tokens.
 
-- **`maxTransferAmount`** — per-transfer cap. Any single `POST /v1/payments/transfers` exceeding this amount is rejected. Compared against the request's `amount` directly, so it is naturally per-token.
-- **`maxDailyAmount`** — UTC-calendar-day cap, **enforced per token**. The day window resets at 00:00 UTC; the projected total is the sum of that wallet's outbound transfers for the **same token** in the current day (`pending`/`processing`/`confirmed`/`finalized`) plus the new request's `amount`. Different tokens are summed independently — see the per-token note under [Reading a wallet's policies](#reading-a-wallets-policies).
+Both limits are optional:
 
-Set both for defense in depth: a per-transaction cap that catches obvious mistakes, plus a daily cap that bounds blast radius if many small transfers are submitted in a coordinated attack.
+- **`maxTransferAmount`** caps one transfer. SDP rejects any single `POST /v1/payments/transfers`
+  above this amount. SDP compares the value against the `amount` of the request.
+- **`maxDailyAmount`** caps one UTC calendar day. The day window resets at 00:00 UTC. SDP adds the
+  `amount` of the new request to the sum of that wallet's outbound transfers of the **same token**
+  in the current day, counting the `pending`, `processing`, `confirmed`, and `finalized` states.
+
+You configure one threshold, and SDP enforces it separately for each token. A wallet with
+`maxDailyAmount: "1000"` can therefore send 1000 USDC and 1000 SOL in the same UTC day. There is no
+combined cap across mints.
+
+If you need a different threshold per token, for example 10,000 USDC per day but 50 SOL per day,
+split the work across separate wallets.
+
+Set both limits. The per-transfer cap catches an obvious mistake. The daily cap limits the total
+that many small transfers can move, when someone submits them in a coordinated attack.
 
 ## Updating policies
 
-`PUT /v1/payments/wallets/{walletId}/policies` has **full-replace** semantics — the request body becomes the new policy state in its entirety. To remove the allowlist, send `destinationAllowlist: []`. To drop a transfer limit, omit the field on the next PUT.
+`PUT /v1/payments/wallets/{walletId}/policies` replaces the whole policy. The request body becomes
+the new policy state in full. To remove the allowlist, send `destinationAllowlist: []`. To drop a
+transfer limit, leave the field out of the next PUT.
 
 <Tabs items={["curl", "TypeScript"]}>
 <Tab value="curl">
 ```bash title="Terminal"
-curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
+curl -X PUT https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies \
   -H "Authorization: Bearer sk_test_..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -249,7 +343,7 @@ curl -X PUT https://api.solana.com/v1/payments/wallets/wal_abc123/policies \
 <Tab value="TypeScript">
 ```typescript title="update-wallet-policies.ts"
 await fetch(
-  "https://api.solana.com/v1/payments/wallets/wal_abc123/policies",
+  "https://api.solana.com/v1/payments/wallets/privy_wallet_123/policies",
   {
     method: "PUT",
     headers: {
@@ -267,16 +361,27 @@ await fetch(
 </Tab>
 </Tabs>
 
-Because PUT is full-replace, treat policy edits like ordinary form submissions: read the current state, present it for editing, and PUT the complete updated object. Don't construct partial patches.
+Because PUT replaces the whole policy, treat a policy edit like an ordinary form submission. Read
+the current state, show it for editing, then PUT the complete updated object. Do not build a
+partial patch.
 
 ## Interaction with compliance
 
-Wallet policies enforce **structural** constraints (where funds can go, how much, how fast). They do not replace compliance screening. If your organization has compliance screening enabled, screening happens on the destination address as a separate check, in addition to the allowlist match. A transfer can be rejected by either layer; both must pass to reach the network.
+A wallet policy enforces structural limits: where funds can go, how much can move, and how fast. It
+does not replace compliance screening.
 
-See the [Compliance API reference](/docs/reference/api/compliance) for address-screening flows that complement policies.
+If your organization has compliance screening enabled, SDP screens the destination address as a
+separate check, next to the allowlist match. Either layer can reject a transfer, and a transfer
+must pass both to reach the network.
+
+See the [Compliance API reference](/docs/reference/api/compliance) for the address-screening flows
+that work alongside a policy.
 
 ## Related
 
-- [Payouts and disbursements](/docs/payments/send-payouts) — running an outbound batch from a policy-constrained wallet.
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint subject to policy enforcement.
-- [Wallet balances](/docs/wallet-operations/balances) — current balance, useful to size transfer limits.
+- [Payouts and disbursements](/docs/payments/send-payouts). Run an outbound batch from a wallet
+  that has a policy.
+- [Basic payment](/docs/payments/send-basic-payment). The transfer endpoint that the policy applies
+  to.
+- [Wallet balances](/docs/wallet-operations/balances). Read the current balance to size a transfer
+  limit.

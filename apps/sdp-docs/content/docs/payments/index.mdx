@@ -1,33 +1,52 @@
 ---
 title: Overview
-description: Build payments on Solana with SDP — concepts, send, accept, and ramps.
+description: Build payments on Solana with SDP, from a single transfer to fiat onramps and offramps.
 ---
 
-SDP provides a Solana-native payments stack: stablecoin transfers, fiat on-ramps and off-ramps, and reconciliation primitives. This section mirrors the structure of the [public Solana payments documentation](https://solana.com/docs/payments) and maps each workflow to the SDP APIs you call to ship it.
+SDP gives you a Solana-native payments stack. It covers stablecoin transfers, fiat onramps and
+offramps, and the records you need to reconcile them.
 
-If you have not yet provisioned a custody wallet or token, start with [Set Up Wallets](/docs/guides/setup-wallets) and [Tokenize an Asset](/docs/tokens/tokenize-an-asset).
+This section follows the structure of the
+[public Solana payments documentation](https://solana.com/docs/payments). Each workflow below names
+the SDP APIs you call to build it.
 
-## What's in this section
+Create a custody wallet and a token before you start. See
+[Set up wallets](/docs/guides/setup-wallets) and
+[Tokenize an asset](/docs/tokens/tokenize-an-asset).
 
-- **[How payments work on SDP](/docs/payments/concepts)** — wallets, tokens, signing modes, fees, and the transfer data model.
-- **Send payments** — outbound flows.
-  - [Basic payment](/docs/payments/send-basic-payment) — a single transfer in either signing mode.
-  - [Payment with memo](/docs/payments/send-payment-with-memo) — attach order or customer references to a transfer.
-  - [Payouts and disbursements](/docs/payments/send-payouts) — batched outbound transfers and reconciliation.
-- **Accept payments** — inbound flows.
-  - [Accept overview](/docs/payments/accept-overview) — receiving-address convention and integration options.
-  - [Verifying a payment](/docs/payments/accept-verification) — transfer-status semantics and finality.
-  - [Indexing and reconciliation](/docs/payments/accept-indexing) — listing inbound transfers for your ledger.
-- **Ramps** — fiat on-ramps and off-ramps.
-  - [Ramps overview](/docs/payments/ramps) — corridor discovery, estimates, and the Ramp Quote request shape.
-  - [Ramp providers](/docs/payments/ramps-providers) — capability matrix and configuration for all seven ramp providers.
+## What is in this section
 
-Wallet-wide controls and balances are documented in [Wallet operations](/docs/wallet-operations).
+- **[How payments work on SDP](/docs/payments/concepts)**. Wallets, tokens, signing modes, fees,
+  and the transfer data model.
+- **Send payments.** The outbound flows.
+  - [Basic payment](/docs/payments/send-basic-payment). One transfer, in either signing mode.
+  - [Payment with memo](/docs/payments/send-payment-with-memo). Attach an order reference or a
+    customer reference to a transfer.
+  - [Payouts and disbursements](/docs/payments/send-payouts). Batched outbound transfers, and how
+    to reconcile them.
+- **Accept payments.** The inbound flows.
+  - [Accept payments](/docs/payments/accept-overview). The receiving-address convention and the
+    integration options.
+  - [Verifying a payment](/docs/payments/accept-verification). What each transfer status means, and
+    what finality means.
+  - [Indexing and reconciliation](/docs/payments/accept-indexing). List inbound transfers for your
+    own ledger.
+- **Ramps.** Fiat onramps and offramps.
+  - [Ramps](/docs/payments/ramps). Corridor discovery, rate estimates, and the shape of a Ramp
+    Quote request.
+  - [Ramp providers](/docs/payments/ramps-providers). The capability matrix and the configuration
+    for all seven ramp providers.
 
-## Underlying API
+[Wallet operations](/docs/wallet-operations) documents wallet-wide controls and balances.
 
-Every page in this section links to specific endpoints in the auto-generated [Payments API reference](/docs/reference/api/payments). The Payments API surface is namespaced under `/v1/payments` and groups into four areas: `transfers`, `ramps`, `wallets/.../balances`, and `wallets/.../policies`.
+## The underlying API
+
+Every page in this section links to endpoints in the generated
+[Payments API reference](/docs/reference/api/payments). The Payments API area sits under
+`/v1/payments`. It groups into four parts: `transfers`, `ramps`, `wallets/.../balances`, and
+`wallets/.../policies`.
 
 ## Related
 
-- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow) — high-level tutorial covering quote through settlement.
+- [End-to-end payment flow](/docs/tutorials/end-to-end-payment-flow). A tutorial that covers the
+  same lifecycle, from quote to settlement.

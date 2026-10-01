@@ -1,9 +1,14 @@
 ---
 title: Idempotency
-description: Replay-safe mutations through the Idempotency-Key header, claimed by the record itself.
+description: Replay a mutation safely with the Idempotency-Key header, which the created record claims.
 ---
 
-Retries are a fact of distributed systems: clients time out, connections drop, workers die mid-run. SDP lets you replay a mutation safely by sending an `Idempotency-Key` header — a unique value (a UUID works well) that you mint once per logical operation and reuse on every retry of that operation.
+Retries are part of every distributed system. A client times out, a connection drops, or a worker
+stops in the middle of a run.
+
+SDP lets you replay a mutation safely. Send an `Idempotency-Key` header with a unique value. A UUID
+works well. Create that value once per logical operation, and send the same value on every retry of
+that operation.
 
 ```bash title="Terminal"
 curl -X POST https://api.solana.com/v1/payments/transfers \
@@ -15,29 +20,52 @@ curl -X POST https://api.solana.com/v1/payments/transfers \
 
 ## How replay resolution works
 
-SDP's model differs from response-cache designs: the idempotency key is claimed by the **business record itself**, not by a snapshot of the original response.
+The SDP model is not a response cache. The **business record** claims the idempotency key, not a
+snapshot of the first response.
 
-1. The first request creates the record — a transfer, a batch, an issuance transaction — carrying your key and a fingerprint of the normalized request payload.
-2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in the normal success envelope. Because it is the live record and not a cached response, a replay reflects current state — a transfer that has since finalized comes back `finalized`, not the `processing` you would have seen on the first attempt.
-3. A request with the same key but a **different payload** is rejected with **409 `CONFLICT`** ("Idempotency key already used with different request payload"). The fingerprint comparison is field-normalized, so formatting differences don't cause false conflicts.
+1. The first request creates the record. The record is a transfer, a batch, or an issuance
+   transaction. It carries your key and a fingerprint of the normalized request payload.
+2. A retry with the same key and the same payload returns **HTTP 200 with the stored record**, in
+   the normal success envelope. The response is the live record, not a cached copy, so a replay
+   shows the current state. A transfer that has finalized since the first attempt comes back as
+   `finalized`, not as the `processing` you saw first.
+3. A request with the same key and a **different payload** returns **409 `CONFLICT`**, with the
+   message "Idempotency key already used with different request payload". SDP normalizes each field
+   before it compares the fingerprints, so a difference in formatting does not create a false
+   conflict.
 
-Keys are retained for the lifetime of the record they claimed — there is no TTL, and a replay works for as long as the record exists.
+SDP keeps a key for as long as the record that claimed it exists. There is no time to live, and a
+replay works for as long as the record exists.
 
-The header itself is validated on every `/v1` route (1–255 printable ASCII characters), but only the endpoints below consume it. Elsewhere it is accepted and ignored.
+SDP validates the header on every `/v1` route. The value must be 1 to 255 printable ASCII
+characters. Only the endpoints below act on it. Every other route accepts the header and ignores
+it.
 
 ## Where it applies
 
-Each domain claims keys in its own namespace, and the namespaces are scoped differently:
+Each domain claims a key in its own namespace, and the namespaces have different scopes:
 
 | Domain | Operations | Key namespace |
 | --- | --- | --- |
-| Payments — transfers | `POST /v1/payments/transfers` | Per project |
-| Payments — batches | `POST /v1/payments/transfer-batches` | Per project |
+| Payments (transfers) | `POST /v1/payments/transfers` | Per project |
+| Payments (batches) | `POST /v1/payments/transfer-batches` | Per project |
 | Issuance | Execute-mode deploy, mint, burn, force-burn, freeze, thaw, pause, unpause, seize, and authority transfer | Per organization, shared across **all** issuance operations and tokens |
 | Custody | Provider credential submission (dashboard flow) | Required on every submission |
 
-Namespaces are independent across domains — the same key value used on a transfer and on a mint are two separate claims that never collide. Within issuance, however, the namespace is organization-wide: reusing a key for a different issuance operation, even on a different token, returns 409.
+The namespaces are independent across domains. The same key value on a transfer and on a mint makes
+two separate claims, and they never collide.
+
+Inside issuance the namespace covers the whole organization. If you reuse a key for a different
+issuance operation, SDP returns 409, even when the operation targets a different token.
 
 ## This model is open to change
 
-The per-domain differences above reflect the order in which these surfaces shipped, not a finished design, and we expect them to converge. Treat the core contract as stable — one key per logical operation, replay returns the record, payload mismatch returns 409 — and treat the scoping details (per-project vs per-organization namespaces, which endpoints consume the header) as subject to change. We are considering extending consumption to more mutation endpoints and unifying namespace scoping across domains.
+The differences between domains above follow the order in which these API areas shipped. They are
+not a finished design, and we expect them to converge.
+
+Treat the core contract as stable: one key per logical operation, a replay returns the record, and
+a payload mismatch returns 409.
+
+Treat the scoping details as open to change: which namespace is per project versus per
+organization, and which endpoints act on the header. We are considering two changes. We may act on
+the header on more mutation endpoints, and we may give every domain the same namespace scope.

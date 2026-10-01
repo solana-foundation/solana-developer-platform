@@ -1,19 +1,29 @@
 ---
 title: Payment with memo
-description: Attach an order ID, invoice number, or customer reference to an SDP transfer.
+description: Attach an order ID, an invoice number, or a customer reference to an SDP transfer.
 ---
 
-The `memo` field on `POST /v1/payments/transfers` carries an arbitrary UTF-8 string (up to 256 characters) alongside the on-chain transfer. Memos are persisted on the SDP `Transfer` record and surface in list and read responses, so your indexer can map each transfer back to a row in your product database.
+The `memo` field on `POST /v1/payments/transfers` carries a UTF-8 string of your choice alongside
+the onchain transfer. A memo can be up to 256 characters.
+
+SDP stores the memo on the `Transfer` record, and returns it in list and read responses. Your
+indexer can therefore map each transfer back to a row in your own product database.
 
 ## When to use a memo
 
-Use a memo when you need a free-form correlation token that your backend already knows at request time:
+Use a memo when you need a free-form correlation value that your backend already knows at request
+time:
 
-- **Order or invoice IDs** — `order_2026-05-14_4837` so the inbound transfer ties to a checkout row.
-- **Customer references** — internal customer or account identifiers for support and reconciliation.
-- **Run identifiers** — a payout-batch ID shared across many outbound transfers in the same disbursement.
+- **Order IDs and invoice IDs.** A value such as `order_2026-05-14_4837` ties the transfer to a
+  checkout row.
+- **Customer references.** Your internal customer or account identifiers, for support and
+  reconciliation.
+- **Run identifiers.** A payout-batch ID shared across many outbound transfers in one
+  disbursement.
 
-Memos are stored by SDP. They are **not** automatically attached as a Solana memo-program instruction; if you need an on-chain memo that block explorers display, that has to be handled at the transaction level (see the trade-offs section below).
+SDP stores the memo on its own record. SDP does not attach it as a Solana memo-program
+instruction. If you need an onchain memo that a block explorer displays, handle that at the
+transaction level. See the trade-offs section below.
 
 ## API usage
 
@@ -73,7 +83,7 @@ HttpRequest request = HttpRequest.newBuilder()
 </Tab>
 </Tabs>
 
-The memo is preserved on the transfer record:
+SDP keeps the memo on the transfer record:
 
 ```json title="response.json"
 {
@@ -85,22 +95,35 @@ The memo is preserved on the transfer record:
 }
 ```
 
-Memo limits: `z.string().max(256)`. UTF-8 is accepted; trim or sanitize on the way in if your downstream systems are stricter.
+A memo can be up to 256 characters. SDP accepts UTF-8. Trim or sanitize the value before you send
+it if your downstream systems are stricter.
 
-## Trade-offs vs. Solana Pay reference accounts
+## Trade-offs against Solana Pay reference accounts
 
-For accept flows, **Solana Pay reference accounts** are an alternative correlation mechanism: you generate a unique pubkey per order and include it in the on-chain transfer as a reference. The advantage is on-chain provenance — anyone can verify the link without trusting SDP's database — and the ability for the payer to construct the transfer themselves from a Solana Pay URL.
+For accept flows, a **Solana Pay reference account** is an alternative way to correlate. You
+generate a unique pubkey for each order and include it in the onchain transfer as a reference.
 
-SDP does not attach a Solana Pay reference on-chain or expose one on inbound transfer records today — use `memo` for SDP-side correlation, or read the reference directly from the transaction via Solana RPC. Use [Accept overview](/docs/payments/accept-overview) and [Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
+This has two advantages. The link has onchain provenance, so anyone can verify it without trusting
+the SDP database. The payer can also build the transfer themselves from a Solana Pay URL.
 
-Rule of thumb: memos are simpler when **you** initiate the transfer (server-side payouts, internal moves), references are stronger when **a third party** initiates the transfer (customer checkout, donations).
+SDP does not attach a Solana Pay reference onchain today, and SDP does not return one on an
+inbound transfer record. Use `memo` for correlation inside SDP, or read the reference from the
+transaction through Solana RPC. See [Accept payments](/docs/payments/accept-overview) and
+[Indexing and reconciliation](/docs/payments/accept-indexing) for the inbound side.
+
+As a rule: a memo is simpler when you initiate the transfer, as in a server-side payout or an
+internal move. A reference is stronger when a third party initiates the transfer, as in a customer
+checkout or a donation.
 
 ## Indexing implications
 
-Memos are returned by `GET /v1/payments/transfers` and `GET /v1/payments/transfers/{id}`, so your reconciliation worker can filter by date / direction / token and then match each row to your order table by memo. See [Indexing and reconciliation](/docs/payments/accept-indexing) for query patterns.
+`GET /v1/payments/transfers` and `GET /v1/payments/transfers/{id}` both return the memo. Your
+reconciliation worker can filter by date, direction, or token, and then match each row to your
+order table by memo. See [Indexing and reconciliation](/docs/payments/accept-indexing) for the
+query patterns.
 
 ## Related
 
-- [Basic payment](/docs/payments/send-basic-payment) — the underlying transfer endpoint.
-- [Payouts and disbursements](/docs/payments/send-payouts) — using memos to tag a batch.
-- [Accept overview](/docs/payments/accept-overview) — when to reach for reference accounts instead.
+- [Basic payment](/docs/payments/send-basic-payment). The underlying transfer endpoint.
+- [Payouts and disbursements](/docs/payments/send-payouts). Use a memo to tag a batch.
+- [Accept payments](/docs/payments/accept-overview). When to use a reference account instead.

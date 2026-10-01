@@ -1,13 +1,14 @@
 ---
-title: Postman Collection
-description: Download the public SDP API Postman collection generated from the OpenAPI contract.
+title: Postman collection
+description: Download the public SDP API Postman collection, generated from the OpenAPI contract.
 ---
 
-The Postman collection is generated from the same public OpenAPI contract that
-powers the [API reference](/docs/reference/api). It includes every
-end-user-facing family published there.
+SDP generates the Postman collection from the same public OpenAPI contract that produces the
+[API reference](/docs/reference/api). The collection includes every end-user-facing family that the
+reference publishes.
 
-Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `organizations`, and `members` are intentionally excluded.
+SDP excludes the internal-only endpoint families on purpose. Those families are `rpc`, `admin`,
+`onboarding`, `auth`, `organizations`, and `members`.
 
 <div>
   <a href="/docs/postman/collection.json" download>Download Postman collection</a>
@@ -15,7 +16,7 @@ Internal-only endpoint families such as `rpc`, `admin`, `onboarding`, `auth`, `o
   <a href="/docs/postman/collection.json">Open raw JSON</a>
 </div>
 
-When you import the collection into Postman, set:
+After you import the collection into Postman, set two variables:
 
-- `baseUrl` to the SDP API environment you want to target
-- `sdpApiKey` to your bearer API key
+- Set `baseUrl` to the SDP API environment you want to target.
+- Set `sdpApiKey` to your bearer API key.

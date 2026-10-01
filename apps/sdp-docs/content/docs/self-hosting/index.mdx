@@ -3,53 +3,60 @@ title: Overview
 description: Run the Solana Developer Platform on your own infrastructure with Docker Compose.
 ---
 
-Self-hosting runs the full Solana Developer Platform — API, web dashboard, docs,
-database, and cache — on infrastructure you control, from prebuilt container
-images. You bring your own authentication, Solana RPC, and signing provider; SDP
-stays the same product you'd use as a managed service.
+Self-hosting runs the full Solana Developer Platform on infrastructure you control, from prebuilt
+container images. The stack includes the API, the dashboard, the documentation site, a database,
+and a cache. You bring your own authentication provider, Solana RPC endpoint, and signing provider.
+SDP is the same product you would use as a managed service.
 
-This section covers installing the stack, generating its configuration, and
-keeping it running.
-
-## What you run
-
-`infra/self-hosted/compose.yml` starts six services:
-
-| Service | Image | Purpose |
-|---|---|---|
-| `sdp-api` | `sdp-api` | The core API (default port `8787`). |
-| `sdp-web` | `sdp-web` | The dashboard web app (default port `3000`). |
-| `sdp-docs` | `sdp-docs` | This documentation site (default port `3001`). |
-| `sdp-migrate` | `sdp-api` | Runs database migrations once on startup, then exits. |
-| `postgres` | `postgres:16-alpine` | Bundled database (or point at an external one). |
-| `redis` | `redis:7-alpine` | Bundled cache (or point at an external one). |
-
-## Start here
-
-- **[Quickstart](/docs/self-hosting/quickstart)** — install the stack and bring it
-  up for the first time.
-- **[First devnet deployment](/docs/self-hosting/first-devnet-deployment)** —
-  log into the dashboard, initialize a local wallet, and verify a wallet-scoped
-  API key.
-- **[Configurator](/docs/self-hosting/configurator)** — generate a complete `.env`
-  in your browser or terminal.
-- **[Environment reference](/docs/self-hosting/env-reference)** — what every
-  configuration variable does and which ones are required.
-
-## Operate
-
-- **[Upgrade & backup](/docs/self-hosting/upgrade-and-backup)** — move to a new
-  release and protect your data.
-- **[Troubleshooting](/docs/self-hosting/troubleshooting)** — common startup and
-  configuration failures.
-- **[External co-signers](/docs/self-hosting/external-co-signers)** — host
-  provider-specific signing automation alongside the stack.
+This section covers installing the stack, generating its configuration, and keeping it running.
 
 ## Requirements
 
 - A 64-bit Linux or macOS host with **Docker Engine** and **Docker Compose v2**.
-- Outbound network access to pull images and reach your Solana RPC and
-  authentication providers.
-- A [Clerk](https://clerk.com) application for authentication and a Solana RPC
-  endpoint. See the [environment reference](/docs/self-hosting/env-reference) for
-  the full list.
+- Outbound network access to pull the images and to reach your Solana RPC endpoint and your
+  authentication provider.
+- A [Clerk](https://clerk.com) application for authentication, and a Solana RPC endpoint. See the
+  [environment reference](/docs/self-hosting/env-reference) for the full list.
+
+Use a dedicated endpoint from an RPC provider. The public devnet endpoint
+`https://api.devnet.solana.com` rejects `getTokenAccountsByOwner`, so wallet balances do not load
+against it.
+
+## Services in the stack
+
+One `compose.yml` file defines the stack. It lives at `infra/self-hosted/compose.yml` in the SDP
+repository, and the install script downloads the released copy of that same file into `~/sdp` on
+your host.
+
+`compose.yml` starts six services. It pulls each SDP image from the registry in
+`SDP_IMAGE_REGISTRY`, at the tag in `SDP_VERSION`. The table shows the default registry, and `<tag>`
+stands for the tag you run.
+
+| Service | Image | Purpose |
+|---|---|---|
+| `sdp-api` | `ghcr.io/solana-foundation/sdp/sdp-api:<tag>` | The core API (default port `8787`). |
+| `sdp-web` | `ghcr.io/solana-foundation/sdp/sdp-web:<tag>` | The dashboard web app (default port `3000`). |
+| `sdp-docs` | `ghcr.io/solana-foundation/sdp/sdp-docs:<tag>` | The Solana Developer Platform documentation site (default port `3001`). |
+| `sdp-migrate` | `ghcr.io/solana-foundation/sdp/sdp-api:<tag>` | Runs database migrations once on startup, then exits. |
+| `postgres` | `postgres:16-alpine` | Bundled database (or point at an external one). |
+| `redis` | `redis:7-alpine` | Bundled cache (or point at an external one). |
+
+## Installation and configuration
+
+- **[Quickstart](/docs/self-hosting/quickstart)** installs the stack and brings it up for the first
+  time.
+- **[First devnet deployment](/docs/self-hosting/first-devnet-deployment)** shows you how to log
+  into the dashboard, initialize a local wallet, and verify a wallet-scoped API key.
+- **[Configurator](/docs/self-hosting/configurator)** generates a complete `.env` file in your
+  browser or your terminal.
+- **[Environment reference](/docs/self-hosting/env-reference)** explains what every configuration
+  variable does and which ones are required.
+
+## Operation and maintenance
+
+- **[Upgrade and backup](/docs/self-hosting/upgrade-and-backup)** moves the stack to a new release
+  and protects your data.
+- **[Troubleshooting](/docs/self-hosting/troubleshooting)** lists the common startup and
+  configuration failures and how to fix them.
+- **[External co-signers](/docs/self-hosting/external-co-signers)** explains how to host
+  provider-specific signing automation alongside the stack.

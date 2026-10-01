@@ -52,6 +52,12 @@ Public docs and AI artifacts should mirror the supported public surface only.
 - Never downgrade a presented Earn credential to anonymous access. Invalid or expired API keys and sessions, plus Clerk tokens without organization context, return 401.
 - Keep public URLs coherent with the shared site constants in `@sdp/types/site`.
 - When changing docs URLs or discovery resources, update both the docs site and any product links that point at it.
+- Write every public docs page and every OpenAPI `description` to
+  [`docs/contributing/documentation-style.md`](docs/contributing/documentation-style.md). It adapts
+  Simplified Technical English: short sentences, active voice, one approved term per concept, and no
+  jargon. It also carries the approved-term list and the rules for documenting a flag-gated screen.
+- Check a dashboard label against `apps/sdp-web/messages/en/*.json` before writing it into the docs.
+  That catalog is the source of truth for what a reader actually sees.
 - Update `docs/architecture/module-map.md` with `pnpm generate:module-map`; do not edit it by hand.
 - Consume Solana Earn packages only through exact registry-backed versions or the exact-version pnpm
   catalog. Do not commit cross-repository workspace, link, file, Git, or URL dependencies; see
