@@ -1,7 +1,9 @@
 @import "tailwindcss";
 @import "@solana/design-system/styles";
-/* SDP color theme (primitives → semantic tokens → package retheme).
-   Imported after the package so its Tier 3 retheme wins. */
+/* SDP tokens (palettes, refresh scope, scale) and their Tailwind utilities, then the app's
+   own wiring (Clerk, design-system retheme). All after the package so SDP names win. */
+@import "@sdp/design-tokens/tokens.css";
+@import "@sdp/design-tokens/theme.css";
 @import "./sdp-theme.css";
 
 /* Tailwind v4 defaults dark: utilities to the OS media query. SDP has an
@@ -80,7 +82,8 @@
 }
 
 :root {
-  --sdp-shell-bg: var(--surface);
+  /* --sdp-shell-bg is declared in sdp-theme.css, on :root and again on the refresh scope so it
+     re-resolves against the scope's --surface. */
   --sdp-field-radius: var(--input-radius-xl, 12px);
   --sdp-surface-radius: var(--radius-xl, 12px);
   --sdp-color-info-bg: rgba(33, 99, 182, 0.12);
