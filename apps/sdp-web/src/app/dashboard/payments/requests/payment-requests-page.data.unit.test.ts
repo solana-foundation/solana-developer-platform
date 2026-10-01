@@ -114,9 +114,10 @@ interface StoredRequest {
 /**
  * The list API over stored requests, newest first: it filters by the stored status, then
  * reconciles each open request it returns, saving any that has landed as paid, as the real
- * handler does. It records each call's page and status.
+ * handler does. It records each call's page and status, then runs `afterRead` with that call's
+ * page, so a test can change the requests between pages.
  */
-function reconcilingApi(stored: StoredRequest[]) {
+function reconcilingApi(stored: StoredRequest[], afterRead?: (page: number) => void) {
   const calls: { page: number; status: string | null }[] = [];
   const request = async (path: string) => {
     const query = new URL(path, "https://sdp.test").searchParams;
@@ -137,6 +138,7 @@ function reconcilingApi(stored: StoredRequest[]) {
         counterpartyId: row.counterpartyId ?? null,
       } as PaymentRequest;
     });
+    afterRead?.(page);
     return Response.json({
       data: { paymentRequests: served, total: matching.length, page, pageSize },
     });
@@ -178,10 +180,7 @@ describe("loadPaymentRequestsList", () => {
     const result = await loadPaymentRequestsList(api.request, listState({ status: "paid" }));
     expect(ids(result.data)).toEqual(["preq_landed", "preq_paid"]);
     expect(result.total).toBe(2);
-    expect(api.calls).toEqual([
-      { page: 1, status: "awaiting_payment" },
-      { page: 1, status: "paid" },
-    ]);
+    expect(api.calls).toEqual([{ page: 1, status: null }]);
   });
 
   it("leaves out of Awaiting payment a request that settles as it is read", async () => {
@@ -195,7 +194,57 @@ describe("loadPaymentRequestsList", () => {
     );
     expect(ids(result.data)).toEqual(["preq_open"]);
     expect(result.total).toBe(1);
-    expect(api.calls).toEqual([{ page: 1, status: "awaiting_payment" }]);
+    expect(api.calls).toEqual([{ page: 1, status: null }]);
+  });
+
+  it("skips no request when open ones leave Awaiting payment between pages", async () => {
+    // 250 open requests. Reading the first page settles every other one of its 100; then,
+    // before the next page, someone cancels a request already read and creates a new one.
+    const loadPage = (page: number) => {
+      const stored: StoredRequest[] = Array.from({ length: 250 }, (_, index) => ({
+        id: `preq_${index}`,
+        status: "awaiting_payment",
+        landed: index < 100 && index % 2 === 0,
+      }));
+      const api = reconcilingApi(stored, (readPage) => {
+        if (readPage !== 1 || stored[0]?.id === "preq_created") return;
+        const read = stored.find((row) => row.id === "preq_1");
+        if (read) read.status = "canceled";
+        stored.unshift({ id: "preq_created", status: "awaiting_payment" });
+      });
+      return loadPaymentRequestsList(
+        api.request,
+        listState({ status: "awaiting_payment", page, pageSize: 100 })
+      );
+    };
+
+    const [first, second] = await Promise.all([loadPage(1), loadPage(2)]);
+    // Every request still open when its page was read, once each, newest first.
+    const openIds = Array.from({ length: 250 }, (_, index) => index)
+      .filter((index) => index >= 100 || index % 2 === 1)
+      .map((index) => `preq_${index}`);
+    expect([...ids(first.data), ...ids(second.data)]).toEqual(openIds);
+    expect(first.total).toBe(openIds.length);
+  });
+
+  it("reads on when a request created mid-read pushes the oldest onto another page", async () => {
+    const stored: StoredRequest[] = Array.from({ length: 200 }, (_, index) => ({
+      id: `preq_${index}`,
+      status: "canceled",
+    }));
+    const api = reconcilingApi(stored, (page) => {
+      if (page === 1) stored.unshift({ id: "preq_created", status: "canceled" });
+    });
+    const result = await loadPaymentRequestsList(
+      api.request,
+      listState({ search: "preq_", page: 2, pageSize: 100 })
+    );
+    // The second page repeated preq_99, which is shown once; a third page held preq_199.
+    expect(ids(result.data)).toEqual(
+      Array.from({ length: 100 }, (_, index) => `preq_${100 + index}`)
+    );
+    expect(result.total).toBe(200);
+    expect(api.calls.map((call) => call.page)).toEqual([1, 2, 3]);
   });
 
   it("searches requests past the page it shows, and pages the matches", async () => {
