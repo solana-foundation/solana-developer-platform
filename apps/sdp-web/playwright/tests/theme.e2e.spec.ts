@@ -276,8 +276,14 @@ test.describe("dashboard theme e2e", () => {
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 
-    // Below xl the account menu lives in the bottom bar's More sheet.
-    await page.getByRole("button", { name: "More" }).click();
+    // On a phone NEW DESIGN opens the navigation drawer, which carries the account menu, from the
+    // header's menu button; the previous design keeps the menu in the bottom bar's More sheet.
+    const openNavigation = page
+      .getByRole("button", { name: "Open navigation" })
+      .filter({ visible: true });
+    const more = page.getByRole("button", { name: "More" }).filter({ visible: true });
+    await expect(openNavigation.or(more).first()).toBeVisible();
+    await ((await openNavigation.count()) > 0 ? openNavigation : more).first().click();
     await openAccountMenu(page);
 
     // All three segments stay on one row, inside the viewport, with no horizontal scroll.
