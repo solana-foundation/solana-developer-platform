@@ -94,7 +94,11 @@ export function resetVedaCompatibilityCache(): void {
   compatibility.clear();
 }
 
-function client(runtime: VedaRuntime, config: VedaClusterConfig) {
+function client(
+  runtime: VedaRuntime,
+  config: VedaClusterConfig,
+  commitment: "confirmed" | "finalized" = "confirmed"
+) {
   // The transport deadline covers both our direct reads and every nested vault,
   // asset, oracle and mint request the SDK performs with this same client.
   const rpc = createVedaRpc(runtime.rpcUrl) as Kit7;
@@ -108,7 +112,7 @@ function client(runtime: VedaRuntime, config: VedaClusterConfig) {
       hookProgramAddress: config.hookProgramAddress as Kit7,
       label: `sdp-${config.cluster}`,
     },
-    commitment: "confirmed",
+    commitment,
   });
 }
 
@@ -901,7 +905,7 @@ export async function readVedaQueuedWithdrawalRequests(
   config: VedaClusterConfig,
   input: VedaQueuedWithdrawalRequestsInput
 ): Promise<VedaQueuedWithdrawalRequest[]> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  const vaultClient = client(runtime, config, "finalized").vault(input.vault as Kit7);
   let state: { shareDecimals: unknown };
   let requests: readonly Kit7[];
   try {
@@ -923,7 +927,8 @@ export async function readVedaQueuedWithdrawalRequest(
   config: VedaClusterConfig,
   input: VedaQueuedWithdrawalRequestInputByAddress
 ): Promise<VedaQueuedWithdrawalRequestLookup> {
-  const vaultClient = client(runtime, config).vault(input.vault as Kit7);
+  // Reconciliation persists these terms and later treats them as immutable.
+  const vaultClient = client(runtime, config, "finalized").vault(input.vault as Kit7);
   let lookup: Kit7;
   try {
     lookup = await vaultClient.getWithdrawalRequest(input.request as Kit7);

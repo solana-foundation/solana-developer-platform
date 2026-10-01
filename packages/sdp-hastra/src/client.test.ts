@@ -103,11 +103,22 @@ function mintData(authority: string | null, supply = 0n): Buffer {
   return data;
 }
 
-function tokenAccountData(mint: string, owner: string, amount = 0n, frozen = false): Buffer {
+function tokenAccountData(
+  mint: string,
+  owner: string,
+  amount = 0n,
+  frozen = false,
+  delegation?: { delegate: string; amount: bigint }
+): Buffer {
   const data = Buffer.alloc(165);
   key(mint).copy(data, 0);
   key(owner).copy(data, 32);
   data.writeBigUInt64LE(amount, 64);
+  if (delegation) {
+    data.writeUInt32LE(1, 72);
+    key(delegation.delegate).copy(data, 76);
+    data.writeBigUInt64LE(delegation.amount, 121);
+  }
   data[108] = frozen ? 2 : 1;
   return data;
 }
@@ -964,6 +975,100 @@ describe("Hastra positions and deployment guardrails", () => {
       providerReferences: [DEPLOYMENT.primeMint],
     });
     expect(position).toMatchObject({ shares: "100", withdrawableShares: "0", tokenValue: "125" });
+  });
+
+  it("keeps a cancelled request's wYLDS on the position after its PRIME is gone", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.primeMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.primeMint, OWNER, 0n),
+    });
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_000_000_000n),
+    });
+    stubRpc(fixture.accounts);
+    await expect(
+      makeClient().readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })
+    ).resolves.toEqual([
+      {
+        providerReference: DEPLOYMENT.primeMint,
+        owner: OWNER,
+        cluster: "mainnet-beta",
+        shares: "0",
+        withdrawableShares: "0",
+        tokenValue: "0",
+        tokenMint: USDC,
+        shareMint: DEPLOYMENT.primeMint,
+        parIntermediate: {
+          mint: DEPLOYMENT.wYldsMint,
+          amount: "2000",
+          withdrawableAmount: "2000",
+          tokenValue: "2000",
+        },
+      },
+    ]);
+  });
+
+  it("leaves wYLDS delegated to an open request out of the residual", async () => {
+    const fixture = fixtureState();
+    const delegated = (amount: bigint) =>
+      tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_500_000_000n, false, {
+        delegate: fixture.addresses.redeemVaultAuthority,
+        amount,
+      });
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: delegated(2_000_000_000n),
+    });
+    stubRpc(fixture.accounts);
+    const client = makeClient();
+    const [position] = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [DEPLOYMENT.primeMint],
+    });
+    expect(position?.parIntermediate).toMatchObject({ amount: "500", withdrawableAmount: "500" });
+
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: delegated(2_500_000_000n),
+    });
+    await expect(
+      client.readVaultPositions(CTX, { owner: OWNER, providerReferences: [] })
+    ).resolves.toEqual([]);
+
+    // Only Hastra's redeem authority marks wYLDS as pledged to a request.
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_500_000_000n, false, {
+        delegate: PAYER,
+        amount: 2_500_000_000n,
+      }),
+    });
+    const [foreign] = await client.readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [DEPLOYMENT.primeMint],
+    });
+    expect(foreign?.parIntermediate).toMatchObject({ amount: "2500" });
+  });
+
+  it("keeps frozen wYLDS in the holding without claiming it is redeemable", async () => {
+    const fixture = fixtureState();
+    fixture.accounts.set(ata(OWNER, DEPLOYMENT.wYldsMint), {
+      owner: TOKEN_PROGRAM,
+      data: tokenAccountData(DEPLOYMENT.wYldsMint, OWNER, 2_000_000_000n, true),
+    });
+    stubRpc(fixture.accounts);
+    const [position] = await makeClient().readVaultPositions(CTX, {
+      owner: OWNER,
+      providerReferences: [],
+    });
+    expect(position?.parIntermediate).toEqual({
+      mint: DEPLOYMENT.wYldsMint,
+      amount: "2000",
+      withdrawableAmount: "0",
+      tokenValue: "2000",
+    });
   });
 
   it("fails closed in sandbox because Hastra has no verified devnet deployment", async () => {

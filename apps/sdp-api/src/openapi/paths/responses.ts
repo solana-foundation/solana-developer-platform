@@ -85,7 +85,6 @@ import {
   rotateApiKeyResponseSchema,
   rpcProvidersResponseSchema,
   rpcRelayResponseSchema,
-  sandboxTransferSimulationResponseSchema,
   signerCheckResponseSchema,
   successResponseSchema,
   switchProviderOptionsResponseSchema,
@@ -358,6 +357,3 @@ export const paymentSubscriptionCollectionAttemptListResponse = successResponseS
 export const onrampCurrenciesResponse = successResponseSchema(onrampCurrenciesResponseSchema);
 export const offrampCurrenciesResponse = successResponseSchema(offrampCurrenciesResponseSchema);
 export const onrampQuoteResponse = successResponseSchema(onrampQuoteResponseSchema);
-export const sandboxTransferSimulationResponse = successResponseSchema(
-  sandboxTransferSimulationResponseSchema
-);

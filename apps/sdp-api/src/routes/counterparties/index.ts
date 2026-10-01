@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { requirePermissions, unifiedAuthMiddleware } from "@/middleware/auth";
 import { projectContextMiddleware } from "@/middleware/project-context";
 import { validateBody } from "@/middleware/validate";
-import { submitCounterpartyRequirementsSchema } from "@/routes/payments/schemas";
 import type { Env } from "@/types/env";
 import counterpartyAccounts from "../counterparty-accounts";
 import counterpartyProviderAccounts from "../counterparty-provider-accounts";
@@ -17,7 +16,11 @@ import {
   submitCounterpartyRequirements,
   updateCounterparty,
 } from "./handlers";
-import { createCounterpartySchema, updateCounterpartySchema } from "./schemas";
+import {
+  createCounterpartySchema,
+  submitCounterpartyRequirementsSchema,
+  updateCounterpartySchema,
+} from "./schemas";
 
 const counterparties = new Hono<{ Bindings: Env }>();
 

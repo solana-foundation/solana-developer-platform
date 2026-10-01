@@ -504,6 +504,29 @@ never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
 about whether the deposit landed.
 
+A position's value is its whole holding: `tokenValue` plus any
+`parIntermediate` (`earnVaultHoldingValue`), and a position stays open while
+either is non-zero (`isEarnVaultHoldingEmpty`, the API close-out's own rule),
+so a cancelled Hastra request's wYLDS never drops out of Treasury.
+
+Treasury's optimistic balance lives in the pure module
+`../treasury-solutions/treasury-vault-balance-projection.ts`. A committed
+deposit or atomic withdrawal is added to the latest hydrated positions read,
+and counts as contained in a read only when that read shows the position's
+SHARES moved off a baseline taken from a read that landed before the POST
+began (the modals report `submittedAt`), attributed to it either because the
+read started after this tab saw the commit or because no other movement
+could have moved them. No hydrated pre-POST baseline means no projection;
+timing alone is never evidence, and direction is deliberately not required
+(an unseen opposite move would otherwise pin a projection over a value that
+already contains it). `useEarnVaultPositions` keeps the recent `reads`
+(client clock at both ends) for exactly that. Nothing compares balances to
+decide a projection is done: Kamino's live value reproduces a deposit
+exactly while Veda's redeemable value lands a hair under it, and the old
+threshold rule double counted the latter until a TTL expired. A share move
+from a source the tab cannot see, or two movements overlapping on one
+position, can misjudge a movement for one read cycle; the next read heals it.
+
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap
 server read that only decides WHICH deposits are worth watching, and the reason
@@ -583,6 +606,16 @@ distinguish every six-decimal value once balances exceed 2^53. So:
   `compareDecimalAmounts`) rather than restating that arithmetic.
 - `earn-format.ts` hands the decimal string straight to `Intl.NumberFormat`,
   which formats it exactly — no `Number` round trip, no manual grouping.
+- Dollars are `formatUsd`: two decimals, truncated, `<$0.01` for a non-zero
+  sub-cent value, never a third decimal. A deposit-token amount (a position's
+  `tokenValue`, a wallet balance in the deposit token, a withdrawal ceiling or
+  quote) goes through `formatTokenValue(value, mint, locale)`, which renders a
+  USD-stable mint as dollars at par and anything else as a token quantity with
+  its symbol. Every Earn deposit token is a USD stablecoin
+  (`EARN_DEPOSIT_TOKEN_SYMBOLS`), so today that is always dollars; the
+  `isUsdStable` guard is what keeps a future non-stable vault from lying. Do
+  not call `formatProviderAmount` or `formatTokenQuantity` on a deposit-token
+  amount directly.
 - `sumDecimalStrings` (`earn-market-presentation.tsx`) adds at the widest scale
   in `BigInt` and formats back.
 - The one deliberate `Number` is `formatProviderApy`, on a RATE (`0.062`) rather

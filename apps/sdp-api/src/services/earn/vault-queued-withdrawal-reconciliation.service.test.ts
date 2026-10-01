@@ -19,6 +19,11 @@ import {
 const provider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
 const parProvider = vi.hoisted(() => ({ client: null as Record<string, unknown> | null }));
 const sweepRpc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
+const broadcast = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
+vi.mock("@/services/earn/vault-execution.service", () => ({
+  broadcastVaultTransaction: broadcast,
+}));
 
 vi.mock("@/services/earn/execution-registry", () => ({
   earnClusterFor: () => "devnet",
@@ -375,14 +380,54 @@ describe("queued withdrawal reconciliation", () => {
     expect(ledger.advanceRequest).not.toHaveBeenCalled();
   });
 
-  it("handles a rejected transaction with one atomic action/request transition", async () => {
+  it.each(["processed", "confirmed", undefined] as const)(
+    "keeps a %s error retryable until the transaction is finalized",
+    async (confirmationStatus) => {
+      const ledger = fakeLedger(request());
+      await expect(
+        reconcileAction(
+          env,
+          ledger,
+          action(),
+          { err: "fork-local rejection", confirmationStatus } as never,
+          { rpc: emptyRpc as never, rpcUrl: "http://rpc.invalid", currentHeight: 2n }
+        )
+      ).resolves.toBe("unchanged");
+      expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+      expect(ledger.advanceAction).not.toHaveBeenCalled();
+      expect(ledger.advanceRequest).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["request", "cancel"] as const)(
+    "rebroadcasts the same submitted %s while its blockhash is valid",
+    async (kind) => {
+      const ledger = fakeLedger(request());
+      await expect(
+        reconcileAction(
+          env,
+          ledger,
+          action({ action: kind, status: "submitted", last_valid_block_height: "10" }),
+          null,
+          { rpc: emptyRpc as never, rpcUrl: "http://rpc.invalid", currentHeight: 10n }
+        )
+      ).resolves.toBe("rebroadcast");
+      expect(broadcast).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({ bytes: Uint8Array.of(1), rpcUrl: "http://rpc.invalid" })
+      );
+      expect(ledger.failActionAndRecoverRequest).not.toHaveBeenCalled();
+    }
+  );
+
+  it("handles a finalized rejection with one atomic action/request transition", async () => {
     const ledger = fakeLedger(request());
     await expect(
       reconcileAction(
         env,
         ledger,
         action(),
-        { err: "program rejected the queued request" } as never,
+        { err: "program rejected the queued request", confirmationStatus: "finalized" } as never,
         {
           rpc: emptyRpc as never,
           rpcUrl: "http://rpc.invalid",

@@ -3,10 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { getDb } from "@/db";
 import app from "@/index";
+import { getLogger } from "@/runtime/logger";
+import { createProviderWallet } from "@/services/domain/signing/provider-wallet-lifecycle";
+import { CustodyConfigStore } from "@/services/stores/custody-config.store";
 import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+vi.mock("@/services/domain/signing/provider-config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/domain/signing/provider-config")>()),
+  parseConfigRecord: vi.fn(async () => ({ provider: "privy" })),
+}));
+
+vi.mock("@/services/domain/signing/provider-wallet-lifecycle", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/domain/signing/provider-wallet-lifecycle")>()),
+  createProviderWallet: vi.fn(async () => ({
+    walletId: "privy_config_new",
+    publicKey: "SysvarRent111111111111111111111111111111111",
+  })),
+}));
 
 const org = "org_default_audit";
 const project = "prj_default_audit";
@@ -33,6 +49,40 @@ async function changeDefault(owner: "connection" | "config", suffix = "b") {
     },
     env
   );
+}
+
+async function createConfigWallet(body: Record<string, unknown>) {
+  return app.request(
+    "/v1/wallets",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${rawKey}`,
+        "Content-Type": "application/json",
+        "X-Request-ID": "req_default_wallet_audit",
+      },
+      body: JSON.stringify({ provider: "privy", label: "Created", ...body }),
+    },
+    env
+  );
+}
+
+async function readAuditRows() {
+  const records = await getDb(env).queryMany<{
+    api_key_id: string;
+    action: string;
+    resource_type: string;
+    resource_id: string;
+    status: string;
+    metadata: string;
+  }>(
+    "SELECT api_key_id, action, resource_type, resource_id, status, metadata FROM audit_logs WHERE organization_id = ? ORDER BY ledger_sequence",
+    [org]
+  );
+  return records.map((row) => ({
+    ...row,
+    metadata: z.record(z.string(), z.json()).parse(JSON.parse(row.metadata)),
+  }));
 }
 
 async function readDefault(owner: "connection" | "config") {
@@ -257,6 +307,181 @@ describe("default wallet audit admission", () => {
     );
     expect(phases).toEqual([{ phase: "intent" }]);
   });
+
+  it("records a Config default promoted during wallet creation like a default change", async () => {
+    const response = await createConfigWallet({ setDefault: true });
+
+    expect(response.status).toBe(201);
+    const body = z
+      .object({ data: z.object({ wallet: z.object({ id: z.string() }) }) })
+      .parse(await response.json());
+    const custodyWalletId = body.data.wallet.id;
+    expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_new" });
+    const rows = await readAuditRows();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      api_key_id: apiKey,
+      metadata: {
+        auditPhase: "intent",
+        target: {
+          action: "update",
+          resourceType: "custody_config",
+          resourceId: config,
+          metadata: {
+            event: "default_wallet_change_started",
+            ownerKind: "config",
+            provider: "privy",
+            custodyWalletId,
+            projectId: project,
+          },
+        },
+      },
+    });
+    expect(rows[1]).toMatchObject({
+      api_key_id: apiKey,
+      action: "update",
+      resource_type: "custody_config",
+      resource_id: config,
+      status: "success",
+      metadata: {
+        auditPhase: "outcome",
+        auditIntentId: rows[0]?.resource_id,
+        event: "default_wallet_changed",
+        ownerKind: "config",
+        projectId: project,
+        previousCustodyWalletId: "cwlt_config_a",
+        custodyWalletId,
+        previousWalletId: "privy_config_a",
+        walletId: "privy_config_new",
+      },
+    });
+  });
+
+  it("creates a Config wallet without setDefault and without an audit record", async () => {
+    const response = await createConfigWallet({});
+
+    expect(response.status).toBe(201);
+    const body = z
+      .object({ data: z.object({ wallet: z.record(z.string(), z.unknown()) }) })
+      .parse(await response.json());
+    expect(Object.keys(body.data.wallet).sort()).toEqual(
+      [
+        "createdAt",
+        "custodyConfigId",
+        "id",
+        "isRuntimeExecutionAllowed",
+        "label",
+        "publicKey",
+        "purpose",
+        "status",
+        "walletId",
+      ].sort()
+    );
+    expect(body.data.wallet).toMatchObject({
+      custodyConfigId: config,
+      walletId: "privy_config_new",
+      label: "Created",
+      status: "active",
+    });
+    expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+    expect(await readAuditRows()).toEqual([]);
+  });
+
+  it("does not create or promote a Config wallet if audit admission fails", async () => {
+    vi.mocked(createProviderWallet).mockClear();
+    vi.spyOn(getDb(env), "lockedTransactionWithPostCommit")
+      .mockRejectedValueOnce(new Error("audit unavailable"))
+      .mockRejectedValueOnce(new Error("audit unavailable"));
+    const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
+
+    const response = await createConfigWallet({ setDefault: true });
+    const selection = await changeDefault("config");
+
+    expect(response.status).toBe(500);
+    expect(response.status).toBe(selection.status);
+    expect(errorSchema.parse(await response.json()).error).toEqual(
+      errorSchema.parse(await selection.json()).error
+    );
+    expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+    expect(
+      await getDb(env).queryMany("SELECT id FROM custody_wallets WHERE wallet_id = ?", [
+        "privy_config_new",
+      ])
+    ).toEqual([]);
+    expect(await readAuditRows()).toEqual([]);
+    expect(createProviderWallet).not.toHaveBeenCalled();
+  });
+
+  it("logs the provisioned wallet as an orphan risk when the Config disappears", async () => {
+    const db = getDb(env);
+    vi.mocked(createProviderWallet).mockImplementationOnce(async () => {
+      await db.execute("DELETE FROM custody_scope_defaults WHERE default_custody_config_id = ?", [
+        config,
+      ]);
+      await db.execute("UPDATE custody_configs SET default_wallet_id = NULL WHERE id = ?", [
+        config,
+      ]);
+      await db.execute("DELETE FROM custody_wallets WHERE custody_config_id = ?", [config]);
+      await db.execute("DELETE FROM custody_configs WHERE id = ?", [config]);
+      return {
+        walletId: "privy_config_orphan",
+        publicKey: "SysvarRent111111111111111111111111111111111",
+      };
+    });
+    const errorLog = vi.spyOn(getLogger(), "error");
+
+    const response = await createConfigWallet({ setDefault: true });
+
+    expect(response.status).toBe(404);
+    const rows = await readAuditRows();
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        custodyConfigId: config,
+        provider: "privy",
+        reason: "persistence_failed",
+        auditIntentId: rows[0]?.resource_id,
+        walletId: "privy_config_orphan",
+      }),
+      "custody_wallet_orphan_risk"
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      status: "failure",
+      metadata: {
+        auditPhase: "outcome",
+        event: "default_wallet_change_failed",
+        reason: "selection_unavailable",
+        walletId: "privy_config_orphan",
+      },
+    });
+  });
+
+  it.each([
+    ["organization", "org_other_scope", project],
+    ["project", org, "prj_other_scope"],
+  ] as const)(
+    "does not lock or promote a Config from another %s",
+    async (_scope, orgId, projectId) => {
+      const created = await new CustodyConfigStore(getDb(env), env).createDefaultWallet(
+        config,
+        orgId,
+        projectId,
+        {
+          id: "cwlt_config_foreign",
+          walletId: "privy_config_foreign",
+          publicKey: "SysvarRent111111111111111111111111111111111",
+        }
+      );
+
+      expect(created).toBeNull();
+      expect(await readDefault("config")).toEqual({ wallet_id: "privy_config_a" });
+      expect(
+        await getDb(env).queryMany("SELECT id FROM custody_wallets WHERE id = ?", [
+          "cwlt_config_foreign",
+        ])
+      ).toEqual([]);
+    }
+  );
 
   it("keeps Config selection available while BYOK is disabled", async () => {
     env.PRIVY_BYOK_ENABLED = "false";

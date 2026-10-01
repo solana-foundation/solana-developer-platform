@@ -20,7 +20,7 @@ import { EarnAmountMaxButton } from "./earn-amount-max-button";
 import { compareUnsignedDecimals, isPositiveDecimal } from "./earn-decimal";
 import { EarnErrorNote } from "./earn-error-note";
 import { EarnFlowStepper, EarnFlowTransition, EarnOutcomeMark } from "./earn-flow-motion";
-import { formatTokenQuantity, formatUsd, positionDisplayName } from "./earn-format";
+import { formatTokenValue, positionDisplayName } from "./earn-format";
 import { earnMintAsset, TransactionLink } from "./earn-market-presentation";
 import {
   createEarnVaultWithdrawal,
@@ -80,6 +80,7 @@ import {
 function amountBalanceHint(
   t: ReturnType<typeof useTranslations>,
   locale: string,
+  tokenMint: string,
   positionValue: string | undefined,
   availableAmount: string | undefined,
   hasStakedShares: boolean
@@ -89,12 +90,12 @@ function amountBalanceHint(
   }
   if (hasStakedShares && positionValue !== undefined) {
     return t("DashboardEarn.vaultWithdraw.amountAvailableOfTotal", {
-      available: formatUsd(availableAmount, locale),
-      total: formatUsd(positionValue, locale),
+      available: formatTokenValue(availableAmount, tokenMint, locale),
+      total: formatTokenValue(positionValue, tokenMint, locale),
     });
   }
   return t("DashboardEarn.vaultWithdraw.amountAvailable", {
-    amount: formatUsd(availableAmount, locale),
+    amount: formatTokenValue(availableAmount, tokenMint, locale),
   });
 }
 
@@ -435,7 +436,9 @@ function WithdrawalMovementResult({
             )}
           </dt>
           <dd className="text-right tabular-nums text-primary">
-            {settlement === "provider_order" ? requestedAmount : formatUsd(requestedAmount, locale)}
+            {settlement === "provider_order"
+              ? requestedAmount
+              : formatTokenValue(requestedAmount, asset.mint, locale)}
           </dd>
         </div>
         {settlement === "provider_order" ? null : (
@@ -506,6 +509,8 @@ export interface EarnVaultWithdrawModalProps {
       amount: string;
       /** False when an approval already executed this replayed intent. */
       projectBalance: boolean;
+      /** Client clock when the POST began; a positions read that landed earlier cannot contain this exit. */
+      submittedAt: number;
     }
   ) => void;
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
@@ -527,6 +532,7 @@ interface WithdrawalDetailsStepProps {
   settlement: EarnVaultWithdrawalSettlement;
   shares: string | undefined;
   submitting: boolean;
+  tokenMint: string;
 }
 
 function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
@@ -544,6 +550,7 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
     settlement,
     shares,
     submitting,
+    tokenMint,
   } = props;
   const locale = useLocale();
   const t = useTranslations();
@@ -588,7 +595,14 @@ function WithdrawalDetailsStep(props: WithdrawalDetailsStepProps) {
         <div className="min-h-5 text-xs text-tertiary" id="earn-vault-withdraw-balance">
           {settlement === "provider_order"
             ? shareBalanceHint(t, shares, availableAmount, hasStakedShares)
-            : amountBalanceHint(t, locale, positionValue, availableAmount, hasStakedShares)}
+            : amountBalanceHint(
+                t,
+                locale,
+                tokenMint,
+                positionValue,
+                availableAmount,
+                hasStakedShares
+              )}
         </div>
         {amountError ? (
           <p className="text-xs text-error" role="alert">
@@ -652,11 +666,13 @@ function AtomicReviewRows({
   assetSymbol,
   minAmountOut,
   quote,
+  tokenMint,
 }: {
   amount: string;
   assetSymbol: string;
   minAmountOut: string | undefined;
   quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
+  tokenMint: string;
 }) {
   const locale = useLocale();
   const t = useTranslations();
@@ -665,7 +681,9 @@ function AtomicReviewRows({
     <>
       <div className="flex items-baseline justify-between gap-5">
         <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.amountLabel")}</dt>
-        <dd className="text-right tabular-nums text-primary">{formatUsd(amount, locale)}</dd>
+        <dd className="text-right tabular-nums text-primary">
+          {formatTokenValue(amount, tokenMint, locale)}
+        </dd>
       </div>
       <div className="flex items-baseline justify-between gap-5">
         <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.receiveAs")}</dt>
@@ -675,7 +693,7 @@ function AtomicReviewRows({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.expectedAmount")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(quote.preview.assetsOut, locale, assetSymbol)}
+            {formatTokenValue(quote.preview.assetsOut, tokenMint, locale)}
           </dd>
         </div>
       ) : null}
@@ -683,7 +701,7 @@ function AtomicReviewRows({
         <div className="flex items-baseline justify-between gap-5">
           <dt className="text-tertiary">{t("DashboardEarn.vaultWithdraw.minAmount")}</dt>
           <dd className="text-right tabular-nums text-primary">
-            {formatTokenQuantity(minAmountOut, locale, assetSymbol)}
+            {formatTokenValue(minAmountOut, tokenMint, locale)}
           </dd>
         </div>
       ) : null}
@@ -697,12 +715,14 @@ function ReviewAmountRows({
   minAmountOut,
   quote,
   settlement,
+  tokenMint,
 }: {
   amount: string;
   assetSymbol: string;
   minAmountOut: string | undefined;
   quote: VaultQuoteState<EarnVaultWithdrawalPreview>;
   settlement: EarnVaultWithdrawalSettlement;
+  tokenMint: string;
 }) {
   if (settlement === "provider_order") {
     return <ProviderOrderReviewRows amount={amount} />;
@@ -713,6 +733,7 @@ function ReviewAmountRows({
       assetSymbol={assetSymbol}
       minAmountOut={minAmountOut}
       quote={quote}
+      tokenMint={tokenMint}
     />
   );
 }
@@ -755,6 +776,7 @@ function WithdrawalReviewStep(props: WithdrawalReviewStepProps) {
           minAmountOut={minAmountOut}
           quote={quote}
           settlement={settlement}
+          tokenMint={position.tokenMint}
         />
       </dl>
 
@@ -971,6 +993,7 @@ export function EarnVaultWithdrawModal({
     rememberVaultWithdrawalFloor(fingerprint, replay.floor);
 
     // No abort signal on the value-moving POST — see the deposit modal.
+    const submittedAt = Date.now();
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
@@ -1015,6 +1038,7 @@ export function EarnVaultWithdrawModal({
         // A share-denominated provider order has no honest dollar projection
         // until NAV is struck. The caller still refreshes live holdings.
         projectBalance: shouldProjectWithdrawalBalance(resolution.outcome, settlement),
+        submittedAt,
       });
     }
   }
@@ -1123,6 +1147,7 @@ export function EarnVaultWithdrawModal({
               settlement={settlement}
               shares={position.shares}
               submitting={submitting}
+              tokenMint={position.tokenMint}
             />
           ) : (
             <WithdrawalReviewStep
