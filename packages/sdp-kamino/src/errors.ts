@@ -11,7 +11,8 @@ export type SdpKaminoErrorCode =
   | "INVALID_AMOUNT"
   | "VAULT_UNREADABLE"
   | "PROGRAM_MISMATCH"
-  | "DEPOSIT_REFUSED";
+  | "DEPOSIT_REFUSED"
+  | "WITHDRAW_REFUSED";
 
 export class SdpKaminoError extends Error {
   constructor(

@@ -1299,7 +1299,8 @@ const earnExternalWalletTokenEarningsSchema = z
         "presented as complete.",
     }),
     totalDeposited: earnLiveDecimalAmountSchema.openapi({
-      description: "Sum of finalized SDP deposits — a ledger fact, always present.",
+      description:
+        "Sum of observed finalized SDP deposits. Excludes unobserved receipts (see `deposits_not_valued`).",
     }),
     totalWithdrawn: earnLiveDecimalAmountSchema.openapi({
       description:
@@ -1318,16 +1319,16 @@ const earnExternalWalletTokenEarningsSchema = z
         "live_value_unavailable",
         "movements_pending",
         "withdrawals_pending",
+        "deposits_not_valued",
         "withdrawals_not_valued",
       ])
       .optional()
       .openapi({
         description:
           "Why `earned` is absent: live value failed to hydrate; a movement is still settling; " +
-          "a currently held position has an open queued withdrawal request, whose shares leave " +
-          "the wallet before its payout (this can last days); or a currently held position has " +
-          "a finalized withdrawal whose token payout was not observed at settlement, so " +
-          "`totalWithdrawn` is incomplete.",
+          "a held position has an open queued withdrawal request, whose shares leave the wallet " +
+          "before its payout (this can last days); or a held position has an unobserved finalized " +
+          "deposit or withdrawal, leaving `totalDeposited` or `totalWithdrawn` incomplete.",
       }),
   })
   .openapi({ description: "Earnings for one deposit token across the wallet's positions." });

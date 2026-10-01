@@ -57,52 +57,75 @@ describe("KaminoVaultDirectClient capabilities", () => {
     expect(typeof client.buildVaultWithdrawal).toBe("function");
   });
 
-  it("prices the withdrawal against one slot and maps the plan", async () => {
-    const resolvedRpcUrl = "https://devnet.example.invalid";
-    const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
-    const slot = 456n;
-    const getSlotSend = vi.fn().mockResolvedValue(slot);
-    mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+  it("refuses an unsupported withdrawal floor before resolving an RPC or building", async () => {
+    const resolveRpc = vi.fn(async () => "https://example.invalid");
+    const probe = new KaminoVaultDirectClient(resolveRpc, runOperation);
 
-    const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
-    const owner = "11111111111111111111111111111112";
-    const builtPlan: KaminoInstructionPlan = {
-      cluster: "devnet",
-      instructions: [],
-      lookupTables: [address(SHARE_MINT)],
-      assetIdentity: {
-        depositTokenMint: address(DEPOSIT_TOKEN_MINT),
-        shareMint: address(SHARE_MINT),
-      },
-      accepted: { shares: "2" },
-    };
-    mocks.buildKaminoWithdrawPlan.mockResolvedValue(builtPlan);
-
-    const plan = await probe.buildVaultWithdrawal(
-      { env: {}, environment: "sandbox" },
-      { providerReference: vault, owner, shares: "2" }
-    );
-
-    expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
-    expect(getSlotSend).toHaveBeenCalledOnce();
-    expect(mocks.buildKaminoWithdrawPlan).toHaveBeenCalledWith(
-      { cluster: "devnet", rpcUrl: resolvedRpcUrl },
-      expect.objectContaining({
-        vault: address(vault),
-        shares: "2",
-        slot,
-      }),
-      expect.any(Function)
-    );
-    // The noop signer carries the custody address; the API attaches the real
-    // signer at compile time by address match.
-    expect(String(mocks.buildKaminoWithdrawPlan.mock.calls[0][1].owner.address)).toBe(owner);
-    expect(plan).toMatchObject({
-      cluster: "devnet",
-      lookupTables: [SHARE_MINT],
-      accepted: { shares: "2" },
-    });
+    await expect(
+      probe.buildVaultWithdrawal(
+        { env: {}, environment: "production" },
+        {
+          providerReference: "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx",
+          owner: "11111111111111111111111111111112",
+          shares: "2",
+          minAmountOut: "1.99",
+        }
+      )
+    ).rejects.toMatchObject({ code: "WITHDRAW_REFUSED" });
+    expect(resolveRpc).not.toHaveBeenCalled();
+    expect(mocks.buildKaminoWithdrawPlan).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, "So11111111111111111111111111111111111111112", "invalid-address"])(
+    "maps the withdrawal plan without parsing or forwarding refund hint %s",
+    async (rentRefundTo) => {
+      const resolvedRpcUrl = "https://devnet.example.invalid";
+      const probe = new KaminoVaultDirectClient(async () => resolvedRpcUrl, runOperation);
+      const slot = 456n;
+      const getSlotSend = vi.fn().mockResolvedValue(slot);
+      mocks.createKaminoRpc.mockReturnValue({ getSlot: () => ({ send: getSlotSend }) });
+
+      const vault = "7uib8xGAwkaPz4ZGCA6t8sSEid5Yp9ty13PHUweTypx";
+      const owner = "11111111111111111111111111111112";
+      const builtPlan: KaminoInstructionPlan = {
+        cluster: "devnet",
+        instructions: [],
+        lookupTables: [address(SHARE_MINT)],
+        assetIdentity: {
+          depositTokenMint: address(DEPOSIT_TOKEN_MINT),
+          shareMint: address(SHARE_MINT),
+        },
+        accepted: { shares: "2" },
+      };
+      mocks.buildKaminoWithdrawPlan.mockResolvedValue(builtPlan);
+
+      const plan = await probe.buildVaultWithdrawal(
+        { env: {}, environment: "sandbox" },
+        { providerReference: vault, owner, shares: "2", rentRefundTo }
+      );
+
+      expect(mocks.createKaminoRpc).toHaveBeenCalledWith(resolvedRpcUrl);
+      expect(getSlotSend).toHaveBeenCalledOnce();
+      expect(mocks.buildKaminoWithdrawPlan).toHaveBeenCalledWith(
+        { cluster: "devnet", rpcUrl: resolvedRpcUrl },
+        expect.objectContaining({
+          vault: address(vault),
+          shares: "2",
+          slot,
+        }),
+        expect.any(Function)
+      );
+      // The noop signer carries the custody address; the API attaches the real
+      // signer at compile time by address match.
+      expect(String(mocks.buildKaminoWithdrawPlan.mock.calls[0][1].owner.address)).toBe(owner);
+      expect(mocks.buildKaminoWithdrawPlan.mock.calls[0][1]).not.toHaveProperty("rentRefundTo");
+      expect(plan).toMatchObject({
+        cluster: "devnet",
+        lookupTables: [SHARE_MINT],
+        accepted: { shares: "2" },
+      });
+    }
+  );
 
   /** Both quote guards narrow onto this client, so the preview routes no longer 501. */
   it("reports both quote capabilities", () => {

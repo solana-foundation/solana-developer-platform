@@ -423,35 +423,9 @@ export interface EarnVaultTransactionPlan {
    */
   accepted?: EarnVaultAcceptedAmounts;
   /**
-   * True when these instructions CREATE the owner's share token account, so its
-   * rent-exemption is charged to `rentPayer` on this transaction.
-   *
-   * Reported rather than assumed. Account creation is idempotent, so the
-   * presence of a create instruction proves nothing: a plan for an owner who
-   * already holds the account emits the same instruction and pays no rent. Only
-   * the builder, which read the chain, can say which happened, and the caller
-   * needs to know because it must remember who to give the rent back to when
-   * the account is closed. Absent or false means no rent was charged here.
-   *
-   * KNOWN RESIDUAL: this is a pre-execution read, so it can be wrong in BOTH
-   * directions if chain state moves between the read and the broadcast. True
-   * when no rent was charged (someone else created the account first), and false
-   * when rent WAS charged (the account was closed in between, so the idempotent
-   * create fires for real and nothing records it). Either way one ATA's rent,
-   * 2,039,280 lamports, is later credited to a party that did not pay it, and
-   * only on a full exit.
-   *
-   * Concurrency does not make this safe: the fee mode is per PROCESS, so a
-   * rolling deploy has both answers live at once, and a create from outside SDP
-   * needs no concurrency at all. A claim whose transaction never lands does NOT
-   * persist, though: the attribution is a ledger projection that drops a failed
-   * movement's claim (SDP migration 0067), so this residual is bounded by the
-   * build-to-broadcast window plus reconciliation lag, not by the position's
-   * lifetime.
-   *
-   * Closing it entirely needs the funder confirmed from the LANDED transaction
-   * at settlement rather than predicted at build; that is deliberately not in
-   * this change.
+   * The builder observed the share account missing. An idempotent create can
+   * still pay no rent if another transaction creates it first. This is a
+   * planning claim, never proof of the payer or authority to refund rent.
    */
   createsShareAccount?: boolean;
 }
@@ -505,14 +479,10 @@ export interface EarnVaultWithdrawInput {
   /** Shares to redeem, as a decimal string. */
   shares: string;
   /**
-   * Where to send rent reclaimed by closing accounts this exit empties, when it
-   * empties them. Omitted means the `owner` keeps it.
-   *
-   * The caller supplies the address it RECORDED when the account was created,
-   * never a currently-configured sponsor: whoever funded the rent is a fact
-   * about the deposit, and refunding anyone else moves lamports away from the
-   * party that actually paid. A provider that empties no closable account
-   * ignores this.
+   * Provider-specific refund hint. A build-time creation claim cannot prove
+   * who paid for the live account. Kamino ignores this and retains share-ATA
+   * rent for an explicit owner-authorized close. Providers must not treat an
+   * unverified hint as attribution.
    */
   rentRefundTo?: string;
   /**
