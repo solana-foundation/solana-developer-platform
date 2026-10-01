@@ -10,6 +10,11 @@ import { bootstrapLocalIssuanceFixtures } from "../support/local-issuance-bootst
 
 type TokenTab = "overview" | "details" | "public" | "compliance" | "operations" | "permissions";
 
+// Waits that reload the page poll slowly. One page load fans out to a dozen API calls, and the
+// API admits 300 dashboard requests a minute per user; the suite runs in one job, so fast
+// reload polling in one test used to get a later test's writes refused with 429.
+const RELOAD_POLL = { timeout: 180_000, intervals: [5_000, 10_000] };
+
 async function withRetry(page: Page, ready: () => Promise<void>): Promise<void> {
   await ready().catch(async () => {
     const retryButton = page.getByRole("button", { name: "Retry", exact: true });
@@ -186,13 +191,10 @@ test.describe
       await deployDialog.getByRole("button", { name: "Deploy token", exact: true }).click();
       await waitForToast(page, "Deploy transaction finalized.", successCount);
       await expect
-        .poll(
-          async () => {
-            await gotoToken(page, fixtures.tokens.pending.id);
-            return (await page.locator('[data-token-page="overview"]').textContent()) ?? "";
-          },
-          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
-        )
+        .poll(async () => {
+          await gotoToken(page, fixtures.tokens.pending.id);
+          return (await page.locator('[data-token-page="overview"]').textContent()) ?? "";
+        }, RELOAD_POLL)
         .toContain("Live onchain");
       await expect(page.getByRole("button", { name: "Deploy token", exact: true })).toHaveCount(0);
     });
@@ -211,13 +213,10 @@ test.describe
       await waitForToast(page, "Mint transaction finalized.", successCount);
 
       await expect
-        .poll(
-          async () => {
-            await gotoToken(page, fixtures.tokens.open.id, "operations");
-            return (await recordValue(page, "Issued supply").textContent()) ?? "";
-          },
-          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
-        )
+        .poll(async () => {
+          await gotoToken(page, fixtures.tokens.open.id, "operations");
+          return (await recordValue(page, "Issued supply").textContent()) ?? "";
+        }, RELOAD_POLL)
         .not.toBe(before);
       await expect(recordValue(page, "Issued supply")).toContainText("10");
     });
@@ -259,13 +258,10 @@ test.describe
         () => page.getByRole("button", { name: "Add entry", exact: true }).click()
       );
       await expect
-        .poll(
-          async () => {
-            await gotoToken(page, tokenId, "compliance");
-            return page.getByRole("cell", { name: address }).count();
-          },
-          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
-        )
+        .poll(async () => {
+          await gotoToken(page, tokenId, "compliance");
+          return page.getByRole("cell", { name: address }).count();
+        }, RELOAD_POLL)
         .toBeGreaterThan(0);
 
       await waitForActionResponse(
@@ -274,13 +270,10 @@ test.describe
         () => page.getByRole("button", { name: `Remove ${address}` }).click()
       );
       await expect
-        .poll(
-          async () => {
-            await gotoToken(page, tokenId, "compliance");
-            return page.getByRole("cell", { name: address }).count();
-          },
-          { timeout: 120_000, intervals: [1_000, 2_000, 5_000] }
-        )
+        .poll(async () => {
+          await gotoToken(page, tokenId, "compliance");
+          return page.getByRole("cell", { name: address }).count();
+        }, RELOAD_POLL)
         .toBe(0);
     });
   });
