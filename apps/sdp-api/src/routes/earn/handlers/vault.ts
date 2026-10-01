@@ -107,7 +107,10 @@ import {
   concludeEarnDepositAuditOnError,
   recordEarnWithdrawalAudit,
 } from "./movement-audit";
-import { throwOnPriorEarnPolicyOperation } from "./policy-replay";
+import {
+  recoverFailedVaultPolicyExecution,
+  throwOnPriorEarnPolicyOperation,
+} from "./policy-replay";
 import { parseParams, parseQuery, resolveDepositSwapRequest } from "./shared";
 import { decodeVaultPositionCursor, encodeVaultPositionCursor } from "./vault-position-cursor";
 import { closeEmptyHydratedPositions, hydrateVaultPositions } from "./vault-position-hydration";
@@ -219,97 +222,99 @@ export async function createEarnVaultDepositPreview(
 export async function createEarnVaultDeposit(
   c: ValidatedBodyContext<typeof earnVaultDepositSchema>
 ) {
-  const { body: parsedData, resolved } = getPolicyGateContext<
-    EarnVaultDepositBody,
-    EarnVaultDepositResolved
-  >(c);
-  const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
-    resolved;
-  const requestId = resolved.requestId;
-  if (requestId === null) {
-    throw internalError("Vault deposit execution reached the handler without an idempotency key");
-  }
-
-  // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
-  const auditIntent = await beginEarnDepositAudit(
-    c,
-    {
-      organizationId: auth.organizationId,
-      userId: auth.userId ?? null,
-      apiKeyId: auth.apiKeyId ?? null,
-    },
-    {
-      executionModel: "vault_direct",
-      signer: "custody",
-      provider,
-      strategyId: strategy.id,
-      custodyWalletId: wallet.id,
-      tokenMint,
-      amount: parsedData.amount,
-      requestId,
+  return recoverFailedVaultPolicyExecution(c, async () => {
+    const { body: parsedData, resolved } = getPolicyGateContext<
+      EarnVaultDepositBody,
+      EarnVaultDepositResolved
+    >(c);
+    const { strategy, wallet, auth, projectId, environment, provider, tokenMint, shareMint } =
+      resolved;
+    const requestId = resolved.requestId;
+    if (requestId === null) {
+      throw internalError("Vault deposit execution reached the handler without an idempotency key");
     }
-  );
 
-  let result: Awaited<ReturnType<typeof depositIntoVault>>;
-  try {
-    result = await depositIntoVault(
-      c.env,
+    // Fail-closed audit admission (PRO-1866): no durable intent, no deposit.
+    const auditIntent = await beginEarnDepositAudit(
+      c,
       {
         organizationId: auth.organizationId,
-        projectId,
-        environment,
-        provider,
-        providerReference: strategy.provider_reference,
-        wallet,
-        tokenMint,
-        shareMint,
-        label: strategy.name,
-        amount: parsedData.amount,
-        requestId,
-        minSharesOut: parsedData.minSharesOut,
-        ...(resolved.swap === null ? {} : { swap: resolved.swap }),
         userId: auth.userId ?? null,
         apiKeyId: auth.apiKeyId ?? null,
       },
       {
-        runIntentTransaction: (mutation) =>
-          runApprovedWalletOperationEffectTransaction(c, mutation),
+        executionModel: "vault_direct",
+        signer: "custody",
+        provider,
+        strategyId: strategy.id,
+        custodyWalletId: wallet.id,
+        tokenMint,
+        amount: parsedData.amount,
+        requestId,
       }
     );
-  } catch (error) {
-    // A 4xx is a definitive pre-broadcast refusal: close the intent instead
-    // of paging verification over it. Anything else stays UNRESOLVED (the
-    // service can 5xx after a successful send; see movement-audit.ts).
-    await concludeEarnDepositAuditOnError(c, auditIntent, error);
-    throw error;
-  }
 
-  if (result.replayed && approvedWalletOperationId(c)) {
-    // Sequential replays do not pass through the insert transaction, so fence
-    // the approved operation before returning their durable outcome. A legacy
-    // unsigned row must fail closed instead of becoming a completed approval.
-    await beginApprovedWalletOperationEffect(c);
-    if (!result.movement.signature || result.movement.status === "failed") {
-      throw conflict(
-        "Approved vault deposit execution is incomplete and requires manual reconciliation"
+    let result: Awaited<ReturnType<typeof depositIntoVault>>;
+    try {
+      result = await depositIntoVault(
+        c.env,
+        {
+          organizationId: auth.organizationId,
+          projectId,
+          environment,
+          provider,
+          providerReference: strategy.provider_reference,
+          wallet,
+          tokenMint,
+          shareMint,
+          label: strategy.name,
+          amount: parsedData.amount,
+          requestId,
+          minSharesOut: parsedData.minSharesOut,
+          ...(resolved.swap === null ? {} : { swap: resolved.swap }),
+          userId: auth.userId ?? null,
+          apiKeyId: auth.apiKeyId ?? null,
+        },
+        {
+          runIntentTransaction: (mutation) =>
+            runApprovedWalletOperationEffectTransaction(c, mutation),
+        }
       );
+    } catch (error) {
+      // A 4xx is a definitive pre-broadcast refusal: close the intent instead
+      // of paging verification over it. Anything else stays UNRESOLVED (the
+      // service can 5xx after a successful send; see movement-audit.ts).
+      await concludeEarnDepositAuditOnError(c, auditIntent, error);
+      throw error;
     }
-  }
 
-  // The approved-operation fence above deliberately leaves the intent
-  // unresolved when it throws: that outcome is genuinely ambiguous, and
-  // verification paging it for reconciliation is the point.
-  await completeEarnDepositAudit(c, auditIntent, {
-    resourceId: result.movement.id,
-    metadata: {
-      movementId: result.movement.id,
-      signature: result.movement.signature,
-      status: result.movement.status,
-      replayed: result.replayed,
-    },
+    if (result.replayed && approvedWalletOperationId(c)) {
+      // Sequential replays do not pass through the insert transaction, so fence
+      // the approved operation before returning their durable outcome. A legacy
+      // unsigned row must fail closed instead of becoming a completed approval.
+      await beginApprovedWalletOperationEffect(c);
+      if (!result.movement.signature || result.movement.status === "failed") {
+        throw conflict(
+          "Approved vault deposit execution is incomplete and requires manual reconciliation"
+        );
+      }
+    }
+
+    // The approved-operation fence above deliberately leaves the intent
+    // unresolved when it throws: that outcome is genuinely ambiguous, and
+    // verification paging it for reconciliation is the point.
+    await completeEarnDepositAudit(c, auditIntent, {
+      resourceId: result.movement.id,
+      metadata: {
+        movementId: result.movement.id,
+        signature: result.movement.signature,
+        status: result.movement.status,
+        replayed: result.replayed,
+      },
+    });
+
+    return success(c, buildEarnVaultDepositResponse(result, strategy));
   });
-
-  return success(c, buildEarnVaultDepositResponse(result, strategy));
 }
 
 function buildEarnVaultDepositResponse(
@@ -1474,84 +1479,87 @@ export async function createEarnVaultWithdrawalPreview(
 export async function createEarnVaultWithdrawal(
   c: ValidatedBodyContext<typeof earnVaultWithdrawalSchema>
 ) {
-  const { body: parsedData, resolved } = getPolicyGateContext<
-    EarnVaultWithdrawalBody,
-    EarnVaultWithdrawalResolved
-  >(c);
-  const { position, wallet, auth, projectId, environment } = resolved;
-  const requestId = resolved.requestId;
-  if (requestId === null) {
-    throw internalError(
-      "Vault withdrawal execution reached the handler without an idempotency key"
-    );
-  }
-
-  const result = await withdrawFromVault(
-    c.env,
-    {
-      organizationId: auth.organizationId,
-      projectId,
-      environment,
-      provider: position.provider,
-      positionId: position.id,
-      vaultAddress: position.vaultAddress,
-      tokenMint: position.tokenMint,
-      shareMint: position.shareMint,
-      wallet,
-      shares: parsedData.shares,
-      minAmountOut: parsedData.minAmountOut,
-      requestId,
-      userId: auth.userId ?? null,
-      apiKeyId: auth.apiKeyId ?? null,
-    },
-    {
-      runIntentTransaction: (mutation) => runApprovedWalletOperationEffectTransaction(c, mutation),
-    }
-  );
-
-  if (result.replayed && approvedWalletOperationId(c)) {
-    // Sequential replays do not pass through the insert transaction, so fence
-    // the approved operation before returning its durable outcome.
-    await beginApprovedWalletOperationEffect(c);
-    if (!result.movement.signature || result.movement.status === "failed") {
-      throw conflict(
-        "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
+  return recoverFailedVaultPolicyExecution(c, async () => {
+    const { body: parsedData, resolved } = getPolicyGateContext<
+      EarnVaultWithdrawalBody,
+      EarnVaultWithdrawalResolved
+    >(c);
+    const { position, wallet, auth, projectId, environment } = resolved;
+    const requestId = resolved.requestId;
+    if (requestId === null) {
+      throw internalError(
+        "Vault withdrawal execution reached the handler without an idempotency key"
       );
     }
-  }
 
-  // Best-effort and post-effect (PRO-1866): a fail-closed audit write here
-  // would be a new way for an exit to 5xx, the exact shape ADR 0002 exit
-  // safety rules out. Actor comes from the movement row itself; a replay only
-  // backfills an audit row the crashed original never wrote.
-  await recordEarnWithdrawalAudit(
-    c,
-    {
-      organizationId: auth.organizationId,
-      userId: result.movement.created_by,
-      apiKeyId: result.movement.initiated_by_key_id,
-    },
-    result.movement.id,
-    {
-      executionModel: "vault_direct",
-      signer: "custody",
-      provider: position.provider,
-      positionId: position.id,
-      shares: parsedData.shares,
-      minAmountOut: parsedData.minAmountOut ?? null,
-      signature: result.movement.signature,
-      requestId,
-    },
-    { replayed: result.replayed }
-  );
+    const result = await withdrawFromVault(
+      c.env,
+      {
+        organizationId: auth.organizationId,
+        projectId,
+        environment,
+        provider: position.provider,
+        positionId: position.id,
+        vaultAddress: position.vaultAddress,
+        tokenMint: position.tokenMint,
+        shareMint: position.shareMint,
+        wallet,
+        shares: parsedData.shares,
+        minAmountOut: parsedData.minAmountOut,
+        requestId,
+        userId: auth.userId ?? null,
+        apiKeyId: auth.apiKeyId ?? null,
+      },
+      {
+        runIntentTransaction: (mutation) =>
+          runApprovedWalletOperationEffectTransaction(c, mutation),
+      }
+    );
 
-  return success(
-    c,
-    buildEarnVaultWithdrawalResponse({
-      movement: result.movement,
-      replayed: result.replayed,
-    })
-  );
+    if (result.replayed && approvedWalletOperationId(c)) {
+      // Sequential replays do not pass through the insert transaction, so fence
+      // the approved operation before returning its durable outcome.
+      await beginApprovedWalletOperationEffect(c);
+      if (!result.movement.signature || result.movement.status === "failed") {
+        throw conflict(
+          "Approved vault withdrawal execution is incomplete and requires manual reconciliation"
+        );
+      }
+    }
+
+    // Best-effort and post-effect (PRO-1866): a fail-closed audit write here
+    // would be a new way for an exit to 5xx, the exact shape ADR 0002 exit
+    // safety rules out. Actor comes from the movement row itself; a replay only
+    // backfills an audit row the crashed original never wrote.
+    await recordEarnWithdrawalAudit(
+      c,
+      {
+        organizationId: auth.organizationId,
+        userId: result.movement.created_by,
+        apiKeyId: result.movement.initiated_by_key_id,
+      },
+      result.movement.id,
+      {
+        executionModel: "vault_direct",
+        signer: "custody",
+        provider: position.provider,
+        positionId: position.id,
+        shares: parsedData.shares,
+        minAmountOut: parsedData.minAmountOut ?? null,
+        signature: result.movement.signature,
+        requestId,
+      },
+      { replayed: result.replayed }
+    );
+
+    return success(
+      c,
+      buildEarnVaultWithdrawalResponse({
+        movement: result.movement,
+        replayed: result.replayed,
+      })
+    );
+  });
 }
 
 function buildEarnVaultWithdrawalResponse(input: {

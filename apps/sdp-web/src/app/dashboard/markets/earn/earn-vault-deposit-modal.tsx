@@ -219,17 +219,6 @@ type DepositSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: DepositOutcome; deposited?: EarnVaultDeposit };
 
-function shouldProjectDepositBalance(outcome: DepositOutcome): boolean {
-  const deposit = observableVaultMovement(outcome);
-  return (
-    deposit !== undefined && earnProviderDepositSettlement(deposit.strategy.provider) === "atomic"
-  );
-}
-
-function shouldProjectDepositIntent(outcome: DepositOutcome, swapActive: boolean): boolean {
-  return !swapActive && shouldProjectDepositBalance(outcome);
-}
-
 function depositProgressStep(outcome: DepositOutcome | null, step: "details" | "review"): number {
   if (
     outcome?.kind === "deposit" &&
@@ -726,8 +715,6 @@ export interface EarnVaultDepositModalProps {
     intent: {
       amount: string;
       custodyWalletId: string;
-      /** False when an approval already executed this replayed intent. */
-      projectBalance: boolean;
       /** Client clock when the POST began; a positions read that landed earlier cannot contain this deposit. */
       submittedAt: number;
     }
@@ -1451,6 +1438,11 @@ export function EarnVaultDepositModal({
     // The controller still exists, but it gates the UI below, never the
     // request or the key bookkeeping.
     const submittedAt = Date.now();
+    const submission = vaultDepositIdempotencyKeyStore.beginSubmission(fingerprint);
+    if (!submission) {
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
     const result = await createEarnVaultDeposit(
       {
         strategyId: strategy.id,
@@ -1472,7 +1464,8 @@ export function EarnVaultDepositModal({
     const disposition = applyIdempotencyKeyOutcome(
       vaultDepositIdempotencyKeyStore,
       fingerprint,
-      result
+      result,
+      submission.wasUncertain
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
@@ -1503,10 +1496,6 @@ export function EarnVaultDepositModal({
       onDeposited?.(resolution.deposited, {
         amount,
         custodyWalletId: wallet.id,
-        // A swap request is denominated in the funding token while the
-        // position is denominated in the vault token. Wait for the provider
-        // value instead of presenting those unlike amounts as one balance.
-        projectBalance: shouldProjectDepositIntent(resolution.outcome, swapActive),
         submittedAt,
       });
     }

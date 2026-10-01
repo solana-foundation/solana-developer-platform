@@ -9,16 +9,14 @@ import {
   createDeposit,
   createWithdrawal,
   getDashboard,
+  resumePendingIntent,
 } from "@/lib/api";
 import {
   ACTIVE_MOVEMENT_REFRESH_MS,
-  applyInFlight,
   applySubmittedTransfers,
-  foldSettledTransfers,
   type InFlightTransfer,
   isPendingMovement,
   type MovementPolling,
-  partitionSettledTransfersBySnapshot,
   reconcileInFlight,
   reconcileMovementPolling,
   reconcileSubmittedTransfers,
@@ -98,7 +96,6 @@ export function useDashboardController() {
     SubmittedTransfer[]
   >([]);
   const inFlightRef = useRef<InFlightTransfer[]>([]);
-  const inFlightBase = useRef<DashboardData>(undefined);
   const movementToastIds = useRef(
     new Map<string, ReturnType<typeof toast.loading>>()
   );
@@ -142,20 +139,6 @@ export function useDashboardController() {
           current,
           next.movements
         );
-        const balanceReconciliation = inFlightBase.current
-          ? partitionSettledTransfersBySnapshot(
-              inFlightBase.current,
-              next,
-              settled
-            )
-          : { reflected: settled, waiting: [] };
-        const now = Date.now();
-        const expired = balanceReconciliation.waiting.filter(
-          (transfer) => now >= transfer.expiresAt
-        );
-        const waiting = balanceReconciliation.waiting.filter(
-          (transfer) => now < transfer.expiresAt
-        );
         const timedOutMovementIds = new Set(reconciliation.timedOutMovementIds);
         const timedOut = remaining.filter((transfer) =>
           timedOutMovementIds.has(transfer.movementId)
@@ -163,37 +146,13 @@ export function useDashboardController() {
         const activeRemaining = remaining.filter(
           (transfer) => !timedOutMovementIds.has(transfer.movementId)
         );
-        const keepIds = new Set(
-          [...activeRemaining, ...waiting].map(
-            (transfer) => transfer.movementId
-          )
-        );
-        const keep = current.filter((transfer) =>
-          keepIds.has(transfer.movementId)
-        );
-        const reflectedOrExpired = [
-          ...balanceReconciliation.reflected,
-          ...expired,
-        ];
-        if (reflectedOrExpired.length && keep.length && inFlightBase.current) {
-          inFlightBase.current = foldSettledTransfers(
-            inFlightBase.current,
-            reflectedOrExpired
-          );
-        }
+        const keep = activeRemaining;
         showSettledTransferToasts(
           settled,
           completedMovementIds.current,
           movementToastIds.current,
           latestData.current?.wallet.cluster
         );
-        if (expired.length) {
-          toast.warning("Balances are taking longer to update", {
-            id: "balance-sync-timeout",
-            description:
-              "The transfer is settled. Refresh to check the latest live balances.",
-          });
-        }
         for (const transfer of failed) {
           const copy =
             TRANSFER_COPY[
@@ -247,6 +206,27 @@ export function useDashboardController() {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    let active = true;
+    async function recover() {
+      try {
+        const result = await resumePendingIntent();
+        if (active && result) await refresh();
+      } catch {
+        // Keep saved intent through every ambiguous error. A new transfer is
+        // blocked until the same signed intent has a durable, parsed answer.
+      }
+    }
+    void recover();
+    const timer = window.setInterval(() => {
+      void recover();
+    }, BACKGROUND_REFRESH_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [refresh]);
 
   useEffect(() => {
@@ -321,9 +301,6 @@ export function useDashboardController() {
             polling.expiresAtByMovement[movement.movementId] ??
             Date.now() + SETTLEMENT_POLL_TIMEOUT_MS;
           updateMovementPolling(polling);
-          if (!inFlightRef.current.length) {
-            inFlightBase.current = latestData.current;
-          }
           updateInFlight([
             ...inFlightRef.current,
             {
@@ -391,10 +368,7 @@ export function useDashboardController() {
   const activity = data
     ? applySubmittedTransfers(data, submittedTransfers)
     : data;
-  const view =
-    activity && inFlight.length && inFlightBase.current
-      ? applyInFlight(inFlightBase.current, activity, inFlight)
-      : activity;
+  const view = activity;
 
   const retry = useCallback(() => void refresh(), [refresh]);
   const refreshDashboard = useCallback(

@@ -22,14 +22,7 @@ import {
   generateEarnVaultWithdrawalRequestId,
   generateEarnVaultWithdrawalRequestReservationId,
 } from "@/db/repositories/earn-vault-withdrawal-requests.repository";
-import {
-  AppError,
-  badRequest,
-  conflict,
-  internalError,
-  notFound,
-  transactionExpired,
-} from "@/lib/errors";
+import { badRequest, conflict, internalError, notFound } from "@/lib/errors";
 import {
   buildEarnVaultParRedemptionFingerprint,
   buildEarnVaultQueuedWithdrawalCancelFingerprint,
@@ -1158,29 +1151,6 @@ async function requireExternalBuild(
   return build;
 }
 
-async function refuseExpiredExternalBuild(
-  env: Env,
-  build: ExternalQueuedWithdrawalBuiltTransaction
-) {
-  if ((build as EarnExternalWalletWithdrawalRequestTransactionRow).consumed_action_id) return;
-  let current: bigint;
-  try {
-    current = await readConfirmedBlockHeight(
-      env,
-      resolveClusterRpcUrl(env, earnClusterFor(build.environment))
-    );
-  } catch (error) {
-    if (error instanceof AppError) throw error;
-    getLogger().warn({ transactionId: build.id, error }, "queued build height unreadable");
-    return;
-  }
-  if (current > BigInt(build.last_valid_block_height)) {
-    throw transactionExpired(
-      "This queued withdrawal transaction expired. Build it again and collect fresh signatures."
-    );
-  }
-}
-
 export async function submitExternalQueuedWithdrawalAction(
   env: Env,
   input: {
@@ -1192,7 +1162,6 @@ export async function submitExternalQueuedWithdrawalAction(
   }
 ): Promise<QueuedWithdrawalMutationResult> {
   const build = await requireExternalBuild(env, input);
-  await refuseExpiredExternalBuild(env, build);
   const signed = await verifySignedExternalWalletTransaction(build, input.signedTransaction);
   const repository = createPostgresEarnVaultWithdrawalRequestsRepository(getDb(env));
   let result: QueuedWithdrawalMutationResult;

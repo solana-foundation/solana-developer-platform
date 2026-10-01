@@ -1,4 +1,6 @@
+import { isTransientRpcError } from "@sdp/rpc";
 import { badRequest, conflict, providerUnavailable } from "@/lib/errors";
+import { getLogger } from "@/runtime/logger";
 
 /**
  * Build failures whose reason belongs in front of the CALLER, not in a 500.
@@ -65,6 +67,25 @@ export function rethrowVaultProviderFailure(error: unknown): never {
     failure?.code === "REQUEST_UNREADABLE" ||
     failure?.code === "POSITION_UNREADABLE"
   ) {
+    const causes = new Set<Error>();
+    let cause = error;
+    let transient = false;
+    while (cause instanceof Error && !causes.has(cause)) {
+      causes.add(cause);
+      transient ||= isTransientRpcError(cause);
+      cause = cause.cause;
+    }
+    const root = [...causes].at(-1);
+    // Log diagnostic categories without raw upstream text, URLs, or credentials.
+    getLogger().warn(
+      {
+        event: "earn_provider_state_unavailable",
+        providerCode: failure.code,
+        transient,
+        causeCode: root && "code" in root && typeof root.code === "number" ? root.code : null,
+      },
+      "Earn provider state could not be read"
+    );
     throw providerUnavailable("Earn provider is temporarily unavailable. Try again.");
   }
   throw error;

@@ -352,6 +352,9 @@ async function reconcileMovement(
   chain: ChainObservation
 ): Promise<MovementOutcome> {
   if (status?.err) {
+    // A fork can report an error before the same signed transaction succeeds
+    // on the finalized chain. Keep its durable intent until finality decides.
+    if (status.confirmationStatus !== "finalized") return "unchanged";
     // The ledger keeps the readable sentence (it reaches the dashboard); the
     // chain's own variant goes to the log, where operators grep for it.
     const verdict = describeVaultSimulationError(status.err);

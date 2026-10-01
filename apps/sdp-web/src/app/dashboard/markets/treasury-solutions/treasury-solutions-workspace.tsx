@@ -125,16 +125,14 @@ import {
   type VaultShareMintVocabulary,
 } from "./treasury-allocation";
 import {
-  createVaultBalanceProjection,
   displayedVaultBalance,
   observeVaultMovementCommit,
-  type ProjectedVaultMovement,
-  pendingVaultProjections,
-  projectionBaseline,
-  type VaultMovementProjectionState,
+  pendingVaultBalanceReads,
+  type TrackedVaultMovement,
+  type VaultMovementBalanceState,
   type VaultPositionsRead,
   vaultActivities,
-} from "./treasury-vault-balance-projection";
+} from "./treasury-vault-balance";
 
 // The three transaction surfaces account for most of this route's client
 // module graph. They are not needed to inspect a portfolio, so load each only
@@ -174,7 +172,7 @@ type TrackedVaultDeposit = Pick<
   EarnVaultDepositRecord,
   "failureReason" | "movementId" | "positionId" | "status"
 > &
-  VaultMovementProjectionState & {
+  VaultMovementBalanceState & {
     createdAt?: string;
     provisionalPosition?: EarnVaultPosition;
   };
@@ -183,10 +181,10 @@ type TrackedVaultWithdrawal = Pick<
   EarnVaultWithdrawal,
   "createdAt" | "failureReason" | "movementId" | "positionId" | "status"
 > &
-  VaultMovementProjectionState;
+  VaultMovementBalanceState;
 
 /** What a caller hands the watch lists; order and commit stamps are this file's to assign. */
-type VaultMovementWatchInput<Movement extends VaultMovementProjectionState> = Omit<
+type VaultMovementWatchInput<Movement extends VaultMovementBalanceState> = Omit<
   Movement,
   "committedObservedAt" | "observedOrder"
 >;
@@ -267,7 +265,7 @@ function strategyTvlUsd(strategy: EarnStrategy): string | undefined {
 }
 
 function replaceTrackedVaultMovement<
-  Movement extends ProjectedVaultMovement,
+  Movement extends TrackedVaultMovement,
   Update extends { movementId: string; status: string },
 >(current: readonly Movement[], updated: Update): readonly Movement[] {
   return current.map((candidate) =>
@@ -287,7 +285,7 @@ function replaceTrackedVaultMovement<
  * tombstone a settled movement would resume polling. Shared by the deposit and
  * withdrawal watchers, whose updaters are otherwise line-for-line identical.
  */
-function mergeTrackedVaultMovements<Movement extends ProjectedVaultMovement>(
+function mergeTrackedVaultMovements<Movement extends TrackedVaultMovement>(
   current: readonly Movement[],
   incoming: readonly Movement[],
   settledIds: ReadonlySet<string>
@@ -444,12 +442,15 @@ function TreasurySummaryFigure({
   label,
   showInfo = false,
   value,
+  refreshing = false,
 }: {
+  refreshing?: boolean;
   description: string;
   label: string;
   showInfo?: boolean;
   value: string;
 }) {
+  const t = useTranslations();
   return (
     <Card className="min-h-[10.5rem] min-w-0 justify-center gap-0 rounded-2xl px-10 py-8">
       <dt className="flex items-center gap-1 text-sm leading-5 font-normal text-secondary">
@@ -463,9 +464,22 @@ function TreasurySummaryFigure({
         )}
       </dt>
       <dd className="mt-4 text-[32px] leading-9 font-medium tracking-[-0.3px] text-primary tabular-nums [overflow-wrap:anywhere]">
-        {value}
+        {refreshing ? (
+          <BalanceRefreshing label={t("DashboardMarkets.treasury.positionBalanceSyncing")} large />
+        ) : (
+          value
+        )}
       </dd>
     </Card>
+  );
+}
+
+function BalanceRefreshing({ label, large = false }: { label: string; large?: boolean }) {
+  return (
+    <div role="status" aria-label={label}>
+      <span className="sr-only">{label}</span>
+      <SkeletonBlock className={large ? "h-9 w-28 rounded-md" : "h-5 w-20 rounded-md"} />
+    </div>
   );
 }
 
@@ -473,10 +487,12 @@ function TreasuryAllocationCard({
   allocation,
   estimatedApy,
   isLoading,
+  refreshing = false,
 }: {
   allocation: TreasuryAllocation;
   estimatedApy: string | undefined;
   isLoading: boolean;
+  refreshing?: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -494,6 +510,7 @@ function TreasuryAllocationCard({
   return (
     <dl className="grid gap-3 sm:grid-cols-3">
       <TreasurySummaryFigure
+        refreshing={refreshing}
         description={t(
           allocation.deployedValue === undefined
             ? allocation.deployedAbsence === "unreconciled"
@@ -509,6 +526,7 @@ function TreasuryAllocationCard({
         value={formatUsd(allocation.deployedValue, locale)}
       />
       <TreasurySummaryFigure
+        refreshing={refreshing}
         description={t(
           allocation.availableCash === undefined
             ? "DashboardMarkets.treasury.summaryCashUnavailable"
@@ -519,6 +537,7 @@ function TreasuryAllocationCard({
         value={formatUsd(allocation.availableCash, locale)}
       />
       <TreasurySummaryFigure
+        refreshing={refreshing}
         description={t(
           estimatedApy === undefined
             ? "DashboardMarkets.treasury.summaryApyUnavailable"
@@ -536,11 +555,13 @@ function TreasuryWalletsCard({
   allocation,
   error,
   isLoading,
+  refreshing = false,
   wallets,
 }: {
   allocation: TreasuryAllocation;
   error: unknown;
   isLoading: boolean;
+  refreshing?: boolean;
   wallets: readonly EarnFundingWallet[];
 }) {
   const t = useTranslations();
@@ -618,7 +639,13 @@ function TreasuryWalletsCard({
                       <TreasuryInfoTip label={t("DashboardMarkets.treasury.summaryCashCaption")} />
                     </dt>
                     <dd className="text-sm text-primary tabular-nums">
-                      {formatUsd(allocation.cashByWalletId.get(wallet.id), locale)}
+                      {refreshing ? (
+                        <BalanceRefreshing
+                          label={t("DashboardMarkets.treasury.positionBalanceSyncing")}
+                        />
+                      ) : (
+                        formatUsd(allocation.cashByWalletId.get(wallet.id), locale)
+                      )}
                     </dd>
                   </div>
                   {deployment.kind === "none" ? null : (
@@ -627,9 +654,15 @@ function TreasuryWalletsCard({
                         {t("DashboardMarkets.treasury.walletDeployed")}
                       </dt>
                       <dd className="text-sm text-primary tabular-nums">
-                        {deployment.kind === "value"
-                          ? formatUsd(deployment.value, locale)
-                          : t("DashboardMarkets.treasury.positionValueUnavailable")}
+                        {refreshing ? (
+                          <BalanceRefreshing
+                            label={t("DashboardMarkets.treasury.positionBalanceSyncing")}
+                          />
+                        ) : deployment.kind === "value" ? (
+                          formatUsd(deployment.value, locale)
+                        ) : (
+                          t("DashboardMarkets.treasury.positionValueUnavailable")
+                        )}
                       </dd>
                     </div>
                   )}
@@ -1189,7 +1222,7 @@ function ActiveVaultPositionsCard({
                       <TreasuryPositionBalanceCell
                         formattedBalance={formattedBalance}
                         parIntermediate={position.parIntermediate}
-                        projected={balance.projected}
+                        syncing={balance.syncing}
                       />
                       <TableCell className="text-sm text-secondary">
                         {wallet?.label?.trim() ||
@@ -1216,11 +1249,11 @@ function ActiveVaultPositionsCard({
 function TreasuryPositionBalanceCell({
   formattedBalance,
   parIntermediate,
-  projected,
+  syncing,
 }: {
   formattedBalance: string;
   parIntermediate: EarnVaultPosition["parIntermediate"];
-  projected: boolean;
+  syncing: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -1228,17 +1261,14 @@ function TreasuryPositionBalanceCell({
     <TableCell className="text-sm text-primary tabular-nums">
       <span
         className={
-          projected ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100" : undefined
+          syncing ? "inline-block motion-safe:animate-pulse motion-reduce:opacity-100" : undefined
         }
-        data-earn-vault-balance={projected ? "projected" : "live"}
-        title={projected ? t("DashboardMarkets.treasury.positionBalanceProjected") : undefined}
+        data-earn-vault-balance={syncing ? "syncing" : "live"}
+        title={syncing ? t("DashboardMarkets.treasury.positionBalanceSyncing") : undefined}
       >
-        <span data-earn-vault-balance-value>{formattedBalance}</span>
-        {projected ? (
-          <span className="sr-only">
-            {`. ${t("DashboardMarkets.treasury.positionBalanceProjected")}`}
-          </span>
-        ) : null}
+        <span data-earn-vault-balance-value>
+          {syncing ? t("DashboardMarkets.treasury.positionBalanceSyncing") : formattedBalance}
+        </span>
       </span>
       {parIntermediate ? (
         <span className="mt-0.5 block text-xs text-tertiary" data-earn-vault-par-intermediate>
@@ -1722,6 +1752,7 @@ interface TreasuryWorkspaceContentProps {
   programsUnavailable: boolean;
   providerAccess: EarnProviderAccess | null;
   summaryLoading: boolean;
+  balancesRefreshing: boolean;
   vaultDeposits: readonly TrackedVaultDeposit[];
   vaultWithdrawals: readonly TrackedVaultWithdrawal[];
   walletsError: unknown;
@@ -1754,6 +1785,7 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
     programsUnavailable,
     providerAccess,
     summaryLoading,
+    balancesRefreshing,
     vaultDeposits,
     vaultWithdrawals,
     walletsError,
@@ -1770,12 +1802,14 @@ function TreasuryWorkspaceContent(props: TreasuryWorkspaceContentProps) {
         allocation={allocation}
         estimatedApy={portfolioApy}
         isLoading={summaryLoading}
+        refreshing={balancesRefreshing}
       />
 
       <TreasuryWalletsCard
         allocation={allocation}
         error={walletsError}
         isLoading={walletsLoading}
+        refreshing={balancesRefreshing}
         wallets={activeWallets}
       />
 
@@ -1942,7 +1976,7 @@ export function TreasurySolutionsWorkspace({
   const { sdpEnvironment, selectedProjectId } = useDashboardWorkspace();
   const {
     wallets,
-    error: walletsError,
+    error: fundingWalletsError,
     isLoading: walletsLoading,
     refreshBalances: refreshWalletBalances,
   } = useEarnFundingWallets();
@@ -1964,7 +1998,7 @@ export function TreasurySolutionsWorkspace({
   const {
     positions,
     reads: positionsReads,
-    error: positionsError,
+    error: vaultPositionsError,
     isLoading: positionsLoading,
     refresh: refreshPositions,
   } = useEarnVaultPositions();
@@ -1974,6 +2008,27 @@ export function TreasurySolutionsWorkspace({
     isLoading: programsLoading,
     refresh: refreshPrograms,
   } = useEarnPrograms();
+  const [balanceRefreshes, setBalanceRefreshes] = useState(0);
+  const [balanceRefreshError, setBalanceRefreshError] = useState<Error>();
+  const balanceRefreshGeneration = useRef(0);
+  const walletsError = fundingWalletsError || balanceRefreshError;
+  const positionsError = vaultPositionsError || balanceRefreshError;
+  const refreshTreasuryBalances = useCallback(async () => {
+    const generation = ++balanceRefreshGeneration.current;
+    setBalanceRefreshes((count) => count + 1);
+    try {
+      const results = await Promise.allSettled([refreshPositions(), refreshWalletBalances()]);
+      if (generation === balanceRefreshGeneration.current) {
+        setBalanceRefreshError(
+          results.some((result) => result.status === "rejected")
+            ? new Error("Treasury balances could not be refreshed")
+            : undefined
+        );
+      }
+    } finally {
+      setBalanceRefreshes((count) => count - 1);
+    }
+  }, [refreshPositions, refreshWalletBalances]);
   const { deposits: discoveredVaultDeposits } = useEarnVaultDeposits();
   const { withdrawals: discoveredVaultWithdrawals } = useEarnVaultWithdrawals();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
@@ -2075,19 +2130,18 @@ export function TreasurySolutionsWorkspace({
     });
   }, [positions]);
 
-  // Every committed movement asks for one fresh read. Its projection retires
-  // by itself once a read shows the shares moved (see
-  // `pendingVaultProjections`), so nothing here clears state.
+  // Confirmation and recovery refresh both sides of the transfer. A read
+  // started before confirmation cannot supply the newly completed balance.
   const latestPositionsRead = positionsReads[positionsReads.length - 1];
   const refreshRequestedFor = useRef(new Set<string>());
   useEffect(() => {
-    const unrequested = pendingVaultProjections(trackedActivities, latestPositionsRead).filter(
+    const unrequested = pendingVaultBalanceReads(trackedActivities, latestPositionsRead).filter(
       ({ movement }) => !refreshRequestedFor.current.has(movement.movementId)
     );
     if (unrequested.length === 0) return;
     for (const { movement } of unrequested) refreshRequestedFor.current.add(movement.movementId);
-    refreshPositions();
-  }, [latestPositionsRead, refreshPositions, trackedActivities]);
+    void refreshTreasuryBalances();
+  }, [latestPositionsRead, refreshTreasuryBalances, trackedActivities]);
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
   // Every share mint the page knows about, from positions AND the catalogue:
@@ -2162,10 +2216,9 @@ export function TreasurySolutionsWorkspace({
     walletsLoading,
   });
   const refreshTreasury = () => {
-    refreshWalletBalances();
+    void refreshTreasuryBalances();
     refreshStrategies();
     if (catalogueCluster !== undefined) refreshCatalogue();
-    refreshPositions();
     refreshPrograms();
   };
 
@@ -2196,6 +2249,7 @@ export function TreasurySolutionsWorkspace({
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
         providerAccess={providerAccess}
         summaryLoading={summaryLoading}
+        balancesRefreshing={balanceRefreshes > 0}
         vaultDeposits={vaultDepositWatches}
         vaultWithdrawals={vaultWithdrawalWatches}
         walletsError={walletsError}
@@ -2217,15 +2271,8 @@ export function TreasurySolutionsWorkspace({
             const provisionalPosition = authoritativePosition
               ? undefined
               : provisionalVaultPosition(deposit, intent.custodyWalletId, depositStrategy);
-            const balanceProjection = intent.projectBalance
-              ? createVaultBalanceProjection(
-                  intent.amount,
-                  projectionBaseline(positionsReads, deposit.positionId, intent.submittedAt)
-                )
-              : undefined;
             addVaultDepositWatches([
               {
-                balanceProjection,
                 failureReason: deposit.failureReason,
                 movementId: deposit.movementId,
                 positionId: deposit.positionId,
@@ -2234,8 +2281,7 @@ export function TreasurySolutionsWorkspace({
                 submittedAt: intent.submittedAt,
               },
             ]);
-            refreshPositions();
-            refreshWalletBalances();
+            void refreshTreasuryBalances();
           }}
           onMovementUpdated={updateVaultDepositWatch}
           strategy={depositStrategy}
@@ -2259,15 +2305,8 @@ export function TreasurySolutionsWorkspace({
           environment={sdpEnvironment}
           onClose={() => setWithdrawPosition(null)}
           onWithdrawn={(withdrawal, intent) => {
-            const balanceProjection = intent.projectBalance
-              ? createVaultBalanceProjection(
-                  intent.amount,
-                  projectionBaseline(positionsReads, withdrawal.positionId, intent.submittedAt)
-                )
-              : undefined;
             addVaultWithdrawalWatches([
               {
-                balanceProjection,
                 createdAt: withdrawal.createdAt,
                 failureReason: withdrawal.failureReason,
                 movementId: withdrawal.movementId,
@@ -2276,15 +2315,13 @@ export function TreasurySolutionsWorkspace({
                 submittedAt: intent.submittedAt,
               },
             ]);
-            refreshPositions();
-            refreshWalletBalances();
+            void refreshTreasuryBalances();
           }}
           onMovementUpdated={updateVaultWithdrawalWatch}
           onAsyncRequest={() => {
             // An asynchronous request can move or escrow shares without paying
             // assets yet. Refresh holdings without projecting an instant exit.
-            refreshPositions();
-            refreshWalletBalances();
+            void refreshTreasuryBalances();
           }}
           onAsyncRequestSettled={refreshTreasury}
           parSource={withdrawParSource}
@@ -2311,10 +2348,7 @@ export function TreasurySolutionsWorkspace({
             setSettledVaultWithdrawalIds((current) =>
               new Set(current).add(settledWithdrawal.movementId)
             );
-            // Only now did the exit change what the org holds: the shares are
-            // burned and the proceeds sit in the custody wallet.
-            refreshPositions();
-            refreshWalletBalances();
+            if (settledWithdrawal.status === "failed") void refreshTreasuryBalances();
           }}
         />
       ))}
@@ -2327,10 +2361,7 @@ export function TreasurySolutionsWorkspace({
           onSettled={(settledDeposit) => {
             updateVaultDepositWatch(settledDeposit);
             setSettledVaultDepositIds((current) => new Set(current).add(settledDeposit.movementId));
-            // Only NOW is the position real: the shares exist on chain and the
-            // wallet balance reflects what left it.
-            refreshPositions();
-            refreshWalletBalances();
+            if (settledDeposit.status === "failed") void refreshTreasuryBalances();
           }}
         />
       ))}

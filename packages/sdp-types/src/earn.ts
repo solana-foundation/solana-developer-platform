@@ -961,6 +961,9 @@ export interface EarnExternalWalletMovement {
   providerReference: string;
   direction: EarnMovementDirection;
   status: EarnVaultDirectMovementStatus;
+  /** Atomic transfers can show Done at confirmation; provider orders still await fulfillment.
+   * Older servers omit this field; clients must not infer atomic settlement from status alone. */
+  settlement?: "atomic" | "provider_order";
   signature: string;
   ownerAddress: string;
   /** Requested quantity, denominated in `denomination`. */

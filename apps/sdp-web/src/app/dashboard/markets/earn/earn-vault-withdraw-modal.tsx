@@ -138,13 +138,6 @@ type WithdrawalSubmissionResolution =
   | { kind: "error"; message: string; slippageExceeded?: true }
   | { kind: "outcome"; outcome: WithdrawalOutcome; withdrawn?: EarnVaultWithdrawal };
 
-function shouldProjectWithdrawalBalance(
-  outcome: WithdrawalOutcome,
-  settlement: EarnVaultWithdrawalSettlement
-): boolean {
-  return settlement === "atomic" && observableVaultMovement(outcome) !== undefined;
-}
-
 function resolveWithdrawalSubmission(
   result: Awaited<ReturnType<typeof createEarnVaultWithdrawal>>,
   fallbackError: string,
@@ -507,8 +500,6 @@ export interface EarnVaultWithdrawModalProps {
     withdrawal: EarnVaultWithdrawal,
     intent: {
       amount: string;
-      /** False when an approval already executed this replayed intent. */
-      projectBalance: boolean;
       /** Client clock when the POST began; a positions read that landed earlier cannot contain this exit. */
       submittedAt: number;
     }
@@ -994,6 +985,11 @@ export function EarnVaultWithdrawModal({
 
     // No abort signal on the value-moving POST — see the deposit modal.
     const submittedAt = Date.now();
+    const submission = vaultWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+    if (!submission) {
+      setSubmitError(t("DashboardEarn.intentStorageUnavailable"));
+      return;
+    }
     const result = await createEarnVaultWithdrawal(
       {
         positionId: position.id,
@@ -1007,7 +1003,8 @@ export function EarnVaultWithdrawModal({
     const disposition = applyIdempotencyKeyOutcome(
       vaultWithdrawalIdempotencyKeyStore,
       fingerprint,
-      result
+      result,
+      submission.wasUncertain
     );
     // A retired key can never be replayed, so its remembered floor is dead
     // weight the next fresh derivation must not inherit.
@@ -1035,9 +1032,6 @@ export function EarnVaultWithdrawModal({
     if (resolution.withdrawn) {
       onWithdrawn?.(resolution.withdrawn, {
         amount,
-        // A share-denominated provider order has no honest dollar projection
-        // until NAV is struck. The caller still refreshes live holdings.
-        projectBalance: shouldProjectWithdrawalBalance(resolution.outcome, settlement),
         submittedAt,
       });
     }

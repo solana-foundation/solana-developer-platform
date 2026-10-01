@@ -155,7 +155,7 @@ export function useEarnFundingWallets() {
     isLoading,
     refresh: () => void mutate(),
     refreshBalances: () =>
-      void mutate(async () => refreshFundingWalletBalances(await fetchFundingWallets()), {
+      mutate(async () => refreshFundingWalletBalances(await fetchFundingWallets()), {
         revalidate: false,
       }),
   };

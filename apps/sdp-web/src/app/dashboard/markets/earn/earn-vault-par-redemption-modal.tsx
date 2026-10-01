@@ -10,7 +10,7 @@ import {
   type SdpEnvironment,
 } from "@sdp/types";
 import { Loader2Icon } from "lucide-react";
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,10 +134,6 @@ function parAvailableAmount(
   return held !== undefined && isPositiveDecimal(held) ? held : undefined;
 }
 
-function isClientErrorStatus(status: number | null): boolean {
-  return status !== null && status >= 400 && status < 500;
-}
-
 function parRedemptionAmountState(
   position: EarnVaultPosition,
   amount: string,
@@ -252,6 +248,7 @@ function useParRedemptionSubmission(options: {
   projectId: string | null;
   setError: (error: string | null) => void;
 }) {
+  const t = useTranslations();
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<EarnVaultQueuedWithdrawalOutcome | null>(null);
 
@@ -271,11 +268,19 @@ function useParRedemptionSubmission(options: {
           : { intermediateAmount: input.intermediateAmount }),
         route: { kind: "operator_redemption" },
       });
-      const result = await createEarnVaultWithdrawalRequest(
-        input,
-        vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint)
+      const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
+      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+      if (!submission) {
+        options.setError(t("DashboardEarn.intentStorageUnavailable"));
+        return;
+      }
+      const result = await createEarnVaultWithdrawalRequest(input, key);
+      applyIdempotencyKeyOutcome(
+        vaultAsyncWithdrawalIdempotencyKeyStore,
+        fingerprint,
+        result,
+        submission.wasUncertain
       );
-      applyIdempotencyKeyOutcome(vaultAsyncWithdrawalIdempotencyKeyStore, fingerprint, result);
       if (result.ok) {
         setOutcome(result.data);
         if (result.data.kind === "submitted") options.onRequested?.(result.data.withdrawalRequest);
@@ -303,7 +308,7 @@ function useParRedemptionRequestView(
   const [cancelResult, setCancelResult] = useState<EarnVaultWithdrawalRequestRecord | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-  const cancelKey = useRef<string | null>(null);
+  const t = useTranslations();
   const request = freshCancelRecord(cancelResult, observed, submitted);
   const cancelable = cancelAllowed && isEarnVaultParRedemptionCancelable(request);
 
@@ -311,19 +316,25 @@ function useParRedemptionRequestView(
     if (!cancelable || cancelling) return;
     setCancelling(true);
     setCancelError(null);
-    cancelKey.current ??= crypto.randomUUID();
+    const fingerprint = `cancel:${request.withdrawalRequestId}`;
+    const key = vaultAsyncWithdrawalIdempotencyKeyStore.claim(fingerprint);
     try {
-      const result = await cancelEarnVaultWithdrawalRequest(
-        request.withdrawalRequestId,
-        cancelKey.current
-      );
+      const submission = vaultAsyncWithdrawalIdempotencyKeyStore.beginSubmission(fingerprint);
+      if (!submission) {
+        setCancelError(t("DashboardEarn.intentStorageUnavailable"));
+        return;
+      }
+      const result = await cancelEarnVaultWithdrawalRequest(request.withdrawalRequestId, key);
       if (result.ok) {
-        cancelKey.current = null;
+        vaultAsyncWithdrawalIdempotencyKeyStore.release(fingerprint);
         setCancelResult(result.data);
       } else {
-        if (isClientErrorStatus(result.status)) {
-          cancelKey.current = null;
-        }
+        applyIdempotencyKeyOutcome(
+          vaultAsyncWithdrawalIdempotencyKeyStore,
+          fingerprint,
+          result,
+          submission.wasUncertain
+        );
         setCancelError(result.error);
       }
     } finally {

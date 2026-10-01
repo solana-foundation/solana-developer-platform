@@ -82,21 +82,34 @@ handlers in [`src/app/api`](src/app/api).
   chain-aware detail read makes the UI reflect Solana confirmation immediately.
   Historical unresolved movements do not restart fast polling. The strategy
   catalogue is cached server-side for five minutes.
-- While a transfer this browser submitted is pending, the page shows the
-  balances it will produce and keeps the total fixed. At `confirmed`, the UI
-  shows `Settled` and keeps that projection until both live account balances
-  fully reflect the transfer. Each transfer has its own two-minute deadline, so
-  one slow movement cannot clear or pause a newer projection. Overlapping
-  deposits and withdrawals reconcile against their combined net effect. SDP
-  continues tracking protocol finalization in the background without holding
-  the customer in a loading state.
+- Atomic transfers show `Done` at `confirmed`; SDP keeps reconciling finality
+  in the background. Provider orders remain pending until fulfillment, using
+  the API's `settlement` field. Missing settlement semantics stay unknown.
+- Balance reads begin after movement observations. The page uses observed
+  checking, savings and withdrawable amounts, with no requested-amount arithmetic.
+  A requested withdrawal amount may appear in activity labeled `requested`;
+  it never replaces an unknown payout or changes an available balance.
 - Outstanding queued withdrawals are restored with `settled=false` across
-  every cursor page and refreshed every ten seconds. `creating` and
-  `closedOrUnknown` make savings value unavailable rather than guessing whether
-  wallet shares or a payout should count. Only `expiredCancelable` exposes the
-  share-recovery action.
+  every cursor page and refreshed every ten seconds. Their quoted payout is
+  labeled expected on the request card; savings totals and earnings remain
+  unavailable while escrow cannot be valued. Only `expiredCancelable` exposes
+  the share-recovery action.
 - API responses and outbound SDP reads use `no-store` caching.
-- Submit retries reuse one `Idempotency-Key`.
+- Transfer preparation builds and signs without broadcasting. The browser saves
+  the signed envelope in `localStorage` before calling `/api/intents/submit`.
+  Submit retries reuse the exact build, signed bytes and `Idempotency-Key`, even
+  after a reload or server restart. Web Locks serialize this journal across tabs.
+  Storage/lock refusal prevents submission; malformed responses and HTTP errors
+  retain intent. The page retries saved intent on load and every 30 seconds.
+- A parsed acknowledgment releases the journal. A new intentional transfer gets
+  a new key even when the vault and amount are unchanged. If a previous response
+  is still uncertain, resolve that intent before starting another. Clearing site
+  data removes this browser recovery record; production integrations should use
+  an authenticated durable server journal and provide intent recovery across devices.
+- Signed envelopes can authorize only their exact transaction. The submit route
+  never signs client-provided bytes; SDP checks tenant ownership, the complete
+  stored message and all signatures. Browser scripts can read localStorage, so
+  the example's same-origin checks and access protection remain required.
 - Quote-derived slippage floors and the amount-to-shares conversion use exact
   `BigInt` arithmetic.
 

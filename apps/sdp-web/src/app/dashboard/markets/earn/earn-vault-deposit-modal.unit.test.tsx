@@ -672,7 +672,6 @@ describe("EarnVaultDepositModal", () => {
       {
         amount: "1",
         custodyWalletId: "wallet_1",
-        projectBalance: false,
         submittedAt: expect.any(Number),
       }
     );
@@ -865,7 +864,6 @@ describe("EarnVaultDepositModal", () => {
       expect(onDeposited).toHaveBeenCalledWith(deposit, {
         amount: "1",
         custodyWalletId: "wallet_1",
-        projectBalance: true,
         submittedAt: expect.any(Number),
       });
     }
@@ -899,7 +897,6 @@ describe("EarnVaultDepositModal", () => {
     expect(onDeposited).toHaveBeenCalledWith(deposit, {
       amount: "1",
       custodyWalletId: "wallet_1",
-      projectBalance: false,
       submittedAt: expect.any(Number),
     });
   });
@@ -1071,7 +1068,6 @@ describe("EarnVaultDepositModal", () => {
     expect(onDeposited).toHaveBeenCalledWith(expect.anything(), {
       amount: "5",
       custodyWalletId: "wallet_1",
-      projectBalance: false,
       submittedAt: expect.any(Number),
     });
     // Paying in a different token is a DIFFERENT request: the held-key

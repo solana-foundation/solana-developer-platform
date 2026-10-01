@@ -1,11 +1,9 @@
 "use client";
 
 import {
-  EARN_MOVEMENT_STATUSES,
   EARN_TERMINAL_MOVEMENT_STATUSES,
   EARN_TERMINAL_VAULT_MOVEMENT_STATUSES,
   EARN_TERMINAL_WITHDRAWAL_STATUSES,
-  EARN_VAULT_MOVEMENT_STATUSES,
   type EarnExternalWalletPosition,
   type EarnExternalWalletPositionSummary,
   type EarnExternalWalletTokenTotal,
@@ -18,7 +16,6 @@ import {
   type EarnProgramWithdrawalResponse,
   type EarnStrategy,
   type EarnVaultAsyncWithdrawalTermsRequest,
-  type EarnVaultDeposit,
   type EarnVaultDepositRecord,
   type EarnVaultDepositRequest,
   type EarnVaultDirectMovementStatus,
@@ -37,9 +34,13 @@ import {
   type ListEarnProgramsResponse,
   type ListEarnProgramWithdrawalsResponse,
   type ListEarnStrategiesResponse,
-  SOLANA_CLUSTERS,
   type SolanaCluster,
 } from "@sdp/types";
+import {
+  earnVaultDepositRecordSchema,
+  earnVaultDepositSchema,
+  earnVaultWithdrawalSchema,
+} from "@sdp/types/earn-wire";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
@@ -405,12 +406,7 @@ export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
   );
 }
 
-/**
- * One landed positions read with the client clock at both ends. Treasury's
- * optimistic balances judge a movement against reads: one that landed before
- * the POST began cannot contain it, one that started after the commit was
- * seen should. The balance a read carries never decides that on its own.
- */
+/** A positions snapshot and client read times, used to refresh after confirmation. */
 export interface EarnVaultPositionsRead {
   positions: EarnVaultPosition[];
   startedAt: number;
@@ -450,7 +446,7 @@ export function useEarnVaultPositions() {
     () => (data ? appendVaultPositionsRead(history, data) : history),
     [data, history]
   );
-  const refresh = useCallback(() => void mutate(), [mutate]);
+  const refresh = useCallback(() => mutate(), [mutate]);
   return { positions: data?.positions, reads, error, isLoading, refresh };
 }
 
@@ -595,21 +591,6 @@ export function useEarnExternalWalletPositionSummary({
  * to inference, so a field added or renamed in `@sdp/types` fails typecheck
  * here instead of being silently stripped from a parsed deposit.
  */
-const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
-  positionId: z.string(),
-  movementId: z.string(),
-  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
-  signature: z.string(),
-  failureReason: z.string().nullable(),
-  replayed: z.boolean(),
-  strategy: z.object({
-    id: z.string(),
-    name: z.string(),
-    provider: z.string(),
-    providerReference: z.string(),
-    hostCluster: z.enum(SOLANA_CLUSTERS),
-  }),
-});
 
 /**
  * The API's 202 approval hold, identical for deposits and withdrawals: the
@@ -698,18 +679,6 @@ export async function createEarnVaultDeposit(
  * envelope is: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed deposit.
  */
-const earnVaultDepositRecordSchema: z.ZodType<EarnVaultDepositRecord> = z.object({
-  movementId: z.string(),
-  positionId: z.string(),
-  provider: z.string(),
-  providerReference: z.string(),
-  status: z.enum(EARN_VAULT_MOVEMENT_STATUSES),
-  signature: z.string(),
-  amount: z.string(),
-  failureReason: z.string().nullable(),
-  createdAt: z.string(),
-  confirmedAt: z.string().nullable(),
-});
 
 const earnVaultDepositResponseSchema = z.object({
   data: z.object({ deposit: earnVaultDepositRecordSchema }),
@@ -784,8 +753,7 @@ async function fetchAllVaultMovementPages<T>(input: {
  *
  * `settled: false` is what makes that affordable. Asking the server for only
  * the movements that can still change keeps the result small by construction —
- * the reconciliation sweep drives every row terminal within about ninety
- * seconds — instead of paging an unbounded history to filter it locally. A
+ * ambiguous outcomes remain in reconciliation until enough evidence arrives — instead of paging an unbounded history to filter it locally. A
  * workspace busy enough to push an in-flight deposit past the first page is
  * exactly the case a single request got wrong.
  */
@@ -1128,21 +1096,6 @@ export function useEarnVaultDepositOutcome(
  * schemas are: a field added or renamed in `@sdp/types` must fail typecheck
  * here rather than be silently stripped from a parsed leg.
  */
-const earnVaultWithdrawalSchema: z.ZodType<EarnVaultWithdrawal> = z.object({
-  movementId: z.string(),
-  positionId: z.string(),
-  provider: z.string(),
-  providerReference: z.string(),
-  status: z.enum(EARN_MOVEMENT_STATUSES.vault_direct),
-  signature: z.string(),
-  shares: z.string(),
-  shareMint: z.string(),
-  failureReason: z.string().nullable(),
-  createdAt: z.string(),
-  confirmedAt: z.string().nullable(),
-  settledAt: z.string().nullable(),
-  replayed: z.boolean().optional(),
-});
 
 const earnVaultWithdrawalOutcomeSchema = z.union([
   z

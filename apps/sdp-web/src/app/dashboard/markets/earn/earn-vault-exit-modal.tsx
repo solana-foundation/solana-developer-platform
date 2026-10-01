@@ -24,7 +24,7 @@ interface EarnVaultExitModalProps {
   onAsyncRequestSettled?: (event: EarnVaultAsyncWithdrawalEvent) => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,
-    intent: { amount: string; projectBalance: boolean; submittedAt: number }
+    intent: { amount: string; submittedAt: number }
   ) => void;
   /**
    * "intermediate" opens straight into the par route over the position's held

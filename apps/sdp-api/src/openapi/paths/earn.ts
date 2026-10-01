@@ -1,5 +1,4 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
-
 import {
   earnExternalWalletEarningsQuerySchema,
   earnExternalWalletMovementParamsSchema,
@@ -42,6 +41,7 @@ import {
   earnVaultDepositPreviewResponse,
   earnVaultShareReconciliationResponse,
 } from "../schemas/earn";
+import { registerEarnTreasuryPaths } from "./earn-treasury";
 import {
   errorResponses,
   jsonContent,
@@ -109,6 +109,7 @@ function jsonContentWithAnonymousExample(
 }
 
 export function registerEarnPaths(registry: OpenAPIRegistry) {
+  registerEarnTreasuryPaths(registry, earnConfigurationSecurity.required);
   registerEarnStrategyPaths(registry, earnConfigurationSecurity.optional);
   registerEarnDepositPreviewPath(registry, earnConfigurationSecurity.optional);
   // Treasury-facing, so the internal document only: partners hold no custody

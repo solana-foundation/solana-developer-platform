@@ -290,15 +290,12 @@ nothing else; the program create still sends the body `requestId` form.
     request for one intent. The controller gates state updates and the outcome
     screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
     unconditionally, before the abort check.
-  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire only on
-    a 4xx or a recorded deposit.** A 5xx is the dangerous one — a gateway timing
+  - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire on a parsed recorded result or a first-attempt 4xx. A later 4xx cannot resolve an earlier uncertain attempt or approval hold; only explicit same-key terminal policy denial can.** A 5xx is the dangerous one — a gateway timing
     out downstream of an API that already recorded and broadcast looks exactly
     like a provider being unavailable before it did. A key released too early is
     a double deposit; a key held too long is a replay the API reports honestly.
   - `vaultDepositIdempotencyKeyStore.hold` SUSPENDS expiry while a policy approval is
-    pending. The default TTL is calibrated to a blockhash (~90s to terminal);
-    an approval answers to a human and can take hours, and a lapsed key there
-    resubmits into a SECOND approval request for one intent.
+    pending. The 15-minute TTL applies only to drafts that never submitted. `beginSubmission` must durably pin the key before every Earn POST; a storage failure blocks submission. Unknown outcomes have no TTL. A parsed acknowledgment releases the key so the same amount can intentionally be submitted again.
   - Suspending expiry needs its own way OUT, or the key outlives the approval and
     a later legitimate deposit of the same amount from the same wallet silently
     replays the approved one. So before reusing a HELD key the modal asks the
@@ -321,7 +318,7 @@ nothing else; the program create still sends the body `requestId` form.
     fresh key, because auto-resubmitting money after a race IS the
     double-deposit hazard. A second deposit stays a human decision. A REJECTED approval
     produces no movement, so its key survives until the next submit reuses it
-    and the API answers 403 "denied by policy" — visible, and a 4xx retires the
+    and the API answers 403 "denied by policy" — visible, and an explicit same-key terminal denial retires the
     key, so the attempt after that mints a fresh one.
   - The entry cap governs EXPIRING entries only; a held entry is **never
     evicted**. The two are not comparable in either direction that matters: an
@@ -437,7 +434,7 @@ nothing else; the program create still sends the body `requestId` form.
   `EARN_TERMINAL_MOVEMENT_STATUSES.vault_direct` (`finalized | failed`),
   because `EarnVaultWithdrawal` speaks the ledger's own words. That backend
   polling contract is intentionally stricter than atomic-route presentation:
-  an atomic withdrawal may treat `confirmed` as complete and project its
+  an atomic withdrawal may treat `confirmed` as complete and refresh its
   resulting balance while polling continues to protocol finality. A
   provider-order withdrawal does neither in PRESENTATION: `confirmed` covers
   only the share leg, stays visibly pending provider settlement, and projects
@@ -500,7 +497,7 @@ at `confirmed` because no later wire state exists — for either settlement
 kind: a provider-order deposit parks at `confirmed` the same way, so the
 "provider settlement" step is presentation-only, never a watch state. Atomic
 presentation may call `confirmed` Done, while provider-order presentation
-stays pending provider settlement and projects no balance. Switching to the
+stays pending provider settlement. Switching to the
 unified set would make the poll wait for a `finalized` nothing writes yet and
 never stop. An unreadable
 poll returns `undefined` and keeps polling; a read that failed says nothing
@@ -511,23 +508,15 @@ A position's value is its whole holding: `tokenValue` plus any
 either is non-zero (`isEarnVaultHoldingEmpty`, the API close-out's own rule),
 so a cancelled Hastra request's wYLDS never drops out of Treasury.
 
-Treasury's optimistic balance lives in the pure module
-`../treasury-solutions/treasury-vault-balance-projection.ts`. A committed
-deposit or atomic withdrawal is added to the latest hydrated positions read,
-and counts as contained in a read only when that read shows the position's
-SHARES moved off a baseline taken from a read that landed before the POST
-began (the modals report `submittedAt`), attributed to it either because the
-read started after this tab saw the commit or because no other movement
-could have moved them. No hydrated pre-POST baseline means no projection;
-timing alone is never evidence, and direction is deliberately not required
-(an unseen opposite move would otherwise pin a projection over a value that
-already contains it). `useEarnVaultPositions` keeps the recent `reads`
-(client clock at both ends) for exactly that. Nothing compares balances to
-decide a projection is done: Kamino's live value reproduces a deposit
-exactly while Veda's redeemable value lands a hair under it, and the old
-threshold rule double counted the latter until a TTL expired. A share move
-from a source the tab cannot see, or two movements overlapping on one
-position, can misjudge a movement for one read cycle; the next read heals it.
+Treasury's balance display lives in `../treasury-solutions/treasury-vault-balance.ts`.
+Atomic movements show Done at confirmation. The same transition requests live
+positions and uncached wallet balances together; summary amounts wait for both.
+A position displays Updating balance until a read starts after confirmation.
+Only the latest provider value is displayed, including actual fees and slippage;
+never add requested amounts or fall back to an older successful valuation.
+Overlapping confirmations each trigger refresh, including recovery after reload.
+These are observed values, not an atomic portfolio snapshot: provider/RPC
+freshness remains an external dependency.
 
 Two tiers, deliberately at different clocks, exactly as the withdrawal side
 does it. `useEarnVaultDeposits` is the **discovery** tier at 30s — a cheap

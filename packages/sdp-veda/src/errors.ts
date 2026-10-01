@@ -115,8 +115,7 @@ export function vaultUnreadable(
 ): SdpVedaError {
   return new SdpVedaError(
     "VAULT_UNREADABLE",
-    `Veda vault ${vault} could not be read on ${cluster}. Check that the RPC endpoint serves ` +
-      "that cluster — a mismatched RPC reports a missing vault, not a connection error.",
+    `Veda vault ${vault} could not be read on ${cluster}. The RPC request or vault state is unavailable.`,
     { cause }
   );
 }

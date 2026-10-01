@@ -39,7 +39,7 @@ import {
 import { createPostgresEarnMovementsRepository } from "@/db/repositories/earn-movements.repository";
 import { createPostgresPolicyRepository } from "@/db/repositories/policy.repository.postgres";
 import app from "@/index";
-import { badRequest } from "@/lib/errors";
+import { badRequest, serviceUnavailable } from "@/lib/errors";
 import { buildEarnVaultDepositFingerprint } from "@/lib/idempotency";
 import { createTenantScope } from "@/lib/tenant-scope";
 import { AuditService } from "@/services/audit.service";
@@ -2079,5 +2079,104 @@ describe("POST /v1/earn/vault-deposits: audit ledger parity (PRO-1866)", () => {
       )
       .all<Record<string, unknown>>();
     expect(results ?? []).toHaveLength(0);
+  });
+});
+
+describe("vault policy retry recovery", () => {
+  async function setup() {
+    await seedAuth();
+    await seedConnectionWallet();
+    env.PRIVY_BYOK_ENABLED = "true";
+    const strategy = await seedStrategy();
+    return {
+      strategy,
+      body: {
+        strategyId: strategy.id,
+        custodyWalletId: "cwlt_earn_vault_connection",
+        amount: "10",
+      },
+    };
+  }
+
+  it("releases only a failed pre-intent operation and reevaluates the same key", async () => {
+    const { body } = await setup();
+    depositIntoVault.mockRejectedValueOnce(serviceUnavailable("RPC unavailable before signing"));
+    expect((await postVaultDeposit(body, "retry-after-build-failure")).status).toBe(503);
+    const rows = await getDb(env)
+      .prepare(
+        "SELECT status, idempotency_key, execution_error, raw_payload FROM wallet_operations WHERE organization_id = ?"
+      )
+      .bind(TEST_ORG.id)
+      .all<Record<string, unknown>>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results?.[0]).toMatchObject({
+      status: "failed",
+      idempotency_key: null,
+      raw_payload: { executionRequest: { idempotencyKey: "retry-after-build-failure" } },
+    });
+    const repo = createPostgresPolicyRepository(
+      getDb(env),
+      createTenantScope({ organizationId: TEST_ORG.id, projectId: TEST_PROJECT.id })
+    );
+    expect(
+      await repo.sumWalletOperationAmounts({
+        organizationId: TEST_ORG.id,
+        projectId: TEST_PROJECT.id,
+        scope: "organization",
+        asset: USDC_MINT,
+        since: "2000-01-01T00:00:00.000Z",
+        custodyWalletId: null,
+        walletId: "privy_earn_vault_connection",
+        apiKeyId: null,
+        excludeWalletOperationId: null,
+        operationTypes: null,
+      })
+    ).toBe("0");
+    expect((await postVaultDeposit(body, "retry-after-build-failure")).status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledTimes(2);
+    const evaluations = await getDb(env).prepare("SELECT id FROM policy_evaluations").all();
+    expect(evaluations.results).toHaveLength(2);
+  });
+
+  it("keeps the policy key after a durable intent even when execution throws", async () => {
+    const { body, strategy } = await setup();
+    depositIntoVault.mockImplementationOnce(async () => {
+      await recordConnectionDeposit(strategy, "recorded-before-error");
+      throw new Error("Broadcast outcome unknown");
+    });
+    expect((await postVaultDeposit(body, "recorded-before-error")).status).toBe(500);
+    const operation = await getDb(env)
+      .prepare("SELECT status, idempotency_key FROM wallet_operations WHERE organization_id = ?")
+      .bind(TEST_ORG.id)
+      .first();
+    expect(operation).toMatchObject({
+      status: "evaluated",
+      idempotency_key: "recorded-before-error",
+    });
+    expect((await postVaultDeposit(body, "recorded-before-error")).status).toBe(200);
+    expect(depositIntoVault).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not release a key while the original handler is still running", async () => {
+    const { body } = await setup();
+    let enter!: () => void;
+    let fail!: (error: Error) => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const completion = new Promise<never>((_resolve, reject) => {
+      fail = reject;
+    });
+    depositIntoVault.mockImplementationOnce(() => {
+      enter();
+      return completion;
+    });
+    const first = postVaultDeposit(body, "in-flight-policy");
+    await entered;
+    expect((await postVaultDeposit(body, "in-flight-policy")).status).toBe(409);
+    expect(depositIntoVault).toHaveBeenCalledTimes(1);
+    fail(new Error("Build failed"));
+    expect((await first).status).toBe(500);
+    expect((await postVaultDeposit(body, "in-flight-policy")).status).toBe(200);
   });
 });

@@ -113,3 +113,8 @@ The full rule set is in [`../../routes/earn/CLAUDE.md`](../../routes/earn/CLAUDE
 Architecture and the migration inventory are in
 [`packages/sdp-earn/README.md`](../../../../../packages/sdp-earn/README.md);
 invariants are in ADR 0002 (`docs/decisions/0002-earn-provider-pluggability.md`).
+
+- Observed queued payouts use `withdrawal_request_id`; their `request_id` is null
+  for new/updated rows after 0123. Initiated movements still require a caller
+  key and keep the existing unique indexes. The migration normalizes old writers
+  with a trigger, without rewriting historical settled rows or changing amounts.

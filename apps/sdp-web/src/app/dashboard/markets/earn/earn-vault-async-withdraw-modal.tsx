@@ -20,7 +20,7 @@ interface EarnVaultAsyncWithdrawModalProps {
   onMovementUpdated?: (withdrawal: EarnVaultWithdrawal) => void;
   onWithdrawn?: (
     withdrawal: EarnVaultWithdrawal,
-    intent: { amount: string; projectBalance: boolean; submittedAt: number }
+    intent: { amount: string; submittedAt: number }
   ) => void;
   /** A par route may redeem the position's held intermediate instead of shares. */
   parSource?: EarnVaultParRedemptionSource;

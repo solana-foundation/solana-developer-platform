@@ -34,6 +34,11 @@
       "import": "./src/api-keys.ts",
       "default": "./src/api-keys.ts"
     },
+    "./earn-wire": {
+      "types": "./src/earn-wire.ts",
+      "import": "./src/earn-wire.ts",
+      "default": "./src/earn-wire.ts"
+    },
     "./earn": {
       "types": "./src/earn.ts",
       "import": "./src/earn.ts",

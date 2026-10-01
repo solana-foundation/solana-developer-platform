@@ -891,8 +891,7 @@ transaction signed by the organization custody wallet or external owner.
     always asks for that. It is not a convenience: a client filtering an
     unbounded history locally has to page it all, and a workspace busy enough to
     push an in-flight deposit past the first page would silently stop tracking
-    it. The reconciliation sweep drives every row terminal within ~90 seconds,
-    so the in-flight set is small by construction.
+    it. Reconciliation retains ambiguous outcomes; blockhash expiry and nonfinal errors alone are not terminal evidence.
   - 0062's `idx_earn_movements_direction_created` (`(organization_id,
     environment, direction, created_at DESC, id DESC)`) is what orders this
     page; the sweep, replay, chain and per-position lookups each have their own
@@ -1472,14 +1471,31 @@ approved-and-executed. Wiring the dashboard to it is deliberately not done
 here. `EARN_PROVIDER_DEPLOYED_CLUSTERS` scopes new deposits to the clusters
 each provider is deployed on; withdrawals remain open independently.
 
-**Per-cluster RPC.** `resolveClusterRpcUrl` reads `SOLANA_DEVNET_RPC_URL` /
-`SOLANA_MAINNET_RPC_URL` (set both on every deployment, PRO-2009; the
-canonical-default fallback for the `SOLANA_NETWORK` cluster is legacy), and
-`assertClusterEndpoint` proves the endpoint by GENESIS HASH before anything is
-built against it (cached per endpoint). One process serves both environments, so
-the old cluster-agnostic read silently built against whichever chain the single
-URL happened to serve — and a mismatch does not error, because Kamino's mainnet
-kvault program id also resolves on devnet with no accounts under it.
+**Per-cluster RPC.** Explicit `SOLANA_DEVNET_RPC_URL` / `SOLANA_MAINNET_RPC_URL`
+pins remain isolated. Otherwise, executing provider read/build operations use
+the ordered managed-provider pool only for `SOLANA_NETWORK`. Each candidate
+must prove its genesis hash before SDK work. Transient nested transport errors
+may retry the unsigned read/build within the same workflow deadline; deterministic
+refusals and cluster mismatches do not. Concurrent operations have independent
+endpoint cursors, and each later operation starts at the primary. Missing history
+remains unknown, never proof of payout or failure. Signing and broadcast are outside
+this retry runner. Infrastructure failures may still occur at those boundaries;
+the durable intent/reconciliation rules apply unchanged.
+
+**Policy retry recovery.** A custody deposit/direct-withdrawal/queued-request
+handler that throws may clear only its own direct-allow `evaluated` operation's
+key, with no execution fence, approval request, movement, or queued intent. The
+row is retained as `failed`, excluded from policy velocity, with the original key
+in its raw execution request. The same client key then receives a fresh policy
+evaluation. Never use this cleanup for provider-managed program withdrawals or
+approval executors. A still-running handler retains its key. Terminal prior
+policy denial carries `intentOutcome: denied` and the request key so clients can
+distinguish it from an authorization error.
+
+**External signed submits.** Verify the exact stored message and signatures,
+then record intent even if the build's blockhash expired. The owner may have
+broadcast independently. A send error retains the signed bytes and original
+signature for reconciliation; do not instruct the client to sign a new intent.
 
 ## Metered quotas
 
