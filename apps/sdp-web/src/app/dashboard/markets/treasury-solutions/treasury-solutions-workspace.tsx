@@ -1271,7 +1271,10 @@ function TreasuryPositionBalanceCell({
       {lastVerifiedAt !== undefined ? (
         <span
           className="mt-0.5 block text-xs text-tertiary"
-          title={new Date(lastVerifiedAt).toLocaleString(locale)}
+          title={new Date(lastVerifiedAt).toLocaleString(locale, {
+            timeZone: "UTC",
+            timeZoneName: "short",
+          })}
         >
           {t("DashboardMarkets.treasury.positionBalanceLastVerified")}
         </span>
