@@ -1316,35 +1316,31 @@ function getLegacyWalletSectionPageConfig(
   return null;
 }
 
-export function getDashboardPageConfig(
+function getHomeTitle(t: ReturnType<typeof useTranslations>, overviewNewDesign: boolean): string {
+  return overviewNewDesign
+    ? t("Shared.dashboardShell.newDesign.home")
+    : t("Shared.dashboardShell.home");
+}
+
+// The first page and the holdings page reached from it: both follow the Overview module, which
+// names the first page Overview on it and Home off it.
+function getHomePageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
-  assetProfilesEnabled: boolean,
-  privateChannelsEnabled: boolean,
-  custodyEnabled = true,
-  paymentsEnabled = true,
-  policiesEnabled = true,
-  newDesign = true,
-  newDesignModules?: DesignModuleFlags
-): DashboardPageConfig {
-  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
-  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
-  // The Overview module also names the first page: Overview on it, Home off it.
-  const overviewNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "overview");
-  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
-  if (accessControlPageConfig) return accessControlPageConfig;
+  overviewNewDesign: boolean
+): DashboardPageConfig | null {
   if (pathname === "/dashboard") {
     // NEW DESIGN's Overview is built on the refresh design: a left title over the same 900px
     // column as the Payments pages. The previous design's Home names itself: the sidebar marks
     // it active and the page opens on a balance, so the workspace renders an sr-only heading.
     return overviewNewDesign
       ? {
-          title: t("Shared.dashboardShell.newDesign.home"),
+          title: getHomeTitle(t, overviewNewDesign),
           titlePosition: "left",
           contentWidthClass: REFRESH_PAGE_WIDTH,
         }
       : {
-          title: t("Shared.dashboardShell.home"),
+          title: getHomeTitle(t, overviewNewDesign),
           hideTitle: true,
           contentWidthClass: "max-w-none",
         };
@@ -1363,6 +1359,28 @@ export function getDashboardPageConfig(
       },
     };
   }
+  return null;
+}
+
+export function getDashboardPageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>,
+  assetProfilesEnabled: boolean,
+  privateChannelsEnabled: boolean,
+  custodyEnabled = true,
+  paymentsEnabled = true,
+  policiesEnabled = true,
+  newDesign = true,
+  newDesignModules?: DesignModuleFlags
+): DashboardPageConfig {
+  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
+  // The Overview module also names the first page: Overview on it, Home off it.
+  const overviewNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "overview");
+  const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
+  if (accessControlPageConfig) return accessControlPageConfig;
+  const homePageConfig = getHomePageConfig(pathname, t, overviewNewDesign);
+  if (homePageConfig) return homePageConfig;
   // Every Wallets page's header follows the Wallets module, its policy and audit pages included.
   const walletsNewDesign = isDesignModuleOn({ newDesign, newDesignModules }, "wallets");
   const walletSectionPageConfig = walletsNewDesign
@@ -1477,9 +1495,5 @@ export function getDashboardPageConfig(
   if (pathname.startsWith("/dashboard/allowlist")) {
     return { title: t("Shared.dashboardShell.allowlist") };
   }
-  return {
-    title: overviewNewDesign
-      ? t("Shared.dashboardShell.newDesign.home")
-      : t("Shared.dashboardShell.home"),
-  };
+  return { title: getHomeTitle(t, overviewNewDesign) };
 }

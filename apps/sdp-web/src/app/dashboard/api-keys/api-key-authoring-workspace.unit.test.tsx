@@ -28,8 +28,9 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/dashboard-quick-start.redesign", () => ({
-  invalidateQuickStartStatus: vi.fn(),
+vi.mock("@/lib/dashboard-quick-start", () => ({
+  completeQuickStartStep: vi.fn(),
+  quickStartKey: vi.fn(() => "quick-start"),
 }));
 
 const PERMISSION_LIST_NAME = "Endpoint permissions";
