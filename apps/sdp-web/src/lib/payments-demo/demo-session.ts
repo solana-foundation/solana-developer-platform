@@ -15,6 +15,11 @@ const CHUNK_LENGTH = 3600;
 /** At most this many chunks, so the request headers stay small next to the session's own. */
 const MAX_CHUNKS = 3;
 const MAX_ENCODED_LENGTH = CHUNK_LENGTH * MAX_CHUNKS;
+/**
+ * The log's JSON is never longer than this, written or read. A cookie is the browser's to send,
+ * so a small, highly compressible one must not inflate into megabytes on every demo read.
+ */
+export const MAX_DECODED_LENGTH = 64 * 1024;
 
 type CookieStore = Awaited<ReturnType<typeof cookies>>;
 
@@ -28,11 +33,16 @@ function chunkName(index: number): string {
 /** The log as the cookies carry it: deflated JSON, base64url, split into chunks. */
 export function encodeDemoOps(ops: readonly DemoOp[]): string[] {
   let kept = [...ops];
-  let encoded = deflateRawSync(JSON.stringify(kept)).toString("base64url");
-  // Past the budget the oldest actions go first; the replay tolerates what they referred to.
-  while (encoded.length > MAX_ENCODED_LENGTH && kept.length > 0) {
+  let json = JSON.stringify(kept);
+  let encoded = deflateRawSync(json).toString("base64url");
+  // Past either budget the oldest actions go first; the replay tolerates what they referred to.
+  while (
+    (encoded.length > MAX_ENCODED_LENGTH || json.length > MAX_DECODED_LENGTH) &&
+    kept.length > 0
+  ) {
     kept = kept.slice(1);
-    encoded = deflateRawSync(JSON.stringify(kept)).toString("base64url");
+    json = JSON.stringify(kept);
+    encoded = deflateRawSync(json).toString("base64url");
   }
   if (kept.length === 0) return [];
   const chunks: string[] = [];
@@ -42,11 +52,19 @@ export function encodeDemoOps(ops: readonly DemoOp[]): string[] {
   return chunks;
 }
 
-/** The log back from its chunks; anything unreadable reads as an empty session. */
+/**
+ * The log back from its chunks; anything unreadable, or more than the budgets allow, reads as
+ * an empty session.
+ */
 export function decodeDemoOps(chunks: readonly string[]): DemoOp[] {
   if (chunks.length === 0) return [];
+  const encoded = chunks.join("");
+  if (encoded.length > MAX_ENCODED_LENGTH) return [];
   try {
-    const json = inflateRawSync(Buffer.from(chunks.join(""), "base64url")).toString("utf8");
+    // Inflating stops at the budget (it throws past it), so the work is bounded by it too.
+    const json = inflateRawSync(Buffer.from(encoded, "base64url"), {
+      maxOutputLength: MAX_DECODED_LENGTH,
+    }).toString("utf8");
     return parseDemoOps(JSON.parse(json));
   } catch {
     return [];

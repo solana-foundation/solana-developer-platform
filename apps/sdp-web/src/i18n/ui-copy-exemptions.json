@@ -186,5 +186,17 @@
   {
     "candidate": "src/components/network-debug-panel.tsx:48:7:&middot;",
     "reason": "Decorative typographic separator"
+  },
+  {
+    "candidate": "src/flags/index.ts:279:3:Offer Payments' Demo switch: sample data and simulated provider, KYC and settlement steps in every ramp flow, per project. Requires the new-design flag, and serves only Payments pages on the new design.",
+    "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
+  },
+  {
+    "candidate": "src/flags/index.ts:282:21:Hidden",
+    "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
+  },
+  {
+    "candidate": "src/flags/index.ts:283:20:Enabled",
+    "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
   }
 ]

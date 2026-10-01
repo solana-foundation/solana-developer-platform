@@ -437,14 +437,18 @@ function PaymentRequestCreateForm({
     // The page stays busy from here: it is on its way to the list, and a second press must not
     // make a second link.
     const created = res.data?.data;
-    const copied = created?.publicToken
-      ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
-      : false;
+    // A demo request lives in this browser only, so the public pay page can't open its link.
+    const copied =
+      !demo && created?.publicToken
+        ? await copyToClipboard(`${window.location.origin}/pay/${created.publicToken}`)
+        : false;
     toast.success(t("DashboardPayments.requests.requestCreated"), {
       id: "payment-request-created",
-      description: copied
-        ? t("DashboardPayments.requests.linkOnClipboard")
-        : t("DashboardPayments.requests.copyLinkFromRequest"),
+      description: demo
+        ? t("DashboardPayments.demo.noPayLink")
+        : copied
+          ? t("DashboardPayments.requests.linkOnClipboard")
+          : t("DashboardPayments.requests.copyLinkFromRequest"),
     });
     router.push(created?.id ? paymentRequestHref(created.id) : PAYMENT_REQUESTS_HREF);
   }

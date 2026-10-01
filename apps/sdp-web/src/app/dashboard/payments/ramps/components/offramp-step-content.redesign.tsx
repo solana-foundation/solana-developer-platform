@@ -74,10 +74,79 @@ function OfframpManualQuoteStep({
   );
 }
 
+/**
+ * The payout's last step once its quote is in: the provider's hosted page or widget (in demo
+ * mode, the demo's stand-in for them), or the bank instructions.
+ */
+function OfframpQuoteStep({
+  wizard,
+  quote,
+  t,
+}: {
+  wizard: OfframpWizard;
+  quote: NonNullable<OfframpWizard["quote"]>;
+  t: Translate;
+}) {
+  const demo = usePaymentsDemo();
+  const { selectedWallet, selectedRampPair, fields, transferStatus } = wizard;
+
+  if (quote.deliveryMode === "manual_instructions") {
+    return <OfframpManualQuoteStep wizard={wizard} quote={quote} t={t} />;
+  }
+
+  // A provider's own page or widget can't open on sample data; the demo stands in for it.
+  if (demo) {
+    return (
+      <div className="space-y-6">
+        <DemoProviderCheckout
+          direction="offramp"
+          provider={quote.provider}
+          transfer={transferStatus}
+        />
+        <div className="border-t border-border-default pt-5">
+          <RampStatusPanel direction="offramp" transfer={transferStatus} />
+        </div>
+      </div>
+    );
+  }
+
+  if (quote.deliveryMode === "hosted") {
+    return (
+      <MoonpayRampFrame
+        title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
+        src={quote.hostedUrl}
+      />
+    );
+  }
+
+  if (quote.provider !== "moneygram" || !selectedWallet || wizard.quoteTransferId === null) {
+    return <RampQuoteSkeleton />;
+  }
+  return (
+    <div className="space-y-6">
+      <MoneygramRampWidget
+        direction="offramp"
+        quote={quote}
+        transferId={wizard.quoteTransferId}
+        sourceWalletId={selectedWallet.id}
+        sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
+        sourceWalletAddress={selectedWallet.publicKey}
+        sourceTokenMint={wizard.sourceTokenMint}
+        cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
+        cryptoAmount={fields.amount.trim()}
+        fiatCurrency={selectedRampPair.fiatCurrency}
+        onSessionExpiring={wizard.refreshQuote}
+      />
+      <div className="border-t border-border-default pt-5">
+        <RampStatusPanel direction="offramp" transfer={transferStatus} />
+      </div>
+    </div>
+  );
+}
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: step dispatch keeps every offramp stage in one component while each branch stays simple.
 export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
   const t = useTranslations();
-  const demo = usePaymentsDemo();
   const {
     currentStepId,
     enabledRampProviders,
@@ -100,8 +169,6 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     collectedData,
     setCollectedField,
     requirementsBlocker,
-    sourceTokenMint,
-    refreshQuote,
     quoteCreationError,
     quoteCreationRetrying,
     retryQuoteCreation,
@@ -264,64 +331,8 @@ export function OfframpStepContent({ wizard }: { wizard: OfframpWizard }) {
     return <RampCompleteScreen direction="offramp" quote={quote} transfer={transferStatus} />;
   }
 
-  // A provider's own page or widget can't open on sample data; the demo stands in for it.
-  if (
-    currentStepId === "COMPLETE" &&
-    demo &&
-    quote &&
-    quote.deliveryMode !== "manual_instructions"
-  ) {
-    return (
-      <div className="space-y-6">
-        <DemoProviderCheckout
-          direction="offramp"
-          provider={quote.provider}
-          transfer={transferStatus}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "hosted") {
-    return (
-      <MoonpayRampFrame
-        title={t("DashboardPayments.ramps.providerPayout", { provider: quote.provider })}
-        src={quote.hostedUrl}
-      />
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && quote?.provider === "moneygram") {
-    if (!selectedWallet || wizard.quoteTransferId === null) {
-      return <RampQuoteSkeleton />;
-    }
-    return (
-      <div className="space-y-6">
-        <MoneygramRampWidget
-          direction="offramp"
-          quote={quote}
-          transferId={wizard.quoteTransferId}
-          sourceWalletId={selectedWallet.id}
-          sourceWalletName={selectedWallet.label ?? selectedWallet.walletId}
-          sourceWalletAddress={selectedWallet.publicKey}
-          sourceTokenMint={sourceTokenMint}
-          cryptoAsset={getCryptoRailAssetLabel(selectedRampPair.assetRail)}
-          cryptoAmount={fields.amount.trim()}
-          fiatCurrency={selectedRampPair.fiatCurrency}
-          onSessionExpiring={refreshQuote}
-        />
-        <div className="border-t border-border-default pt-5">
-          <RampStatusPanel direction="offramp" transfer={transferStatus} />
-        </div>
-      </div>
-    );
-  }
-
-  if (currentStepId === "COMPLETE" && quote?.deliveryMode === "manual_instructions") {
-    return <OfframpManualQuoteStep wizard={wizard} quote={quote} t={t} />;
+  if (currentStepId === "COMPLETE" && quote) {
+    return <OfframpQuoteStep wizard={wizard} quote={quote} t={t} />;
   }
 
   return <RampQuoteSkeleton />;
