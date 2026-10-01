@@ -118,6 +118,34 @@ describe("New request page", () => {
     ]);
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/pay/tok_1`);
     expect(router.push).toHaveBeenCalledWith("/dashboard/payments/requests/preq_1");
+    // On its way to the request, the form stays busy so a second press makes no second link.
+    const creating = screen.getByRole("button", { name: "Creating…" });
+    expect(creating.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("frees the form when creating the link throws", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("offline");
+    });
+    render(
+      <PaymentRequestCreateWorkspace
+        wallets={[wallet]}
+        walletsError={null}
+        counterparties={[contact]}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    const create = () => screen.getByRole("button", { name: "Create and copy link" });
+
+    await user.type(screen.getByRole("textbox", { name: "Amount" }), "25");
+    await user.click(screen.getByRole("button", { name: "Destination wallet" }));
+    await user.click(screen.getByRole("button", { name: /Treasury/ }));
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    await user.click(create());
+
+    await waitFor(() => expect(create().hasAttribute("disabled")).toBe(false));
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it("keeps create off for an amount the API would refuse", async () => {
