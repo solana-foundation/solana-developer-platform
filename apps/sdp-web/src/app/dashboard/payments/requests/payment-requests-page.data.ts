@@ -162,46 +162,96 @@ type PaymentRequestsScan = PaymentRequestsResult & {
   capped: boolean;
 };
 
+/** One page of a scan, by its 1-based number. */
+interface ScannedPage {
+  page: number;
+  result: PaymentRequestsResult;
+}
+
 /**
  * The newest payment requests, up to {@link PAYMENT_REQUESTS_SCAN_CAP}, read in pages of
  * {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it reads, and saves
  * any that has been paid, so the rows carry the status the list shows.
  *
- * With no stored status the pages are read across every status. Under one, a request that
- * settles, expires or is canceled while the pages are read leaves the filtered set, so every
- * later offset moves up a row and a page skips one. Newest first across every status, a row only
- * moves when a request is created: that pushes the rest down, so a page repeats a row (dropped
- * here) and the total grows (read on to cover it). A stored status is read only to reach past
- * the cap of that unfiltered read; see {@link loadPaymentRequestsList}.
+ * The API pages by offset, so a request that joins or leaves the set read moves every row after
+ * it, and the order the pages are read in decides whether that repeats a row (dropped here) or
+ * skips one:
+ * - With no stored status, a row only moves when a request is created, which pushes the rest
+ *   down; the pages are read at once, and the total growing is read on to cover it.
+ * - Awaiting payment loses requests as they settle (reading a page settles its paid ones) or
+ *   expire, which pulls the rest up. Its pages are read one at a time from the last to the first,
+ *   so a request leaving only moves rows already read onto a page still to be read, a repeat at
+ *   worst. Even the first page waits, since its own settles would pull the second's newest onto
+ *   it: a probe of one row reads the total.
+ * - Paid, canceled and expired only gain requests (an open one settles or expires), which pushes
+ *   the rest down, so their pages are read one at a time from the first.
+ *
+ * Reading one page at a time is slower; only a stored status is read so, and only to reach past
+ * the unfiltered read's cap (see {@link loadPaymentRequestsList}). A request created while
+ * Awaiting payment is read still pushes a row onto a page already read, so it can skip one, as a
+ * creation between pages read at once can with no stored status; only cursor paging from the API
+ * closes that.
  */
 async function scanPaymentRequests(
   request: SdpApiClient["request"],
   storedStatus?: PaymentRequest["status"]
 ): Promise<PaymentRequestsScan> {
-  const statusOption = storedStatus ? { status: storedStatus } : {};
-  const first = await fetchPaymentRequests(request, { page: 1, ...statusOption });
-  if (!first.ok) return { ...first, capped: false };
-  const pages = [first];
-  let total = first.total;
+  const readPage = async (page: number, pageSize?: number): Promise<ScannedPage> => ({
+    page,
+    result: await fetchPaymentRequests(request, {
+      page,
+      ...(pageSize ? { pageSize } : {}),
+      ...(storedStatus ? { status: storedStatus } : {}),
+    }),
+  });
+  const lastFirst = storedStatus === "awaiting_payment";
+  const first = await readPage(1, lastFirst ? 1 : undefined);
+  if (!first.result.ok) return { ...first.result, capped: false };
+  // In the order they were read, so a repeated row's last copy is its freshest.
+  const pages: ScannedPage[] = lastFirst ? [] : [first];
+  let pagesRead = pages.length;
+  let total = first.result.total;
   for (;;) {
     const needed = Math.ceil(
       Math.min(total, PAYMENT_REQUESTS_SCAN_CAP) / PAYMENT_REQUESTS_PAGE_SIZE
     );
-    if (pages.length >= needed) break;
-    const read = await Promise.all(
-      Array.from({ length: needed - pages.length }, (_, index) =>
-        fetchPaymentRequests(request, { page: pages.length + index + 1, ...statusOption })
-      )
-    );
-    const failed = read.find((result) => !result.ok);
-    if (failed) return { ...failed, capped: false };
+    if (pagesRead >= needed) break;
+    const unread = Array.from({ length: needed - pagesRead }, (_, index) => pagesRead + index + 1);
+    const read: ScannedPage[] = [];
+    if (storedStatus === undefined) {
+      read.push(...(await Promise.all(unread.map((page) => readPage(page)))));
+    } else {
+      for (const page of lastFirst ? unread.reverse() : unread) {
+        const scanned = await readPage(page);
+        read.push(scanned);
+        if (!scanned.result.ok) break;
+      }
+    }
+    const failed = read.find((scanned) => !scanned.result.ok);
+    if (failed) return { ...failed.result, capped: false };
     pages.push(...read);
-    total = Math.max(total, ...read.map((result) => result.total));
+    pagesRead = needed;
+    total = Math.max(total, ...read.map((scanned) => scanned.result.total));
   }
-  // Keyed by id, so a repeated row keeps its first place.
-  const byId = new Map(pages.flatMap((result) => result.data).map((row) => [row.id, row]));
-  const data = [...byId.values()].slice(0, PAYMENT_REQUESTS_SCAN_CAP);
-  return { ok: true, data, total, capped: total > PAYMENT_REQUESTS_SCAN_CAP };
+  const freshest = new Map(
+    pages.flatMap((scanned) => scanned.result.data).map((row) => [row.id, row])
+  );
+  // Once each, in page order: a repeated row keeps its first place.
+  const inPageOrder = new Set(
+    [...pages]
+      .sort((a, b) => a.page - b.page)
+      .flatMap((scanned) => scanned.result.data.map((row) => row.id))
+  );
+  const data = [...inPageOrder].flatMap((id) => {
+    const row = freshest.get(id);
+    return row ? [row] : [];
+  });
+  return {
+    ok: true,
+    data: data.slice(0, PAYMENT_REQUESTS_SCAN_CAP),
+    total,
+    capped: total > PAYMENT_REQUESTS_SCAN_CAP,
+  };
 }
 
 /** Every well-known token's symbol by mint, on any cluster, for searching by symbol. */
