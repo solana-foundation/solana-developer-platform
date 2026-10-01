@@ -59,12 +59,13 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
   read: VaultPositionsRead | undefined,
   positionId?: string
 ): Activity[] {
+  const acknowledgedMovements = new Set(read?.afterMovementIds);
   return activities.filter(
     ({ movement }) =>
       (positionId === undefined || movement.positionId === positionId) &&
       isCommittedVaultMovement(movement) &&
       movement.committedObservedAt !== undefined &&
-      !read?.afterMovementIds?.includes(movement.movementId)
+      !acknowledgedMovements.has(movement.movementId)
   );
 }
 

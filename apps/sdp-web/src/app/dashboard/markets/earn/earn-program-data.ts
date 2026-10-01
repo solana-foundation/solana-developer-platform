@@ -393,10 +393,8 @@ async function fetchAllPositionPages<Position>(
       }>(path(query));
       if (afterMovementIds.length > 0) {
         const context = earnBalanceReadContextSchema.safeParse(body.data.balanceReadContext);
-        if (
-          !context.success ||
-          afterMovementIds.some((id) => !context.data.afterMovementIds.includes(id))
-        ) {
+        const acknowledgedMovements = new Set(context.success ? context.data.afterMovementIds : []);
+        if (!context.success || afterMovementIds.some((id) => !acknowledgedMovements.has(id))) {
           throw new Error("Vault position read did not establish confirmation freshness");
         }
         observeMinimumSlot?.(context.data.minimumSlot);
