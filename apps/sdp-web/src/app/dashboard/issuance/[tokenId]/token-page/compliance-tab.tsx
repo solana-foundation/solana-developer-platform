@@ -234,8 +234,8 @@ export function TokenComplianceTab({ token, ops, canManageTokenAdmin }: TokenTab
                 variant="outline"
                 size="sm"
                 disabled={!canChange || ops.isPending || !ops.allowlistForm.address.trim()}
+                iconLeft={<PlusIcon aria-hidden="true" />}
               >
-                <PlusIcon aria-hidden="true" />
                 {t("DashboardIssuance.newDesign.compliance.addEntry")}
               </Button>
             </div>

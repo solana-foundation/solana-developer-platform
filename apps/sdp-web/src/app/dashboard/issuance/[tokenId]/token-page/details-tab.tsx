@@ -217,10 +217,13 @@ export function TokenDetailsTab({ token, ops, form }: TokenTabProps) {
   return (
     <div className="flex flex-col">
       <div className="grid gap-12 @3xl:grid-cols-[minmax(0,1fr)_260px]">
-        <RecordBlock
-          title={t("DashboardIssuance.newDesign.details.about")}
-          aside={
-            editing ? (
+        <RecordBlock>
+          <div className="flex min-h-6 flex-wrap items-center justify-between gap-4 [&>button]:-my-1 [&>button]:[--button-height-md:1.875rem]">
+            <h2 className="flex items-center gap-1 text-subheading font-medium text-primary">
+              {t("DashboardIssuance.newDesign.details.about")}
+              <InfoHint text={t("DashboardIssuance.newDesign.details.aboutHint")} />
+            </h2>
+            {editing ? (
               <span className="text-meta text-secondary">
                 {t("DashboardIssuance.newDesign.details.editing")}
               </span>
@@ -228,18 +231,14 @@ export function TokenDetailsTab({ token, ops, form }: TokenTabProps) {
               <Button
                 variant="outline"
                 size="sm"
+                iconLeft={<PencilIcon aria-hidden="true" />}
                 disabled={saving}
                 onClick={() => setEditing(true)}
               >
-                <PencilIcon aria-hidden="true" />
                 {t("DashboardIssuance.newDesign.details.editSettings")}
               </Button>
-            ) : undefined
-          }
-        >
-          <p className="-mt-2 max-w-[40em] text-meta text-tertiary">
-            {t("DashboardIssuance.newDesign.details.aboutHint")}
-          </p>
+            ) : null}
+          </div>
           {editing ? <div className="flex flex-col gap-6">{edit}</div> : view}
         </RecordBlock>
         <RecordBlock title={t("DashboardIssuance.newDesign.details.operational")}>

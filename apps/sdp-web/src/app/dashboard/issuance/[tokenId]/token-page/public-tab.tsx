@@ -287,8 +287,13 @@ function MetadataPreview({ metadata }: { metadata: Record<string, unknown> }) {
         <span className="text-meta text-secondary">
           {t("DashboardIssuance.newDesign.publicInfo.tokenMetadata")}
         </span>
-        <Button variant="ghost" size="sm" className="-me-2.5" onClick={() => void copy(json)}>
-          {copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-me-2.5"
+          iconLeft={copied ? <CheckIcon aria-hidden="true" /> : <CopyIcon aria-hidden="true" />}
+          onClick={() => void copy(json)}
+        >
           {copied
             ? t("Shared.SharedComponents.copied")
             : t("DashboardIssuance.newDesign.publicInfo.copy")}

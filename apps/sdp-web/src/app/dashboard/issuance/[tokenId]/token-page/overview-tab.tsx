@@ -107,130 +107,138 @@ export function TokenOverviewTab({
 
   return (
     <RecordStack>
-      <StateBand
-        tone={TOKEN_LIFECYCLE_BAND[state]}
-        state={t(TOKEN_LIFECYCLE_LABEL[state])}
-        action={
-          ops.explorerHref ? (
-            <Button asChild variant="outline" size="sm">
-              <a href={ops.explorerHref} target="_blank" rel="noreferrer">
-                {t("DashboardIssuance.newDesign.overview.explorer")}
-                <ExternalLinkIcon aria-hidden="true" />
-              </a>
-            </Button>
-          ) : state === "deploying" && latestDeploy ? (
-            <span className="text-meta text-secondary">
-              {t("DashboardIssuance.newDesign.overview.submittedAgo", {
-                minutes: minutesSince(latestDeploy.createdAt),
-              })}
-            </span>
-          ) : undefined
-        }
-      >
-        {t(TOKEN_LIFECYCLE_WHY[state])}
-      </StateBand>
+      {/* The state band sits 32px over what follows it, closer than the parts below. */}
+      <div className="flex flex-col gap-8">
+        <StateBand
+          tone={TOKEN_LIFECYCLE_BAND[state]}
+          state={t(TOKEN_LIFECYCLE_LABEL[state])}
+          action={
+            ops.explorerHref ? (
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="[--button-height-md:1.875rem]"
+                iconRight={<ExternalLinkIcon aria-hidden="true" />}
+              >
+                <a href={ops.explorerHref} target="_blank" rel="noreferrer">
+                  {t("DashboardIssuance.newDesign.overview.explorer")}
+                </a>
+              </Button>
+            ) : state === "deploying" && latestDeploy ? (
+              <span className="text-meta text-secondary">
+                {t("DashboardIssuance.newDesign.overview.submittedAgo", {
+                  minutes: minutesSince(latestDeploy.createdAt),
+                })}
+              </span>
+            ) : undefined
+          }
+        >
+          {t(TOKEN_LIFECYCLE_WHY[state])}
+        </StateBand>
 
-      {state === "draft" ? (
-        <RecordBlock title={t("DashboardIssuance.newDesign.overview.deployTitle")}>
-          <p className="max-w-[40em] text-body text-secondary">
-            {t("DashboardIssuance.newDesign.overview.deployBody")}
-          </p>
-          <dl>
-            <RecordLine label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
-              {signingWalletName}
-            </RecordLine>
-            <RecordLine label={t("DashboardIssuance.newDesign.overview.authorities")}>
-              {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
-            </RecordLine>
-            <RecordLine label={t("DashboardIssuance.newDesign.overview.reversible")}>
-              {t("DashboardIssuance.newDesign.overview.reversibleNo")}
-            </RecordLine>
-          </dl>
-          <div className="flex items-center justify-end gap-2">
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/dashboard/issuance">
-                {t("DashboardIssuance.newDesign.overview.notNow")}
-              </Link>
-            </Button>
-            {deployButton(t("DashboardIssuance.newDesign.overview.deployToken"))}
+        {state === "draft" ? (
+          <RecordBlock title={t("DashboardIssuance.newDesign.overview.deployTitle")}>
+            <p className="max-w-[40em] text-body text-secondary">
+              {t("DashboardIssuance.newDesign.overview.deployBody")}
+            </p>
+            <dl>
+              <RecordLine label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
+                {signingWalletName}
+              </RecordLine>
+              <RecordLine label={t("DashboardIssuance.newDesign.overview.authorities")}>
+                {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
+              </RecordLine>
+              <RecordLine label={t("DashboardIssuance.newDesign.overview.reversible")}>
+                {t("DashboardIssuance.newDesign.overview.reversibleNo")}
+              </RecordLine>
+            </dl>
+            <div className="flex items-center justify-end gap-2">
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/dashboard/issuance">
+                  {t("DashboardIssuance.newDesign.overview.notNow")}
+                </Link>
+              </Button>
+              {deployButton(t("DashboardIssuance.newDesign.overview.deployToken"))}
+            </div>
+          </RecordBlock>
+        ) : null}
+
+        {state === "failed" ? (
+          <div className="flex flex-col items-start gap-4">
+            <p className="max-w-[40em] text-body text-secondary">{failedWhy}</p>
+            <div className="flex items-center gap-2">
+              {deployButton(t("DashboardIssuance.newDesign.overview.retryDeploy"))}
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/dashboard/wallets">
+                  {t("DashboardIssuance.newDesign.overview.openWallets")}
+                </Link>
+              </Button>
+            </div>
           </div>
-        </RecordBlock>
-      ) : null}
+        ) : null}
 
-      {state === "failed" ? (
-        <div className="flex flex-col items-start gap-4">
-          <p className="max-w-[40em] text-body text-secondary">{failedWhy}</p>
-          <div className="flex items-center gap-2">
-            {deployButton(t("DashboardIssuance.newDesign.overview.retryDeploy"))}
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/dashboard/wallets">
-                {t("DashboardIssuance.newDesign.overview.openWallets")}
-              </Link>
-            </Button>
+        {state === "paused" && canManageTokenAdmin ? (
+          <div className="flex flex-col items-start gap-4">
+            <p className="max-w-[40em] text-body text-secondary">
+              {t("DashboardIssuance.newDesign.overview.resumeBody")}
+            </p>
+            <TokenDisabledActionTooltip reason={ops.effectivePauseDisabledReason}>
+              <Button
+                size="sm"
+                disabled={ops.isPending || Boolean(ops.effectivePauseDisabledReason)}
+                onClick={() => ops.handlePause(false)}
+              >
+                {t("DashboardIssuance.newDesign.overview.resumeTransfers")}
+              </Button>
+            </TokenDisabledActionTooltip>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {state === "paused" && canManageTokenAdmin ? (
-        <div className="flex flex-col items-start gap-4">
-          <p className="max-w-[40em] text-body text-secondary">
-            {t("DashboardIssuance.newDesign.overview.resumeBody")}
-          </p>
-          <TokenDisabledActionTooltip reason={ops.effectivePauseDisabledReason}>
-            <Button
-              size="sm"
-              disabled={ops.isPending || Boolean(ops.effectivePauseDisabledReason)}
-              onClick={() => ops.handlePause(false)}
-            >
-              {t("DashboardIssuance.newDesign.overview.resumeTransfers")}
-            </Button>
-          </TokenDisabledActionTooltip>
-        </div>
-      ) : null}
-
-      <RecordBlock>
-        <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
-          {formatDecimalAmount(token.totalSupply || "0", locale)}
-        </RecordAmount>
-        <RecordColumns>
-          <dl>
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
-              {token.maxSupply
-                ? formatDecimalAmount(token.maxSupply, locale)
-                : t("DashboardIssuance.newDesign.overview.noCap")}
-            </RecordRow>
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
-              {token.decimals}
-            </RecordRow>
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
-              {token.symbol}
-            </RecordRow>
-          </dl>
-          <dl>
-            <RecordRow
-              label={t("DashboardIssuance.newDesign.overview.category")}
-              hint={classification.categoryHelp}
-            >
-              {classification.category}
-            </RecordRow>
-            {classification.type ? (
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.type")}>
-                {classification.type}
+        <RecordBlock>
+          <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
+            {formatDecimalAmount(token.totalSupply || "0", locale)}
+          </RecordAmount>
+          <RecordColumns>
+            <dl>
+              <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
+                {token.maxSupply
+                  ? formatDecimalAmount(token.maxSupply, locale)
+                  : t("DashboardIssuance.newDesign.overview.noCap")}
               </RecordRow>
-            ) : null}
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
-              {accessControlLabel(ops.accessControlMode, t)}
+              <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
+                {token.decimals}
+              </RecordRow>
+              <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
+                {token.symbol}
+              </RecordRow>
+            </dl>
+            <dl>
+              <RecordRow
+                label={t("DashboardIssuance.newDesign.overview.category")}
+                hint={classification.categoryHelp}
+              >
+                {classification.category}
+              </RecordRow>
+              {classification.type ? (
+                <RecordRow label={t("DashboardIssuance.newDesign.overview.type")}>
+                  {classification.type}
+                </RecordRow>
+              ) : null}
+              <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
+                {accessControlLabel(ops.accessControlMode, t)}
+              </RecordRow>
+            </dl>
+          </RecordColumns>
+          <dl className="border-t border-border-subtle">
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
+              <span className="max-w-[40em] text-right whitespace-normal">
+                {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
+              </span>
             </RecordRow>
           </dl>
-        </RecordColumns>
-        <dl className="border-t border-border-subtle">
-          <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
-            <span className="max-w-[40em] text-right whitespace-normal">
-              {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
-            </span>
-          </RecordRow>
-        </dl>
-      </RecordBlock>
+        </RecordBlock>
+      </div>
 
       <RecordBlock title={t("DashboardIssuance.newDesign.overview.identity")}>
         <RecordColumns>
@@ -238,18 +246,22 @@ export function TokenOverviewTab({
             {token.mintAddress ? (
               <RecordRow label={t("DashboardIssuance.newDesign.overview.mintAddress")}>
                 <span className="tabular-nums">{shortAddress(token.mintAddress)}</span>
-                <WalletMetadataCopyButton
-                  value={token.mintAddress}
-                  label={t("DashboardIssuance.newDesign.overview.copyMintAddress")}
-                />
+                <span className="-my-1 inline-flex">
+                  <WalletMetadataCopyButton
+                    value={token.mintAddress}
+                    label={t("DashboardIssuance.newDesign.overview.copyMintAddress")}
+                  />
+                </span>
               </RecordRow>
             ) : null}
             <RecordRow label={t("DashboardIssuance.newDesign.overview.tokenId")}>
               <span className="tabular-nums">{shortTokenId(token.id)}</span>
-              <WalletMetadataCopyButton
-                value={token.id}
-                label={t("DashboardIssuance.newDesign.overview.copyTokenId")}
-              />
+              <span className="-my-1 inline-flex">
+                <WalletMetadataCopyButton
+                  value={token.id}
+                  label={t("DashboardIssuance.newDesign.overview.copyTokenId")}
+                />
+              </span>
             </RecordRow>
             <RecordRow
               label={t("DashboardIssuance.newDesign.overview.authorities")}

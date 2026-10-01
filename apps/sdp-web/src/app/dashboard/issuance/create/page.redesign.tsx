@@ -1,14 +1,12 @@
 import { notFound } from "next/navigation";
-import { Suspense } from "react";
 import { assetProfiles } from "@/flags";
-import { withLegacyDesign } from "@/flags/new-design";
 import { getTranslations } from "@/i18n/server";
 import { createSdpApiClient } from "@/lib/sdp-api";
 import { fetchPaymentsWallets } from "../../payments/payments-page.data";
-import { IssuanceDraftForm } from "./issuance-draft-form";
-import CreateDraftPage from "./page.redesign";
+import { IssuanceDraftFlow } from "./issuance-draft-flow.redesign";
 
-async function CreateAssetPage() {
+/** A new draft on the new design: the flow, with the project's wallets to hold its keys. */
+export default async function CreateDraftPage() {
   const t = await getTranslations();
   if (!(await assetProfiles())) notFound();
   const client = await createSdpApiClient();
@@ -17,13 +15,9 @@ async function CreateAssetPage() {
     includeBalances: false,
   });
   return (
-    <Suspense>
-      <IssuanceDraftForm
-        wallets={result.data ?? []}
-        walletsError={result.ok ? null : t("DashboardIssuance.draftForm.walletsError")}
-      />
-    </Suspense>
+    <IssuanceDraftFlow
+      wallets={result.data ?? []}
+      walletsError={result.ok ? null : t("DashboardIssuance.draftForm.walletsError")}
+    />
   );
 }
-
-export default withLegacyDesign(CreateDraftPage, CreateAssetPage, "issuance");

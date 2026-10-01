@@ -167,8 +167,8 @@ export function TokenPermissionsTab({
                             ops.handleAuthorityModalOpen(row);
                           }
                         }}
+                        iconLeft={<PencilIcon aria-hidden="true" />}
                       >
-                        <PencilIcon aria-hidden="true" />
                         {t("DashboardIssuance.newDesign.permissions.edit")}
                       </Button>
                     </span>

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
 import { isOnChain } from "../../issuance-token-state.redesign";
 import {
   getOperationGroups,
@@ -311,13 +312,16 @@ function OperationRows({
               ) : null}
             </span>
             <Button
-              variant={DANGER_OPERATIONS.has(row.id) ? "destructive" : "outline"}
+              variant="outline"
               size="sm"
-              className="shrink-0"
+              className={cn(
+                "shrink-0 [--button-height-md:1.875rem]",
+                DANGER_OPERATIONS.has(row.id) && "text-error refresh:border-error/40"
+              )}
               disabled={pending || Boolean(row.disabledReason)}
               onClick={row.onAction}
+              iconLeft={<Icon aria-hidden="true" />}
             >
-              <Icon aria-hidden="true" />
               {copy ? t(copy.action) : (row.actionLabel ?? row.title)}
             </Button>
           </div>
