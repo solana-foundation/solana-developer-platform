@@ -2,29 +2,21 @@
 
 import type {
   Counterparty,
-  CounterpartyEntityType,
   PaymentsDashboardWallet,
   RampProviderEstimateResult,
   RampProviderId,
   SdpEnvironment,
 } from "@sdp/types";
-import { RAMP_PROVIDER_SUPPORT_DETAILS, type RampFiatCurrency } from "@sdp/types/generated/ramp";
-import {
-  type CryptoRailId,
-  getCryptoRailAssetLabel,
-  type RampProviderDirectionSupport,
-} from "@sdp/types/payment-rails";
-import {
-  type ProviderAvailabilityEntry,
-  RAMP_PROVIDER_SURFACING,
-} from "@sdp/types/provider-access";
+import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import { type CryptoRailId, getCryptoRailAssetLabel } from "@sdp/types/payment-rails";
+import { RAMP_PROVIDER_SURFACING } from "@sdp/types/provider-access";
 import { AnimatePresence, domMax, LazyMotion, m } from "motion/react";
 import Image from "next/image";
 import { useCallback, useMemo, useState } from "react";
 import { useThemeScope } from "@/components/theme-scope";
 import { Modal } from "@/components/ui/modal";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
-import { useTranslations } from "@/i18n/provider";
+import { useLocale, useTranslations } from "@/i18n/provider";
 import type { RampProviderAccess } from "@/lib/provider-availability";
 import {
   findRampPair,
@@ -41,6 +33,11 @@ import {
 import { useRampEstimate } from "../hooks/use-ramp-estimate";
 import { CurrencyPairSelector } from "./currency-pair-selector.redesign";
 import { ProviderCard, ProviderQuoteCard } from "./provider-card.redesign";
+import {
+  buildProviderExclusion,
+  getDirectionSupport,
+  type ProviderExclusion,
+} from "./provider-exclusions.redesign";
 import { RampSelectionProvider } from "./ramp-selection-context";
 
 interface RampPairProviderSelectorProps {
@@ -60,23 +57,6 @@ interface RampPairProviderSelectorProps {
   onWalletChange: (walletId: string) => void;
   onPairChange: (pair: SelectedRampPair) => void;
   onProviderSelect: (provider: RampProviderId) => void;
-}
-
-interface ProviderExclusion {
-  option: RampProviderOption;
-  reasons: readonly string[];
-}
-
-const entityTypeListFormatter = new Intl.ListFormat("en", {
-  style: "long",
-  type: "conjunction",
-});
-
-function getDirectionSupport(
-  provider: RampProviderId,
-  direction: RampDirection
-): RampProviderDirectionSupport {
-  return RAMP_PROVIDER_SUPPORT_DETAILS[provider][direction];
 }
 
 /**
@@ -104,124 +84,6 @@ function pairsForDirection(
   }
 }
 
-function providerAccessReason(access: ProviderAvailabilityEntry): string | null {
-  if (!access.entitled) {
-    return "Not available on your plan";
-  }
-  if (!access.configured) {
-    return "Provider credentials are not configured for this environment";
-  }
-  if (!access.enabled) {
-    return "Disabled for this organization";
-  }
-  return null;
-}
-
-function unsupportedPairReason(direction: RampDirection, selectedPair: SelectedRampPair): string {
-  const assetLabel = getCryptoRailAssetLabel(selectedPair.assetRail);
-  switch (direction) {
-    case "onramp":
-      return `Does not support ${selectedPair.fiatCurrency} → ${assetLabel}`;
-    case "offramp":
-      return `Does not support ${assetLabel} → ${selectedPair.fiatCurrency}`;
-    default: {
-      const exhaustive: never = direction;
-      return exhaustive;
-    }
-  }
-}
-
-function formatEntityTypes(entityTypes: readonly CounterpartyEntityType[]): string {
-  return entityTypeListFormatter.format(entityTypes);
-}
-
-/**
- * Off-ramp amount input is crypto-denominated while generated provider limits
- * are fiat-denominated, so limit exclusion reasons only apply to on-ramp.
- */
-function amountLimitReasons(
-  direction: RampDirection,
-  support: RampProviderDirectionSupport,
-  fiatCurrency: RampFiatCurrency,
-  amount: string
-): readonly string[] {
-  if (direction === "offramp") {
-    return [];
-  }
-
-  const parsedAmount = Number(amount.trim());
-  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-    return [];
-  }
-
-  const limits = support.currencies[fiatCurrency];
-  if (limits === undefined) {
-    return [];
-  }
-
-  const reasons: string[] = [];
-  if (limits.min !== null && parsedAmount < Number(limits.min)) {
-    reasons.push(`Minimum is ${limits.min} ${fiatCurrency}`);
-  }
-  if (limits.max !== null && parsedAmount > Number(limits.max)) {
-    reasons.push(`Maximum is ${limits.max} ${fiatCurrency}`);
-  }
-  return reasons;
-}
-
-function buildProviderExclusion(args: {
-  option: RampProviderOption;
-  direction: RampDirection;
-  rampProviderAccess: RampProviderAccess | null;
-  selectedPairSupport: RampPair | null;
-  selectedPair: SelectedRampPair;
-  selectedCounterparty: Counterparty | null;
-  amount: string;
-}): ProviderExclusion | null {
-  const {
-    option,
-    direction,
-    rampProviderAccess,
-    selectedPairSupport,
-    selectedPair,
-    selectedCounterparty,
-    amount,
-  } = args;
-  const provider = option.id;
-  const reasons: string[] = [];
-  const support = getDirectionSupport(provider, direction);
-
-  if (rampProviderAccess !== null) {
-    const access = rampProviderAccess[provider];
-    if (access === undefined) {
-      reasons.push("Availability is not reported for this environment");
-    } else {
-      const reason = providerAccessReason(access);
-      if (reason !== null) {
-        reasons.push(reason);
-      }
-    }
-  }
-
-  if (selectedPairSupport === null || !selectedPairSupport.providers.includes(provider)) {
-    reasons.push(unsupportedPairReason(direction, selectedPair));
-  }
-
-  if (selectedCounterparty !== null && support.entityTypes.length > 0) {
-    if (!support.entityTypes.includes(selectedCounterparty.entityType)) {
-      reasons.push(`Supports ${formatEntityTypes(support.entityTypes)} counterparties only`);
-    }
-  }
-
-  reasons.push(...amountLimitReasons(direction, support, selectedPair.fiatCurrency, amount));
-
-  if (reasons.length === 0) {
-    return null;
-  }
-
-  return { option, reasons };
-}
-
 /**
  * Which providers can take this ramp and which cannot. A provider is out, with its reasons,
  * when its access, the pair, the counterparty's kind or the amount's limits rule it out.
@@ -245,6 +107,8 @@ function useProviderAvailability({
   selectedCounterparty: Counterparty | null;
   amount: string;
 }) {
+  const t = useTranslations();
+  const locale = useLocale();
   const directionProviderOptions = useMemo(
     () =>
       surfacedRampProviderOptions(sdpEnvironment, enabledRampProviders).filter(
@@ -263,6 +127,7 @@ function useProviderAvailability({
           selectedPair,
           selectedCounterparty,
           amount,
+          format: { t, locale },
         });
         return exclusion ? [exclusion] : [];
       }),
@@ -270,10 +135,12 @@ function useProviderAvailability({
       amount,
       direction,
       directionProviderOptions,
+      locale,
       rampProviderAccess,
       selectedCounterparty,
       selectedPair,
       selectedPairSupport,
+      t,
     ]
   );
   const excludedProviderSet = useMemo(

@@ -25,7 +25,6 @@ import { getRampProviderLabel } from "@/lib/ramps";
 import { openBvnkCustomerLink } from "@/lib/trusted-ramp-destinations";
 import { toTitleCase } from "../../activity-format-utils";
 import { formatDisplayAmount, formatTimestamp } from "../payments-overview.utils";
-import { groupProviderAccounts } from "./counterparty-provider-accounts.utils";
 
 const PROVIDER_ACCOUNT_STATUS_TONE: ReadonlyMap<string, StatusTone> = new Map([
   ["active", "positive"],
@@ -316,7 +315,8 @@ function ProviderAgreements({
  * The contact's provider accounts as the design's table, one row per account the providers
  * hold for this contact: payout accounts (corridor, rail, bank, account), funding wallets
  * (with their live balance) and customer records. Agreements a provider wants accepted follow
- * the table. Covers the loading, error and empty states of the fetch the page owns.
+ * the table. Covers the loading, error and empty states of the fetch the page owns; a refresh
+ * that fails after a successful read keeps the rows it loaded and says the refresh failed.
  *
  * @param props.accounts - Provider-account rows, undefined while loading.
  * @param props.error - Fetch error, if the request failed.
@@ -330,16 +330,16 @@ export function CounterpartyProviderAccounts({
   error: unknown;
 }) {
   const t = useTranslations();
+  const errorMessage =
+    error instanceof Error ? error.message : t("DashboardPayments.counterparty.somethingWentWrong");
 
-  if (error) {
+  // With nothing loaded to show, the failure is the block's whole content.
+  if (error && (accounts === undefined || accounts.length === 0)) {
     return (
       <p className="text-body">
         <StatusText tone="critical">
           {t("DashboardPayments.counterparty.detail.providerAccountsFailed", {
-            error:
-              error instanceof Error
-                ? error.message
-                : t("DashboardPayments.counterparty.somethingWentWrong"),
+            error: errorMessage,
           })}
         </StatusText>
       </p>
@@ -360,16 +360,26 @@ export function CounterpartyProviderAccounts({
       />
     );
   }
-  const agreements = groupProviderAccounts(accounts).flatMap((group) =>
-    group.customerLink?.provider === "bvnk"
-      ? group.customerLink.agreements.map((agreement) => ({
-          provider: getRampProviderLabel(group.provider),
+  const rows = providerAccountRows(accounts);
+  const agreements = rows.flatMap((row) =>
+    row.kind === "customer" && row.link.provider === "bvnk"
+      ? row.link.agreements.map((agreement) => ({
+          provider: getRampProviderLabel(row.provider),
           agreement,
         }))
       : []
   );
   return (
     <div className="flex flex-col gap-4">
+      {error ? (
+        <p className="text-body">
+          <StatusText tone="critical">
+            {t("DashboardPayments.counterparty.detail.providerAccountsRefreshFailed", {
+              error: errorMessage,
+            })}
+          </StatusText>
+        </p>
+      ) : null}
       <div className="overflow-x-auto refresh:-mx-3">
         <Table className="min-w-[720px] table-fixed rounded-none border-0">
           <TableHeader>
@@ -380,7 +390,7 @@ export function CounterpartyProviderAccounts({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {providerAccountRows(accounts).map((row) => (
+            {rows.map((row) => (
               <TableRow
                 key={row.key}
                 data-provider-account-kind={
