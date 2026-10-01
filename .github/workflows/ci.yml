@@ -1124,17 +1124,17 @@ jobs:
     permissions:
       actions: read
     steps:
-      - name: Require all five issuance groups green
+      - name: Require all six issuance groups green
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist)\\)$")) | .conclusion]')
+            --jq '[.jobs[] | select(.name | test("^Issuance E2E \\((basics|authority and supply|freeze controls|pause controls|allowlist|new design)\\)$")) | .conclusion]')
           count=$(jq 'length' <<<"${conclusions}")
           green=$(jq '[.[] | select(. == "success")] | length' <<<"${conclusions}")
-          if [ "${count}" -ne 5 ] || [ "${green}" -ne 5 ]; then
-            echo "Expected 5 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
+          if [ "${count}" -ne 6 ] || [ "${green}" -ne 6 ]; then
+            echo "Expected 6 successful issuance e2e jobs, found ${green}/${count}: ${conclusions}" >&2
             exit 1
           fi
-          echo "All 5 issuance e2e groups passed."
+          echo "All 6 issuance e2e groups passed."
