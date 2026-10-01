@@ -106,9 +106,15 @@ export function removeWalletFavorite(key: string, walletId: string): void {
   );
 }
 
-/** Puts back an earlier list exactly, order included: what Undo does. */
-export function restoreWalletFavorites(key: string, favorites: readonly WalletFavorite[]): void {
-  writeFavorites(key, favorites);
+/**
+ * Puts an unpinned wallet back at the place it had, what Undo on an unpin does. Only that wallet
+ * returns: pins made or removed since stay as they are, and a wallet already back changes nothing.
+ */
+export function reinsertWalletFavorite(key: string, favorite: WalletFavorite, index: number): void {
+  const current = readWalletFavorites(key);
+  if (current.some((entry) => entry.walletId === favorite.walletId)) return;
+  const at = Math.min(Math.max(index, 0), current.length);
+  writeFavorites(key, [...current.slice(0, at), favorite, ...current.slice(at)]);
 }
 
 /**

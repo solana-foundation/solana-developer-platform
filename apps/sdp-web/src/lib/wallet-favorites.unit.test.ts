@@ -44,15 +44,27 @@ describe("wallet favorites", () => {
     expect(favorites.readWalletFavorites(key)).not.toBe(first);
   });
 
-  it("removes a pin and restores an earlier list exactly", async () => {
+  it("removes a pin and puts it back at its old place", async () => {
     const favorites = await import("./wallet-favorites");
     favorites.addWalletFavorite(key, offRamp);
     favorites.addWalletFavorite(key, kms);
-    const before = favorites.readWalletFavorites(key);
     favorites.removeWalletFavorite(key, "wa-1");
     expect(favorites.readWalletFavorites(key)).toEqual([kms]);
-    favorites.restoreWalletFavorites(key, before);
+    favorites.reinsertWalletFavorite(key, offRamp, 0);
     expect(favorites.readWalletFavorites(key)).toEqual([offRamp, kms]);
+    favorites.reinsertWalletFavorite(key, offRamp, 0);
+    expect(favorites.readWalletFavorites(key)).toEqual([offRamp, kms]);
+  });
+
+  it("keeps pins made after the unpin when it is undone", async () => {
+    const favorites = await import("./wallet-favorites");
+    const treasury = { walletId: "tr-1", name: "Treasury", provider: null };
+    favorites.addWalletFavorite(key, offRamp);
+    favorites.removeWalletFavorite(key, "wa-1");
+    favorites.addWalletFavorite(key, kms);
+    favorites.addWalletFavorite(key, treasury);
+    favorites.reinsertWalletFavorite(key, offRamp, 5);
+    expect(favorites.readWalletFavorites(key)).toEqual([kms, treasury, offRamp]);
   });
 
   it("follows renames, drops deleted wallets, and writes nothing when nothing changed", async () => {
