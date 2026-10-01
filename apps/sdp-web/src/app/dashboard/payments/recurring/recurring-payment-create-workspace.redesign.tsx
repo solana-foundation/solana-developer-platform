@@ -20,6 +20,7 @@ import {
 } from "../payments-overview.utils";
 import { formatDate } from "../payments-presentation";
 import { ContactCombobox } from "../ramps/components/contact-combobox";
+import { AmountFields, SourceWalletField } from "../ramps/components/payment-form-fields";
 import { RampWizardShell } from "../ramps/components/ramp-wizard-shell.redesign";
 import { accountAddress, parsePeriodHours } from "./recurring-payments-shared.redesign";
 import {
@@ -175,41 +176,35 @@ function ContactFields({ form }: StepProps) {
 }
 
 /** The source wallet, with its total beside it and a note when it cannot sign. */
-function SourceWalletField({ form }: StepProps) {
+function ScheduleSourceWalletField({ form }: StepProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { fields, selectWallet, walletOptions, availableWallets, selectedWallet } = form;
   const total = form.selectedWalletTotal;
   return (
-    <div className="space-y-2">
-      <Combobox
-        label={t("DashboardPayments.onchainSend.sourceWallet")}
-        value={fields.sourceCustodyWalletId || null}
-        onChange={selectWallet}
-        options={walletOptions}
-        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
-        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-        disabled={availableWallets.length === 0}
-        trailing={
-          total === null ? undefined : (
-            <span className="text-secondary tabular-nums">
-              {formatCurrencyAmount(total, locale)}
-            </span>
-          )
-        }
-      />
+    <SourceWalletField
+      value={fields.sourceCustodyWalletId}
+      onChange={selectWallet}
+      options={walletOptions}
+      disabled={availableWallets.length === 0}
+      trailing={
+        total === null ? undefined : (
+          <span className="text-secondary tabular-nums">{formatCurrencyAmount(total, locale)}</span>
+        )
+      }
+    >
       {selectedWallet && selectedWallet.isRuntimeExecutionAllowed !== true ? (
         <FieldHint tone="warning">
           {t("DashboardPayments.signingUnavailable")}{" "}
           {t("DashboardPayments.recurring.signingDisabledDraft")}
         </FieldHint>
       ) : null}
-    </div>
+    </SourceWalletField>
   );
 }
 
 /** The amount beside its token, then the balance it is checked against (or why there is none). */
-function AmountFields({ form }: StepProps) {
+function ScheduleAmountFields({ form }: StepProps) {
   const t = useTranslations();
   const locale = useLocale();
   const {
@@ -228,36 +223,20 @@ function AmountFields({ form }: StepProps) {
   } = form;
   const assetLabel = selectedAsset?.label ?? resolvedToken;
   return (
-    <div className="space-y-2">
-      <div className="grid gap-6 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="recurring-payment-amount">
-            {t("DashboardPayments.recurring.amount")}
-          </Label>
-          <Input
-            id="recurring-payment-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
-            placeholder="0.00"
-            size="xl"
-            maxDecimals={maxAmountDecimals}
-          />
-        </div>
-        <Combobox
-          label={t("DashboardPayments.payForm.token")}
-          value={resolvedToken || null}
-          onChange={(value) => setField("token", value)}
-          options={assetSelectOptions}
-          placeholder={assetSelectPlaceholder}
-          searchable={false}
-          disabled={!fields.sourceCustodyWalletId || assetSelectOptions.length === 0}
-          size="xl"
-        />
-      </div>
+    <AmountFields
+      id="recurring-payment-amount"
+      label={t("DashboardPayments.recurring.amount")}
+      value={fields.amount}
+      onChange={(amount) => setField("amount", amount)}
+      maxDecimals={maxAmountDecimals}
+      token={{
+        value: resolvedToken,
+        onChange: (value) => setField("token", value),
+        options: assetSelectOptions,
+        placeholder: assetSelectPlaceholder,
+        disabled: !fields.sourceCustodyWalletId || assetSelectOptions.length === 0,
+      }}
+    >
       {fields.amount && amountValidationError ? (
         <FieldHint tone="error">
           {amountErrorMessage(amountValidationError, maxAmountDecimals, t)}
@@ -277,7 +256,7 @@ function AmountFields({ form }: StepProps) {
             : t("DashboardPayments.newDesign.recurring.nativeSolUnsupported")}
         </FieldHint>
       ) : null}
-    </div>
+    </AmountFields>
   );
 }
 
@@ -288,8 +267,8 @@ function PaymentStep({ form }: StepProps) {
       <StepHeading>{t("DashboardPayments.recurring.paymentStepTitle")}</StepHeading>
       <div className="mt-8 space-y-6">
         <ContactFields form={form} />
-        <SourceWalletField form={form} />
-        <AmountFields form={form} />
+        <ScheduleSourceWalletField form={form} />
+        <ScheduleAmountFields form={form} />
       </div>
     </div>
   );

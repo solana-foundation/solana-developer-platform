@@ -10,6 +10,7 @@ import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address
 import { DashboardPageTitle } from "@/components/dashboard-page-title";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { Button } from "@/components/ui/button";
+import { DetailList, DetailRow } from "@/components/ui/detail-list";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { StatusText } from "@/components/ui/status-text";
 import {
@@ -160,16 +161,6 @@ function DetailBlock({
   );
 }
 
-/** A label and its value on one 40px rule, as the design's record rows read: 13px, then 14px. */
-function DetailRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-border-subtle py-2.5 last:border-b-0">
-      <dt className="shrink-0 text-meta leading-5 text-secondary">{label}</dt>
-      <dd className="min-w-0 truncate text-right text-body text-primary">{children}</dd>
-    </div>
-  );
-}
-
 function ContactRecord({
   counterparty,
   payouts,
@@ -197,7 +188,7 @@ function ContactRecord({
   );
   return (
     <section className="grid gap-x-6 md:grid-cols-2">
-      <dl>
+      <DetailList>
         <DetailRow label={t("DashboardPayments.counterparty.type")}>
           {counterparty.entityType === "individual"
             ? t("DashboardPayments.counterparty.individual")
@@ -215,8 +206,8 @@ function ContactRecord({
         <DetailRow label={t("DashboardPayments.counterparty.createdLabel")}>
           {formatDate(counterparty.createdAt, locale)}
         </DetailRow>
-      </dl>
-      <dl>
+      </DetailList>
+      <DetailList>
         <DetailRow label={t("DashboardPayments.counterparty.detail.status")}>
           {counterparty.status === "active" ? (
             <StatusText tone="positive">
@@ -240,7 +231,7 @@ function ContactRecord({
         <DetailRow label={t("DashboardPayments.counterparty.detail.paidSoFar")}>
           {summary.count === 0 ? notYet : paidSoFarLabel(summary, partial, locale, t)}
         </DetailRow>
-      </dl>
+      </DetailList>
     </section>
   );
 }
