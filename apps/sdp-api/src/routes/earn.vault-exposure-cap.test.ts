@@ -259,7 +259,12 @@ async function recordOtherOrgDeposit(
   ]);
 }
 
-function post(path: string, body: Record<string, unknown>, idempotencyKey?: string) {
+function post(
+  path: string,
+  body: Record<string, unknown>,
+  idempotencyKey?: string,
+  options: { anonymous?: boolean } = {}
+) {
   const requestBody =
     path === "vault-deposits" || path === "external-wallet/deposit-transactions"
       ? { minSharesOut: "1", ...body }
@@ -269,7 +274,7 @@ function post(path: string, body: Record<string, unknown>, idempotencyKey?: stri
     {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${TEST_API_KEY.raw}`,
+        ...(options.anonymous ? {} : { Authorization: `Bearer ${TEST_API_KEY.raw}` }),
         "Content-Type": "application/json",
         ...(idempotencyKey === undefined ? {} : { "Idempotency-Key": idempotencyKey }),
       },
@@ -277,6 +282,11 @@ function post(path: string, body: Record<string, unknown>, idempotencyKey?: stri
     },
     env
   );
+}
+
+/** A keyless call to one of the two anonymous-capable routes. */
+function postAnonymous(path: string, body: Record<string, unknown>) {
+  return post(path, body, undefined, { anonymous: true });
 }
 
 function quoteCapableClient() {
@@ -298,14 +308,22 @@ function evaluatedEvents() {
     .map(([level, payload]) => ({ level, payload: payload as Record<string, unknown> }));
 }
 
-const CAP_ERROR = {
-  code: "VAULT_EXPOSURE_CAP",
-  details: {
-    limit: DEFAULT_CEILING,
-    exposure: DEFAULT_CEILING,
-    projected: "5000010",
-  },
-};
+/**
+ * The typed refusal, and the redaction that makes it safe on a keyless route
+ * (SOLA9-9): `details` names only the vault the caller already addressed, and
+ * nothing in the body carries the SDP-wide `exposure` (5M), the `projected`
+ * total (5000010) or the `limit`, because together those are every other
+ * tenant's holdings in the vault.
+ */
+async function expectRedactedCapRefusal(res: Response, vaultAddress: string): Promise<void> {
+  expect(res.status).toBe(409);
+  const text = await res.text();
+  const body = JSON.parse(text) as { error: { code: string; details: unknown } };
+  expect(body.error.code).toBe("VAULT_EXPOSURE_CAP");
+  expect(body.error.details).toEqual({ vaultAddress });
+  expect(text).not.toContain(DEFAULT_CEILING);
+  expect(text).not.toContain("5000010");
+}
 
 beforeEach(async () => {
   originalMarketsEnabled = env.MARKETS_ENABLED;
@@ -384,13 +402,7 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
       "capped-deposit"
     );
 
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({
-      error: {
-        ...CAP_ERROR,
-        details: { ...CAP_ERROR.details, vaultAddress: strategy.provider_reference },
-      },
-    });
+    await expectRedactedCapRefusal(res, strategy.provider_reference);
     expect(depositIntoVault).not.toHaveBeenCalled();
     expect(evaluatedEvents()).toEqual([
       {
@@ -423,9 +435,33 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
       amount: "10",
     });
 
-    expect(res.status).toBe(409);
-    expect(await res.json()).toMatchObject({ error: CAP_ERROR });
+    await expectRedactedCapRefusal(res, strategy.provider_reference);
     expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses the ANONYMOUS external-wallet build without disclosing the SDP-wide figures", async () => {
+    // The route is keyless, so this body is what anyone on the internet reads
+    // when they probe a vault at its cap. The aggregate is every tenant's
+    // holdings; it must reach the operator on the event and nobody else.
+    await seedAuth();
+    const strategy = await seedStrategy();
+    await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING);
+
+    const res = await postAnonymous("external-wallet/deposit-transactions", {
+      strategyId: strategy.id,
+      ownerAddress: WALLET_ADDRESS,
+      amount: "10",
+    });
+
+    await expectRedactedCapRefusal(res, strategy.provider_reference);
+    expect(buildExternalWalletDepositTransaction).not.toHaveBeenCalled();
+    expect(evaluatedEvents()[0]?.payload).toMatchObject({
+      exposure: DEFAULT_CEILING,
+      projected: "5000010",
+      limit: DEFAULT_CEILING,
+      would_block: true,
+      enforced: true,
+    });
   });
 
   it("admits a deposit that lands exactly on the cap, counting in-flight deposits", async () => {
@@ -457,11 +493,37 @@ describe("vault exposure cap (ADR 0004 layer 1): enforced", () => {
     const res = await post("vault-deposit-previews", { strategyId: strategy.id, amount: "10" });
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { blockingIssues: unknown[] } };
+    const text = await res.text();
+    const body = JSON.parse(text) as { data: { blockingIssues: unknown[] } };
     expect(body.data.blockingIssues).toEqual([
       { code: "PROVIDER_ISSUE", message: "From the provider" },
-      { code: "VAULT_EXPOSURE_CAP", message: expect.stringContaining("5000010") },
+      // A fixed sentence: the projected total and the limit stay on the event.
+      { code: "VAULT_EXPOSURE_CAP", message: expect.not.stringMatching(/\d/) },
     ]);
+    expect(text).not.toContain(DEFAULT_CEILING);
+    expect(text).not.toContain("5000010");
+  });
+
+  it("reports the cap on an ANONYMOUS preview without disclosing the SDP-wide figures", async () => {
+    await seedAuth();
+    const strategy = await seedStrategy({ provider: "veda" });
+    await recordOtherOrgDeposit(strategy.provider_reference, DEFAULT_CEILING, "veda");
+    vaultDirectClientOverride.current = quoteCapableClient();
+
+    const res = await postAnonymous("vault-deposit-previews", {
+      strategyId: strategy.id,
+      amount: "10",
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text) as { data: { blockingIssues: unknown[] } };
+    expect(body.data.blockingIssues).toEqual([
+      { code: "PROVIDER_ISSUE", message: "From the provider" },
+      { code: "VAULT_EXPOSURE_CAP", message: expect.not.stringMatching(/\d/) },
+    ]);
+    expect(text).not.toContain(DEFAULT_CEILING);
+    expect(text).not.toContain("5000010");
   });
 
   it("serves a burst of previews from one ledger read", async () => {

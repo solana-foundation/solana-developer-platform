@@ -354,6 +354,39 @@ describe("GET /v1/earn/vault-positions", () => {
     expect(body.data.positions[0]).not.toHaveProperty("tokenValue");
   });
 
+  it("carries the par intermediate a provider reports beside the shares", async () => {
+    await createPosition({ providerReference: "vault_par_intermediate" });
+    const parIntermediate = {
+      mint: PUBLIC_KEY_B,
+      amount: "2000",
+      withdrawableAmount: "2000",
+      tokenValue: "2000",
+    };
+    readVaultPositions.mockResolvedValue([
+      {
+        providerReference: "vault_par_intermediate",
+        owner: PUBLIC_KEY_A,
+        cluster: "devnet",
+        shares: "0",
+        withdrawableShares: "0",
+        tokenValue: "0",
+        tokenMint: TOKEN_MINT,
+        shareMint: SHARE_MINT,
+        parIntermediate,
+      },
+    ]);
+
+    const response = await getPositions();
+    const body = (await response.json()) as {
+      data: { positions: Array<Record<string, unknown>> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.positions).toEqual([
+      expect.objectContaining({ shares: "0", tokenValue: "0", parIntermediate }),
+    ]);
+  });
+
   it("hydrates every custody row that projects the same owner and vault", async () => {
     const duplicateWalletId = "cwlt_vault_positions_duplicate_owner";
     await getDb(env)
@@ -406,6 +439,17 @@ describe("GET /v1/earn/vault-positions", () => {
     ["amount", { shares: "NaN" }],
     ["withdrawable amount", { withdrawableShares: "NaN" }],
     ["out-of-range unlock timestamp", { unlockTimestamp: "99999999999999999999" }],
+    [
+      "par intermediate",
+      {
+        parIntermediate: {
+          mint: "not-a-mint",
+          amount: "1",
+          withdrawableAmount: "1",
+          tokenValue: "1",
+        },
+      },
+    ],
   ] as const)("does not attach live balances under a mismatched %s", async (kind, override) => {
     const providerReference = `vault_${kind}_mismatch`;
     await createPosition({ providerReference });

@@ -202,7 +202,7 @@ export class Token2022Service {
     requestSimulation?: boolean
   ): Promise<PreparedTransaction> {
     const rpc = createRpcForSdk<MosaicSdkRpc>(this.env);
-    const feePayer = await this.resolveFeePayerSigner();
+    const authority = createNoopSigner(options.authority);
 
     const authorityAta = await resolveTokenAccount(rpc, options.authority, options.mint);
     const normalizedSource =
@@ -217,9 +217,9 @@ export class Token2022Service {
     const fullTx = await createBurnTransaction(
       rpc,
       options.mint,
-      createNoopSigner(options.authority),
+      authority,
       options.amount,
-      feePayer
+      authority
     );
 
     const compiledTx = compileTransaction(fullTx);

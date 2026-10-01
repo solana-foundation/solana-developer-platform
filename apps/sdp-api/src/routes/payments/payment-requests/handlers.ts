@@ -1,6 +1,4 @@
-import { isAddress } from "@sdp/solana/address";
 import type { ListPaymentRequestsResponse, PaymentRequest } from "@sdp/types";
-import { z } from "zod";
 import type { PaymentRequestRow } from "@/db/repositories/payment-requests.repository";
 import { createPaymentRequestsRepository } from "@/db/repositories/repository-factory";
 import { getAuth, requireProjectId } from "@/lib/auth";
@@ -15,14 +13,8 @@ import {
   reconcilePaymentRequest,
 } from "@/services/payments/payment-requests";
 import type { AppContext } from "../context";
-import { paymentAmountSchema } from "../schemas";
 import { assertFreshPaymentWalletAccess, resolveScope, resolveWallet } from "../wallets";
-
-const listPaymentRequestsQuerySchema = z.object({
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  status: z.enum(["awaiting_payment", "paid", "canceled", "expired"]).optional(),
-});
+import { type createPaymentRequestSchema, listPaymentRequestsQuerySchema } from "./schemas";
 
 function mapPaymentRequest(row: PaymentRequestRow): PaymentRequest {
   const expired = isPaymentRequestExpired(row.expires_at);
@@ -78,18 +70,6 @@ export async function listPaymentRequests(c: AppContext) {
   };
   return success(c, response);
 }
-
-export const createPaymentRequestSchema = z.object({
-  walletId: z.string().min(1),
-  token: z.string().refine(isAddress, "token must be a valid Solana mint address"),
-  amount: paymentAmountSchema,
-  // Optional counterparty (the payer). When set, payment is expected from this
-  // counterparty's crypto account; when null the link is payable by anyone.
-  counterpartyId: z.string().min(1).nullable().default(null),
-  // Absolute UTC expiry (ISO 8601). The client converts the user's local
-  // selection to UTC before sending; the server stores UTC verbatim.
-  expiresAt: z.string().datetime().nullable().default(null),
-});
 
 export async function createPaymentRequest(
   c: ValidatedBodyContext<typeof createPaymentRequestSchema>

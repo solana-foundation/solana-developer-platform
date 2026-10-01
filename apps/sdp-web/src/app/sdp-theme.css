@@ -62,10 +62,12 @@
   --badge-info-dot: var(--blue-tx);
 }
 
-/* Refresh scope: the design-system component tokens the 2026 Payments design changes. The
-   package derives its text and component tokens from its gray ramp at :root, so each one the
-   design touches is re-stated here to resolve against the scope's palette. */
-[data-sdp-theme="refresh"] {
+/* Refresh palette: the design-system text and button colours and the face's weight, wherever
+   the refresh palette applies (tokens.css): a refresh subtree, or the whole document while NEW
+   DESIGN marks the shell. The package derives these from its gray ramp at :root, so each is
+   re-stated here to resolve against the refresh palette. */
+[data-sdp-theme="refresh"],
+:root:has([data-sdp-palette="refresh"]) {
   /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
      which the browser matches to the Medium face, so every plain run came out heavy. The design's
      body text is the Regular face, drawn antialiased. */
@@ -86,6 +88,11 @@
   --button-secondary-bg: var(--t8);
   --button-secondary-bg-hover: var(--t12);
   --button-secondary-text: var(--emph-xh);
+}
+
+/* Refresh scope: the design-system component shapes the 2026 Payments design changes, only on
+   a refresh subtree. Pages outside it keep their own corners, fields, tabs and tables. */
+[data-sdp-theme="refresh"] {
   --button-radius-xl: var(--corner-control);
   --button-radius-lg: var(--corner-control);
   --button-radius-md: var(--corner-control);

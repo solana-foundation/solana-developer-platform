@@ -13,40 +13,45 @@ import {
   buildBvnkCustomerExternalReference,
   buildBvnkFundingWalletName,
   buildBvnkWalletIdempotencyKey,
+  bvnkCustomerStatusRequirements,
   bvnkOnrampRemittance,
   bvnkPayoutPartyDetailsFromCustomer,
+  isBvnkCustomerVerified,
 } from "@sdp/payments/ramps/providers/bvnk/provider-data";
 import { bvnkOnrampFields } from "@sdp/payments/ramps/providers/bvnk/requirements";
-import type {
-  BvnkAgreementSession,
-  BvnkCustomer,
-  BvnkCustomerIndividual,
-  BvnkLedgerWalletProfilesV2,
-  BvnkLedgerWalletProfileV2,
-  BvnkLedgerWalletV2,
-  BvnkOnrampPayoutInput,
-  BvnkV2WalletListRow,
+import {
+  type BvnkAgreementSession,
+  type BvnkCustomer,
+  type BvnkCustomerIndividual,
+  type BvnkLedgerWalletProfilesV2,
+  type BvnkLedgerWalletProfileV2,
+  type BvnkLedgerWalletV2,
+  type BvnkOnrampPayoutInput,
+  type BvnkV2WalletListRow,
+  bvnkCustomerStatusSchema,
 } from "@sdp/payments/ramps/providers/bvnk/schemas";
 import { readStoredBvnkSettlement } from "@sdp/payments/ramps/providers/bvnk/settlement";
+import { readyCounterparty } from "@sdp/payments/ramps/requirements";
 import { rampId } from "@sdp/payments/ramps/shared";
 import type { RampRuntimeContext } from "@sdp/payments/ramps/types";
 import { toNumberAmount } from "@sdp/solana/amount";
-import type {
-  BvnkBankFundingDetails,
-  BvnkFiatFundingInstruction,
-  BvnkPaymentRampInstruction,
-  CountryCode,
-  CryptoRailId,
-  PaymentRampQuote,
+import {
+  BVNK_FUNDING_WALLET_STATUS,
+  type BvnkBankFundingDetails,
+  type BvnkFiatFundingInstruction,
+  type BvnkPaymentRampInstruction,
+  type CountryCode,
+  type PaymentRampQuote,
 } from "@sdp/types";
-import { BVNK_FUNDING_WALLET_STATUS } from "@sdp/types";
 import type { RampFiatCurrency } from "@sdp/types/generated/ramp";
+import type { CryptoRailId } from "@sdp/types/payment-rails";
 import type {
   CollectedFieldData,
   CounterpartyRequirements,
   RampDirection,
 } from "@sdp/types/ramp-requirements";
 import { getDb } from "@/db";
+import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories";
 import type { BvnkOnrampPayoutIntent } from "@/db/repositories/bvnk-onramp-transfers.repository";
 import type { CounterpartyRow } from "@/db/repositories/counterparty.repository";
 import {
@@ -57,7 +62,6 @@ import {
   counterpartyProviderAccountUuid,
   type GetCounterpartyProviderAccountInput,
 } from "@/db/repositories/counterparty-provider-account.repository";
-import { createPostgresCounterpartyProviderAccountsRepository } from "@/db/repositories/counterparty-provider-account.repository.postgres";
 import type {
   PaymentTransferRow,
   PaymentTransferStatus,
@@ -65,12 +69,13 @@ import type {
 import { getClientIp } from "@/lib/client-ip";
 import { badRequest, conflict, counterpartyNotProvisioned, internalError } from "@/lib/errors";
 import { getCounterpartiesRepository } from "@/routes/counterparties/context";
+import type { SubmitCounterpartyRequirementsInput } from "@/routes/counterparties/schemas";
 import { getLogger } from "@/runtime/logger";
 import { type AuditIntent, AuditService } from "@/services/audit.service";
 import { rampTransferTokenMint } from "@/services/payment-operation.service";
 import type { Env } from "@/types/env";
 import { type AppContext, getPaymentsRepository, rampRuntime } from "../../context";
-import { rampQuoteCryptoDepositProviderData } from "./quote-binding";
+import { rampQuoteCryptoDepositProviderData } from "../quote-binding";
 
 const BVNK_UNRESOLVED_CONSENT_IP = "0.0.0.0";
 
@@ -1399,4 +1404,132 @@ export function bvnkProviderReference(row: PaymentTransferRow): string | undefin
     throw internalError(`BVNK on-ramp transfer ${row.id} has a malformed stored settlement.`);
   }
   return stored.outcome === "present" ? stored.settlement.payoutId : undefined;
+}
+
+async function bvnkCustomerVerificationRequirements(
+  c: AppContext,
+  input: { counterparty: CounterpartyRow; projectId: string; direction: "onramp" | "offramp" },
+  customer: BvnkCustomerResolution
+): Promise<CounterpartyRequirements> {
+  if (!customer.customerReference) {
+    throw internalError("BVNK customer reference is missing while resolving verification.");
+  }
+  const account = await createPostgresCounterpartyProviderAccountsRepository(
+    getDb(c.env)
+  ).getProviderAccount({
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk",
+  });
+  if (!account) {
+    throw internalError("BVNK customer-link row is missing while resolving verification.");
+  }
+  const refreshed = await refreshBvnkCustomerAccount(c.env, rampRuntime(c), {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    providerAccountId: account.id,
+    customerReference: customer.customerReference,
+  });
+  return bvnkCustomerStatusRequirements(
+    bvnkCustomerStatusSchema.parse(refreshed.customer.status),
+    input.direction,
+    refreshed.verificationUrl
+  );
+}
+
+/**
+ * Advances the BVNK requirements for either ramp direction: gates the fiat on
+ * the USD funding-wallet corridor, resolves the customer lifecycle, provisions
+ * or recovers the funding wallet for verified customers, and answers the
+ * funding requirement.
+ *
+ * @param c - Request context used for provider and repository access.
+ * @param input - Scoped counterparty requirements submission.
+ * @returns The client-facing requirement state after advancement.
+ */
+export async function advanceBvnkRequirements(
+  c: AppContext,
+  input: Extract<SubmitCounterpartyRequirementsInput, { provider: "bvnk" }> & {
+    counterparty: CounterpartyRow;
+    projectId: string;
+  }
+): Promise<CounterpartyRequirements> {
+  if (input.fiatCurrency !== BVNK_FUNDING_WALLET_FIAT) {
+    return {
+      provider: "bvnk",
+      direction: input.direction,
+      status: "unsupported",
+      reason: "BVNK supports USD only.",
+    };
+  }
+  const customerResult = await ensureBvnkCustomer(
+    c,
+    input.counterparty,
+    input.projectId,
+    input.direction,
+    input.collectedData,
+    input.agreementConsent
+  );
+  if ("requirements" in customerResult) {
+    return customerResult.requirements;
+  }
+  const customer = customerResult.customer;
+  if (!isBvnkCustomerVerified(customer.status)) {
+    return bvnkCustomerVerificationRequirements(
+      c,
+      {
+        counterparty: input.counterparty,
+        projectId: input.projectId,
+        direction: input.direction,
+      },
+      customer
+    );
+  }
+  const accounts = createPostgresCounterpartyProviderAccountsRepository(getDb(c.env));
+  const scope = {
+    organizationId: input.counterparty.organization_id,
+    projectId: input.projectId,
+    counterpartyId: input.counterparty.id,
+    provider: "bvnk" as const,
+  };
+  const fundingRow = await accounts.getAccountByKindAndCurrency({
+    ...scope,
+    kind: "funding_wallet",
+    fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
+  });
+  const claimIsStale =
+    fundingRow !== null &&
+    Date.parse(fundingRow.updated_at) < Date.now() - BVNK_FUNDING_WALLET_CLAIM_TAKEOVER_MS;
+  if (fundingRow === null || (fundingRow.external_account_reference === null && claimIsStale)) {
+    const customerLink = await accounts.getProviderAccount(scope);
+    if (customerLink === null) {
+      throw internalError(
+        "BVNK requirements advancement has no customer link to provision a funding wallet."
+      );
+    }
+    await ensureBvnkFundingWallet(c.env, rampRuntime(c), {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      customerLink,
+      fiatCurrency: BVNK_FUNDING_WALLET_FIAT,
+      audit: requestProvisioningAudit(c, input.counterparty),
+    });
+  } else if (
+    fundingRow.provider_status === BVNK_FUNDING_WALLET_STATUS.provisioning &&
+    fundingRow.external_account_reference !== null &&
+    claimIsStale
+  ) {
+    await recoverProvisioningBvnkFundingWallet(c.env, rampRuntime(c), {
+      counterparty: input.counterparty,
+      projectId: input.projectId,
+      fundingRow,
+    });
+  }
+  const funding = await bvnkFundingWalletRequirements(c, {
+    counterparty: input.counterparty,
+    projectId: input.projectId,
+    direction: input.direction,
+  });
+  return funding !== null ? funding : readyCounterparty("bvnk", input.direction);
 }
