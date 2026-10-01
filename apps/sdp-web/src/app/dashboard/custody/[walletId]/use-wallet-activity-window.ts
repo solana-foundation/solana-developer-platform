@@ -23,28 +23,34 @@ function isAsComplete(wider: WalletActivityPayload, loaded: WalletActivityPayloa
 /**
  * The Activity tab's window onto the wallet's feed. It shows the window that last loaded and
  * keeps refreshing it; "Load older activity" asks for a window `WALLET_ACTIVITY_LOAD_STEP` rows
- * wider, which replaces the shown one only once it loads in full. A wider read that fails, or
- * comes back missing a source, leaves the shown window as it was and reports `olderFailed`;
- * `loadOlder` then retries that same size instead of widening again.
+ * wider, which replaces the shown one only once a fresh read of it loads in full. Rows already
+ * cached for the wider window (from an earlier visit) never count: the read this hook starts
+ * has to settle first. A wider read that fails, or comes back missing a source, leaves the
+ * shown window as it was and reports `olderFailed`; `loadOlder` then retries that same size
+ * instead of widening again.
  */
 export function useWalletActivityWindow(walletId: string) {
   const [loadedLimit, setLoadedLimit] = useState(WALLET_ACTIVITY_LIMIT);
   const [requestedLimit, setRequestedLimit] = useState(WALLET_ACTIVITY_LIMIT);
+  /** The wider window whose latest fresh read failed or came back incomplete. */
+  const [failedLimit, setFailedLimit] = useState<number | null>(null);
   const shown = useWalletActivity(walletId, loadedLimit);
-  const wider = useWalletActivity(walletId, requestedLimit);
-
   const widening = requestedLimit !== loadedLimit;
-  const widerLoaded = widening && wider.data !== undefined && isAsComplete(wider.data, shown.data);
-  if (widerLoaded) {
-    // The wider window is already cached, so `shown` reads it on the re-render this queues.
-    setLoadedLimit(requestedLimit);
-  }
+  const wider = useWalletActivity(walletId, requestedLimit, {
+    // The wider rows are in the cache once this read settles, so `shown` reads them as it
+    // switches to this window.
+    onSuccess: (data) => {
+      if (!widening) return;
+      if (isAsComplete(data, shown.data)) setLoadedLimit(requestedLimit);
+      else setFailedLimit(requestedLimit);
+    },
+    onError: () => {
+      if (widening) setFailedLimit(requestedLimit);
+    },
+  });
+
   // Settled without loading in full; a retry in flight counts as loading again.
-  const olderFailed =
-    widening &&
-    !widerLoaded &&
-    !wider.isValidating &&
-    (wider.error !== undefined || wider.data !== undefined);
+  const olderFailed = widening && failedLimit === requestedLimit && !wider.isValidating;
 
   const data = shown.data;
   return {

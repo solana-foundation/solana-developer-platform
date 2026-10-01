@@ -58,20 +58,33 @@ vi.mock("@/app/dashboard/payments/payments-workspace.data", () => ({
 vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
   WalletProviderMark: () => <span data-testid="mark" />,
 }));
-vi.mock("./use-wallet-activity", () => ({
-  useWalletActivity: (_walletId: string, limit?: number) => {
-    mocks.activityLimits.push(limit);
-    if (mocks.widerActivityFails && limit !== 20) {
-      return {
-        data: undefined,
-        error: new Error("unavailable"),
-        isValidating: false,
-        mutate: mocks.retryActivity,
-      };
-    }
-    return { data: mocks.activity, error: undefined, isValidating: false, mutate: vi.fn() };
-  },
-}));
+vi.mock("./use-wallet-activity", async () => {
+  const { useEffect } = await import("react");
+  return {
+    useWalletActivity: (
+      _walletId: string,
+      limit?: number,
+      callbacks: { onSuccess?: (data: unknown) => void; onError?: (error: Error) => void } = {}
+    ) => {
+      mocks.activityLimits.push(limit);
+      const fails = mocks.widerActivityFails && limit !== 20;
+      // Like SWR, report how the read this hook started settled.
+      useEffect(() => {
+        if (fails) callbacks.onError?.(new Error("unavailable"));
+        else callbacks.onSuccess?.(mocks.activity);
+      }, [limit]);
+      if (fails) {
+        return {
+          data: undefined,
+          error: new Error("unavailable"),
+          isValidating: false,
+          mutate: mocks.retryActivity,
+        };
+      }
+      return { data: mocks.activity, error: undefined, isValidating: false, mutate: vi.fn() };
+    },
+  };
+});
 
 const { WalletDetailView } = await import("./wallet-detail-view");
 
