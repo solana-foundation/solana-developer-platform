@@ -14,10 +14,8 @@ import {
   getDashboardPageConfig,
   HeaderBackAction,
 } from "@/components/dashboard-header";
-import {
-  DASHBOARD_HEADER_TABS_TRAILING_ID,
-  DashboardHeaderTabs,
-} from "@/components/dashboard-header-tabs";
+import { DashboardHeaderTabs } from "@/components/dashboard-header-tabs";
+import { DashboardHeaderTabsTrailingContext } from "@/components/dashboard-header-tabs-trailing-context";
 import { DashboardLoadingScreen } from "@/components/dashboard-loading-screen";
 import { DashboardMoreSheet } from "@/components/dashboard-more-sheet";
 import {
@@ -377,6 +375,28 @@ function DashboardSidebarContent({
   );
 }
 
+/**
+ * What the shell hands its pages: the setter a page names itself through, and the slot at the
+ * right end of the header tab row that `DashboardHeaderTabsTrailing` portals into.
+ */
+function DashboardShellPageContexts({
+  setPageTitle,
+  headerTabsTrailingSlot,
+  children,
+}: {
+  setPageTitle: (override: DashboardPageTitleOverride | null) => void;
+  headerTabsTrailingSlot: HTMLElement | null;
+  children: ReactNode;
+}) {
+  return (
+    <DashboardPageTitleContext.Provider value={setPageTitle}>
+      <DashboardHeaderTabsTrailingContext.Provider value={headerTabsTrailingSlot}>
+        {children}
+      </DashboardHeaderTabsTrailingContext.Provider>
+    </DashboardPageTitleContext.Provider>
+  );
+}
+
 function clipsDashboardHorizontalOverflow(pathname: string): boolean {
   return (
     pathname === "/dashboard/payments" ||
@@ -465,6 +485,8 @@ export function DashboardShell({
   const [pageTitleOverride, setPageTitleOverride] = useState<DashboardPageTitleOverride | null>(
     null
   );
+  // Set once the header tab row's trailing slot mounts, so a page's controls portal into it.
+  const [headerTabsTrailingSlot, setHeaderTabsTrailingSlot] = useState<HTMLElement | null>(null);
   const [openSubnavs, setOpenSubnavs] = useState<Record<DashboardSubnavKey, boolean>>(() => {
     const initial = {} as Record<DashboardSubnavKey, boolean>;
     for (const [key, group] of Object.entries(DASHBOARD_SUBNAV_GROUPS)) {
@@ -743,7 +765,10 @@ export function DashboardShell({
       ].join(" ")}
     >
       <ThemeScopeProvider scope={themeScope}>
-        <DashboardPageTitleContext.Provider value={setPageTitleOverride}>
+        <DashboardShellPageContexts
+          setPageTitle={setPageTitleOverride}
+          headerTabsTrailingSlot={headerTabsTrailingSlot}
+        >
           <PaymentsDemoProvider value={paymentsDemoOn}>
             {paymentsDemoOn ? <PaymentsDemoNotice /> : null}
             <SentryUserContext />
@@ -979,7 +1004,7 @@ export function DashboardShell({
                             </div>
                             {/* A page's own controls for the tab row (DashboardHeaderTabsTrailing). */}
                             <div
-                              id={DASHBOARD_HEADER_TABS_TRAILING_ID}
+                              ref={setHeaderTabsTrailingSlot}
                               className="ml-auto flex shrink-0 items-center gap-4 self-center empty:hidden"
                             />
                           </div>
@@ -1058,7 +1083,7 @@ export function DashboardShell({
               </section>
             </div>
           </PaymentsDemoProvider>
-        </DashboardPageTitleContext.Provider>
+        </DashboardShellPageContexts>
       </ThemeScopeProvider>
     </main>
   );
