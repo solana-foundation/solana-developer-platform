@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
+import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
 import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 
@@ -999,8 +1000,11 @@ export function getDashboardPageConfig(
   custodyEnabled = true,
   _paymentsEnabled = true,
   _policiesEnabled = true,
-  newDesign = true
+  newDesign = true,
+  newDesignModules?: DesignModuleFlags
 ): DashboardPageConfig {
+  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
+  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
@@ -1047,9 +1051,9 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  // `newDesign` is this page's design (isNewDesignPage): a Payments page no design module has
-  // redesigned keeps the previous design's header under NEW DESIGN too.
-  const legacyDesignConfig = !newDesign
+  // A Payments page no design module has redesigned keeps the previous design's header under
+  // NEW DESIGN too.
+  const legacyDesignConfig = !newDesignPage
     ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
     : null;
   if (legacyDesignConfig) {
