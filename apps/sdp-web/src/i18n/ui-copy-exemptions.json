@@ -210,5 +210,13 @@
   {
     "candidate": "src/flags/index.ts:244:20:New design",
     "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
+  },
+  {
+    "candidate": "src/components/dashboard-nav.ts:119:7:contacts",
+    "reason": "Design-module id passed to isDesignModuleOn, never rendered; the label comes from the catalog"
+  },
+  {
+    "candidate": "src/flags/index.ts:95:5:`NEW DESIGN for ${area}. Requires the new-design flag; off serves that area's previous design.`",
+    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
   }
 ]
