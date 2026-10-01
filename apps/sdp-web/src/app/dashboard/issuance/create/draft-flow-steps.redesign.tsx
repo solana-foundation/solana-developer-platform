@@ -48,7 +48,7 @@ const CLASSES: {
   },
 ];
 
-export const CLASS_LABEL: Record<DraftState["assetClass"], MessageKey> = {
+const CLASS_LABEL: Record<DraftState["assetClass"], MessageKey> = {
   stablecoin: "DashboardIssuance.newDesign.classification.stablecoin",
   "digital-asset": "DashboardIssuance.newDesign.classification.digitalToken",
 };
@@ -501,31 +501,59 @@ export function PermissionsStep({
   );
 }
 
-/** Step 5: the draft read back, then what creating it does and does not do. */
-export function ReviewStep({
-  draft,
-  access,
-  wallets,
-  environment,
-}: {
-  draft: DraftState;
-  access: DraftAccess;
-  wallets: readonly PaymentsDashboardWallet[];
-  environment: "sandbox" | "production";
-}) {
-  const t = useTranslations();
+type Translate = ReturnType<typeof useTranslations>;
+
+const ACCESS_LABEL: Record<DraftAccess, MessageKey> = {
+  blocklist: "DashboardIssuance.newDesign.access.blocklist",
+  allowlist: "DashboardIssuance.newDesign.access.allowlist",
+  off: "DashboardIssuance.newDesign.access.off",
+};
+
+/** What creating the draft does and does not do, the review's second half. */
+const WHAT_HAPPENS_NEXT: [MessageKey, MessageKey][] = [
+  [
+    "DashboardIssuance.newDesign.draft.networkCost",
+    "DashboardIssuance.newDesign.draft.networkCostValue",
+  ],
+  [
+    "DashboardIssuance.newDesign.draft.notYetSet",
+    "DashboardIssuance.newDesign.draft.notYetSetValue",
+  ],
+  [
+    "DashboardIssuance.newDesign.overview.reversible",
+    "DashboardIssuance.newDesign.draft.reversibleValue",
+  ],
+  ["DashboardIssuance.newDesign.draft.then", "DashboardIssuance.newDesign.draft.thenValue"],
+];
+
+/** The controls the draft switches on, as the review lists them. */
+function draftControls(draft: DraftState, access: DraftAccess, t: Translate): string {
   const stablecoin = draft.assetClass === "stablecoin";
-  const notSet = t("DashboardIssuance.newDesign.notSet");
-  const mintWallet = wallets.find((wallet) => wallet.id === draft.authorities["mint-authority"]);
-  const controls = [
+  return [
     (stablecoin || draft.freezeAccounts) && t("DashboardIssuance.newDesign.permissions.freezable"),
     (stablecoin || draft.pauseTransfers) && t("DashboardIssuance.newDesign.permissions.pausable"),
     (stablecoin || draft.permanentDelegate) &&
       t("DashboardIssuance.newDesign.permissions.delegate"),
     access !== "off" && t("DashboardIssuance.newDesign.draft.accessList"),
     t("DashboardIssuance.newDesign.permissions.mintable"),
-  ].filter(Boolean);
-  const rows: [MessageKey, string][] = [
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/** The draft read back, label then value, with "Not set" where a field is still empty. */
+function draftReviewRows(
+  draft: DraftState,
+  access: DraftAccess,
+  wallets: readonly PaymentsDashboardWallet[],
+  t: Translate
+): [MessageKey, string][] {
+  const notSet = t("DashboardIssuance.newDesign.notSet");
+  const mintWallet = wallets.find((wallet) => wallet.id === draft.authorities["mint-authority"]);
+  const mintHolder = mintWallet
+    ? mintWallet.label?.trim() || `${mintWallet.publicKey.slice(0, 5)}…`
+    : notSet;
+  return [
     ["DashboardIssuance.newDesign.details.name", draft.name.trim() || notSet],
     ["DashboardIssuance.newDesign.draft.classification", t(CLASS_LABEL[draft.assetClass])],
     ["DashboardIssuance.newDesign.details.symbol", draft.symbol.trim() || notSet],
@@ -541,69 +569,58 @@ export function ReviewStep({
       "DashboardIssuance.newDesign.details.currency",
       draft.pegCurrency ?? t("DashboardIssuance.newDesign.details.noCurrency"),
     ],
-    ["DashboardIssuance.newDesign.draft.controls", controls.join(", ")],
-    [
-      "DashboardIssuance.newDesign.draft.accessList",
-      t(
-        access === "blocklist"
-          ? "DashboardIssuance.newDesign.access.blocklist"
-          : access === "allowlist"
-            ? "DashboardIssuance.newDesign.access.allowlist"
-            : "DashboardIssuance.newDesign.access.off"
-      ),
-    ],
-    [
-      "DashboardIssuance.newDesign.permissions.mint",
-      mintWallet?.label?.trim() || (mintWallet ? `${mintWallet.publicKey.slice(0, 5)}…` : notSet),
-    ],
+    ["DashboardIssuance.newDesign.draft.controls", draftControls(draft, access, t)],
+    ["DashboardIssuance.newDesign.draft.accessList", t(ACCESS_LABEL[access])],
+    ["DashboardIssuance.newDesign.permissions.mint", mintHolder],
   ];
+}
+
+function ReviewSection({ title, rows }: { title: string; rows: [string, string][] }) {
+  return (
+    <section className="flex flex-col">
+      <h3 className="pb-1.5 text-body font-medium text-primary">{title}</h3>
+      <dl>
+        {rows.map(([label, value]) => (
+          <RecordLine key={label} label={label}>
+            {value}
+          </RecordLine>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+/** Step 5: the draft read back, then what creating it does and does not do. */
+export function ReviewStep({
+  draft,
+  access,
+  wallets,
+  environment,
+}: {
+  draft: DraftState;
+  access: DraftAccess;
+  wallets: readonly PaymentsDashboardWallet[];
+  environment: "sandbox" | "production";
+}) {
+  const t = useTranslations();
+  const environmentValue: MessageKey =
+    environment === "production"
+      ? "DashboardIssuance.newDesign.draft.environmentProduction"
+      : "DashboardIssuance.newDesign.draft.environmentSandbox";
   const next: [MessageKey, MessageKey][] = [
-    [
-      "DashboardIssuance.newDesign.draft.environment",
-      environment === "production"
-        ? "DashboardIssuance.newDesign.draft.environmentProduction"
-        : "DashboardIssuance.newDesign.draft.environmentSandbox",
-    ],
-    [
-      "DashboardIssuance.newDesign.draft.networkCost",
-      "DashboardIssuance.newDesign.draft.networkCostValue",
-    ],
-    [
-      "DashboardIssuance.newDesign.draft.notYetSet",
-      "DashboardIssuance.newDesign.draft.notYetSetValue",
-    ],
-    [
-      "DashboardIssuance.newDesign.overview.reversible",
-      "DashboardIssuance.newDesign.draft.reversibleValue",
-    ],
-    ["DashboardIssuance.newDesign.draft.then", "DashboardIssuance.newDesign.draft.thenValue"],
+    ["DashboardIssuance.newDesign.draft.environment", environmentValue],
+    ...WHAT_HAPPENS_NEXT,
   ];
   return (
     <div className="flex flex-col gap-10">
-      <section className="flex flex-col">
-        <h3 className="pb-1.5 text-body font-medium text-primary">
-          {t("DashboardIssuance.newDesign.draft.thisDraft")}
-        </h3>
-        <dl>
-          {rows.map(([label, value]) => (
-            <RecordLine key={label} label={t(label)}>
-              {value}
-            </RecordLine>
-          ))}
-        </dl>
-      </section>
-      <section className="flex flex-col">
-        <h3 className="pb-1.5 text-body font-medium text-primary">
-          {t("DashboardIssuance.newDesign.draft.whatHappensNext")}
-        </h3>
-        <dl>
-          {next.map(([label, value]) => (
-            <RecordLine key={label} label={t(label)}>
-              {t(value)}
-            </RecordLine>
-          ))}
-        </dl>
-      </section>
+      <ReviewSection
+        title={t("DashboardIssuance.newDesign.draft.thisDraft")}
+        rows={draftReviewRows(draft, access, wallets, t).map(([label, value]) => [t(label), value])}
+      />
+      <ReviewSection
+        title={t("DashboardIssuance.newDesign.draft.whatHappensNext")}
+        rows={next.map(([label, value]) => [t(label), t(value)])}
+      />
     </div>
   );
 }

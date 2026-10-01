@@ -40,7 +40,11 @@ import {
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
 import { IssuedTokenMark } from "./issued-token-mark.redesign";
 import { LocalDraftsBlock } from "./local-drafts-block.redesign";
-import { useIssuancePlaygroundTokens, useIssuanceTokenList } from "./use-issuance-token-list";
+import {
+  type UseIssuanceTokenListResult,
+  useIssuancePlaygroundTokens,
+  useIssuanceTokenList,
+} from "./use-issuance-token-list";
 import { useLatestDeploys } from "./use-latest-deploys.redesign";
 
 export const ISSUANCE_CREATE_PATH = "/dashboard/issuance/create";
@@ -154,137 +158,174 @@ function IssuanceTokenList({
   facets,
   tokensNotice,
 }: IssuanceWorkspaceProps) {
-  const t = useTranslations();
-  const {
-    query,
-    search,
-    setSearch,
-    updateQuery,
-    clearFilters,
-    tokens,
-    total,
-    pageCount,
-    rangeStart,
-    rangeEnd,
-    isFiltered,
-    isRefreshing,
-    isLoadingNewResults,
-    isLoadingAnotherPage,
-    errorMessage,
-  } = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
-  const { sections, chips } = useIssuanceFilterSections(query, updateQuery, facets);
-  const latestDeploys = useLatestDeploys(tokens);
-  const searchOnly = Boolean(query.search) && chips.length === 0;
+  const list = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
+  const { sections, chips } = useIssuanceFilterSections(list.query, list.updateQuery, facets);
+  const latestDeploys = useLatestDeploys(list.tokens);
+  const searchOnly = Boolean(list.query.search) && chips.length === 0;
 
   // The project's own count, not the filtered page's: what tells "no tokens yet" from
   // "nothing matches".
-  if (facets.total === 0 && !isFiltered && tokens.length === 0) {
-    return tokensNotice ? (
-      <ListEmptyState
-        message={t("DashboardIssuance.newDesign.list.loadFailed")}
-        description={tokensNotice}
-      />
-    ) : (
-      <ListEmptyState
-        message={t("DashboardIssuance.newDesign.list.emptyTitle")}
-        description={t("DashboardIssuance.newDesign.list.emptyBody")}
-        hidesPageAction
-        action={
-          <Button asChild>
-            <Link href={ISSUANCE_CREATE_PATH}>{t("DashboardIssuance.newDesign.createDraft")}</Link>
-          </Button>
-        }
-      />
-    );
+  if (facets.total === 0 && !list.isFiltered && list.tokens.length === 0) {
+    return <IssuanceProjectEmpty notice={tokensNotice} />;
   }
 
   return (
-    <div className="flex flex-col gap-5" aria-busy={isRefreshing}>
-      <ListToolbar
-        filters={
-          <FilterMenu
-            label={t("Shared.SharedComponents.filter")}
-            searchPlaceholder={t("Shared.SharedComponents.filterBy")}
-            sections={sections}
-          />
-        }
-      >
-        <Select
-          ariaLabel={t("DashboardIssuance.newDesign.list.sort")}
-          value={query.sort}
-          onValueChange={(value) => {
-            const sort = SORT_OPTIONS.find((option) => option.value === value)?.value;
-            if (sort) updateQuery({ sort });
-          }}
-          className="hidden w-auto shrink-0 sm:flex"
-          textSize="body"
-        >
-          {SORT_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {t(option.label)}
-            </SelectItem>
-          ))}
-        </Select>
-        <RowsPerPageSelect
-          value={query.pageSize}
-          sizes={ISSUANCE_PAGE_SIZES}
-          onChange={(pageSize) => updateQuery({ pageSize })}
-        />
-        <SearchInput
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          clear={{
-            label: t("DashboardIssuance.newDesign.list.clearSearch"),
-            onClear: () => setSearch(""),
-          }}
-          placeholder={t("DashboardIssuance.newDesign.list.searchPlaceholder")}
-          aria-label={t("DashboardIssuance.newDesign.list.searchLabel")}
-          className="min-w-0 flex-1 sm:w-56 sm:flex-none"
-        />
-      </ListToolbar>
+    <div className="flex flex-col gap-5" aria-busy={list.isRefreshing}>
+      <IssuanceListToolbar list={list} sections={sections} />
       <FilterChips chips={chips} />
-      {errorMessage ? (
-        <ListEmptyState
-          message={t("DashboardIssuance.newDesign.list.loadFailed")}
-          description={t("DashboardIssuance.errors.unableToLoadTokens")}
-        />
-      ) : isLoadingNewResults ? (
-        <IssuanceListRowsSkeleton />
-      ) : tokens.length === 0 ? (
-        <NoMatches
-          search={searchOnly ? query.search : null}
-          total={facets.total}
-          onClear={clearFilters}
-        />
-      ) : (
-        <>
-          <ul
-            className={cn(
-              "flex flex-col transition-opacity",
-              isLoadingAnotherPage ? "opacity-60" : null
-            )}
-          >
-            {tokens.map((token) => (
-              <li key={token.id}>
-                <IssuanceTokenRow token={token} latestDeploy={latestDeploys[token.id]} />
-              </li>
-            ))}
-          </ul>
-          {pageCount > 1 ? (
-            <ArrowPagination
-              page={query.page}
-              pageCount={pageCount}
-              onPageChange={(page) => updateQuery({ page })}
-              summary={t("DashboardIssuance.pagination.range", {
-                start: rangeStart,
-                end: rangeEnd,
-                total,
-              })}
-            />
-          ) : null}
-        </>
-      )}
+      <IssuanceListResults
+        list={list}
+        latestDeploys={latestDeploys}
+        search={searchOnly ? list.query.search : null}
+        projectTotal={facets.total}
+      />
     </div>
+  );
+}
+
+/** A project with no tokens yet, or whose tokens could not be read. */
+function IssuanceProjectEmpty({ notice }: { notice: string | null }) {
+  const t = useTranslations();
+  return notice ? (
+    <ListEmptyState
+      message={t("DashboardIssuance.newDesign.list.loadFailed")}
+      description={notice}
+    />
+  ) : (
+    <ListEmptyState
+      message={t("DashboardIssuance.newDesign.list.emptyTitle")}
+      description={t("DashboardIssuance.newDesign.list.emptyBody")}
+      hidesPageAction
+      action={
+        <Button asChild>
+          <Link href={ISSUANCE_CREATE_PATH}>{t("DashboardIssuance.newDesign.createDraft")}</Link>
+        </Button>
+      }
+    />
+  );
+}
+
+/** The list's Filter menu, sort, page size and search. */
+function IssuanceListToolbar({
+  list,
+  sections,
+}: {
+  list: UseIssuanceTokenListResult;
+  sections: FilterMenuSection[];
+}) {
+  const t = useTranslations();
+  const { query, updateQuery, search, setSearch } = list;
+  return (
+    <ListToolbar
+      filters={
+        <FilterMenu
+          label={t("Shared.SharedComponents.filter")}
+          searchPlaceholder={t("Shared.SharedComponents.filterBy")}
+          sections={sections}
+        />
+      }
+    >
+      <Select
+        ariaLabel={t("DashboardIssuance.newDesign.list.sort")}
+        value={query.sort}
+        onValueChange={(value) => {
+          const sort = SORT_OPTIONS.find((option) => option.value === value)?.value;
+          if (sort) updateQuery({ sort });
+        }}
+        className="hidden w-auto shrink-0 sm:flex"
+        textSize="body"
+      >
+        {SORT_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {t(option.label)}
+          </SelectItem>
+        ))}
+      </Select>
+      <RowsPerPageSelect
+        value={query.pageSize}
+        sizes={ISSUANCE_PAGE_SIZES}
+        onChange={(pageSize) => updateQuery({ pageSize })}
+      />
+      <SearchInput
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        clear={{
+          label: t("DashboardIssuance.newDesign.list.clearSearch"),
+          onClear: () => setSearch(""),
+        }}
+        placeholder={t("DashboardIssuance.newDesign.list.searchPlaceholder")}
+        aria-label={t("DashboardIssuance.newDesign.list.searchLabel")}
+        className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+      />
+    </ListToolbar>
+  );
+}
+
+/** What the list holds below its toolbar: an error, a skeleton, no matches, or the rows. */
+function IssuanceListResults({
+  list,
+  latestDeploys,
+  search,
+  projectTotal,
+}: {
+  list: UseIssuanceTokenListResult;
+  latestDeploys: ReturnType<typeof useLatestDeploys>;
+  search: string | null;
+  projectTotal: number;
+}) {
+  const t = useTranslations();
+  if (list.errorMessage) {
+    return (
+      <ListEmptyState
+        message={t("DashboardIssuance.newDesign.list.loadFailed")}
+        description={t("DashboardIssuance.errors.unableToLoadTokens")}
+      />
+    );
+  }
+  if (list.isLoadingNewResults) return <IssuanceListRowsSkeleton />;
+  if (list.tokens.length === 0) {
+    return <NoMatches search={search} total={projectTotal} onClear={list.clearFilters} />;
+  }
+  return <IssuanceTokenRows list={list} latestDeploys={latestDeploys} />;
+}
+
+/** The page's rows, dimmed while another page loads, over the pager when there is more than one. */
+function IssuanceTokenRows({
+  list,
+  latestDeploys,
+}: {
+  list: UseIssuanceTokenListResult;
+  latestDeploys: ReturnType<typeof useLatestDeploys>;
+}) {
+  const t = useTranslations();
+  const { query, updateQuery, tokens, pageCount } = list;
+  return (
+    <>
+      <ul
+        className={cn(
+          "flex flex-col transition-opacity",
+          list.isLoadingAnotherPage ? "opacity-60" : null
+        )}
+      >
+        {tokens.map((token) => (
+          <li key={token.id}>
+            <IssuanceTokenRow token={token} latestDeploy={latestDeploys[token.id]} />
+          </li>
+        ))}
+      </ul>
+      {pageCount > 1 ? (
+        <ArrowPagination
+          page={query.page}
+          pageCount={pageCount}
+          onPageChange={(page) => updateQuery({ page })}
+          summary={t("DashboardIssuance.pagination.range", {
+            start: list.rangeStart,
+            end: list.rangeEnd,
+            total: list.total,
+          })}
+        />
+      ) : null}
+    </>
   );
 }
 

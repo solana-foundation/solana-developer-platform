@@ -54,6 +54,28 @@ function minutesSince(iso: string): number {
   return Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
 }
 
+type Translate = ReturnType<typeof useTranslations>;
+
+type OverviewTabProps = TokenTabProps & {
+  latestDeploy: LatestDeployAttempt | null;
+  onOpenTab: (tab: TokenTab) => void;
+};
+
+/** The signing wallet's name, its short address when unnamed, "Not set" when there is none. */
+function signingWalletNameOf(
+  { token, ops, form }: Pick<TokenTabProps, "token" | "ops" | "form">,
+  t: Translate
+): string {
+  const signingWalletId = token.signingCustodyWalletId ?? form.draft.signingWalletId;
+  const signingWallet = ops.authorityWallets.find((wallet) => wallet.id === signingWalletId);
+  return (
+    signingWallet?.label?.trim() ||
+    (signingWallet
+      ? shortAddress(signingWallet.publicKey)
+      : t("DashboardIssuance.newDesign.notSet"))
+  );
+}
+
 /**
  * The token at a glance: its state and the one thing it asks for, the issued supply over the
  * token's terms, who and what it is, and its two latest events.
@@ -67,22 +89,86 @@ export function TokenOverviewTab({
   canManageTokenAdmin,
   latestDeploy,
   onOpenTab,
-}: TokenTabProps & {
-  latestDeploy: LatestDeployAttempt | null;
-  onOpenTab: (tab: TokenTab) => void;
-}) {
+}: OverviewTabProps) {
   const t = useTranslations();
-  const locale = useLocale();
-  const classification = classificationOf(assetProfile, t);
-  const onChain = isOnChain(state);
-  const signingWalletId = token.signingCustodyWalletId ?? form.draft.signingWalletId;
-  const signingWallet = ops.authorityWallets.find((wallet) => wallet.id === signingWalletId);
-  const signingWalletName =
-    signingWallet?.label?.trim() ||
-    (signingWallet
-      ? shortAddress(signingWallet.publicKey)
-      : t("DashboardIssuance.newDesign.notSet"));
-  const heldAuthorities = ops.permissionRows.filter((row) => row.value || !onChain);
+  const signingWalletName = signingWalletNameOf({ token, ops, form }, t);
+  const deployProps = { ops, form, canManageTokenAdmin };
+
+  return (
+    <RecordStack>
+      {/* The state band sits 32px over what follows it, closer than the parts below. */}
+      <div className="flex flex-col gap-8">
+        <OverviewStateBand state={state} ops={ops} latestDeploy={latestDeploy} />
+
+        {state === "draft" ? (
+          <DeployDraftBlock signingWalletName={signingWalletName} {...deployProps} />
+        ) : null}
+
+        {state === "failed" ? (
+          <DeployFailedBlock state={state} latestDeploy={latestDeploy} {...deployProps} />
+        ) : null}
+
+        {state === "paused" && canManageTokenAdmin ? <ResumeTransfersBlock ops={ops} /> : null}
+
+        <SupplyBlock token={token} assetProfile={assetProfile} ops={ops} />
+      </div>
+
+      <IdentityBlock
+        token={token}
+        ops={ops}
+        form={form}
+        state={state}
+        signingWalletName={signingWalletName}
+      />
+
+      <RecentActivity tokenId={token.id} onViewAll={() => onOpenTab("activity")} />
+    </RecordStack>
+  );
+}
+
+/** The token's state, why it is there, and the explorer link or how long a deploy has run. */
+function OverviewStateBand({
+  state,
+  ops,
+  latestDeploy,
+}: Pick<OverviewTabProps, "state" | "ops" | "latestDeploy">) {
+  const t = useTranslations();
+  const action = ops.explorerHref ? (
+    <Button
+      asChild
+      variant="outline"
+      size="sm"
+      className="[--button-height-md:1.875rem]"
+      iconRight={<ExternalLinkIcon aria-hidden="true" />}
+    >
+      <a href={ops.explorerHref} target="_blank" rel="noreferrer">
+        {t("DashboardIssuance.newDesign.overview.explorer")}
+      </a>
+    </Button>
+  ) : state === "deploying" && latestDeploy ? (
+    <span className="text-meta text-secondary">
+      {t("DashboardIssuance.newDesign.overview.submittedAgo", {
+        minutes: minutesSince(latestDeploy.createdAt),
+      })}
+    </span>
+  ) : undefined;
+
+  return (
+    <StateBand
+      tone={TOKEN_LIFECYCLE_BAND[state]}
+      state={t(TOKEN_LIFECYCLE_LABEL[state])}
+      action={action}
+    >
+      {t(TOKEN_LIFECYCLE_WHY[state])}
+    </StateBand>
+  );
+}
+
+type DeployProps = Pick<OverviewTabProps, "ops" | "form" | "canManageTokenAdmin">;
+
+/** Deploys the draft with its saved authorities, held back while edits are unsaved. */
+function DeployButton({ label, ops, form, canManageTokenAdmin }: DeployProps & { label: string }) {
+  const t = useTranslations();
   const deployBlocked = form.dirty
     ? t("DashboardIssuance.simplified.saveBeforeDeploy")
     : (form.errors.authorityWalletIds ?? ops.deployDisabledReason);
@@ -91,9 +177,8 @@ export function TokenOverviewTab({
       ...form.draft.authorityWalletIds,
       "mint-authority": form.draft.signingWalletId,
     });
-  const failedWhy =
-    state === "failed" && latestDeploy?.error ? latestDeploy.error : t(TOKEN_LIFECYCLE_WHY[state]);
-  const deployButton = (label: string) => (
+
+  return (
     <TokenDisabledActionTooltip reason={canManageTokenAdmin ? deployBlocked : null}>
       <Button
         size="sm"
@@ -104,196 +189,211 @@ export function TokenOverviewTab({
       </Button>
     </TokenDisabledActionTooltip>
   );
+}
 
+/** A draft's one ask: what deploying signs with and holds, and the deploy itself. */
+function DeployDraftBlock({
+  signingWalletName,
+  ...deployProps
+}: DeployProps & { signingWalletName: string }) {
+  const t = useTranslations();
   return (
-    <RecordStack>
-      {/* The state band sits 32px over what follows it, closer than the parts below. */}
-      <div className="flex flex-col gap-8">
-        <StateBand
-          tone={TOKEN_LIFECYCLE_BAND[state]}
-          state={t(TOKEN_LIFECYCLE_LABEL[state])}
-          action={
-            ops.explorerHref ? (
-              <Button
-                asChild
-                variant="outline"
-                size="sm"
-                className="[--button-height-md:1.875rem]"
-                iconRight={<ExternalLinkIcon aria-hidden="true" />}
-              >
-                <a href={ops.explorerHref} target="_blank" rel="noreferrer">
-                  {t("DashboardIssuance.newDesign.overview.explorer")}
-                </a>
-              </Button>
-            ) : state === "deploying" && latestDeploy ? (
-              <span className="text-meta text-secondary">
-                {t("DashboardIssuance.newDesign.overview.submittedAgo", {
-                  minutes: minutesSince(latestDeploy.createdAt),
-                })}
-              </span>
-            ) : undefined
-          }
-        >
-          {t(TOKEN_LIFECYCLE_WHY[state])}
-        </StateBand>
-
-        {state === "draft" ? (
-          <RecordBlock title={t("DashboardIssuance.newDesign.overview.deployTitle")}>
-            <p className="max-w-[40em] text-body text-secondary">
-              {t("DashboardIssuance.newDesign.overview.deployBody")}
-            </p>
-            <dl>
-              <RecordLine label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
-                {signingWalletName}
-              </RecordLine>
-              <RecordLine label={t("DashboardIssuance.newDesign.overview.authorities")}>
-                {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
-              </RecordLine>
-              <RecordLine label={t("DashboardIssuance.newDesign.overview.reversible")}>
-                {t("DashboardIssuance.newDesign.overview.reversibleNo")}
-              </RecordLine>
-            </dl>
-            <div className="flex items-center justify-end gap-2">
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/dashboard/issuance">
-                  {t("DashboardIssuance.newDesign.overview.notNow")}
-                </Link>
-              </Button>
-              {deployButton(t("DashboardIssuance.newDesign.overview.deployToken"))}
-            </div>
-          </RecordBlock>
-        ) : null}
-
-        {state === "failed" ? (
-          <div className="flex flex-col items-start gap-4">
-            <p className="max-w-[40em] text-body text-secondary">{failedWhy}</p>
-            <div className="flex items-center gap-2">
-              {deployButton(t("DashboardIssuance.newDesign.overview.retryDeploy"))}
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/dashboard/wallets">
-                  {t("DashboardIssuance.newDesign.overview.openWallets")}
-                </Link>
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {state === "paused" && canManageTokenAdmin ? (
-          <div className="flex flex-col items-start gap-4">
-            <p className="max-w-[40em] text-body text-secondary">
-              {t("DashboardIssuance.newDesign.overview.resumeBody")}
-            </p>
-            <TokenDisabledActionTooltip reason={ops.effectivePauseDisabledReason}>
-              <Button
-                size="sm"
-                disabled={ops.isPending || Boolean(ops.effectivePauseDisabledReason)}
-                onClick={() => ops.handlePause(false)}
-              >
-                {t("DashboardIssuance.newDesign.overview.resumeTransfers")}
-              </Button>
-            </TokenDisabledActionTooltip>
-          </div>
-        ) : null}
-
-        <RecordBlock>
-          <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
-            {formatDecimalAmount(token.totalSupply || "0", locale)}
-          </RecordAmount>
-          <RecordColumns>
-            <dl>
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
-                {token.maxSupply
-                  ? formatDecimalAmount(token.maxSupply, locale)
-                  : t("DashboardIssuance.newDesign.overview.noCap")}
-              </RecordRow>
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
-                {token.decimals}
-              </RecordRow>
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
-                {token.symbol}
-              </RecordRow>
-            </dl>
-            <dl>
-              <RecordRow
-                label={t("DashboardIssuance.newDesign.overview.category")}
-                hint={classification.categoryHelp}
-              >
-                {classification.category}
-              </RecordRow>
-              {classification.type ? (
-                <RecordRow label={t("DashboardIssuance.newDesign.overview.type")}>
-                  {classification.type}
-                </RecordRow>
-              ) : null}
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
-                {accessControlLabel(ops.accessControlMode, t)}
-              </RecordRow>
-            </dl>
-          </RecordColumns>
-          <dl className="border-t border-border-subtle">
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
-              <span className="max-w-[40em] text-right whitespace-normal">
-                {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
-              </span>
-            </RecordRow>
-          </dl>
-        </RecordBlock>
+    <RecordBlock title={t("DashboardIssuance.newDesign.overview.deployTitle")}>
+      <p className="max-w-[40em] text-body text-secondary">
+        {t("DashboardIssuance.newDesign.overview.deployBody")}
+      </p>
+      <dl>
+        <RecordLine label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
+          {signingWalletName}
+        </RecordLine>
+        <RecordLine label={t("DashboardIssuance.newDesign.overview.authorities")}>
+          {t("DashboardIssuance.newDesign.overview.authoritiesDraft")}
+        </RecordLine>
+        <RecordLine label={t("DashboardIssuance.newDesign.overview.reversible")}>
+          {t("DashboardIssuance.newDesign.overview.reversibleNo")}
+        </RecordLine>
+      </dl>
+      <div className="flex items-center justify-end gap-2">
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/dashboard/issuance">{t("DashboardIssuance.newDesign.overview.notNow")}</Link>
+        </Button>
+        <DeployButton
+          label={t("DashboardIssuance.newDesign.overview.deployToken")}
+          {...deployProps}
+        />
       </div>
+    </RecordBlock>
+  );
+}
 
-      <RecordBlock title={t("DashboardIssuance.newDesign.overview.identity")}>
-        <RecordColumns>
-          <dl>
-            {token.mintAddress ? (
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.mintAddress")}>
-                <span className="tabular-nums">{shortAddress(token.mintAddress)}</span>
-                <span className="-my-1 inline-flex">
-                  <WalletMetadataCopyButton
-                    value={token.mintAddress}
-                    label={t("DashboardIssuance.newDesign.overview.copyMintAddress")}
-                  />
-                </span>
-              </RecordRow>
-            ) : null}
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.tokenId")}>
-              <span className="tabular-nums">{shortTokenId(token.id)}</span>
+/** A failed deploy: why it failed, a retry, and the way to the wallets that sign it. */
+function DeployFailedBlock({
+  state,
+  latestDeploy,
+  ...deployProps
+}: DeployProps & Pick<OverviewTabProps, "state" | "latestDeploy">) {
+  const t = useTranslations();
+  const failedWhy =
+    state === "failed" && latestDeploy?.error ? latestDeploy.error : t(TOKEN_LIFECYCLE_WHY[state]);
+  return (
+    <div className="flex flex-col items-start gap-4">
+      <p className="max-w-[40em] text-body text-secondary">{failedWhy}</p>
+      <div className="flex items-center gap-2">
+        <DeployButton
+          label={t("DashboardIssuance.newDesign.overview.retryDeploy")}
+          {...deployProps}
+        />
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/dashboard/wallets">
+            {t("DashboardIssuance.newDesign.overview.openWallets")}
+          </Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** A paused token's one ask: resuming its transfers. */
+function ResumeTransfersBlock({ ops }: Pick<TokenTabProps, "ops">) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col items-start gap-4">
+      <p className="max-w-[40em] text-body text-secondary">
+        {t("DashboardIssuance.newDesign.overview.resumeBody")}
+      </p>
+      <TokenDisabledActionTooltip reason={ops.effectivePauseDisabledReason}>
+        <Button
+          size="sm"
+          disabled={ops.isPending || Boolean(ops.effectivePauseDisabledReason)}
+          onClick={() => ops.handlePause(false)}
+        >
+          {t("DashboardIssuance.newDesign.overview.resumeTransfers")}
+        </Button>
+      </TokenDisabledActionTooltip>
+    </div>
+  );
+}
+
+/** The issued supply over the token's terms and classification. */
+function SupplyBlock({
+  token,
+  assetProfile,
+  ops,
+}: Pick<TokenTabProps, "token" | "assetProfile" | "ops">) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const classification = classificationOf(assetProfile, t);
+  return (
+    <RecordBlock>
+      <RecordAmount label={t("DashboardIssuance.newDesign.overview.issuedSupply")}>
+        {formatDecimalAmount(token.totalSupply || "0", locale)}
+      </RecordAmount>
+      <RecordColumns>
+        <dl>
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.supplyCap")}>
+            {token.maxSupply
+              ? formatDecimalAmount(token.maxSupply, locale)
+              : t("DashboardIssuance.newDesign.overview.noCap")}
+          </RecordRow>
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.decimals")}>
+            {token.decimals}
+          </RecordRow>
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.symbol")}>
+            {token.symbol}
+          </RecordRow>
+        </dl>
+        <dl>
+          <RecordRow
+            label={t("DashboardIssuance.newDesign.overview.category")}
+            hint={classification.categoryHelp}
+          >
+            {classification.category}
+          </RecordRow>
+          {classification.type ? (
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.type")}>
+              {classification.type}
+            </RecordRow>
+          ) : null}
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.accessControl")}>
+            {accessControlLabel(ops.accessControlMode, t)}
+          </RecordRow>
+        </dl>
+      </RecordColumns>
+      <dl className="border-t border-border-subtle">
+        <RecordRow label={t("DashboardIssuance.newDesign.overview.description")}>
+          <span className="max-w-[40em] text-right whitespace-normal">
+            {token.description || t("DashboardIssuance.newDesign.overview.noDescription")}
+          </span>
+        </RecordRow>
+      </dl>
+    </RecordBlock>
+  );
+}
+
+/** Who and what the token is: its addresses, authorities, issuer, signer and age. */
+function IdentityBlock({
+  token,
+  ops,
+  form,
+  state,
+  signingWalletName,
+}: Pick<TokenTabProps, "token" | "ops" | "form" | "state"> & { signingWalletName: string }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const onChain = isOnChain(state);
+  const heldAuthorities = ops.permissionRows.filter((row) => row.value || !onChain);
+  return (
+    <RecordBlock title={t("DashboardIssuance.newDesign.overview.identity")}>
+      <RecordColumns>
+        <dl>
+          {token.mintAddress ? (
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.mintAddress")}>
+              <span className="tabular-nums">{shortAddress(token.mintAddress)}</span>
               <span className="-my-1 inline-flex">
                 <WalletMetadataCopyButton
-                  value={token.id}
-                  label={t("DashboardIssuance.newDesign.overview.copyTokenId")}
+                  value={token.mintAddress}
+                  label={t("DashboardIssuance.newDesign.overview.copyMintAddress")}
                 />
               </span>
             </RecordRow>
-            <RecordRow
-              label={t("DashboardIssuance.newDesign.overview.authorities")}
-              hint={heldAuthorities.map((row) => `${row.title}: ${row.helper}`).join(" ")}
-            >
-              {heldAuthorities.length
-                ? heldAuthorities.map((row) => t(AUTHORITY_SHORT[row.id])).join(", ")
-                : t("DashboardIssuance.newDesign.permissions.nobody")}
+          ) : null}
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.tokenId")}>
+            <span className="tabular-nums">{shortTokenId(token.id)}</span>
+            <span className="-my-1 inline-flex">
+              <WalletMetadataCopyButton
+                value={token.id}
+                label={t("DashboardIssuance.newDesign.overview.copyTokenId")}
+              />
+            </span>
+          </RecordRow>
+          <RecordRow
+            label={t("DashboardIssuance.newDesign.overview.authorities")}
+            hint={heldAuthorities.map((row) => `${row.title}: ${row.helper}`).join(" ")}
+          >
+            {heldAuthorities.length
+              ? heldAuthorities.map((row) => t(AUTHORITY_SHORT[row.id])).join(", ")
+              : t("DashboardIssuance.newDesign.permissions.nobody")}
+          </RecordRow>
+        </dl>
+        <dl>
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.issuerName")}>
+            {form.draft.issuerName.trim() || t("DashboardIssuance.newDesign.notSet")}
+          </RecordRow>
+          <RecordRow label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
+            {signingWalletName}
+          </RecordRow>
+          {onChain && token.deployedAt ? (
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.deployed")}>
+              {formatTokenDay(token.deployedAt, locale)}
             </RecordRow>
-          </dl>
-          <dl>
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.issuerName")}>
-              {form.draft.issuerName.trim() || t("DashboardIssuance.newDesign.notSet")}
+          ) : (
+            <RecordRow label={t("DashboardIssuance.newDesign.overview.created")}>
+              {formatTokenDay(token.createdAt, locale)}
             </RecordRow>
-            <RecordRow label={t("DashboardIssuance.newDesign.overview.signingWallet")}>
-              {signingWalletName}
-            </RecordRow>
-            {onChain && token.deployedAt ? (
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.deployed")}>
-                {formatTokenDay(token.deployedAt, locale)}
-              </RecordRow>
-            ) : (
-              <RecordRow label={t("DashboardIssuance.newDesign.overview.created")}>
-                {formatTokenDay(token.createdAt, locale)}
-              </RecordRow>
-            )}
-          </dl>
-        </RecordColumns>
-      </RecordBlock>
-
-      <RecentActivity tokenId={token.id} onViewAll={() => onOpenTab("activity")} />
-    </RecordStack>
+          )}
+        </dl>
+      </RecordColumns>
+    </RecordBlock>
   );
 }
 

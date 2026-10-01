@@ -74,6 +74,9 @@ const FIELDS: PublicField[] = [
   },
 ];
 
+type TokenView = TokenTabProps["token"];
+type ProfileDraft = TokenTabProps["form"]["draft"];
+
 function setPath(target: Record<string, unknown>, path: string, value: unknown) {
   const keys = path.split(".");
   let cursor = target;
@@ -85,21 +88,20 @@ function setPath(target: Record<string, unknown>, path: string, value: unknown) 
   cursor[keys[keys.length - 1] ?? path] = value;
 }
 
-/**
- * What the world can read about the token: the fields its public metadata carries, chosen
- * here, beside a preview of the metadata, an explorer and a wallet.
- */
-export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const canEdit = useDashboardWorkspace().dashboardAccess.capabilities.canManageTokenWrite;
-  const [preview, setPreview] = useState<Preview>("token");
-  const { draft, updateDraft, saving } = form;
-  const selected = new Set(draft.publicFields);
-  const signingWallet = ops.authorityWallets.find(
-    (wallet) => wallet.id === (token.signingCustodyWalletId ?? draft.signingWalletId)
-  );
-  const values: Record<string, string> = {
+/** Whether the metadata carries a field: core ones always, private ones never, the rest as chosen. */
+function isFieldPublic(field: PublicField, selected: ReadonlySet<string>): boolean {
+  if (field.core) return true;
+  if (field.private) return false;
+  return selected.has(field.path ?? "");
+}
+
+/** The value each field shows beside its toggle, keyed by field id. */
+function publicFieldValues(
+  token: TokenView,
+  draft: ProfileDraft,
+  signingWallet: TokenTabProps["ops"]["authorityWallets"][number] | undefined
+): Record<string, string> {
+  return {
     name: token.name,
     symbol: token.symbol,
     description: token.description ?? "",
@@ -109,31 +111,47 @@ export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
     currency: draft.pegCurrency,
     wallet: signingWallet?.label?.trim() || shortAddress(signingWallet?.publicKey),
   };
-  const isPublic = (field: PublicField) =>
-    field.core ? true : field.private ? false : selected.has(field.path ?? "");
-  const publicCount = FIELDS.filter(isPublic).length;
+}
 
-  const metadata = useMemo(() => {
-    const projected: Record<string, unknown> = {};
-    const source: Record<string, string> = {
-      "asset.name": draft.name.trim(),
-      "asset.description": draft.description.trim(),
-      "asset.website": draft.website.trim(),
-      "asset.issuerName": draft.issuerName.trim(),
-      "asset.pegCurrency": draft.pegCurrency,
-    };
-    for (const path of draft.publicFields) {
-      if (path === "chain.decimals") setPath(projected, path, token.decimals);
-      else if (path.startsWith("asset.") && source[path]) setPath(projected, path, source[path]);
-    }
-    return {
-      ...projected,
-      name: token.name,
-      symbol: token.symbol,
-      ...(token.description ? { description: token.description } : {}),
-      ...(token.imageUrl ? { image: token.imageUrl } : {}),
-    };
-  }, [draft, token]);
+/** The metadata document the token's URI serves for the fields chosen in the draft. */
+function projectPublicMetadata(draft: ProfileDraft, token: TokenView): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  const source: Record<string, string> = {
+    "asset.name": draft.name.trim(),
+    "asset.description": draft.description.trim(),
+    "asset.website": draft.website.trim(),
+    "asset.issuerName": draft.issuerName.trim(),
+    "asset.pegCurrency": draft.pegCurrency,
+  };
+  for (const path of draft.publicFields) {
+    if (path === "chain.decimals") setPath(projected, path, token.decimals);
+    else if (path.startsWith("asset.") && source[path]) setPath(projected, path, source[path]);
+  }
+  return {
+    ...projected,
+    name: token.name,
+    symbol: token.symbol,
+    ...(token.description ? { description: token.description } : {}),
+    ...(token.imageUrl ? { image: token.imageUrl } : {}),
+  };
+}
+
+/**
+ * What the world can read about the token: the fields its public metadata carries, chosen
+ * here, beside a preview of the metadata, an explorer and a wallet.
+ */
+export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
+  const t = useTranslations();
+  const canEdit = useDashboardWorkspace().dashboardAccess.capabilities.canManageTokenWrite;
+  const { draft, updateDraft, saving } = form;
+  const selected = new Set(draft.publicFields);
+  const signingWallet = ops.authorityWallets.find(
+    (wallet) => wallet.id === (token.signingCustodyWalletId ?? draft.signingWalletId)
+  );
+  const values = publicFieldValues(token, draft, signingWallet);
+  const isPublic = (field: PublicField) => isFieldPublic(field, selected);
+
+  const metadata = useMemo(() => projectPublicMetadata(draft, token), [draft, token]);
 
   const toggle = (field: PublicField, on: boolean) => {
     if (!field.path) return;
@@ -146,122 +164,20 @@ export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
   return (
     <div className="flex flex-col">
       <div className="grid gap-12 @3xl:grid-cols-2">
-        <RecordBlock title={t("DashboardIssuance.newDesign.publicInfo.included")}>
-          <p className="text-body text-secondary">
-            {t("DashboardIssuance.newDesign.publicInfo.count", {
-              count: publicCount,
-              total: FIELDS.length,
-            })}
-          </p>
-          <div className="h-1 overflow-hidden rounded-full bg-fill">
-            <i
-              className="block h-full rounded-full bg-primary"
-              style={{ width: `${Math.round((publicCount / FIELDS.length) * 100)}%` }}
-            />
-          </div>
-          <div className="flex flex-col">
-            {FIELDS.map((field) => {
-              const locked = field.core || field.private || !canEdit;
-              return (
-                <IssuanceCheckRow
-                  key={field.id}
-                  checked={isPublic(field)}
-                  disabled={locked || saving}
-                  onChange={(on) => toggle(field, on)}
-                  className="items-center py-2.5"
-                  aside={
-                    <>
-                      <span className="max-w-56 truncate text-meta text-secondary">
-                        {values[field.id] || t("DashboardIssuance.newDesign.notSet")}
-                      </span>
-                      {field.why ? <LockHint text={t(field.why)} /> : null}
-                    </>
-                  }
-                >
-                  <span className="text-body text-primary">{t(field.label)}</span>
-                </IssuanceCheckRow>
-              );
-            })}
-          </div>
-        </RecordBlock>
-
-        <RecordBlock
-          title={t("DashboardIssuance.newDesign.publicInfo.preview")}
-          aside={
-            <SegmentedControl
-              ariaLabel={t("DashboardIssuance.newDesign.publicInfo.previewAs")}
-              value={preview}
-              onChange={(value) => setPreview(value as Preview)}
-              options={[
-                { value: "token", label: t("DashboardIssuance.newDesign.publicInfo.previewToken") },
-                {
-                  value: "explorer",
-                  label: t("DashboardIssuance.newDesign.publicInfo.previewExplorer"),
-                },
-                {
-                  value: "wallet",
-                  label: t("DashboardIssuance.newDesign.publicInfo.previewWallet"),
-                },
-              ]}
-            />
-          }
-        >
-          {preview === "token" ? (
-            <MetadataPreview metadata={metadata} />
-          ) : preview === "explorer" ? (
-            <>
-              <div className="flex flex-col gap-4 rounded-card border border-border-subtle p-4">
-                <div className="flex items-center gap-3">
-                  <IssuedTokenMark symbol={token.symbol} logoUrl={token.imageUrl} size="md" />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-body font-medium text-primary">{token.name}</span>
-                    <span className="text-meta text-secondary">{token.symbol}</span>
-                  </span>
-                </div>
-                <dl>
-                  <RecordRow label={t("DashboardIssuance.newDesign.publicInfo.mint")}>
-                    {token.mintAddress
-                      ? shortAddress(token.mintAddress)
-                      : t("DashboardIssuance.newDesign.publicInfo.notDeployed")}
-                  </RecordRow>
-                  {FIELDS.filter(
-                    (field) => !field.private && field.id !== "name" && field.id !== "symbol"
-                  )
-                    .filter(isPublic)
-                    .filter((field) => values[field.id])
-                    .map((field) => (
-                      <RecordRow key={field.id} label={t(field.label)}>
-                        <span className="truncate">{values[field.id]}</span>
-                      </RecordRow>
-                    ))}
-                </dl>
-              </div>
-              <p className="text-meta text-secondary">
-                {t("DashboardIssuance.newDesign.publicInfo.explorerNote")}
-              </p>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 rounded-card border border-border-subtle p-4">
-                <IssuedTokenMark symbol={token.symbol} logoUrl={token.imageUrl} size="md" />
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-body font-medium text-primary">{token.name}</span>
-                  <span className="text-meta text-secondary tabular-nums">
-                    {formatDecimalAmount(token.totalSupply || "0", locale)} {token.symbol}
-                  </span>
-                </span>
-              </div>
-              {selected.has("asset.issuerName") && values.issuer ? (
-                <p className="text-meta text-secondary">
-                  {t("DashboardIssuance.newDesign.publicInfo.issuedBy", { issuer: values.issuer })}
-                </p>
-              ) : null}
-              <p className="text-meta text-secondary">
-                {t("DashboardIssuance.newDesign.publicInfo.walletNote")}
-              </p>
-            </>
-          )}
-        </RecordBlock>
+        <PublicFieldsBlock
+          values={values}
+          isPublic={isPublic}
+          canEdit={canEdit}
+          saving={saving}
+          onToggle={toggle}
+        />
+        <PublicPreviewBlock
+          token={token}
+          metadata={metadata}
+          values={values}
+          isPublic={isPublic}
+          showsIssuer={selected.has("asset.issuerName")}
+        />
       </div>
       {form.dirty ? (
         <TokenSaveFooter
@@ -274,6 +190,184 @@ export function TokenPublicTab({ token, ops, form }: TokenTabProps) {
         />
       ) : null}
     </div>
+  );
+}
+
+/** The fields the metadata can carry, each with a toggle, over a meter of how many it does. */
+function PublicFieldsBlock({
+  values,
+  isPublic,
+  canEdit,
+  saving,
+  onToggle,
+}: {
+  values: Record<string, string>;
+  isPublic: (field: PublicField) => boolean;
+  canEdit: boolean;
+  saving: boolean;
+  onToggle: (field: PublicField, on: boolean) => void;
+}) {
+  const t = useTranslations();
+  const publicCount = FIELDS.filter(isPublic).length;
+  return (
+    <RecordBlock title={t("DashboardIssuance.newDesign.publicInfo.included")}>
+      <p className="text-body text-secondary">
+        {t("DashboardIssuance.newDesign.publicInfo.count", {
+          count: publicCount,
+          total: FIELDS.length,
+        })}
+      </p>
+      <div className="h-1 overflow-hidden rounded-full bg-fill">
+        <i
+          className="block h-full rounded-full bg-primary"
+          style={{ width: `${Math.round((publicCount / FIELDS.length) * 100)}%` }}
+        />
+      </div>
+      <div className="flex flex-col">
+        {FIELDS.map((field) => {
+          const locked = field.core || field.private || !canEdit;
+          return (
+            <IssuanceCheckRow
+              key={field.id}
+              checked={isPublic(field)}
+              disabled={locked || saving}
+              onChange={(on) => onToggle(field, on)}
+              className="items-center py-2.5"
+              aside={
+                <>
+                  <span className="max-w-56 truncate text-meta text-secondary">
+                    {values[field.id] || t("DashboardIssuance.newDesign.notSet")}
+                  </span>
+                  {field.why ? <LockHint text={t(field.why)} /> : null}
+                </>
+              }
+            >
+              <span className="text-body text-primary">{t(field.label)}</span>
+            </IssuanceCheckRow>
+          );
+        })}
+      </div>
+    </RecordBlock>
+  );
+}
+
+/** The token as the metadata, an explorer or a wallet shows it, one at a time. */
+function PublicPreviewBlock({
+  token,
+  metadata,
+  values,
+  isPublic,
+  showsIssuer,
+}: {
+  token: TokenView;
+  metadata: Record<string, unknown>;
+  values: Record<string, string>;
+  isPublic: (field: PublicField) => boolean;
+  showsIssuer: boolean;
+}) {
+  const t = useTranslations();
+  const [preview, setPreview] = useState<Preview>("token");
+  return (
+    <RecordBlock
+      title={t("DashboardIssuance.newDesign.publicInfo.preview")}
+      aside={
+        <SegmentedControl
+          ariaLabel={t("DashboardIssuance.newDesign.publicInfo.previewAs")}
+          value={preview}
+          onChange={(value) => setPreview(value as Preview)}
+          options={[
+            { value: "token", label: t("DashboardIssuance.newDesign.publicInfo.previewToken") },
+            {
+              value: "explorer",
+              label: t("DashboardIssuance.newDesign.publicInfo.previewExplorer"),
+            },
+            {
+              value: "wallet",
+              label: t("DashboardIssuance.newDesign.publicInfo.previewWallet"),
+            },
+          ]}
+        />
+      }
+    >
+      {preview === "token" ? (
+        <MetadataPreview metadata={metadata} />
+      ) : preview === "explorer" ? (
+        <ExplorerPreview token={token} values={values} isPublic={isPublic} />
+      ) : (
+        <WalletPreview token={token} issuer={showsIssuer ? values.issuer : undefined} />
+      )}
+    </RecordBlock>
+  );
+}
+
+/** The token as an explorer lists it: its mint and the public fields that hold a value. */
+function ExplorerPreview({
+  token,
+  values,
+  isPublic,
+}: {
+  token: TokenView;
+  values: Record<string, string>;
+  isPublic: (field: PublicField) => boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <>
+      <div className="flex flex-col gap-4 rounded-card border border-border-subtle p-4">
+        <div className="flex items-center gap-3">
+          <IssuedTokenMark symbol={token.symbol} logoUrl={token.imageUrl} size="md" />
+          <span className="flex min-w-0 flex-col">
+            <span className="text-body font-medium text-primary">{token.name}</span>
+            <span className="text-meta text-secondary">{token.symbol}</span>
+          </span>
+        </div>
+        <dl>
+          <RecordRow label={t("DashboardIssuance.newDesign.publicInfo.mint")}>
+            {token.mintAddress
+              ? shortAddress(token.mintAddress)
+              : t("DashboardIssuance.newDesign.publicInfo.notDeployed")}
+          </RecordRow>
+          {FIELDS.filter((field) => !field.private && field.id !== "name" && field.id !== "symbol")
+            .filter(isPublic)
+            .filter((field) => values[field.id])
+            .map((field) => (
+              <RecordRow key={field.id} label={t(field.label)}>
+                <span className="truncate">{values[field.id]}</span>
+              </RecordRow>
+            ))}
+        </dl>
+      </div>
+      <p className="text-meta text-secondary">
+        {t("DashboardIssuance.newDesign.publicInfo.explorerNote")}
+      </p>
+    </>
+  );
+}
+
+/** The token as a wallet lists it: its supply, and its issuer when that is published. */
+function WalletPreview({ token, issuer }: { token: TokenView; issuer: string | undefined }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  return (
+    <>
+      <div className="flex items-center gap-3 rounded-card border border-border-subtle p-4">
+        <IssuedTokenMark symbol={token.symbol} logoUrl={token.imageUrl} size="md" />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-body font-medium text-primary">{token.name}</span>
+          <span className="text-meta text-secondary tabular-nums">
+            {formatDecimalAmount(token.totalSupply || "0", locale)} {token.symbol}
+          </span>
+        </span>
+      </div>
+      {issuer ? (
+        <p className="text-meta text-secondary">
+          {t("DashboardIssuance.newDesign.publicInfo.issuedBy", { issuer })}
+        </p>
+      ) : null}
+      <p className="text-meta text-secondary">
+        {t("DashboardIssuance.newDesign.publicInfo.walletNote")}
+      </p>
+    </>
   );
 }
 

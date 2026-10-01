@@ -3,7 +3,7 @@
 import type { Token } from "@sdp/types";
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "@/app/dashboard/payments/payments-table";
+import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/payments/payments-table";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
 import { FilterMenu, FilterMenuOptions, type FilterMenuSection } from "@/components/ui/filter-menu";
@@ -11,14 +11,7 @@ import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { ListToolbar } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { TableCell, TableRow } from "@/components/ui/table";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import {
   ACTIVITY_ACTIONS,
@@ -29,6 +22,7 @@ import {
   useTokenActivity,
 } from "./token-activity";
 import { transactionExplorerHref } from "./token-page.shared";
+import { TokenTable } from "./token-table";
 
 // The history is read in one window and searched and paged here: the audit API filters by
 // event, actor type and status but has no text search.
@@ -197,75 +191,54 @@ export function TokenActivityTab({ token }: { token: Token }) {
           <ListEmptyState message={t("DashboardIssuance.newDesign.activity.empty")} />
         )
       ) : (
-        <div className="overflow-x-auto refresh:-mx-3">
-          <Table className="min-w-[640px] table-fixed rounded-none border-0">
-            <colgroup>
-              <col className="w-[30%]" />
-              <col className="w-[24%]" />
-              <col className="w-[14%]" />
-              <col className="w-[22%]" />
-              <col className="w-[10%]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
-                  {t("DashboardIssuance.newDesign.activity.event")}
-                </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
-                  {t("DashboardIssuance.newDesign.activity.actor")}
-                </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
-                  {t("DashboardIssuance.newDesign.activity.status")}
-                </TableHead>
-                <TableHead className={PAYMENTS_TABLE_HEAD}>
-                  {t("DashboardIssuance.newDesign.activity.when")}
-                </TableHead>
-                <TableHead>
-                  <span className="sr-only">
-                    {t("DashboardIssuance.newDesign.overview.explorer")}
-                  </span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((event) => {
-                const status = activityStatus(event, t);
-                const signature = activitySignature(event);
-                return (
-                  <TableRow key={event.id}>
-                    <TableCell
-                      className={`${PAYMENTS_TABLE_CELL} truncate font-medium text-primary`}
+        <TokenTable
+          tableClassName="min-w-[640px]"
+          columns={[
+            { className: "w-[30%]", label: t("DashboardIssuance.newDesign.activity.event") },
+            { className: "w-[24%]", label: t("DashboardIssuance.newDesign.activity.actor") },
+            { className: "w-[14%]", label: t("DashboardIssuance.newDesign.activity.status") },
+            { className: "w-[22%]", label: t("DashboardIssuance.newDesign.activity.when") },
+            {
+              className: "w-[10%]",
+              label: t("DashboardIssuance.newDesign.overview.explorer"),
+              srOnly: true,
+            },
+          ]}
+        >
+          {visible.map((event) => {
+            const status = activityStatus(event, t);
+            const signature = activitySignature(event);
+            return (
+              <TableRow key={event.id}>
+                <TableCell className={`${PAYMENTS_TABLE_CELL} truncate font-medium text-primary`}>
+                  {activityEventLabel(event.action, t)}
+                </TableCell>
+                <TableCell className={`${PAYMENTS_TABLE_CELL} truncate text-primary`}>
+                  {event.actorLabel}
+                </TableCell>
+                <TableCell className={PAYMENTS_TABLE_CELL}>
+                  <StatusText tone={status.tone}>{status.label}</StatusText>
+                </TableCell>
+                <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
+                  {formatter.format(new Date(event.createdAt))}
+                </TableCell>
+                <TableCell className={PAYMENTS_TABLE_CELL}>
+                  {signature ? (
+                    <a
+                      href={transactionExplorerHref(signature)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-secondary hover:text-primary"
                     >
-                      {activityEventLabel(event.action, t)}
-                    </TableCell>
-                    <TableCell className={`${PAYMENTS_TABLE_CELL} truncate text-primary`}>
-                      {event.actorLabel}
-                    </TableCell>
-                    <TableCell className={PAYMENTS_TABLE_CELL}>
-                      <StatusText tone={status.tone}>{status.label}</StatusText>
-                    </TableCell>
-                    <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
-                      {formatter.format(new Date(event.createdAt))}
-                    </TableCell>
-                    <TableCell className={PAYMENTS_TABLE_CELL}>
-                      {signature ? (
-                        <a
-                          href={transactionExplorerHref(signature)}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1 text-secondary hover:text-primary"
-                        >
-                          {t("DashboardIssuance.newDesign.overview.explorer")}
-                          <ExternalLinkIcon className="size-3" aria-hidden="true" />
-                        </a>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                      {t("DashboardIssuance.newDesign.overview.explorer")}
+                      <ExternalLinkIcon className="size-3" aria-hidden="true" />
+                    </a>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TokenTable>
       )}
       {pageCount > 1 ? (
         <ArrowPagination page={page} pageCount={pageCount} onPageChange={setPage} />

@@ -2,7 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
@@ -20,7 +20,7 @@ import {
 } from "./draft-flow-steps.redesign";
 import { type DraftState, draftSchema } from "./draft-model";
 import {
-  readLocalDrafts,
+  type LocalDraft,
   removeLocalDraft,
   restoreDraft,
   saveLocalDraft,
@@ -119,121 +119,61 @@ export function IssuanceDraftFlow({
   walletsError: string | null;
   resumeId: string | null;
 }) {
+  // Browser storage is read after hydration, so the kept draft arrives a render late: hold on
+  // to the first one found and remount the flow on it. Later writes (Save and exit again, or
+  // the copy dropped once SDP stores it) leave the open flow alone.
+  const { drafts } = useLocalDrafts();
+  const stored = resumeId ? (drafts.find((entry) => entry.id === resumeId) ?? null) : null;
+  const [resumeFrom, setResumeFrom] = useState<LocalDraft | null>(null);
+  if (stored && resumeFrom === null) setResumeFrom(stored);
+
+  return (
+    <DraftFlow
+      key={resumeFrom?.id ?? "fresh"}
+      wallets={wallets}
+      walletsError={walletsError}
+      localId={resumeFrom?.id ?? resumeId}
+      resumeFrom={resumeFrom}
+    />
+  );
+}
+
+function DraftFlow({
+  wallets,
+  walletsError,
+  localId: keptId,
+  resumeFrom,
+}: {
+  wallets: PaymentsDashboardWallet[];
+  walletsError: string | null;
+  localId: string | null;
+  resumeFrom: LocalDraft | null;
+}) {
   const t = useTranslations();
-  const router = useRouter();
   const { sdpEnvironment } = useDashboardWorkspace();
-  const [step, setStep] = useState(0);
-  const [classified, setClassified] = useState(false);
-  const [draft, setDraft] = useState<DraftState>(() => initialDraft(wallets));
-  const [access, setAccess] = useState<DraftAccess>("blocklist");
-  const [pending, startTransition] = useTransition();
-  const { storageKey } = useLocalDrafts();
-  const [localId] = useState(() => resumeId ?? crypto.randomUUID());
-  useResumeLocalDraft({
-    resumeId,
+  const {
+    step,
+    setStep,
+    classified,
+    setClassified,
+    draft,
+    setDraft,
+    access,
+    setAccess,
     storageKey,
-    wallets,
-    onResume: (stored) => {
-      setDraft(stored.draft);
-      setAccess(stored.access);
-      setClassified(true);
-      setStep(Math.min(Math.max(stored.step, 0), STEPS.length - 1));
-    },
+    localId,
+  } = useDraftFlowState(wallets, keptId, resumeFrom);
+  const { pending, save, keepLocally } = useDraftSave({
+    draft,
+    access,
+    step,
+    storageKey,
+    localId,
   });
   const update = (changes: Partial<DraftState>) =>
     setDraft((current) => ({ ...current, ...changes }));
 
-  const blocker = stepBlocker(step, draft, classified);
   const savable = classified && draftSchema.safeParse(draft).success;
-  const last = step === STEPS.length - 1;
-
-  // An unfinished draft stays in this browser until it is complete enough for SDP to store.
-  const keepLocally = () => {
-    if (!storageKey) return;
-    saveLocalDraft(storageKey, {
-      id: localId,
-      savedAt: new Date().toISOString(),
-      step,
-      access,
-      draft,
-    });
-    toast.success(t("DashboardIssuance.newDesign.draft.savedLocally"), {
-      description: t("DashboardIssuance.newDesign.draft.savedLocallyBody"),
-      position: "bottom-right",
-    });
-    router.push(LIST_PATH);
-  };
-
-  const save = (destination: "list" | "token") =>
-    startTransition(async () => {
-      const result = await saveIssuanceDraft({ ...draft, allowlist: access === "allowlist" });
-      if (result.state !== "success") {
-        toast.error(t("DashboardIssuance.newDesign.draft.saveFailed"), {
-          description: result.message,
-          position: "bottom-right",
-        });
-        return;
-      }
-      if (storageKey) removeLocalDraft(storageKey, localId);
-      toast.success(
-        destination === "token"
-          ? t("DashboardIssuance.newDesign.draft.created")
-          : t("DashboardIssuance.newDesign.draft.saved"),
-        {
-          description:
-            destination === "token"
-              ? t("DashboardIssuance.newDesign.draft.createdBody", { name: draft.name.trim() })
-              : t("DashboardIssuance.newDesign.draft.savedBody"),
-          position: "bottom-right",
-        }
-      );
-      router.push(
-        destination === "token" && result.tokenId ? `${LIST_PATH}/${result.tokenId}` : LIST_PATH
-      );
-    });
-
-  const footer = (
-    <div className="flex flex-wrap items-center gap-4">
-      {step > 0 ? (
-        <Button variant="outline" disabled={pending} onClick={() => setStep(step - 1)}>
-          {t("DashboardIssuance.newDesign.draft.back")}
-        </Button>
-      ) : null}
-      <p className="order-first w-full min-w-0 text-meta text-secondary md:order-none md:w-auto md:flex-1">
-        {blocker ? t(blocker) : null}
-      </p>
-      <div className="ml-auto flex items-center gap-4">
-        {step === 0 ? (
-          <Button variant="outline" disabled={pending} onClick={() => router.push(LIST_PATH)}>
-            {t("DashboardIssuance.newDesign.draft.exit")}
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            disabled={pending || !(savable || storageKey)}
-            onClick={() => (savable ? save("list") : keepLocally())}
-          >
-            {t("DashboardIssuance.newDesign.draft.saveAndExit")}
-          </Button>
-        )}
-        {last ? (
-          <Button disabled={pending || !savable} onClick={() => save("token")}>
-            {pending
-              ? t("DashboardIssuance.newDesign.draft.creating")
-              : t("DashboardIssuance.newDesign.draft.createDraft")}
-          </Button>
-        ) : (
-          <Button
-            variant={blocker ? "outline" : "default"}
-            disabled={pending || Boolean(blocker)}
-            onClick={() => setStep(step + 1)}
-          >
-            {t("DashboardIssuance.newDesign.draft.continue")}
-          </Button>
-        )}
-      </div>
-    </div>
-  );
 
   return (
     <div className="h-full min-h-0" data-issuance-draft-flow>
@@ -244,7 +184,18 @@ export function IssuanceDraftFlow({
           current: step + 1,
           total: STEPS.length,
         })}
-        footer={footer}
+        footer={
+          <DraftFlowFooter
+            step={step}
+            blocker={stepBlocker(step, draft, classified)}
+            pending={pending}
+            savable={savable}
+            canKeepLocally={Boolean(storageKey)}
+            onStep={setStep}
+            onSave={save}
+            onKeepLocally={keepLocally}
+          />
+        }
       >
         {step === 0 ? (
           <ClassifyStep
@@ -284,33 +235,181 @@ export function IssuanceDraftFlow({
 }
 
 /**
- * Opens the kept draft `resumeId` names, once the project's storage key is known. A draft
- * that is no longer kept (finished or discarded in another tab) leaves the flow fresh.
+ * Back, what the step still needs, then Exit (step one) or Save and exit, and Continue or,
+ * on the last step, Create draft. Save and exit stores a complete draft in SDP and keeps an
+ * unfinished one in this browser.
  */
-function useResumeLocalDraft({
-  resumeId,
-  storageKey,
-  wallets,
-  onResume,
+function DraftFlowFooter({
+  step,
+  blocker,
+  pending,
+  savable,
+  canKeepLocally,
+  onStep,
+  onSave,
+  onKeepLocally,
 }: {
-  resumeId: string | null;
-  storageKey: string | null;
-  wallets: readonly PaymentsDashboardWallet[];
-  onResume: (stored: { draft: DraftState; access: DraftAccess; step: number }) => void;
+  step: number;
+  blocker: MessageKey | null;
+  pending: boolean;
+  savable: boolean;
+  canKeepLocally: boolean;
+  onStep: (step: number) => void;
+  onSave: (destination: "list" | "token") => void;
+  onKeepLocally: () => void;
 }) {
-  const resumed = useRef(false);
-  const onResumeRef = useRef(onResume);
-  onResumeRef.current = onResume;
-  useEffect(() => {
-    if (resumed.current || !resumeId || !storageKey) return;
-    resumed.current = true;
-    const stored = readLocalDrafts(storageKey).find((entry) => entry.id === resumeId);
-    if (!stored) return;
-    const walletIds = new Set(wallets.map((wallet) => wallet.id));
-    onResumeRef.current({
-      draft: restoreDraft(initialDraft(wallets), stored.draft, walletIds),
-      access: stored.access,
-      step: stored.step,
+  const t = useTranslations();
+  const router = useRouter();
+  const last = step === STEPS.length - 1;
+
+  return (
+    <div className="flex flex-wrap items-center gap-4">
+      {step > 0 ? (
+        <Button variant="outline" disabled={pending} onClick={() => onStep(step - 1)}>
+          {t("DashboardIssuance.newDesign.draft.back")}
+        </Button>
+      ) : null}
+      <p className="order-first w-full min-w-0 text-meta text-secondary md:order-none md:w-auto md:flex-1">
+        {blocker ? t(blocker) : null}
+      </p>
+      <div className="ml-auto flex items-center gap-4">
+        {step === 0 ? (
+          <Button variant="outline" disabled={pending} onClick={() => router.push(LIST_PATH)}>
+            {t("DashboardIssuance.newDesign.draft.exit")}
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            disabled={pending || !(savable || canKeepLocally)}
+            onClick={() => (savable ? onSave("list") : onKeepLocally())}
+          >
+            {t("DashboardIssuance.newDesign.draft.saveAndExit")}
+          </Button>
+        )}
+        {last ? (
+          <Button disabled={pending || !savable} onClick={() => onSave("token")}>
+            {pending
+              ? t("DashboardIssuance.newDesign.draft.creating")
+              : t("DashboardIssuance.newDesign.draft.createDraft")}
+          </Button>
+        ) : (
+          <Button
+            variant={blocker ? "outline" : "default"}
+            disabled={pending || Boolean(blocker)}
+            onClick={() => onStep(step + 1)}
+          >
+            {t("DashboardIssuance.newDesign.draft.continue")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Where a draft goes when it leaves the flow: into SDP once it is complete (to its own page,
+ * or back to Issuance), or into this browser while it is not. Storing it in SDP drops the
+ * browser's copy.
+ */
+function useDraftSave({
+  draft,
+  access,
+  step,
+  storageKey,
+  localId,
+}: {
+  draft: DraftState;
+  access: DraftAccess;
+  step: number;
+  storageKey: string | null;
+  localId: string;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  const keepLocally = () => {
+    if (!storageKey) return;
+    saveLocalDraft(storageKey, {
+      id: localId,
+      savedAt: new Date().toISOString(),
+      step,
+      access,
+      draft,
     });
-  }, [resumeId, storageKey, wallets]);
+    toast.success(t("DashboardIssuance.newDesign.draft.savedLocally"), {
+      description: t("DashboardIssuance.newDesign.draft.savedLocallyBody"),
+      position: "bottom-right",
+    });
+    router.push(LIST_PATH);
+  };
+
+  const save = (destination: "list" | "token") =>
+    startTransition(async () => {
+      const result = await saveIssuanceDraft({ ...draft, allowlist: access === "allowlist" });
+      if (result.state !== "success") {
+        toast.error(t("DashboardIssuance.newDesign.draft.saveFailed"), {
+          description: result.message,
+          position: "bottom-right",
+        });
+        return;
+      }
+      if (storageKey) removeLocalDraft(storageKey, localId);
+      const toToken = destination === "token";
+      toast.success(
+        toToken
+          ? t("DashboardIssuance.newDesign.draft.created")
+          : t("DashboardIssuance.newDesign.draft.saved"),
+        {
+          description: toToken
+            ? t("DashboardIssuance.newDesign.draft.createdBody", { name: draft.name.trim() })
+            : t("DashboardIssuance.newDesign.draft.savedBody"),
+          position: "bottom-right",
+        }
+      );
+      router.push(toToken && result.tokenId ? `${LIST_PATH}/${result.tokenId}` : LIST_PATH);
+    });
+
+  return { pending, save, keepLocally };
+}
+
+/**
+ * The flow's state: the step, whether a classification was picked, the draft and its access
+ * list, starting from the kept draft `resumeFrom` when there is one, and the id the browser
+ * keeps it under.
+ */
+function useDraftFlowState(
+  wallets: readonly PaymentsDashboardWallet[],
+  keptId: string | null,
+  resumeFrom: LocalDraft | null
+) {
+  const [step, setStep] = useState(() =>
+    resumeFrom ? Math.min(Math.max(resumeFrom.step, 0), STEPS.length - 1) : 0
+  );
+  const [classified, setClassified] = useState(resumeFrom !== null);
+  const [draft, setDraft] = useState<DraftState>(() =>
+    resumeFrom
+      ? restoreDraft(
+          initialDraft(wallets),
+          resumeFrom.draft,
+          new Set(wallets.map((wallet) => wallet.id))
+        )
+      : initialDraft(wallets)
+  );
+  const [access, setAccess] = useState<DraftAccess>(resumeFrom?.access ?? "blocklist");
+  const { storageKey } = useLocalDrafts();
+  const [localId] = useState(() => keptId ?? crypto.randomUUID());
+
+  return {
+    step,
+    setStep,
+    classified,
+    setClassified,
+    draft,
+    setDraft,
+    access,
+    setAccess,
+    storageKey,
+    localId,
+  };
 }
