@@ -50,8 +50,10 @@ async function CounterpartyPage({
       <CounterpartyWorkspace
         counterparties={directory.data}
         total={directory.total}
+        directoryFailed={!directory.ok}
         accounts={accounts.data}
         accountsTotal={accounts.total}
+        accountsFailed={!accounts.ok}
       />
     );
   });

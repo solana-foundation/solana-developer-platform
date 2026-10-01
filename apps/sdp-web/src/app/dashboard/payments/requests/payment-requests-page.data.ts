@@ -72,37 +72,53 @@ export async function fetchPaymentRequests(
   }
 }
 
-/** The most requests the Requests list loads for local search, filtering and paging. */
-export const PAYMENT_REQUESTS_CAP = 500;
+/** Rows a page of the Requests list shows until the user picks another size. */
+export const PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE = 25;
+
+const PAYMENT_REQUEST_STATUSES = [
+  "awaiting_payment",
+  "paid",
+  "canceled",
+  "expired",
+] as const satisfies readonly PaymentRequest["status"][];
+
+/** The Requests list's page, its size and its status filter, as the URL carries them. */
+export interface PaymentRequestsListState {
+  page: number;
+  pageSize: number;
+  status: PaymentRequest["status"] | null;
+}
+
+function firstParamValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseListInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || !/^\d+$/.test(value)) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return parsed > 0 ? parsed : fallback;
+}
 
 /**
- * The newest payment requests up to `cap`, read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}.
- * The list API has no search, so the Requests list loads this once and searches it locally;
- * `total` is the project's full count, so the list can say when the cap cut it short.
+ * The Requests list's state from its URL. Anything missing or malformed falls back to the
+ * first page, the default size and every status; the size never exceeds what the API serves.
  *
- * @param request - Authenticated SDP API fetcher.
- * @param cap - Most rows to read.
- * @returns The loaded requests and the full total; never throws.
+ * @param params - The route's search params.
+ * @returns The page, its size and the status filter.
  */
-export async function fetchPaymentRequestDirectory(
-  request: SdpApiClient["request"],
-  cap = PAYMENT_REQUESTS_CAP
-): Promise<PaymentRequestsResult> {
-  const first = await fetchPaymentRequests(request, { page: 1 });
-  if (!first.ok) return first;
-  const target = Math.min(first.total, cap);
-  const pages = Math.ceil(target / PAYMENT_REQUESTS_PAGE_SIZE);
-  const rest = await Promise.all(
-    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
-      fetchPaymentRequests(request, { page: index + 2 })
-    )
-  );
-  const failed = rest.find((result) => !result.ok);
-  if (failed) return failed;
+export function parsePaymentRequestsListParams(
+  params: Record<string, string | string[] | undefined>
+): PaymentRequestsListState {
+  const status = firstParamValue(params.status);
   return {
-    ok: true,
-    data: [first, ...rest].flatMap((result) => result.data).slice(0, cap),
-    total: first.total,
+    page: parseListInteger(firstParamValue(params.page), 1),
+    pageSize: Math.min(
+      parseListInteger(firstParamValue(params.pageSize), PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE),
+      PAYMENT_REQUESTS_PAGE_SIZE
+    ),
+    status: PAYMENT_REQUEST_STATUSES.find((candidate) => candidate === status) ?? null,
   };
 }
 
@@ -113,8 +129,8 @@ export type PaymentRequestDetailResult =
 
 /**
  * One payment request by id. The API reads requests only as a list, so this pages through it
- * newest first, as far as the Requests list itself reads ({@link PAYMENT_REQUESTS_CAP}), and
- * stops at the match; a request just created is on the first page.
+ * newest first and stops at the match, or once the pages run out; a request just created is on
+ * the first page.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param requestId - The request's id.
@@ -124,13 +140,13 @@ export async function fetchPaymentRequestDetail(
   request: SdpApiClient["request"],
   requestId: string
 ): Promise<PaymentRequestDetailResult> {
-  const pages = Math.ceil(PAYMENT_REQUESTS_CAP / PAYMENT_REQUESTS_PAGE_SIZE);
-  for (let page = 1; page <= pages; page += 1) {
+  for (let page = 1; ; page += 1) {
     const result = await fetchPaymentRequests(request, { page });
     if (!result.ok) return { status: "error", error: result.error };
     const match = result.data.find((candidate) => candidate.id === requestId);
     if (match) return { status: "found", request: match };
-    if (page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) break;
+    if (result.data.length === 0 || page * PAYMENT_REQUESTS_PAGE_SIZE >= result.total) {
+      return { status: "not_found" };
+    }
   }
-  return { status: "not_found" };
 }

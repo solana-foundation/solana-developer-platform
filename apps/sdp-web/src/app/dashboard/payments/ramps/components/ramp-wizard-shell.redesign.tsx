@@ -1,7 +1,7 @@
 "use client";
 
 import type { Counterparty } from "@sdp/types";
-import { motion } from "motion/react";
+import { domAnimation, LazyMotion, m } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { CounterpartyCreateDialog } from "@/app/dashboard/payments/counterparty/counterparty-create-dialog.redesign";
 import { useThemeScope } from "@/components/theme-scope";
@@ -410,15 +410,17 @@ export function RampWizardShell({
             </div>
           ) : null}
 
-          <motion.div
-            key={stepIndex}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, ease: "easeOut" }}
-            className="space-y-6"
-          >
-            {children}
-          </motion.div>
+          <LazyMotion features={domAnimation}>
+            <m.div
+              key={stepIndex}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="space-y-6"
+            >
+              {children}
+            </m.div>
+          </LazyMotion>
         </div>
       </WizardFrame>
 

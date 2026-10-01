@@ -2,9 +2,10 @@
   "DashboardPayments": {
     "demo": {
       "label": "Demo",
-      "turnOn": "Try Payments with sample data. Nothing you do in demo mode is sent anywhere; it stays in this browser until you reload.",
+      "turnOn": "Try Payments with sample data. Payments, contacts and provider steps in demo mode are simulated and never sent to a provider; they stay in this browser until you reload.",
       "turnOff": "Turn off demo mode",
       "sandboxOnly": "Demo mode runs on sandbox projects. Switch to your sandbox project to try it.",
+      "noPayLink": "Demo requests have no pay link to share. Turn off demo mode to create a real one.",
       "notice": {
         "state": "Demo mode",
         "body": "Sample data for presentation. Every action is simulated."
@@ -473,6 +474,7 @@
       "noCounterpartiesWithSolanaAddress": "No counterparties with a Solana address.",
       "noMatches": "No matches.",
       "addRecipient": "Add {name}",
+      "recipientAmountLabel": "Amount for {name}",
       "totalAmount": "Total {total} {asset}",
       "totalOfAmount": " of {available} {asset}",
       "reviewSummary": "{total} {asset} → {recipients}",
@@ -721,6 +723,9 @@
       "directoryCapped": "Showing the first {count} of {total} contacts. Search and filters cover these.",
       "addressesCapped": "Addresses were loaded for the first {count} of {total} saved accounts. A contact past that shows no address here; open it to see its addresses.",
       "addressNotLoaded": "Not loaded",
+      "addressesLoadFailed": "Saved addresses could not all be loaded, so a contact may show no address here and the address filter is off. Open a contact to see its addresses.",
+      "directoryLoadFailed": "Contacts could not be loaded",
+      "directoryLoadFailedDescription": "Something went wrong reading your contacts. Try again in a moment.",
       "addContact": "Add a contact",
       "detail": {
         "status": "Status",
@@ -730,11 +735,13 @@
         "lastPaid": "Last paid",
         "paidSoFar": "Paid so far",
         "notPaidYet": "Not yet",
+        "notPaidInLatest": "None in the latest {count} transfers",
         "paymentCountOne": "1 payment",
         "paymentCountOther": "{count} payments",
         "paidSummary": "{amounts} over {payments}",
         "paidSummaryPartial": "{amounts} over the latest {payments}",
         "paidInTokens": "{payments} in {count} tokens",
+        "paidInTokensPartial": "The latest {payments}, in {count} tokens",
         "addresses": "Addresses",
         "addAddress": "Add an address",
         "addressName": "Name",
@@ -1393,7 +1400,7 @@
       "searchPlaceholder": "Search requests",
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
-      "directoryCapped": "Showing the newest {count} of {total} requests. Search and filters cover these.",
+      "range": "{from}-{to} of {total} requests",
       "emptyTitle": "You haven't created a request yet",
       "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
       "newRequest": "New request",
