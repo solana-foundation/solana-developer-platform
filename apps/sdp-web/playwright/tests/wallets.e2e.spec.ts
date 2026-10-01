@@ -389,11 +389,13 @@ test.describe
       await page.keyboard.press("Escape");
       await expect(drawer).toBeHidden({ timeout: E2E_POLL_TIMEOUT_MS });
 
-      await page.goto(walletHref, { waitUntil: "domcontentloaded" });
-      await expect(page.locator(`a[href="${auditHref}"]`)).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
-      await page.locator(`a[href="${auditHref}"]`).click();
+      // The wallet's policy history opens from its Policy tab, beside the revisions (the
+      // previous design ignores the tab and shows the same link on the wallet's page).
+      const auditLink = page.getByRole("link", { name: "Policy audit", exact: true });
+      await page.goto(`${walletHref}?tab=policy`, { waitUntil: "domcontentloaded" });
+      await expect(auditLink).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
+      await expect(auditLink).toHaveAttribute("href", auditHref);
+      await auditLink.click();
       await expect(page).toHaveURL(new RegExp(`${auditHref.replaceAll("/", "\\/")}$`));
       await expect(page.getByRole("button", { name: "Revision history" })).toBeVisible({
         timeout: E2E_POLL_TIMEOUT_MS,
