@@ -469,6 +469,32 @@ function vaultBalanceReadBatches(
   return batches;
 }
 
+/** At most two portfolio reads at once, even after a prolonged outage. */
+async function readVaultBalanceBatches(batches: readonly string[][]) {
+  const results: { batch: string[]; positions: EarnVaultPosition[]; minimumSlot?: number }[] = [];
+  let next = 0;
+  let stopped = false;
+  async function readNext(): Promise<void> {
+    if (stopped) return;
+    const index = next++;
+    const batch = batches[index];
+    if (!batch) return;
+    try {
+      let minimumSlot: number | undefined;
+      const positions = await fetchEarnVaultPositions(batch, (slot) => {
+        minimumSlot = Math.max(minimumSlot ?? 0, slot);
+      });
+      results[index] = { batch, positions, minimumSlot };
+      return readNext();
+    } catch (error) {
+      stopped = true;
+      throw error;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(2, batches.length) }, () => readNext()));
+  return results;
+}
+
 export async function readEarnVaultPositions(
   afterMovementIds: readonly string[] = [],
   positionIds?: ReadonlyMap<string, string>
@@ -478,11 +504,9 @@ export async function readEarnVaultPositions(
   const verified = new Map<string, { position: EarnVaultPosition | undefined; slot: number }>();
   let positions: EarnVaultPosition[] = [];
   let minimumSlot: number | undefined;
-  for (const batch of batches) {
-    let batchSlot: number | undefined;
-    positions = await fetchEarnVaultPositions(batch, (slot) => {
-      batchSlot = Math.max(batchSlot ?? 0, slot);
-    });
+  const reads = await readVaultBalanceBatches(batches);
+  for (const { batch, positions: batchPositions, minimumSlot: batchSlot } of reads) {
+    positions = batchPositions;
     if (batchSlot !== undefined) minimumSlot = Math.max(minimumSlot ?? 0, batchSlot);
     if (batches.length > 1) {
       const byId = new Map(positions.map((position) => [position.id, position]));

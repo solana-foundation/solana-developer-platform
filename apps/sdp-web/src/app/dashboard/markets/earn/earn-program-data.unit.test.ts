@@ -1319,3 +1319,36 @@ describe("batched confirmation reads", () => {
     expect(read.positions.map(({ id }) => id)).toEqual(["open"]);
   });
 });
+
+it("limits concurrent confirmation batches to two while draining a large backlog", async () => {
+  const ids = Array.from({ length: 350 }, (_, i) => `movement-${i}`);
+  const positions = new Map(ids.map((id) => [id, "a"]));
+  let active = 0;
+  let maximumActive = 0;
+  const finish: (() => void)[] = [];
+  const fetchMock = vi.fn(async (input: string) => {
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    const batch =
+      new URL(input, "https://example.test").searchParams.get("afterMovementIds")?.split(",") ?? [];
+    await new Promise<void>((resolve) => finish.push(resolve));
+    active -= 1;
+    return Response.json({
+      data: {
+        positions: [vaultPosition("a")],
+        hasMore: false,
+        nextCursor: null,
+        balanceReadContext: { afterMovementIds: batch, minimumSlot: 200 },
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const read = readEarnVaultPositions(ids, positions);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  for (const resolve of finish.splice(0)) resolve();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  expect(maximumActive).toBe(2);
+  for (const resolve of finish.splice(0)) resolve();
+  await expect(read).resolves.toMatchObject({ afterMovementIds: ids, minimumSlot: 200 });
+  expect(active).toBe(0);
+});
