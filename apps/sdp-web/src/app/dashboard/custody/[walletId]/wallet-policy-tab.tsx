@@ -8,7 +8,7 @@ import type {
 import { PauseIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useMemo, useState } from "react";
+import { type ComponentProps, type ReactNode, use, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { updateWalletPolicy } from "@/app/dashboard/payments/payments-workspace.data";
 import { RecordBlock, RecordRow, RecordStack, StateBand } from "@/components/refresh-record";
@@ -137,6 +137,42 @@ function RulesBlock({
   );
 }
 
+interface RecordTableColumn {
+  label: string;
+  /** The column's width, plus its alignment where it isn't left. */
+  className: string;
+}
+
+/**
+ * A record block's table: flush to the block's edges, fixed column widths, and scrolling sideways
+ * on a phone rather than squeezing its columns.
+ */
+function RecordTable({
+  columns,
+  children,
+  ...props
+}: {
+  columns: readonly RecordTableColumn[];
+  children: ReactNode;
+} & Omit<ComponentProps<typeof Table>, "className" | "children">) {
+  return (
+    <div className="overflow-x-auto refresh:-mx-3">
+      <Table className="min-w-[640px] rounded-none border-0 [&_table]:table-fixed" {...props}>
+        <TableHeader>
+          <TableRow>
+            {columns.map((column) => (
+              <TableHead key={column.label} className={cn(PAYMENTS_TABLE_HEAD, column.className)}>
+                {column.label}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>{children}</TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function RevisionsBlock({ result }: { result: WalletRevisionsResult }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -151,62 +187,47 @@ function RevisionsBlock({ result }: { result: WalletRevisionsResult }) {
   if (revisions.length === 0) return null;
   return (
     <RecordBlock title={t("DashboardCustody.policyAuditRevisions")}>
-      <div className="overflow-x-auto refresh:-mx-3">
-        <Table
-          className="min-w-[640px] rounded-none border-0 [&_table]:table-fixed"
-          data-wallet-revisions
-        >
-          <TableHeader>
-            <TableRow>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[18%]")}>
-                {t("DashboardCustody.policyRevision")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[20%]")}>
-                {t("DashboardCustody.walletActivated")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[22%]")}>
-                {t("DashboardCustody.walletRevisionBy")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[40%]")}>
-                {t("DashboardCustody.walletRevisionMessage")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {revisions.map((revision) => (
-              <TableRow key={revision.id}>
-                <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <span className="flex items-center gap-2 font-medium text-primary">
-                    #{revision.revisionNumber}
-                    {revision.isActive ? (
-                      <StatusText tone="positive" className="font-normal">
-                        {t("DashboardCustody.policyRevisionsActive")}
-                      </StatusText>
-                    ) : null}
-                  </span>
-                </TableCell>
-                <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
-                  {formatDate(revision.activatedAt ?? revision.createdAt, locale) ?? "—"}
-                </TableCell>
-                <TableCell className={cn(PAYMENTS_TABLE_CELL, "truncate text-primary")}>
-                  {revision.createdBy
-                    ? (result.userNames[revision.createdBy] ?? shortIdentifier(revision.createdBy))
-                    : t("DashboardCustody.policyRevisionsSystem")}
-                </TableCell>
-                <TableCell className={cn(PAYMENTS_TABLE_CELL, "truncate")}>
-                  {revision.commitMessage ? (
-                    <span className="text-primary" title={revision.commitMessage}>
-                      {revision.commitMessage}
-                    </span>
-                  ) : (
-                    <span className="text-tertiary">{t("DashboardCustody.walletNoMessage")}</span>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <RecordTable
+        data-wallet-revisions
+        columns={[
+          { label: t("DashboardCustody.policyRevision"), className: "w-[18%]" },
+          { label: t("DashboardCustody.walletActivated"), className: "w-[20%]" },
+          { label: t("DashboardCustody.walletRevisionBy"), className: "w-[22%]" },
+          { label: t("DashboardCustody.walletRevisionMessage"), className: "w-[40%]" },
+        ]}
+      >
+        {revisions.map((revision) => (
+          <TableRow key={revision.id}>
+            <TableCell className={PAYMENTS_TABLE_CELL}>
+              <span className="flex items-center gap-2 font-medium text-primary">
+                #{revision.revisionNumber}
+                {revision.isActive ? (
+                  <StatusText tone="positive" className="font-normal">
+                    {t("DashboardCustody.policyRevisionsActive")}
+                  </StatusText>
+                ) : null}
+              </span>
+            </TableCell>
+            <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
+              {formatDate(revision.activatedAt ?? revision.createdAt, locale) ?? "—"}
+            </TableCell>
+            <TableCell className={cn(PAYMENTS_TABLE_CELL, "truncate text-primary")}>
+              {revision.createdBy
+                ? (result.userNames[revision.createdBy] ?? shortIdentifier(revision.createdBy))
+                : t("DashboardCustody.policyRevisionsSystem")}
+            </TableCell>
+            <TableCell className={cn(PAYMENTS_TABLE_CELL, "truncate")}>
+              {revision.commitMessage ? (
+                <span className="text-primary" title={revision.commitMessage}>
+                  {revision.commitMessage}
+                </span>
+              ) : (
+                <span className="text-tertiary">{t("DashboardCustody.walletNoMessage")}</span>
+              )}
+            </TableCell>
+          </TableRow>
+        ))}
+      </RecordTable>
     </RecordBlock>
   );
 }
@@ -234,65 +255,45 @@ function DecisionsBlock({
         </Button>
       }
     >
-      <div className="overflow-x-auto refresh:-mx-3">
-        <Table
-          className="min-w-[640px] rounded-none border-0 [&_table]:table-fixed"
-          data-wallet-decisions
-        >
-          <TableHeader>
-            <TableRow>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[34%]")}>
-                {t("DashboardCustody.walletOperation")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[22%]")}>
-                {t("DashboardCustody.policyAuditDecision")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[24%] text-right")}>
-                {t("DashboardCustody.walletAmount")}
-              </TableHead>
-              <TableHead className={cn(PAYMENTS_TABLE_HEAD, "w-[20%]")}>
-                {t("DashboardCustody.policyAuditEvaluated")}
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {evaluations.map((evaluation) => (
-              <TableRow key={evaluation.policyEvaluationId}>
-                <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <span className="block truncate font-medium text-primary">
-                    {familyName(evaluation.operationFamily)}
-                  </span>
-                  <span className="block truncate text-tertiary">{evaluation.operationType}</span>
-                </TableCell>
-                <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <StatusText tone={DECISION_TONE[evaluation.decision]}>
-                    {decisionLabel(evaluation.decision, t)}
-                  </StatusText>
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    PAYMENTS_TABLE_CELL,
-                    "truncate text-right text-primary tabular-nums"
-                  )}
-                >
-                  {evaluation.amount ? (
-                    `${evaluation.amount}${
-                      evaluation.asset
-                        ? ` ${resolveTransferTokenLabel(evaluation.asset, symbols)}`
-                        : ""
-                    }`
-                  ) : (
-                    <span className="text-tertiary">{t("DashboardCustody.walletNoAmount")}</span>
-                  )}
-                </TableCell>
-                <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
-                  {formatDate(evaluation.evaluatedAt, locale) ?? "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <RecordTable
+        data-wallet-decisions
+        columns={[
+          { label: t("DashboardCustody.walletOperation"), className: "w-[34%]" },
+          { label: t("DashboardCustody.policyAuditDecision"), className: "w-[22%]" },
+          { label: t("DashboardCustody.walletAmount"), className: "w-[24%] text-right" },
+          { label: t("DashboardCustody.policyAuditEvaluated"), className: "w-[20%]" },
+        ]}
+      >
+        {evaluations.map((evaluation) => (
+          <TableRow key={evaluation.policyEvaluationId}>
+            <TableCell className={PAYMENTS_TABLE_CELL}>
+              <span className="block truncate font-medium text-primary">
+                {familyName(evaluation.operationFamily)}
+              </span>
+              <span className="block truncate text-tertiary">{evaluation.operationType}</span>
+            </TableCell>
+            <TableCell className={PAYMENTS_TABLE_CELL}>
+              <StatusText tone={DECISION_TONE[evaluation.decision]}>
+                {decisionLabel(evaluation.decision, t)}
+              </StatusText>
+            </TableCell>
+            <TableCell
+              className={cn(PAYMENTS_TABLE_CELL, "truncate text-right text-primary tabular-nums")}
+            >
+              {evaluation.amount ? (
+                `${evaluation.amount}${
+                  evaluation.asset ? ` ${resolveTransferTokenLabel(evaluation.asset, symbols)}` : ""
+                }`
+              ) : (
+                <span className="text-tertiary">{t("DashboardCustody.walletNoAmount")}</span>
+              )}
+            </TableCell>
+            <TableCell className={cn(PAYMENTS_TABLE_CELL, "text-primary tabular-nums")}>
+              {formatDate(evaluation.evaluatedAt, locale) ?? "—"}
+            </TableCell>
+          </TableRow>
+        ))}
+      </RecordTable>
     </RecordBlock>
   );
 }

@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 import {
   WalletDetailSkeleton as LegacyWalletDetailSkeleton,
   WalletSetupSkeleton as LegacyWalletSetupSkeleton,
-  WalletsOnboardingSkeleton as LegacyWalletsOnboardingSkeleton,
   WalletsOverviewSkeleton as LegacyWalletsOverviewSkeleton,
 } from "./wallet-route-skeletons";
 
@@ -30,23 +29,6 @@ function LoadingRegion({
   return (
     <div aria-busy="true" className={className} data-wallet-loading-layout={layout}>
       {children}
-    </div>
-  );
-}
-
-function MetadataRows({ count = 4 }: { count?: 3 | 4 }) {
-  const rows = count === 3 ? THREE_ITEMS : FOUR_ITEMS;
-  return (
-    <div className="overflow-hidden rounded-2xl border border-border-subtle bg-fill-subtle">
-      {rows.map((row) => (
-        <div
-          key={row}
-          className="flex min-h-11 items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-b-0"
-        >
-          <Pulse className="h-4 w-24" />
-          <Pulse className="h-4 w-36 sm:w-44" />
-        </div>
-      ))}
     </div>
   );
 }
@@ -88,23 +70,6 @@ export function CurrentWalletsOverviewSkeleton() {
         </div>
       </LoadingRegion>
     </DashboardWorkspaceOverviewPanel>
-  );
-}
-
-export function CurrentWalletsOnboardingSkeleton() {
-  return (
-    <LoadingRegion layout="wallets-onboarding">
-      <section className="rounded-[24px] border border-border-subtle bg-surface-raised">
-        <div className="space-y-3 border-b border-border-subtle px-6 py-5">
-          <Pulse className="h-6 w-64 max-w-full" />
-          <Pulse className="h-4 w-[min(34rem,80%)]" />
-        </div>
-        <div className="space-y-4 p-6">
-          <MetadataRows count={3} />
-          <Pulse className="h-4 w-[min(38rem,90%)]" />
-        </div>
-      </section>
-    </LoadingRegion>
   );
 }
 
@@ -218,17 +183,18 @@ export function CurrentWalletDetailSkeleton() {
   );
 }
 
-// The policy, audit and connection pages are the same in both designs, so their skeletons are
-// the base design's own.
+// The policy, audit and connection pages and the onboarding fallback are the same in both
+// designs, so their skeletons are the base design's own.
 export {
   WalletConnectionsListSkeleton,
   WalletPolicyAuditDetailSkeleton,
   WalletPolicyAuditListSkeleton,
   WalletPolicySkeleton,
+  WalletsOnboardingSkeleton,
 } from "./wallet-route-skeletons";
 
 // The Wallets list, setup and wallet page were redesigned for NEW DESIGN; the previous design keeps
-// its own skeletons for them (the policy, audit and connection pages are the same in both). These
+// its own skeletons for them (the pages re-exported above are the same in both). These
 // pick by the flag for route loading files; the shell's loading map picks with the flag it has.
 
 export function WalletsOverviewSkeleton() {
@@ -237,16 +203,6 @@ export function WalletsOverviewSkeleton() {
       designModule="wallets"
       current={<CurrentWalletsOverviewSkeleton />}
       legacy={<LegacyWalletsOverviewSkeleton />}
-    />
-  );
-}
-
-export function WalletsOnboardingSkeleton() {
-  return (
-    <DesignSwitch
-      designModule="wallets"
-      current={<CurrentWalletsOnboardingSkeleton />}
-      legacy={<LegacyWalletsOnboardingSkeleton />}
     />
   );
 }
