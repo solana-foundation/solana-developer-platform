@@ -76,6 +76,11 @@ transaction fee; the separate 50 bps DEX tolerance is only a slippage bound.
 - Cancellation is deliberately not pause- or oracle-gated. It releases an
   obligation and Hastra's program permits it while paused, but it can still
   fail when the wYLDS account is frozen and its delegate must be revoked.
+- A cancel leaves wYLDS in the canonical ATA, and that wYLDS is still the
+  PRIME position's money. `readVaultPositions` reports it as `parIntermediate`
+  (balance minus whatever is delegated to the redeem authority, which an open
+  request owns) and returns the position while it is non-zero even with no
+  PRIME, so the API never closes or hides it.
 - Lifecycle decoding accepts `Program data:` only while the pinned vault-mint
   program is the active invocation frame, derives the request PDA from the
   event owner, checks both mints, and uses finalized transaction `blockTime`.

@@ -22,7 +22,7 @@ import * as repositories from "@/db/repositories";
 import type { BvnkCustomerProviderAccountMetadata } from "@/db/repositories/counterparty-provider-account.repository";
 import app from "@/index";
 import { bvnkCustomerLinkProviderStatus } from "@/routes/counterparty-provider-accounts/handlers";
-import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/handlers/ramps/bvnk";
+import { bvnkCustomerRequirementsFromMetadata } from "@/routes/payments/ramps/providers/bvnk";
 import { RAMP_WEBHOOK_EVENT_MAX_ATTEMPTS } from "@/services/jobs/replay-ramp-webhook-events";
 import { SessionService } from "@/services/session.service";
 import {

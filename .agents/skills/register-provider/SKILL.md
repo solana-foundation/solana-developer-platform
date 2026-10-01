@@ -52,9 +52,8 @@ Update every applicable site:
 |---|---|
 | `apps/sdp-api/src/services/provider-availability.service.ts` | label plus prod/sandbox credential completeness; `testMode === undefined` means either configured mode |
 | `apps/sdp-api/src/services/provider-setup-registry.ts` | add `rampSetup("<id>")`; ramps are deployment-managed today |
-| `apps/sdp-api/src/routes/payments/schemas.ts` | add the provider-specific submit-requirements schema arm |
-| `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the id only to the directions actually supported |
-| `apps/sdp-api/src/routes/payments/handlers/ramps.ts` | add quote and `advanceCounterpartyRequirements` branches for every provider; unsupported directions reject explicitly; keep DB work here or in `handlers/ramps/<id>.ts` |
+| `apps/sdp-api/src/routes/counterparties/schemas.ts` | add the provider-specific submit-requirements schema arm; add the id only to the directions actually supported |
+| `apps/sdp-api/src/routes/payments/ramps/{onramp,offramp}/handlers.ts` + `ramps/shared.ts` | add quote branches per direction and `advanceCounterpartyRequirements` branches in `shared.ts` for every provider; unsupported directions reject explicitly; keep DB work here or in `ramps/providers/<id>.ts` |
 | `apps/sdp-api/src/routes/webhooks/handlers.ts` | register a processor, or explicitly add the id to the excluded no-webhook providers |
 
 Availability is tri-state by environment:

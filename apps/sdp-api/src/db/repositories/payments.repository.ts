@@ -287,6 +287,31 @@ export interface PaymentsRepository {
     providerData: Record<string, unknown>;
     updatedAt: string;
   }): Promise<PaymentTransferRow | null>;
+  /**
+   * Removes a claim written by `claimTransferProviderData` when the guarded
+   * action definitively did not happen. The delete applies only when the row
+   * still holds the exact claim value the caller wrote and is still in the
+   * status the claim was made from, so a claim taken by another caller in
+   * between is never released.
+   *
+   * @param input.transferId - The transfer holding the claim.
+   * @param input.organizationId - Tenant scope.
+   * @param input.projectId - Tenant scope.
+   * @param input.expectedStatus - The status the claim was made from.
+   * @param input.claimPath - JSON path inside provider_data to remove.
+   * @param input.claimValue - The exact value currently expected at claimPath.
+   * @param input.updatedAt - Timestamp written on success.
+   * @returns The updated row, or null when the claim was not ours or the row moved.
+   */
+  releaseTransferProviderDataClaim(input: {
+    transferId: string;
+    organizationId: string;
+    projectId: string | null;
+    expectedStatus: PaymentTransferStatus;
+    claimPath: readonly string[];
+    claimValue: Record<string, unknown>;
+    updatedAt: string;
+  }): Promise<PaymentTransferRow | null>;
   listTransfersByStatus(params: ListTransfersByStatusInput): Promise<PaymentTransferRow[]>;
   /**
    * Lists the page of confirmed transfers whose finalization should be polled

@@ -59,6 +59,35 @@ jobs:
           I18N_BASE_REPOSITORY: ${{ github.repository }}
         run: node .github/scripts/check-catalog-change-policy.mjs
 
+  migration_compat_policy:
+    name: Migration Compatibility Policy
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 10.16.0
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Require rollback-safe migrations
+        env:
+          MIGRATION_COMPAT_BASE_REF: origin/${{ github.base_ref }}
+        run: pnpm check:migration-compat
+
   module_boundaries:
     name: Module Boundaries
     runs-on: ubuntu-latest

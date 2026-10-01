@@ -60,6 +60,11 @@ export interface CreateWalletParams {
   purpose?: WalletPurpose;
 }
 
+export interface PreviousDefaultWallet {
+  custody_wallet_id: string | null;
+  wallet_id: string | null;
+}
+
 export type DeactivateWalletResult = "deactivated" | "wallet_not_found" | "last_wallet";
 
 // Database row types (snake_case)
@@ -407,15 +412,9 @@ export class CustodyConfigStore implements SigningConfigStore {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * Create a wallet record associated with a custody config. With
-   * `setDefault`, the insert and the config's default-wallet promotion land
-   * in one atomic batch.
+   * Create a wallet record associated with a custody config.
    */
-  async createWallet(
-    configId: string,
-    params: CreateWalletParams,
-    options: { setDefault?: boolean } = {}
-  ): Promise<CustodyConfigWallet> {
+  async createWallet(configId: string, params: CreateWalletParams): Promise<CustodyConfigWallet> {
     const id = `cwlt_${crypto.randomUUID()}`;
 
     const statements: PreparedStatement[] = [
@@ -443,18 +442,6 @@ export class CustodyConfigStore implements SigningConfigStore {
         ),
     ];
 
-    if (options.setDefault) {
-      statements.push(
-        this.db
-          .prepare(
-            `UPDATE custody_configs
-             SET default_wallet_id = ?, updated_at = datetime('now')
-             WHERE id = ?`
-          )
-          .bind(params.walletId, configId)
-      );
-    }
-
     await this.db.batch(statements);
 
     const row = await this.db
@@ -467,6 +454,67 @@ export class CustodyConfigStore implements SigningConfigStore {
     }
 
     return this.mapWalletRow(row);
+  }
+
+  /**
+   * Create a wallet record and promote it to the config's default in one
+   * transaction, returning the default it replaced. Returns null without
+   * writing when the config no longer exists.
+   */
+  async createDefaultWallet(
+    configId: string,
+    orgId: string,
+    projectId: string | undefined,
+    params: CreateWalletParams & { id: string }
+  ): Promise<{ wallet: CustodyConfigWallet; previous: PreviousDefaultWallet } | null> {
+    const result = await this.db.transaction(async (tx) => {
+      const current = await tx.queryOne<PreviousDefaultWallet>(
+        `SELECT w.id AS custody_wallet_id, c.default_wallet_id AS wallet_id
+         FROM custody_configs c
+         LEFT JOIN custody_wallets w
+           ON w.custody_config_id = c.id AND w.wallet_id = c.default_wallet_id
+         WHERE c.id = ? AND c.organization_id = ? AND c.project_id IS NOT DISTINCT FROM ?
+         FOR UPDATE OF c`,
+        [configId, orgId, projectId ?? null]
+      );
+      if (!current) return null;
+
+      const row = await tx.queryOne<CustodyWalletRow>(
+        `INSERT INTO custody_wallets (
+           id,
+           custody_config_id,
+           wallet_id,
+           public_key,
+           label,
+           purpose,
+           status,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, 'active', STRFTIME('%Y-%m-%dT%H:%M:%fZ','now'))
+         RETURNING *`,
+        [
+          params.id,
+          configId,
+          params.walletId,
+          params.publicKey,
+          params.label ?? null,
+          params.purpose ?? null,
+        ]
+      );
+      if (!row) {
+        throw new Error("Failed to create wallet");
+      }
+      await tx.execute(
+        `UPDATE custody_configs
+         SET default_wallet_id = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+        [params.walletId, configId]
+      );
+      return { row, previous: current };
+    });
+    if (!result) return null;
+
+    return { wallet: this.mapWalletRow(result.row), previous: result.previous };
   }
 
   /**

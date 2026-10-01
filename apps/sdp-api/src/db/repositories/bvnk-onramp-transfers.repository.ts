@@ -96,11 +96,6 @@ export interface MarkBvnkOnrampPayoutPolledInput {
   polledAt: string;
 }
 
-export interface ClaimBvnkOnrampPayinSimulationInput {
-  transferId: string;
-  requestedAt: string;
-}
-
 export interface BvnkOnrampTransfersRepository {
   /** Reads a BVNK on-ramp transfer by its persisted pay-in id, scoped to the owning project's environment. */
   getByPayinId(input: GetBvnkOnrampTransferByPayinIdInput): Promise<PaymentTransferRow | null>;
@@ -175,10 +170,5 @@ export interface BvnkOnrampTransfersRepository {
    */
   touchPayoutCandidate(
     input: TouchBvnkOnrampPayoutCandidateInput
-  ): Promise<PaymentTransferRow | null>;
-
-  /** Claims the sandbox simulation slot first-write-wins while the transfer is still awaiting payment (R15). */
-  claimPayinSimulation(
-    input: ClaimBvnkOnrampPayinSimulationInput
   ): Promise<PaymentTransferRow | null>;
 }

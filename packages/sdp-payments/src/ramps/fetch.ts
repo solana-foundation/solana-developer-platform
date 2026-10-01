@@ -36,6 +36,29 @@ export function classifyProviderStatus(status: number): SdpPaymentsErrorCode {
 }
 
 /**
+ * Whether a provider call failed with a response that proves the provider
+ * received the request and refused it, so the requested action was never
+ * created. Only a 4xx other than 408 and 409 carries that proof: a transport
+ * failure, a client timeout, or a 408 may have landed after the provider
+ * processed the request, a 409 typically means an earlier request with the
+ * same key already went through, and a 5xx may have committed before failing,
+ * so all of those stay ambiguous and callers must not undo a once-only claim
+ * on them.
+ *
+ * @param error - The value thrown by a provider client call.
+ * @returns True when the error carries a 4xx `providerStatus` other than 408 and 409.
+ */
+export function isDefinitiveProviderRejection(error: unknown): boolean {
+  if (!(error instanceof SdpPaymentsError) || error.details === undefined) {
+    return false;
+  }
+  const status = error.details.providerStatus;
+  return (
+    typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 409
+  );
+}
+
+/**
  * Ramp providers validate the counterparty fields we submit and echo them back
  * in the failure ("email jane@doe.test is already registered", "phone must be
  * E.164"). That message becomes an `SdpPaymentsError` that is both logged and
