@@ -30,6 +30,7 @@ vi.mock("@/contexts/dashboard-workspace-context", () => ({
     dashboardAccess: {
       capabilities: { canReadApprovals: true, canManageOrgSettings: true },
     },
+    dashboardCacheScope: { orgId: "org-sidebar-scope", userId: "user-sidebar-scope" },
     selectedProjectId: "project-sidebar-scope",
     isSidebarOpen: true,
     setSidebarOpen: () => undefined,
