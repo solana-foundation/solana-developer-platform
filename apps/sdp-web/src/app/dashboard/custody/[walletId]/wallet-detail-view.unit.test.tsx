@@ -108,6 +108,7 @@ const policy: PaymentWalletPolicy = {
 
 const wallet: ComponentProps<typeof WalletDetailView>["wallet"] = {
   walletId: "wallet_one",
+  custodyWalletId: "cwlt_one",
   name: "Settlement Fireblocks",
   label: "Settlement Fireblocks",
   publicKey: "gZeTc7Hq9mXw2JDUBSDgZeTc7Hq9mXw2JDUBSD",
@@ -267,6 +268,30 @@ describe("Activity", () => {
       target: { value: "a046" },
     });
     expect(screen.getAllByText(/xfr_/)).toHaveLength(1);
+    expect(document.querySelector("[data-wallet-activity-capped]")).toBeNull();
+  });
+
+  it("sends a full feed's older history to the Transactions ledger for this wallet", async () => {
+    mocks.tab = "activity";
+    const [first] = mocks.activity.activityRows as { id: string }[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: Array.from({ length: 20 }, (_, index) => ({
+        ...first,
+        id: `payment-xfr_row_${index}`,
+      })),
+    };
+    await act(async () => {
+      renderView();
+    });
+    expect(
+      await screen.findByText(
+        /Showing the latest 20 transactions\. Older ones are in Transactions\./
+      )
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Transactions" }).getAttribute("href")).toBe(
+      "/dashboard/payments/transactions?custodyWalletId=cwlt_one"
+    );
   });
 });
 

@@ -14,9 +14,28 @@ type Translate = (key: MessageKey, values?: TranslationValues) => string;
 /** "Aug 12, 2026". */
 export const POLICY_DATE: Intl.DateTimeFormatOptions = { dateStyle: "medium" };
 
+/**
+ * How many rows the wallet's activity feed returns, newest first: the cap
+ * `loadWalletActivity` (custody/wallet-activity.data.ts) reads with.
+ */
+export const WALLET_ACTIVITY_FEED_LIMIT = 20;
+
+/** The Transactions ledger narrowed to one wallet, where its whole history pages. */
+export function walletTransactionsHref(custodyWalletId: string): string {
+  return `/dashboard/payments/transactions?${new URLSearchParams({ custodyWalletId })}`;
+}
+
+/** The transfer or transaction id the row carries, without the feed's source prefix. */
+export function activityDisplayId(id: string): string {
+  const bare = id.replace(/^(payment|issuance)-/, "");
+  return bare.length > 14 ? `${bare.slice(0, 8)}…${bare.slice(-4)}` : bare;
+}
+
 /** What the wallet's page shows about the wallet itself, resolved on the server. */
 export interface WalletPageView {
   walletId: string;
+  /** The custody record's own id, which the Transactions ledger filters by. */
+  custodyWalletId: string;
   /** The label, or "Untitled wallet". */
   name: string;
   publicKey: string;

@@ -209,6 +209,7 @@ export default async function WalletDetailPage({
 
   const view: WalletPageView = {
     walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
     name: wallet.label?.trim() || t("DashboardCustody.untitledWallet"),
     label: wallet.label?.trim() || null,
     publicKey: wallet.publicKey,
