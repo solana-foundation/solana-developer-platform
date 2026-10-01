@@ -65,8 +65,9 @@ function recordValue(page: Page, label: string) {
  * would otherwise pass against the empty loading state.
  */
 async function openLoadedComplianceList(page: Page, tokenId: string): Promise<void> {
-  await gotoToken(page, tokenId, "compliance");
-  const tab = page.locator('[data-token-page="compliance"]');
+  const compliance: TokenTab = "compliance";
+  await gotoToken(page, tokenId, compliance);
+  const tab = page.locator(`[data-token-page="${compliance}"]`);
   await expect(
     tab.getByText("Nothing is on the list yet").or(tab.locator("tbody tr").first())
   ).toBeVisible({ timeout: 60_000 });
