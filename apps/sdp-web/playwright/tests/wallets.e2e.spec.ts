@@ -5,6 +5,7 @@ import {
   type Token,
   type TokenTransaction,
 } from "@sdp/types";
+import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { createLocalApiClient, type LocalApiClient } from "../support/local-api-client";
 import {
   bootstrapLocalWalletFixtures,
@@ -761,6 +762,10 @@ test.describe
         });
       });
 
+      // The page runs on Playwright's clock (time still flows) so the test can step past SWR's
+      // dedupe window instead of sleeping through it.
+      await page.clock.install();
+
       // The wallet's page opens on Overview, whose recent activity reads the feed straight away;
       // the whole feed is on the Activity tab (`?tab=activity`). Both read the same window.
       await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
@@ -783,14 +788,22 @@ test.describe
       await expect(activityTab.locator(rowSelector)).toBeVisible();
 
       // The feed refreshes itself every 20s, and at once on reconnecting; that read now fails.
+      // SWR serves any read within `dedupingInterval` of the last one from that read, so a
+      // reconnect straight after the Activity tab loaded would never reach the route. Each try
+      // jumps the page clock past that window, then reconnects; a 20s poll that comes due on the
+      // way is a failing refresh too. Further tries only add more failing reads.
       failNextActivityRequest = true;
       const requestCountBeforeFailure = activityRequestCount;
-      await page.evaluate(() => {
-        window.dispatchEvent(new Event("offline"));
-        window.dispatchEvent(new Event("online"));
-      });
+      const dedupeWindowMs = DASHBOARD_SWR_CONFIG.dedupingInterval ?? 2_000;
       await expect
-        .poll(() => activityRequestCount, E2E_POLL_OPTIONS)
+        .poll(async () => {
+          await page.clock.fastForward(dedupeWindowMs + 1_000);
+          await page.evaluate(() => {
+            window.dispatchEvent(new Event("offline"));
+            window.dispatchEvent(new Event("online"));
+          });
+          return activityRequestCount;
+        }, E2E_POLL_OPTIONS)
         .toBeGreaterThan(requestCountBeforeFailure);
 
       const refreshFailed = page.getByText("Wallet activity is unavailable right now.");
