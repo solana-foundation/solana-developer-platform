@@ -129,10 +129,36 @@ export function RecurringPaymentEditForm({
     selectedCustodyWalletId: fields.sourceCustodyWalletId,
   });
   const assetOptions = recurringPaymentAssetOptions(selectedWallet ?? wallet, {}, t);
+  const walletChanged = fields.sourceCustodyWalletId !== recurringPayment.sourceCustodyWalletId;
+  // Another wallet funds the schedule only in a token it holds; the schedule's own wallet keeps
+  // its token even when its balance has run out.
+  const tokenOffered = assetOptions.some((option) => option.value === fields.token);
+
+  const changeWallet = (sourceCustodyWalletId: string) => {
+    const nextWallet = liveWallets.find((entry) => entry.id === sourceCustodyWalletId);
+    const nextOptions = recurringPaymentAssetOptions(nextWallet ?? null, {}, t);
+    setFields((current) => {
+      // Back on the schedule's own wallet, a token cleared on the way picks up the schedule's.
+      if (sourceCustodyWalletId === recurringPayment.sourceCustodyWalletId) {
+        return {
+          ...current,
+          sourceCustodyWalletId,
+          token: current.token || recurringPayment.token,
+        };
+      }
+      const keepsToken = nextOptions.some((option) => option.value === current.token);
+      return { ...current, sourceCustodyWalletId, token: keepsToken ? current.token : "" };
+    });
+    setValidationError(null);
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (saveDisabled) return;
+    if (walletChanged && !tokenOffered) {
+      setValidationError(t("DashboardPayments.recurring.selectCurrency"));
+      return;
+    }
     const result = editUpdates(fields, recurringPayment, t);
     if ("error" in result) {
       setValidationError(result.error);
@@ -199,7 +225,7 @@ export function RecurringPaymentEditForm({
         <Combobox
           label={t("DashboardPayments.recurring.fundingWallet")}
           value={fields.sourceCustodyWalletId}
-          onChange={(value) => setField("sourceCustodyWalletId", value)}
+          onChange={changeWallet}
           options={liveWallets.map((entry) => ({
             value: entry.id,
             label: walletLabel(entry, entry.walletId),
