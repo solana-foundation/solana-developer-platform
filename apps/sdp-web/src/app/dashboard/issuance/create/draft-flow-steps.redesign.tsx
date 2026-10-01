@@ -16,8 +16,9 @@ import { useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { IssuanceCheckRow } from "../issuance-checkbox.redesign";
 import { type AuthorityKey, type DraftState, isDraftAuthorityInUse } from "./draft-model";
+import type { DraftAccess } from "./local-drafts.redesign";
 
-export type DraftAccess = "blocklist" | "allowlist" | "off";
+export type { DraftAccess };
 
 /** The flow's draft: the saved draft's fields, and the access list as the design picks it. */
 export interface FlowDraft {

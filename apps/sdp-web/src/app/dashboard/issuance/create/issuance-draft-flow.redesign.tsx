@@ -2,7 +2,7 @@
 
 import type { PaymentsDashboardWallet } from "@sdp/types";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { WizardFrame } from "@/components/wizard-frame";
@@ -19,6 +19,13 @@ import {
   ReviewStep,
 } from "./draft-flow-steps.redesign";
 import { type DraftState, draftSchema } from "./draft-model";
+import {
+  readLocalDrafts,
+  removeLocalDraft,
+  restoreDraft,
+  saveLocalDraft,
+  useLocalDrafts,
+} from "./local-drafts.redesign";
 
 const STEPS: { label: MessageKey; title: MessageKey }[] = [
   {
@@ -100,14 +107,17 @@ function stepBlocker(step: number, draft: DraftState, classified: boolean): Mess
 /**
  * A new draft, as the design takes it: what the token is, its details, what it can do, who
  * holds its keys, then a review. Nothing reaches the chain; the draft is stored in SDP and
- * opens on its own page with Deploy token.
+ * opens on its own page with Deploy token. The API takes only a complete draft, so one left
+ * unfinished is kept in this browser, and opens again from Issuance (`resumeId`).
  */
 export function IssuanceDraftFlow({
   wallets,
   walletsError,
+  resumeId,
 }: {
   wallets: PaymentsDashboardWallet[];
   walletsError: string | null;
+  resumeId: string | null;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -117,12 +127,42 @@ export function IssuanceDraftFlow({
   const [draft, setDraft] = useState<DraftState>(() => initialDraft(wallets));
   const [access, setAccess] = useState<DraftAccess>("blocklist");
   const [pending, startTransition] = useTransition();
+  const { storageKey } = useLocalDrafts();
+  const [localId] = useState(() => resumeId ?? crypto.randomUUID());
+  useResumeLocalDraft({
+    resumeId,
+    storageKey,
+    wallets,
+    onResume: (stored) => {
+      setDraft(stored.draft);
+      setAccess(stored.access);
+      setClassified(true);
+      setStep(Math.min(Math.max(stored.step, 0), STEPS.length - 1));
+    },
+  });
   const update = (changes: Partial<DraftState>) =>
     setDraft((current) => ({ ...current, ...changes }));
 
   const blocker = stepBlocker(step, draft, classified);
   const savable = classified && draftSchema.safeParse(draft).success;
   const last = step === STEPS.length - 1;
+
+  // An unfinished draft stays in this browser until it is complete enough for SDP to store.
+  const keepLocally = () => {
+    if (!storageKey) return;
+    saveLocalDraft(storageKey, {
+      id: localId,
+      savedAt: new Date().toISOString(),
+      step,
+      access,
+      draft,
+    });
+    toast.success(t("DashboardIssuance.newDesign.draft.savedLocally"), {
+      description: t("DashboardIssuance.newDesign.draft.savedLocallyBody"),
+      position: "bottom-right",
+    });
+    router.push(LIST_PATH);
+  };
 
   const save = (destination: "list" | "token") =>
     startTransition(async () => {
@@ -134,6 +174,7 @@ export function IssuanceDraftFlow({
         });
         return;
       }
+      if (storageKey) removeLocalDraft(storageKey, localId);
       toast.success(
         destination === "token"
           ? t("DashboardIssuance.newDesign.draft.created")
@@ -167,7 +208,11 @@ export function IssuanceDraftFlow({
             {t("DashboardIssuance.newDesign.draft.exit")}
           </Button>
         ) : (
-          <Button variant="outline" disabled={pending || !savable} onClick={() => save("list")}>
+          <Button
+            variant="outline"
+            disabled={pending || !(savable || storageKey)}
+            onClick={() => (savable ? save("list") : keepLocally())}
+          >
             {t("DashboardIssuance.newDesign.draft.saveAndExit")}
           </Button>
         )}
@@ -236,4 +281,36 @@ export function IssuanceDraftFlow({
       </WizardFrame>
     </div>
   );
+}
+
+/**
+ * Opens the kept draft `resumeId` names, once the project's storage key is known. A draft
+ * that is no longer kept (finished or discarded in another tab) leaves the flow fresh.
+ */
+function useResumeLocalDraft({
+  resumeId,
+  storageKey,
+  wallets,
+  onResume,
+}: {
+  resumeId: string | null;
+  storageKey: string | null;
+  wallets: readonly PaymentsDashboardWallet[];
+  onResume: (stored: { draft: DraftState; access: DraftAccess; step: number }) => void;
+}) {
+  const resumed = useRef(false);
+  const onResumeRef = useRef(onResume);
+  onResumeRef.current = onResume;
+  useEffect(() => {
+    if (resumed.current || !resumeId || !storageKey) return;
+    resumed.current = true;
+    const stored = readLocalDrafts(storageKey).find((entry) => entry.id === resumeId);
+    if (!stored) return;
+    const walletIds = new Set(wallets.map((wallet) => wallet.id));
+    onResumeRef.current({
+      draft: restoreDraft(initialDraft(wallets), stored.draft, walletIds),
+      access: stored.access,
+      step: stored.step,
+    });
+  }, [resumeId, storageKey, wallets]);
 }

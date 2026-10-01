@@ -1543,7 +1543,9 @@
         "saved": "Draft saved",
         "savedBody": "You can finish it from Issuance whenever you like.",
         "created": "Draft created",
-        "createdBody": "{name} is stored in SDP. Nothing is on chain yet."
+        "createdBody": "{name} is stored in SDP. Nothing is on chain yet.",
+        "savedLocally": "Draft kept on this device",
+        "savedLocallyBody": "It isn’t in SDP until it’s complete. Finish it from Issuance in this browser."
       },
       "list": {
         "emptyTitle": "You haven’t drafted a token yet",
@@ -1837,6 +1839,16 @@
           "update": "Settings updated",
           "revoke": "Authority given up"
         }
+      },
+      "localDrafts": {
+        "title": "Unfinished drafts",
+        "note": "Kept in this browser only",
+        "untitled": "Untitled draft",
+        "state": "Not in SDP yet · Step {current} of {total}",
+        "saved": "Saved",
+        "discard": "Discard {name}",
+        "discarded": "Draft discarded",
+        "undo": "Undo"
       }
     }
   }

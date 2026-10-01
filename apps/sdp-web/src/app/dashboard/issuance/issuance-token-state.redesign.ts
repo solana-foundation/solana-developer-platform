@@ -4,7 +4,7 @@ import type { MessageKey } from "@/i18n/messages";
 /**
  * Where a token is in its life, as the design names it. The API stores only pending, active,
  * paused and revoked, so a deploy in flight and a deploy that failed come from the token's
- * latest deploy transaction, which only one token's page reads; the list knows the four.
+ * latest deploy transaction, which the token's page and the list both read.
  */
 export type TokenLifecycle = "draft" | "deploying" | "failed" | "live" | "paused" | "revoked";
 

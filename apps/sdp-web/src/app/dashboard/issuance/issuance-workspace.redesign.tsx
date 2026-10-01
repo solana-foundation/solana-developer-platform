@@ -31,6 +31,7 @@ import type {
 import { IssuanceListRowsSkeleton } from "./issuance-route-skeletons.redesign";
 import { getTokenTypeLabel, type IssuanceTokenView } from "./issuance-token-fields";
 import {
+  type DeployAttemptStatus,
   formatTokenDay,
   TOKEN_LIFECYCLE_LABEL,
   TOKEN_LIFECYCLE_TONE,
@@ -38,7 +39,9 @@ import {
 } from "./issuance-token-state.redesign";
 import type { IssuanceTokenFacets } from "./issuance-tokens.data";
 import { IssuedTokenMark } from "./issued-token-mark.redesign";
+import { LocalDraftsBlock } from "./local-drafts-block.redesign";
 import { useIssuancePlaygroundTokens, useIssuanceTokenList } from "./use-issuance-token-list";
+import { useLatestDeploys } from "./use-latest-deploys.redesign";
 
 export const ISSUANCE_CREATE_PATH = "/dashboard/issuance/create";
 
@@ -118,7 +121,12 @@ export function IssuanceWorkspace(props: IssuanceWorkspaceProps) {
         {
           id: "overview",
           className: dashboardWorkspaceOverviewPanelClassName,
-          content: <IssuanceTokenList {...props} />,
+          content: (
+            <div className="flex flex-col gap-8">
+              <LocalDraftsBlock />
+              <IssuanceTokenList {...props} />
+            </div>
+          ),
         },
         {
           id: "playground",
@@ -165,6 +173,7 @@ function IssuanceTokenList({
     errorMessage,
   } = useIssuanceTokenList({ initialQuery, initialTokens, initialTotal });
   const { sections, chips } = useIssuanceFilterSections(query, updateQuery, facets);
+  const latestDeploys = useLatestDeploys(tokens);
   const searchOnly = Boolean(query.search) && chips.length === 0;
 
   // The project's own count, not the filtered page's: what tells "no tokens yet" from
@@ -257,7 +266,7 @@ function IssuanceTokenList({
           >
             {tokens.map((token) => (
               <li key={token.id}>
-                <IssuanceTokenRow token={token} />
+                <IssuanceTokenRow token={token} latestDeploy={latestDeploys[token.id]} />
               </li>
             ))}
           </ul>
@@ -438,10 +447,16 @@ function FilterChips({ chips }: { chips: readonly FilterChip[] }) {
  * One token: its mark, name and ticker over its state, and on the right when it went on
  * chain, or when it was drafted while it has not.
  */
-function IssuanceTokenRow({ token }: { token: IssuanceTokenView }) {
+function IssuanceTokenRow({
+  token,
+  latestDeploy,
+}: {
+  token: IssuanceTokenView;
+  latestDeploy?: DeployAttemptStatus | null;
+}) {
   const t = useTranslations();
   const locale = useLocale();
-  const state = tokenLifecycle(token);
+  const state = tokenLifecycle(token, latestDeploy);
   const deployed = Boolean(token.deployedAt);
   // A ticker that only repeats the name adds nothing beside it.
   const ticker = token.symbol.toLowerCase() === token.name.toLowerCase() ? "" : token.symbol;
