@@ -55,8 +55,6 @@ function renderColdLoad(pathname: string): string {
         payments: true,
         policies: false,
         privateChannels: false,
-        // The preparation screen has no flags and draws the previous design; the shell matches it.
-        newDesign: false,
       }}
     >
       <div>settled route content</div>

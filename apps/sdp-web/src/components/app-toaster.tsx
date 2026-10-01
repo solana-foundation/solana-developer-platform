@@ -9,8 +9,6 @@ export function AppToaster() {
   return (
     <Toaster
       position="bottom-right"
-      // Raised above a flow's footer by globals.css, so toasts never cover its actions.
-      offset={{ bottom: "var(--app-toast-offset-bottom, 24px)" }}
       mobileOffset={{ bottom: "calc(80px + env(safe-area-inset-bottom))", left: 16, right: 16 }}
       richColors
       closeButton

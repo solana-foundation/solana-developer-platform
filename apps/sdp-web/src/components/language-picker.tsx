@@ -1,7 +1,7 @@
 "use client";
 
 import { LanguagesIcon } from "lucide-react";
-import { localeDisplayName, useSelectLocale } from "@/components/locale-selection";
+import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,19 +11,42 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { supportedLocales } from "@/i18n/config";
+import { type AppLocale, isAppLocale, localeCookieName, supportedLocales } from "@/i18n/config";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
-/**
- * The language button: the landing page's, and the previous design's dashboard header's. On the
- * new design the dashboard's choice lives in the account menu.
- */
+const localeCookieMaxAgeSeconds = 60 * 60 * 24 * 365;
+
+const displayNamesCache = new Map<AppLocale, Intl.DisplayNames>();
+
+function getDisplayNames(displayLocale: AppLocale): Intl.DisplayNames {
+  let dn = displayNamesCache.get(displayLocale);
+  if (!dn) {
+    dn = new Intl.DisplayNames([displayLocale], { type: "language" });
+    displayNamesCache.set(displayLocale, dn);
+  }
+  return dn;
+}
+
+function localeDisplayName(locale: AppLocale, displayLocale: AppLocale): string {
+  const name = getDisplayNames(displayLocale).of(locale) ?? locale;
+  return name.charAt(0).toLocaleUpperCase(displayLocale) + name.slice(1);
+}
+
 export function LanguagePicker({ variant = "topbar" }: { variant?: "topbar" | "landing" }) {
   const locale = useLocale();
   const t = useTranslations();
-  const selectLocale = useSelectLocale();
+  const router = useRouter();
   const isLanding = variant === "landing";
+
+  const selectLocale = (value: string) => {
+    if (!isAppLocale(value) || value === locale) return;
+
+    // biome-ignore lint/suspicious/noDocumentCookie: The server locale resolver needs this preference on the next request.
+    document.cookie = `${localeCookieName}=${encodeURIComponent(value)}; Path=/; Max-Age=${localeCookieMaxAgeSeconds}; SameSite=Lax; Secure`;
+    document.documentElement.lang = value;
+    router.refresh();
+  };
 
   return (
     <DropdownMenu modal={false}>

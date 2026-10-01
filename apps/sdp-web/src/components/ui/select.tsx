@@ -3,7 +3,6 @@
 import { Select as BaseSelect } from "@base-ui/react/select";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Children, isValidElement, type ReactNode, useMemo } from "react";
-import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { cn } from "@/lib/utils";
 
 type SelectSize = "lg" | "xl";
@@ -31,11 +30,6 @@ interface UiSelectProps {
   onValueChange?: (value: string | null) => void;
   placeholder?: string;
   size?: SelectSize;
-  /**
-   * The value's text: a form field's (16px on a refresh surface), or `body` (14px) for a
-   * list toolbar's pickers, which sit beside the 14px Filter button and search field.
-   */
-  textSize?: "field" | "body";
   disabled?: boolean;
   className?: string;
   /** Persistent leading icon on the trigger only (not repeated on each option). */
@@ -80,7 +74,6 @@ function Select({
   onValueChange,
   placeholder,
   size = "lg",
-  textSize = "field",
   disabled,
   className,
   iconLeft,
@@ -88,7 +81,6 @@ function Select({
   children,
 }: UiSelectProps) {
   const items = useMemo(() => collectItemLabels(children), [children]);
-  const themeScopeAttributes = useThemeScopeAttributes();
 
   return (
     <BaseSelect.Root
@@ -111,8 +103,7 @@ function Select({
         <span
           className={cn(
             "pointer-events-none absolute inset-0 rounded-[inherit] bg-fill-subtle",
-            "group-[[data-popup-open]]/select:shadow-[0_0_0_2px_var(--input-focus-ring)]",
-            "refresh:border-b refresh:border-border-default refresh:bg-transparent refresh:group-hover/select:border-border-strong refresh:group-[[data-popup-open]]/select:border-primary"
+            "group-[[data-popup-open]]/select:shadow-[0_0_0_2px_var(--input-focus-ring)]"
           )}
         />
         {iconLeft && (
@@ -121,10 +112,7 @@ function Select({
           </span>
         )}
         <BaseSelect.Value
-          className={cn(
-            "relative min-w-0 flex-1 truncate text-primary",
-            textSize === "body" ? "text-body" : "text-sm refresh:text-field"
-          )}
+          className="relative min-w-0 flex-1 truncate text-sm text-primary"
           placeholder={<span className="text-[var(--input-placeholder-color)]">{placeholder}</span>}
         />
         {trailing && (
@@ -137,12 +125,7 @@ function Select({
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
-        <BaseSelect.Positioner
-          {...themeScopeAttributes}
-          className="z-50"
-          sideOffset={4}
-          alignItemWithTrigger={false}
-        >
+        <BaseSelect.Positioner className="z-50" sideOffset={4} alignItemWithTrigger={false}>
           <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] overflow-y-auto rounded-xl border border-border-default bg-surface-raised p-1 shadow-lg outline-none">
             {children}
           </BaseSelect.Popup>

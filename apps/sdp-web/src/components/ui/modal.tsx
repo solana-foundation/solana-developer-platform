@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useThemeScopeAttributes } from "@/components/theme-scope";
 import { useTranslations } from "@/i18n/provider";
 import { useEscapeKey } from "@/lib/use-escape-key";
 import { cn } from "@/lib/utils";
@@ -47,7 +46,6 @@ export function Modal({
   const [mounted, setMounted] = useState(false);
   const [dialogNode, setDialogNode] = useState<HTMLElement | null>(null);
   const canClose = Boolean(onClose) && !closeDisabled;
-  const themeScopeAttributes = useThemeScopeAttributes();
 
   useEffect(() => {
     setMounted(true);
@@ -62,10 +60,7 @@ export function Modal({
   }
 
   return createPortal(
-    <div
-      {...themeScopeAttributes}
-      className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[rgba(18,18,19,0.44)]"
-    >
+    <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-[rgba(18,18,19,0.44)]">
       {onClose ? (
         <button
           type="button"

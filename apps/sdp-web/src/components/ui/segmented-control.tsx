@@ -22,7 +22,7 @@ export function SegmentedControl({
   ariaLabel,
   className,
   optionClassName,
-  selectedClassName = "bg-surface-raised text-primary refresh:bg-chip refresh:shadow-chip",
+  selectedClassName = "bg-surface-raised text-primary",
 }: {
   options: readonly SegmentedOption[];
   value: string;
@@ -38,7 +38,7 @@ export function SegmentedControl({
   return (
     <fieldset
       className={cn(
-        "flex min-w-0 rounded-lg border border-border-default bg-fill-subtle p-0.5 refresh:rounded-control refresh:border-0",
+        "flex min-w-0 rounded-lg border border-border-default bg-fill-subtle p-0.5",
         className
       )}
       disabled={disabled}
@@ -49,10 +49,7 @@ export function SegmentedControl({
         return (
           <label
             key={option.value}
-            className={cn(
-              "relative flex flex-1",
-              disabled ? "cursor-not-allowed" : "cursor-pointer"
-            )}
+            className={cn("flex flex-1", disabled ? "cursor-not-allowed" : "cursor-pointer")}
           >
             <input
               type="radio"
@@ -65,13 +62,9 @@ export function SegmentedControl({
             <span
               className={cn(
                 "inline-flex flex-1 items-center justify-center rounded-md px-3 py-1.5 text-xs font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-primary",
-                "refresh:whitespace-nowrap refresh:rounded-control-inner refresh:py-1 refresh:text-meta",
                 checked
                   ? selectedClassName
-                  : cn(
-                      "text-tertiary refresh:text-secondary",
-                      !disabled && "peer-hover:text-primary"
-                    ),
+                  : cn("text-tertiary", !disabled && "peer-hover:text-primary"),
                 optionClassName
               )}
             >

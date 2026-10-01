@@ -1,10 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import {
-  CenteredDashboardTopBar,
-  StackedDashboardTopBar,
-  StandardDashboardTopBar,
-} from "./dashboard-header";
+import { CenteredDashboardTopBar, StandardDashboardTopBar } from "./dashboard-header";
 
 describe("CenteredDashboardTopBar", () => {
   it("hides the redundant title on mobile and tablet while retaining its accessible heading", () => {
@@ -53,46 +49,5 @@ describe("StandardDashboardTopBar", () => {
     expect(markup).toContain("col-span-2 row-start-2");
     expect(markup).toContain("sm:col-span-1 sm:col-start-2 sm:row-start-1");
     expect(markup.match(/<h1/g)).toHaveLength(1);
-  });
-});
-
-describe("StackedDashboardTopBar", () => {
-  it("stacks the menu button, the title and the action on a phone and rows them from md, utilities before the action", () => {
-    const markup = renderToStaticMarkup(
-      <StackedDashboardTopBar
-        navigation={<button type="button">Menu</button>}
-        title="Requests"
-        action={<a href="/new">New</a>}
-        trailingContent={<span>Language</span>}
-      />
-    );
-
-    expect(markup).toContain("data-dashboard-stacked-topbar");
-    expect(markup).toContain("md:grid-cols-[minmax(0,1fr)_auto_auto] md:gap-x-0");
-    expect(markup).toContain("col-start-1 row-start-1 flex items-center md:hidden");
-    expect(markup).toContain(
-      "col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1"
-    );
-    expect(markup).toContain("col-span-3 row-start-3");
-    expect(markup).toContain("md:col-start-3 md:row-start-1 md:mt-0 md:ml-3");
-    // The utilities share the menu button's row on a phone and sit before the action from md.
-    expect(markup).toContain(
-      "col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3"
-    );
-    expect(markup.match(/<h1/g)).toHaveLength(1);
-  });
-
-  it("keeps one screen-reader heading when the title is hidden", () => {
-    const markup = renderToStaticMarkup(
-      <StackedDashboardTopBar
-        navigation={<button type="button">Menu</button>}
-        title="Home"
-        hideTitle
-        trailingContent={<span>Language</span>}
-      />
-    );
-
-    expect(markup).toContain('<h1 class="sr-only">Home</h1>');
-    expect(markup).not.toContain("row-start-3");
   });
 });

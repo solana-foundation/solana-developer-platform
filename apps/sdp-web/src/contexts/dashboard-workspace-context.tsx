@@ -20,7 +20,6 @@ import type { DashboardAccess } from "@/lib/dashboard-access";
 import { type DashboardCacheScope, getDashboardCacheScopeKey } from "@/lib/dashboard-cache-scope";
 import { DASHBOARD_SWR_CONFIG } from "@/lib/dashboard-swr-config";
 import { readDashboardTabFromUrl, useDashboardUrlState } from "@/lib/dashboard-url-state";
-import { isNewDesignPage } from "@/lib/design-modules";
 import { clearStoredApiKeySecrets, syncStoredApiKeySecretScope } from "@/lib/playground-api-keys";
 import { reconcileProjectCookieAction, selectProjectAction } from "@/lib/project-cookie-action";
 import { shouldClearDashboardTabAfterPathnameChange } from "./dashboard-workspace-url-state";
@@ -207,12 +206,11 @@ export function DashboardWorkspaceProvider({
         previousPathname,
         pathname,
         tab,
-        newDesign: isNewDesignPage(pathname, flags),
       })
     ) {
       replaceSearchParams({ tab: null });
     }
-  }, [flags, pathname, replaceSearchParams]);
+  }, [pathname, replaceSearchParams]);
 
   const issuanceTab: IssuanceWorkspaceTab = useMemo(() => {
     const tab = searchParams.get("tab");

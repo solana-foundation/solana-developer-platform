@@ -1,14 +1,7 @@
 "use client";
 
 import { UNIFIED_TRANSACTION_MODULES } from "@sdp/types";
-import {
-  ArrowLeftIcon,
-  ChevronLeftIcon,
-  DownloadIcon,
-  MenuIcon,
-  PanelRightIcon,
-  PlusIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, PanelRightIcon } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import {
@@ -19,12 +12,10 @@ import { privateChannelsInstancePath } from "@/app/dashboard/integrations/privat
 import type { DashboardHeaderTabsConfig } from "@/components/dashboard-header-tabs";
 import { getPaymentsActions } from "@/components/dashboard-nav";
 import type { DashboardRouteTabsConfig } from "@/components/dashboard-route-tabs";
-import { Button } from "@/components/ui/button";
+import { LanguagePicker } from "@/components/language-picker";
 import type { MessageKey } from "@/i18n/messages";
 import { useTranslations } from "@/i18n/provider";
 import { DASHBOARD_MARKETS_SUBNAV_HREFS } from "@/lib/dashboard-navigation-loading";
-import { type DesignModuleFlags, isNewDesignPage } from "@/lib/design-modules";
-import { PAYMENT_REQUESTS_HREF, PAYMENT_TRANSACTIONS_HREF } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 
 type DashboardPageConfig = {
@@ -39,13 +30,6 @@ type DashboardPageConfig = {
   routeTabs?: DashboardRouteTabsConfig;
   topBarLeadingContent?: ReactNode;
   contentWidthClass?: string;
-  /**
-   * Refresh pages set the title and tabs in the page's column; this names that column when it
-   * is narrower than the content box, as on a flow whose footer band spans the whole card.
-   */
-  headerWidthClass?: string;
-  /** The page's one primary action, set in the title row (Download CSV, Add, New). */
-  headerAction?: DashboardHeaderActionConfig;
   hideTitle?: boolean;
   hideTitleOnMobile?: boolean;
   backAction?: {
@@ -54,51 +38,7 @@ type DashboardPageConfig = {
   };
 };
 
-export type DashboardHeaderActionConfig = {
-  label: string;
-  href: string;
-  /** Left out for a plain label, as a contact page's Pay is. */
-  icon?: "plus" | "download";
-  variant: "primary" | "outline";
-  /** Appends the page's current query string, so an export follows the list's filters. */
-  withCurrentQuery?: boolean;
-  /** A file download rather than a page: rendered as a plain anchor with `download`. */
-  download?: boolean;
-};
-
-/**
- * The title row's page action.
- *
- * @param props - The action config and the page's current query string.
- * @returns The action button.
- */
-export function DashboardHeaderAction({
-  action,
-  search,
-}: {
-  action: DashboardHeaderActionConfig;
-  search: string;
-}) {
-  const Icon = action.icon === undefined ? null : action.icon === "plus" ? PlusIcon : DownloadIcon;
-  const href = action.withCurrentQuery && search ? `${action.href}?${search}` : action.href;
-  const content = (
-    <>
-      {Icon === null ? null : <Icon className="size-4" aria-hidden="true" />}
-      {action.label}
-    </>
-  );
-  return (
-    <Button asChild variant={action.variant === "primary" ? "default" : "outline"} size="sm">
-      {action.download ? (
-        <a href={href} download>
-          {content}
-        </a>
-      ) : (
-        <Link href={href}>{content}</Link>
-      )}
-    </Button>
-  );
-}
+const TRAILING_CONTENT = <LanguagePicker />;
 
 type DashboardTopBarProps = {
   isMobileSidebarOpen: boolean;
@@ -108,17 +48,6 @@ type DashboardTopBarProps = {
   titlePosition?: "left" | "center";
   topBarLeadingContent?: ReactNode;
   hasHeaderTabs?: boolean;
-  action?: ReactNode;
-  /** Set over a left title: a refresh action page's way back. */
-  above?: ReactNode;
-  /**
-   * "refresh" is the design's phone header: a menu button that opens the navigation, the title
-   * under it, then the page's action; from md the sidebar is back and the action rejoins the
-   * title's row. "base" keeps the bottom bar's layout.
-   */
-  layout?: "base" | "refresh";
-  /** Page-level controls at the title row's end (Payments puts its demo switch here). */
-  utilities?: ReactNode;
 };
 
 export function HeaderBackAction({
@@ -133,13 +62,12 @@ export function HeaderBackAction({
   return (
     <Link
       href={href}
-      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary refresh:h-5 refresh:gap-1"
+      className="inline-flex h-7 items-center gap-1.5 rounded-[var(--button-radius-md)] text-secondary transition-colors hover:text-primary"
     >
-      <ArrowLeftIcon className="h-4 w-4 refresh:hidden" />
-      <ChevronLeftIcon className="hidden size-4 refresh:block" />
+      <ArrowLeftIcon className="h-4 w-4" />
       <span
         className={[
-          "text-[13px] leading-[18px] font-medium refresh:text-body refresh:leading-5 refresh:font-normal",
+          "text-[13px] leading-[18px] font-medium",
           compactOnMobile ? "hidden sm:inline" : "",
         ].join(" ")}
       >
@@ -176,82 +104,6 @@ function SidebarToggle({
   );
 }
 
-/**
- * The refresh phone header's way into the navigation: the design's 20px menu glyph on a 36px
- * target, pulled 4px into the gutter so the glyph's lines start where the title does. Gone
- * from md, where the sidebar itself is on screen.
- */
-function MobileNavButton({ onClick }: { onClick: () => void }) {
-  const t = useTranslations();
-  return (
-    <button
-      type="button"
-      aria-label={t("Shared.dashboardShell.openNavigation")}
-      onClick={onClick}
-      className="-ml-1 inline-flex size-9 items-center justify-center rounded-control text-secondary transition-colors hover:bg-fill-subtle hover:text-primary md:hidden"
-    >
-      <MenuIcon className="size-5" strokeWidth={1.5} aria-hidden="true" />
-    </button>
-  );
-}
-
-/**
- * The refresh title block. On a phone it is the design's three rows: the navigation button, the
- * title 8px under it, then the page's action 12px under that. From md the button goes and the
- * action sits on the title's row. Any utilities (Payments' demo mode switch) sit at the far right
- * of the phone's navigation row, and from md on the title's row, before the action.
- */
-export function StackedDashboardTopBar({
-  navigation,
-  title,
-  action,
-  trailingContent,
-  hideTitle = false,
-  above,
-}: {
-  navigation: ReactNode;
-  title: string;
-  action?: ReactNode;
-  trailingContent: ReactNode;
-  hideTitle?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
-  above?: ReactNode;
-}) {
-  return (
-    <div
-      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2 md:grid-cols-[minmax(0,1fr)_auto_auto] md:gap-x-0"
-      data-dashboard-stacked-topbar
-    >
-      <div className="col-start-1 row-start-1 flex items-center md:hidden">{navigation}</div>
-      {hideTitle ? (
-        <h1 className="sr-only">{title}</h1>
-      ) : (
-        <div className="col-span-3 row-start-2 min-w-0 md:col-span-1 md:col-start-1 md:row-start-1">
-          {above ? <div className="mb-2">{above}</div> : null}
-          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-            {title}
-          </h1>
-        </div>
-      )}
-      {/* An empty state whose action repeats this one (New, Add) hides it: the shell's
-          section is the `page` group and the state carries the attribute. */}
-      {action ? (
-        <div className="col-span-3 row-start-3 mt-1 flex items-center justify-start group-has-[[data-hides-page-action]]/page:hidden md:col-span-1 md:col-start-3 md:row-start-1 md:mt-0 md:ml-3">
-          {action}
-        </div>
-      ) : null}
-      {trailingContent ? (
-        // On a phone it shares the navigation button's row; from md it sits on the title's row
-        // before the action. The md columns have no gap, only margins, so a missing or hidden
-        // action leaves no empty gap at the right edge.
-        <div className="col-start-3 row-start-1 flex items-center justify-end empty:hidden md:col-start-2 md:ml-3">
-          {trailingContent}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export function CenteredDashboardTopBar({
   leadingContent,
   title,
@@ -275,7 +127,7 @@ export function CenteredDashboardTopBar({
           hideTitleOnMobile && "max-xl:sr-only"
         )}
       >
-        <h1 className="min-w-0 max-w-full text-center text-page-title font-medium text-primary">
+        <h1 className="min-w-0 max-w-full text-center text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary">
           {title}
         </h1>
       </div>
@@ -292,21 +144,16 @@ export function StandardDashboardTopBar({
   trailingContent,
   hideTitle = false,
   alignTitleWithTabs = false,
-  above,
 }: {
   leadingContent: ReactNode;
   title: string;
   trailingContent: ReactNode;
   hideTitle?: boolean;
   alignTitleWithTabs?: boolean;
-  /** Set over the title in its column: a refresh action page's way back. */
-  above?: ReactNode;
 }) {
   return (
-    // Refresh: the row is exactly the title's height, so the 24px to the tabs is measured from
-    // the title itself and a taller page action centres on it.
     <div
-      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0 refresh:min-h-0 refresh:items-center"
+      className="grid min-h-[40px] min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] xl:grid-cols-[0_minmax(0,1fr)_auto] xl:gap-x-0"
       data-dashboard-standard-topbar
     >
       <div className="col-start-1 row-start-1 flex min-w-0 items-center">{leadingContent}</div>
@@ -316,17 +163,14 @@ export function StandardDashboardTopBar({
       {hideTitle ? (
         <h1 className="sr-only">{title}</h1>
       ) : (
-        <div
+        <h1
           className={cn(
-            "col-span-2 row-start-2 min-w-0 max-w-full sm:col-span-1 sm:col-start-2 sm:row-start-1",
+            "col-span-2 row-start-2 min-w-0 max-w-full break-words text-[36px] leading-[40px] font-medium tracking-[-0.3px] text-primary sm:col-span-1 sm:col-start-2 sm:row-start-1",
             alignTitleWithTabs && "xl:pl-[var(--tab-padding-x-md)]"
           )}
         >
-          {above ? <div className="mb-2">{above}</div> : null}
-          <h1 className="min-w-0 max-w-full break-words text-page-title font-medium text-primary">
-            {title}
-          </h1>
-        </div>
+          {title}
+        </h1>
       )}
       <div className="col-start-2 row-start-1 flex min-w-0 items-center justify-end gap-2 sm:col-start-3 xl:ml-3">
         {trailingContent}
@@ -343,49 +187,10 @@ export function DashboardTopBar({
   titlePosition,
   topBarLeadingContent,
   hasHeaderTabs = false,
-  action,
-  above,
-  layout = "base",
-  utilities,
 }: DashboardTopBarProps) {
-  const utilityContent = utilities ?? null;
-  const trailingContent = action ? (
-    <>
-      {action}
-      {utilityContent}
-    </>
-  ) : (
-    utilityContent
-  );
   const centersPageTitle =
     titleVisibility !== "screen-reader-only" &&
     (titlePosition === undefined ? !hasHeaderTabs : titlePosition === "center");
-  const isRefresh = layout === "refresh";
-  const openNavigation = () => setMobileSidebarOpen(true);
-
-  if (isRefresh && !centersPageTitle && !topBarLeadingContent) {
-    return (
-      <StackedDashboardTopBar
-        navigation={<MobileNavButton onClick={openNavigation} />}
-        title={title}
-        hideTitle={titleVisibility === "screen-reader-only"}
-        above={above}
-        action={action}
-        trailingContent={utilityContent}
-      />
-    );
-  }
-
-  // The refresh phone has no bottom bar, so a centred or back-linked title still needs the
-  // menu button; the base shell's toggle stays hidden behind the bar.
-  const sidebarToggle = isRefresh ? (
-    <MobileNavButton onClick={openNavigation} />
-  ) : (
-    <SidebarToggle
-      isMobileSidebarOpen={isMobileSidebarOpen}
-      setMobileSidebarOpen={setMobileSidebarOpen}
-    />
-  );
 
   if (centersPageTitle) {
     return (
@@ -394,11 +199,14 @@ export function DashboardTopBar({
         hideTitleOnMobile={titleVisibility === "desktop-only"}
         leadingContent={
           <>
-            {sidebarToggle}
+            <SidebarToggle
+              isMobileSidebarOpen={isMobileSidebarOpen}
+              setMobileSidebarOpen={setMobileSidebarOpen}
+            />
             {topBarLeadingContent}
           </>
         }
-        trailingContent={trailingContent}
+        trailingContent={TRAILING_CONTENT}
       />
     );
   }
@@ -408,14 +216,16 @@ export function DashboardTopBar({
       hideTitle={titleVisibility === "screen-reader-only"}
       title={title}
       alignTitleWithTabs={hasHeaderTabs}
-      above={above}
       leadingContent={
         <>
-          {sidebarToggle}
+          <SidebarToggle
+            isMobileSidebarOpen={isMobileSidebarOpen}
+            setMobileSidebarOpen={setMobileSidebarOpen}
+          />
           {topBarLeadingContent}
         </>
       }
-      trailingContent={trailingContent}
+      trailingContent={TRAILING_CONTENT}
     />
   );
 }
@@ -473,16 +283,6 @@ function privateChannelsSubPageTitle(
   }
 }
 
-/** The Privacy connect form, on the refresh design: a left title over the form's column. */
-function privacySetupPageConfig(t: ReturnType<typeof useTranslations>): DashboardPageConfig {
-  return {
-    title: t("Shared.dashboardShell.privacy"),
-    titlePosition: "left",
-    contentWidthClass: "max-w-none",
-    headerWidthClass: "max-w-flow",
-  };
-}
-
 /**
  * Header config for the Private Channels segment. The Overview hub is a plain
  * section title; every other view is entered from the Overview and so carries a
@@ -506,7 +306,12 @@ function getPrivateChannelsRoutePageConfig(
     };
   }
   if (pathname === "/dashboard/integrations/private-channels/setup") {
-    return privacySetupPageConfig(t);
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: "/dashboard/integrations/private-channels",
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
   }
   const privateChannelsSegments = pathname.split("/");
   const instanceId = privateChannelsSegments[4];
@@ -515,7 +320,12 @@ function getPrivateChannelsRoutePageConfig(
   const instanceSubpage = privateChannelsSegments[5];
   const instanceNestedPage = privateChannelsSegments[6];
   if (instanceRoute && instanceSubpage === "setup") {
-    return privacySetupPageConfig(t);
+    return actionPageConfig({
+      title: t("DashboardPrivateChannels.instance.title"),
+      backHref: privateChannelsInstancePath(instanceId),
+      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
+      contentWidthClass: "max-w-none",
+    });
   }
   if (instanceRoute && instanceSubpage === "channels" && instanceNestedPage === "new") {
     return actionPageConfig({
@@ -564,6 +374,31 @@ function getPrivateChannelsRoutePageConfig(
       label: t("Shared.dashboardShell.backToPrivateChannels"),
     },
   };
+}
+
+function getCounterpartyRoutePageConfig(
+  pathname: string,
+  t: ReturnType<typeof useTranslations>
+): DashboardPageConfig | null {
+  if (pathname === "/dashboard/payments/counterparty/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.newCounterparty"),
+      backHref: "/dashboard/payments/counterparty",
+      backLabel: t("Shared.dashboardShell.backToCounterparty"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
+    return {
+      title: t("Shared.dashboardShell.manageCounterparty"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/counterparty",
+        label: t("Shared.dashboardShell.backToCounterparty"),
+      },
+    };
+  }
+  return null;
 }
 
 function getMarketsRoutePageConfig(
@@ -862,136 +697,6 @@ function getWalletSectionPageConfig(
   return null;
 }
 
-/**
- * Header config for the routes NEW DESIGN redesigns, as the previous design draws them: Payments
- * and the Privacy connect form. Returns null for every other route, and for the new design's own
- * routes, which send the previous design back to their list.
- */
-function getLegacyDesignPageConfig(
-  pathname: string,
-  t: ReturnType<typeof useTranslations>,
-  privateChannelsEnabled: boolean
-): DashboardPageConfig | null {
-  if (pathname === "/dashboard/integrations/private-channels/setup") {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: "/dashboard/integrations/private-channels",
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  const privateChannelsSetup = pathname.match(
-    /^\/dashboard\/integrations\/private-channels\/([^/]+)\/setup$/
-  );
-  if (privateChannelsSetup) {
-    return actionPageConfig({
-      title: t("DashboardPrivateChannels.instance.title"),
-      backHref: privateChannelsInstancePath(privateChannelsSetup[1]),
-      backLabel: t("Shared.dashboardShell.backToPrivateChannels"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname !== "/dashboard/payments" && !pathname.startsWith("/dashboard/payments/")) {
-    return null;
-  }
-  if (pathname === "/dashboard/payments/counterparty") {
-    return {
-      title: t("Shared.dashboardShell.counterparty"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/counterparty/create") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.newCounterparty"),
-      backHref: "/dashboard/payments/counterparty",
-      backLabel: t("Shared.dashboardShell.backToCounterparty"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/payments/counterparty/")) {
-    return {
-      title: t("Shared.dashboardShell.manageCounterparty"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/payments/counterparty",
-        label: t("Shared.dashboardShell.backToCounterparty"),
-      },
-    };
-  }
-  if (pathname === "/dashboard/payments") {
-    return {
-      title: t("Shared.dashboardShell.payments"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (
-    pathname === PAYMENT_TRANSACTIONS_HREF ||
-    pathname.startsWith(`${PAYMENT_TRANSACTIONS_HREF}/`)
-  ) {
-    return {
-      title: t("Shared.dashboardShell.transactions"),
-      headerTabs: {
-        tabs: [
-          { id: "all", label: t("DashboardPayments.transactions.all") },
-          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
-            id: module,
-            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
-          })),
-        ],
-        hideOnMobile: false,
-      },
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === PAYMENT_REQUESTS_HREF || pathname.startsWith(`${PAYMENT_REQUESTS_HREF}/`)) {
-    return {
-      title: t("Shared.dashboardShell.requests"),
-      headerTabs: playgroundHeaderTabs(t),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/recurring") {
-    return {
-      title: t("Shared.dashboardShell.recurringPayments"),
-      contentWidthClass: "max-w-none",
-    };
-  }
-  if (pathname === "/dashboard/payments/recurring/create") {
-    return actionPageConfig({
-      title: t("Shared.dashboardShell.recurringPayment"),
-      backHref: "/dashboard/payments/recurring",
-      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
-      contentWidthClass: "max-w-none",
-    });
-  }
-  if (pathname.startsWith("/dashboard/payments/recurring/")) {
-    return {
-      title: t("Shared.dashboardShell.recurringPayment"),
-      contentWidthClass: "max-w-none",
-      backAction: {
-        href: "/dashboard/payments/recurring",
-        label: t("Shared.dashboardShell.backToRecurringPayments"),
-      },
-    };
-  }
-  const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
-    pathname.startsWith(item.href)
-  );
-  const title = action
-    ? action.label
-    : pathname.endsWith("/receive")
-      ? t("Shared.dashboardShell.receive")
-      : t("Shared.dashboardShell.send");
-  return actionPageConfig({
-    title,
-    backHref: "/dashboard/payments",
-    backLabel: t("Shared.dashboardShell.backToPayments"),
-    contentWidthClass: "max-w-none",
-  });
-}
-
 export function getDashboardPageConfig(
   pathname: string,
   t: ReturnType<typeof useTranslations>,
@@ -999,12 +704,8 @@ export function getDashboardPageConfig(
   privateChannelsEnabled: boolean,
   custodyEnabled = true,
   _paymentsEnabled = true,
-  _policiesEnabled = true,
-  newDesign = true,
-  newDesignModules?: DesignModuleFlags
+  _policiesEnabled = true
 ): DashboardPageConfig {
-  // This page's design: NEW DESIGN and, for a redesigned area, its module's flag too.
-  const newDesignPage = isNewDesignPage(pathname, { newDesign, newDesignModules });
   const accessControlPageConfig = getAccessControlPageConfig(pathname, t);
   if (accessControlPageConfig) return accessControlPageConfig;
   if (pathname === "/dashboard") {
@@ -1051,21 +752,95 @@ export function getDashboardPageConfig(
   }
   const issuanceRoutePageConfig = getIssuanceRoutePageConfig(pathname, t, assetProfilesEnabled);
   if (issuanceRoutePageConfig) return issuanceRoutePageConfig;
-  // A Payments page no design module has redesigned keeps the previous design's header under
-  // NEW DESIGN too.
-  const legacyDesignConfig = !newDesignPage
-    ? getLegacyDesignPageConfig(pathname, t, privateChannelsEnabled)
-    : null;
-  if (legacyDesignConfig) {
-    return legacyDesignConfig;
+  if (pathname === "/dashboard/payments/counterparty") {
+    return {
+      title: t("Shared.dashboardShell.counterparty"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  const counterpartyRouteConfig = getCounterpartyRoutePageConfig(pathname, t);
+  if (counterpartyRouteConfig) {
+    return counterpartyRouteConfig;
   }
   const marketsRouteConfig = getMarketsRoutePageConfig(pathname, t);
   if (marketsRouteConfig) {
     return marketsRouteConfig;
   }
+  if (pathname === "/dashboard/payments") {
+    return {
+      title: t("Shared.dashboardShell.payments"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/transactions") {
+    return {
+      title: t("Shared.dashboardShell.transactions"),
+      headerTabs: {
+        tabs: [
+          { id: "all", label: t("DashboardPayments.transactions.all") },
+          ...UNIFIED_TRANSACTION_MODULES.map((module) => ({
+            id: module,
+            label: t(`DashboardPayments.transactions.modules.${module}` as MessageKey),
+          })),
+        ],
+        hideOnMobile: false,
+      },
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/requests") {
+    return {
+      title: t("Shared.dashboardShell.requests"),
+      headerTabs: playgroundHeaderTabs(t),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring") {
+    return {
+      title: t("Shared.dashboardShell.recurringPayments"),
+      contentWidthClass: "max-w-none",
+    };
+  }
+  if (pathname === "/dashboard/payments/recurring/create") {
+    return actionPageConfig({
+      title: t("Shared.dashboardShell.recurringPayment"),
+      backHref: "/dashboard/payments/recurring",
+      backLabel: t("Shared.dashboardShell.backToRecurringPayments"),
+      contentWidthClass: "max-w-none",
+    });
+  }
+  if (pathname.startsWith("/dashboard/payments/recurring/")) {
+    return {
+      title: t("Shared.dashboardShell.recurringPayment"),
+      contentWidthClass: "max-w-none",
+      backAction: {
+        href: "/dashboard/payments/recurring",
+        label: t("Shared.dashboardShell.backToRecurringPayments"),
+      },
+    };
+  }
   const privateChannelsConfig = getPrivateChannelsRoutePageConfig(pathname, t);
   if (privateChannelsConfig) {
     return privateChannelsConfig;
+  }
+  if (pathname.startsWith("/dashboard/payments/")) {
+    const action = getPaymentsActions(t, privateChannelsEnabled).find((item) =>
+      pathname.startsWith(item.href)
+    );
+    const title = action
+      ? action.label
+      : pathname.endsWith("/receive")
+        ? t("Shared.dashboardShell.receive")
+        : t("Shared.dashboardShell.send");
+
+    return actionPageConfig({
+      title,
+      backHref: "/dashboard/payments",
+      backLabel: t("Shared.dashboardShell.backToPayments"),
+      contentWidthClass: "max-w-none",
+    });
   }
   const integrationsConfig = getIntegrationsPageConfig(pathname, t);
   if (integrationsConfig) {

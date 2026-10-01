@@ -140,12 +140,15 @@ describe("dashboard route headers", () => {
     ["/dashboard/integrations", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/helius", "Shared.dashboardShell.integrations"],
     ["/dashboard/integrations/private-channels", "Shared.dashboardShell.integrations"],
-    ["/dashboard/integrations/private-channels/setup", "Shared.dashboardShell.privacy"],
+    ["/dashboard/integrations/private-channels/setup", "DashboardPrivateChannels.instance.title"],
     [
       "/dashboard/integrations/private-channels/instance_1",
       "Shared.dashboardShell.privateChannels",
     ],
-    ["/dashboard/integrations/private-channels/instance_1/setup", "Shared.dashboardShell.privacy"],
+    [
+      "/dashboard/integrations/private-channels/instance_1/setup",
+      "DashboardPrivateChannels.instance.title",
+    ],
     [
       "/dashboard/integrations/private-channels/instance_1/channels/new",
       "DashboardPrivateChannels.directory.setupChannel",

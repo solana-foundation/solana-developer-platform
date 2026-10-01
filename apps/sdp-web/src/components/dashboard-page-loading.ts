@@ -59,21 +59,7 @@ interface PageLoadingProps {
   assetProfilesEnabled?: boolean;
 }
 
-// The previous design's skeletons for the routes NEW DESIGN redesigns. Each redesigned route
-// adds its previous skeleton here; the rest load as they always have.
-const LEGACY_DESIGN_PAGE_LOADING: Partial<
-  Record<DashboardLoadingRoute, ComponentType<PageLoadingProps>>
-> = {};
-
 export function resolvePageLoadingComponent(
-  route: DashboardLoadingRoute,
-  newDesign = true
-): ComponentType<PageLoadingProps> {
-  const legacy = newDesign ? undefined : LEGACY_DESIGN_PAGE_LOADING[route];
-  return legacy ?? resolveCurrentPageLoadingComponent(route);
-}
-
-function resolveCurrentPageLoadingComponent(
   route: DashboardLoadingRoute
 ): ComponentType<PageLoadingProps> {
   switch (route) {

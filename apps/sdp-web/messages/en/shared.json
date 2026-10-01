@@ -182,9 +182,7 @@
     "playgroundExecutionFailed": "Playground execution failed.",
     "requestExecutionFailed": "Request execution failed.",
     "unknownToken": "Unknown",
-    "sdpMintedToken": "SDP-Minted",
-    "rowsCount": "{count} rows",
-    "openCalendarFor": "Open the calendar for {field}"
+    "sdpMintedToken": "SDP-Minted"
   },
   "dashboardShell": {
     "workspace": "Workspace",
@@ -264,8 +262,7 @@
     "allowlist": "Allowlist",
     "integrations": "Integrations",
     "holdings": "Holdings",
-    "backToHome": "Back to Home",
-    "privacy": "Privacy"
+    "backToHome": "Back to Home"
   },
   "validation": {
     "allowlistValueRequired": "Allowlist value is required",
