@@ -710,6 +710,7 @@
         "paidSoFar": "Paid so far",
         "notPaidYet": "Not yet",
         "notPaidInLatest": "None in the latest {count} transfers",
+        "paymentsNotLoaded": "Not loaded",
         "paymentCountOne": "1 payment",
         "paymentCountOther": "{count} payments",
         "paidSummary": "{amounts} over {payments}",
@@ -743,6 +744,8 @@
         "notSent": "Not sent",
         "noPayments": "No payments yet",
         "noPaymentsDescription": "Nothing has been sent to or received from this contact.",
+        "paymentsLoadFailed": "Payments could not be loaded",
+        "paymentsLoadFailedDescription": "Something went wrong reading this contact's payments. Try again in a moment.",
         "notKeptHere": "Not kept here",
         "notKeptHereDescription": "Phone, address and identity details are collected per payment.",
         "delete": "Delete"

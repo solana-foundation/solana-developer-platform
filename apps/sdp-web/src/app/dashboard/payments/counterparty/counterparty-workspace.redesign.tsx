@@ -34,10 +34,13 @@ import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDate } from "../payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
+import {
+  type AddressFilter,
+  type EntityType,
+  filterDirectory,
+} from "./counterparty-directory-filter.redesign";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 
-type AddressFilter = "with" | "without";
-type EntityType = Counterparty["entityType"];
 type Translate = ReturnType<typeof useTranslations>;
 
 function counterpartyHref(counterpartyId: string): string {
@@ -105,6 +108,43 @@ function DirectoryLoadFailed() {
         }
       />
     </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** What the list could not load: contacts past the directory cap, and unread saved addresses. */
+function DirectoryNotices({
+  loaded,
+  total,
+  accountsLoaded,
+  accountsTotal,
+  accountsFailed,
+}: {
+  loaded: number;
+  total: number;
+  accountsLoaded: number;
+  accountsTotal: number;
+  accountsFailed: boolean;
+}) {
+  const t = useTranslations();
+  const directoryCapped = total > loaded;
+  const addressesCapped = accountsTotal > accountsLoaded;
+  if (!directoryCapped && !accountsFailed && !addressesCapped) return null;
+  let addressesNotice: string | null = null;
+  if (accountsFailed) {
+    addressesNotice = t("DashboardPayments.counterparty.addressesLoadFailed");
+  } else if (addressesCapped) {
+    addressesNotice = t("DashboardPayments.counterparty.addressesCapped", {
+      count: accountsLoaded,
+      total: accountsTotal,
+    });
+  }
+  return (
+    <div className="space-y-1 text-meta text-tertiary">
+      {directoryCapped ? (
+        <p>{t("DashboardPayments.counterparty.directoryCapped", { count: loaded, total })}</p>
+      ) : null}
+      {addressesNotice === null ? null : <p>{addressesNotice}</p>}
+    </div>
   );
 }
 
@@ -364,25 +404,17 @@ export function CounterpartyWorkspace({
     return byId;
   }, [accounts]);
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return counterparties.filter((counterparty) => {
-      const addresses = addressesByCounterparty.get(counterparty.id) ?? [];
-      if (typeFilter !== undefined && counterparty.entityType !== typeFilter) return false;
-      if (addressFilter === "with" && addresses.length === 0) return false;
-      if (addressFilter === "without" && addresses.length > 0) return false;
-      if (!needle) return true;
-      return [
-        counterparty.displayName,
-        counterparty.externalId ?? "",
-        counterparty.id,
-        ...addresses,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [counterparties, addressesByCounterparty, query, typeFilter, addressFilter]);
+  const filtered = useMemo(
+    () =>
+      filterDirectory(counterparties, addressesByCounterparty, {
+        query,
+        typeFilter,
+        // A hidden address filter must not keep narrowing the list: the menu no longer offers
+        // a way to clear it. It applies again, still selected, once the addresses load.
+        addressFilter: addressesLoaded ? addressFilter : undefined,
+      }),
+    [counterparties, addressesByCounterparty, query, typeFilter, addressFilter, addressesLoaded]
+  );
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, pageCount);
@@ -436,28 +468,13 @@ export function CounterpartyWorkspace({
         onAddressFilterChange={resetPage(setAddressFilter)}
         onPageSizeChange={resetPage(setPageSize)}
       />
-      {total > initialCounterparties.length || !addressesLoaded ? (
-        <div className="space-y-1 text-meta text-tertiary">
-          {total > initialCounterparties.length ? (
-            <p>
-              {t("DashboardPayments.counterparty.directoryCapped", {
-                count: initialCounterparties.length,
-                total,
-              })}
-            </p>
-          ) : null}
-          {addressesLoaded ? null : (
-            <p>
-              {accountsFailed
-                ? t("DashboardPayments.counterparty.addressesLoadFailed")
-                : t("DashboardPayments.counterparty.addressesCapped", {
-                    count: accounts.length,
-                    total: accountsTotal,
-                  })}
-            </p>
-          )}
-        </div>
-      ) : null}
+      <DirectoryNotices
+        loaded={initialCounterparties.length}
+        total={total}
+        accountsLoaded={accounts.length}
+        accountsTotal={accountsTotal}
+        accountsFailed={accountsFailed}
+      />
       {rows.length === 0 ? (
         <p className="py-12 text-center text-body text-tertiary">
           {t("DashboardPayments.counterparty.noMatches")}

@@ -31,6 +31,7 @@ async function CounterpartyDetailRoute({
         ok: detail.counterparty !== null,
         accounts: detail.accounts.length,
         transfers: detail.transfers.length,
+        transfersFailed: detail.transfersFailed,
       });
 
       if (!detail.counterparty) {
@@ -44,6 +45,7 @@ async function CounterpartyDetailRoute({
             initialAccounts={detail.accounts}
             initialTransfers={detail.transfers}
             transfersTotal={detail.transfersTotal}
+            transfersFailed={detail.transfersFailed}
           />
         </div>
       );
