@@ -575,6 +575,103 @@ function getInitialSelection(input: {
   };
 }
 
+/**
+ * What the chosen provider means for step 2. The availability status comes from legacy
+ * Configs; a BYOK-only project has none, so an active connection also shows the provider is
+ * installed, and without either the wizard asks for the credentials again.
+ */
+function resolveSetupProvider({
+  availability,
+  connections,
+  selectedProvider,
+  privyByokEnabled,
+}: {
+  availability: CustodyProviderAvailability[];
+  connections: readonly CustodyConnectionListItem[];
+  selectedProvider: KnownCustodyProvider | null;
+  privyByokEnabled: boolean;
+}) {
+  const selectedAvailability =
+    availability.find(
+      (provider) => provider.isSelectable && provider.entry.id === selectedProvider
+    ) ?? null;
+  const selectedProviderEntry = selectedAvailability?.entry ?? null;
+  // Switching provider on step 1 must not carry the previous provider's connections into
+  // step 2, so the list is narrowed here rather than trusted as delivered. The picker earns
+  // its place only when the provider is already installed and something is selectable: a
+  // legacy Config-backed provider has no connections and keeps the original form.
+  const connectionOptions = connections.filter(
+    (connection) => connection.provider === selectedProvider
+  );
+  const hasSelectableConnection = connectionOptions.some(isSelectableConnection);
+  const isConnected =
+    selectedAvailability !== null &&
+    (selectedAvailability.status === "active" || hasSelectableConnection);
+  return {
+    selectedProviderEntry,
+    connectionOptions,
+    isConnected,
+    canProvisionWallet: selectedProviderEntry
+      ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
+      : false,
+    showConnectionPicker: isConnected && hasSelectableConnection,
+    // An uninstalled Privy under BYOK goes through provider details (credential submission +
+    // connection check) instead of the legacy initialize path, which the API refuses once
+    // stored-credential setup is enforced.
+    isByokDetails: privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected,
+  };
+}
+
+/** Why step 2 cannot create a wallet: the provider holds one already, or none is chosen. */
+function provisioningNotice(
+  providerLabel: string | null,
+  t: ReturnType<typeof useTranslations>
+): string {
+  return providerLabel
+    ? t("DashboardCustody.connectedProviderDescription", { provider: providerLabel })
+    : t("DashboardCustody.chooseEnabledProvider");
+}
+
+/**
+ * Enter anywhere in the flow submits the step's form, as its primary button would, except
+ * where Enter already means something (a textarea, a button, a link).
+ */
+function useEnterSubmitsStep(formId: string) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.key !== "Enter" ||
+        event.repeat ||
+        event.shiftKey ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing ||
+        event.defaultPrevented
+      ) {
+        return;
+      }
+      const target = event.target;
+      if (
+        !(target instanceof HTMLElement) ||
+        !target.closest("[data-wallet-setup-flow]") ||
+        ignoresEnterToSubmit(target)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      const form = document.getElementById(formId);
+      if (form instanceof HTMLFormElement) {
+        form.requestSubmit();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [formId]);
+}
+
 export function WalletSetupFlow({
   connectedProviders,
   enabledProviders,
@@ -610,38 +707,18 @@ export function WalletSetupFlow({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const submissionInFlightRef = useRef(false);
 
-  const selectedAvailability = useMemo(
-    () =>
-      availability.find(
-        (provider) => provider.isSelectable && provider.entry.id === selectedProvider
-      ) ?? null,
-    [availability, selectedProvider]
+  const {
+    selectedProviderEntry,
+    connectionOptions,
+    isConnected,
+    canProvisionWallet,
+    showConnectionPicker,
+    isByokDetails,
+  } = useMemo(
+    () => resolveSetupProvider({ availability, connections, selectedProvider, privyByokEnabled }),
+    [availability, connections, selectedProvider, privyByokEnabled]
   );
-  const selectedProviderEntry = selectedAvailability?.entry ?? null;
-  // Switching provider on step 1 must not carry the previous provider's
-  // connections into step 2, so the list is narrowed here rather than trusted
-  // as delivered. The picker earns its place only when the provider is already
-  // installed and something is actually selectable: a legacy Config-backed
-  // provider has no connections and keeps the original form.
-  const connectionOptions = useMemo(
-    () => connections.filter((connection) => connection.provider === selectedProvider),
-    [connections, selectedProvider]
-  );
-  // The availability status comes from legacy Configs. A BYOK-only project has
-  // no legacy Config, so an active connection also shows that the provider is
-  // installed. Without it, the wizard asks for the credentials again.
-  const isConnected =
-    selectedAvailability !== null &&
-    (selectedAvailability.status === "active" || connectionOptions.some(isSelectableConnection));
-  const canProvisionWallet = selectedProviderEntry
-    ? !isConnected || selectedProviderEntry.supportsAdditionalWallets
-    : false;
   const formAction = isConnected ? createCustodySetupWalletAction : initializeCustodySetupAction;
-  const showConnectionPicker = isConnected && connectionOptions.some(isSelectableConnection);
-  // An uninstalled Privy under BYOK goes through provider details (credential
-  // submission + connection check) instead of the legacy initialize path,
-  // which the API refuses once stored-credential setup is enforced.
-  const isByokDetails = privyByokEnabled && selectedProviderEntry?.id === "privy" && !isConnected;
   const canCreate = canProvisionWallet && walletLabel.trim().length > 0 && !isPending;
 
   const leaveFlow = () => router.push("/dashboard/wallets");
@@ -700,45 +777,7 @@ export function WalletSetupFlow({
     handleCreateWallet(event.currentTarget);
   };
 
-  const currentStepSubmitRef = useRef<() => void>(() => {});
-  currentStepSubmitRef.current = () => {
-    const formId = currentStep === "provider" ? PROVIDER_FORM_ID : DETAILS_FORM_ID;
-    const form = document.getElementById(formId);
-    if (form instanceof HTMLFormElement) {
-      form.requestSubmit();
-    }
-  };
-
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (
-        event.key !== "Enter" ||
-        event.repeat ||
-        event.shiftKey ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.isComposing ||
-        event.defaultPrevented
-      ) {
-        return;
-      }
-      const target = event.target;
-      if (
-        !(target instanceof HTMLElement) ||
-        !target.closest("[data-wallet-setup-flow]") ||
-        ignoresEnterToSubmit(target)
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      currentStepSubmitRef.current();
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  useEnterSubmitsStep(currentStep === "provider" ? PROVIDER_FORM_ID : DETAILS_FORM_ID);
 
   const stepIndex = SETUP_STEPS.indexOf(currentStep);
   const steps = [
@@ -805,11 +844,7 @@ export function WalletSetupFlow({
             notice={
               canProvisionWallet
                 ? null
-                : selectedProviderEntry
-                  ? t("DashboardCustody.connectedProviderDescription", {
-                      provider: selectedProviderEntry.label,
-                    })
-                  : t("DashboardCustody.chooseEnabledProvider")
+                : provisioningNotice(selectedProviderEntry?.label ?? null, t)
             }
             isConnected={isConnected}
             onChangeProvider={goToProviderStep}
