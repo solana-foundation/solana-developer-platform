@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import type { ReactNode } from "react";
+import { act, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { DashboardShell } from "./dashboard-shell";
@@ -47,9 +48,8 @@ vi.mock("@/components/network-debug-panel", () => ({ NetworkDebugPanel: () => nu
 vi.mock("@/components/sentry-user-context", () => ({ SentryUserContext: () => null }));
 vi.mock("@/components/language-picker", () => ({ LanguagePicker: () => null }));
 
-function renderShell(pathname: string, newDesign: boolean): HTMLElement {
-  pathnameMock.value = pathname;
-  const markup = renderToStaticMarkup(
+function shell(newDesign: boolean) {
+  return (
     <DashboardShell
       flags={{
         assetProfiles: false,
@@ -68,10 +68,16 @@ function renderShell(pathname: string, newDesign: boolean): HTMLElement {
       <div>route content</div>
     </DashboardShell>
   );
+}
+
+function renderShell(pathname: string, newDesign: boolean): HTMLElement {
+  pathnameMock.value = pathname;
   const root = document.createElement("div");
-  root.innerHTML = markup;
+  root.innerHTML = renderToStaticMarkup(shell(newDesign));
   return root;
 }
+
+const openNavigationSelector = 'button[aria-label="Shared.dashboardShell.openNavigation"]';
 
 describe("dashboard shell sidebar on a route no area has redesigned", () => {
   it("puts the sidebar in the refresh scope on NEW DESIGN while the page keeps the base one", () => {
@@ -101,10 +107,54 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
     expect(page?.className).toContain("rounded-2xl");
   });
 
-  it("keeps the phone's bottom bar on a base page either way", () => {
-    for (const newDesign of [true, false]) {
-      const root = renderShell("/dashboard/issuance", newDesign);
-      expect(root.querySelector("[data-dashboard-bottom-nav]")).not.toBeNull();
+  it("drops the phone's bottom bar on NEW DESIGN and opens the navigation from the header", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    // A phone: the tablet query never matches, so nothing closes the slide-over.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    pathnameMock.value = "/dashboard/issuance";
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(shell(true)));
+
+      expect(container.querySelector("[data-dashboard-bottom-nav]")).toBeNull();
+      const menuButton = container.querySelector<HTMLButtonElement>(openNavigationSelector);
+      expect(menuButton).not.toBeNull();
+      expect(menuButton?.className).toContain("md:hidden");
+      // The page itself stays on the base design: only its phone header gains the button.
+      expect(container.querySelector("main")?.hasAttribute("data-sdp-theme")).toBe(false);
+      expect(
+        container.querySelector('[aria-label="Shared.dashboardShell.closeNavigationOverlay"]')
+      ).toBeNull();
+
+      await act(async () => menuButton?.click());
+
+      const overlay = container.querySelector(
+        '[aria-label="Shared.dashboardShell.closeNavigationOverlay"]'
+      );
+      expect(overlay).not.toBeNull();
+      expect(overlay?.nextElementSibling?.getAttribute("data-sdp-theme")).toBe("refresh");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the phone's bottom bar and no header menu button with NEW DESIGN off", () => {
+    const root = renderShell("/dashboard/issuance", false);
+    expect(root.querySelector("[data-dashboard-bottom-nav]")).not.toBeNull();
+    // The previous design's toggle carries the same label but is never displayed.
+    const toggles = root.querySelectorAll(openNavigationSelector);
+    for (const toggle of toggles) {
+      expect(toggle.className.split(" ")).toContain("hidden");
+      expect(toggle.className).not.toContain("md:hidden");
     }
   });
 });

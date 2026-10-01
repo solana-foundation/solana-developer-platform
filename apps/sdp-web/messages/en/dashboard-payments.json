@@ -753,6 +753,7 @@
         "noProviderAccounts": "No provider accounts",
         "noProviderAccountsDescription": "A provider account is made the first time a payout goes through that provider.",
         "providerAccountsFailed": "Provider accounts could not be loaded: {error}",
+        "providerAccountsRefreshFailed": "Provider accounts could not be refreshed: {error}. Showing the accounts loaded earlier.",
         "payments": "Payments",
         "seeAllInTransactions": "See all in Transactions",
         "transaction": "Transaction",
