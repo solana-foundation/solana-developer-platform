@@ -12,7 +12,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useMemo } from "react";
+import { useMemo } from "react";
 import { NewSolanaAddressForm } from "@/app/dashboard/payments/counterparty/new-solana-address-form";
 import {
   formatTokenAmount,
@@ -20,6 +20,7 @@ import {
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { DetailList, DetailRow } from "@/components/ui/detail-list";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -58,22 +59,6 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
     return null;
   }
   return <p className="text-sm text-error">{t("DashboardPayments.onchainSend.noAssets")}</p>;
-}
-
-function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 refresh:py-3.5 refresh:first:pt-3.5">
-      <span className="flex items-center gap-2.5 text-sm text-tertiary refresh:text-body refresh:text-secondary">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary refresh:hidden">
-          {icon}
-        </span>
-        {label}
-      </span>
-      <div className="min-w-0 truncate text-right text-sm font-medium text-primary refresh:text-body refresh:font-normal">
-        {value}
-      </div>
-    </div>
-  );
 }
 
 function sourceWalletName(wallet: PaymentsDashboardWallet | null): string {
@@ -415,30 +400,34 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           })}
         </p>
       </div>
-      <div className="divide-y divide-border-default">
+      <DetailList variant="summary">
         <DetailRow
           icon={<UserRoundIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.to")}
-          value={counterpartyName === "" ? "—" : counterpartyName}
-        />
+        >
+          {counterpartyName === "" ? "—" : counterpartyName}
+        </DetailRow>
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.destination")}
-          value={destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
-        />
+        >
+          {destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
+        </DetailRow>
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.sourceWallet")}
-          value={sourceWalletName(selectedWallet)}
-        />
+        >
+          {sourceWalletName(selectedWallet)}
+        </DetailRow>
         {memo === "" ? null : (
           <DetailRow
             icon={<StickyNoteIcon className="size-3.5" />}
             label={t("DashboardPayments.onchainSend.memo")}
-            value={memo}
-          />
+          >
+            {memo}
+          </DetailRow>
         )}
-      </div>
+      </DetailList>
     </>
   );
 }
