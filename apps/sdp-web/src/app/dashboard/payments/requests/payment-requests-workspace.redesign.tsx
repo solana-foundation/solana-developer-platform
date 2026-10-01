@@ -9,7 +9,7 @@ import {
 import { CopyIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type KeyboardEvent, useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { DashboardWorkspaceOverviewPanel } from "@/components/dashboard-workspace-panel";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
@@ -22,7 +22,11 @@ import { StatusText } from "@/components/ui/status-text";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { PAYMENT_REQUEST_NEW_HREF, paymentRequestHref } from "@/lib/payments-routes";
+import {
+  PAYMENT_REQUEST_NEW_HREF,
+  PAYMENT_REQUESTS_HREF,
+  paymentRequestHref,
+} from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
@@ -31,6 +35,8 @@ import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
+  PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
+  type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
 } from "./payment-requests-page.data";
 
@@ -54,24 +60,12 @@ interface PaymentRequestsWorkspaceProps {
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   counterparties: Counterparty[];
-  /** The project's full request count; more than the rows given when the load was capped. */
-  total?: number;
+  /** How many requests match the status filter, across every page. */
+  total: number;
+  listState: PaymentRequestsListState;
 }
 
 const REQUEST_STATUSES = Object.keys(REQUEST_STATUS_TRANSLATION_KEYS) as PaymentRequestStatus[];
-
-/** Says when the load cap left older requests out, so search and filters are known to miss them. */
-function DirectoryCapNotice({ count, total }: { count: number; total: number }) {
-  const t = useTranslations();
-  if (total <= count) {
-    return null;
-  }
-  return (
-    <p className="text-meta text-tertiary">
-      {t("DashboardPayments.requests.directoryCapped", { count, total })}
-    </p>
-  );
-}
 
 /** The list's rows: status, amount, who pays, where to, when, and a copy of the link. */
 function PaymentRequestsTable({
@@ -180,16 +174,16 @@ function PaymentRequestsTable({
 }
 
 /**
- * The Requests list. The API has no search, so the page loads the newest requests up to a cap
- * and search, the status filter and paging all run over those here. When the cap cut the list
- * short, the list says so.
+ * The Requests list. The status filter and the page live in the URL and load on the server, one
+ * page at a time; search runs here over the loaded page, because the API has none.
  */
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
   initialError,
   initialLocalErrorCode,
   counterparties,
-  total = initialPaymentRequests.length,
+  total,
+  listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -200,10 +194,44 @@ export function PaymentRequestsWorkspace({
   );
   const router = useRouter();
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<PaymentRequestStatus | undefined>();
-  const [pageSize, setPageSize] = useState(25);
-  const [page, setPage] = useState(1);
+  const [isPending, startTransition] = useTransition();
   const requests = initialPaymentRequests;
+  const statusFilter = listState.status ?? undefined;
+
+  const applyListParams = (updates: {
+    page?: number;
+    pageSize?: number;
+    status?: PaymentRequestStatus | null;
+  }) => {
+    const params = new URLSearchParams(window.location.search);
+    if (updates.page !== undefined) {
+      if (updates.page === 1) {
+        params.delete("page");
+      } else {
+        params.set("page", String(updates.page));
+      }
+    }
+    if (updates.pageSize !== undefined) {
+      params.delete("page");
+      if (updates.pageSize === PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE) {
+        params.delete("pageSize");
+      } else {
+        params.set("pageSize", String(updates.pageSize));
+      }
+    }
+    if (updates.status !== undefined) {
+      params.delete("page");
+      if (updates.status === null) {
+        params.delete("status");
+      } else {
+        params.set("status", updates.status);
+      }
+    }
+    const search = params.toString();
+    startTransition(() =>
+      router.replace(`${PAYMENT_REQUESTS_HREF}${search ? `?${search}` : ""}`, { scroll: false })
+    );
+  };
   const tokenSymbolByMint = useMemo(
     () => new Map(tokens.map((token) => [token.mintAddress, token.symbol])),
     [tokens]
@@ -224,10 +252,9 @@ export function PaymentRequestsWorkspace({
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  const filtered = useMemo(() => {
+  const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return requests.filter((request) => {
-      if (statusFilter !== undefined && request.status !== statusFilter) return false;
       if (!needle) return true;
       return [
         request.amount,
@@ -240,10 +267,11 @@ export function PaymentRequestsWorkspace({
         .toLowerCase()
         .includes(needle);
     });
-  }, [requests, statusFilter, query, tokenSymbolByMint, counterpartyNameById]);
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const currentPage = Math.min(page, pageCount);
-  const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  }, [requests, query, tokenSymbolByMint, counterpartyNameById]);
+  const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
+  const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
+  const rangeEnd = Math.min(listState.page * listState.pageSize, total);
+  const listIsEmpty = total === 0 && listState.status === null;
 
   const copyLink = (request: PaymentRequest) => {
     void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
@@ -256,7 +284,7 @@ export function PaymentRequestsWorkspace({
         <p className="text-body text-error">
           {initialError ?? t("DashboardPayments.requests.loadFailed")}
         </p>
-      ) : requests.length === 0 ? (
+      ) : listIsEmpty ? (
         <ListEmptyState
           hidesPageAction
           message={t("DashboardPayments.requests.emptyTitle")}
@@ -292,10 +320,11 @@ export function PaymentRequestsWorkspace({
                           value: status,
                           label: t(REQUEST_STATUS_TRANSLATION_KEYS[status]),
                         }))}
-                        onChange={(value) => {
-                          setStatusFilter(REQUEST_STATUSES.find((status) => status === value));
-                          setPage(1);
-                        }}
+                        onChange={(value) =>
+                          applyListParams({
+                            status: REQUEST_STATUSES.find((status) => status === value) ?? null,
+                          })
+                        }
                       />
                     ),
                   },
@@ -304,18 +333,12 @@ export function PaymentRequestsWorkspace({
             }
           >
             <RowsPerPageSelect
-              value={pageSize}
-              onChange={(size) => {
-                setPageSize(size);
-                setPage(1);
-              }}
+              value={listState.pageSize}
+              onChange={(pageSize) => applyListParams({ pageSize })}
             />
             <SearchInput
               value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
-              }}
+              onChange={(event) => setQuery(event.target.value)}
               clear={{
                 label: t("DashboardPayments.requests.clearSearch"),
                 onClear: () => setQuery(""),
@@ -324,7 +347,6 @@ export function PaymentRequestsWorkspace({
               className="min-w-0 flex-1 sm:w-56 sm:flex-none"
             />
           </ListToolbar>
-          <DirectoryCapNotice count={requests.length} total={total} />
           {rows.length === 0 ? (
             <p className="py-12 text-center text-body text-tertiary">
               {t("DashboardPayments.requests.noMatches")}
@@ -339,9 +361,17 @@ export function PaymentRequestsWorkspace({
               onCopyLink={copyLink}
             />
           )}
-          {filtered.length > pageSize ? (
-            <ArrowPagination page={currentPage} pageCount={pageCount} onPageChange={setPage} />
-          ) : null}
+          <ArrowPagination
+            page={listState.page}
+            pageCount={pageCount}
+            onPageChange={(page) => applyListParams({ page })}
+            disabled={isPending}
+            summary={t("DashboardPayments.requests.range", {
+              from: rangeStart,
+              to: rangeEnd,
+              total,
+            })}
+          />
         </>
       )}
     </DashboardWorkspaceOverviewPanel>

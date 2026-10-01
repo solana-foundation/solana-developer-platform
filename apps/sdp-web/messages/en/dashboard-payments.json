@@ -1368,7 +1368,7 @@
       "searchPlaceholder": "Search requests",
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
-      "directoryCapped": "Showing the newest {count} of {total} requests. Search and filters cover these.",
+      "range": "{from}-{to} of {total} requests",
       "emptyTitle": "You haven't created a request yet",
       "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
       "newRequest": "New request",
