@@ -57,7 +57,9 @@ import {
   buildApiKeyPolicyRules,
   createApiKeyAuthoringDraft,
   getPolicyBindingIntent,
+  type InitialApiKeyAuthoringState,
   isPositiveDecimal,
+  type PolicyBindingIntent,
   requiredBindingConfirmation,
   splitPolicyValues,
 } from "./api-key-authoring";
@@ -1191,7 +1193,7 @@ function BindingChangeDialog({
 }
 
 function bindingSummaryLabel(
-  intent: ReturnType<typeof getPolicyBindingIntent>,
+  intent: PolicyBindingIntent,
   mode: ApiKeyAuthoringMode,
   t: ReturnType<typeof useTranslations>
 ): string {
@@ -1208,6 +1210,108 @@ function bindingSummaryLabel(
   return t("DashboardCustody.apiKeyBindingsWillReplace");
 }
 
+function initialAuthoringState(
+  initialKey: ApiKeyAuthoringExistingKey | undefined
+): InitialApiKeyAuthoringState | null {
+  if (!initialKey) return null;
+  return {
+    walletScope: initialKey.walletScope,
+    selectedWalletIds: initialKey.signingWalletIds,
+    policyBindings: initialKey.policyBindings,
+  };
+}
+
+function isWalletStepValid(draft: ApiKeyAuthoringDraft, bindingIntent: PolicyBindingIntent) {
+  const amountValid =
+    !draft.maximumAmount ||
+    (isPositiveDecimal(draft.maximumAmount) &&
+      splitPolicyValues(draft.maximumAmountAssets).length > 0);
+  return (
+    (draft.walletScope === "all" || draft.selectedWalletIds.length > 0) &&
+    amountValid &&
+    bindingIntent.mode !== "blocked"
+  );
+}
+
+function canContinueFromStep(
+  step: ApiKeyAuthoringStep,
+  draft: ApiKeyAuthoringDraft,
+  bindingIntent: PolicyBindingIntent
+): boolean {
+  if (step === "details") return draft.name.trim().length > 0;
+  if (step === "wallets") return isWalletStepValid(draft, bindingIntent);
+  return true;
+}
+
+function affectedWalletNamesFor(
+  intent: PolicyBindingIntent,
+  wallets: ApiKeyAuthoringWallet[]
+): string[] {
+  if (intent.mode !== "replace" && intent.mode !== "clear") return [];
+  if (intent.affectedTargets.includes("all")) return wallets.map(walletLabel);
+  const byId = new Map(wallets.map((wallet) => [wallet.walletId, walletLabel(wallet)]));
+  return intent.affectedTargets.map((target) => byId.get(target) ?? target);
+}
+
+function primaryActionLabel(
+  step: ApiKeyAuthoringStep,
+  mode: ApiKeyAuthoringMode,
+  isPending: boolean,
+  t: ReturnType<typeof useTranslations>
+): string {
+  if (step !== "review") return t("DashboardCustody.continue");
+  if (isPending) return t("DashboardCustody.saving");
+  return mode === "create"
+    ? t("DashboardCustody.createKey")
+    : t("DashboardCustody.apiKeySaveChanges");
+}
+
+function AuthoringStepPanel({
+  currentStep,
+  draft,
+  mode,
+  wallets,
+  environment,
+  bindingSummary,
+  hadExistingRestrictions,
+  walletSelectionTouched,
+  onWalletSelectionTouched,
+  update,
+}: {
+  currentStep: ApiKeyAuthoringStep;
+  draft: ApiKeyAuthoringDraft;
+  mode: ApiKeyAuthoringMode;
+  wallets: ApiKeyAuthoringWallet[];
+  environment: string;
+  bindingSummary: string;
+  hadExistingRestrictions: boolean;
+  walletSelectionTouched: boolean;
+  onWalletSelectionTouched: () => void;
+  update: (patch: Partial<ApiKeyAuthoringDraft>) => void;
+}) {
+  switch (currentStep) {
+    case "details":
+      return <DetailsStep draft={draft} environment={environment} update={update} />;
+    case "permissions":
+      return <PermissionsStep draft={draft} mode={mode} update={update} />;
+    case "wallets":
+      return (
+        <WalletPolicyStep
+          draft={draft}
+          wallets={wallets}
+          hadExistingRestrictions={hadExistingRestrictions}
+          walletSelectionTouched={walletSelectionTouched}
+          onWalletSelectionTouched={onWalletSelectionTouched}
+          update={update}
+        />
+      );
+    case "review":
+      return <ReviewStep draft={draft} wallets={wallets} bindingSummary={bindingSummary} />;
+    default:
+      return null;
+  }
+}
+
 export function ApiKeyAuthoringWorkspace({
   mode,
   wallets,
@@ -1221,14 +1325,7 @@ export function ApiKeyAuthoringWorkspace({
   const [walletSelectionTouched, setWalletSelectionTouched] = useState(false);
   const [dialogConfirmation, setDialogConfirmation] = useState<BindingConfirmation | null>(null);
   const [isPending, startTransition] = useTransition();
-  const initialState = initialKey
-    ? {
-        walletScope: initialKey.walletScope,
-        selectedWalletIds: initialKey.signingWalletIds,
-        policyBindings: initialKey.policyBindings,
-      }
-    : null;
-  const bindingIntent = getPolicyBindingIntent(mode, initialState, draft);
+  const bindingIntent = getPolicyBindingIntent(mode, initialAuthoringState(initialKey), draft);
   const bindingConfirmation = requiredBindingConfirmation(bindingIntent);
   const hadExistingRestrictions = Boolean(
     initialKey?.policyBindings.some((binding) => binding.apiKeyControlProfileId)
@@ -1238,27 +1335,9 @@ export function ApiKeyAuthoringWorkspace({
       ? t("DashboardCustody.production")
       : t("DashboardCustody.sandbox");
   const currentStepIndex = API_KEY_AUTHORING_STEPS.indexOf(currentStep);
-  const selectedWalletCount = draft.selectedWalletIds.length;
-  const amountValid =
-    !draft.maximumAmount ||
-    (isPositiveDecimal(draft.maximumAmount) &&
-      splitPolicyValues(draft.maximumAmountAssets).length > 0);
-  const canContinue =
-    currentStep === "details"
-      ? draft.name.trim().length > 0
-      : currentStep === "wallets"
-        ? (draft.walletScope === "all" || selectedWalletCount > 0) &&
-          amountValid &&
-          bindingIntent.mode !== "blocked"
-        : true;
+  const canContinue = canContinueFromStep(currentStep, draft, bindingIntent);
   const bindingSummary = bindingSummaryLabel(bindingIntent, mode, t);
-  let affectedWalletNames: string[] = [];
-  if (bindingIntent.mode === "replace" || bindingIntent.mode === "clear") {
-    const byId = new Map(wallets.map((wallet) => [wallet.walletId, walletLabel(wallet)]));
-    affectedWalletNames = bindingIntent.affectedTargets.includes("all")
-      ? wallets.map(walletLabel)
-      : bindingIntent.affectedTargets.map((target) => byId.get(target) ?? target);
-  }
+  const affectedWalletNames = affectedWalletNamesFor(bindingIntent, wallets);
 
   const update = (patch: Partial<ApiKeyAuthoringDraft>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -1316,25 +1395,18 @@ export function ApiKeyAuthoringWorkspace({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6">
         <div className="mx-auto grid w-full max-w-6xl gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-w-0">
-            {currentStep === "details" ? (
-              <DetailsStep draft={draft} environment={environment} update={update} />
-            ) : null}
-            {currentStep === "permissions" ? (
-              <PermissionsStep draft={draft} mode={mode} update={update} />
-            ) : null}
-            {currentStep === "wallets" ? (
-              <WalletPolicyStep
-                draft={draft}
-                wallets={wallets}
-                hadExistingRestrictions={hadExistingRestrictions}
-                walletSelectionTouched={walletSelectionTouched}
-                onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
-                update={update}
-              />
-            ) : null}
-            {currentStep === "review" ? (
-              <ReviewStep draft={draft} wallets={wallets} bindingSummary={bindingSummary} />
-            ) : null}
+            <AuthoringStepPanel
+              currentStep={currentStep}
+              draft={draft}
+              mode={mode}
+              wallets={wallets}
+              environment={environment}
+              bindingSummary={bindingSummary}
+              hadExistingRestrictions={hadExistingRestrictions}
+              walletSelectionTouched={walletSelectionTouched}
+              onWalletSelectionTouched={() => setWalletSelectionTouched(true)}
+              update={update}
+            />
           </div>
           <KeySummary
             draft={draft}
@@ -1350,13 +1422,7 @@ export function ApiKeyAuthoringWorkspace({
             {currentStepIndex === 0 ? t("DashboardCustody.cancel") : t("DashboardCustody.back")}
           </Button>
           <Button type="button" onClick={handlePrimary} disabled={!canContinue || isPending}>
-            {currentStep === "review"
-              ? isPending
-                ? t("DashboardCustody.saving")
-                : mode === "create"
-                  ? t("DashboardCustody.createKey")
-                  : t("DashboardCustody.apiKeySaveChanges")
-              : t("DashboardCustody.continue")}
+            {primaryActionLabel(currentStep, mode, isPending, t)}
           </Button>
         </div>
       </div>
