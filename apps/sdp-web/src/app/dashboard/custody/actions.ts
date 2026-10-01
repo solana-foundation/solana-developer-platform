@@ -349,13 +349,13 @@ const FAUCET_CONFIRMATION_POLL_MS = 1_000;
 
 /**
  * Poll the transaction's status through the RPC relay until it is confirmed or
- * failed, or the timeout passes. Best effort: on timeout the caller still
- * revalidates, and the page's balance polling picks up the result later.
+ * failed, or the timeout passes. On timeout the caller still revalidates, and the
+ * page's balance polling picks up the result later.
  */
 async function waitForSignatureConfirmation(
   client: Awaited<ReturnType<typeof createSdpApiClient>>,
   signature: string
-): Promise<void> {
+): Promise<"confirmed" | "failed" | "timeout"> {
   const deadline = Date.now() + FAUCET_CONFIRMATION_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const relay = await client
@@ -367,18 +367,19 @@ async function waitForSignatureConfirmation(
           method: "getSignatureStatuses",
           params: [[signature]],
         }),
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       })
       .catch(() => null);
     const status = relay?.response?.result?.value?.[0];
-    if (
-      status?.err ||
-      status?.confirmationStatus === "confirmed" ||
-      status?.confirmationStatus === "finalized"
-    ) {
-      return;
+    if (status?.err) {
+      return "failed";
+    }
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+      return "confirmed";
     }
     await new Promise((resolve) => setTimeout(resolve, FAUCET_CONFIRMATION_POLL_MS));
   }
+  return "timeout";
 }
 
 interface RpcRelayResponse<TResponse> {
@@ -514,7 +515,14 @@ export async function requestDevnetSolanaFaucetAction(
 
     // requestAirdrop returns once the transaction is submitted. Revalidating now would
     // re-read the pre-airdrop balance, so wait (bounded) for confirmation first.
-    await waitForSignatureConfirmation(client, payload.result);
+    if ((await waitForSignatureConfirmation(client, payload.result)) === "failed") {
+      return {
+        status: "error",
+        message: t("DashboardCustody.devnetFaucetProviderGenericError", {
+          provider: relay.provider.id,
+        }),
+      };
+    }
 
     revalidatePath("/dashboard/custody");
     revalidatePath("/dashboard/wallets");

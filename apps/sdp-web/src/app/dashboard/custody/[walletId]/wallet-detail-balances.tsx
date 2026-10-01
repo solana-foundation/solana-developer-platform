@@ -7,7 +7,7 @@ import { custodyQueryKeys } from "@/app/dashboard/custody/custody-query-key";
 import {
   BALANCE_REFRESH_INTERVAL_MS,
   fetchWalletBalance,
-} from "@/app/dashboard/custody/wallet-card-balance-value";
+} from "@/app/dashboard/custody/wallet-balances.data";
 import { TokenMark } from "@/components/token-mark";
 import {
   formatCurrencyAmount,
@@ -39,8 +39,9 @@ function useWalletDetailBalances(
     () => fetchWalletBalance(walletId),
     {
       fallbackData: initial.error ? undefined : initial.balances,
-      // The server just read these; only retry at once if that read failed.
-      revalidateOnMount: Boolean(initial.error),
+      // SWR's cache outlives navigation: without this a return visit would show the
+      // previous visit's cached balance over the fresh server read.
+      revalidateOnMount: true,
       revalidateOnFocus: true,
       refreshWhenHidden: false,
       refreshInterval: BALANCE_REFRESH_INTERVAL_MS,

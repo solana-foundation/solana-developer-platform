@@ -135,10 +135,29 @@ describe("requestDevnetSolanaFaucetAction", () => {
       method: "getSignatureStatuses",
       params: [["sig_airdrop"]],
     });
+    expect(client.fetch.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     const lastStatusCheck = client.fetch.mock.invocationCallOrder[2] ?? 0;
     for (const order of mocks.revalidatePath.mock.invocationCallOrder) {
       expect(order).toBeGreaterThan(lastStatusCheck);
     }
+  });
+
+  it("reports an airdrop that failed on-chain instead of success", async () => {
+    client.fetch
+      .mockResolvedValueOnce(relay({ result: "sig_airdrop" }))
+      .mockResolvedValueOnce(
+        relay({ result: { value: [{ err: { InstructionError: [0, {}] } }] } })
+      );
+
+    const pending = requestDevnetSolanaFaucetAction("wallet_one", WALLET_ADDRESS);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const result = await pending;
+
+    expect(result).toEqual({
+      status: "error",
+      message: "DashboardCustody.devnetFaucetProviderGenericError",
+    });
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("still succeeds and revalidates when confirmation does not arrive in time", async () => {

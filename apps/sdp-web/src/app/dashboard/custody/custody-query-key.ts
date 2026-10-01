@@ -6,7 +6,8 @@ export const custodyQueryKeys = {
   /** Balances and activity of any wallet, as shown on the wallet pages. */
   isWalletLiveDataKey: (key: Arguments) =>
     (Array.isArray(key) && (key[0] === "wallet-balances" || key[0] === "wallet-activity")) ||
-    key === "wallet-card-balances",
+    key === "wallet-card-balances" ||
+    (typeof key === "string" && key.startsWith("wallet-card-balance-fallback:")),
   policyDestinationAccounts: () => "policy-destination-accounts",
   walletPolicyRevisions: ({ walletId }: { walletId: string }) =>
     ["wallet-policy-revisions", walletId] as const,

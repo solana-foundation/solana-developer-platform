@@ -6,7 +6,7 @@ const { mockUseSWR } = vi.hoisted(() => ({ mockUseSWR: vi.fn() }));
 
 vi.mock("swr", () => ({ default: mockUseSWR }));
 
-import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/custody/wallet-card-balance-value";
+import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/custody/wallet-balances.data";
 import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
 
 const WALLET_ID = "wallet-1";
@@ -44,6 +44,8 @@ describe("wallet detail balances", () => {
         fallbackData: [sol("1", 150)],
         refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
         revalidateOnFocus: true,
+        // A cached balance from an earlier visit must not outlive the fresh server read.
+        revalidateOnMount: true,
       })
     );
   });
