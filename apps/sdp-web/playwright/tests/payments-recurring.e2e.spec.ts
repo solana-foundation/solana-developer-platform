@@ -145,18 +145,26 @@ test.describe
       await expect(recurringRow).toContainText(recurringWalletLabel);
       await expect(recurringRow).toContainText(`7.50 ${recurringTokenSymbol}`);
 
-      await recurringRow.getByText(`7.50 ${recurringTokenSymbol}`, { exact: true }).click();
+      // The row's title, "<amount> to <contact>", is its link.
+      await recurringRow
+        .getByRole("link", { name: `7.50 ${recurringTokenSymbol} to ${recurringCounterpartyName}` })
+        .click();
       await expect(page).toHaveURL(
         new RegExp(`/dashboard/payments/recurring/${recurringPaymentId}$`)
       );
+      // The header names the schedule by what it pays and to whom.
       await expect(
-        page.locator("main").getByRole("heading", { level: 1, name: "Schedule" })
+        page.locator("main").getByRole("heading", {
+          level: 1,
+          name: `7.50 ${recurringTokenSymbol} to ${recurringCounterpartyName}`,
+        })
       ).toBeVisible();
       await expect(page.getByRole("link", { name: "Schedules", exact: true })).toBeVisible();
-      await expect(page.getByText("Payment reference", { exact: true })).toBeVisible();
-      await expect(page.getByText("Billing interval", { exact: true })).toBeVisible();
-      await expect(page.getByText("Funding wallet", { exact: true })).toBeVisible();
-      await expect(page.getByText("Receiving wallet", { exact: true })).toBeVisible();
+      // The plan reads as labelled lines; the schedule's identifiers sit under Details.
+      const recordLabels = page.locator("main dt");
+      for (const label of ["Pays", "To", "From", "Repeats", "Next run", "Schedule ID"]) {
+        await expect(recordLabels.getByText(label, { exact: true })).toBeVisible();
+      }
       await expect(page.locator("main").getByText("Token mint", { exact: true })).toHaveCount(0);
       await expect(page.locator("main").getByText("Plan PDA", { exact: true })).toHaveCount(0);
       await expect(page.locator("main").getByText("Subscription PDA", { exact: true })).toHaveCount(
