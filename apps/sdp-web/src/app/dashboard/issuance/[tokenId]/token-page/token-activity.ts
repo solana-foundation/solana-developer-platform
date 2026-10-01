@@ -50,13 +50,17 @@ export const TOKEN_ACTIVITY_WINDOW = 100;
 /**
  * The token's audit history read 100 events at a time, newest first: the tab searches and
  * pages what is loaded, and `loadOlder` reads the next window while `hasMore` says the API
- * holds older events.
+ * holds older events. A window that fails to load keeps the ones before it (`olderFailed`),
+ * and `loadOlder` then retries it.
  */
 export function useTokenActivityWindows(
   tokenId: string,
   filters: Omit<TokenActivityQuery, "page" | "pageSize">
 ) {
-  const { data, error, size, setSize, isValidating } = useSWRInfinite<AssetAuditHistory, Error>(
+  const { data, error, size, setSize, isValidating, mutate } = useSWRInfinite<
+    AssetAuditHistory,
+    Error
+  >(
     (index, previous) =>
       previous && !previous.hasMore
         ? null
@@ -81,14 +85,17 @@ export function useTokenActivityWindows(
   );
   const events = data?.flatMap((window) => window.events) ?? [];
   const hasMore = data?.at(-1)?.hasMore === true;
-  const loadingOlder = isValidating && size > (data?.length ?? 0);
+  const loadedWindows = data?.length ?? 0;
+  const loadingOlder = isValidating && size > loadedWindows;
   return {
     events,
     loaded: data !== undefined,
-    error,
+    // Nothing to show: the newest window itself failed.
+    error: loadedWindows === 0 ? error : undefined,
+    olderFailed: loadedWindows > 0 && error !== undefined && size > loadedWindows,
     hasMore,
     loadingOlder,
-    loadOlder: () => setSize(size + 1),
+    loadOlder: () => (size > loadedWindows ? mutate() : setSize(size + 1)),
   };
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Token } from "@sdp/types";
+import type { AssetAuditEvent, Token } from "@sdp/types";
 import { ExternalLinkIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PAYMENTS_TABLE_CELL } from "@/app/dashboard/payments/payments-table";
@@ -190,75 +190,102 @@ export function TokenActivityTab({ token }: { token: Token }) {
           <ListEmptyState message={t("DashboardIssuance.newDesign.activity.empty")} />
         )
       ) : (
-        <TokenTable
-          tableClassName="min-w-[640px]"
-          columns={[
-            { className: "w-[30%]", label: t("DashboardIssuance.newDesign.activity.event") },
-            { className: "w-[24%]", label: t("DashboardIssuance.newDesign.activity.actor") },
-            { className: "w-[14%]", label: t("DashboardIssuance.newDesign.activity.status") },
-            { className: "w-[22%]", label: t("DashboardIssuance.newDesign.activity.when") },
-            {
-              className: "w-[10%]",
-              label: t("DashboardIssuance.newDesign.overview.explorer"),
-              srOnly: true,
-            },
-          ]}
-        >
-          {visible.map((event) => {
-            const status = activityStatus(event, t);
-            const signature = activitySignature(event);
-            return (
-              <TableRow key={event.id}>
-                <TableCell className={`${PAYMENTS_TABLE_CELL} truncate font-medium text-primary`}>
-                  {activityEventLabel(event.action, t)}
-                </TableCell>
-                <TableCell className={`${PAYMENTS_TABLE_CELL} truncate text-primary`}>
-                  {event.actorLabel}
-                </TableCell>
-                <TableCell className={PAYMENTS_TABLE_CELL}>
-                  <StatusText tone={status.tone}>{status.label}</StatusText>
-                </TableCell>
-                <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
-                  {formatter.format(new Date(event.createdAt))}
-                </TableCell>
-                <TableCell className={PAYMENTS_TABLE_CELL}>
-                  {signature ? (
-                    <a
-                      href={transactionExplorerHref(signature)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-secondary hover:text-primary"
-                    >
-                      {t("DashboardIssuance.newDesign.overview.explorer")}
-                      <ExternalLinkIcon className="size-3" aria-hidden="true" />
-                    </a>
-                  ) : null}
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TokenTable>
+        <ActivityTable events={visible} formatter={formatter} />
       )}
       {pageCount > 1 ? (
         <ArrowPagination page={page} pageCount={pageCount} onPageChange={setPage} />
       ) : null}
-      {history.hasMore ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-meta text-tertiary">
-            {t("DashboardIssuance.newDesign.activity.windowNote", {
-              count: history.events.length,
-            })}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={history.loadingOlder}
-            onClick={() => void history.loadOlder()}
-          >
-            {t("DashboardIssuance.newDesign.activity.loadOlder")}
-          </Button>
-        </div>
-      ) : null}
+      <ActivityMore history={history} />
+    </div>
+  );
+}
+
+/** One page of events: what was done, by whom, how it went, when, and its transaction. */
+function ActivityTable({
+  events,
+  formatter,
+}: {
+  events: AssetAuditEvent[];
+  formatter: Intl.DateTimeFormat;
+}) {
+  const t = useTranslations();
+  return (
+    <TokenTable
+      tableClassName="min-w-[640px]"
+      columns={[
+        { className: "w-[30%]", label: t("DashboardIssuance.newDesign.activity.event") },
+        { className: "w-[24%]", label: t("DashboardIssuance.newDesign.activity.actor") },
+        { className: "w-[14%]", label: t("DashboardIssuance.newDesign.activity.status") },
+        { className: "w-[22%]", label: t("DashboardIssuance.newDesign.activity.when") },
+        {
+          className: "w-[10%]",
+          label: t("DashboardIssuance.newDesign.overview.explorer"),
+          srOnly: true,
+        },
+      ]}
+    >
+      {events.map((event) => {
+        const status = activityStatus(event, t);
+        const signature = activitySignature(event);
+        return (
+          <TableRow key={event.id}>
+            <TableCell className={`${PAYMENTS_TABLE_CELL} truncate font-medium text-primary`}>
+              {activityEventLabel(event.action, t)}
+            </TableCell>
+            <TableCell className={`${PAYMENTS_TABLE_CELL} truncate text-primary`}>
+              {event.actorLabel}
+            </TableCell>
+            <TableCell className={PAYMENTS_TABLE_CELL}>
+              <StatusText tone={status.tone}>{status.label}</StatusText>
+            </TableCell>
+            <TableCell className={`${PAYMENTS_TABLE_CELL} text-primary tabular-nums`}>
+              {formatter.format(new Date(event.createdAt))}
+            </TableCell>
+            <TableCell className={PAYMENTS_TABLE_CELL}>
+              {signature ? (
+                <a
+                  href={transactionExplorerHref(signature)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-secondary hover:text-primary"
+                >
+                  {t("DashboardIssuance.newDesign.overview.explorer")}
+                  <ExternalLinkIcon className="size-3" aria-hidden="true" />
+                </a>
+              ) : null}
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </TokenTable>
+  );
+}
+
+/** How much history is loaded and a way to read older events, while the API holds more. */
+function ActivityMore({ history }: { history: ReturnType<typeof useTokenActivityWindows> }) {
+  const t = useTranslations();
+  if (!history.hasMore) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {history.olderFailed ? (
+        <p className="text-meta text-error">
+          {t("DashboardIssuance.newDesign.activity.olderFailed")}
+        </p>
+      ) : (
+        <p className="text-meta text-tertiary">
+          {t("DashboardIssuance.newDesign.activity.windowNote", {
+            count: history.events.length,
+          })}
+        </p>
+      )}
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={history.loadingOlder}
+        onClick={() => void history.loadOlder()}
+      >
+        {t("DashboardIssuance.newDesign.activity.loadOlder")}
+      </Button>
     </div>
   );
 }

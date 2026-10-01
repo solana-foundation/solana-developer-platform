@@ -1839,7 +1839,8 @@
           "update": "Settings updated",
           "revoke": "Authority given up"
         },
-        "loadOlder": "Load older events"
+        "loadOlder": "Load older events",
+        "olderFailed": "Older events could not be loaded. The events above are still current."
       },
       "localDrafts": {
         "title": "Unfinished drafts",
