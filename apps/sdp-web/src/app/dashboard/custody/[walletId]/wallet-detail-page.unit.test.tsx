@@ -288,7 +288,7 @@ describe("WalletDetailPage critical path", () => {
 
   it("keeps wallet detail data cards on theme-aware surfaces", async () => {
     const t = await getTranslations();
-    const balanceResult = { balances: [solBalance], error: null };
+    const balanceResult = { balances: [solBalance], error: null, readAt: 0 };
     const [summary, populatedBalances, emptyBalances] = await Promise.all([
       WalletBalanceSummary({
         walletId: "wallet_one",
@@ -307,7 +307,7 @@ describe("WalletDetailPage critical path", () => {
       }),
       WalletBalancesSection({
         walletId: "wallet_one",
-        balancesPromise: Promise.resolve({ balances: [], error: null }),
+        balancesPromise: Promise.resolve({ balances: [], error: null, readAt: 0 }),
         ownedTokensByMintPromise: Promise.resolve(new Map()),
         issuanceEnabled: true,
         t,

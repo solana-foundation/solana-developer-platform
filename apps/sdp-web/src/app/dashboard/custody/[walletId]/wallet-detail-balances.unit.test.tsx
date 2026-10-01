@@ -10,6 +10,7 @@ import { BALANCE_REFRESH_INTERVAL_MS } from "@/app/dashboard/custody/wallet-bala
 import { WalletBalanceRows, WalletBalanceTotal } from "./wallet-detail-balances";
 
 const WALLET_ID = "wallet-1";
+const READ_AT = 1_700_000_000_000;
 
 function sol(uiAmount: string, usdValue: number): CustodyWalletTokenBalance {
   return {
@@ -33,25 +34,27 @@ describe("wallet detail balances", () => {
     renderToStaticMarkup(
       <WalletBalanceTotal
         walletId={WALLET_ID}
-        initial={{ balances: [sol("1", 150)], error: null }}
+        initial={{ balances: [sol("1", 150)], error: null, readAt: READ_AT }}
       />
     );
 
     expect(mockUseSWR).toHaveBeenCalledWith(
-      ["wallet-balances", WALLET_ID],
+      // Keyed to the server read, so an earlier visit's cached balance can't show first.
+      ["wallet-balances", WALLET_ID, READ_AT],
       expect.any(Function),
       expect.objectContaining({
         fallbackData: [sol("1", 150)],
         refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
         revalidateOnFocus: true,
-        // A cached balance from an earlier visit must not outlive the fresh server read.
-        revalidateOnMount: true,
+        revalidateOnMount: false,
       })
     );
+    // keepPreviousData would show the previous key's balance after a new server read.
+    expect(mockUseSWR.mock.calls[0]?.[2]).not.toHaveProperty("keepPreviousData");
   });
 
   it("shows polled balances instead of the server-rendered ones", () => {
-    const initial = { balances: [sol("1", 150)], error: null };
+    const initial = { balances: [sol("1", 150)], error: null, readAt: READ_AT };
     mockUseSWR.mockReturnValue({ data: [sol("2", 300)] });
 
     const total = renderToStaticMarkup(
@@ -73,7 +76,7 @@ describe("wallet detail balances", () => {
   });
 
   it("replaces a failed server read once a poll succeeds", () => {
-    const initial = { balances: [], error: "Balances unavailable" };
+    const initial = { balances: [], error: "Balances unavailable", readAt: READ_AT };
 
     mockUseSWR.mockReturnValue({ data: undefined });
     expect(

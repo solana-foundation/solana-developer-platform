@@ -99,24 +99,27 @@ async function getWalletTrackedBalances(
   walletId: string,
   unavailableMessage: string
 ): Promise<WalletTrackedBalancesResult> {
+  const readAt = Date.now();
   try {
     const response = await request(`/v1/payments/wallets/${encodeURIComponent(walletId)}/balances`);
     if (response.status === 404) {
-      return { balances: [], error: null };
+      return { balances: [], error: null, readAt };
     }
     if (!response.ok) {
       return {
         balances: [],
         error: unavailableMessage,
+        readAt,
       };
     }
 
     const json = (await response.json()) as { data?: WalletBalancesResponse };
-    return { balances: json.data?.walletBalances?.balances ?? [], error: null };
+    return { balances: json.data?.walletBalances?.balances ?? [], error: null, readAt };
   } catch {
     return {
       balances: [],
       error: unavailableMessage,
+      readAt,
     };
   }
 }

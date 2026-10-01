@@ -19,6 +19,8 @@ import {
 export interface WalletTrackedBalancesResult {
   balances: CustodyWalletTokenBalance[];
   error: string | null;
+  /** When the server read these balances. */
+  readAt: number;
 }
 
 /** Issued tokens the balance rows link to, keyed by mint. */
@@ -34,23 +36,26 @@ function useWalletDetailBalances(
   walletId: string,
   initial: WalletTrackedBalancesResult
 ): WalletTrackedBalancesResult {
+  // A per-read key rather than seeding the cache in an effect (as the issuance list
+  // does): effects run after paint, so a return visit would still flash the old balance.
   const { data } = useSWR(
-    custodyQueryKeys.walletBalances({ walletId }),
+    custodyQueryKeys.walletBalances({ walletId, readAt: initial.readAt }),
     () => fetchWalletBalance(walletId),
     {
       fallbackData: initial.error ? undefined : initial.balances,
-      // SWR's cache outlives navigation: without this a return visit would show the
-      // previous visit's cached balance over the fresh server read.
-      revalidateOnMount: true,
+      // The key is new per server read, so there is no older cache to replace;
+      // only retry at once if that read failed.
+      revalidateOnMount: Boolean(initial.error),
       revalidateOnFocus: true,
       refreshWhenHidden: false,
       refreshInterval: BALANCE_REFRESH_INTERVAL_MS,
       dedupingInterval: 5_000,
-      keepPreviousData: true,
+      // No keepPreviousData: on a new server read (e.g. after a faucet airdrop) it
+      // would keep the previous key's balance instead of the fresh fallback.
     }
   );
   // A successful refresh supersedes a failed server read.
-  return data ? { balances: data, error: null } : initial;
+  return data ? { ...initial, balances: data, error: null } : initial;
 }
 
 export function WalletBalanceTotal({
