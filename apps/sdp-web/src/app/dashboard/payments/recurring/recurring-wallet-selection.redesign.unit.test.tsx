@@ -269,4 +269,61 @@ describe("Recurring Payment exact source selection", () => {
       await waitFor(() => expect(writes).toEqual([]));
     }
   );
+
+  it.each([
+    ["holds the schedule's token", MINT, true],
+    ["holds only another token", "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", false],
+  ])("switching to a wallet that %s", async (_case, replacementMint, keepsToken) => {
+    const replacement = {
+      ...source,
+      id: "cwlt_replacement",
+      label: "Replacement",
+      balances: [
+        {
+          token: keepsToken ? "USDC" : "USDT",
+          mint: replacementMint,
+          amount: "10000000",
+          uiAmount: "10",
+          decimals: 6,
+        },
+      ],
+    };
+    const writes: unknown[] = [];
+    vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PATCH") writes.push(JSON.parse(String(init.body)));
+      return Response.json({
+        data: { wallets: [source, replacement], recurringPayment: recurring },
+      });
+    });
+    render(
+      <RecurringPaymentDetailWorkspace
+        recurringPayment={recurring}
+        wallet={source}
+        wallets={[source, replacement]}
+        issuedTokensByMint={{}}
+        counterpartyAccounts={[account]}
+        counterpartyLabel="Receiver"
+        collectionAttempts={[]}
+        collectionAttemptsTotal={0}
+      />,
+      { wrapper }
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Funding wallet" }));
+    await user.click(await screen.findByRole("button", { name: /Replacement/ }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    if (keepsToken) {
+      await waitFor(() => expect(writes).toHaveLength(1));
+      expect(writes[0]).toEqual({ sourceCustodyWalletId: replacement.id });
+      return;
+    }
+    // The old token is not the new wallet's to pay with: the picker clears and the form asks
+    // for one, as its placeholder and its error, instead of saving the pair.
+    expect(screen.getByRole("button", { name: "Token" }).textContent).toContain(
+      "Select a currency."
+    );
+    expect(await screen.findAllByText("Select a currency.")).toHaveLength(2);
+    expect(writes).toEqual([]);
+  });
 });

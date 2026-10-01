@@ -103,4 +103,20 @@ describe("DateField", () => {
     expect(before?.hasAttribute("disabled")).toBe(true);
     expect(first?.hasAttribute("disabled")).toBe(false);
   });
+
+  it("puts back the last day for a typed one before the first allowed one", () => {
+    const onChange = vi.fn();
+    render(
+      <Harness initial="2026-10-12" onChange={onChange} minDate={new Date(2026, 9, 10, 15, 30)} />
+    );
+    fireEvent.change(field(), { target: { value: "Oct 9, 2026" } });
+    fireEvent.blur(field());
+    expect(onChange).not.toHaveBeenCalled();
+    expect(field().value).toBe("Oct 12, 2026");
+
+    // The first allowed day itself counts, whatever time of day `minDate` carries.
+    fireEvent.change(field(), { target: { value: "2026-10-10" } });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("2026-10-10");
+  });
 });

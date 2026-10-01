@@ -198,5 +198,17 @@
   {
     "candidate": "src/flags/index.ts:283:20:Enabled",
     "reason": "Vercel Flags Explorer metadata for operators (flag description and option labels); never rendered in the product UI"
+  },
+  {
+    "candidate": "src/flags/index.ts:240:3:NEW DESIGN: show the 2026 refresh's shell (palette, type and sidebar, the language switch in the account menu) and the Privacy connect form. Each redesigned area also has a new-design-* flag of its own, which counts only while this one is on. Off serves the previous design everywhere.",
+    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
+  },
+  {
+    "candidate": "src/flags/index.ts:243:21:Previous design",
+    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
+  },
+  {
+    "candidate": "src/flags/index.ts:244:20:New design",
+    "reason": "Vercel Toolbar flag metadata for operators; never rendered in the dashboard"
   }
 ]

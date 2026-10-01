@@ -97,19 +97,21 @@ async function createRampQuote(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const body = (await response.json().catch(() => ({}))) as {
-    data?: { quote?: PaymentRampQuote; transferId?: string };
-    error?: { message?: string };
-  };
-
   if (!response.ok) {
+    const errorBody = (await response.json().catch(() => ({}))) as {
+      error?: { message?: string };
+    };
     throw new Error(
       getApiError(
-        body,
+        errorBody,
         t("DashboardPayments.ramps.quoteRequestFailedStatus", { status: response.status })
       )
     );
   }
+
+  const body = (await response.json().catch(() => ({}))) as {
+    data?: { quote?: PaymentRampQuote; transferId?: string };
+  };
 
   if (!body.data?.quote || !body.data.transferId) {
     throw new Error(t("DashboardPayments.ramps.quoteResponseMissingDetails"));
@@ -405,10 +407,19 @@ export function useRampWizard<TId extends string>(
         toast.dismiss(toastId);
         return;
       }
-      if (hasOnboardingLifecycle(result.provider) && result.status !== "ready") {
+      if (
+        hasOnboardingLifecycle(result.provider) &&
+        result.status !== "ready" &&
+        isRequirementsStep
+      ) {
+        // The requirements step shows the onboarding panel in place and waits there.
         toast.dismiss(toastId);
         return;
       }
+      // From the memo step (a provider with no fields to collect, such as a first Mural
+      // onboarding) an unfinished onboarding moves on too: the memo step has nowhere to show
+      // the terms or verification link, so staying would strand the user. The last step shows
+      // the onboarding and the readiness effect quotes once it reaches ready.
       // Reaching the transaction stage with derived readiness fires the quote
       // through the single readiness effect above.
       setStepIndex((current) => current + 1);

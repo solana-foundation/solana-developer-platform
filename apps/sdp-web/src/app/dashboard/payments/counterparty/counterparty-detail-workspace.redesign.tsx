@@ -1,5 +1,6 @@
 "use client";
 
+import { addDecimalAmounts, isDecimalString } from "@sdp/solana/amount";
 import type {
   Counterparty,
   CounterpartyAccount,
@@ -39,7 +40,7 @@ import {
 } from "../payments-presentation";
 import { AddExternalAccountDialog } from "./add-external-account-dialog";
 import { CounterpartyProviderAccounts } from "./counterparty-provider-accounts.redesign";
-import { TransferDetailModal } from "./counterparty-transfer-detail-modal";
+import { TransferDetailModal } from "./counterparty-transactions";
 import { DeleteCounterpartyDialog } from "./delete-counterparty-dialog";
 import { useCounterpartyProviderAccounts } from "./use-counterparty-provider-accounts";
 
@@ -68,18 +69,20 @@ function isInbound(transfer: PaymentTransferSummary): boolean {
 
 /**
  * What has been paid to the contact, read from the transfers the page loaded: the settled
- * outbound ones, their totals per token, and when the latest went out.
+ * outbound ones, their totals per token (added as decimal strings, so no float rounding), and
+ * when the latest went out.
  */
 function summarizePayouts(transfers: PaymentTransferSummary[]) {
   const payouts = transfers.filter(
     (transfer) => SETTLED_STATUSES.has(transfer.status) && !isInbound(transfer)
   );
-  const totals = new Map<string, number>();
+  const totals = new Map<string, string>();
   for (const transfer of payouts) {
     const token = resolveTransferTokenLabel(transfer.token);
-    const amount = Number(transfer.amount);
-    if (token === undefined || !Number.isFinite(amount)) continue;
-    totals.set(token, (totals.get(token) ?? 0) + amount);
+    const amount = transfer.amount?.trim();
+    if (token === undefined || amount === undefined || !isDecimalString(amount)) continue;
+    const total = totals.get(token);
+    totals.set(token, total === undefined ? amount : addDecimalAmounts(total, amount));
   }
   const lastPaidAt = payouts
     .flatMap((transfer) => (transfer.createdAt ? [transfer.createdAt] : []))
@@ -111,13 +114,18 @@ function paidSoFarLabel(
       ? t("DashboardPayments.counterparty.detail.paymentCountOne")
       : t("DashboardPayments.counterparty.detail.paymentCountOther", { count: summary.count });
   if (summary.totals.size > 2 || summary.totals.size === 0) {
-    return t("DashboardPayments.counterparty.detail.paidInTokens", {
-      payments,
-      count: summary.totals.size,
-    });
+    return partial
+      ? t("DashboardPayments.counterparty.detail.paidInTokensPartial", {
+          payments,
+          count: summary.totals.size,
+        })
+      : t("DashboardPayments.counterparty.detail.paidInTokens", {
+          payments,
+          count: summary.totals.size,
+        });
   }
   const amounts = [...summary.totals]
-    .map(([token, total]) => `${formatDecimalAmount(String(total), locale)} ${token}`)
+    .map(([token, total]) => `${formatDecimalAmount(total, locale)} ${token}`)
     .join(", ");
   return partial
     ? t("DashboardPayments.counterparty.detail.paidSummaryPartial", { amounts, payments })
@@ -171,8 +179,14 @@ function ContactRecord({
   const t = useTranslations();
   const locale = useLocale();
   const summary = summarizePayouts(transfers);
+  // Only the latest transfers were loaded: older ones may hold payouts these do not.
+  const partial = transfersTotal > transfers.length;
   const notYet = (
-    <span className="text-tertiary">{t("DashboardPayments.counterparty.detail.notPaidYet")}</span>
+    <span className="text-tertiary">
+      {partial
+        ? t("DashboardPayments.counterparty.detail.notPaidInLatest", { count: transfers.length })
+        : t("DashboardPayments.counterparty.detail.notPaidYet")}
+    </span>
   );
   return (
     <section className="grid gap-x-6 md:grid-cols-2">
@@ -217,9 +231,7 @@ function ContactRecord({
           )}
         </DetailRow>
         <DetailRow label={t("DashboardPayments.counterparty.detail.paidSoFar")}>
-          {summary.count === 0
-            ? notYet
-            : paidSoFarLabel(summary, transfersTotal > transfers.length, locale, t)}
+          {summary.count === 0 ? notYet : paidSoFarLabel(summary, partial, locale, t)}
         </DetailRow>
       </dl>
     </section>
