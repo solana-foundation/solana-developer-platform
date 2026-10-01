@@ -125,41 +125,6 @@ function simulationOffered(context: SimulationContext): context is SimulationCon
   return context.demo || (context.sandbox && canSimulateQuote(quote, context.fiatCurrency));
 }
 
-type SimulationRequest = Parameters<typeof simulateSandboxTransfer>[0];
-
-/**
- * What marks the deposit paid. Demo mode answers by the transfer for any provider; the real
- * sandboxes each take their own payload, Mural's only in the currencies it pays in.
- */
-function simulationRequest(
-  quote: PaymentRampQuote,
-  transferId: string,
-  demo: boolean,
-  mural: { counterpartyId: string; amount: string; fiatCurrency: string },
-  t: Translate
-): SimulationRequest {
-  if (quote.provider === "lightspark") {
-    return { provider: "lightspark", payload: { quoteId: quote.id, currencyCode: "USD" } };
-  }
-  if (demo || quote.provider !== "mural") {
-    return { provider: quote.provider, payload: { transferId } };
-  }
-  const { fiatCurrency } = mural;
-  if (!isMuralSandboxPayinCurrency(fiatCurrency)) {
-    throw new Error(
-      t("DashboardPayments.ramps.muralSandboxCurrencyUnsupported", { currency: fiatCurrency })
-    );
-  }
-  return {
-    provider: "mural",
-    payload: {
-      counterpartyId: mural.counterpartyId,
-      amount: Number(mural.amount.trim()),
-      fiatCurrency,
-    },
-  };
-}
-
 export function useOnrampWizard(props: UseRampWizardProps) {
   const { sdpEnvironment } = useDashboardWorkspace();
   const demo = usePaymentsDemo();
@@ -265,7 +230,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     if (!simulationOffered(simulation) || !wizard.selectedWallet) {
       return;
     }
-    const { quote, transferId } = simulation;
+    const { transferId } = simulation;
 
     setQuoteSimulationLoading(true);
     const toastId = toast.loading(t("DashboardPayments.ramps.simulatingQuoteFunding"), {
@@ -273,20 +238,7 @@ export function useOnrampWizard(props: UseRampWizardProps) {
     });
 
     try {
-      await simulateSandboxTransfer(
-        simulationRequest(
-          quote,
-          transferId,
-          demo,
-          {
-            counterpartyId: wizard.fields.counterpartyId,
-            amount: wizard.fields.amount,
-            fiatCurrency: simulation.fiatCurrency,
-          },
-          t
-        ),
-        t
-      );
+      await simulateSandboxTransfer({ transferId }, t);
       setQuoteSimulationSucceeded(true);
       toast.success(t("DashboardPayments.ramps.quoteFundingSimulated"), {
         id: toastId,

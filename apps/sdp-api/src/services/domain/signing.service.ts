@@ -27,10 +27,13 @@ import { SigningError } from "@sdp/custody/signing";
 import { getBase58Codec } from "@solana/codecs";
 import type { Address, TransactionSigner } from "@solana/kit";
 import { createKeyPairSignerFromPrivateKeyBytes } from "@solana/signers";
+import type { Context } from "hono";
 import { getDb } from "@/db";
 import { AppError } from "@/lib/errors";
 import { assertTenantClaim, type TenantScope } from "@/lib/tenant-scope";
+import { getLogger } from "@/runtime/logger";
 import { KeychainFireblocksAdapter, type SigningConfigRecord } from "@/services/adapters";
+import { AuditService } from "@/services/audit.service";
 import * as custodyProvisioning from "@/services/custody/provisioning";
 import { type CustodyCipher, createCustodyCipher } from "@/services/custody-cipher/cipher-router";
 import {
@@ -269,6 +272,7 @@ export class SigningService {
     private configStore: SigningConfigStore & {
       saveProviderConfig: CustodyConfigStore["saveProviderConfig"];
       createWallet: CustodyConfigStore["createWallet"];
+      createDefaultWallet: CustodyConfigStore["createDefaultWallet"];
       getWallets: CustodyConfigStore["getWallets"];
       getWalletsForConfigs: CustodyConfigStore["getWalletsForConfigs"];
       findActiveWalletByIdentifier: CustodyConfigStore["findActiveWalletByIdentifier"];
@@ -1262,6 +1266,7 @@ export class SigningService {
       purpose?: WalletPurpose;
       setDefault?: boolean;
       provider?: SigningConfiguration["provider"];
+      auditContext?: Context<{ Bindings: Env }>;
     }
   ): Promise<CustodyConfigWallet> {
     const config = await this.getConfigurationForMutation(orgId, projectId, params.provider);
@@ -1273,11 +1278,22 @@ export class SigningService {
         "NOT_FOUND"
       );
     }
+    const auditContext = params.setDefault ? params.auditContext : undefined;
+    if (params.setDefault && !auditContext) {
+      throw new SigningError("Default wallet changes require an audit context", "INVALID_REQUEST");
+    }
 
     await this.assertProviderEnabled(orgId, config.provider);
     assertCustodyProviderCanCreateWallet(config.provider);
 
     const parsed = await parseConfigRecord(this.env, orgId, config, this.getCustodyCipher());
+    if (auditContext) {
+      return this.createDefaultWallet(auditContext, orgId, projectId, config, parsed, {
+        label: params.label,
+        purpose: params.purpose,
+      });
+    }
+
     const { walletId, publicKey } = await createProviderWallet({
       env: this.env,
       orgId,
@@ -1291,16 +1307,12 @@ export class SigningService {
 
     let wallet: CustodyConfigWallet;
     try {
-      wallet = await this.configStore.createWallet(
-        config.id,
-        {
-          walletId,
-          publicKey,
-          label: params.label,
-          purpose: params.purpose,
-        },
-        { setDefault: params.setDefault }
-      );
+      wallet = await this.configStore.createWallet(config.id, {
+        walletId,
+        publicKey,
+        label: params.label,
+        purpose: params.purpose,
+      });
     } catch (error) {
       throw new SigningError(
         `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -1309,11 +1321,131 @@ export class SigningService {
       );
     }
 
-    if (params.setDefault) {
-      this.providerCache.delete(config.id);
+    return wallet;
+  }
+
+  private async createDefaultWallet(
+    c: Context<{ Bindings: Env }>,
+    orgId: string,
+    projectId: string | undefined,
+    config: SigningConfigRecord,
+    parsed: Parameters<typeof createProviderWallet>[0]["parsed"],
+    params: { label?: string; purpose?: WalletPurpose }
+  ): Promise<CustodyConfigWallet> {
+    const custodyWalletId = `cwlt_${crypto.randomUUID()}`;
+    const auditService = new AuditService(getDb(this.env));
+    const intent = await auditService.beginCritical(c, {
+      action: "update",
+      resourceType: "custody_config",
+      resourceId: config.id,
+      metadata: {
+        event: "default_wallet_change_started",
+        ownerKind: "config",
+        provider: config.provider,
+        custodyWalletId,
+        projectId: projectId ?? null,
+      },
+    });
+
+    let provisioned: { walletId: string; publicKey: string };
+    try {
+      provisioned = await createProviderWallet({
+        env: this.env,
+        orgId,
+        projectId,
+        params: { label: params.label },
+        parsed,
+        cipher: this.getCustodyCipher(),
+      });
+    } catch (error) {
+      if (!(error instanceof SigningError) || error.code === "NETWORK_ERROR") {
+        this.logWalletOrphanRisk(orgId, projectId, config, "provider_result_unknown", intent.id);
+      } else {
+        await auditService.completeCritical(c, intent, {
+          status: "failure",
+          metadata: { event: "default_wallet_change_failed", reason: "provider_rejected" },
+        });
+      }
+      throw error;
     }
 
-    return wallet;
+    let created: Awaited<ReturnType<CustodyConfigStore["createDefaultWallet"]>>;
+    try {
+      created = await this.configStore.createDefaultWallet(config.id, orgId, projectId, {
+        id: custodyWalletId,
+        walletId: provisioned.walletId,
+        publicKey: provisioned.publicKey,
+        label: params.label,
+        purpose: params.purpose,
+      });
+    } catch (error) {
+      this.logWalletOrphanRisk(
+        orgId,
+        projectId,
+        config,
+        "persistence_failed",
+        intent.id,
+        provisioned.walletId
+      );
+      throw new SigningError(
+        `Failed to persist wallet record: ${error instanceof Error ? error.message : "Unknown error"}`,
+        "NETWORK_ERROR",
+        error instanceof Error ? error : undefined
+      );
+    }
+    if (!created) {
+      this.logWalletOrphanRisk(
+        orgId,
+        projectId,
+        config,
+        "persistence_failed",
+        intent.id,
+        provisioned.walletId
+      );
+      await auditService.completeCritical(c, intent, {
+        status: "failure",
+        metadata: {
+          event: "default_wallet_change_failed",
+          reason: "selection_unavailable",
+          walletId: provisioned.walletId,
+        },
+      });
+      throw new SigningError("Custody not initialized", "NOT_FOUND");
+    }
+
+    this.providerCache.delete(config.id);
+    await auditService.completeCritical(c, intent, {
+      metadata: {
+        event: "default_wallet_changed",
+        walletId: provisioned.walletId,
+        previousCustodyWalletId: created.previous.custody_wallet_id,
+        previousWalletId: created.previous.wallet_id,
+      },
+    });
+
+    return created.wallet;
+  }
+
+  private logWalletOrphanRisk(
+    orgId: string,
+    projectId: string | undefined,
+    config: SigningConfigRecord,
+    reason: "provider_result_unknown" | "persistence_failed",
+    auditIntentId: string,
+    walletId?: string
+  ): void {
+    getLogger().error(
+      {
+        organizationId: orgId,
+        projectId: projectId ?? null,
+        custodyConfigId: config.id,
+        provider: config.provider,
+        reason,
+        auditIntentId,
+        walletId,
+      },
+      "custody_wallet_orphan_risk"
+    );
   }
 
   /**

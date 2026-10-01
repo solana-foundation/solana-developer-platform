@@ -378,7 +378,8 @@ export async function waitForEarnMovement(
  * Balance and earned per deposit token. A customer with no history answers
  * empty totals, not an error. \`earned\` is current value plus withdrawn minus
  * deposited, and is ABSENT with \`earnedUnavailableReason\` while a movement
- * is pending or a payout could not be valued: render a dash, never $0.
+ * or queued withdrawal is pending, or a payout could not be valued: render a
+ * dash, never $0.
  */
 export async function getEarnEarnings(ownerAddress: string) {
   const data = await sdpFetch(

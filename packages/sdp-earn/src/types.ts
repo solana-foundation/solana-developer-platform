@@ -13,6 +13,7 @@ import type {
   EarnPortfolioYield,
   EarnStrategyRiskMetadata,
   EarnStrategySourceKind,
+  EarnVaultPositionIntermediate,
   SdpEnvironment,
   SolanaCluster,
 } from "@sdp/types";
@@ -937,10 +938,18 @@ export interface EarnVaultPositionSnapshot {
   withdrawableShares: string;
   /** Unix epoch seconds when the shares unlock; null when the provider reports no lock. */
   unlockTimestamp?: string | null;
-  /** Value of those shares in the deposit token; omitted when unreadable. */
+  /**
+   * Provider-reported value of the shares in the deposit token (`tokenMint`), by rate or by
+   * exit quote: a deposit-token amount, never a share count. Omitted when unreadable.
+   */
   tokenValue?: string;
   tokenMint: string;
   shareMint: string;
+  /**
+   * The par route's intermediate token held outside any open request. Omitted
+   * when the owner holds none or the provider has no par intermediate.
+   */
+  parIntermediate?: EarnVaultPositionIntermediate;
 }
 
 /**

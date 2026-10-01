@@ -12,22 +12,58 @@ export function getPostgresMigrationMode(sql) {
 /**
  * Split a migration file into its individual statements.
  *
- * Comments are stripped first so a `;` inside one cannot split a statement.
- * Deliberately NOT a general SQL parser: it is correct for the migrations this
- * repo writes (no dollar-quoted bodies, no semicolons inside string literals),
- * which is why it lives here — one implementation to audit, used by the runner
- * and by the tests that execute a migration through the pooled client.
- *
  * @param sql - Full text of a migration file.
  * @returns The statements, comment-free and trimmed, in file order.
  */
 export function splitSqlStatements(sql) {
-  return sql
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/--.*$/gm, "")
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
+  const statements = [];
+  let current = "";
+  let i = 0;
+  while (i < sql.length) {
+    const comment = commentLength(sql, i);
+    if (comment > 0) {
+      i += comment;
+      continue;
+    }
+    const quoted = quotedToken(sql, i);
+    if (quoted) {
+      current += quoted;
+      i += quoted.length;
+      continue;
+    }
+    if (sql[i] === ";") {
+      statements.push(current);
+      current = "";
+    } else {
+      current += sql[i];
+    }
+    i++;
+  }
+  statements.push(current);
+  return statements.map((statement) => statement.trim()).filter(Boolean);
+}
+
+function commentLength(sql, i) {
+  if (sql.startsWith("--", i)) {
+    const end = sql.indexOf("\n", i);
+    return (end === -1 ? sql.length : end) - i;
+  }
+  if (sql.startsWith("/*", i)) {
+    const end = sql.indexOf("*/", i + 2);
+    return (end === -1 ? sql.length : end + 2) - i;
+  }
+  return 0;
+}
+
+function quotedToken(sql, i) {
+  const rest = sql.slice(i);
+  if (rest[0] === "'" || rest[0] === '"') {
+    return rest.match(rest[0] === "'" ? /^'(?:[^']|'')*'/ : /^"(?:[^"]|"")*"/)?.[0] ?? rest[0];
+  }
+  const tag = rest.match(/^\$[A-Za-z_]?[A-Za-z0-9_]*\$/);
+  if (!tag) return null;
+  const close = sql.indexOf(tag[0], i + tag[0].length);
+  return sql.slice(i, close === -1 ? sql.length : close + tag[0].length);
 }
 
 function concurrentIndexName(sql, migrationFile) {
@@ -97,6 +133,7 @@ export async function runPostgresMigrations({ databaseUrl, migrationsDir }) {
 
   try {
     await client.connect();
+    await client.query("SELECT pg_advisory_lock(hashtext('sdp_schema_migrations'))");
     // Data migrations must cross tenant boundaries. FORCE ROW LEVEL SECURITY
     // (migration 0079) binds even a non-superuser table owner, so stamp the
     // privileged system identity for this migration session.

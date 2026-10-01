@@ -293,6 +293,11 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
   --font-mono: var(--font-brand-mono);
   font-family: var(--font-sans);
 
+  /* Every page title at the design's heading size, as on a refresh route. */
+  --page-title-size: var(--font-size-heading);
+  --page-title-line-height: var(--line-height-heading);
+  --page-title-letter-spacing: var(--letter-spacing-heading);
+
   /* NEW DESIGN's page section is flat and opaque. */
   --sdp-page-backdrop: var(--surface-raised);
 

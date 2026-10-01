@@ -34,6 +34,6 @@ Capability work is parallel after registration. For an unsupported direction, de
 
 ## Choose the closest reference
 
-Every integration shape is represented under `packages/sdp-payments/src/ramps/providers/` (with API-side DB helpers in `apps/sdp-api/src/routes/payments/handlers/ramps/<provider>.ts`): manual instructions + counterparty provisioning, hosted redirect/widget, embedded session widget, and multi-step KYC with provider-side account state. Read the existing client whose shape matches yours.
+Every integration shape is represented under `packages/sdp-payments/src/ramps/providers/` (with API-side DB helpers in `apps/sdp-api/src/routes/payments/ramps/providers/<provider>.ts`): manual instructions + counterparty provisioning, hosted redirect/widget, embedded session widget, and multi-step KYC with provider-side account state. Read the existing client whose shape matches yours.
 
 The type system catches many missing registrations, but not every schema, public type, translation, or UI catalog. Use `register-provider` as the complete checklist.

@@ -191,6 +191,30 @@ server environment. Do not expose them as `NEXT_PUBLIC_*` values or paste them
 into client-side settings. Shared links unfurl with the production hostname
 that Vercel exposes as `VERCEL_PROJECT_PRODUCTION_URL`.
 
+### Updating the hosted demo
+
+The team's hosted demo is the `earn-embedded-demo` project in the
+`solana-foundation` Vercel team. **It is not on CI/CD.** Git is disconnected,
+so pushes and merges never build or deploy it and post no PR check. Deploy
+updates by hand with the Vercel CLI. You need access to that Vercel project;
+its environment variables already live there.
+
+From a clean checkout of the commit you want live, at the repository root (the
+project's root directory setting already points at this example):
+
+```bash
+pnpm dlx vercel@60.1.3 login
+pnpm dlx vercel@60.1.3 link --scope solana-foundation --project earn-embedded-demo --yes
+pnpm dlx vercel@60.1.3 deploy
+pnpm dlx vercel@60.1.3 deploy --prod
+```
+
+`link` runs once per checkout and writes the gitignored `.vercel/`. Plain
+`deploy` gives a preview URL to check first. `deploy --prod` is a separate
+production build from the same tree, not a promotion of that preview, and uses
+the Production environment variables. The CLI uploads your working tree, so
+uncommitted changes ship too. Run the [validation](#validation) commands before deploying.
+
 ## Configuration
 
 | Variable | Required | Purpose |

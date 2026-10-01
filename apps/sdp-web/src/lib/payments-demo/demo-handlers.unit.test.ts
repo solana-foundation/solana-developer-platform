@@ -4,7 +4,7 @@ import { buildWorld, DEMO_TOKENS, demoPathParts } from "./demo-fixtures";
 import { demoFlowRead, demoWrite } from "./demo-handlers";
 import type { DemoOp } from "./demo-ops";
 import { DEMO_RAMP_ASSETS, demoRampPairs, isDemoRampRail } from "./demo-ramp-assets";
-import { applyDemoOps, tokenKeyForRail } from "./demo-replay";
+import { applyDemoOps, tokenKeyForRail, transferById } from "./demo-replay";
 
 /*
  * The demo's write handlers on their own: each refuses what the SDP API would refuse, with the
@@ -152,9 +152,9 @@ describe("ramp requirements", () => {
         ...body,
       });
     const simulate = () =>
-      write("POST", "/v1/payments/ramps/sandbox/simulate", {
+      write("POST", "/v1/payments/demo/verifications", {
         provider: "bvnk",
-        payload: { counterpartyId: "demo_cpty_kai", verification: "approved" },
+        counterpartyId: "demo_cpty_kai",
       });
 
     expect(read(path).body.data.status).toBe("counterparty_collect_agreement");
@@ -180,13 +180,11 @@ describe("ramp requirements", () => {
 
   it("refuses Simulate verification for another provider or an unknown contact", () => {
     const simulate = (provider: string, counterpartyId?: string) =>
-      write("POST", "/v1/payments/ramps/sandbox/simulate", {
-        provider,
-        payload: { counterpartyId, verification: "approved" },
-      });
+      write("POST", "/v1/payments/demo/verifications", { provider, counterpartyId });
     expect(simulate("lightspark", "demo_cpty_kai")?.status).toBe(400);
-    expect(simulate("bvnk")?.status).toBe(404);
+    expect(simulate("bvnk")?.status).toBe(400);
     expect(simulate("bvnk", "demo_cpty_nobody")?.status).toBe(404);
+    expect(ops).toEqual([]);
   });
 
   it("asks a Lightspark payout which bank account to pay, in the payout's currency", () => {
@@ -462,21 +460,24 @@ describe("ramp pay-ins and cancels", () => {
       fiatAmount: "100",
     })?.body.data as { transferId: string; quote: { id: string } };
   }
-  const simulate = (payload: Record<string, unknown>) =>
-    write("POST", "/v1/payments/ramps/sandbox/simulate", { provider: "mural", payload });
+  const simulate = (body: Record<string, unknown>) =>
+    write("POST", "/v1/payments/ramps/sandbox/simulate", body);
 
-  it("pays the deposit the contact has waiting, once", () => {
-    expect(write("POST", "/v1/payments/ramps/sandbox/simulate", {})?.status).toBe(400);
-    expect(refusal(simulate({ counterpartyId: "demo_cpty_jane" }))).toEqual([404, "not_found"]);
-    deposit();
-    expect(simulate({ counterpartyId: "demo_cpty_jane", amount: 100 })?.status).toBe(200);
-    // That one is paid; nothing else waits for the contact.
-    expect(simulate({ counterpartyId: "demo_cpty_jane" })?.status).toBe(404);
+  it("pays a deposit by its transfer alone, as the API takes it", () => {
+    expect(simulate({})?.status).toBe(400);
+    // The provider's own sandbox payloads are not what the API takes any more.
+    expect(
+      simulate({ provider: "mural", payload: { counterpartyId: "demo_cpty_jane" } })?.status
+    ).toBe(400);
+    expect(refusal(simulate({ transferId: "demo_xfr_nobody" }))).toEqual([404, "not_found"]);
+    const { transferId } = deposit();
+    expect(simulate({ transferId })?.status).toBe(204);
+    expect(transferById(world(), transferId)?.status).toBe("settling");
   });
 
   it("refuses to pay a deposit twice by its transfer", () => {
     const { transferId } = deposit();
-    expect(simulate({ transferId })?.status).toBe(200);
+    expect(simulate({ transferId })?.status).toBe(204);
     expect(refusal(simulate({ transferId }))).toEqual([409, "conflict"]);
   });
 

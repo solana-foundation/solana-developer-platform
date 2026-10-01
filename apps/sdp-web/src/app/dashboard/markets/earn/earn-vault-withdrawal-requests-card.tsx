@@ -8,8 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
-import { formatEpochSecondsOr, formatProviderAmount, shortenMarketAddress } from "./earn-format";
-import { earnMintAsset } from "./earn-market-presentation";
+import { formatEpochSecondsOr, formatTokenValue, shortenMarketAddress } from "./earn-format";
 import {
   cancelEarnVaultWithdrawalRequest,
   useEarnVaultWithdrawalRequests,
@@ -45,11 +44,7 @@ function WithdrawalRequestSummary({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const amount = formatProviderAmount(
-    request.quotedAssets,
-    locale,
-    earnMintAsset(request.assetMint).symbol
-  );
+  const amount = formatTokenValue(request.quotedAssets, request.assetMint, locale);
   if (parRedemption) {
     return <>{t(parRedemptionSummaryKey(request.status), { amount })}</>;
   }

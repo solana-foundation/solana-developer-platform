@@ -17,10 +17,11 @@ import { readHastraPrimeMetrics } from "./prime-metrics";
 /**
  * Catalogue half of Hastra PRIME.
  *
- * PRIME is a non-rebasing share token for Figure's Democratized Prime HELOC
- * pool. The executable route is USDC -> wYLDS through Hastra `vault-mint`,
- * then wYLDS -> PRIME through `vault-stake`; `@sdp/hastra` owns those
- * instructions while this SDK-free client owns the one admitted strategy.
+ * PRIME is a non-rebasing share token over Figure's Democratized Prime home
+ * equity lending (Figure lists the pool as "YLDS HELOC"; the inventory explains
+ * the broader name). The executable route is USDC -> wYLDS through Hastra
+ * `vault-mint`, then wYLDS -> PRIME through `vault-stake`; `@sdp/hastra` owns
+ * those instructions while this SDK-free client owns the one admitted strategy.
  *
  * The identity is deliberately a single pinned deployment, not a program
  * account census. Hastra's programs can create more vaults, but an arbitrary
@@ -63,7 +64,7 @@ export class HastraEarnClient extends StubEarnClient implements EarnLiveMetricsP
         providerReference: deployment.primeMint,
         name: "Hastra PRIME",
         sourceKind: "rwa",
-        underlyingSource: "figure-democratized-prime-heloc",
+        underlyingSource: "figure-democratized-prime-home-equity",
         depositMints: [...depositMints],
         shareMint: deployment.primeMint,
         hostCluster: "mainnet-beta",
@@ -76,7 +77,7 @@ export class HastraEarnClient extends StubEarnClient implements EarnLiveMetricsP
         riskMetadata: {
           curator: "hastra",
           issuer: "Hastra",
-          yieldSource: "Figure Democratized Prime HELOC pool",
+          yieldSource: "Figure Democratized Prime home equity pool",
           wrapperAsset: "wYLDS",
           priceOracle: "Chainlink Data Streams",
           programRelease: deployment.release,

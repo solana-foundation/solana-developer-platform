@@ -352,9 +352,12 @@ describe("assessVaultExposure", () => {
       env: { EARN_VOLUME_CAPS_ENFORCED: "true" } as Env,
     });
     expect(enforced.enforced).toBe(true);
+    // The issue names the cap, never the figures: `projected` (105) and
+    // `limit` (100) are the cross-tenant aggregate and stay on the event
+    // (SOLA9-9).
     expect(vaultExposureBlockingIssue(enforced)).toEqual({
       code: "VAULT_EXPOSURE_CAP",
-      message: expect.stringContaining("105"),
+      message: expect.not.stringMatching(/\d/),
     });
     expect(evaluatedEvents().at(-1)).toEqual([
       "warn",
