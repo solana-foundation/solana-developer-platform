@@ -2,7 +2,7 @@
 
 import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
 import { ExternalLink, PlusIcon, UploadIcon, XIcon } from "lucide-react";
-import { motion } from "motion/react";
+import { domAnimation, LazyMotion, m } from "motion/react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -237,10 +237,13 @@ function CsvDropzone({
 }
 
 function RecipientAmountInput({
+  label,
   value,
   onChange,
   onEmpty,
 }: {
+  /** Names the field for assistive tech; the row's recipient name is its visible label. */
+  label: string;
   value: string;
   onChange: (value: string) => void;
   onEmpty: () => void;
@@ -257,6 +260,7 @@ function RecipientAmountInput({
         if (value.trim() === "" || Number(value) === 0) onEmpty();
       }}
       placeholder="0.0"
+      aria-label={label}
       className="w-24 border-0 border-b border-border-strong bg-transparent pb-0.5 text-right text-sm text-primary [appearance:textfield] focus:border-[var(--input-border-focus)] focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
     />
   );
@@ -295,7 +299,7 @@ function BatchSourceWalletField({ wizard }: { wizard: BatchSendWizard }) {
         isLoading={walletsLoading}
         trailing={
           selectedAssetBalance && displayAsset !== null ? (
-            <motion.span
+            <m.span
               className="inline-flex"
               animate={exceedsBalance ? { x: [0, -2, 2, -2, 2, 0] } : { x: 0 }}
               transition={{ duration: 0.4 }}
@@ -305,7 +309,7 @@ function BatchSourceWalletField({ wizard }: { wizard: BatchSendWizard }) {
                 assetLabel={displayAsset}
                 exceeds={exceedsBalance}
               />
-            </motion.span>
+            </m.span>
           ) : null
         }
       />
@@ -359,6 +363,9 @@ function CsvRecipientRows({ wizard, onPaste }: { wizard: BatchSendWizard; onPast
                 </span>
               </span>
               <RecipientAmountInput
+                label={t("DashboardPayments.batchSend.recipientAmountLabel", {
+                  name: recipient.name,
+                })}
                 value={amount}
                 onChange={(value) => setRecipientAmount(recipient, value)}
                 onEmpty={() => toggleRecipient(recipient)}
@@ -433,19 +440,20 @@ function ContactsPickerRow({
         </span>
       </button>
       {isSelected ? (
-        <motion.div
+        <m.div
           initial={{ opacity: 0, x: 8 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.15 }}
           className="flex shrink-0 items-center gap-1.5"
         >
           <RecipientAmountInput
+            label={t("DashboardPayments.batchSend.recipientAmountLabel", { name: account.name })}
             value={entry.amount}
             onChange={(value) => setRecipientAmount(account, value)}
             onEmpty={() => toggleRecipient(account)}
           />
           <span className="text-sm text-tertiary">{displayAsset}</span>
-        </motion.div>
+        </m.div>
       ) : (
         <button
           type="button"
@@ -495,7 +503,7 @@ function ContactsPicker({ wizard }: { wizard: BatchSendWizard }) {
         />
       </div>
 
-      <motion.div
+      <m.div
         key={page}
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
@@ -519,7 +527,7 @@ function ContactsPicker({ wizard }: { wizard: BatchSendWizard }) {
             />
           ))
         )}
-      </motion.div>
+      </m.div>
     </div>
   );
 }
@@ -571,44 +579,50 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   const [rowsSource, setRowsSource] = useState<RowsSource>("csv");
 
   return (
-    <div className="space-y-6">
-      <BatchSourceWalletField wizard={wizard} />
-      <BatchTokenField wizard={wizard} />
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
-        <Input
-          id="batch-send-reference"
-          value={externalId}
-          onChange={(event) => setExternalId(event.currentTarget.value)}
-          maxLength={256}
-          placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
-          size="xl"
+    <LazyMotion features={domAnimation}>
+      <div className="space-y-6">
+        <BatchSourceWalletField wizard={wizard} />
+        <BatchTokenField wizard={wizard} />
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="batch-send-reference">{t("DashboardPayments.batchSend.reference")}</Label>
+          <Input
+            id="batch-send-reference"
+            value={externalId}
+            onChange={(event) => setExternalId(event.currentTarget.value)}
+            maxLength={256}
+            placeholder={t("DashboardPayments.batchSend.referencePlaceholder")}
+            size="xl"
+          />
+        </div>
+
+        <div className="space-y-3">
+          <Label>{t("DashboardPayments.batchSend.rows")}</Label>
+          <SegmentedControl
+            ariaLabel={t("DashboardPayments.batchSend.rows")}
+            value={rowsSource}
+            onChange={(next) => setRowsSource(next === "contacts" ? "contacts" : "csv")}
+            options={[
+              { value: "csv", label: t("DashboardPayments.batchSend.uploadCsv") },
+              { value: "contacts", label: t("DashboardPayments.batchSend.pickFromContacts") },
+            ]}
+            className="w-fit"
+          />
+          {rowsSource === "csv" ? (
+            <CsvRecipientRows wizard={wizard} onPaste={() => setBulkOpen(true)} />
+          ) : (
+            <ContactsPicker wizard={wizard} />
+          )}
+        </div>
+
+        <BulkImportDialog
+          open={bulkOpen}
+          onClose={() => setBulkOpen(false)}
+          onImport={bulkImport}
         />
+
+        <BatchTotals wizard={wizard} />
       </div>
-
-      <div className="space-y-3">
-        <Label>{t("DashboardPayments.batchSend.rows")}</Label>
-        <SegmentedControl
-          ariaLabel={t("DashboardPayments.batchSend.rows")}
-          value={rowsSource}
-          onChange={(next) => setRowsSource(next === "contacts" ? "contacts" : "csv")}
-          options={[
-            { value: "csv", label: t("DashboardPayments.batchSend.uploadCsv") },
-            { value: "contacts", label: t("DashboardPayments.batchSend.pickFromContacts") },
-          ]}
-          className="w-fit"
-        />
-        {rowsSource === "csv" ? (
-          <CsvRecipientRows wizard={wizard} onPaste={() => setBulkOpen(true)} />
-        ) : (
-          <ContactsPicker wizard={wizard} />
-        )}
-      </div>
-
-      <BulkImportDialog open={bulkOpen} onClose={() => setBulkOpen(false)} onImport={bulkImport} />
-
-      <BatchTotals wizard={wizard} />
-    </div>
+    </LazyMotion>
   );
 }
 

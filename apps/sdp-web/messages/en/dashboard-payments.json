@@ -448,6 +448,7 @@
       "noCounterpartiesWithSolanaAddress": "No counterparties with a Solana address.",
       "noMatches": "No matches.",
       "addRecipient": "Add {name}",
+      "recipientAmountLabel": "Amount for {name}",
       "totalAmount": "Total {total} {asset}",
       "totalOfAmount": " of {available} {asset}",
       "reviewSummary": "{total} {asset} → {recipients}",
