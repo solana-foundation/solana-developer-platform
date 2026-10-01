@@ -12,7 +12,7 @@ import {
   WalletIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useMemo } from "react";
+import { useMemo } from "react";
 import { NewSolanaAddressForm } from "@/app/dashboard/payments/counterparty/new-solana-address-form";
 import {
   formatTokenAmount,
@@ -20,6 +20,7 @@ import {
 } from "@/app/dashboard/payments/payments-overview.utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
+import { DetailList, DetailRow } from "@/components/ui/detail-list";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useLocale, useTranslations } from "@/i18n/provider";
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 import type { OnchainSendWizard } from "../hooks/use-onchain-send-wizard.redesign";
 import { walletComboboxOptions } from "../wallet-options";
 import { ContactCombobox, type ContactControls } from "./contact-combobox";
+import { AmountFields, SourceWalletField } from "./payment-form-fields";
 
 /** Whether this project can send privately, for the "Send privately" row; null hides it. */
 export interface PrivateSendStatus {
@@ -58,22 +60,6 @@ function NoAssetsHint({ walletId, assetCount }: { walletId: string; assetCount: 
     return null;
   }
   return <p className="text-sm text-error">{t("DashboardPayments.onchainSend.noAssets")}</p>;
-}
-
-function DetailRow({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 refresh:py-3.5 refresh:first:pt-3.5">
-      <span className="flex items-center gap-2.5 text-sm text-tertiary refresh:text-body refresh:text-secondary">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-raised text-secondary refresh:hidden">
-          {icon}
-        </span>
-        {label}
-      </span>
-      <div className="min-w-0 truncate text-right text-sm font-medium text-primary refresh:text-body refresh:font-normal">
-        {value}
-      </div>
-    </div>
-  );
 }
 
 function sourceWalletName(wallet: PaymentsDashboardWallet | null): string {
@@ -275,7 +261,7 @@ function DestinationFields({
 }
 
 /** The wallet the payment leaves from, and why it may not be able to sign. */
-function SourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
+function PaySourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
   const t = useTranslations();
   const { liveWallets, walletsLoading, fields, selectWallet, sourceWalletHint } = wizard;
   const walletOptions = useMemo(
@@ -286,25 +272,21 @@ function SourceWalletField({ wizard }: { wizard: OnchainSendWizard }) {
     [liveWallets, t]
   );
   return (
-    <div className="space-y-2">
-      <Combobox
-        label={t("DashboardPayments.onchainSend.sourceWallet")}
-        value={fields.walletId === "" ? null : fields.walletId}
-        onChange={selectWallet}
-        options={walletOptions}
-        placeholder={t("DashboardPayments.onchainSend.selectSourceWallet")}
-        searchPlaceholder={t("DashboardPayments.onchainSend.searchWallets")}
-        isLoading={walletsLoading}
-      />
+    <SourceWalletField
+      value={fields.walletId}
+      onChange={selectWallet}
+      options={walletOptions}
+      isLoading={walletsLoading}
+    >
       <p hidden={!sourceWalletHint} className="text-meta text-warning">
         {sourceWalletHint}
       </p>
-    </div>
+    </SourceWalletField>
   );
 }
 
 /** The amount, its Max, the token, and the balance the amount is checked against. */
-function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
+function PayAmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const t = useTranslations();
   const locale = useLocale();
   const { assetOptions, availableAmount, selectedAsset, exceedsBalance, fields, setField } = wizard;
@@ -315,44 +297,23 @@ function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
   const assetLabel = selectedAsset === null ? fields.asset : selectedAsset.label;
   const canMax = availableAmount !== null && compareDecimalAmounts(availableAmount, "0") > 0;
   return (
-    <div className="space-y-2">
-      <div className="grid items-end gap-x-4 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.9fr)]">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="onchain-send-amount">{t("DashboardPayments.onchainSend.amount")}</Label>
-          <Input
-            id="onchain-send-amount"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={fields.amount}
-            onChange={(event) => setField("amount", event.currentTarget.value)}
-            placeholder="0.00"
-            size="xl"
-          />
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="mb-1 self-end"
-          disabled={!canMax}
-          onClick={() => {
-            if (availableAmount !== null) setField("amount", availableAmount);
-          }}
-        >
-          {t("DashboardPayments.payForm.max")}
-        </Button>
-        <Combobox
-          label={t("DashboardPayments.payForm.token")}
-          value={fields.asset === "" ? null : fields.asset}
-          onChange={(value) => setField("asset", value)}
-          options={assetSelectOptions}
-          placeholder={t("DashboardPayments.onchainSend.selectAsset")}
-          searchable={false}
-          disabled={fields.walletId === "" || assetSelectOptions.length === 0}
-        />
-      </div>
+    <AmountFields
+      id="onchain-send-amount"
+      label={t("DashboardPayments.onchainSend.amount")}
+      value={fields.amount}
+      onChange={(amount) => setField("amount", amount)}
+      onMax={() => {
+        if (availableAmount !== null) setField("amount", availableAmount);
+      }}
+      maxDisabled={!canMax}
+      token={{
+        value: fields.asset,
+        onChange: (value) => setField("asset", value),
+        options: assetSelectOptions,
+        placeholder: t("DashboardPayments.onchainSend.selectAsset"),
+        disabled: fields.walletId === "" || assetSelectOptions.length === 0,
+      }}
+    >
       {availableAmount === null ? null : (
         <p className={cn("text-meta", exceedsBalance ? "text-error" : "text-tertiary")}>
           {t("DashboardPayments.payForm.available", {
@@ -362,7 +323,7 @@ function AmountFields({ wizard }: { wizard: OnchainSendWizard }) {
         </p>
       )}
       <NoAssetsHint walletId={fields.walletId} assetCount={assetSelectOptions.length} />
-    </div>
+    </AmountFields>
   );
 }
 
@@ -387,8 +348,8 @@ function DetailsStep({ wizard, contact, privateSend, onPayByBank }: StepProps) {
   return (
     <div className="space-y-6">
       <DestinationFields wizard={wizard} contact={contact} onPayByBank={onPayByBank} />
-      <SourceWalletField wizard={wizard} />
-      <AmountFields wizard={wizard} />
+      <PaySourceWalletField wizard={wizard} />
+      <PayAmountFields wizard={wizard} />
       <MemoField wizard={wizard} />
       <PrivateSendOption status={privateSend ?? null} />
     </div>
@@ -415,30 +376,34 @@ function ReviewSummary({ wizard, counterpartyName }: StepProps) {
           })}
         </p>
       </div>
-      <div className="divide-y divide-border-default">
+      <DetailList variant="summary">
         <DetailRow
           icon={<UserRoundIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.to")}
-          value={counterpartyName === "" ? "—" : counterpartyName}
-        />
+        >
+          {counterpartyName === "" ? "—" : counterpartyName}
+        </DetailRow>
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.destination")}
-          value={destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
-        />
+        >
+          {destinationAddress === null ? "—" : shortenAddress(destinationAddress)}
+        </DetailRow>
         <DetailRow
           icon={<WalletIcon className="size-3.5" />}
           label={t("DashboardPayments.onchainSend.sourceWallet")}
-          value={sourceWalletName(selectedWallet)}
-        />
+        >
+          {sourceWalletName(selectedWallet)}
+        </DetailRow>
         {memo === "" ? null : (
           <DetailRow
             icon={<StickyNoteIcon className="size-3.5" />}
             label={t("DashboardPayments.onchainSend.memo")}
-            value={memo}
-          />
+          >
+            {memo}
+          </DetailRow>
         )}
-      </div>
+      </DetailList>
     </>
   );
 }
