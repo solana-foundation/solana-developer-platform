@@ -947,6 +947,10 @@ jobs:
           - name: Issuance E2E (allowlist)
             issuance_group: allowlist
             artifact_suffix: issuance-allowlist
+          - name: Issuance E2E (new design)
+            issuance_group: redesign
+            new_design_issuance: "true"
+            artifact_suffix: issuance-redesign
     env:
       E2E_AFFECTED: ${{ needs.unit_test_scope.outputs.e2e }}
       CI_HAS_DOPPLER_TOKEN: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
