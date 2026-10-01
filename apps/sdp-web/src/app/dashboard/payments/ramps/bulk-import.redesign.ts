@@ -19,20 +19,44 @@ export function isEmptyBulkRow(row: BulkImportRow): boolean {
   return row.accountId === "" && row.currency === "" && row.amount === "";
 }
 
-/** Split pasted text (one `wallet_id, currency_or_mint, amount` per line) into rows. */
-export function splitPastedRows(text: string): BulkImportRow[] {
+/**
+ * One `wallet_id, currency_or_mint, amount` line as a row. Missing cells stay empty and cells
+ * past the third stay in the amount (so `cpa_1,USDC,1,000` reads as amount `1,000`), so the
+ * validator rejects a malformed line rather than the import dropping or misreading it.
+ * Trailing empty cells, which spreadsheets add, are ignored.
+ */
+function lineToBulkRow(line: string): BulkImportRow {
+  const parts = line.split(",").map((part) => part.trim());
+  while (parts.length > 3 && parts[parts.length - 1] === "") {
+    parts.pop();
+  }
+  const [accountId = "", currency = "", ...rest] = parts;
+  const upper = currency.toUpperCase();
+  return {
+    accountId,
+    currency: isWellKnownTokenSymbol(upper) ? upper : currency,
+    amount: rest.join(","),
+  };
+}
+
+function nonBlankLines(text: string): string[] {
   return text
+    .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((line) => line.split(",").map((part) => part.trim()))
-    .filter((parts) => parts.length >= 3 && parts[0].length > 0)
-    .map((parts) => {
-      const upper = parts[1].toUpperCase();
-      return {
-        accountId: parts[0],
-        currency: isWellKnownTokenSymbol(upper) ? upper : parts[1],
-        amount: parts[2],
-      };
-    });
+    .filter((line) => line.trim().length > 0);
+}
+
+/**
+ * Split pasted text (one `wallet_id, currency_or_mint, amount` per line) into rows. Text with
+ * no comma is a plain value pasted into one field, so it yields no rows; otherwise every
+ * nonblank line becomes a row, malformed ones included, for the validator to flag.
+ */
+export function splitPastedRows(text: string): BulkImportRow[] {
+  const lines = nonBlankLines(text);
+  if (!lines.some((line) => line.includes(","))) {
+    return [];
+  }
+  return lines.map(lineToBulkRow);
 }
 
 /**
@@ -91,15 +115,16 @@ export function bulkCsvTemplate(): string {
 
 /**
  * Rows from an uploaded batch CSV. Tolerates a byte-order mark, CRLF line endings, a header
- * row (skipped when its first cell is the template's first column) and blank lines; each other
- * line is read exactly as a pasted row.
+ * row (skipped when its first cell is the template's first column) and blank lines. Every other
+ * line becomes a row, even one with a missing cell, so `validateBulkRows` rejects the file
+ * instead of the batch silently leaving that recipient out.
  *
  * @param text - The file's text.
  * @returns The rows, in file order.
  */
 export function parseBulkCsv(text: string): BulkImportRow[] {
-  const lines = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").split("\n");
+  const lines = nonBlankLines(text.replace(/^\uFEFF/, ""));
   const firstCell = lines[0]?.split(",")[0]?.trim().toLowerCase();
   const body = firstCell === BULK_CSV_HEADER[0] ? lines.slice(1) : lines;
-  return splitPastedRows(body.join("\n"));
+  return body.map(lineToBulkRow);
 }
