@@ -205,11 +205,7 @@
 
 /* ── 3. Refresh scope ────────────────────────────────────────────────────── */
 
-/* A subtree marked data-sdp-theme="refresh" takes the refresh palette and faces. So does the
-   whole document while any element in it is marked data-sdp-palette="refresh": every page,
-   and what portals out to <body>, then shares the palette while keeping its own shapes. */
-[data-sdp-theme="refresh"],
-:root:has([data-sdp-palette="refresh"]) {
+[data-sdp-theme="refresh"] {
   --surface: var(--paper-side);
   --surface-sunken: var(--paper-card);
   --surface-raised: var(--paper);

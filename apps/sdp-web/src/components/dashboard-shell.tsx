@@ -640,13 +640,10 @@ export function DashboardShell({
 
   return (
     // On a refresh route the whole screen carries the scope, sidebar included, so the shell
-    // renders in the design's papers and face. Other routes keep the base shell's shapes, but
-    // while NEW DESIGN is on the palette marker gives every page, and anything portalled out
-    // of it, the refresh palette and face (tokens.css).
+    // renders in the design's papers and face. Other routes keep the base shell.
     <main
       {...themeScopeAttributes(themeScope)}
       data-sdp-new-design={newDesignEnabled ? "" : undefined}
-      data-sdp-palette={newDesignEnabled ? "refresh" : undefined}
       aria-busy={isWorkspaceSwitching}
       className={[
         "min-h-screen bg-[var(--sdp-shell-bg)] p-0 text-primary",

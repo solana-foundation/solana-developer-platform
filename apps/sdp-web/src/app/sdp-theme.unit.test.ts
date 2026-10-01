@@ -17,9 +17,10 @@ function declarationsBySelector(): Map<string, string[]> {
   return blocks;
 }
 
-const PALETTE_SCOPE = '[data-sdp-theme="refresh"], :root:has([data-sdp-palette="refresh"])';
+const PALETTE_SCOPE = ":root:has(main[data-sdp-new-design])";
 const SHAPE_SCOPE = '[data-sdp-theme="refresh"]';
-// Component shapes the refresh design changes; pages outside a refresh subtree keep their own.
+// Component shapes the refresh design changes. Under NEW DESIGN every page takes the palette, but
+// only a refresh subtree takes these; pages that aren't redesigned keep their own.
 const SHAPE_TOKEN = /^--(button-radius|input-|tab-|table-|select-|tooltip-|text-button)/;
 
 describe("sdp-theme.css", () => {
