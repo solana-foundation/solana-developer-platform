@@ -502,6 +502,9 @@ export function DashboardShell({
   const isWorkspaceSwitching = isProjectSwitching || isOrganizationSwitching;
   const themeScope = themeScopeForPath(pathname, newDesignPage);
   const isRefresh = themeScope === "refresh";
+  // NEW DESIGN's phone has no bottom bar on any route: the header's menu button opens the
+  // navigation, including on a page no area has redesigned yet.
+  const hasBottomNav = !newDesignEnabled;
   // The design's sidebar is 272px (17rem) including its rule; the previous design's is 296.
   const sidebarExpandedWidth = newDesignEnabled ? 272 : 296;
   const sidebarScope = sidebarThemeScope(newDesignEnabled, themeScope);
@@ -826,10 +829,10 @@ export function DashboardShell({
               </aside>
 
               {/* Unmounted, not CSS-hidden, while the slide-over is open: a covered
-            duplicate of every destination would otherwise sit behind the overlay. A refresh
-            route has no bar at all: the design's phone reaches the navigation through the
-            menu button over the title. */}
-              {isRefresh || isMobileSidebarOpen || isMoreSheetOpen ? null : (
+            duplicate of every destination would otherwise sit behind the overlay. NEW DESIGN
+            has no bar at all: the design's phone reaches the navigation through the menu
+            button in the header. */}
+              {!hasBottomNav || isMobileSidebarOpen || isMoreSheetOpen ? null : (
                 <DashboardBottomNav
                   pathname={pathname}
                   custodyEnabled={custodyEnabled}
@@ -901,13 +904,13 @@ export function DashboardShell({
                     ? "bg-surface-raised"
                     : "rounded-2xl rounded-tr-none border border-border-subtle bg-surface-raised/80",
                   isRefresh && "@container",
-                  // The locked layout clears the phone's bottom bar; a refresh route has none, so it
+                  // The locked layout clears the phone's bottom bar; NEW DESIGN has none, so it
                   // keeps only the home indicator's inset.
                   shouldLockViewportScroll
                     ? [
                         "flex min-h-0 flex-col md:pb-0",
                         newDesignEnabled ? "overflow-clip" : "overflow-hidden",
-                        isRefresh
+                        !hasBottomNav
                           ? "pb-[env(safe-area-inset-bottom)]"
                           : "pb-[calc(4rem+env(safe-area-inset-bottom))]",
                       ]
@@ -965,6 +968,7 @@ export function DashboardShell({
                           above={stacksBackAboveTitle ? backAction : undefined}
                           mark={activeTitleOverride?.mark}
                           layout={isRefresh ? "refresh" : "base"}
+                          hasBottomNav={hasBottomNav}
                           utilities={
                             // The previous design keeps the language switch in the header; the
                             // new one moves it to the account menu and gives Payments its demo
@@ -1042,9 +1046,9 @@ export function DashboardShell({
                         "mx-auto min-w-0 w-full",
                         contentWidthClass,
                         // Clears the fixed mobile bottom bar so the last row of any page is
-                        // still reachable; the bar is md:hidden, so the padding is too. A refresh
-                        // route has no bar.
-                        !shouldLockViewportScroll && !isRefresh ? "pb-20 md:pb-0" : "",
+                        // still reachable; the bar is md:hidden, so the padding is too. NEW DESIGN
+                        // has no bar.
+                        !shouldLockViewportScroll && hasBottomNav ? "pb-20 md:pb-0" : "",
                         // clip, not hidden: hidden makes this a scroll container, and a sticky wizard
                         // footer inside it would then pin to this box instead of the viewport.
                         shouldClipHorizontalOverflow && !shouldLockViewportScroll
