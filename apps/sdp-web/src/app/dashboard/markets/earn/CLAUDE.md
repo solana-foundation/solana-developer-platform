@@ -513,7 +513,12 @@ cache, and paired wallet/position refreshes. Submission observers start before
 any POST and release only their own attempt. An early chain read cannot reveal
 changed balances while that movement is still pending. Atomic movements show
 Done at confirmation; affected amounts wait for a verified read and the paired
-wallet refresh. Overlapping confirmations each trigger refresh, including recovery.
+wallet refresh. A failed wallet read never releases an affected position; only a
+successful pair clears that gate, including retries and overlapping completions.
+Keep the custody wallet ID from the intent while a deposit is provisional and
+resolve recovered movements from the returned position read. An unknown wallet
+scope remains pending; it must never become a global freshness bound. Overlapping
+confirmations each trigger refresh, including recovery.
 
 Post-confirmation position reads send `afterMovementIds`. The API authorizes the
 movements and bounds only the affected positions by each position's maximum

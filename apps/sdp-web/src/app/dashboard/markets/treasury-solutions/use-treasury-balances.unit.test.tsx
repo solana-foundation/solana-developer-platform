@@ -54,14 +54,23 @@ const movement = (status: string): VaultActivity => ({
   },
 });
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.error = undefined;
   mocks.positions = [position];
   mocks.reads = [{ positions: mocks.positions, startedAt: 1, landedAt: 2 }];
-  mocks.refreshPositions.mockResolvedValue({ minimumSlot: 101 });
+  mocks.refreshPositions.mockImplementation(async (ids: readonly string[] = []) => ({
+    positions: mocks.positions,
+    afterMovementIds: ids,
+    startedAt: 11,
+    landedAt: 12,
+    minimumSlot: ids.length > 0 ? 101 : undefined,
+  }));
   mocks.refreshWallets.mockResolvedValue([]);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("Treasury balance coordinator", () => {
   it("holds early chain balances until confirmation and the paired wallet read complete", async () => {
@@ -136,5 +145,109 @@ describe("Treasury balance coordinator", () => {
       await result.current.refresh();
     });
     expect(result.current.walletsError).toBeUndefined();
+  });
+});
+
+describe("confirmation refresh recovery", () => {
+  it("keeps the affected balance gated after wallet failure and retries with the same wallet scope", async () => {
+    vi.useFakeTimers();
+    const unrelated = { ...position, id: "other", custodyWalletId: "other-wallet" };
+    mocks.positions = [position, unrelated];
+    mocks.refreshPositions.mockImplementation(async (ids: readonly string[]) => {
+      const read = {
+        positions: mocks.positions,
+        startedAt: 11,
+        landedAt: 12,
+        afterMovementIds: ids,
+        minimumSlot: 101,
+      };
+      mocks.reads = [read];
+      return read;
+    });
+    mocks.refreshWallets.mockRejectedValueOnce(new Error("wallet RPC unavailable"));
+    const activities = [movement("confirmed")];
+    const { result } = renderHook(() => useTreasuryBalances(activities));
+    await act(async () => {});
+    expect(result.current.walletsError).toBeInstanceOf(Error);
+    expect(result.current.balanceOf(position)).toEqual({ value: undefined, syncing: true });
+    expect(result.current.balanceOf(unrelated)).toEqual({ value: "10", syncing: false });
+    expect(result.current.balancesRefreshing).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(mocks.refreshWallets.mock.calls).toEqual([
+      [101, ["wallet"]],
+      [101, ["wallet"]],
+    ]);
+    expect(result.current.walletsError).toBeUndefined();
+    expect(result.current.balanceOf(position)).toEqual({ value: "10", syncing: false });
+    expect(result.current.balancesRefreshing).toBe(false);
+  });
+
+  it.each([true, false])(
+    "scopes a provisional deposit using intent metadata or the returned position (intent=%s)",
+    async (hasIntent) => {
+      mocks.positions = [];
+      const activity = movement("confirmed");
+      if (hasIntent) activity.movement.custodyWalletId = position.custodyWalletId;
+      mocks.refreshPositions.mockResolvedValue({
+        positions: hasIntent ? [] : [position],
+        afterMovementIds: ["movement"],
+        minimumSlot: 101,
+        startedAt: 11,
+        landedAt: 12,
+      });
+      const activities = [activity];
+      renderHook(() => useTreasuryBalances(activities));
+      await waitFor(() => expect(mocks.refreshWallets).toHaveBeenCalledWith(101, ["wallet"]));
+      expect(mocks.refreshWallets).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("waits for an unknown movement wallet instead of making its slot a global bound", async () => {
+    mocks.positions = [];
+    const activities = [movement("confirmed")];
+    const { result } = renderHook(() => useTreasuryBalances(activities));
+    await waitFor(() => expect(result.current.walletsError).toBeInstanceOf(Error));
+    expect(mocks.refreshWallets).not.toHaveBeenCalled();
+    expect(result.current.balanceOf(position).syncing).toBe(true);
+    mocks.positions = [position];
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(mocks.refreshWallets).toHaveBeenCalledWith(101, ["wallet"]);
+    expect(result.current.walletsError).toBeUndefined();
+  });
+
+  it("keeps a failed newer confirmation gated when an older wallet read finishes late", async () => {
+    let finishOld: () => void = () => {};
+    mocks.refreshWallets
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishOld = resolve;
+          })
+      )
+      .mockRejectedValueOnce(new Error("new wallet read failed"));
+    let activities = [movement("confirmed")];
+    const { result, rerender } = renderHook(() => useTreasuryBalances(activities));
+    await waitFor(() => expect(mocks.refreshWallets).toHaveBeenCalledTimes(1));
+    activities = [
+      ...activities,
+      {
+        kind: "deposit",
+        movement: {
+          ...movement("confirmed").movement,
+          movementId: "second-movement",
+          observedOrder: 2,
+        },
+      },
+    ];
+    rerender();
+    await waitFor(() => expect(result.current.walletsError).toBeInstanceOf(Error));
+    await act(async () => finishOld());
+    expect(result.current.balanceOf(position).syncing).toBe(true);
+    expect(result.current.balancesRefreshing).toBe(true);
+    expect(result.current.walletsError).toBeInstanceOf(Error);
   });
 });

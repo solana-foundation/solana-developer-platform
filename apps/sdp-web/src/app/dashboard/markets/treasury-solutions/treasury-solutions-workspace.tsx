@@ -2251,6 +2251,7 @@ export function TreasurySolutionsWorkspace({
                 provisionalPosition,
                 status: deposit.status,
                 submittedAt: intent.submittedAt,
+                custodyWalletId: intent.custodyWalletId,
               },
             ]);
             void refreshTreasuryBalances();
@@ -2292,6 +2293,7 @@ export function TreasurySolutionsWorkspace({
                 positionId: withdrawal.positionId,
                 status: withdrawal.status,
                 submittedAt: intent.submittedAt,
+                custodyWalletId: withdrawPosition.custodyWalletId,
               },
             ]);
             void refreshTreasuryBalances();

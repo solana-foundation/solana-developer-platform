@@ -511,7 +511,18 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
       // what must refuse to render it as live.
       error: mocks.positionsError ? new Error("positions unavailable") : undefined,
       isLoading: false,
-      refresh: mocks.refreshPositions,
+      // The mutation resolves with a real read envelope; tests independently
+      // advance the rendered cache to exercise the render/refresh boundary.
+      refresh: (movementIds?: readonly string[]) => {
+        mocks.refreshPositions(movementIds);
+        return Promise.resolve({
+          positions,
+          startedAt: mocks.positionsReadStartedAt,
+          landedAt: mocks.positionsReadLandedAt,
+          afterMovementIds: movementIds,
+          minimumSlot: movementIds?.length ? 101 : undefined,
+        });
+      },
       positions,
       // One read whose contents follow the mocks; a test moves its clock and
       // shares to stand for the next read landing.

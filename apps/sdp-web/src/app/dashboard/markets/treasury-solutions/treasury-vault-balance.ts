@@ -13,6 +13,8 @@ export interface VaultPositionsRead {
 export interface VaultMovementBalanceState {
   observedOrder: number;
   submittedAt?: number;
+  /** Retained from the intent even before a newly created position is listed. */
+  custodyWalletId?: string;
   committedObservedAt?: number;
 }
 
