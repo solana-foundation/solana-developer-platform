@@ -19,21 +19,15 @@ import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { ListToolbar, RowsPerPageSelect } from "@/components/ui/list-toolbar";
 import { SearchInput } from "@/components/ui/search-input";
 import { StatusText } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { useDashboardWorkspace } from "@/contexts/dashboard-workspace-context";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { PAYMENT_REQUEST_NEW_HREF, paymentRequestHref } from "@/lib/payments-routes";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
+import { PAYMENTS_TABLE_CELL } from "../payments-table";
+import { PaymentsTableHeader } from "../payments-table-header";
 import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-request-status";
 import {
   deriveTokenOptions,
@@ -99,26 +93,24 @@ function PaymentRequestsTable({
   return (
     <div className="overflow-x-auto refresh:-mx-3">
       <Table className="min-w-[760px] rounded-none border-0">
-        <TableHeader>
-          <TableRow>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>{t("DashboardPayments.status")}</TableHead>
-            <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
-              {t("DashboardPayments.requests.amount")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.requests.from")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.requests.to")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.recurring.created")}
-            </TableHead>
-            <TableHead className="w-px">
-              <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
+        <PaymentsTableHeader
+          columns={[
+            { id: "status", label: t("DashboardPayments.status") },
+            {
+              id: "amount",
+              label: t("DashboardPayments.requests.amount"),
+              className: "text-right",
+            },
+            { id: "from", label: t("DashboardPayments.requests.from") },
+            { id: "to", label: t("DashboardPayments.requests.to") },
+            { id: "created", label: t("DashboardPayments.recurring.created") },
+            {
+              id: "copy",
+              label: <span className="sr-only">{t("Shared.SharedComponents.copyLink")}</span>,
+              className: "w-px",
+            },
+          ]}
+        />
         <TableBody>
           {rows.map((request) => (
             <TableRow
