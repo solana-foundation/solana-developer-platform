@@ -382,7 +382,9 @@ nothing else; the program create still sends the body `requestId` form.
   come from the provider's live terms, and the provider preview must resolve
   before shares can be escrowed. A provider-order route takes exact shares,
   never a dollar estimate: its cash amount does not exist until the later NAV
-  strike and provider settlement.
+  strike and provider settlement. A held par intermediate opens straight into
+  the par route over it (`parSource: "intermediate"`, Treasury's "Redeem
+  wYLDS"), since no other exit can redeem it.
 - `earn-vault-withdrawal-requests-card.tsx` — durable queued-request recovery.
   Its discovery read asks the server for `settled=false`, then polls request
   detail through terminal state. An expired request exposes an idempotent cancel

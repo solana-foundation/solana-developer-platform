@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  earnExternalWalletQueuedWithdrawalPreviewSchema,
   earnExternalWalletWithdrawalRequestTransactionSchema,
+  earnVaultQueuedWithdrawalPreviewSchema,
   earnVaultWithdrawalRequestSchema,
 } from "@/routes/earn/schemas";
 import { AuditService } from "@/services/audit.service";
+import { parTermsFromRecordedRequest } from "@/services/earn/vault-queued-withdraw.service";
 import { env } from "@/test/helpers/env";
 import {
   builtTransactionWire,
@@ -81,6 +84,44 @@ describe("queued withdrawal handler contracts", () => {
         deadlineSeconds: 60,
       }).success
     ).toBe(false);
+  });
+
+  it("accepts a par request over held intermediate as the one alternative to shares", () => {
+    const held = {
+      positionId: position.id,
+      intermediateAmount: "2000",
+      mechanism: "operatorRedemption",
+    };
+    for (const schema of [
+      earnVaultWithdrawalRequestSchema,
+      earnVaultQueuedWithdrawalPreviewSchema,
+      earnExternalWalletWithdrawalRequestTransactionSchema,
+      earnExternalWalletQueuedWithdrawalPreviewSchema,
+    ]) {
+      expect(schema.safeParse(held).success).toBe(true);
+      expect(schema.safeParse({ ...held, shares: "10" }).success).toBe(false);
+      expect(schema.safeParse({ ...held, intermediateAmount: "0" }).success).toBe(false);
+    }
+    // Only a par request has an intermediate to redeem.
+    expect(
+      earnVaultWithdrawalRequestSchema.safeParse({
+        positionId: position.id,
+        intermediateAmount: "2000",
+        discountBps: 25,
+        deadlineSeconds: 60,
+      }).success
+    ).toBe(false);
+  });
+
+  it("reconstructs a recorded par request's source from the shares it burned", () => {
+    expect(parTermsFromRecordedRequest({ shares: "1600", intermediate_amount: "2000" })).toEqual({
+      mechanism: "operator_redemption",
+      shares: "1600",
+    });
+    expect(parTermsFromRecordedRequest({ shares: "0", intermediate_amount: "2000" })).toEqual({
+      mechanism: "operator_redemption",
+      intermediateAmount: "2000",
+    });
   });
 
   it("keeps instant-only providers available and leaves queue-only fields null", async () => {

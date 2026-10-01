@@ -1060,6 +1060,31 @@ export function queuedFulfillmentMovementId(requestId: string): string {
   return `${QUEUED_FULFILLMENT_MOVEMENT_PREFIX}${requestId}`;
 }
 
+/**
+ * What a fulfilled request's payout movement is denominated in, shared by the
+ * writer and the read-side projection: the shares the request consumed, or,
+ * for a par request that burned none because it redeemed intermediate the
+ * owner already held, the intermediate its operator burned. 0062 requires a
+ * non-zero amount either way.
+ */
+export function fulfilledQueueQuantity(request: {
+  mechanism: string;
+  shares: string;
+  share_mint: string;
+  intermediate_mint: string | null;
+  intermediate_amount: string | null;
+}): { denomination: string; amount: string } {
+  if (
+    request.mechanism === "operator_redemption" &&
+    !/[1-9]/.test(request.shares) &&
+    request.intermediate_mint !== null &&
+    request.intermediate_amount !== null
+  ) {
+    return { denomination: request.intermediate_mint, amount: request.intermediate_amount };
+  }
+  return { denomination: request.share_mint, amount: request.shares };
+}
+
 function queuedRequestIdFromMovementId(movementId: string): string | null {
   return movementId.startsWith(QUEUED_FULFILLMENT_MOVEMENT_PREFIX)
     ? movementId.slice(QUEUED_FULFILLMENT_MOVEMENT_PREFIX.length)
@@ -1069,6 +1094,13 @@ function queuedRequestIdFromMovementId(movementId: string): string | null {
 function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRow {
   const requestId = String(row.id);
   const settledAt = String(row.fulfilled_at ?? row.updated_at);
+  const quantity = fulfilledQueueQuantity({
+    mechanism: String(row.mechanism),
+    shares: String(row.shares),
+    share_mint: String(row.share_mint),
+    intermediate_mint: row.intermediate_mint == null ? null : String(row.intermediate_mint),
+    intermediate_amount: row.intermediate_amount == null ? null : String(row.intermediate_amount),
+  });
   return {
     id: queuedFulfillmentMovementId(requestId),
     organization_id: String(row.organization_id),
@@ -1083,9 +1115,9 @@ function mapFulfilledQueueMovement(row: Record<string, unknown>): EarnMovementRo
     confirmed_at: settledAt,
     chain_finalized_at: null,
     settled_at: settledAt,
-    denomination: String(row.share_mint),
-    amount_requested: String(row.shares),
-    amount_settled: String(row.shares),
+    denomination: quantity.denomination,
+    amount_requested: quantity.amount,
+    amount_settled: quantity.amount,
     fee_amount: null,
     token_amount_settled: row.assets_paid == null ? null : String(row.assets_paid),
     min_shares_out: null,
@@ -1407,7 +1439,12 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
       // A cancelled operator redemption never recreates the shares it burned:
       // the owner keeps the intermediate it delegated (Hastra wYLDS), and an
       // open one's delegated intermediate still sits in the wallet. The
-      // amounts come back per status class so the service can tell which
+      // retained balance excludes fulfilled and open held-intermediate requests;
+      // A held-intermediate cancellation proves at least its released amount
+      // remains; repeated cancellations do not accumulate the same tokens.
+      // Clamp debits at zero in lifecycle order so an older redemption cannot
+      // spend backing created by a later cancellation.
+      // Amounts come back per status class so the service can tell which
       // balance is provably whose. Requests are aggregated once per tenant
       // (the tenant/created index) and joined by position, because the
       // request table has no position index and the claim set is unpaged.
@@ -1425,12 +1462,55 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                 )
               GROUP BY queued.position_id
            ),
+           redemption_history AS (
+             SELECT redemption.position_id,
+                    redemption.intermediate_mint,
+                    redemption.intermediate_amount,
+                    redemption.status,
+                    redemption.id,
+                    redemption.created_at,
+                    COALESCE(redemption.fulfilled_at, redemption.cancelled_at,
+                      redemption.created_at)::timestamptz AS observed_at,
+                    CASE
+                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric > 0
+                        THEN redemption.intermediate_amount::numeric
+                      WHEN redemption.status <> 'cancelled' AND redemption.shares::numeric = 0
+                        THEN -redemption.intermediate_amount::numeric
+                      ELSE 0
+                    END AS retained_delta,
+                    CASE
+                      WHEN redemption.status = 'cancelled' AND redemption.shares::numeric = 0
+                        THEN redemption.intermediate_amount::numeric
+                      ELSE 0
+                    END AS retained_floor
+               FROM earn_vault_withdrawal_requests redemption
+              WHERE redemption.organization_id = ?
+                AND redemption.environment = ?
+                AND redemption.mechanism = 'operator_redemption'
+                AND redemption.intermediate_mint IS NOT NULL
+                AND redemption.status IN (
+                  'cancelled', 'fulfilled', 'creating', 'pending', 'fulfillable',
+                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
+                )
+           ),
+           redemption_balances AS (
+             SELECT redemption_history.*,
+                    SUM(retained_delta) OVER (
+                      PARTITION BY position_id, intermediate_mint
+                      ORDER BY observed_at, created_at, id
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                    ) AS running_retained
+               FROM redemption_history
+           ),
            redemption_amounts AS (
              SELECT redemption.position_id,
                     redemption.intermediate_mint,
-                    COALESCE(SUM(redemption.intermediate_amount::numeric)
-                      FILTER (WHERE redemption.status = 'cancelled'), 0)::text
-                      AS retained,
+                    -- Track the largest shortfall from the balance floor at each event:
+                    -- zero after a debit, or the amount released by a held-token cancel.
+                    -- This preserves later credits and never sums repeated releases.
+                    (SUM(redemption.retained_delta)
+                      + GREATEST(MAX(redemption.retained_floor
+                        - redemption.running_retained), 0))::text AS retained,
                     COALESCE(SUM(redemption.intermediate_amount::numeric)
                       FILTER (WHERE redemption.status IN (
                         'pending', 'fulfillable', 'expired_cancelable', 'cancelling'
@@ -1444,15 +1524,7 @@ export function createPostgresEarnMovementsRepository(db: AppDb): EarnMovementsR
                         'creating', 'closed_or_unknown'
                       )), 0)::text
                       AS unresolved
-               FROM earn_vault_withdrawal_requests redemption
-              WHERE redemption.organization_id = ?
-                AND redemption.environment = ?
-                AND redemption.mechanism = 'operator_redemption'
-                AND redemption.intermediate_mint IS NOT NULL
-                AND redemption.status IN (
-                  'cancelled', 'creating', 'pending', 'fulfillable',
-                  'expired_cancelable', 'cancelling', 'closed_or_unknown'
-                )
+               FROM redemption_balances redemption
               GROUP BY redemption.position_id, redemption.intermediate_mint
            ),
            intermediates_by_position AS (

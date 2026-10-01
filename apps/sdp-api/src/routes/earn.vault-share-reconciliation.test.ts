@@ -241,9 +241,11 @@ async function seedCustodyWithdrawalRequest(params: {
     share_mint: string | null;
   };
   mechanism: "solver_queue" | "operator_redemption";
-  status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed";
+  status: (typeof OPEN_WITHDRAWAL_REQUEST_STATUSES)[number] | "cancelled" | "failed" | "fulfilled";
   createdAt?: string;
+  closedAt?: string;
   intermediateAmount?: string;
+  shares?: string;
 }): Promise<string> {
   const requestId = generateEarnVaultWithdrawalRequestId();
   const solverQueue = params.mechanism === "solver_queue";
@@ -255,9 +257,9 @@ async function seedCustodyWithdrawalRequest(params: {
          request_address, status, mechanism, shares, quoted_assets, share_decimals,
          asset_decimals, discount_bps, maturity_timestamp, deadline_timestamp,
          intermediate_mint, intermediate_amount, client_request_id,
-         idempotency_fingerprint, cancelled_at, failure_reason, created_at
-       ) VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1', '1.01', 6, 6,
-                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         idempotency_fingerprint, cancelled_at, failure_reason, fulfilled_at, created_at
+       ) VALUES (?, ?, ?, 'sandbox', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '1.01', 6, 6,
+                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       requestId,
@@ -273,6 +275,7 @@ async function seedCustodyWithdrawalRequest(params: {
       `request_pda_${crypto.randomUUID()}`,
       params.status,
       params.mechanism,
+      params.shares ?? "1",
       solverQueue ? 25 : null,
       solverQueue ? 1700000060 : null,
       solverQueue ? 1700000120 : null,
@@ -280,8 +283,9 @@ async function seedCustodyWithdrawalRequest(params: {
       solverQueue ? null : (params.intermediateAmount ?? "1.01"),
       crypto.randomUUID(),
       `fingerprint_${crypto.randomUUID()}`,
-      params.status === "cancelled" ? new Date().toISOString() : null,
+      params.status === "cancelled" ? (params.closedAt ?? new Date().toISOString()) : null,
       params.status === "failed" ? "request never landed" : null,
+      params.status === "fulfilled" ? (params.closedAt ?? new Date().toISOString()) : null,
       params.createdAt ?? new Date().toISOString()
     )
     .run();
@@ -578,6 +582,217 @@ describe("GET /v1/earn/vault-share-reconciliation", () => {
       expect(body.data.unbackedPositions).toEqual([]);
       expect(body.data.queuedWithdrawalPositions).toEqual([]);
     });
+
+    it.each(["1.01", "2"])(
+      "does not assign another claim's wYLDS to a claim that redeemed %s of its retained balance",
+      async (intermediateAmount) => {
+        const redeemed = await claimAfterOperatorRedemption("cancelled");
+        await seedCustodyWithdrawalRequest({
+          position: redeemed.position,
+          mechanism: "operator_redemption",
+          status: "fulfilled",
+          shares: "0",
+          intermediateAmount,
+        });
+        await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([
+          expect.objectContaining({ positionId: redeemed.position.id, ambiguousBacking: false }),
+        ]);
+        expect(body.data.queuedWithdrawalPositions).toEqual([]);
+      }
+    );
+
+    it("retains only the remainder after a partial held-wYLDS fulfillment", async () => {
+      const partial = await claimAfterOperatorRedemption("cancelled");
+      await seedCustodyWithdrawalRequest({
+        position: partial.position,
+        mechanism: "operator_redemption",
+        status: "fulfilled",
+        shares: "0",
+        intermediateAmount: "0.5",
+      });
+      await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1520000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([]);
+    });
+
+    it.each([false, true])(
+      "preserves newly cancelled backing after an older held-wYLDS fulfillment (reverse insertion: %s)",
+      async (reverseInsertion) => {
+        const retained = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "hastra" });
+        await finalizeMovement(retained.movement.id);
+        const requests = [
+          {
+            status: "fulfilled" as const,
+            shares: "0",
+            createdAt: "2026-09-01T00:00:00.000Z",
+            closedAt: "2026-09-01T01:00:00.000Z",
+          },
+          {
+            status: "cancelled" as const,
+            shares: "1",
+            createdAt: "2026-09-02T00:00:00.000Z",
+            closedAt: "2026-09-02T01:00:00.000Z",
+          },
+        ];
+        for (const request of reverseInsertion ? requests.slice().reverse() : requests) {
+          await seedCustodyWithdrawalRequest({
+            position: retained.position,
+            mechanism: "operator_redemption",
+            ...request,
+          });
+        }
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual([]);
+      }
+    );
+
+    it("does not count held-wYLDS cancellations as new backing", async () => {
+      const retained = await claimAfterOperatorRedemption("cancelled");
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await seedCustodyWithdrawalRequest({
+          position: retained.position,
+          mechanism: "operator_redemption",
+          status: "cancelled",
+          shares: "0",
+          intermediateAmount: "0.5",
+        });
+      }
+      await claimAfterOperatorRedemption("cancelled");
+      getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
+
+      const response = await getReconciliation();
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as ReportBody;
+
+      expect(body.data.unbackedPositions).toEqual([]);
+      expect(body.data.queuedWithdrawalPositions).toEqual([]);
+    });
+
+    it.each([
+      { redeemed: "0", held: "2020000", unbacked: false },
+      { redeemed: "0.5", held: "1520000", unbacked: false },
+      { redeemed: "1.01", held: "1010000", unbacked: true },
+    ])(
+      "tracks cancelled held wYLDS without prior SDP history after redeeming $redeemed",
+      async ({ redeemed, held, unbacked }) => {
+        const retained = await createPosition({ shareMint: SHARE_MINT_EMPTY, provider: "hastra" });
+        await finalizeMovement(retained.movement.id);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await seedCustodyWithdrawalRequest({
+            position: retained.position,
+            mechanism: "operator_redemption",
+            status: "cancelled",
+            shares: "0",
+          });
+        }
+        if (redeemed !== "0") {
+          await seedCustodyWithdrawalRequest({
+            position: retained.position,
+            mechanism: "operator_redemption",
+            status: "fulfilled",
+            shares: "0",
+            intermediateAmount: redeemed,
+          });
+        }
+        await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, held)]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual(
+          unbacked
+            ? [
+                expect.objectContaining({
+                  positionId: retained.position.id,
+                  ambiguousBacking: false,
+                }),
+              ]
+            : []
+        );
+        expect(body.data.queuedWithdrawalPositions).toEqual([]);
+      }
+    );
+
+    it.each(
+      (["pending", "creating", "closed_or_unknown"] as const).flatMap((status) =>
+        ["0.5", "1.01"].map((intermediateAmount) => ({ status, intermediateAmount }))
+      )
+    )(
+      "reserves $intermediateAmount held wYLDS once while its request is $status",
+      async ({ status, intermediateAmount }) => {
+        const retained = await claimAfterOperatorRedemption("cancelled");
+        const requestId = await seedCustodyWithdrawalRequest({
+          position: retained.position,
+          mechanism: "operator_redemption",
+          status,
+          shares: "0",
+          intermediateAmount,
+        });
+        await claimAfterOperatorRedemption("cancelled");
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "2020000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual(
+          intermediateAmount === "1.01"
+            ? [
+                expect.objectContaining({
+                  positionId: retained.position.id,
+                  withdrawalRequestIds: [requestId],
+                  ambiguousBacking: false,
+                }),
+              ]
+            : []
+        );
+      }
+    );
+
+    it.each([
+      { status: "fulfilled", shares: "1" },
+      { status: "failed", shares: "0" },
+    ] as const)(
+      "keeps retained backing after a $status request for $shares shares",
+      async (request) => {
+        const retained = await claimAfterOperatorRedemption("cancelled");
+        await seedCustodyWithdrawalRequest({
+          position: retained.position,
+          mechanism: "operator_redemption",
+          ...request,
+        });
+        getSplTokenBalances.mockResolvedValue([balance(OPERATOR_INTERMEDIATE_MINT, "1010000")]);
+
+        const response = await getReconciliation();
+        expect(response.status).toBe(200);
+        const body = (await response.json()) as ReportBody;
+
+        expect(body.data.unbackedPositions).toEqual([]);
+        expect(body.data.queuedWithdrawalPositions).toEqual([]);
+      }
+    );
 
     it("omits a backed claim with an open request from both lists", async () => {
       // It retained 1.01 from a cancelled redemption and has 1.01 more delegated.

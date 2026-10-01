@@ -149,7 +149,12 @@ and `advanceRequest` reopens the holding on every cancellation, not only a
 solver queue's, so a stale zero-share snapshot cannot retire it. Values that
 sum a holding (earnings `currentValue`, the summary totals) add the
 intermediate through `hydratedHoldingTokenValue`; `tokenValue` itself stays the
-shares' value. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
+shares' value. A par request redeems either shares or that held intermediate
+(`intermediateAmount`, exactly one of the two in every body schema). The
+intermediate source records `shares = '0'` (migration 0120 admits it for
+operator redemptions only), its policy candidate names the intermediate mint
+as the asset, and its idempotency fingerprint adds `intermediateAmount` without
+changing a shares fingerprint by a byte. Persist both lifecycles in `earn_vault_withdrawal_requests` plus their
 signed action rows. Only a provider-authenticated terminal fulfillment is
 projected into movement/activity reads, using the closing transaction's
 signature and payout; request and cancel transactions remain request history

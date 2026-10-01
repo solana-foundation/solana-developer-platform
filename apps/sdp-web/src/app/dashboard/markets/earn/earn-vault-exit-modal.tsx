@@ -13,6 +13,7 @@ import {
   type EarnVaultAsyncWithdrawalEvent,
   earnVaultAsyncWithdrawalRoute,
 } from "./earn-vault-async-withdrawal";
+import type { EarnVaultParRedemptionSource } from "./earn-vault-par-redemption-modal";
 import { EarnVaultWithdrawModal } from "./earn-vault-withdraw-modal";
 
 interface EarnVaultExitModalProps {
@@ -25,6 +26,11 @@ interface EarnVaultExitModalProps {
     withdrawal: EarnVaultWithdrawal,
     intent: { amount: string; projectBalance: boolean; submittedAt: number }
   ) => void;
+  /**
+   * "intermediate" opens straight into the par route over the position's held
+   * intermediate; no other exit can redeem it.
+   */
+  parSource?: EarnVaultParRedemptionSource;
   position: EarnVaultPosition;
   projectId: string | null;
 }
@@ -229,9 +235,18 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
   const { position } = props;
   const { options, retry } = useEarnVaultExitOptions(position.id);
   const [choice, setChoice] = useState<RouteChoice | null>(null);
-  const ready = options?.kind === "ready" ? options.value : null;
-  const asyncRoute = ready ? earnVaultAsyncWithdrawalRoute(ready) : null;
-  const activeChoice = choice ?? autoRouteChoice(asyncRoute, ready);
+  const intermediateOnly = props.parSource === "intermediate";
+  const offered = options?.kind === "ready" ? options.value : null;
+  // Held intermediate has exactly one way out, so its entry never offers the
+  // share exits or waits on a choice.
+  const ready = offered && intermediateOnly ? { ...offered, instant: false } : offered;
+  const route = ready ? earnVaultAsyncWithdrawalRoute(ready) : null;
+  const asyncRoute = intermediateOnly && route?.kind !== "operator_redemption" ? null : route;
+  const activeChoice = intermediateOnly
+    ? asyncRoute
+      ? "async"
+      : null
+    : (choice ?? autoRouteChoice(asyncRoute, ready));
 
   if (activeChoice === "instant") {
     return (
@@ -255,6 +270,7 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
         onRequested={props.onAsyncRequest}
         onSettled={props.onAsyncRequestSettled}
         onWithdrawn={props.onWithdrawn}
+        parSource={props.parSource}
         position={position}
         projectId={props.projectId}
         route={asyncRoute}
@@ -267,7 +283,7 @@ export function EarnVaultExitModal(props: EarnVaultExitModalProps) {
       asyncRoute={asyncRoute}
       onClose={props.onClose}
       onChoose={setChoice}
-      options={options}
+      options={options?.kind === "ready" && ready ? { kind: "ready", value: ready } : options}
       position={position}
       retry={retry}
     />
