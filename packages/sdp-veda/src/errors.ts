@@ -100,13 +100,8 @@ export function deploymentNotConfigured(cluster: SolanaCluster): SdpVedaError {
 }
 
 /**
- * The vault account could not be read on this cluster.
- *
- * The likeliest cause is the RPC pointing at the wrong chain. Veda's
- * integration material implies devnet and mainnet may share program addresses,
- * so a cluster mismatch does not present as a connection error — it presents as
- * "this vault does not exist", or worse, as a different chain's vault at the
- * same address. The message names both so the reader checks the right thing.
+ * Preserve the underlying RPC or decoding cause. Cluster identity is proved
+ * separately; an unreadable vault alone does not establish a cluster mismatch.
  */
 export function vaultUnreadable(
   vault: string,

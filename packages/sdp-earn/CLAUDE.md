@@ -284,7 +284,7 @@ fundable address.
 Money moves through provider-specific execution packages. SDP builds the plan,
 signs it with one of the organization's own custody wallets, and submits it.
 The current packages are `@sdp/kamino`, `@sdp/veda`, `@sdp/jupiter-lend`,
-`@sdp/ondo`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
+`@sdp/ondo`, `@sdp/hastra`, and pre-launch `@sdp/wisdomtree`; the API signs and submits
 (`POST /v1/earn/vault-deposits`). Since PRO-1722 the same builders also serve
 the EXTERNAL-WALLET flow (`/v1/earn/external-wallet/*`), where the plan's
 `owner` is a wallet SDP does not custody and the OWNER signs instead of SDP.
@@ -608,6 +608,10 @@ checklist.
 ## Cross-package coupling
 
 - Wire DTOs shared with API/web live in `packages/sdp-types/src/earn.ts`.
+  Runtime deposit, deposit-history and direct-withdrawal response schemas live
+  in `@sdp/types/earn-wire`; internal OpenAPI and Treasury reuse those parsers.
+  External movement responses declare atomic or provider-order `settlement`.
+  Consumers must not interpret a missing settlement kind as atomic completion.
 - Curators/categories are open-string registries in `@sdp/types` — adding one
   is a data change; do not introduce closed curator unions anywhere.
 - Env credential names follow `<PROVIDER>_API_KEY` / `<PROVIDER>_SANDBOX_API_KEY`;

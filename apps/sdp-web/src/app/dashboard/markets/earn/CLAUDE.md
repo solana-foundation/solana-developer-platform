@@ -283,11 +283,10 @@ nothing else; the program create still sends the body `requestId` form.
     reachable once the key outlived the component. The API refuses that case too
     (see `routes/earn/CLAUDE.md`) — this keeps the client from asking.
   - **The value-moving POST takes no abort signal.** The server processes the
-    request whether or not the component survives it, so aborting on unmount
-    only blinds the client to an answer the STORE needs: a 202 hold whose key
-    was never pinned stays on the 15-minute TTL while the approval lives for
-    hours, and the eventual resubmit mints a fresh key — a second approval
-    request for one intent. The controller gates state updates and the outcome
+    request whether or not the component survives it. The key is already pinned
+    before posting, and the store still needs the parsed response to distinguish
+    recorded intent from a policy approval hold. Aborting on unmount would hide
+    that acknowledgment. The controller gates state updates and the outcome
     screen; key bookkeeping (`applyVaultDepositIdempotencyKeyOutcome`) runs
     unconditionally, before the abort check.
   - `vaultDepositIdempotencyKeyStore.claim` mints once per fingerprint; `vaultDepositIdempotencyKeyStore.release` retires it. **Retire on a parsed recorded result or a first-attempt 4xx. A later 4xx cannot resolve an earlier uncertain attempt or approval hold; only explicit same-key terminal policy denial can.** A 5xx is the dangerous one — a gateway timing
@@ -436,9 +435,9 @@ nothing else; the program create still sends the body `requestId` form.
   polling contract is intentionally stricter than atomic-route presentation:
   an atomic withdrawal may treat `confirmed` as complete and refresh its
   resulting balance while polling continues to protocol finality. A
-  provider-order withdrawal does neither in PRESENTATION: `confirmed` covers
-  only the share leg, stays visibly pending provider settlement, and projects
-  no cash or balance change. Its WATCH, however, is terminal at `confirmed`
+  provider-order withdrawal stays visibly pending: `confirmed` covers only
+  the share leg. Balance reads never infer a payout from that status. Its
+  WATCH, however, is terminal at `confirmed`
   (`PROVIDER_ORDER_WATCH_TERMINAL_STATUSES`): the reconciler caps a
   provider-order row there, the NAV strike after it has no wire state to
   observe, and watching past the strongest wire fact would poll forever with

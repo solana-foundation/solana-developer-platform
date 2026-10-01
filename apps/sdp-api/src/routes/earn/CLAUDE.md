@@ -133,6 +133,12 @@ balance with a live one.
   read, queued request/cancellation build, and signed-transaction submit remains
   authenticated.
 
+  Internal route parity is checked by `../../openapi/earn-contracts.test.ts`
+  against the mounted router. Treasury registrations live in
+  `../../openapi/paths/earn-treasury.ts` and reuse runtime request schemas.
+  Deposit, deposit-history and direct-withdrawal response schemas come from
+  `@sdp/types/earn-wire`, shared with the dashboard parsers.
+
 ### Asynchronous vault withdrawals (Veda queue and Hastra par redemption)
 
 Asynchronous exits are a separate durable resource, not a slow
@@ -223,8 +229,8 @@ widen the surface just to make a test pass.
 - `GET /strategies[/:id]` — **DB** (synced catalogue), env-scoped. Rows are
   admitted only by the hourly sync cron; the 5-minute metrics refresh
   (`cron/earn-metrics-refresh.ts`) updates figures only and can never insert.
-  Published in BOTH OpenAPI documents (public included) since the embedded
-  guide shipped: partners need the `strategyId` every deposit build takes and
+  Registered in the internal and opt-in public documents; default public
+  publication remains held under PRO-2038. Partners need the `strategyId` every deposit build takes and
   the live APY their own UI shows (`openapi/paths/earn.ts`,
   `registerEarnStrategyPaths`).
   - **The list is ranked by deposit size** (PRO-1732): TVL descending, read from
@@ -1273,12 +1279,12 @@ guarantee durable status and recovery (`handlers/external-wallet.ts`,
   fingerprint includes the build id, so a key reused against a REBUILT
   transaction conflicts rather than silently replaying (and a rebuilt
   transaction is also how a different `feePayer` conflicts).
-  - **Expired builds are refused before anything is recorded**: after the
-    replay short-circuit and before signature verification, the submit reads
-    the confirmed block height and answers `409 TRANSACTION_EXPIRED` when it is
-    past the build's `last_valid_block_height` (no movement row, build left
-    unconsumed; a consumed build still answers its consumption conflict, and a
-    failed height read falls through rather than refusing).
+  - **Expiry does not reject authenticated signed intent.** An owner may have
+    already broadcast the transaction. Verify the exact stored message and
+    every signature, then consume the build and record the original bytes even
+    past `last_valid_block_height`. Direct and queued submits follow this rule;
+    replay and consumed-build conflicts still apply. Reconciliation resolves
+    the recorded signature without asking for a replacement transaction.
   - **A preflight `BlockhashNotFound` leaves the movement reconcilable**, even
     past its window. `broadcastRecordedVaultMovement` shares this behavior
     with custody: a refusal describes this attempt, while an external wallet
