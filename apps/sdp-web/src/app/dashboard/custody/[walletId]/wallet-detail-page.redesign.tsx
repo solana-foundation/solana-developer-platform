@@ -43,7 +43,7 @@ interface OwnedTokenRoute {
   symbol?: string | null;
 }
 
-export async function getWalletDetail(
+async function getWalletDetail(
   request: SdpApiClient["request"],
   walletId: string
 ): Promise<CustodyWalletMetadataResponse["wallet"]> {
@@ -65,7 +65,7 @@ export async function getWalletDetail(
   return wallet;
 }
 
-export async function getWalletTrackedBalances(
+async function getWalletTrackedBalances(
   request: SdpApiClient["request"],
   walletId: string,
   unavailableMessage: string
@@ -86,7 +86,7 @@ export async function getWalletTrackedBalances(
   }
 }
 
-export async function getWalletPolicy(
+async function getWalletPolicy(
   request: SdpApiClient["request"],
   walletId: string,
   unavailableMessage: string
@@ -150,6 +150,57 @@ async function getIssuedTokens(request: SdpApiClient["request"]): Promise<Issued
   }
 }
 
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+type WalletConnection = Awaited<ReturnType<typeof fetchConnectionInstallation>>;
+
+/** The connection the wallet signs through. Its label is optional, so a failed lookup is null. */
+async function getWalletConnection(
+  request: SdpApiClient["request"],
+  connectionId: string | null | undefined
+): Promise<WalletConnection | null> {
+  if (!connectionId) return null;
+  return fetchConnectionInstallation(request, connectionId).catch(() => null);
+}
+
+/** What the page shows about the wallet itself, from its record and its connection's. */
+function toWalletPageView(
+  wallet: CustodyWalletMetadataResponse["wallet"],
+  connection: WalletConnection | null,
+  { byokEnabled, canManageCustody }: { byokEnabled: boolean; canManageCustody: boolean },
+  t: Translate
+): WalletPageView {
+  const provider =
+    wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
+  const label = wallet.label?.trim() || null;
+  return {
+    walletId: wallet.walletId,
+    custodyWalletId: wallet.id,
+    name: label ?? t("DashboardCustody.untitledWallet"),
+    label,
+    publicKey: wallet.publicKey,
+    provider,
+    providerName: provider
+      ? formatCustodyProviderName(provider)
+      : (wallet.provider ?? t("DashboardCustody.unknown")),
+    purposeLabel: formatWalletPurposeLabel(wallet.purpose, t),
+    createdAt: wallet.createdAt ?? null,
+    isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
+    supportsSignerCheck: provider
+      ? getCustodyProviderEntry(provider).supportsSigning
+      : !wallet.provider,
+    connection: wallet.custodyConnectionId
+      ? {
+          label: connection?.label ?? truncateMiddle(wallet.custodyConnectionId),
+          href:
+            byokEnabled && canManageCustody
+              ? `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
+              : null,
+        }
+      : null,
+    canManageCustody,
+  };
+}
+
 /**
  * One wallet's page. The wallet itself is read before anything renders (its name heads the
  * page); balances, the policy and its revisions, and the issued-token names are handed to the
@@ -196,44 +247,12 @@ export default async function WalletDetailPage({
   const issuedTokensPromise = getIssuedTokens(apiClient.request);
   const wallet = await walletPromise;
 
-  const provider =
-    wallet.provider && isKnownCustodyProvider(wallet.provider) ? wallet.provider : null;
   const canManageCustody = resolveDashboardAccess(orgRole).capabilities.canManageCustody;
-  // The connection label is optional; keep the wallet and its connection id if the lookup fails.
   const connection =
-    byokEnabled && canManageCustody && wallet.custodyConnectionId
-      ? await fetchConnectionInstallation(apiClient.request, wallet.custodyConnectionId).catch(
-          () => null
-        )
+    byokEnabled && canManageCustody
+      ? await getWalletConnection(apiClient.request, wallet.custodyConnectionId)
       : null;
-
-  const view: WalletPageView = {
-    walletId: wallet.walletId,
-    custodyWalletId: wallet.id,
-    name: wallet.label?.trim() || t("DashboardCustody.untitledWallet"),
-    label: wallet.label?.trim() || null,
-    publicKey: wallet.publicKey,
-    provider,
-    providerName: provider
-      ? formatCustodyProviderName(provider)
-      : (wallet.provider ?? t("DashboardCustody.unknown")),
-    purposeLabel: formatWalletPurposeLabel(wallet.purpose, t),
-    createdAt: wallet.createdAt ?? null,
-    isRuntimeExecutionAllowed: wallet.isRuntimeExecutionAllowed,
-    supportsSignerCheck: provider
-      ? getCustodyProviderEntry(provider).supportsSigning
-      : !wallet.provider,
-    connection: wallet.custodyConnectionId
-      ? {
-          label: connection?.label ?? truncateMiddle(wallet.custodyConnectionId),
-          href:
-            byokEnabled && canManageCustody
-              ? `/dashboard/integrations/${connection?.provider ?? provider ?? "privy"}/connections/${wallet.custodyConnectionId}`
-              : null,
-        }
-      : null,
-    canManageCustody,
-  };
+  const view = toWalletPageView(wallet, connection, { byokEnabled, canManageCustody }, t);
 
   return (
     <WalletDetailView

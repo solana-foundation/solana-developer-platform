@@ -28,6 +28,20 @@ function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
   );
 }
 
+/** A failed read's message, or the fallback when what it threw was not an Error. */
+function settledError(result: SettledResult<unknown>, fallback: string): string | null {
+  if (result.ok) return null;
+  return result.error instanceof Error ? result.error.message : fallback;
+}
+
+/** The providers with an active config that the catalogue knows. */
+function activeKnownProviders(configs: readonly CustodyConfigSummary[]): KnownCustodyProvider[] {
+  return configs
+    .filter((config) => config.status === "active")
+    .map((config) => config.provider)
+    .filter(isKnownCustodyProvider);
+}
+
 async function getCustodyConfigs(
   request: SdpApiClient["request"]
 ): Promise<{ configs: CustodyConfigSummary[]; defaultConfigId: string | null }> {
@@ -99,30 +113,22 @@ async function CurrentCustodyPage() {
       trace.step("fetch_active_api_keys", () => fetchActiveApiKeys(projectClient.request)),
     ]);
 
-    const connectedProviders: KnownCustodyProvider[] = configsResult.ok
-      ? configsResult.value.configs
-          .filter((config) => config.status === "active")
-          .map((config) => config.provider)
-          .filter(isKnownCustodyProvider)
+    const connectedProviders = configsResult.ok
+      ? activeKnownProviders(configsResult.value.configs)
       : [];
-
-    const configsError = configsResult.ok
-      ? null
-      : configsResult.error instanceof Error
-        ? configsResult.error.message
-        : t("DashboardCustody.unableToLoadWalletProviders");
-    const walletsError = walletsResult.ok
-      ? null
-      : walletsResult.error instanceof Error
-        ? walletsResult.error.message
-        : t("DashboardCustody.unableToLoadWallets");
+    const configsError = settledError(
+      configsResult,
+      t("DashboardCustody.unableToLoadWalletProviders")
+    );
+    const walletsError = settledError(walletsResult, t("DashboardCustody.unableToLoadWallets"));
+    const wallets = walletsResult.ok ? walletsResult.value : [];
     const apiKeys = apiKeysResult.ok ? (apiKeysResult.data ?? []) : [];
 
     trace.log({
       ok: true,
       linked: true,
       connectedProviderCount: connectedProviders.length,
-      walletCount: walletsResult.ok ? walletsResult.value.length : 0,
+      walletCount: wallets.length,
       apiKeyCount: apiKeys.length,
     });
 
@@ -133,7 +139,7 @@ async function CurrentCustodyPage() {
           apiKeys={apiKeys}
           connectedProviders={connectedProviders}
           configsError={configsError}
-          wallets={walletsResult.ok ? walletsResult.value : []}
+          wallets={wallets}
           walletsError={walletsError}
         />
       </Suspense>
