@@ -1,7 +1,9 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { paymentsDemoMode } from "@/flags";
 import { PROJECT_COOKIE_NAME } from "../project-cookie";
+import { getSdpAuth } from "../sdp-api";
 import { isDemoSessionCookie, PAYMENTS_DEMO_COOKIE_NAME } from "./demo-cookie";
 
 const DEMO_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
@@ -13,11 +15,21 @@ const COOKIE_SAFE_VALUE = /^[\w-]{1,80}$/;
  * the dashboard has selected, or the project cookie's when the project list didn't load. Off,
  * it clears that. Either way it forgets what was done in the demo so far. Returns whether the
  * switch took; the caller then redraws the page, dropping what it had cached.
+ *
+ * A server action can be called directly, so it does nothing for a caller who isn't signed in
+ * to an organization, and turns the demo on only while its flag is on.
  */
 export async function setPaymentsDemoAction(
   enabled: boolean,
   projectId: string | null
 ): Promise<boolean> {
+  const { userId, orgId } = await getSdpAuth();
+  if (!userId || !orgId) {
+    return false;
+  }
+  if (enabled && !(await paymentsDemoMode())) {
+    return false;
+  }
   const store = await cookies();
   for (const { name } of store.getAll()) {
     if (isDemoSessionCookie(name)) store.delete(name);

@@ -185,6 +185,7 @@ describe("WalletDetailPage", () => {
     const { wallet } = await renderPage();
     expect(wallet).toMatchObject({
       walletId: "wallet/one",
+      custodyWalletId: "wallet_record",
       name: "Fast wallet",
       label: "Fast wallet",
       provider: "privy",

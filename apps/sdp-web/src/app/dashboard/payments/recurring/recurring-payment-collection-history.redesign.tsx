@@ -8,14 +8,7 @@ import { ArrowUpRightIcon } from "lucide-react";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
 import { ListEmptyState } from "@/components/ui/list-empty-state";
 import { StatusText, type StatusTone } from "@/components/ui/status-text";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import type { MessageKey } from "@/i18n/messages";
 import { useLocale, useTranslations } from "@/i18n/provider";
 import { explorerTxUrl } from "@/lib/explorer";
@@ -23,7 +16,8 @@ import { useSolanaCluster } from "@/lib/use-solana-cluster";
 import { cn } from "@/lib/utils";
 import { shortenAddress } from "../payments-overview.utils";
 import { formatDate, formatDateTime, formatDecimalAmount } from "../payments-presentation";
-import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../payments-table";
+import { PAYMENTS_TABLE_CELL } from "../payments-table";
+import { PaymentsTableHeader } from "../payments-table-header";
 
 /** How each run reads: collected, still moving, waiting, went wrong, or passed over. */
 const RUN_STATUS_TONES = {
@@ -96,26 +90,20 @@ export function RecurringPaymentRunHistory({
           <col className="w-[17%]" />
           <col className="w-[13%]" />
         </colgroup>
-        <TableHeader>
-          <TableRow>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.recurring.due")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.recurring.attempted")}
-            </TableHead>
-            <TableHead className={cn(PAYMENTS_TABLE_HEAD, "text-right")}>
-              {t("DashboardPayments.recurring.amount")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>{t("DashboardPayments.status")}</TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.recurring.transfer")}
-            </TableHead>
-            <TableHead className={PAYMENTS_TABLE_HEAD}>
-              {t("DashboardPayments.recurring.explorer")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
+        <PaymentsTableHeader
+          columns={[
+            { id: "due", label: t("DashboardPayments.recurring.due") },
+            { id: "attempted", label: t("DashboardPayments.recurring.attempted") },
+            {
+              id: "amount",
+              label: t("DashboardPayments.recurring.amount"),
+              className: "text-right",
+            },
+            { id: "status", label: t("DashboardPayments.status") },
+            { id: "transfer", label: t("DashboardPayments.recurring.transfer") },
+            { id: "explorer", label: t("DashboardPayments.recurring.explorer") },
+          ]}
+        />
         <TableBody>
           {attempts.map((attempt) => (
             // Rows grow with a reason, every cell on the first line's baseline.

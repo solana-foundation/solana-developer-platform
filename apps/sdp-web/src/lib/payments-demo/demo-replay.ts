@@ -26,6 +26,7 @@ import {
   tokenBalance,
 } from "./demo-fixtures";
 import type { DemoOp, DemoOpOf } from "./demo-ops";
+import { isDemoRampRail, railAsset } from "./demo-ramp-assets";
 
 /*
  * The session's actions applied to the fixture world, oldest first. Each one changes the world
@@ -49,13 +50,16 @@ export function tokenKeyForMint(mint: string): DemoTokenKey | undefined {
   return (Object.keys(DEMO_TOKENS) as DemoTokenKey[]).find((key) => DEMO_TOKENS[key].mint === mint);
 }
 
-/** The mint a ramp's asset rail delivers ("usdc.solana" → USDC), USDC when the demo lacks it. */
-export function mintForRail(rail: string): string {
-  const symbol = rail.split(".", 1)[0]?.toUpperCase();
-  const key = (Object.keys(DEMO_TOKENS) as DemoTokenKey[]).find(
-    (candidate) => DEMO_TOKENS[candidate].symbol === symbol
+/**
+ * The demo token a ramp's asset rail delivers ("usdc.solana" → USDC), or undefined for an asset
+ * the demo wallets don't hold: such a ramp is refused, never run in USDC instead.
+ */
+export function tokenKeyForRail(rail: string): DemoTokenKey | undefined {
+  if (!isDemoRampRail(rail)) return undefined;
+  const asset = railAsset(rail);
+  return (Object.keys(DEMO_TOKENS) as DemoTokenKey[]).find(
+    (candidate) => DEMO_TOKENS[candidate].symbol.toLowerCase() === asset
   );
-  return DEMO_TOKENS[key ?? "USDC"].mint;
 }
 
 export function contactById(world: DemoWorld, id: string | null | undefined) {
@@ -297,7 +301,8 @@ export function consentKey(provider: RampProviderId, counterpartyId: string): st
 
 function applyRamp(world: DemoWorld, op: DemoOpOf<"ramp">): void {
   const wallet = findWallet(world, op.wallet);
-  if (!wallet) return;
+  const tokenKey = tokenKeyForRail(op.rail);
+  if (!wallet || !tokenKey) return;
   const onramp = op.dir === "onramp";
   const depositAddress = rampDepositAddress(op.id);
   const { deliveryMode } = DEMO_RAMP_PROVIDERS[op.provider];
@@ -310,7 +315,7 @@ function applyRamp(world: DemoWorld, op: DemoOpOf<"ramp">): void {
       signature: null,
       source: onramp ? demoAddress(`${op.provider}:${op.id}`) : wallet.publicKey,
       destination: onramp ? wallet.publicKey : depositAddress,
-      token: mintForRail(op.rail),
+      token: DEMO_TOKENS[tokenKey].mint,
       amount: op.crypto,
       provider: op.provider,
       providerReference: rampReference(op.provider, op.quote),

@@ -60,9 +60,13 @@ interface CounterpartyWorkspaceProps {
   counterparties: Counterparty[];
   /** The directory's full size; more than `counterparties.length` when the load was capped. */
   total: number;
+  /** True when the directory could not be read, so an empty list is not an empty directory. */
+  directoryFailed?: boolean;
   accounts: CounterpartyAccountSummary[];
   /** The project's saved account count; more than `accounts.length` when that load was capped. */
   accountsTotal?: number;
+  /** True when the saved addresses could not all be read, so a missing one may just be unread. */
+  accountsFailed?: boolean;
 }
 
 function EmptyDirectory() {
@@ -78,6 +82,25 @@ function EmptyDirectory() {
             <Link href="/dashboard/payments/counterparty/create">
               {t("DashboardPayments.counterparty.addContact")}
             </Link>
+          </Button>
+        }
+      />
+    </DashboardWorkspaceOverviewPanel>
+  );
+}
+
+/** The directory could not be read: say so rather than offer to add a first contact. */
+function DirectoryLoadFailed() {
+  const t = useTranslations();
+  const router = useRouter();
+  return (
+    <DashboardWorkspaceOverviewPanel className="flex flex-col">
+      <ListEmptyState
+        message={t("DashboardPayments.counterparty.directoryLoadFailed")}
+        description={t("DashboardPayments.counterparty.directoryLoadFailedDescription")}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => router.refresh()}>
+            {t("Shared.SharedComponents.retry")}
           </Button>
         }
       />
@@ -309,19 +332,27 @@ function CounterpartyRow({
 export function CounterpartyWorkspace({
   counterparties: initialCounterparties,
   total,
+  directoryFailed = false,
   accounts,
   accountsTotal = accounts.length,
+  accountsFailed = false,
 }: CounterpartyWorkspaceProps) {
   const t = useTranslations();
   const router = useRouter();
-  const [counterparties, setCounterparties] = useState(initialCounterparties);
+  // Contacts whose delete is in flight or done, hidden until the refreshed directory drops them.
+  // The rows themselves always come from the props, so a refresh lands in the list.
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const counterparties = useMemo(
+    () => initialCounterparties.filter((counterparty) => !deletedIds.has(counterparty.id)),
+    [initialCounterparties, deletedIds]
+  );
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<EntityType | undefined>();
   const [addressFilter, setAddressFilter] = useState<AddressFilter | undefined>();
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
   const [pendingDelete, setPendingDelete] = useState<Counterparty | null>(null);
-  const addressesLoaded = accountsTotal <= accounts.length;
+  const addressesLoaded = !accountsFailed && accountsTotal <= accounts.length;
 
   const addressesByCounterparty = useMemo(() => {
     const byId = new Map<string, string[]>();
@@ -366,15 +397,20 @@ export function CounterpartyWorkspace({
   async function confirmDelete() {
     if (!pendingDelete) return;
     const target = pendingDelete;
-    setCounterparties((current) => current.filter((row) => row.id !== target.id));
+    setDeletedIds((current) => new Set(current).add(target.id));
     setPendingDelete(null);
     const result = await dashboardFetch(
       `/api/dashboard/counterparty/${encodeURIComponent(target.id)}`,
       { method: "DELETE" }
     );
     if (!result.ok) {
+      // Not deleted: bring the row back.
+      setDeletedIds((current) => {
+        const next = new Set(current);
+        next.delete(target.id);
+        return next;
+      });
       toast.error(result.error, { position: "bottom-right" });
-      router.refresh();
       return;
     }
     toast.success(t("DashboardPayments.counterparty.deleted", { name: target.displayName }), {
@@ -384,7 +420,7 @@ export function CounterpartyWorkspace({
   }
 
   if (initialCounterparties.length === 0) {
-    return <EmptyDirectory />;
+    return directoryFailed ? <DirectoryLoadFailed /> : <EmptyDirectory />;
   }
 
   return (
@@ -412,10 +448,12 @@ export function CounterpartyWorkspace({
           ) : null}
           {addressesLoaded ? null : (
             <p>
-              {t("DashboardPayments.counterparty.addressesCapped", {
-                count: accounts.length,
-                total: accountsTotal,
-              })}
+              {accountsFailed
+                ? t("DashboardPayments.counterparty.addressesLoadFailed")
+                : t("DashboardPayments.counterparty.addressesCapped", {
+                    count: accounts.length,
+                    total: accountsTotal,
+                  })}
             </p>
           )}
         </div>

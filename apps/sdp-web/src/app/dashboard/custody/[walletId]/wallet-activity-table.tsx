@@ -16,6 +16,7 @@ import { toTitleCase } from "../../activity-format-utils";
 import { resolveTransferTokenLabel, shortenAddress } from "../../payments/payments-overview.utils";
 import { formatDate } from "../../payments/payments-presentation";
 import { PAYMENTS_TABLE_CELL, PAYMENTS_TABLE_HEAD } from "../../payments/payments-table";
+import { activityDisplayId } from "./wallet-detail.shared";
 
 const SETTLED = new Set(["confirmed", "finalized", "completed", "succeeded", "success"]);
 const FAILED = new Set(["failed", "rejected", "canceled", "cancelled", "expired"]);
@@ -25,12 +26,6 @@ function statusTone(status: string): StatusTone {
   if (SETTLED.has(normalized)) return "positive";
   if (FAILED.has(normalized)) return "critical";
   return "progress";
-}
-
-/** The transfer or transaction id the row carries, without the feed's source prefix. */
-export function activityDisplayId(id: string): string {
-  const bare = id.replace(/^(payment|issuance)-/, "");
-  return bare.length > 14 ? `${bare.slice(0, 8)}…${bare.slice(-4)}` : bare;
 }
 
 /**

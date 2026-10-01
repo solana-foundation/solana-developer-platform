@@ -45,8 +45,13 @@ test.describe("payments command center and transaction ledger", () => {
         timeout: 120_000,
       });
     }
+    // With transfers the activity list ends on "View all transactions"; a project with none
+    // shows the empty state, whose one way on is "Open Transactions".
     await expect(
-      commandCenter.getByRole("link", { name: "View all transactions" })
+      commandCenter
+        .locator('[data-payments-overview-section="activity"]')
+        .getByRole("link", { name: /^(View all transactions|Open Transactions)$/ })
+        .first()
     ).toHaveAttribute("href", "/dashboard/payments/transactions");
   });
 

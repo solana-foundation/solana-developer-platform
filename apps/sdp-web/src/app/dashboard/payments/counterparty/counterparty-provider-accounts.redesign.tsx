@@ -4,7 +4,9 @@ import {
   BVNK_FUNDING_WALLET_STATUSES,
   type BvnkFundingWalletStatus,
   type CounterpartyProviderAccount,
+  type CounterpartyProviderCustomerLink,
   type CounterpartyProviderCustomerLinkAgreement,
+  type RampProviderId,
 } from "@sdp/types";
 import { regionFlagEmoji } from "@sdp/types/payment-rails";
 import { WalletMetadataCopyButton } from "@/app/dashboard/custody/wallet-address-copy-button";
@@ -186,9 +188,8 @@ function PayoutAccountCells({ account }: { account: CounterpartyProviderAccount 
 }
 
 /** The provider's customer record for this contact: where it is registered, and its id. */
-function CustomerLinkCells({ account }: { account: CounterpartyProviderAccount }) {
+function CustomerLinkCells({ link }: { link: CounterpartyProviderCustomerLink | undefined }) {
   const t = useTranslations();
-  const link = account.customerLink;
   return (
     <>
       <TableCell className="text-body text-secondary">
@@ -231,7 +232,37 @@ function ProviderAccountCells({ account }: { account: CounterpartyProviderAccoun
   if (account.kind === "payout_account") {
     return <PayoutAccountCells account={account} />;
   }
-  return <CustomerLinkCells account={account} />;
+  return <CustomerLinkCells link={account.customerLink} />;
+}
+
+/** One row of the table: a provider's customer record, or one account the provider holds. */
+type ProviderAccountRow = { key: string; provider: RampProviderId } & (
+  | { kind: "customer"; link: CounterpartyProviderCustomerLink }
+  | { kind: "account"; account: CounterpartyProviderAccount }
+);
+
+/**
+ * The table's rows: each provider's customer record once, ahead of that provider's accounts.
+ * The API sends a separate customer-link row only when the provider holds no accounts for the
+ * contact; otherwise the link rides on each account, so it is lifted into its own row here.
+ *
+ * @param accounts - Provider-account rows from the API.
+ * @returns The rows to render, in the API's order.
+ */
+function providerAccountRows(accounts: CounterpartyProviderAccount[]): ProviderAccountRow[] {
+  const rows: ProviderAccountRow[] = [];
+  const linkedProviders = new Set<RampProviderId>();
+  for (const account of accounts) {
+    const link = account.customerLink;
+    if (link !== undefined && !linkedProviders.has(account.provider)) {
+      linkedProviders.add(account.provider);
+      rows.push({ kind: "customer", key: `customer:${link.id}`, provider: account.provider, link });
+    }
+    if (account.kind !== "customer_link" || link === undefined) {
+      rows.push({ kind: "account", key: account.id, provider: account.provider, account });
+    }
+  }
+  return rows;
 }
 
 /** The provider agreements a contact is asked to accept, with where each one stands. */
@@ -349,19 +380,24 @@ export function CounterpartyProviderAccounts({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {accounts.map((account) => (
-              <TableRow key={account.id} data-provider-account-kind={account.kind}>
+            {providerAccountRows(accounts).map((row) => (
+              <TableRow
+                key={row.key}
+                data-provider-account-kind={
+                  row.kind === "customer" ? "customer_link" : row.account.kind
+                }
+              >
                 <TableCell className="truncate text-body text-primary">
-                  {getRampProviderLabel(account.provider)}
+                  {getRampProviderLabel(row.provider)}
                 </TableCell>
-                <ProviderAccountCells account={account} />
+                {row.kind === "customer" ? (
+                  <CustomerLinkCells link={row.link} />
+                ) : (
+                  <ProviderAccountCells account={row.account} />
+                )}
                 <TableCell className="text-body whitespace-nowrap">
                   <ProviderAccountStatus
-                    status={providerAccountStatus(
-                      account.kind === "customer_link" && account.customerLink !== undefined
-                        ? account.customerLink
-                        : account
-                    )}
+                    status={providerAccountStatus(row.kind === "customer" ? row.link : row.account)}
                   />
                 </TableCell>
               </TableRow>

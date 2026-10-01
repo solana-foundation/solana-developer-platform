@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { use, useMemo, useState } from "react";
 import { ArrowPagination } from "@/components/ui/arrow-pagination";
 import { Button } from "@/components/ui/button";
@@ -9,11 +10,14 @@ import { SearchInput } from "@/components/ui/search-input";
 import { useTranslations } from "@/i18n/provider";
 import { toTitleCase } from "../../activity-format-utils";
 import { useWalletActivity } from "./use-wallet-activity";
-import { activityDisplayId, WalletActivityTable } from "./wallet-activity-table";
+import { WalletActivityTable } from "./wallet-activity-table";
 import {
+  activityDisplayId,
   type IssuedTokensByMint,
   symbolsByMint,
+  WALLET_ACTIVITY_FEED_LIMIT,
   type WalletBalancesResult,
+  walletTransactionsHref,
 } from "./wallet-detail.shared";
 import { EmptyNote } from "./wallet-overview-tab";
 
@@ -22,15 +26,18 @@ function distinct(values: readonly string[]): string[] {
 }
 
 /**
- * Everything the wallet signed that the feed returns, searchable and filterable by type and
- * status, a page at a time.
+ * The wallet's latest activity as the feed returns it, searchable and filterable by type and
+ * status, a page at a time. The feed holds only the newest rows, so once it is full the tab
+ * says so and links to the Transactions ledger, where the wallet's whole history pages.
  */
 export function WalletActivityTab({
   walletId,
+  custodyWalletId,
   balancesPromise,
   issuedTokensPromise,
 }: {
   walletId: string;
+  custodyWalletId: string;
   balancesPromise: Promise<WalletBalancesResult>;
   issuedTokensPromise: Promise<IssuedTokensByMint>;
 }) {
@@ -44,7 +51,8 @@ export function WalletActivityTab({
   const [status, setStatus] = useState<string | undefined>();
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
-  const rows = data?.activityRows ?? [];
+  const feedRows = data?.activityRows;
+  const rows = useMemo(() => feedRows ?? [], [feedRows]);
   const types = useMemo(() => distinct(rows.map((row) => row.operationLabel)), [rows]);
   const statuses = useMemo(() => distinct(rows.map((row) => row.status)), [rows]);
 
@@ -149,6 +157,17 @@ export function WalletActivityTab({
       </ListToolbar>
       {data?.activityNotice ? (
         <p className="text-meta text-tertiary">{data.activityNotice}</p>
+      ) : null}
+      {rows.length >= WALLET_ACTIVITY_FEED_LIMIT ? (
+        <p className="text-meta text-tertiary" data-wallet-activity-capped>
+          {t("DashboardCustody.walletActivityLatestOnly", { count: rows.length })}{" "}
+          <Link
+            href={walletTransactionsHref(custodyWalletId)}
+            className="text-primary hover:underline"
+          >
+            {t("DashboardCustody.walletActivityOpenTransactions")}
+          </Link>
+        </p>
       ) : null}
       {filtered.length === 0 ? (
         <div className="flex flex-col items-start gap-4">

@@ -293,26 +293,24 @@ test.describe
     });
 
     test("wallet actions menu preserves page geometry", async ({ browser, page }) => {
-      const { wallet, walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
+      const { walletLabel } = await bootstrapWalletRouteFixture(browser, page, {
         labelPrefix: "Wallet Action Geometry",
       });
       await page.setViewportSize({ width: 1280, height: 500 });
-      await page.goto(`/dashboard/wallets/${encodeURIComponent(wallet.walletId)}`, {
-        waitUntil: "domcontentloaded",
-      });
-      await expect(page.getByRole("heading", { name: walletLabel })).toBeVisible({
-        timeout: E2E_POLL_TIMEOUT_MS,
-      });
+      // The wallet's actions menu sits on its card in the Wallets list; the wallet's own page
+      // spreads those actions across its tabs.
+      await page.goto("/dashboard/wallets", { waitUntil: "domcontentloaded" });
+      const walletCard = page.locator("article").filter({ hasText: walletLabel }).first();
+      await expect(walletCard).toBeVisible({ timeout: E2E_POLL_TIMEOUT_MS });
 
-      const actions = page.getByRole("button", {
+      const actions = walletCard.getByRole("button", {
         name: `Wallet actions for ${walletLabel}`,
       });
-      const actionTrigger = page.locator(
+      const actionTrigger = walletCard.locator(
         '[data-slot="dropdown-menu-trigger"][aria-label^="Wallet actions for"]'
       );
-      const walletHeading = page.getByRole("heading", { name: walletLabel });
       const pageGeometry = async () => {
-        const [root, trigger, heading] = await Promise.all([
+        const [root, trigger, card] = await Promise.all([
           page.evaluate(() => ({
             viewportWidth: document.documentElement.clientWidth,
             pageWidth: document.documentElement.scrollWidth,
@@ -321,17 +319,17 @@ test.describe
             bodyPaddingRight: getComputedStyle(document.body).paddingRight,
           })),
           actionTrigger.boundingBox(),
-          walletHeading.boundingBox(),
+          walletCard.boundingBox(),
         ]);
-        if (!trigger || !heading) {
+        if (!trigger || !card) {
           throw new Error("Wallet action geometry anchors did not render");
         }
 
         return {
           ...root,
           triggerLeft: trigger.x,
-          headingLeft: heading.x,
-          headingWidth: heading.width,
+          cardLeft: card.x,
+          cardWidth: card.width,
         };
       };
 

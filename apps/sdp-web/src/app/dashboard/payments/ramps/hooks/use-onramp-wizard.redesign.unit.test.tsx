@@ -319,3 +319,61 @@ describe("useOnrampWizard — showCompleteScreen and transfer-status polling", (
     expect(transferStatusCalls()).toBe(callsBefore);
   });
 });
+
+describe("useOnrampWizard — a first Mural onboarding", () => {
+  it("moves past the memo step while the terms are still to accept", async () => {
+    const termsRequired = {
+      provider: "mural",
+      direction: "onramp",
+      status: "terms_of_service_required",
+      termsOfServiceUrl: "https://app.mural.example/tos",
+    };
+    let started = false;
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.startsWith("/api/dashboard/wallets")) {
+        return Promise.resolve(Response.json({ data: { wallets: [WALLET] } }));
+      }
+      if (url.startsWith("/api/dashboard/counterparty/counterparty-test/requirements")) {
+        // A first Mural onboarding has no fields to collect, so no requirements step is
+        // inserted; the advance from the memo step starts it and answers with the terms.
+        if (method === "POST") {
+          started = true;
+        }
+        return Promise.resolve(
+          Response.json({
+            data: started
+              ? termsRequired
+              : { provider: "mural", direction: "onramp", status: "onboarding_not_started" },
+          })
+        );
+      }
+      return Promise.resolve(Response.json({ data: {} }));
+    });
+
+    const { result } = renderHook(
+      () => useOnrampWizard({ ...PROPS, enabledRampProviders: ["mural"] }),
+      { wrapper }
+    );
+    await act(async () => {});
+    act(() => result.current.selectProvider("mural"));
+    act(() => result.current.setField("amount", "100"));
+    act(() => result.current.setField("walletId", WALLET.id));
+    await waitFor(() => expect(result.current.canProceed).toBe(true));
+    expect(result.current.fields.provider).toBe("mural");
+    expect(result.current.steps.map((step) => step.id)).not.toContain("REQUIREMENTS");
+
+    await act(async () => {
+      await result.current.handlePrimary();
+    });
+    expect(result.current.currentStepId).toBe("MEMO");
+    await act(async () => {
+      await result.current.handlePrimary();
+    });
+
+    expect(result.current.currentStepId).toBe("REVIEW");
+    expect(result.current.onboarding?.status).toBe("terms_of_service_required");
+    expect(result.current.quoteTransferId).toBeNull();
+  });
+});

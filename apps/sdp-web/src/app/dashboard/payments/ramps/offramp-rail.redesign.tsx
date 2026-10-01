@@ -62,6 +62,17 @@ function offrampPrimaryAction(
   }
 }
 
+/** Whether the footer's primary button waits: on a quote, a verification, or the wallets. */
+function offrampPrimaryDisabled(wizard: OfframpWizard, verificationPending: boolean): boolean {
+  return (
+    wizard.hostedQuoteLoading ||
+    verificationPending ||
+    wizard.verificationSimulating ||
+    !wizard.canProceed ||
+    (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
+  );
+}
+
 /** The final step's heading once the payout reached an outcome worth naming. */
 function offrampCompletionTitle(wizard: OfframpWizard, t: Translate): string | undefined {
   if (wizard.transferStatus?.status === "completed") {
@@ -215,13 +226,7 @@ export function OfframpRail({
       steps={[...preSteps, ...wizard.steps]}
       stepIndex={preSteps.length + wizard.stepIndex}
       completionTitle={offrampCompletionTitle(wizard, t)}
-      primaryDisabled={
-        wizard.hostedQuoteLoading ||
-        verificationPending ||
-        wizard.verificationSimulating ||
-        !wizard.canProceed ||
-        (wizard.currentStepId === "WALLET" && wizard.walletsLoading)
-      }
+      primaryDisabled={offrampPrimaryDisabled(wizard, verificationPending)}
       primaryLabel={offrampPrimaryLabel(wizard, verificationPending, verificationUrl, t)}
       walletsError={wizard.liveWalletsError}
       onPrimary={offrampPrimaryAction(wizard, verificationUrl)}
