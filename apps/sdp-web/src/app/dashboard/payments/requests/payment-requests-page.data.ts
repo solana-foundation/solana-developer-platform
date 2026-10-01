@@ -158,38 +158,45 @@ export function paymentRequestsListHref(state: PaymentRequestsListState): string
 export const PAYMENT_REQUESTS_SCAN_CAP = 500;
 
 type PaymentRequestsScan = PaymentRequestsResult & {
-  /** More requests matched the read than {@link PAYMENT_REQUESTS_SCAN_CAP}. */
+  /** More requests exist than {@link PAYMENT_REQUESTS_SCAN_CAP}. */
   capped: boolean;
 };
 
 /**
- * The newest payment requests up to {@link PAYMENT_REQUESTS_SCAN_CAP}, with an optional status,
- * read in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it
+ * The newest payment requests of every status, up to {@link PAYMENT_REQUESTS_SCAN_CAP}, read
+ * in pages of {@link PAYMENT_REQUESTS_PAGE_SIZE}. Listing reconciles each open request it
  * reads, and saves any that has been paid, so the rows carry the status the list shows.
+ *
+ * The pages are read without a status filter. Under one, a request that settles, expires or is
+ * canceled while the pages are read leaves the filtered set, so every later offset moves up a
+ * row and a page skips one. Newest first across every status, a row only moves when a request
+ * is created: that pushes the rest down, so a page repeats a row (dropped here) and the total
+ * grows (read on to cover it).
  */
-async function scanPaymentRequests(
-  request: SdpApiClient["request"],
-  status: PaymentRequest["status"] | undefined
-): Promise<PaymentRequestsScan> {
-  const statusOption = status ? { status } : {};
-  const first = await fetchPaymentRequests(request, { page: 1, ...statusOption });
+async function scanPaymentRequests(request: SdpApiClient["request"]): Promise<PaymentRequestsScan> {
+  const first = await fetchPaymentRequests(request, { page: 1 });
   if (!first.ok) return { ...first, capped: false };
-  const pages = Math.ceil(
-    Math.min(first.total, PAYMENT_REQUESTS_SCAN_CAP) / PAYMENT_REQUESTS_PAGE_SIZE
-  );
-  const rest = await Promise.all(
-    Array.from({ length: Math.max(0, pages - 1) }, (_, index) =>
-      fetchPaymentRequests(request, { page: index + 2, ...statusOption })
-    )
-  );
-  const failed = rest.find((result) => !result.ok);
-  if (failed) return { ...failed, capped: false };
-  return {
-    ok: true,
-    data: [first, ...rest].flatMap((result) => result.data).slice(0, PAYMENT_REQUESTS_SCAN_CAP),
-    total: first.total,
-    capped: first.total > PAYMENT_REQUESTS_SCAN_CAP,
-  };
+  const pages = [first];
+  let total = first.total;
+  for (;;) {
+    const needed = Math.ceil(
+      Math.min(total, PAYMENT_REQUESTS_SCAN_CAP) / PAYMENT_REQUESTS_PAGE_SIZE
+    );
+    if (pages.length >= needed) break;
+    const read = await Promise.all(
+      Array.from({ length: needed - pages.length }, (_, index) =>
+        fetchPaymentRequests(request, { page: pages.length + index + 1 })
+      )
+    );
+    const failed = read.find((result) => !result.ok);
+    if (failed) return { ...failed, capped: false };
+    pages.push(...read);
+    total = Math.max(total, ...read.map((result) => result.total));
+  }
+  // Keyed by id, so a repeated row keeps its first place.
+  const byId = new Map(pages.flatMap((result) => result.data).map((row) => [row.id, row]));
+  const data = [...byId.values()].slice(0, PAYMENT_REQUESTS_SCAN_CAP);
+  return { ok: true, data, total, capped: total > PAYMENT_REQUESTS_SCAN_CAP };
 }
 
 /** Every well-known token's symbol by mint, on any cluster, for searching by symbol. */
@@ -260,10 +267,12 @@ function pageOf(
 /**
  * One page of the Requests list as its URL names it. With no search and no status, or a status
  * no payment can change (canceled, expired), the API pages it. Awaiting payment and paid are
- * read after the open requests, since listing settles any that has been paid, and the API's
- * filter reads the stored status: a request paid since the last read would otherwise be missed
- * by Paid and shown as paid under Awaiting payment. The API has no search, so a search reads up
- * to {@link PAYMENT_REQUESTS_SCAN_CAP} requests and matches and pages them here.
+ * matched here after reading every request, since listing settles any open one that has been
+ * paid, and the API's filter reads the stored status: a request paid since the last read would
+ * otherwise be missed by Paid and shown as paid under Awaiting payment. The API has no search,
+ * so a search matches here too. Both read up to {@link PAYMENT_REQUESTS_SCAN_CAP} requests;
+ * past it, a status filter with no search goes back to the API's pages, the newest requests
+ * already settled.
  *
  * @param request - Authenticated SDP API fetcher.
  * @param state - The list's page, size, status and search.
@@ -277,36 +286,28 @@ export async function loadPaymentRequestsList(
   options: { counterpartyNames?: () => Promise<ReadonlyMap<string, string>> } = {}
 ): Promise<PaymentRequestsListResult> {
   const { status, search } = state;
-  let open: PaymentRequestsScan | undefined;
-  if (status === "awaiting_payment" || status === "paid") {
-    open = await scanPaymentRequests(request, "awaiting_payment");
-    if (!open.ok) return listFailure(open);
-  }
-  // Awaiting payment is the open requests that were not just settled: when they were all read,
-  // or the list is searched (which reads no further), the open read already holds the list.
-  const directory =
-    status === "awaiting_payment" && open && (search !== null || !open.capped)
-      ? open
-      : search !== null
-        ? await scanPaymentRequests(request, status ?? undefined)
-        : undefined;
-  if (directory === undefined) {
-    const result = await fetchPaymentRequests(request, {
+  const pageFromApi = async (): Promise<PaymentRequestsListResult> => ({
+    ...(await fetchPaymentRequests(request, {
       page: state.page,
       pageSize: state.pageSize,
       ...(status ? { status } : {}),
-    });
-    return { ...result, searchCapped: false };
+    })),
+    searchCapped: false,
+  });
+  if (search === null && status !== "awaiting_payment" && status !== "paid") {
+    return pageFromApi();
   }
-  if (!directory.ok) return listFailure(directory);
+  const scan = await scanPaymentRequests(request);
+  if (!scan.ok) return listFailure(scan);
+  if (search === null && scan.capped) return pageFromApi();
   const counterpartyNames =
     search !== null && options.counterpartyNames ? await options.counterpartyNames() : new Map();
-  const rows = directory.data.filter(
+  const rows = scan.data.filter(
     (row) =>
       (status === null || row.status === status) &&
       (search === null || paymentRequestMatchesSearch(row, search, counterpartyNames))
   );
-  return pageOf(rows, state, search !== null && directory.capped);
+  return pageOf(rows, state, search !== null && scan.capped);
 }
 
 export type PaymentRequestDetailResult =

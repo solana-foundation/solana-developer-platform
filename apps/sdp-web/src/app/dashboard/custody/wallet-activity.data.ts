@@ -268,10 +268,11 @@ export async function fetchWalletActivity(
     cache: "no-store",
     signal: options.signal,
   });
-  const body = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
   if (!response.ok) {
-    throw new Error(body.error?.message ?? "");
+    const failure = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
+    throw new Error(failure.error?.message ?? "");
   }
+  const body = (await response.json().catch(() => ({}))) as DashboardWalletActivityEnvelope;
 
   return {
     activityRows: body.data?.activityRows ?? [],

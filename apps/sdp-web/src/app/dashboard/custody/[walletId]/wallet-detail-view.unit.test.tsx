@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
     hasMore: false as boolean,
   },
   activityLimits: [] as (number | undefined)[],
+  widerActivityFails: false,
+  retryActivity: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -59,7 +61,15 @@ vi.mock("@/app/dashboard/custody/wallet-provider-mark", () => ({
 vi.mock("./use-wallet-activity", () => ({
   useWalletActivity: (_walletId: string, limit?: number) => {
     mocks.activityLimits.push(limit);
-    return { data: mocks.activity, error: undefined, isLoading: false };
+    if (mocks.widerActivityFails && limit !== 20) {
+      return {
+        data: undefined,
+        error: new Error("unavailable"),
+        isValidating: false,
+        mutate: mocks.retryActivity,
+      };
+    }
+    return { data: mocks.activity, error: undefined, isValidating: false, mutate: vi.fn() };
   },
 }));
 
@@ -207,6 +217,7 @@ beforeEach(() => {
     hasMore: false,
   };
   mocks.activityLimits = [];
+  mocks.widerActivityFails = false;
 });
 afterEach(() => {
   cleanup();
@@ -307,6 +318,36 @@ describe("Activity", () => {
       fireEvent.click(screen.getByRole("button", { name: "Load older activity" }));
     });
     expect(mocks.activityLimits.at(-1)).toBe(120);
+  });
+
+  it("keeps the loaded rows when older activity fails, and retries the same window", async () => {
+    mocks.tab = "activity";
+    mocks.widerActivityFails = true;
+    const [first] = mocks.activity.activityRows as { id: string }[];
+    mocks.activity = {
+      ...mocks.activity,
+      activityRows: Array.from({ length: 20 }, (_, index) => ({
+        ...first,
+        id: `payment-xfr_row_${index}`,
+      })),
+      hasMore: true,
+    };
+    await act(async () => {
+      renderView();
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Load older activity" }));
+    });
+    expect(
+      screen.getByText("Older activity didn't load. The latest 20 transactions are still shown.")
+    ).toBeTruthy();
+    expect(screen.getAllByText(/xfr_row_/)).toHaveLength(20);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Try loading older activity again" }));
+    });
+    expect(mocks.retryActivity).toHaveBeenCalledTimes(1);
+    expect(Math.max(...mocks.activityLimits.map((limit) => limit ?? 20))).toBe(120);
   });
 
   it("offers older activity only from the last page of what is loaded", async () => {

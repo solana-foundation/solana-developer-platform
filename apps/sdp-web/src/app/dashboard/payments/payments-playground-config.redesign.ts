@@ -33,6 +33,8 @@ const policyDefaultActionOptions: ApiPlaygroundFieldOption[] = [
   { label: "approval_required", value: "approval_required" },
   { label: "review", value: "review" },
 ];
+/** The wallet policy's starting `defaultAction`: an API value, shown as typed, never translated. */
+const defaultPolicyAction = "allow";
 const examplePolicyRules = [
   {
     id: "deny-issuance",
@@ -203,10 +205,10 @@ export function buildPaymentsPlaygroundEndpointConfigs(
         {
           key: "defaultAction",
           label: "defaultAction",
-          placeholder: "allow",
+          placeholder: defaultPolicyAction,
           kind: "select",
           options: policyDefaultActionOptions,
-          defaultValue: "allow",
+          defaultValue: defaultPolicyAction,
           required: true,
         },
         {

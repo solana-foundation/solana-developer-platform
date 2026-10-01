@@ -114,6 +114,7 @@ export function getPaymentsActions(
   _privateChannelsEnabled: boolean,
   design: DesignFlags = { newDesign: true }
 ): SubNavItem[] {
+  const activityDesign = isDesignModuleOn(design, "activity");
   return [
     {
       label: t("Shared.dashboardShell.transactions"),
@@ -143,7 +144,7 @@ export function getPaymentsActions(
       icon: FileTextIcon,
     },
     {
-      label: isDesignModuleOn(design, "activity")
+      label: activityDesign
         ? t("Shared.dashboardShell.newDesign.recurring")
         : t("Shared.dashboardShell.recurring"),
       href: DASHBOARD_PAYMENTS_SUBNAV_HREFS.recurring,
