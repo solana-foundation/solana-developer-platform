@@ -33,13 +33,23 @@ describe("sdp-theme.css", () => {
   });
 
   it("keeps every component shape on the refresh subtree alone", () => {
+    // A refresh rule may also name the scope on the root (`:root[data-sdp-theme="refresh"]`) so it
+    // outranks `:root.dark`; it is still refresh-only while every selector in its list is.
+    const refreshOnly = (selector: string) =>
+      selector
+        .split(",")
+        .map((part) => part.trim().replace(/^:root(?=\[)/, ""))
+        .every((part) => part === SHAPE_SCOPE || part.startsWith(`${SHAPE_SCOPE} `));
     const leaked = [...blocks]
-      .filter(([selector]) => selector !== SHAPE_SCOPE && !selector.startsWith(`${SHAPE_SCOPE} `))
+      .filter(([selector]) => !refreshOnly(selector))
       .flatMap(([selector, names]) =>
         names.filter((name) => SHAPE_TOKEN.test(name)).map((name) => `${selector} ${name}`)
       );
     expect(leaked).toEqual([]);
-    expect(blocks.get(SHAPE_SCOPE)).toEqual(
+    const refreshShapes = [...blocks]
+      .filter(([selector]) => refreshOnly(selector))
+      .flatMap(([, names]) => names);
+    expect(refreshShapes).toEqual(
       expect.arrayContaining(["--button-radius-xl", "--input-radius-xl", "--table-radius"])
     );
   });
