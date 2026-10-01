@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   strategiesClusterRequests: [] as Array<"devnet" | "mainnet-beta" | undefined>,
   refreshStrategies: vi.fn(),
   refreshPositions: vi.fn(),
+  positionsAfterMovementIds: [] as string[],
   refreshPrograms: vi.fn(),
   refreshWalletBalances: vi.fn(),
   refreshWallets: vi.fn(),
@@ -518,6 +519,7 @@ vi.mock("../earn/earn-program-data", async (importOriginal) => ({
         {
           startedAt: mocks.positionsReadStartedAt,
           landedAt: mocks.positionsReadLandedAt,
+          afterMovementIds: mocks.positionsAfterMovementIds,
           positions,
         },
       ],
@@ -786,6 +788,7 @@ const devnetStrategyRow = (name: string) =>
     .find((row) => row?.textContent?.includes("Devnet"));
 
 beforeEach(() => {
+  mocks.positionsAfterMovementIds = [];
   mocks.canManageCustody = true;
   mocks.environment = "sandbox";
   mocks.programProvider = "upshift";
@@ -1211,11 +1214,18 @@ describe("TreasurySolutionsWorkspace", () => {
     rerenderWorkspace(view);
     expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
 
+    // A later HTTP request alone cannot prove the provider caught up.
+    mocks.positionsReadStartedAt = Date.now() + 500;
+    rerenderWorkspace(view);
+    expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
+    expect(mocks.refreshPositions).toHaveBeenLastCalledWith([movementId]);
+
     // A fresh provider read includes the deposit net of its exit premium.
     // Its observed value is used without adding the requested amount again.
     mocks.positionsReadStartedAt = Date.now() + 1_000;
     mocks.livePositionShares = "129.5";
     mocks.livePositionTokenValue = "135.249985";
+    mocks.positionsAfterMovementIds = [movementId];
     rerenderWorkspace(view);
     await waitFor(() =>
       expect(document.querySelector('[data-earn-vault-balance="syncing"]')).toBeNull()
@@ -1264,6 +1274,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadLandedAt = Date.now() + 1_500;
     mocks.livePositionShares = "129.5";
     mocks.livePositionTokenValue = "135.25";
+    mocks.positionsAfterMovementIds = ["earn_vault_movement_between_1"];
     rerenderWorkspace(view);
     expect(syncingBalanceText(livePositionRow())).toBeUndefined();
     expect(within(livePositionRow()).getByText("$135.25")).toBeTruthy();
@@ -1277,6 +1288,10 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.positionsReadLandedAt = Date.now() + 1_500;
     mocks.livePositionShares = "134.5";
     mocks.livePositionTokenValue = "140.25";
+    mocks.positionsAfterMovementIds = [
+      "earn_vault_movement_between_1",
+      "earn_vault_movement_between_2",
+    ];
     rerenderWorkspace(view);
     expect(syncingBalanceText(livePositionRow())).toBeUndefined();
     expect(within(livePositionRow()).getByText("$140.25")).toBeTruthy();
@@ -1317,6 +1332,7 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
 
     mocks.livePositionTokenValue = "135.2499";
+    mocks.positionsAfterMovementIds = ["earn_vault_movement_session_deposit"];
     mocks.livePositionShares = "129.5";
     mocks.positionsReadStartedAt = Date.now() + 1;
     mocks.positionsReadLandedAt = Date.now() + 2;
@@ -1349,6 +1365,10 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(syncingBalanceText(livePositionRow())).toBe("Updating balance…");
 
     mocks.livePositionTokenValue = "129.2499";
+    mocks.positionsAfterMovementIds = [
+      "earn_vault_movement_session_deposit",
+      "earn_vault_movement_session_withdrawal",
+    ];
     mocks.livePositionShares = "123.5";
     mocks.positionsReadStartedAt = Date.now() + 1;
     mocks.positionsReadLandedAt = Date.now() + 2;
@@ -1454,6 +1474,7 @@ describe("TreasurySolutionsWorkspace", () => {
 
     mocks.positionsEmpty = false;
     mocks.livePositionTokenValue = "10";
+    mocks.positionsAfterMovementIds = [movementId];
     mocks.positionsReadStartedAt = Date.now() + 1_000;
     rerenderWorkspace(view);
 
@@ -1572,7 +1593,7 @@ describe("TreasurySolutionsWorkspace", () => {
       });
     });
 
-    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
     expect(mocks.refreshWallets).not.toHaveBeenCalled();
   });
 
@@ -1587,7 +1608,7 @@ describe("TreasurySolutionsWorkspace", () => {
     mocks.vaultDeposits = [
       { movementId, positionId: "earn_vault_position_live", status: "submitted" },
     ];
-    renderWorkspace();
+    const view = renderWorkspace();
     await waitFor(() => expect(mocks.vaultDepositTrackers[movementId]).toBeTruthy());
     await act(async () => {
       mocks.vaultDepositTrackers[movementId]?.onSettled?.({
@@ -1601,6 +1622,9 @@ describe("TreasurySolutionsWorkspace", () => {
     expect(screen.getByRole("heading", { name: "Operating treasury" })).toBeTruthy();
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
     await act(async () => finishWalletRead?.());
+    expect(screen.getAllByRole("status", { name: "Updating balance…" }).length).toBeGreaterThan(1);
+    mocks.positionsAfterMovementIds = [movementId];
+    rerenderWorkspace(view);
     expect(screen.queryAllByRole("status", { name: "Updating balance…" })).toHaveLength(0);
   });
 
@@ -1623,7 +1647,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
     await waitFor(() => expect(screen.queryByText("$125.25")).toBeNull());
     expect(screen.getByText("Vault positions unavailable")).toBeTruthy();
-    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
   });
 
@@ -2335,7 +2359,7 @@ describe("TreasurySolutionsWorkspace", () => {
     });
 
     expect(mocks.refreshPositions).toHaveBeenCalledTimes(1);
-    expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.refreshWalletBalances).toHaveBeenCalledTimes(1));
   });
 
   it("keeps the vault exit verb live in production, where deposits are closed", () => {

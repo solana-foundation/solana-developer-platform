@@ -1,4 +1,5 @@
 import type { OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { earnBalanceReadContextSchema } from "@sdp/types/earn-wire";
 import * as requests from "@/routes/earn/schemas";
 import { errorResponseSchema, successResponseSchema, z } from "../schemas/base";
 import {
@@ -177,11 +178,15 @@ export function registerEarnTreasuryPaths(
     "vault-positions",
     "listEarnVaultPositions",
     "List live custody positions",
-    envelope({ positions: z.array(responses.earnVaultPositionSchema), ...pageFields }),
+    envelope({
+      positions: z.array(responses.earnVaultPositionSchema),
+      balanceReadContext: earnBalanceReadContextSchema.optional(),
+      ...pageFields,
+    }),
     {
       query: requests.earnVaultPositionsQuerySchema,
       description:
-        "Requires earn:read. Live shares, tokenValue and withdrawableShares are absent when unavailable; absence never means zero. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
+        "Requires earn:read. Optional afterMovementIds is a comma-separated list of up to 100 visible custody movement IDs. Balance reads must observe chain context at or after every movement's confirmed slot. balanceReadContext acknowledges that bound; unavailable or stale provider values remain absent. confirmed is optimistic chain commitment; finalized or provider settlement supplies final amounts.",
     }
   );
   route(

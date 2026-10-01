@@ -261,6 +261,30 @@ function vaultPosition(id: string, provider = "kamino"): EarnVaultPosition {
 }
 
 describe("fetchEarnVaultPositions", () => {
+  it("requires the API to acknowledge every confirmed movement on the balance read", async () => {
+    const data = { positions: [vaultPosition("vault_1")], hasMore: false, nextCursor: null };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ data }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { ...data, balanceReadContext: { afterMovementIds: ["one"], minimumSlot: 10 } },
+        })
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            ...data,
+            balanceReadContext: { afterMovementIds: ["one", "two"], minimumSlot: 12 },
+          },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchEarnVaultPositions(["one", "two"])).rejects.toThrow(/confirmation freshness/);
+    await expect(fetchEarnVaultPositions(["one", "two"])).rejects.toThrow(/confirmation freshness/);
+    await expect(fetchEarnVaultPositions(["one", "two"])).resolves.toEqual(data.positions);
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("afterMovementIds=one%2Ctwo");
+  });
   it("follows every live keyset page without filtering un-surfaced providers", async () => {
     // Pages that report more must be full, so the first page carries a whole
     // page of rows and only the final one is short.

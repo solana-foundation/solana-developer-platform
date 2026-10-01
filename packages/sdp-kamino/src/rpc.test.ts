@@ -1,3 +1,4 @@
+import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import type { RpcTransport } from "@solana/kit";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withKaminoRpcTimeout } from "./rpc";
@@ -13,6 +14,34 @@ afterEach(() => {
 });
 
 describe("withKaminoRpcTimeout", () => {
+  it("rejects an older bank through the actual SDK transport boundary", async () => {
+    const accountRequest = {
+      payload: {
+        id: "1",
+        jsonrpc: "2.0",
+        method: "getMultipleAccounts",
+        params: [["account"], {}],
+      },
+    } as unknown as RpcRequest;
+    let responseSlot = 100;
+    const transport = vi.fn(async () => ({
+      result: { context: { slot: responseSlot }, value: [] },
+    })) as unknown as RpcTransport;
+    const rpc = withKaminoRpcTimeout(transport);
+    await expect(withMinimumRpcSlot(101, () => rpc(accountRequest))).rejects.toThrow(/behind/);
+    responseSlot = 101;
+    await expect(withMinimumRpcSlot(101, () => rpc(accountRequest))).resolves.toHaveProperty(
+      "result.context.slot",
+      101
+    );
+    expect(transport).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          params: [["account"], { commitment: "confirmed", minContextSlot: 101 }],
+        }),
+      })
+    );
+  });
   it("aborts a stalled transport at the package deadline", async () => {
     vi.useFakeTimers();
     let observedSignal: AbortSignal | undefined;

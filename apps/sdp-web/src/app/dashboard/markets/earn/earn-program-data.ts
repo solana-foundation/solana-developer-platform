@@ -37,6 +37,7 @@ import {
   type SolanaCluster,
 } from "@sdp/types";
 import {
+  earnBalanceReadContextSchema,
   earnVaultDepositRecordSchema,
   earnVaultDepositSchema,
   earnVaultWithdrawalSchema,
@@ -375,7 +376,9 @@ async function fetchAllCursorPages<T>(input: {
  */
 async function fetchAllPositionPages<Position>(
   path: (query: URLSearchParams) => string,
-  subject: string
+  subject: string,
+  afterMovementIds: readonly string[] = [],
+  observeMinimumSlot?: (slot: number) => void
 ): Promise<Position[]> {
   return fetchAllCursorPages<Position>({
     subject,
@@ -383,8 +386,21 @@ async function fetchAllPositionPages<Position>(
     async fetchPage(before) {
       const query = new URLSearchParams({ limit: String(EARN_PAGE_SIZE) });
       if (before) query.set("before", before);
+      if (afterMovementIds.length > 0) query.set("afterMovementIds", afterMovementIds.join(","));
 
-      const body = await requestJsonOk<{ data: PositionPage<Position> }>(path(query));
+      const body = await requestJsonOk<{
+        data: PositionPage<Position> & { balanceReadContext?: unknown };
+      }>(path(query));
+      if (afterMovementIds.length > 0) {
+        const context = earnBalanceReadContextSchema.safeParse(body.data.balanceReadContext);
+        if (
+          !context.success ||
+          afterMovementIds.some((id) => !context.data.afterMovementIds.includes(id))
+        ) {
+          throw new Error("Vault position read did not establish confirmation freshness");
+        }
+        observeMinimumSlot?.(context.data.minimumSlot);
+      }
       return {
         items: body.data.positions,
         hasMore: body.data.hasMore,
@@ -399,10 +415,15 @@ async function fetchAllPositionPages<Position>(
  * opaque keyset cursor and hydrates balances live from chain, so cursor
  * progression — not row count — decides when the read is complete.
  */
-export async function fetchEarnVaultPositions(): Promise<EarnVaultPosition[]> {
+export async function fetchEarnVaultPositions(
+  afterMovementIds: readonly string[] = [],
+  observeMinimumSlot?: (slot: number) => void
+): Promise<EarnVaultPosition[]> {
   return fetchAllPositionPages<EarnVaultPosition>(
     (query) => `/api/dashboard/markets/earn/vault-positions?${query}`,
-    "Vault positions"
+    "Vault positions",
+    afterMovementIds,
+    observeMinimumSlot
   );
 }
 
@@ -411,15 +432,22 @@ export interface EarnVaultPositionsRead {
   positions: EarnVaultPosition[];
   startedAt: number;
   landedAt: number;
+  afterMovementIds?: readonly string[];
+  minimumSlot?: number;
 }
 
-async function readEarnVaultPositions(): Promise<EarnVaultPositionsRead> {
+async function readEarnVaultPositions(
+  afterMovementIds: readonly string[] = []
+): Promise<EarnVaultPositionsRead> {
   const startedAt = Date.now();
-  const positions = await fetchEarnVaultPositions();
-  return { positions, startedAt, landedAt: Date.now() };
+  let minimumSlot: number | undefined;
+  const positions = await fetchEarnVaultPositions(afterMovementIds, (slot) => {
+    minimumSlot = Math.max(minimumSlot ?? 0, slot);
+  });
+  return { positions, startedAt, landedAt: Date.now(), afterMovementIds, minimumSlot };
 }
 
-/** Three minutes at the live cadence: enough to hold a read that predates any movement still projected. */
+/** Bound recent snapshots while keeping confirmation acknowledgments available to the UI. */
 const RECENT_VAULT_POSITIONS_READS = 12;
 
 function appendVaultPositionsRead(
@@ -432,9 +460,10 @@ function appendVaultPositionsRead(
 
 /** Live position values refresh while the surface is mounted; `reads` keeps the recent history, newest last. */
 export function useEarnVaultPositions() {
+  const afterMovementIds = useRef<readonly string[]>([]);
   const { data, error, isLoading, mutate } = useSWR(
     earnQueryKeys.vaultPositions(),
-    readEarnVaultPositions,
+    () => readEarnVaultPositions(afterMovementIds.current),
     { refreshInterval: LIVE_FEED_REFRESH_MS }
   );
   const [history, setHistory] = useState<readonly EarnVaultPositionsRead[]>([]);
@@ -446,7 +475,18 @@ export function useEarnVaultPositions() {
     () => (data ? appendVaultPositionsRead(history, data) : history),
     [data, history]
   );
-  const refresh = useCallback(() => mutate(), [mutate]);
+  const refresh = useCallback(
+    (movementIds?: readonly string[]) => {
+      if (movementIds) afterMovementIds.current = [...movementIds];
+      // Explicit mutation propagates failures; a bare SWR revalidation can
+      // resolve with cached data after its fetcher failed.
+      return mutate(readEarnVaultPositions(afterMovementIds.current), {
+        revalidate: false,
+        throwOnError: true,
+      });
+    },
+    [mutate]
+  );
   return { positions: data?.positions, reads, error, isLoading, refresh };
 }
 

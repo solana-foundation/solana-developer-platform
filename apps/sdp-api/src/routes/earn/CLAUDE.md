@@ -1696,3 +1696,17 @@ fail-closed + 4xx-vs-ambiguous outcomes in `../earn.vault.test.ts`, fail-open
   `../../db/repositories/earn.repository.test.ts` run against a stub id on
   purpose — the ledger consumes only the canonical contract, and that suite is
   the pluggability proof.
+
+
+### Treasury balance confirmation context
+
+Authenticated `GET /vault-positions?afterMovementIds=id1,id2` accepts at most 100
+movement ids. Resolve organization, project, environment and readable custody
+wallet scope before looking up their confirmed/finalized signature slots. The
+response's `balanceReadContext` acknowledges the ids and maximum slot.
+`@sdp/rpc/read-context` scopes provider RPC reads to confirmed state, requests
+`minContextSlot` where supported, and rejects missing or older response contexts.
+Unscoped execution/reconciliation commitment is unchanged. A failed hydration
+omits value fields. Request timing and unchanged/changed balances prove nothing.
+Treasury forwards the slot to the Payments wallet-balance endpoint; that endpoint
+returns 503 on any SOL/SPL read failure, including stale or unverifiable context.

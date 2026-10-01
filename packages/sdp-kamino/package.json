@@ -33,6 +33,7 @@
   "dependencies": {
     "@kamino-finance/klend-sdk": "10.0.0",
     "@sdp/earn": "workspace:*",
+    "@sdp/rpc": "workspace:*",
     "@sdp/solana": "workspace:*",
     "@sdp/types": "workspace:*",
     "@solana-program/token": "catalog:",

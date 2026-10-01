@@ -514,6 +514,13 @@ A position displays Updating balance until a read starts after confirmation.
 Only the latest provider value is displayed, including actual fees and slippage;
 never add requested amounts or fall back to an older successful valuation.
 Overlapping confirmations each trigger refresh, including recovery after reload.
+Post-confirmation position reads send `afterMovementIds`; the API scopes those
+movements and bounds every provider account read by their confirmed slots.
+`balanceReadContext` acknowledges that bound on every page. Client timestamps or
+changed share counts are not freshness evidence. Wallet balance reads then use
+`minimumSlot` from that acknowledgment, and subsequent revalidation keeps the bound.
+A missing acknowledgment or any wallet RPC failure preserves the unavailable state;
+it never restores cached amounts or substitutes zero.
 These are observed values, not an atomic portfolio snapshot: provider/RPC
 freshness remains an external dependency.
 

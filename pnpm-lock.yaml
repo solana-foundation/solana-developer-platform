@@ -678,6 +678,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/solana':
         specifier: workspace:*
         version: link:../sdp-solana
@@ -787,6 +790,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types
@@ -818,6 +824,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/solana':
         specifier: workspace:*
         version: link:../sdp-solana
@@ -852,6 +861,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/solana':
         specifier: workspace:*
         version: link:../sdp-solana
@@ -1077,6 +1089,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/solana':
         specifier: workspace:*
         version: link:../sdp-solana
@@ -1108,6 +1123,9 @@ importers:
       '@sdp/earn':
         specifier: workspace:*
         version: link:../sdp-earn
+      '@sdp/rpc':
+        specifier: workspace:*
+        version: link:../sdp-rpc
       '@sdp/types':
         specifier: workspace:*
         version: link:../sdp-types

@@ -1,4 +1,5 @@
 import { addDecimalAmounts } from "@sdp/payments/decimal";
+import { withMinimumRpcSlot } from "@sdp/rpc/read-context";
 import { isDecimalString } from "@sdp/solana/amount";
 import {
   type EarnVaultPositionIntermediate,
@@ -47,6 +48,7 @@ export function hydratedHoldingTokenValue(
 
 export interface VaultPositionHydrationOptions {
   ownerKind: "custody" | "external-wallet";
+  minimumSlot?: number;
 }
 
 /**
@@ -107,10 +109,14 @@ export async function hydrateVaultPositions(
         hydrate: async () => {
           const client = resolveVaultDirectClient(c.env, provider, hydrationDeadline);
           if (!client) return;
-          const snapshots = await client.readVaultPositions(earnRuntime(c), {
-            owner,
-            providerReferences: [...trustedByReference.keys()],
-          });
+          const read = () =>
+            client.readVaultPositions(earnRuntime(c), {
+              owner,
+              providerReferences: [...trustedByReference.keys()],
+            });
+          const snapshots = await (options.minimumSlot === undefined
+            ? read()
+            : withMinimumRpcSlot(options.minimumSlot, read));
           for (const snapshot of snapshots) {
             const trustedPositions = trustedByReference.get(snapshot.providerReference);
             if (

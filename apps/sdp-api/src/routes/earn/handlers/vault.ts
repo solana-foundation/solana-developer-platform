@@ -61,6 +61,7 @@ import {
   resolveVaultDirectClient,
   resolveVaultWithdrawClient,
 } from "@/services/earn/execution-registry";
+import { resolveVaultBalanceReadContext } from "@/services/earn/vault-balance-read-context";
 import { createVaultDeadline } from "@/services/earn/vault-deadline";
 import { depositIntoVault } from "@/services/earn/vault-deposit.service";
 import { checkVaultExposure, vaultExposureBlockingIssue } from "@/services/earn/vault-exposure";
@@ -1105,6 +1106,13 @@ export async function listEarnVaultPositions(c: AppContext) {
   // spaces this translates between.
   const scopedWallets = await listReadableEarnVaultWallets(c, auth, projectId);
   const custodyWalletIds = [...new Set(scopedWallets.map((wallet) => wallet.id))];
+  const balanceReadContext = await resolveVaultBalanceReadContext(c.env, {
+    movementIds: query.afterMovementIds?.split(",") ?? [],
+    organizationId: auth.organizationId,
+    projectId,
+    environment,
+    custodyWalletIds,
+  });
   if (custodyWalletIds.length === 0) {
     return success(c, { positions: [], hasMore: false, nextCursor: null });
   }
@@ -1143,7 +1151,7 @@ export async function listEarnVaultPositions(c: AppContext) {
         shareMint: row.shareMint,
       };
     }),
-    { ownerKind: "custody" }
+    { ownerKind: "custody", minimumSlot: balanceReadContext?.minimumSlot }
   );
   await closeEmptyHydratedPositions(
     (positionId, observedUpdatedAt) =>
@@ -1165,6 +1173,7 @@ export async function listEarnVaultPositions(c: AppContext) {
   const feeSponsored = isEarnVaultSponsorshipEnabled(c.env, earnClusterFor(environment));
 
   return success(c, {
+    balanceReadContext,
     positions: rows.map((row) => {
       const hydrated = live.get(row.id);
       return {

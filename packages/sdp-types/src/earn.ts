@@ -365,6 +365,8 @@ export interface EarnVaultPositionsPage {
   positions: EarnVaultPosition[];
   hasMore: boolean;
   nextCursor: string | null;
+  /** Present when afterMovementIds constrained every successful provider read. */
+  balanceReadContext?: { afterMovementIds: string[]; minimumSlot: number };
 }
 
 /** One live position held by a partner end user's external wallet. */

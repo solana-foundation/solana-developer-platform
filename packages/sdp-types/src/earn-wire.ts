@@ -9,6 +9,11 @@ import {
 } from "./earn";
 import { SOLANA_CLUSTERS } from "./well-known-tokens";
 
+export const earnBalanceReadContextSchema = z.object({
+  afterMovementIds: z.array(z.string()).max(100),
+  minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
+
 export const earnVaultDepositSchema: z.ZodType<EarnVaultDeposit> = z.object({
   positionId: z.string(),
   movementId: z.string(),

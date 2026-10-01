@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import useSWR from "swr";
 import { z } from "zod";
 import { earnQueryKeys } from "../earn-query-key";
@@ -69,6 +70,9 @@ const fundingWalletsResponseSchema = z.object({
 
 const fundingWalletBalanceResponseSchema = z.object({
   data: z.object({
+    balanceReadContext: z
+      .object({ minimumSlot: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
+      .optional(),
     walletBalances: z.object({
       balances: z.array(walletTokenBalanceSchema),
     }),
@@ -108,10 +112,12 @@ export async function fetchFundingWallets(): Promise<EarnFundingWallet[]> {
  * on the pre-transaction balance.
  */
 export async function fetchLiveFundingWalletBalance(
-  walletId: string
+  walletId: string,
+  minimumSlot?: number
 ): Promise<NonNullable<EarnFundingWallet["balances"]>> {
+  const query = minimumSlot === undefined ? "" : `?minimumSlot=${minimumSlot}`;
   const response = await fetch(
-    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances`,
+    `/api/dashboard/payments/wallets/${encodeURIComponent(walletId)}/balances${query}`,
     { cache: "no-store" }
   );
   if (!response.ok) {
@@ -121,43 +127,56 @@ export async function fetchLiveFundingWalletBalance(
   if (!parsed.success) {
     throw new Error("Invalid custody wallet balance response");
   }
+  if (
+    minimumSlot !== undefined &&
+    (parsed.data.data.balanceReadContext?.minimumSlot ?? -1) < minimumSlot
+  ) {
+    throw new Error("Wallet balance read did not establish confirmation freshness");
+  }
   return parsed.data.data.walletBalances.balances;
 }
 
 /**
- * Refresh every visible wallet independently. A failed live read preserves
- * that wallet's previous observation, including `undefined`; it never turns
- * unavailable into an invented zero and it does not block healthy wallets
- * from updating.
+ * A refresh completes only when every visible wallet was read successfully.
+ * Reject partial failure so Treasury cannot clear its updating/error state
+ * while any wallet still carries a cached pre-transfer balance.
  */
 export async function refreshFundingWalletBalances(
-  wallets: readonly EarnFundingWallet[]
+  wallets: readonly EarnFundingWallet[],
+  minimumSlot?: number
 ): Promise<EarnFundingWallet[]> {
   return Promise.all(
     wallets.map(async (wallet) => {
-      try {
-        const balances = await fetchLiveFundingWalletBalance(wallet.walletId);
-        return { ...wallet, balances };
-      } catch {
-        return wallet;
-      }
+      const balances = await fetchLiveFundingWalletBalance(wallet.walletId, minimumSlot);
+      return { ...wallet, balances };
     })
   );
 }
 
 export function useEarnFundingWallets() {
-  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), () =>
-    fetchFundingWallets()
-  );
+  const minimumSlot = useRef<number | undefined>(undefined);
+  const read = async () => {
+    const wallets = await fetchFundingWallets();
+    return minimumSlot.current === undefined
+      ? wallets
+      : refreshFundingWalletBalances(wallets, minimumSlot.current);
+  };
+  const { data, error, isLoading, mutate } = useSWR(earnQueryKeys.fundingWallets(), read);
   return {
     wallets: data,
     error,
     isLoading,
     refresh: () => void mutate(),
-    refreshBalances: () =>
-      mutate(async () => refreshFundingWalletBalances(await fetchFundingWallets()), {
-        revalidate: false,
-      }),
+    refreshBalances: (slot?: number) => {
+      if (slot !== undefined) minimumSlot.current = Math.max(minimumSlot.current ?? 0, slot);
+      return mutate(
+        async () => refreshFundingWalletBalances(await fetchFundingWallets(), minimumSlot.current),
+        {
+          revalidate: false,
+          throwOnError: true,
+        }
+      );
+    },
   };
 }
 

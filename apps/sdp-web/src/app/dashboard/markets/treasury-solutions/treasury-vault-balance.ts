@@ -6,6 +6,7 @@ export type VaultMovementKind = "deposit" | "withdrawal";
 export interface VaultPositionsRead {
   startedAt: number;
   landedAt: number;
+  afterMovementIds?: readonly string[];
   positions: readonly Pick<EarnVaultPosition, "id" | "shares" | "tokenValue" | "parIntermediate">[];
 }
 
@@ -63,15 +64,15 @@ export function pendingVaultBalanceReads<Activity extends VaultActivity>(
       (positionId === undefined || movement.positionId === positionId) &&
       isCommittedVaultMovement(movement) &&
       movement.committedObservedAt !== undefined &&
-      (read === undefined || read.startedAt <= movement.committedObservedAt)
+      !read?.afterMovementIds?.includes(movement.movementId)
   );
 }
 
 /**
  * Status can finish at confirmation. Amounts always come from a live provider
- * read requested afterwards, never requested-amount arithmetic or a fallback
- * to an older valuation. This is an observed balance, not a same-slot portfolio
- * snapshot: provider/RPC freshness remains an external dependency.
+ * read whose RPC contexts meet the confirmed movements' slots. Request timing
+ * and a changed share count are not freshness proofs. The provider's observed
+ * value is displayed without requested-amount arithmetic or an older fallback.
  */
 export function displayedVaultBalance(
   reads: readonly VaultPositionsRead[],

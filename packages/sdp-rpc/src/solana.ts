@@ -74,6 +74,8 @@ export interface RpcClientOptions {
    * Callers that pass their own `abortSignal` to `.send()` keep full control.
    */
   requestTimeoutMs?: number;
+  /** Optional caller-owned transport middleware, applied to every provider. */
+  wrapTransport?: (transport: RpcTransport) => RpcTransport;
 }
 
 export const DEFAULT_RPC_REQUEST_TIMEOUT_MS = 30_000;
@@ -208,9 +210,11 @@ export function createRpc(env: RpcEnv, options?: RpcClientOptions): SolanaRpc {
   const buildTransport = (url: string): RpcTransport => {
     if (options?.headers && Object.keys(options.headers).length > 0) {
       assertAllowedRpcHeaders(options.headers);
-      return createDefaultRpcTransport({ headers: options.headers, url });
+      const transport = createDefaultRpcTransport({ headers: options.headers, url });
+      return options.wrapTransport?.(transport) ?? transport;
     }
-    return createDefaultRpcTransport({ url });
+    const transport = createDefaultRpcTransport({ url });
+    return options?.wrapTransport?.(transport) ?? transport;
   };
 
   // An explicit URL is already the complete endpoint selection. Do not force
@@ -262,10 +266,12 @@ export function createClusterRpc(
 /** Build the standard SDP Solana client around a caller-owned egress transport. */
 export function createRpcFromTransport(
   transport: RpcTransport,
-  options: Pick<RpcClientOptions, "requestTimeoutMs"> = {}
+  options: Pick<RpcClientOptions, "requestTimeoutMs" | "wrapTransport"> = {}
 ): SolanaRpc {
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_RPC_REQUEST_TIMEOUT_MS;
-  return createSolanaRpcFromTransport(withRequestTimeout(transport, timeoutMs));
+  return createSolanaRpcFromTransport(
+    withRequestTimeout(options.wrapTransport?.(transport) ?? transport, timeoutMs)
+  );
 }
 
 export type SolanaRpcSdkBridge<TSdkRpc> = SolanaRpc & TSdkRpc;

@@ -167,14 +167,23 @@ export function programProxyQuery(
  */
 function positionsProxyQuery(
   request: Request,
-  labels: { resource: string; title: string }
+  labels: { resource: string; title: string; balanceReadContext?: boolean }
 ): ProxyQueryValidation {
   const incoming = new URL(request.url).searchParams;
   const allowed = new Set(["limit", "before"]);
+  if (labels.balanceReadContext) allowed.add("afterMovementIds");
   const query = new URLSearchParams();
 
   const rejected = validateCommonParams(incoming, allowed, labels.resource, labels.title, query);
   if (rejected) return rejected;
+
+  const afterMovementIds = incoming.get("afterMovementIds");
+  if (afterMovementIds !== null) {
+    if (!/^[A-Za-z0-9_-]{1,128}(,[A-Za-z0-9_-]{1,128}){0,99}$/.test(afterMovementIds)) {
+      return { ok: false, message: "Vault positions afterMovementIds is invalid" };
+    }
+    query.set("afterMovementIds", afterMovementIds);
+  }
 
   return { ok: true, query: query.size > 0 ? `?${query}` : "" };
 }
@@ -183,6 +192,7 @@ export function vaultPositionsProxyQuery(request: Request): ProxyQueryValidation
   return positionsProxyQuery(request, {
     resource: "vault positions",
     title: "Vault positions",
+    balanceReadContext: true,
   });
 }
 

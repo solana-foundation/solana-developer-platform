@@ -78,8 +78,13 @@ review, exact-head CI and a controlled staging/live-provider exercise remain
 release gates. No zero-loss guarantee follows from passing local tests.
 
 Treasury keeps atomic confirmation as Done and requests wallet and position
-balances together. The UI uses only the latest read, with an updating state
-through the confirmation handoff. It does not project requested amounts into
+balances with a common confirmation bound. The positions API authorizes every
+requested movement before resolving confirmed signature slots. Request-local RPC
+contexts enforce the maximum slot across provider account reads, and each page
+acknowledges the bound. Wallet reads then enforce that same minimum slot. A late
+HTTP response alone cannot clear the updating state. Partial RPC failure is
+unavailable, never a cached or fabricated zero balance. Subsequent polling keeps
+the bound; execution and reconciliation keep their existing commitments. It does not project requested amounts into
 holdings or availability. The bank example also separates requested amounts
 from observed payouts and excludes queue quotes from current value and earnings.
 Provider-order confirmation stays pending; the external-wallet movement contract

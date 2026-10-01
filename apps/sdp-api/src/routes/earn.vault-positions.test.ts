@@ -1,5 +1,8 @@
 import { hashString } from "@sdp/payments/hash";
+import { withRpcReadContext } from "@sdp/rpc/read-context";
+import { createRpcFromTransport, getAccountInfo } from "@sdp/rpc/solana";
 import type { CachedApiKey } from "@sdp/types";
+import type { Address, RpcTransport } from "@solana/kit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb } from "@/db";
 import {
@@ -13,6 +16,12 @@ import { env } from "@/test/helpers/env";
 import { seedDefaultProjects } from "@/test/helpers/projects";
 import { seedTestDatabase } from "@/test/mocks/db";
 import { clearKVStores, seedCachedApiKey } from "@/test/mocks/kv";
+
+const signatureStatuses = vi.hoisted(() => vi.fn());
+vi.mock("@sdp/rpc/solana", async (original) => ({
+  ...(await original<typeof import("@sdp/rpc/solana")>()),
+  getSignatureStatuses: signatureStatuses,
+}));
 
 const { readVaultPositions, resolveVaultDirectClient } = vi.hoisted(() => {
   const readVaultPositions = vi.fn();
@@ -30,6 +39,7 @@ const reconcileEarnVaultMovementReadThrough = vi.hoisted(() =>
 vi.mock("@/services/earn/execution-registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/earn/execution-registry")>()),
   resolveVaultDirectClient,
+  assertClusterEndpoint: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/services/earn/vault-movement-reconciliation.service", () => ({
   reconcileEarnVaultMovementReadThrough,
@@ -218,6 +228,58 @@ afterEach(() => {
 });
 
 describe("GET /v1/earn/vault-positions", () => {
+  it.each([100, 101])(
+    "only exposes balances whose RPC bank covers confirmation: bank %s",
+    async (slot) => {
+      const created = await createPosition({});
+      signatureStatuses.mockResolvedValue([
+        { slot: 101n, err: null, confirmationStatus: "confirmed" },
+      ]);
+      const originalRead = readVaultPositions.getMockImplementation();
+      if (!originalRead) throw new Error("Missing provider fixture");
+      const payloads: unknown[] = [];
+      const transport: RpcTransport = async <T>(request: Parameters<RpcTransport>[0]) => {
+        payloads.push(request.payload);
+        return { jsonrpc: "2.0", id: 1, result: { context: { slot }, value: null } } as T;
+      };
+      const rpc = createRpcFromTransport(transport, { wrapTransport: withRpcReadContext });
+      readVaultPositions.mockImplementation(async (context, input) => {
+        await getAccountInfo(rpc, input.owner as Address);
+        return originalRead(context, input);
+      });
+      const response = await getPositions(`?afterMovementIds=${created.movement.id}`);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        data: { balanceReadContext: unknown; positions: Array<{ tokenValue?: string }> };
+      };
+      expect(body.data.balanceReadContext).toEqual({
+        afterMovementIds: [created.movement.id],
+        minimumSlot: 101,
+      });
+      expect(body.data.positions).toHaveLength(1);
+      expect(body.data.positions[0]?.tokenValue).toBe(slot < 101 ? undefined : "1");
+      expect(payloads).toContainEqual(
+        expect.objectContaining({
+          method: "getAccountInfo",
+          params: [
+            PUBLIC_KEY_A,
+            expect.objectContaining({ minContextSlot: 101, commitment: "confirmed" }),
+          ],
+        })
+      );
+    }
+  );
+
+  it("rejects a foreign movement before any status or provider RPC read", async () => {
+    const created = await createPosition({});
+    const response = await requestAsProduction(
+      `/v1/earn/vault-positions?afterMovementIds=${created.movement.id}`
+    );
+    expect(response.status).toBe(404);
+    expect(signatureStatuses).not.toHaveBeenCalled();
+    expect(readVaultPositions).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["position list", "/v1/earn/vault-positions", 200],
     ["deposit list", "/v1/earn/vault-deposits", 200],

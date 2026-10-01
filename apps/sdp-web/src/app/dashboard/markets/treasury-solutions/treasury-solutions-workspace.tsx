@@ -2013,22 +2013,29 @@ export function TreasurySolutionsWorkspace({
   const balanceRefreshGeneration = useRef(0);
   const walletsError = fundingWalletsError || balanceRefreshError;
   const positionsError = vaultPositionsError || balanceRefreshError;
-  const refreshTreasuryBalances = useCallback(async () => {
-    const generation = ++balanceRefreshGeneration.current;
-    setBalanceRefreshes((count) => count + 1);
-    try {
-      const results = await Promise.allSettled([refreshPositions(), refreshWalletBalances()]);
-      if (generation === balanceRefreshGeneration.current) {
-        setBalanceRefreshError(
-          results.some((result) => result.status === "rejected")
-            ? new Error("Treasury balances could not be refreshed")
-            : undefined
-        );
+  const refreshTreasuryBalances = useCallback(
+    async (afterMovementIds?: readonly string[]) => {
+      const generation = ++balanceRefreshGeneration.current;
+      setBalanceRefreshes((count) => count + 1);
+      try {
+        const positionRead = Promise.resolve(refreshPositions(afterMovementIds));
+        const results = await Promise.allSettled([
+          positionRead,
+          positionRead.then((read) => refreshWalletBalances(read?.minimumSlot)),
+        ]);
+        if (generation === balanceRefreshGeneration.current) {
+          setBalanceRefreshError(
+            results.some((result) => result.status === "rejected")
+              ? new Error("Treasury balances could not be refreshed")
+              : undefined
+          );
+        }
+      } finally {
+        setBalanceRefreshes((count) => count - 1);
       }
-    } finally {
-      setBalanceRefreshes((count) => count - 1);
-    }
-  }, [refreshPositions, refreshWalletBalances]);
+    },
+    [refreshPositions, refreshWalletBalances]
+  );
   const { deposits: discoveredVaultDeposits } = useEarnVaultDeposits();
   const { withdrawals: discoveredVaultWithdrawals } = useEarnVaultWithdrawals();
   const [depositStrategy, setDepositStrategy] = useState<EarnStrategy | null>(null);
@@ -2131,7 +2138,7 @@ export function TreasurySolutionsWorkspace({
   }, [positions]);
 
   // Confirmation and recovery refresh both sides of the transfer. A read
-  // started before confirmation cannot supply the newly completed balance.
+  // must acknowledge the movement slots before supplying completed balances.
   const latestPositionsRead = positionsReads[positionsReads.length - 1];
   const refreshRequestedFor = useRef(new Set<string>());
   useEffect(() => {
@@ -2140,7 +2147,13 @@ export function TreasurySolutionsWorkspace({
     );
     if (unrequested.length === 0) return;
     for (const { movement } of unrequested) refreshRequestedFor.current.add(movement.movementId);
-    void refreshTreasuryBalances();
+    void refreshTreasuryBalances(
+      trackedActivities
+        .filter(
+          ({ movement }) => movement.status === "confirmed" || movement.status === "finalized"
+        )
+        .map(({ movement }) => movement.movementId)
+    );
   }, [latestPositionsRead, refreshTreasuryBalances, trackedActivities]);
 
   const activeWallets = useMemo(() => wallets ?? [], [wallets]);
@@ -2249,7 +2262,11 @@ export function TreasurySolutionsWorkspace({
         programsUnavailable={Boolean(programsError || programsState?.kind === "unconfigured")}
         providerAccess={providerAccess}
         summaryLoading={summaryLoading}
-        balancesRefreshing={balanceRefreshes > 0}
+        balancesRefreshing={
+          balanceRefreshes > 0 ||
+          (!balanceRefreshError &&
+            pendingVaultBalanceReads(trackedActivities, latestPositionsRead).length > 0)
+        }
         vaultDeposits={vaultDepositWatches}
         vaultWithdrawals={vaultWithdrawalWatches}
         walletsError={walletsError}
