@@ -236,8 +236,9 @@ apps/sdp-api/src/
                                    withdrawal requests, signed actions, and build
                                    rows; 0114 projects verified fulfilments into
                                    earn_movements; 0118 adds the durable due queue;
-                                   0119 adds finalized Kamino deposit receipt
-                                   provenance and its historical repair index.
+                                   0121 adds finalized Kamino deposit receipt
+                                   provenance; 0122 builds its repair index
+                                   concurrently.
                                    earn_provider_wallets stays — it is an
                                    ACCOUNT at a provider, not a holding.
   services/earn-withdrawal-ledger.service.ts

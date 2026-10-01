@@ -29,16 +29,18 @@ Things that will bite:
   `shares_out` to the commitment states, so recording it could only succeed by
   erasing an observation SDP made. Do not add a transition without checking the
   constraint it would have to violate.
-- **Kamino settlement uses receipts, never requested maxima** (0119).
+- **Kamino settlement uses receipts, never requested maxima** (0121).
   `advanceVaultMovement` leaves deposit amounts unknown until a finalized
   receipt is supplied; `recordKaminoDepositReceipt` repairs missing receipts
   once, scoped by organization and movement. Earnings must withhold `earned`
   while a finalized deposit has no observed amount. Exposure may conservatively
-  count the requested maximum until then. Migration 0120 is additive: legacy
+  count the requested maximum until then. Migration 0121 is additive: legacy
   projections remain in storage for rollback compatibility, but mapped reads
   and earnings ignore them without `deposit_receipt_observed_at`. Repair claims
   prioritize rows with no recorded reconciliation attempt, then rotate retries
   by oldest attempt with 15-minute spacing; missing receipts remain retryable.
+  0122 builds the repair index CONCURRENTLY (non-transactional) because
+  `earn_movements` is live; keep its ORDER BY and the index expression aligned.
 - **Kamino creation claims never authorize rent refunds.** The position's
   `share_ata_rent_funder` is cleared by new Kamino writes; historical claims are
   ignored by the builder. Other providers retain the legacy projection. Kamino

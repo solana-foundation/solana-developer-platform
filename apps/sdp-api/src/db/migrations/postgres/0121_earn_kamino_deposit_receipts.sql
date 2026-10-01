@@ -15,12 +15,5 @@ ALTER TABLE earn_movements
     )
   );
 
-CREATE INDEX idx_earn_movements_kamino_receipt_repair
-  ON earn_movements ((reconciliation_attempted_at IS NOT NULL),
-                    COALESCE(reconciliation_attempted_at, settled_at), id)
-  WHERE execution_model = 'vault_direct' AND provider = 'kamino'
-    AND direction = 'deposit' AND status = 'finalized'
-    AND deposit_receipt_observed_at IS NULL AND signature IS NOT NULL;
-
 COMMENT ON COLUMN earn_movements.deposit_receipt_observed_at IS
   'When a finalized Kamino deposit CPI receipt established amount_settled and shares_out. NULL means unobserved, including historical requested-amount projections.';

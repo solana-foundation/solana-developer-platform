@@ -423,7 +423,7 @@ describe("Unified earn movement ledger (postgres)", () => {
       ).rejects.toThrow(/finalized/);
     });
 
-    it("migration 0119 preserves old-revision writes while new readers repair historical guesses", async () => {
+    it("migration 0121 preserves old-revision writes while new readers repair historical guesses", async () => {
       const created = await ledger.createSignedVaultDepositIntent(intent());
       const observedAt = new Date().toISOString();
       await ledger.advanceVaultMovement({
@@ -434,8 +434,18 @@ describe("Unified earn movement ledger (postgres)", () => {
         settledAt: observedAt,
       });
       const migration = readFileSync(
-        path.join(__dirname, "../migrations/postgres/0120_earn_kamino_deposit_receipts.sql"),
+        path.join(__dirname, "../migrations/postgres/0121_earn_kamino_deposit_receipts.sql"),
         "utf8"
+      );
+      // The repair index builds CONCURRENTLY on the live ledger, so it lives in
+      // its own non-transactional migration and cannot run inside this block.
+      const indexMigration = readFileSync(
+        path.join(__dirname, "../migrations/postgres/0122_earn_kamino_receipt_repair_index.sql"),
+        "utf8"
+      );
+      expect(indexMigration).toMatch(/^-- sdp:migration-mode: non-transactional$/m);
+      expect(indexMigration).toContain(
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_earn_movements_kamino_receipt_repair"
       );
       await getDb(env).transaction(async (tx) => {
         // Connection-local copies let the actual migration run against old data

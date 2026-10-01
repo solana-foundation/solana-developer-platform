@@ -155,7 +155,7 @@ crank funds.
   signature, cluster program, owner, vault, both mints, maximum and share floor,
   then reads token transfers and minted shares inside that deposit invocation.
   It does not use the wallet's net balance, which can include swap proceeds.
-  Missing or unfamiliar metadata stays unvalued. API migration 0119 adds receipt
+  Missing or unfamiliar metadata stays unvalued. API migration 0121 adds receipt
   provenance; reads ignore historical guesses and repair retries durably.
 - **Exit quotes are conservative, and exits still carry no on-chain floor.**
   `quoteKaminoWithdraw` prices an exit through the SDK's `ShareExitLiquidityPlan`

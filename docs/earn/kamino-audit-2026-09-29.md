@@ -41,8 +41,9 @@ view ignore legacy guesses. `totalDeposited` contains only observed amounts;
 `earned` is withheld with `deposits_not_valued` while relevant deposits remain
 unvalued. Exposure admission can conservatively retain the requested maximum.
 
-Migration 0120 is additive. It adds provenance and a repair index without
-rewriting old rows, allowing the previous revision to remain schema-compatible.
+Migrations 0121 and 0122 are additive. 0121 adds provenance without rewriting
+old rows, so the previous revision stays schema-compatible; 0122 builds the
+repair index concurrently so the live ledger is never locked.
 Repair updates historical amounts only when finalized chain evidence exists.
 Tests exercise the actual migration with old rows, old-revision projections,
 scoped repair, replay, overspend rejection and new-reader behavior.
@@ -78,11 +79,12 @@ remains in the owner's empty ATA.
 A `requested` row can already have landed after a crash, an ambiguous RPC
 response or an external broadcast. Previously, an expired `BlockhashNotFound`
 could fail it immediately, and the sweep failed it on its first missing status.
-Broadcast errors now leave the durable intent for reconciliation. The first
-expired unknown observation promotes a requested row under a status guard and
-records the existing unknown marker. A later finalized observation can recover
-it. Regression tests cover recovery and genuine expiry across separate sweeps.
-This shared execution correction applies to all vault providers.
+Broadcast errors now leave the durable intent for reconciliation. Past the
+blockhash window the sweep consults finalized transaction history first (#2161);
+only when that is also absent does it promote a requested row under a status
+guard and record the existing unknown marker, and a later observation can still
+recover it. Regression tests cover recovery and genuine expiry across separate
+sweeps. This shared execution correction applies to all vault providers.
 
 ### Slippage protection is explicit
 
