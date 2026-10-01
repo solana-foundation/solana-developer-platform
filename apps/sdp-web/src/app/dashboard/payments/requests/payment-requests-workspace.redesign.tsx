@@ -36,6 +36,7 @@ import { REQUEST_STATUS_TONE, REQUEST_STATUS_TRANSLATION_KEYS } from "./payment-
 import {
   deriveTokenOptions,
   PAYMENT_REQUESTS_LIST_DEFAULT_PAGE_SIZE,
+  PAYMENT_REQUESTS_SCAN_CAP,
   type PaymentRequestsListState,
   type PaymentRequestsLocalErrorCode,
 } from "./payment-requests-page.data";
@@ -60,8 +61,10 @@ interface PaymentRequestsWorkspaceProps {
   initialError?: string;
   initialLocalErrorCode?: PaymentRequestsLocalErrorCode;
   counterparties: Counterparty[];
-  /** How many requests match the status filter, across every page. */
+  /** How many requests match the status filter and the search, across every page. */
   total: number;
+  /** The search read only the newest {@link PAYMENT_REQUESTS_SCAN_CAP} requests. */
+  searchCapped: boolean;
   listState: PaymentRequestsListState;
 }
 
@@ -173,9 +176,45 @@ function PaymentRequestsTable({
   );
 }
 
+/** The search field, which searches once the user presses Enter, leaves it, or clears it. */
+function PaymentRequestsSearch({
+  initialValue,
+  pending,
+  onCommit,
+}: {
+  initialValue: string;
+  pending: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const t = useTranslations();
+  const [value, setValue] = useState(initialValue);
+  return (
+    <SearchInput
+      value={value}
+      pending={pending}
+      onChange={(event) => setValue(event.target.value)}
+      onBlur={() => onCommit(value)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        onCommit(value);
+      }}
+      clear={{
+        label: t("DashboardPayments.requests.clearSearch"),
+        onClear: () => {
+          setValue("");
+          onCommit("");
+        },
+      }}
+      placeholder={t("DashboardPayments.requests.searchPlaceholder")}
+      className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+    />
+  );
+}
+
 /**
- * The Requests list. The status filter and the page live in the URL and load on the server, one
- * page at a time; search runs here over the loaded page, because the API has none.
+ * The Requests list. The page, its size, the status filter and the search live in the URL and
+ * load on the server (see loadPaymentRequestsList), so every page is one the server matched.
  */
 export function PaymentRequestsWorkspace({
   initialPaymentRequests,
@@ -183,6 +222,7 @@ export function PaymentRequestsWorkspace({
   initialLocalErrorCode,
   counterparties,
   total,
+  searchCapped,
   listState,
 }: PaymentRequestsWorkspaceProps) {
   const t = useTranslations();
@@ -193,15 +233,15 @@ export function PaymentRequestsWorkspace({
     [sdpEnvironment]
   );
   const router = useRouter();
-  const [query, setQuery] = useState("");
   const [isPending, startTransition] = useTransition();
-  const requests = initialPaymentRequests;
+  const rows = initialPaymentRequests;
   const statusFilter = listState.status ?? undefined;
 
   const applyListParams = (updates: {
     page?: number;
     pageSize?: number;
     status?: PaymentRequestStatus | null;
+    search?: string;
   }) => {
     const params = new URLSearchParams(window.location.search);
     if (updates.page !== undefined) {
@@ -225,6 +265,16 @@ export function PaymentRequestsWorkspace({
         params.delete("status");
       } else {
         params.set("status", updates.status);
+      }
+    }
+    if (updates.search !== undefined) {
+      const search = updates.search.trim();
+      if (search === (listState.search ?? "")) return;
+      params.delete("page");
+      if (search === "") {
+        params.delete("search");
+      } else {
+        params.set("search", search);
       }
     }
     const search = params.toString();
@@ -252,26 +302,10 @@ export function PaymentRequestsWorkspace({
     const symbol = tokenSymbolByMint.get(request.token);
     return `${formatDecimalAmount(request.amount, locale)} ${symbol ? symbol : shortenAddress(request.token)}`;
   };
-  const rows = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return requests.filter((request) => {
-      if (!needle) return true;
-      return [
-        request.amount,
-        tokenSymbolByMint.get(request.token) ?? request.token,
-        request.counterpartyId ? (counterpartyNameById.get(request.counterpartyId) ?? "") : "",
-        request.destinationAddress,
-        request.reference,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
-    });
-  }, [requests, query, tokenSymbolByMint, counterpartyNameById]);
   const pageCount = Math.max(1, Math.ceil(total / listState.pageSize));
   const rangeStart = total === 0 ? 0 : (listState.page - 1) * listState.pageSize + 1;
   const rangeEnd = Math.min(listState.page * listState.pageSize, total);
-  const listIsEmpty = total === 0 && listState.status === null;
+  const listIsEmpty = total === 0 && listState.status === null && listState.search === null;
 
   const copyLink = (request: PaymentRequest) => {
     void navigator.clipboard.writeText(`${window.location.origin}/pay/${request.publicToken}`);
@@ -336,17 +370,18 @@ export function PaymentRequestsWorkspace({
               value={listState.pageSize}
               onChange={(pageSize) => applyListParams({ pageSize })}
             />
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              clear={{
-                label: t("DashboardPayments.requests.clearSearch"),
-                onClear: () => setQuery(""),
-              }}
-              placeholder={t("DashboardPayments.requests.searchPlaceholder")}
-              className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+            <PaymentRequestsSearch
+              key={listState.search ?? ""}
+              initialValue={listState.search ?? ""}
+              pending={isPending}
+              onCommit={(search) => applyListParams({ search })}
             />
           </ListToolbar>
+          {searchCapped ? (
+            <p className="text-body text-tertiary">
+              {t("DashboardPayments.requests.searchCapped", { count: PAYMENT_REQUESTS_SCAN_CAP })}
+            </p>
+          ) : null}
           {rows.length === 0 ? (
             <p className="py-12 text-center text-body text-tertiary">
               {t("DashboardPayments.requests.noMatches")}

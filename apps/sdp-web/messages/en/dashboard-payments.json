@@ -1375,6 +1375,7 @@
       "clearSearch": "Clear request search",
       "noMatches": "No requests match these filters.",
       "range": "{from}-{to} of {total} requests",
+      "searchCapped": "Search covers the newest {count} requests only.",
       "emptyTitle": "You haven't created a request yet",
       "emptyDescription": "A request is a link or QR that asks for a fixed amount. Anyone with the link can pay it.",
       "newRequest": "New request",
