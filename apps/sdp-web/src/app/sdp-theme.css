@@ -243,3 +243,118 @@ input[type="week"]::-webkit-calendar-picker-indicator:hover {
     transition: none;
   }
 }
+
+/* NEW DESIGN: the 2026 palette, faces and body type on every route, not only inside the refresh
+   scope. The shell marks its <main> with data-sdp-new-design when the flag is on; :has lifts
+   that to the root, so menus, dialogs and toasts portaled to <body> follow, and the previous
+   design keeps the base palette everywhere. Component shapes and page layout stay with the
+   refresh scope. Same re-points as the refresh scope in @sdp/design-tokens' tokens.css. */
+/* The shell's page section as a solid colour, for surfaces that must match it exactly (a pinned
+   header over scrolling cards). The previous design's section is surface-raised at 80% over the
+   shell; alpha compositing is a plain sRGB mix, so this reproduces it in both themes. */
+:root {
+  --sdp-page-backdrop: color-mix(in srgb, var(--surface-raised) 80%, var(--surface));
+}
+
+:root:has(main[data-sdp-new-design]) {
+  --surface: var(--paper-side);
+  --surface-sunken: var(--paper-card);
+  --surface-raised: var(--paper);
+  --surface-tile: var(--paper-tile);
+
+  --emph-xh: var(--ink);
+  --emph-m: var(--ink-secondary);
+  --emph-l: var(--ink-tertiary);
+  --emph-xl: var(--ink-disabled);
+  --on-primary: var(--paper);
+
+  --t4: var(--wash);
+  --t8: var(--wash-strong);
+  --t12: var(--wash-strongest);
+
+  --border-xl: var(--rule-faint);
+  --border-l: var(--rule);
+  --border-m: var(--rule-strong);
+
+  --green-tx: var(--positive);
+  --green-bg: var(--positive-wash);
+  --green-brd: var(--positive-rule);
+  --blue-tx: var(--progress);
+  --blue-bg: var(--progress-wash);
+  --blue-brd: var(--progress-rule);
+  --amber-tx: var(--attention);
+  --amber-bg: var(--attention-wash);
+  --amber-brd: var(--attention-rule);
+  --red-tx: var(--critical);
+  --red-bg: var(--critical-wash);
+  --red-brd: var(--critical-rule);
+
+  --font-sans: var(--font-brand-sans);
+  --font-mono: var(--font-brand-mono);
+  font-family: var(--font-sans);
+
+  /* Every page title at the design's heading size, as on a refresh route. */
+  --page-title-size: var(--font-size-heading);
+  --page-title-line-height: var(--line-height-heading);
+  --page-title-letter-spacing: var(--letter-spacing-heading);
+
+  /* NEW DESIGN's page section is flat and opaque. */
+  --sdp-page-backdrop: var(--surface-raised);
+
+  /* Season Sans ships Regular and Medium faces only. The design system's regular weight is 450,
+     which the browser matches to the Medium face, so every plain run came out heavy; body text is
+     the Regular face, drawn antialiased. A semibold or bold request takes the Medium face as it
+     is instead of a smeared synthetic bold. */
+  --font-weight-regular-base: 400;
+  font-weight: var(--font-weight-regular);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* The design-system tokens the package derives from its own gray ramp, re-stated against
+     SDP's names. */
+  --text-extra-high: var(--emph-xh);
+  --text-high: var(--emph-m);
+  --text-medium: var(--emph-m);
+  --text-low: var(--emph-l);
+  --text-extra-low: var(--emph-xl);
+  --border-light: var(--border-l);
+
+  --button-primary-bg: var(--emph-xh);
+  --button-primary-bg-hover: var(--emph-xh);
+  --button-secondary-bg: var(--t8);
+  --button-secondary-bg-hover: var(--t12);
+  --button-secondary-text: var(--emph-xh);
+
+  /* Clerk derives its shades from these, so they are the palette's literal sRGB values. */
+  --clerk-color-primary: #0f0f13;
+  --clerk-color-primary-foreground: #fbfaf9;
+  --clerk-color-foreground: #0f0f13;
+  --clerk-color-muted-foreground: #4a4852;
+  --clerk-color-neutral: #0f0f13;
+  --clerk-color-background: #fbfaf9;
+  --clerk-color-input: #ffffff;
+  --clerk-color-input-foreground: #0f0f13;
+  --clerk-color-muted: color-mix(in srgb, #fbfaf9, #0f0f13 6%);
+  --clerk-color-border: rgba(15, 15, 19, 0.14);
+  --clerk-color-ring: rgba(15, 15, 19, 0.4);
+  --clerk-color-shimmer: rgba(15, 15, 19, 0.1);
+}
+
+:root.dark:has(main[data-sdp-new-design]) {
+  --clerk-color-primary: #fbfaf9;
+  --clerk-color-primary-foreground: #08080a;
+  --clerk-color-foreground: #fbfaf9;
+  --clerk-color-muted-foreground: #b4b0be;
+  --clerk-color-neutral: #fbfaf9;
+  --clerk-color-background: #08080a;
+  --clerk-color-input: #0e0e11;
+  --clerk-color-input-foreground: #fbfaf9;
+  --clerk-color-muted: color-mix(in srgb, #08080a, #fbfaf9 8%);
+  --clerk-color-border: rgba(251, 250, 249, 0.16);
+  --clerk-color-ring: rgba(251, 250, 249, 0.56);
+  --clerk-color-shimmer: rgba(251, 250, 249, 0.1);
+  --clerk-color-danger: #d8584d;
+  --clerk-color-success: #4b9b73;
+  --clerk-color-warning: #a77446;
+}
