@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { DashboardShell } from "./dashboard-shell";
 
-const pathnameMock = vi.hoisted(() => ({ value: "/dashboard/issuance" }));
+const pathnameMock = vi.hoisted(() => ({ value: "/dashboard/api-keys" }));
 
 vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: true, orgId: "org-sidebar-scope" }),
@@ -75,7 +75,7 @@ function renderShell(pathname: string, newDesign: boolean): HTMLElement {
 
 describe("dashboard shell sidebar on a route no area has redesigned", () => {
   it("puts the sidebar in the refresh scope on NEW DESIGN while the page keeps the base one", () => {
-    const root = renderShell("/dashboard/issuance", true);
+    const root = renderShell("/dashboard/api-keys", true);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -89,7 +89,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
   });
 
   it("keeps the previous design's sidebar and page card with NEW DESIGN off", () => {
-    const root = renderShell("/dashboard/issuance", false);
+    const root = renderShell("/dashboard/api-keys", false);
     const main = root.querySelector("main");
     const sidebar = root.querySelector("aside");
     const page = root.querySelector("section");
@@ -103,7 +103,7 @@ describe("dashboard shell sidebar on a route no area has redesigned", () => {
 
   it("keeps the phone's bottom bar on a base page either way", () => {
     for (const newDesign of [true, false]) {
-      const root = renderShell("/dashboard/issuance", newDesign);
+      const root = renderShell("/dashboard/api-keys", newDesign);
       expect(root.querySelector("[data-dashboard-bottom-nav]")).not.toBeNull();
     }
   });
