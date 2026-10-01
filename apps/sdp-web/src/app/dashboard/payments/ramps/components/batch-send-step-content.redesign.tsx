@@ -3,7 +3,7 @@
 import type { PaymentTransferBatchRecipientStatus, PaymentTransferBatchStatus } from "@sdp/types";
 import { ExternalLink, PlusIcon, UploadIcon, XIcon } from "lucide-react";
 import { domAnimation, LazyMotion, m } from "motion/react";
-import { useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   formatLamportsAsSol,
@@ -626,6 +626,26 @@ function RecipientsStep({ wizard }: { wizard: BatchSendWizard }) {
   );
 }
 
+/** One label/value line of the review's fee summary. */
+function ReviewSummaryRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between">
+      <dt className="text-tertiary">{label}</dt>
+      <dd className="text-primary">{children}</dd>
+    </div>
+  );
+}
+
+/** A recipient line shared by the review and the result: who, then what happened to them. */
+function RecipientRow({ children, trailing }: { children: ReactNode; trailing: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+      <div className="min-w-0">{children}</div>
+      {trailing}
+    </div>
+  );
+}
+
 function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
   const t = useTranslations();
   const { recipients, displayAsset, totalAmount, estimate, estimateError } = wizard;
@@ -666,24 +686,17 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
           <p className="text-center text-sm text-error">{estimateError}</p>
         ) : fees && totalFeeLamports !== null ? (
           <dl className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <dt className="text-tertiary">{t("DashboardPayments.batchSend.source")}</dt>
-              <dd className="text-primary">{rootLabel}</dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-tertiary">{t("DashboardPayments.batchSend.transactionFees")}</dt>
-              <dd className="text-primary">
-                {formatLamportsAsSol(
-                  BigInt(fees.networkFeeLamports) + BigInt(fees.priorityFeeLamports)
-                )}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-tertiary">{t("DashboardPayments.batchSend.rentFees")}</dt>
-              <dd className="text-primary">
-                {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
-              </dd>
-            </div>
+            <ReviewSummaryRow label={t("DashboardPayments.batchSend.source")}>
+              {rootLabel}
+            </ReviewSummaryRow>
+            <ReviewSummaryRow label={t("DashboardPayments.batchSend.transactionFees")}>
+              {formatLamportsAsSol(
+                BigInt(fees.networkFeeLamports) + BigInt(fees.priorityFeeLamports)
+              )}
+            </ReviewSummaryRow>
+            <ReviewSummaryRow label={t("DashboardPayments.batchSend.rentFees")}>
+              {formatLamportsAsSol(BigInt(fees.tokenAccountRentLamports))}
+            </ReviewSummaryRow>
             <div className="h-px bg-fill-strong" />
             <div className="flex items-center justify-between">
               <span className="font-medium text-primary">
@@ -718,27 +731,26 @@ function BatchReviewView({ wizard }: { wizard: BatchSendWizard }) {
       </section>
       <div className="flex flex-col gap-0.5">
         {recipients.map((recipient) => (
-          <div
+          <RecipientRow
             key={recipient.counterpartyAccountId}
-            className="flex items-center justify-between gap-3 px-3 py-2.5"
+            trailing={
+              <span className="shrink-0 text-sm font-medium text-primary">
+                {formatTokenAmount(recipient.amount)} {displayAsset}
+              </span>
+            }
           >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-primary">
-                {recipient.label && recipient.label.trim().length > 0
-                  ? recipient.label
-                  : recipient.name}
-              </p>
-              <p className="flex items-center gap-1.5 truncate text-xs text-tertiary">
-                {recipient.label && recipient.label.trim().length > 0 ? (
-                  <span>{recipient.name}</span>
-                ) : null}
-                <span className="font-mono">{shortenAddress(recipient.address)}</span>
-              </p>
-            </div>
-            <span className="shrink-0 text-sm font-medium text-primary">
-              {formatTokenAmount(recipient.amount)} {displayAsset}
-            </span>
-          </div>
+            <p className="truncate text-sm font-medium text-primary">
+              {recipient.label && recipient.label.trim().length > 0
+                ? recipient.label
+                : recipient.name}
+            </p>
+            <p className="flex items-center gap-1.5 truncate text-xs text-tertiary">
+              {recipient.label && recipient.label.trim().length > 0 ? (
+                <span>{recipient.name}</span>
+              ) : null}
+              <span className="font-mono">{shortenAddress(recipient.address)}</span>
+            </p>
+          </RecipientRow>
         ))}
       </div>
     </div>
@@ -780,38 +792,40 @@ function BatchResultView({ wizard }: { wizard: BatchSendWizard }) {
             : null;
           const name = nameByAccount.get(recipient.counterpartyAccountId);
           return (
-            <div key={recipient.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-              <div className="min-w-0">
-                {name ? <p className="truncate text-sm font-medium text-primary">{name}</p> : null}
-                <p className="truncate font-mono text-xs text-tertiary">
-                  {formatTokenAmount(recipient.amount)} {displayAsset} ·{" "}
-                  {shortenAddress(recipient.destination)}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span
-                  className={cn("text-sm font-medium", RECIPIENT_STATUS_TONE[recipient.status])}
-                >
-                  {recipientStatusLabel(recipient.status, t)}
-                </span>
-                {signature ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      window.open(
-                        explorerTxUrl(signature, cluster),
-                        "_blank",
-                        "noopener,noreferrer"
-                      )
-                    }
-                    className="text-tertiary hover:text-primary"
-                    aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
+            <RecipientRow
+              key={recipient.id}
+              trailing={
+                <div className="flex shrink-0 items-center gap-2">
+                  <span
+                    className={cn("text-sm font-medium", RECIPIENT_STATUS_TONE[recipient.status])}
                   >
-                    <ExternalLink className="size-4" />
-                  </button>
-                ) : null}
-              </div>
-            </div>
+                    {recipientStatusLabel(recipient.status, t)}
+                  </span>
+                  {signature ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open(
+                          explorerTxUrl(signature, cluster),
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                      className="text-tertiary hover:text-primary"
+                      aria-label={t("DashboardPayments.batchSend.viewOnExplorer")}
+                    >
+                      <ExternalLink className="size-4" />
+                    </button>
+                  ) : null}
+                </div>
+              }
+            >
+              {name ? <p className="truncate text-sm font-medium text-primary">{name}</p> : null}
+              <p className="truncate font-mono text-xs text-tertiary">
+                {formatTokenAmount(recipient.amount)} {displayAsset} ·{" "}
+                {shortenAddress(recipient.destination)}
+              </p>
+            </RecipientRow>
           );
         })}
       </div>

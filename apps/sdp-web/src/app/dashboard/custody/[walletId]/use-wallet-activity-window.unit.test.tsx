@@ -40,6 +40,19 @@ function payload(count: number, overrides: Partial<WalletActivityPayload> = {}) 
   } satisfies WalletActivityPayload;
 }
 
+/** Renders over `cache`, so a test can revisit the wallet with what an earlier visit left. */
+function cachedWrapper(cache: Map<string, unknown>) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <SWRConfig
+        value={{ provider: () => cache as never, shouldRetryOnError: false, dedupingInterval: 0 }}
+      >
+        {children}
+      </SWRConfig>
+    );
+  };
+}
+
 function wrapper({ children }: { children: ReactNode }) {
   return (
     <SWRConfig
@@ -101,6 +114,39 @@ describe("useWalletActivityWindow", () => {
     await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(120));
     expect(result.current.olderFailed).toBe(false);
     expect(Math.max(...limitsRequested().map((limit) => limit ?? 20))).toBe(120);
+  });
+
+  it("does not count a wider window cached by an earlier visit until a fresh read loads it", async () => {
+    const cache = new Map<string, unknown>();
+    fetchWalletActivity.mockImplementation(async (_id, options) => payload(options?.limit ?? 20));
+    const firstVisit = renderHook(() => useWalletActivityWindow("wallet_one"), {
+      wrapper: cachedWrapper(cache),
+    });
+    await waitFor(() => expect(firstVisit.result.current.data?.activityRows).toHaveLength(20));
+    act(() => firstVisit.result.current.loadOlder());
+    await waitFor(() => expect(firstVisit.result.current.data?.activityRows).toHaveLength(120));
+    firstVisit.unmount();
+
+    // Back on the wallet: the 120-row window is still cached, but reading it again fails.
+    fetchWalletActivity.mockImplementation(async (_id, options) => {
+      const limit = options?.limit ?? 20;
+      if (limit > 20) throw new Error("upstream unavailable");
+      return payload(limit);
+    });
+    const { result } = renderHook(() => useWalletActivityWindow("wallet_one"), {
+      wrapper: cachedWrapper(cache),
+    });
+    await waitFor(() => expect(result.current.data?.activityRows).toHaveLength(20));
+    const widerReadsBefore = limitsRequested().filter((limit) => limit === 120).length;
+
+    act(() => result.current.loadOlder());
+    expect(result.current.data?.activityRows).toHaveLength(20);
+    expect(result.current.loadingOlder).toBe(true);
+    await waitFor(() => expect(result.current.olderFailed).toBe(true));
+    expect(limitsRequested().filter((limit) => limit === 120).length).toBe(widerReadsBefore + 1);
+    expect(result.current.data?.activityRows).toHaveLength(20);
+    expect(result.current.loadingOlder).toBe(false);
+    expect(result.current.canLoadOlder).toBe(true);
   });
 
   it("treats a wider read that loses a source as failed", async () => {
